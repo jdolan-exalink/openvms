@@ -1,0 +1,44 @@
+package api
+
+import (
+	"errors"
+	"net/http"
+
+	"github.com/jdolan-exalink/openvms/internal/access"
+	"github.com/jdolan-exalink/openvms/internal/events"
+	"github.com/jdolan-exalink/openvms/internal/frigate"
+	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/store"
+)
+
+// errUnauthenticated is returned by handlers that somehow run without an actor.
+var errUnauthenticated = errors.New("unauthenticated")
+
+// statusFor maps service errors to the responses declared in the contract.
+func statusFor(err error) (int, string, string) {
+	var ve *inventory.ValidationError
+	var fe *inventory.FrigateError
+	switch {
+	case errors.As(err, &ve):
+		return http.StatusBadRequest, "invalid", ve.Msg
+	case errors.Is(err, events.ErrInvalidCursor):
+		return http.StatusBadRequest, "invalid_cursor", "the pagination cursor is not valid"
+	case errors.Is(err, errUnauthenticated):
+		return http.StatusUnauthorized, "unauthorized", "authentication required"
+	case errors.Is(err, access.ErrForbidden):
+		return http.StatusForbidden, "forbidden", "you do not have permission for this action"
+	case errors.Is(err, store.ErrNotFound):
+		return http.StatusNotFound, "not_found", "not found"
+	case errors.Is(err, store.ErrConflict):
+		return http.StatusConflict, "conflict", "a resource with the same name already exists"
+	case errors.Is(err, inventory.ErrSiteNotEmpty):
+		return http.StatusConflict, "site_not_empty", err.Error()
+	case errors.As(err, &fe):
+		msg := "could not reach Frigate"
+		if errors.Is(err, frigate.ErrUnauthorized) {
+			msg = "Frigate rejected the credentials"
+		}
+		return http.StatusBadGateway, "frigate_unreachable", msg + ": " + fe.Err.Error()
+	}
+	return http.StatusInternalServerError, "internal", "internal server error"
+}

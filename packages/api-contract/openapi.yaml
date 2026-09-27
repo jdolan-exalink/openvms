@@ -1,0 +1,1798 @@
+openapi: 3.0.3
+info:
+  title: OpenVMS API
+  version: 0.3.0
+  description: |
+    Control plane API for the Federated Frigate VMS.
+    Every endpoint is defined here first; server and client code are generated from this file.
+servers:
+  - url: /
+tags:
+  - name: health
+  - name: system
+  - name: identity
+  - name: tenants
+  - name: sites
+  - name: servers
+  - name: cameras
+  - name: permissions
+  - name: events
+  - name: lpr
+  - name: audit
+  - name: live
+  - name: playback
+security:
+  - bearerAuth: []
+  - cookieAuth: []
+paths:
+  /health/live:
+    get:
+      tags: [health]
+      operationId: getLiveness
+      summary: Liveness probe
+      security: []
+      description: Returns 200 while the process is running. Does not check dependencies.
+      responses:
+        "200":
+          description: Process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LivenessStatus"
+  /health/ready:
+    get:
+      tags: [health]
+      operationId: getReadiness
+      summary: Readiness probe
+      security: []
+      description: Checks every backing service. Returns 503 when any required dependency is down.
+      responses:
+        "200":
+          description: All dependencies are reachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+        "503":
+          description: At least one dependency is unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+  /api/v1/system/info:
+    get:
+      tags: [system]
+      operationId: getSystemInfo
+      summary: Build and runtime information
+      security: []
+      responses:
+        "200":
+          description: System information
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemInfo"
+  /api/v1/me:
+    get:
+      tags: [identity]
+      operationId: getMe
+      summary: Current user and their permissions
+      responses:
+        "200":
+          description: The authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Me"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/permissions:
+    get:
+      tags: [permissions]
+      operationId: listPermissionCatalog
+      summary: Permission catalog
+      description: Every permission the VMS knows and the narrowest scope it can be granted at.
+      responses:
+        "200":
+          description: Catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PermissionDefinition" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/grants:
+    get:
+      tags: [permissions]
+      operationId: listGrants
+      summary: List grants
+      description: Grants whose scope the caller can manage (permissions.manage).
+      parameters:
+        - { name: subject_type, in: query, schema: { $ref: "#/components/schemas/SubjectType" } }
+        - { name: subject_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Grants
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Grant" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [permissions]
+      operationId: createGrant
+      summary: Grant or deny a permission on a scope
+      description: |
+        Requires permissions.manage on the scope. Callers cannot grant a permission they do not
+        hold themselves on that scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GrantInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Grant" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/grants/{grantId}:
+    parameters:
+      - { name: grantId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      tags: [permissions]
+      operationId: deleteGrant
+      summary: Revoke a grant
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/tenants:
+    get:
+      tags: [tenants]
+      operationId: listTenants
+      summary: List tenants visible to the caller
+      responses:
+        "200":
+          description: Tenants
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Tenant" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [tenants]
+      operationId: createTenant
+      summary: Create a tenant (platform administrators)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TenantInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Tenant" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/sites:
+    get:
+      tags: [sites]
+      operationId: listSites
+      summary: List sites the caller can view
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Sites
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Site" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [sites]
+      operationId: createSite
+      summary: Create a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SiteCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/sites/{siteId}:
+    parameters:
+      - { name: siteId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [sites]
+      operationId: getSite
+      summary: Get a site
+      responses:
+        "200":
+          description: Site
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [sites]
+      operationId: updateSite
+      summary: Update a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SiteUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [sites]
+      operationId: deleteSite
+      summary: Soft-delete an empty site
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/servers:
+    get:
+      tags: [servers]
+      operationId: listServers
+      summary: List Frigate servers the caller can view
+      parameters:
+        - { name: site_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Servers
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [servers]
+      operationId: createServer
+      summary: Register a Frigate server
+      description: |
+        Connects with the given credentials, detects version and capabilities and, when
+        import_cameras is true, imports every camera. Credentials are stored encrypted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerCreate" }
+      responses:
+        "201":
+          description: Registered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/probe:
+    post:
+      tags: [servers]
+      operationId: probeServer
+      summary: Test a Frigate connection without saving it
+      description: Wizard step 3. Requires servers.manage on the target site.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerProbe" }
+      responses:
+        "200":
+          description: Connection works
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProbeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServer
+      summary: Get a Frigate server
+      responses:
+        "200":
+          description: Server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [servers]
+      operationId: updateServer
+      summary: Rename, move or change the credentials of a server
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Server" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [servers]
+      operationId: deleteServer
+      summary: Remove a server and its cameras from the VMS (soft delete)
+      description: Frigate itself is not touched.
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/sync:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: syncServer
+      summary: Rediscover version, capabilities and cameras
+      responses:
+        "200":
+          description: Synchronised
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SyncResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras:
+    get:
+      tags: [cameras]
+      operationId: listCameras
+      summary: List cameras the caller can view
+      description: Only cameras covered by cameras.view are returned; the total never counts others.
+      parameters:
+        - { name: site_id, in: query, schema: { type: string, format: uuid } }
+        - { name: server_id, in: query, schema: { type: string, format: uuid } }
+        - { name: group_id, in: query, schema: { type: string, format: uuid } }
+        - { name: q, in: query, description: Case-insensitive name filter, schema: { type: string, maxLength: 100 } }
+      responses:
+        "200":
+          description: Cameras
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Camera" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/cameras/{cameraId}:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: getCamera
+      summary: Get a camera
+      responses:
+        "200":
+          description: Camera
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Camera" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [cameras]
+      operationId: updateCamera
+      summary: Rename or enable/disable a camera in the VMS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Camera" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/camera-groups:
+    get:
+      tags: [cameras]
+      operationId: listCameraGroups
+      summary: List camera groups
+      responses:
+        "200":
+          description: Camera groups
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/CameraGroup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [cameras]
+      operationId: createCameraGroup
+      summary: Create a camera group
+      description: Requires cameras.manage on the tenant and on every member camera.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraGroupInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraGroup" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/camera-groups/{groupId}:
+    parameters:
+      - { name: groupId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: getCameraGroup
+      summary: Get a camera group
+      responses:
+        "200":
+          description: Camera group
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraGroup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [cameras]
+      operationId: replaceCameraGroup
+      summary: Replace name, description and members of a camera group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraGroupInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraGroup" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [cameras]
+      operationId: deleteCameraGroup
+      summary: Delete a camera group
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/events:
+    get:
+      tags: [events]
+      operationId: listEvents
+      summary: Search the federated event index
+      description: |
+        Review items from every Frigate the caller can see, newest first, with keyset
+        pagination. Filtering by label, time or plate needs events.search; plates are only
+        returned and searchable on cameras with lpr.view / lpr.search.
+      parameters:
+        - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: camera_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: label, in: query, style: form, explode: true, schema: { type: array, items: { type: string } } }
+        - { name: severity, in: query, schema: { $ref: "#/components/schemas/Severity" } }
+        - { name: plate, in: query, schema: { type: string, maxLength: 20 } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: reviewed, in: query, schema: { type: boolean } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        "200":
+          description: A page of events
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EventPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/events/sync-status:
+    get:
+      tags: [events]
+      operationId: listEventSyncStatus
+      summary: Event ingestion state per Frigate server
+      responses:
+        "200":
+          description: One entry per visible server
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/EventSyncStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/events/{eventId}:
+    parameters:
+      - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [events]
+      operationId: getEvent
+      summary: Get an event
+      responses:
+        "200":
+          description: Event
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Event" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [events]
+      operationId: updateEvent
+      summary: Mark an event reviewed or not (events.review)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reviewed]
+              properties:
+                reviewed: { type: boolean }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Event" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/events/{eventId}/thumbnail:
+    parameters:
+      - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [events]
+      operationId: getEventThumbnail
+      summary: Event thumbnail
+      description: The copy kept by the VMS, or the one in the origin Frigate while it has not been copied yet.
+      responses:
+        "200":
+          description: Image
+          content:
+            image/*: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/lpr/reads:
+    get:
+      tags: [lpr]
+      operationId: listPlateReads
+      summary: Search plate reads across every authorized Frigate
+      description: Needs lpr.view to list and lpr.search to filter by plate.
+      parameters:
+        - { name: plate, in: query, schema: { type: string, maxLength: 20 }, description: "Plate or part of it; spaces and dashes are ignored." }
+        - { name: exact, in: query, schema: { type: boolean, default: false } }
+        - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: camera_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        "200":
+          description: A page of plate reads
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PlateReadPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/auth/login:
+    post:
+      tags: [identity]
+      operationId: login
+      summary: Log in with username and password (and TOTP when enabled)
+      security: []
+      description: |
+        On success sets the HttpOnly session cookie. When the account has MFA and no
+        totp_code was sent, answers mfa_required without opening a session. After
+        repeated failures the account locks for a while (429).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Logged in, or a TOTP code is needed
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429":
+          description: Account temporarily locked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /api/v1/auth/logout:
+    post:
+      tags: [identity]
+      operationId: logout
+      summary: End the current browser session
+      responses:
+        "204":
+          description: Logged out
+          headers:
+            Set-Cookie:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/me/password:
+    post:
+      tags: [identity]
+      operationId: changePassword
+      summary: Change your own password
+      description: Other sessions of the user are closed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string, format: password }
+                new_password: { type: string, format: password, minLength: 10 }
+      responses:
+        "204": { description: Changed }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/me/mfa/setup:
+    post:
+      tags: [identity]
+      operationId: setupMfa
+      summary: Start TOTP enrolment
+      description: Returns a new secret. MFA is only enforced after enableMfa confirms a code.
+      responses:
+        "200":
+          description: Secret to add to an authenticator app
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [secret, otpauth_url]
+                properties:
+                  secret: { type: string, description: Base32 secret for manual entry. }
+                  otpauth_url: { type: string, description: otpauth:// URL (render as QR). }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/me/mfa/enable:
+    post:
+      tags: [identity]
+      operationId: enableMfa
+      summary: Confirm a TOTP code and turn MFA on
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, pattern: "^[0-9 ]{6,7}$" }
+      responses:
+        "204": { description: Enabled }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/me/mfa/disable:
+    post:
+      tags: [identity]
+      operationId: disableMfa
+      summary: Turn MFA off (needs the password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, format: password }
+      responses:
+        "204": { description: Disabled }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/users:
+    get:
+      tags: [identity]
+      operationId: listUsers
+      summary: List users (users.view)
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [identity]
+      operationId: createUser
+      summary: Create a user (users.manage; groups.manage to add groups)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/users/{userId}:
+    parameters:
+      - { name: userId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [identity]
+      operationId: getUser
+      summary: Get a user
+      responses:
+        "200":
+          description: User
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [identity]
+      operationId: updateUser
+      summary: Update, disable, reset the password or MFA of a user (users.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [identity]
+      operationId: deleteUser
+      summary: Remove a user (soft delete, sessions closed)
+      responses:
+        "204": { description: Removed }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/groups:
+    get:
+      tags: [identity]
+      operationId: listUserGroups
+      summary: List user groups (groups.view)
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Groups
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/UserGroup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [identity]
+      operationId: createUserGroup
+      summary: Create a user group (groups.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserGroupInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserGroup" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/groups/{groupId}:
+    parameters:
+      - { name: groupId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [identity]
+      operationId: getUserGroup
+      summary: Get a user group
+      responses:
+        "200":
+          description: Group
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserGroup" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [identity]
+      operationId: replaceUserGroup
+      summary: Rename a group and replace its members
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UserGroupInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserGroup" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [identity]
+      operationId: deleteUserGroup
+      summary: Delete a user group (its grants stop applying)
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/audit:
+    get:
+      tags: [audit]
+      operationId: listAudit
+      summary: Read the audit trail (audit.view)
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: actor_id, in: query, schema: { type: string, format: uuid } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: before_id, in: query, schema: { type: integer, format: int64 }, description: Return entries older than this id (pagination). }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        "200":
+          description: Entries, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditEntry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/views:
+    get:
+      tags: [live]
+      operationId: listViews
+      summary: Your views and the shared views of your tenant
+      description: Tiles with cameras you cannot watch come back empty.
+      responses:
+        "200":
+          description: Views
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/View" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [live]
+      operationId: createView
+      summary: Save a view (views.create_private, or views.create_shared when shared)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ViewInput" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/View" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/views/{viewId}:
+    parameters:
+      - { name: viewId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [live]
+      operationId: getView
+      summary: Get a view
+      responses:
+        "200":
+          description: View
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/View" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [live]
+      operationId: replaceView
+      summary: Change a view (owner, or views.manage_shared for shared views)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ViewInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/View" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [live]
+      operationId: deleteView
+      summary: Delete a view
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/recordings:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [playback]
+      operationId: listCameraRecordings
+      summary: Recorded spans of a camera, read from its Frigate (recordings.seek)
+      description: |
+        Play a span through the media gateway:
+        /media/v1/cameras/{cameraId}/vod/{start_unix}/{end_unix}/master.m3u8 (HLS).
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+      responses:
+        "200":
+          description: Spans, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/RecordingSpan" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/exports:
+    get:
+      tags: [playback]
+      operationId: listExports
+      summary: Your exports and those of cameras where you hold exports.download
+      responses:
+        "200":
+          description: Exports, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Export" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [playback]
+      operationId: createExport
+      summary: Export a clip from the camera's Frigate (exports.create)
+      description: |
+        Frigate encodes the file; the VMS follows it until ready. Download it from
+        /media/v1/exports/{exportId}/download (exports.download).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExportInput" }
+      responses:
+        "201":
+          description: Started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Export" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/exports/{exportId}:
+    parameters:
+      - { name: exportId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [playback]
+      operationId: getExport
+      summary: Get an export
+      responses:
+        "200":
+          description: Export
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Export" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [playback]
+      operationId: deleteExport
+      summary: Remove an export from the VMS list (the file in Frigate is untouched)
+      responses:
+        "204": { description: Removed }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API token for scripts and integrations. Browsers use the openvms_session cookie set by login.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: openvms_session
+      description: Browser session. State-changing requests must also send the X-OpenVMS-Request header.
+  responses:
+    BadRequest:
+      description: The request is invalid
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Unauthorized:
+      description: Missing or invalid credentials
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: The caller lacks the permission on this resource
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: The resource does not exist or belongs to another tenant
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: The request conflicts with existing data
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    FrigateUnreachable:
+      description: Frigate could not be reached or rejected the credentials
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Me:
+      type: object
+      required: [id, username, display_name, tenant_id, grants, mfa_enabled, must_change_password, auth_method]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        display_name: { type: string }
+        mfa_enabled: { type: boolean }
+        must_change_password: { type: boolean }
+        auth_method:
+          type: string
+          enum: [session, token]
+          description: How this request was authenticated.
+        tenant_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null for platform users.
+        grants:
+          type: array
+          items: { $ref: "#/components/schemas/Grant" }
+    SubjectType:
+      type: string
+      enum: [user, group]
+    ScopeType:
+      type: string
+      enum: [platform, tenant, site, server, camera_group, camera]
+    Effect:
+      type: string
+      enum: [allow, deny]
+    PermissionDefinition:
+      type: object
+      required: [permission, description, narrowest_scope]
+      properties:
+        permission: { type: string, example: live.view }
+        description: { type: string }
+        narrowest_scope: { $ref: "#/components/schemas/ScopeType" }
+    GrantInput:
+      type: object
+      required: [subject_type, subject_id, permission, effect, scope_type]
+      properties:
+        subject_type: { $ref: "#/components/schemas/SubjectType" }
+        subject_id: { type: string, format: uuid }
+        permission: { type: string, example: live.view }
+        effect: { $ref: "#/components/schemas/Effect" }
+        scope_type: { $ref: "#/components/schemas/ScopeType" }
+        scope_id:
+          type: string
+          format: uuid
+          description: Required unless scope_type is platform.
+    Grant:
+      allOf:
+        - $ref: "#/components/schemas/GrantInput"
+        - type: object
+          required: [id, created_at]
+          properties:
+            id: { type: string, format: uuid }
+            tenant_id: { type: string, format: uuid, nullable: true }
+            created_at: { type: string, format: date-time }
+    TenantInput:
+      type: object
+      required: [slug, name]
+      properties:
+        slug: { type: string, pattern: "^[a-z0-9][a-z0-9-]{1,62}$", example: municipalidad-helvecia }
+        name: { type: string, minLength: 1, maxLength: 200 }
+    Tenant:
+      allOf:
+        - $ref: "#/components/schemas/TenantInput"
+        - type: object
+          required: [id, created_at]
+          properties:
+            id: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+    SiteCreate:
+      type: object
+      required: [tenant_id, name]
+      properties:
+        tenant_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        timezone: { type: string, example: America/Argentina/Cordoba }
+        address: { type: string, maxLength: 500 }
+    SiteUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        timezone: { type: string }
+        address: { type: string, maxLength: 500 }
+    Site:
+      type: object
+      required: [id, tenant_id, name, timezone, address, server_count, camera_count, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        timezone: { type: string }
+        address: { type: string }
+        server_count: { type: integer }
+        camera_count:
+          type: integer
+          description: Cameras in this site the caller can view.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    HealthStatus:
+      type: string
+      enum: [unknown, online, degraded, offline]
+    AuthMode:
+      type: string
+      enum: [credentials, none]
+      description: |
+        credentials logs in with a Frigate user on the authenticated port (8971).
+        none is for a Frigate without login (internal port 5000 or auth disabled); use it only
+        on trusted networks.
+    ServerProbe:
+      type: object
+      required: [site_id, base_url]
+      properties:
+        site_id: { type: string, format: uuid }
+        base_url:
+          type: string
+          example: https://10.20.0.11:8971
+          description: Frigate URL. Port 5000 is only accepted with auth_mode none.
+        auth_mode: { $ref: "#/components/schemas/AuthMode" }
+        username: { type: string, description: Required with auth_mode credentials. }
+        password: { type: string, format: password, description: Required with auth_mode credentials. Stored encrypted. }
+        tls_skip_verify:
+          type: boolean
+          default: false
+          description: Accept Frigate's self-signed certificate.
+    ServerCreate:
+      allOf:
+        - $ref: "#/components/schemas/ServerProbe"
+        - type: object
+          required: [name]
+          properties:
+            name: { type: string, minLength: 1, maxLength: 200, example: Frigate-H01 }
+            import_cameras: { type: boolean, default: true }
+    ServerUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        site_id: { type: string, format: uuid }
+        base_url: { type: string }
+        auth_mode: { $ref: "#/components/schemas/AuthMode" }
+        username: { type: string, minLength: 1 }
+        password: { type: string, minLength: 1, format: password }
+        tls_skip_verify: { type: boolean }
+    Capabilities:
+      type: object
+      required: [review, preview, exports, lpr, face_recognition, semantic_search, audio, ptz]
+      properties:
+        review: { type: boolean }
+        preview: { type: boolean }
+        exports: { type: boolean }
+        lpr: { type: boolean }
+        face_recognition: { type: boolean }
+        semantic_search: { type: boolean }
+        audio: { type: boolean }
+        ptz: { type: boolean }
+    DiscoveredCamera:
+      type: object
+      required: [remote_name, enabled, zones, lpr]
+      properties:
+        remote_name: { type: string }
+        enabled: { type: boolean }
+        zones: { type: array, items: { type: string } }
+        lpr: { type: boolean }
+    ProbeResult:
+      type: object
+      required: [frigate_version, adapter, capabilities, cameras]
+      properties:
+        frigate_version: { type: string, example: 0.17.2 }
+        adapter:
+          type: string
+          description: Adapter chosen for this version.
+          example: v017
+        capabilities: { $ref: "#/components/schemas/Capabilities" }
+        cameras:
+          type: array
+          items: { $ref: "#/components/schemas/DiscoveredCamera" }
+    ServerStorage:
+      type: object
+      required: [total_mb, used_mb, free_mb]
+      properties:
+        total_mb: { type: number }
+        used_mb: { type: number }
+        free_mb: { type: number }
+    Server:
+      type: object
+      required: [id, tenant_id, site_id, name, base_url, auth_mode, username, tls_skip_verify, frigate_version, capabilities, status, last_error, camera_count, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        name: { type: string }
+        base_url: { type: string }
+        auth_mode: { $ref: "#/components/schemas/AuthMode" }
+        username: { type: string }
+        tls_skip_verify: { type: boolean }
+        frigate_version: { type: string }
+        capabilities: { $ref: "#/components/schemas/Capabilities" }
+        status: { $ref: "#/components/schemas/HealthStatus" }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        last_checked_at: { type: string, format: date-time, nullable: true }
+        last_error: { type: string }
+        uptime_seconds: { type: integer, nullable: true }
+        storage: { $ref: "#/components/schemas/ServerStorage" }
+        camera_count: { type: integer }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    SyncResult:
+      type: object
+      required: [server, added, updated, missing]
+      properties:
+        server: { $ref: "#/components/schemas/Server" }
+        added: { type: integer }
+        updated: { type: integer }
+        missing:
+          type: integer
+          description: Cameras no longer present in Frigate. They are kept and flagged, not deleted.
+    Camera:
+      type: object
+      required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        server_id: { type: string, format: uuid }
+        remote_name:
+          type: string
+          description: Camera name inside its Frigate server.
+        display_name: { type: string }
+        enabled: { type: boolean }
+        zones: { type: array, items: { type: string } }
+        lpr: { type: boolean }
+        status: { $ref: "#/components/schemas/HealthStatus" }
+        fps: { type: number, nullable: true }
+        missing_since: { type: string, format: date-time, nullable: true }
+        group_ids: { type: array, items: { type: string, format: uuid } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CameraUpdate:
+      type: object
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        enabled: { type: boolean }
+    CameraGroupInput:
+      type: object
+      required: [tenant_id, name, camera_ids]
+      properties:
+        tenant_id: { type: string, format: uuid }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 1000 }
+        camera_ids: { type: array, items: { type: string, format: uuid }, maxItems: 5000 }
+    CameraGroup:
+      type: object
+      required: [id, tenant_id, name, description, camera_ids, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        camera_ids:
+          type: array
+          description: Members the caller can view.
+          items: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LivenessStatus:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    ReadinessStatus:
+      type: object
+      required: [status, checks]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DependencyCheck"
+    DependencyCheck:
+      type: object
+      required: [name, status, latency_ms]
+      properties:
+        name:
+          type: string
+          example: postgres
+        status:
+          type: string
+          enum: [ok, error]
+        latency_ms:
+          type: integer
+          format: int64
+        error:
+          type: string
+    SystemInfo:
+      type: object
+      required: [name, version, commit, build_time, go_version, schema_version]
+      properties:
+        name:
+          type: string
+          example: openvms-api
+        version:
+          type: string
+          example: v0.1.0
+        commit:
+          type: string
+        build_time:
+          type: string
+        go_version:
+          type: string
+        schema_version:
+          type: integer
+          format: int64
+          description: Latest applied database migration.
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
+    Severity:
+      type: string
+      enum: [alert, detection]
+    Event:
+      type: object
+      required: [id, tenant_id, site_id, site_name, server_id, server_name, camera_id, camera_name, remote_id, severity, labels, sub_labels, zones, plates, start_time, reviewed, has_thumbnail]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        site_name: { type: string }
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        remote_id:
+          type: string
+          description: Review id inside the origin Frigate.
+        severity: { $ref: "#/components/schemas/Severity" }
+        labels: { type: array, items: { type: string } }
+        sub_labels: { type: array, items: { type: string } }
+        zones: { type: array, items: { type: string } }
+        plates:
+          type: array
+          description: Normalized plates read during the event. Empty without lpr.view.
+          items: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null while the event is in progress.
+        reviewed: { type: boolean }
+        has_thumbnail:
+          type: boolean
+          description: The VMS keeps its own copy of the thumbnail.
+    EventPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Event" }
+        next_cursor:
+          type: string
+          description: Pass as cursor to get the next page. Absent on the last page.
+    EventSyncStatus:
+      type: object
+      required: [server_id, last_error, event_count]
+      properties:
+        server_id: { type: string, format: uuid }
+        review_cursor: { type: string, format: date-time, nullable: true }
+        object_cursor: { type: string, format: date-time, nullable: true }
+        last_success_at: { type: string, format: date-time, nullable: true }
+        last_error: { type: string }
+        event_count: { type: integer, format: int64 }
+    PlateRead:
+      type: object
+      required: [id, site_id, site_name, server_id, server_name, camera_id, camera_name, plate, plate_normalized, label, zones, seen_at]
+      properties:
+        id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        site_name: { type: string }
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        plate: { type: string, description: As read by Frigate. }
+        plate_normalized: { type: string, example: AB123CD }
+        score: { type: number, nullable: true }
+        label: { type: string, example: car }
+        zones: { type: array, items: { type: string } }
+        seen_at: { type: string, format: date-time }
+        event_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Indexed event that contains this read, when known.
+    PlateReadPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/PlateRead" }
+        next_cursor: { type: string }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1, maxLength: 64 }
+        password: { type: string, format: password, minLength: 1, maxLength: 256 }
+        totp_code: { type: string, maxLength: 7 }
+    LoginResponse:
+      type: object
+      required: [mfa_required]
+      properties:
+        mfa_required:
+          type: boolean
+          description: True when the password was right and a TOTP code must be sent too.
+        expires_at: { type: string, format: date-time }
+        user: { $ref: "#/components/schemas/Me" }
+    UserStatus:
+      type: string
+      enum: [active, disabled, locked, pending]
+    User:
+      type: object
+      required: [id, tenant_id, username, display_name, status, mfa_enabled, has_password, must_change_password, group_ids, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid, nullable: true, description: Null for platform users. }
+        username: { type: string }
+        display_name: { type: string }
+        email: { type: string, nullable: true }
+        status: { $ref: "#/components/schemas/UserStatus" }
+        mfa_enabled: { type: boolean }
+        has_password: { type: boolean, description: False for users that only use API tokens. }
+        must_change_password: { type: boolean }
+        locked_until: { type: string, format: date-time, nullable: true }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        group_ids: { type: array, items: { type: string, format: uuid } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UserCreate:
+      type: object
+      required: [username]
+      properties:
+        tenant_id:
+          type: string
+          format: uuid
+          description: Defaults to the caller's tenant. Omit (platform administrators) for a platform user.
+        username: { type: string, minLength: 3, maxLength: 64, pattern: "^[A-Za-z0-9._@-]+$" }
+        display_name: { type: string, maxLength: 200 }
+        email: { type: string, maxLength: 200 }
+        password: { type: string, format: password, minLength: 10, description: Omit for a user that only uses API tokens. }
+        must_change_password: { type: boolean, default: false }
+        group_ids: { type: array, items: { type: string, format: uuid } }
+    UserUpdate:
+      type: object
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 200 }
+        email: { type: string, maxLength: 200 }
+        status: { type: string, enum: [active, disabled, locked] }
+        password: { type: string, format: password, minLength: 10, description: Resets the password and closes the user's sessions. }
+        must_change_password: { type: boolean }
+        group_ids: { type: array, items: { type: string, format: uuid } }
+        disable_mfa: { type: boolean, description: Removes the second factor (lost phone). }
+    UserGroupInput:
+      type: object
+      required: [name]
+      properties:
+        tenant_id: { type: string, format: uuid, description: Defaults to the caller's tenant. }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        description: { type: string, maxLength: 1000 }
+        member_ids: { type: array, items: { type: string, format: uuid }, maxItems: 5000 }
+    UserGroup:
+      type: object
+      required: [id, tenant_id, name, description, member_ids, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid, nullable: true }
+        name: { type: string }
+        description: { type: string }
+        member_ids: { type: array, items: { type: string, format: uuid } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AuditEntry:
+      type: object
+      required: [id, occurred_at, actor_name, action, target_type, request_id, details]
+      properties:
+        id: { type: integer, format: int64 }
+        occurred_at: { type: string, format: date-time }
+        tenant_id: { type: string, format: uuid, nullable: true }
+        actor_id: { type: string, format: uuid, nullable: true }
+        actor_name: { type: string }
+        action: { type: string, example: LOGIN_SUCCESS }
+        target_type: { type: string }
+        target_id: { type: string, format: uuid, nullable: true }
+        request_id: { type: string }
+        ip: { type: string, nullable: true }
+        details: { type: object, additionalProperties: true }
+    ViewCell:
+      type: object
+      description: A tile. Without camera_id it is empty.
+      properties:
+        camera_id: { type: string, format: uuid }
+        quality: { type: string, enum: [sub, main], default: sub }
+    ViewLayout:
+      type: object
+      required: [columns, cells]
+      properties:
+        columns: { type: integer, minimum: 1, maximum: 8 }
+        cells:
+          type: array
+          maxItems: 64
+          description: Tiles in reading order.
+          items: { $ref: "#/components/schemas/ViewCell" }
+    ViewInput:
+      type: object
+      required: [name, layout]
+      properties:
+        tenant_id: { type: string, format: uuid, description: Required for platform users. }
+        name: { type: string, minLength: 1, maxLength: 200 }
+        shared: { type: boolean, default: false }
+        layout: { $ref: "#/components/schemas/ViewLayout" }
+    View:
+      type: object
+      required: [id, tenant_id, owner_id, name, shared, layout, editable, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid }
+        name: { type: string }
+        shared: { type: boolean }
+        layout: { $ref: "#/components/schemas/ViewLayout" }
+        editable: { type: boolean, description: The caller may change or delete it. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RecordingSpan:
+      type: object
+      required: [start_time, end_time, motion, objects]
+      properties:
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        motion: { type: integer }
+        objects: { type: integer }
+    ExportInput:
+      type: object
+      required: [camera_id, start_time, end_time]
+      properties:
+        camera_id: { type: string, format: uuid }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time, description: At most 2 hours after start_time. }
+        name: { type: string, maxLength: 200 }
+    ExportStatus:
+      type: string
+      enum: [pending, running, ready, failed]
+    Export:
+      type: object
+      required: [id, tenant_id, site_id, server_id, camera_id, camera_name, requested_by, requested_by_name, name, start_time, end_time, status, progress, error, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        server_id: { type: string, format: uuid }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        requested_by: { type: string, format: uuid }
+        requested_by_name: { type: string }
+        name: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/ExportStatus" }
+        progress: { type: number, description: 0 to 100. }
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }

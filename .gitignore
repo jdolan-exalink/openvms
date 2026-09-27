@@ -1,0 +1,19 @@
+# Go
+/bin/
+*.test
+coverage.out
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local env and editors
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+# Local Pi runtime state
+.atl/

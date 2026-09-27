@@ -1,0 +1,25 @@
+# SITE_ADDRESS=":80" serves plain HTTP for local development.
+# Set it to the public hostname (e.g. vms.example.com) and Caddy obtains a TLS certificate.
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+		# /docs loads the API reference renderer from jsdelivr; everything else is same-origin.
+		Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob:; connect-src 'self' ws: wss:; media-src 'self' blob:; frame-ancestors 'none'"
+		-Server
+	}
+
+	@api path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs
+	handle @api {
+		reverse_proxy {$API_UPSTREAM:api:8080}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+}

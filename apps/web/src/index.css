@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+/* Dark is the default for the monitoring room (PRD §7); .light switches palettes. */
+@custom-variant light (&:where(.light, .light *));
+
+@theme {
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-bg: #0d1312;
+  --color-surface: #141c1a;
+  --color-raised: #1b2522;
+  --color-line: #26332f;
+  --color-ink: #e1eae7;
+  --color-muted: #95a6a1;
+  --color-accent: #45c3ad;
+  --color-ok: #6ccb93;
+  --color-warn: #e3ae5b;
+  --color-bad: #ee8080;
+}
+
+:root.light {
+  --color-bg: #f4f6f5;
+  --color-surface: #ffffff;
+  --color-raised: #eef2f0;
+  --color-line: #d6dfdc;
+  --color-ink: #15201d;
+  --color-muted: #586864;
+  --color-accent: #0e7565;
+  --color-ok: #2e7d4f;
+  --color-warn: #9a6212;
+  --color-bad: #a83434;
+  color-scheme: light;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-bg text-ink font-sans antialiased;
+}

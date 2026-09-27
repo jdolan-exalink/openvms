@@ -1,0 +1,33 @@
+version: "2"
+run:
+  tests: true
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gosec
+    - misspell
+    - noctx
+    - revive
+    - unconvert
+  settings:
+    misspell:
+      # User-facing strings are in Spanish.
+      ignore-rules: [administrar, inventario]
+    gosec:
+      excludes:
+        - G104 # unhandled errors are covered by errcheck
+  exclusions:
+    presets: [comments, std-error-handling]
+    paths:
+      - internal/api/gen
+    rules:
+      # The mock simulates data; weak randomness and casual cookies are intended there.
+      - path: internal/frigatemock/
+        linters: [gosec]
+      # Tests talk to httptest servers that live for the test only.
+      - path: _test\.go
+        linters: [noctx]
+formatters:
+  enable: [gofmt, goimports]

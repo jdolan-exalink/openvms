@@ -1,0 +1,9 @@
+{
+  "identities": [
+    {
+      "name": "openvms",
+      "credentials": [{ "accessKey": "openvms", "secretKey": "openvms-dev-secret" }],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    }
+  ]
+}
