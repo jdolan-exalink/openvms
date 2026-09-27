@@ -17,3 +17,6 @@ dist/
 .vscode/
 # Local Pi runtime state
 .atl/
+
+# CodeGraph index
+.codegraph/
