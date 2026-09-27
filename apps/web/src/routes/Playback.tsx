@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { camerasQuery, eventsQuery, meQuery, recordingsQuery } from "@/api/queries";
 import { HlsPlayer } from "@/components/HlsPlayer";
@@ -19,6 +19,8 @@ function startOfDay(unix: number): number {
   return Math.floor(d.getTime() / 1000);
 }
 
+const unixNow = () => Math.floor(Date.now() / 1000);
+
 /**
  * Playback (PRD §51-55): a day timeline of one camera built from its Frigate's recordings
  * and the VMS event index, HLS playback from the origin Frigate, and clip export.
@@ -29,7 +31,11 @@ export function Playback() {
   const me = useQuery(meQuery);
   const cameras = useQuery(camerasQuery({}));
   const cameraId = search.camera ?? "";
-  const now = Math.floor(Date.now() / 1000);
+  const [now, setNow] = useState(unixNow);
+  useEffect(() => {
+    const id = setInterval(() => setNow(unixNow()), 30_000);
+    return () => clearInterval(id);
+  }, []);
   const [instant, setInstant] = useState<number>(search.t ?? now - 600);
   const [day, setDay] = useState<number>(startOfDay(search.t ?? now));
   const [position, setPosition] = useState<number>(instant);

@@ -30,7 +30,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 - All PRD §44 minimum filters available on search, permission-scoped.
 - Plate partial search returns correct, permission-scoped results. Index usage deferred (see M3-2 evidence).
 - Cross-tenant and denied-camera tests pass for events and plates.
-- All runners above pass (known pre-existing lint finding: `apps/web/src/routes/Playback.tsx:32`, outside M3).
+- All runners above pass.
 
 ## Delivery
 - Branch `feat/m3-search` from baseline `a4443d1`. One work-unit commit per task. Forecast ~1,200-1,800 authored lines; no remote, so PR slicing is deferred until a remote exists.
@@ -41,5 +41,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 
 - M3-2: Writer tried a trigger-maintained `events.plates_search` column + `gin_trgm_ops` index. Finding: with `FORCE ROW LEVEL SECURITY` on `events` and `lpr_reads`, Postgres never uses an index for a non-leakproof qual (`textlike` has `proleakproof = f`); `EXPLAIN` with `enable_seqscan=off` still chose Seq Scan. The same applies to the pre-existing `lpr_reads_plate_trgm_idx`. Fixes considered: `ALTER FUNCTION textlike LEAKPROOF` (works, but global, needs superuser, not preserved across major upgrades) and a custom leakproof opclass (crashed Postgres). User chose to defer: migration and query change reverted; kept `internal/events/plate_filter_integration_test.go` (`TestPlateFilterCorrectness`: partial match, nonexistent plate, denied camera hidden) — PASS (parent run). Queries remain narrowed by tenant/time indexes before the plate filter. Test-only outcome, so no RED applies to the kept test.
 
+- Pending item (user-authorized): `apps/web/src/routes/Playback.tsx:32` `react-hooks/purity` fixed by moving `now` into state refreshed every 30 s. RED: `make lint` failing on that finding (baseline). GREEN: `make lint` exit 0, `pnpm typecheck` OK, web tests 3/3.
+
 ## Next step
-Fix pre-existing lint finding `apps/web/src/routes/Playback.tsx:32` (user-authorized pending item), then M3-3.
+M3-3.
