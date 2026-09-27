@@ -8,14 +8,14 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 
 ## Scope and constraints
 - In scope: tasks below.
-- Out of scope (not in PRD for M3): saved searches, plate watchlists/alerts, table partitioning (§48, deferred until real volume), result export (M6 already covers per-event export).
+- Out of scope (not in PRD for M3): saved searches, plate watchlists/alerts, table partitioning and index-backed partial plate search (§46/§48, deferred until real volume), result export (M6 already covers per-event export).
 - Contract first: every API change starts in `packages/api-contract/openapi.yaml`, then `make generate`.
 - Never leak events or plates of denied cameras or other tenants.
 - Do not push or open PRs (no remote configured).
 
 ## Tasks
 - [x] M3-1: Add explicit cross-tenant negative tests for `/events` and `/lpr/reads` (two tenants, zero leakage). Route: delegated direct.
-- [ ] M3-2: Make plate filtering on `/events` index-backed (pg_trgm) instead of `unnest(...) LIKE` scan in `internal/events/service.go`. Migration + correctness test. Route: delegated direct.
+- [x] M3-2: Plate filtering on `/events`: correctness test added; index-backed search deferred (user decision 2026-09-27, see evidence). Route: delegated direct.
 - [ ] M3-3: Add `zone` and `sub_label` filters end-to-end (OpenAPI → service SQL → Events UI) plus GIN indexes on `zones`/`sub_labels` (PRD §46). Route: delegated direct.
 - [ ] M3-4: Add `camera_group` filter to `/events` and `/lpr/reads`. Route: delegated direct.
 - [ ] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Route: delegated direct.
@@ -28,7 +28,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 
 ## Acceptance criteria
 - All PRD §44 minimum filters available on search, permission-scoped.
-- Plate partial search on `/events` uses an index (EXPLAIN shows index usage).
+- Plate partial search returns correct, permission-scoped results. Index usage deferred (see M3-2 evidence).
 - Cross-tenant and denied-camera tests pass for events and plates.
 - All runners above pass (known pre-existing lint finding: `apps/web/src/routes/Playback.tsx:32`, outside M3).
 
@@ -39,5 +39,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 - Baseline commit `a4443d1` on `main`; CodeGraph initialized.
 - M3-1: added `internal/events/cross_tenant_search_integration_test.go` (`TestCrossTenantSearchIsolation`: sanity, operator, full-access admin, raw-SQL RLS). No leak found. `go test ./...` PASS; `go test -tags integration ./internal/events/...` PASS (writer + parent re-run). Test-only task: behavior already held, so no RED phase applies; the sanity subtest proves assertions are non-vacuous.
 
+- M3-2: Writer tried a trigger-maintained `events.plates_search` column + `gin_trgm_ops` index. Finding: with `FORCE ROW LEVEL SECURITY` on `events` and `lpr_reads`, Postgres never uses an index for a non-leakproof qual (`textlike` has `proleakproof = f`); `EXPLAIN` with `enable_seqscan=off` still chose Seq Scan. The same applies to the pre-existing `lpr_reads_plate_trgm_idx`. Fixes considered: `ALTER FUNCTION textlike LEAKPROOF` (works, but global, needs superuser, not preserved across major upgrades) and a custom leakproof opclass (crashed Postgres). User chose to defer: migration and query change reverted; kept `internal/events/plate_filter_integration_test.go` (`TestPlateFilterCorrectness`: partial match, nonexistent plate, denied camera hidden) — PASS (parent run). Queries remain narrowed by tenant/time indexes before the plate filter. Test-only outcome, so no RED applies to the kept test.
+
 ## Next step
-M3-2.
+Fix pre-existing lint finding `apps/web/src/routes/Playback.tsx:32` (user-authorized pending item), then M3-3.
