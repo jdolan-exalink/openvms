@@ -376,8 +376,8 @@ export interface paths {
         /**
          * Search the federated event index
          * @description Review items from every Frigate the caller can see, newest first, with keyset
-         *     pagination. Filtering by label, time or plate needs events.search; plates are only
-         *     returned and searchable on cameras with lpr.view / lpr.search.
+         *     pagination. Filtering by label, zone, sub_label, time or plate needs events.search;
+         *     plates are only returned and searchable on cameras with lpr.view / lpr.search.
          */
         get: operations["listEvents"];
         put?: never;
@@ -2224,6 +2224,8 @@ export interface operations {
                 server_id?: string[];
                 camera_id?: string[];
                 label?: string[];
+                zone?: string[];
+                sub_label?: string[];
                 severity?: components["schemas"]["Severity"];
                 plate?: string;
                 from?: string;

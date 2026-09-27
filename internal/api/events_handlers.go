@@ -48,6 +48,12 @@ func (h *Handlers) ListEvents(ctx context.Context, r gen.ListEventsRequestObject
 	if p.Label != nil {
 		f.Labels = *p.Label
 	}
+	if p.Zone != nil {
+		f.Zones = *p.Zone
+	}
+	if p.SubLabel != nil {
+		f.SubLabels = *p.SubLabel
+	}
 	if p.Severity != nil {
 		f.Severity = string(*p.Severity)
 	}

@@ -60,6 +60,8 @@ type Filter struct {
 	ServerIDs []uuid.UUID
 	CameraIDs []uuid.UUID
 	Labels    []string
+	Zones     []string
+	SubLabels []string
 	Severity  string
 	// Plate matches events with a plate containing this text (normalized).
 	Plate    string
@@ -163,7 +165,7 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 	n := limit(f.Limit)
 	err := s.tx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
 		perm := authz.EventsView
-		if f.Plate != "" || len(f.Labels) > 0 || f.From != nil {
+		if f.Plate != "" || len(f.Labels) > 0 || len(f.Zones) > 0 || len(f.SubLabels) > 0 || f.From != nil {
 			perm = authz.EventsSearch
 		}
 		cams, err := c.CameraIDs(ctx, perm)
@@ -195,6 +197,12 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 		}
 		if len(f.Labels) > 0 {
 			b.add("e.labels && ?", f.Labels)
+		}
+		if len(f.Zones) > 0 {
+			b.add("e.zones && ?", f.Zones)
+		}
+		if len(f.SubLabels) > 0 {
+			b.add("e.sub_labels && ?", f.SubLabels)
 		}
 		if f.Severity != "" {
 			b.add("e.severity = ?", f.Severity)

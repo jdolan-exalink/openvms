@@ -59,6 +59,8 @@ export type EventFilter = {
   server_id?: string[];
   camera_id?: string[];
   label?: string[];
+  zone?: string[];
+  sub_label?: string[];
   severity?: "alert" | "detection";
   plate?: string;
   from?: string;

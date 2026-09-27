@@ -9,15 +9,28 @@ import { cn } from "@/lib/cn";
 import { commonLabels, fmtDateTime, fmtDuration, fromLocalInput, labelName } from "@/lib/format";
 import { can } from "@/lib/perm";
 
-type Form = { site: string; camera: string; label: string; severity: "" | "alert" | "detection"; plate: string; from: string; to: string; pending: boolean };
+type Form = {
+  site: string;
+  camera: string;
+  label: string;
+  zone: string;
+  subLabel: string;
+  severity: "" | "alert" | "detection";
+  plate: string;
+  from: string;
+  to: string;
+  pending: boolean;
+};
 
-const emptyForm: Form = { site: "", camera: "", label: "", severity: "", plate: "", from: "", to: "", pending: false };
+const emptyForm: Form = { site: "", camera: "", label: "", zone: "", subLabel: "", severity: "", plate: "", from: "", to: "", pending: false };
 
 function toFilter(f: Form): EventFilter {
   return {
     site_id: f.site ? [f.site] : undefined,
     camera_id: f.camera ? [f.camera] : undefined,
     label: f.label ? [f.label] : undefined,
+    zone: f.zone.trim() ? [f.zone.trim()] : undefined,
+    sub_label: f.subLabel.trim() ? [f.subLabel.trim()] : undefined,
     severity: f.severity || undefined,
     plate: f.plate.trim() || undefined,
     from: fromLocalInput(f.from),
@@ -79,6 +92,12 @@ export function Events() {
               </option>
             ))}
           </Select>
+        </Field>
+        <Field label="Zona">
+          <TextInput value={form.zone} onChange={(e) => set("zone", e.target.value)} placeholder="entrada, ingreso…" />
+        </Field>
+        <Field label="Sub-etiqueta">
+          <TextInput value={form.subLabel} onChange={(e) => set("subLabel", e.target.value)} placeholder="placa_reconocida…" />
         </Field>
         <Field label="Tipo">
           <Select value={form.severity} onChange={(e) => set("severity", e.target.value as Form["severity"])}>

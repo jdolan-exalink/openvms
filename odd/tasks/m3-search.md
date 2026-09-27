@@ -16,7 +16,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 ## Tasks
 - [x] M3-1: Add explicit cross-tenant negative tests for `/events` and `/lpr/reads` (two tenants, zero leakage). Route: delegated direct.
 - [x] M3-2: Plate filtering on `/events`: correctness test added; index-backed search deferred (user decision 2026-09-27, see evidence). Route: delegated direct.
-- [ ] M3-3: Add `zone` and `sub_label` filters end-to-end (OpenAPI → service SQL → Events UI) plus GIN indexes on `zones`/`sub_labels` (PRD §46). Route: delegated direct.
+- [x] M3-3: Add `zone` and `sub_label` filters end-to-end (OpenAPI → service SQL → Events UI) plus GIN indexes on `zones`/`sub_labels` (PRD §46). Route: delegated direct.
 - [ ] M3-4: Add `camera_group` filter to `/events` and `/lpr/reads`. Route: delegated direct.
 - [ ] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Route: delegated direct.
 - [ ] M3-6: Web tests for Events and Plates routes (filters, infinite scroll, `lpr.search` gating). Route: delegated direct.
@@ -43,5 +43,12 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 
 - Pending item (user-authorized): `apps/web/src/routes/Playback.tsx:32` `react-hooks/purity` fixed by moving `now` into state refreshed every 30 s. RED: `make lint` failing on that finding (baseline). GREEN: `make lint` exit 0, `pnpm typecheck` OK, web tests 3/3.
 
+- M3-3: OpenAPI `zone`/`sub_label` query params (array, form/explode) and `internal/events/service.go` Filter.Zones/SubLabels + `e.zones && ?` / `e.sub_labels && ?` SQL were already in the working tree; wired the last two ends. Handler: `internal/api/events_handlers.go` maps `p.Zone`/`p.SubLabel` into the Filter, mirroring `p.Label` (no pre-existing handler-level filter-mapping test in the package, so none added — coverage stays at the service/integration level). UI: `apps/web/src/routes/Events.tsx` adds "Zona" and "Sub-etiqueta" free-text fields (no fixed catalog exists for these values, same free-text approach as the plate field); `apps/web/src/api/queries.ts` `EventFilter` gained `zone`/`sub_label`.
+  - Test-only backend behavior (service.go filters were already implemented): ran the pre-written, never-run `internal/events/zone_sub_label_filter_integration_test.go` (`TestZoneAndSubLabelFilterCorrectness`) directly to GREEN — `go test -tags integration ./internal/events/... ./internal/api/...` PASS (same "test-only, no RED phase" situation as M3-1/M3-2, see method note there).
+  - Web UI is new behavior, so TDD applied: RED — `pnpm vitest run src/routes/Events.test.tsx` failed with `Unable to find a label with the text of: Zona` (fields did not exist yet). GREEN — after adding the two `Field`/`TextInput` pairs and the `toFilter` mapping, same command passed, asserting `zone=entrada` and `sub_label=placa_reconocida` land in the request's query string.
+  - Migration `migrations/00006_events_zone_sub_label_indexes.sql`: `CREATE INDEX ... USING gin (zones)` / `(sub_labels)`, with Down. EXPLAIN finding (same root cause as M3-2's plate index): with `FORCE ROW LEVEL SECURITY` on `events`, `EXPLAIN (ANALYZE, BUFFERS)` with `enable_seqscan=off` still chose Seq Scan for `zones && '{entrada}'` (cost carries the `enable_seqscan=off` disable-penalty, confirming no index alternative was considered) — `SELECT ... FROM pg_operator o JOIN pg_proc p ON p.oid=o.oprcode WHERE o.oprname='&&'` shows the backing function `arrayoverlap` has `proleakproof = false`, so Postgres refuses to push the qual through the RLS barrier into the GIN index, exactly like `textlike` in M3-2. Verified with a throwaway integration test (deleted after the finding was recorded here, not part of the deliverable). Decision: kept the indexes per PRD §46 and the task's explicit instruction — a GIN index is write overhead only, not harmful, and both indexes become usable if `events` ever drops FORCE RLS or gains a leakproof wrapper, so they are not "provably useless AND harmful."
+  - Full verification: `go test ./...` PASS; `go test -tags integration ./internal/events/... ./internal/api/...` PASS (needs Docker, used testcontainers); `pnpm --filter web test` PASS (3 files / 4 tests); `pnpm typecheck` clean; `make lint` clean (`go vet` 0 issues, `eslint .` clean); `make generate` re-run twice, byte-identical output both times (sha256 match) — the residual `git diff` against HEAD before commit is expected (this task's own uncommitted contract change), and resolves once committed.
+  - Commit: see below.
+
 ## Next step
-M3-3.
+M3-4.

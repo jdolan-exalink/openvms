@@ -558,13 +558,15 @@ paths:
       summary: Search the federated event index
       description: |
         Review items from every Frigate the caller can see, newest first, with keyset
-        pagination. Filtering by label, time or plate needs events.search; plates are only
-        returned and searchable on cameras with lpr.view / lpr.search.
+        pagination. Filtering by label, zone, sub_label, time or plate needs events.search;
+        plates are only returned and searchable on cameras with lpr.view / lpr.search.
       parameters:
         - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: camera_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: label, in: query, style: form, explode: true, schema: { type: array, items: { type: string } } }
+        - { name: zone, in: query, style: form, explode: true, schema: { type: array, items: { type: string } } }
+        - { name: sub_label, in: query, style: form, explode: true, schema: { type: array, items: { type: string } } }
         - { name: severity, in: query, schema: { $ref: "#/components/schemas/Severity" } }
         - { name: plate, in: query, schema: { type: string, maxLength: 20 } }
         - { name: from, in: query, schema: { type: string, format: date-time } }
