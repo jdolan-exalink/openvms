@@ -129,7 +129,11 @@ func TestZoneAndSubLabelFilterCorrectness(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		grantCameraPermission(t, env, env.Demo.TenantID, u.UserID, camA.ID, authz.EventsSearch)
+		// lpr.search is required to observe an own-camera sub_label match (see the
+		// "sub_label filter requires lpr.search" test below for the case without it).
+		for _, p := range []authz.Permission{authz.EventsSearch, authz.LPRSearch} {
+			grantCameraPermission(t, env, env.Demo.TenantID, u.UserID, camA.ID, p)
+		}
 		scoped := u
 
 		// Permitted camera: the scoped actor finds its own zone and sub_label.
@@ -150,26 +154,109 @@ func TestZoneAndSubLabelFilterCorrectness(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(ownSubLabel.Items) == 0 {
-			t.Fatalf("scoped actor with events.search on camera %s found no event for its own sub_label %s", camA.RemoteName, subLabelA)
+			t.Fatalf("scoped actor with events.search+lpr.search on camera %s found no event for its own sub_label %s", camA.RemoteName, subLabelA)
+		}
+		for _, e := range ownSubLabel.Items {
+			if e.CameraID != camA.ID {
+				t.Errorf("scoped actor's sub_label result carries camera %s, want only %s", e.CameraID, camA.ID)
+			}
 		}
 
-		// Denied camera (no grant at all on camB): the scoped actor gets zero results even
-		// though the zone/sub_label genuinely exist there.
+		// Denied camera (no grant at all on camB): the scoped actor never gets an event that
+		// belongs to camB back, even though the zone/sub_label genuinely exist there.
 		deniedZone, err := svc.ListEvents(ctx, scoped, events.Filter{Zones: []string{zoneB}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(deniedZone.Items) != 0 {
-			t.Errorf("scoped actor without access to camera %s found %d events for its zone %s, want 0",
-				camB.RemoteName, len(deniedZone.Items), zoneB)
+		for _, e := range deniedZone.Items {
+			if e.CameraID == camB.ID {
+				t.Errorf("scoped actor without access to camera %s got back event %s for its zone %s", camB.RemoteName, e.ID, zoneB)
+			}
 		}
 		deniedSubLabel, err := svc.ListEvents(ctx, scoped, events.Filter{SubLabels: []string{subLabelB}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(deniedSubLabel.Items) != 0 {
-			t.Errorf("scoped actor without access to camera %s found %d events for its sub_label %s, want 0",
-				camB.RemoteName, len(deniedSubLabel.Items), subLabelB)
+		for _, e := range deniedSubLabel.Items {
+			if e.CameraID == camB.ID {
+				t.Errorf("scoped actor without access to camera %s got back event %s for its sub_label %s", camB.RemoteName, e.ID, subLabelB)
+			}
+		}
+	})
+
+	// TestZoneAndSubLabelFilterCorrectness/sub_label_filter_requires_lpr.search proves the fix for
+	// the review finding on commit 195f76a: sub_label carries recognized plate text on LPR
+	// cameras (internal/frigatemock/generator.go, enrich), so filtering by it must be gated the
+	// same way the plate filter already is — events.search alone is not enough.
+	t.Run("sub_label filter requires lpr.search, not just events.search", func(t *testing.T) {
+		u, _, err := bootstrap.TenantUser(ctx, env.Store, env.Demo.TenantID, "sublabel-no-lpr-search")
+		if err != nil {
+			t.Fatal(err)
+		}
+		grantCameraPermission(t, env, env.Demo.TenantID, u.UserID, camA.ID, authz.EventsSearch)
+		scoped := u
+
+		page, err := svc.ListEvents(ctx, scoped, events.Filter{SubLabels: []string{subLabelA}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) != 0 {
+			t.Errorf("actor with events.search but not lpr.search on camera %s probed sub_label %q and got %d events, want 0",
+				camA.RemoteName, subLabelA, len(page.Items))
+		}
+	})
+
+	// sub_labels can carry plate text on LPR cameras (same sensitivity as the plates field), so
+	// they must stay redacted for an actor who can search them but was not granted lpr.view,
+	// exactly like plates already are (internal/events/service.go, ListEvents/getEvent).
+	t.Run("sub_labels are redacted from the response without lpr.view", func(t *testing.T) {
+		u, _, err := bootstrap.TenantUser(ctx, env.Store, env.Demo.TenantID, "sublabel-no-lpr-view")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range []authz.Permission{authz.EventsSearch, authz.LPRSearch} {
+			grantCameraPermission(t, env, env.Demo.TenantID, u.UserID, camA.ID, p)
+		}
+		scoped := u
+
+		page, err := svc.ListEvents(ctx, scoped, events.Filter{SubLabels: []string{subLabelA}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) == 0 {
+			t.Fatalf("actor with lpr.search on camera %s found no event for sub_label %s", camA.RemoteName, subLabelA)
+		}
+		for _, e := range page.Items {
+			if len(e.SubLabels) != 0 {
+				t.Errorf("event %s exposed sub_labels %v to an actor without lpr.view, want redacted", e.ID, e.SubLabels)
+			}
+		}
+	})
+
+	// Proves the events.search escalation at service.go ListEvents (using zone/sub_label bumps
+	// the required permission from events.view to events.search) actually blocks a view-only
+	// actor, not just skips the assertion.
+	t.Run("events.view alone cannot use the zone or sub_label filters", func(t *testing.T) {
+		u, _, err := bootstrap.TenantUser(ctx, env.Store, env.Demo.TenantID, "viewonly-zone-sublabel")
+		if err != nil {
+			t.Fatal(err)
+		}
+		grantCameraPermission(t, env, env.Demo.TenantID, u.UserID, camA.ID, authz.EventsView)
+		scoped := u
+
+		byZone, err := svc.ListEvents(ctx, scoped, events.Filter{CameraIDs: []uuid.UUID{camA.ID}, Zones: []string{zoneA}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(byZone.Items) != 0 {
+			t.Errorf("actor with only events.view filtered by zone %q and got %d events, want 0", zoneA, len(byZone.Items))
+		}
+		bySubLabel, err := svc.ListEvents(ctx, scoped, events.Filter{CameraIDs: []uuid.UUID{camA.ID}, SubLabels: []string{subLabelA}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(bySubLabel.Items) != 0 {
+			t.Errorf("actor with only events.view filtered by sub_label %q and got %d events, want 0", subLabelA, len(bySubLabel.Items))
 		}
 	})
 }

@@ -1,4 +1,4 @@
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { Events } from "./Events";
@@ -43,8 +43,12 @@ describe("Events", () => {
     fireEvent.change(screen.getByLabelText("Sub-etiqueta"), { target: { value: "placa_reconocida" } });
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
 
-    expect(await screen.findByText("No hay eventos que coincidan.")).toBeInTheDocument();
-    expect(lastEventsUrl?.searchParams.getAll("zone")).toEqual(["entrada"]);
-    expect(lastEventsUrl?.searchParams.getAll("sub_label")).toEqual(["placa_reconocida"]);
+    // The submit re-triggers the same "no results" text, so waiting for it alone does not
+    // guarantee the filtered fetch (as opposed to the initial one) has landed yet: wait for the
+    // fetch mock to actually be called with the filtered query string.
+    await waitFor(() => {
+      expect(lastEventsUrl?.searchParams.getAll("zone")).toEqual(["entrada"]);
+      expect(lastEventsUrl?.searchParams.getAll("sub_label")).toEqual(["placa_reconocida"]);
+    });
   });
 });

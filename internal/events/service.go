@@ -158,8 +158,9 @@ func scanEvent(row pgx.Row) (Event, error) {
 	return e, err
 }
 
-// ListEvents searches the index newest first. Plates are only returned (and only
-// searchable) on cameras where the actor holds lpr.view / lpr.search.
+// ListEvents searches the index newest first. Plates and sub_labels (which carry recognized
+// plate text on LPR cameras) are only returned on cameras where the actor holds lpr.view, and
+// only searchable on cameras where the actor holds lpr.search.
 func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (Page[Event], error) {
 	var out Page[Event]
 	n := limit(f.Limit)
@@ -202,6 +203,14 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 			b.add("e.zones && ?", f.Zones)
 		}
 		if len(f.SubLabels) > 0 {
+			// sub_label carries recognized plate text on LPR cameras (frigatemock.enrich), so
+			// filtering by it is gated the same as the Plate filter above: events.search alone
+			// is not enough to probe it, only lpr.search.
+			subLabelCams, err := c.CameraIDs(ctx, authz.LPRSearch)
+			if err != nil {
+				return err
+			}
+			b.add("e.camera_id = ANY(?)", subLabelCams)
 			b.add("e.sub_labels && ?", f.SubLabels)
 		}
 		if f.Severity != "" {
@@ -239,7 +248,12 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 				return err
 			}
 			if !canPlates[e.CameraID] {
+				// sub_labels can carry plate text on LPR cameras, so they are redacted under
+				// the same lpr.view gate as plates (conservative: sub_label is a generic Frigate
+				// field that could also carry non-plate values such as face names on other
+				// camera types, but this codebase has no such consumer today).
 				e.Plates = []string{}
+				e.SubLabels = []string{}
 			}
 			out.Items = append(out.Items, e)
 		}
@@ -275,6 +289,7 @@ func getEvent(ctx context.Context, tx pgx.Tx, c *access.Checker, p authz.Permiss
 	}
 	if !c.Can(authz.LPRView, access.Camera(cam.TenantID, cam.SiteID, cam.ServerID, cam.ID, cam.GroupIds)) {
 		e.Plates = []string{}
+		e.SubLabels = []string{}
 	}
 	return e, nil
 }
