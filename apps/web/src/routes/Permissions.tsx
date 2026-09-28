@@ -45,7 +45,7 @@ function grantable(def: Schemas["PermissionDefinition"], scope: Scope) {
 
 /** Permissions assigns permission + scope + effect to users and groups (PRD §27-31). */
 export function Permissions() {
-  const search = useSearch({ from: "/app/permissions" });
+  const search = useSearch({ from: "/app/settings/permissions" });
   const navigate = useNavigate();
   const qc = useQueryClient();
   const me = useQuery(meQuery);

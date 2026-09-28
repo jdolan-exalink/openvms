@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect } from "@tanstack/react-router";
 import { meQuery } from "./api/queries";
 import { Layout } from "./components/Layout";
+import { SettingsLayout } from "./components/SettingsLayout";
 import { Account } from "./routes/Account";
 import { Audit } from "./routes/Audit";
 import { Cameras } from "./routes/Cameras";
@@ -54,8 +55,25 @@ const playbackRoute = createRoute({
   }),
 });
 
-const permissionsRoute = createRoute({
+// "/" always resolves to Live (En vivo): the operational landing page.
+const indexRoute = createRoute({
   getParentRoute: () => appRoute,
+  path: "/",
+  beforeLoad: () => {
+    throw redirect({ to: "/live" });
+  },
+});
+
+// Settings is a pathless layout (like appRoute above): its children keep their own literal,
+// unprefixed paths, so existing links/bookmarks to e.g. "/sites" keep working unchanged. It only
+// adds the shared SettingsLayout chrome (sub-nav) around the former Infraestructura/
+// Administración pages and the settings landing page (the former Panel/Dashboard content).
+const settingsRoute = createRoute({ getParentRoute: () => appRoute, id: "settings", component: SettingsLayout });
+const settingsChild = <P extends string>(path: P, component: () => ReactNode) =>
+  createRoute({ getParentRoute: () => settingsRoute, path, component });
+
+const permissionsRoute = createRoute({
+  getParentRoute: () => settingsRoute,
   path: "/permissions",
   component: Permissions,
   validateSearch: (s: Record<string, unknown>): { subject?: string } => ({
@@ -66,20 +84,23 @@ const permissionsRoute = createRoute({
 export const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
-    child("/", Dashboard),
+    indexRoute,
     child("/live", Live),
     child("/events", Events),
     child("/plates", Plates),
     playbackRoute,
     child("/exports", Exports),
-    child("/sites", Sites),
-    child("/servers", Servers),
-    child("/cameras", Cameras),
-    child("/users", Users),
-    child("/groups", Groups),
-    permissionsRoute,
-    child("/audit", Audit),
-    child("/account", Account),
+    settingsRoute.addChildren([
+      settingsChild("/settings", Dashboard),
+      settingsChild("/sites", Sites),
+      settingsChild("/servers", Servers),
+      settingsChild("/cameras", Cameras),
+      settingsChild("/users", Users),
+      settingsChild("/groups", Groups),
+      permissionsRoute,
+      settingsChild("/audit", Audit),
+      settingsChild("/account", Account),
+    ]),
   ]),
 ]);
 

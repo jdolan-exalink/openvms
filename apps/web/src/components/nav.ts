@@ -1,6 +1,6 @@
 import {
   Bell, Camera, Download, FileSearch, FolderLock, Gauge, History, KeyRound, LayoutGrid,
-  ListVideo, MapPin, ScanLine, Server, ShieldCheck, UserCog, Users, UsersRound,
+  ListVideo, MapPin, ScanLine, Server, Settings, ShieldCheck, UserCog, Users, UsersRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -14,9 +14,10 @@ export type NavItem = {
   permission?: string;
 };
 
-// Sidebar from PRD §80.
-export const navGroups: { title?: string; items: NavItem[] }[] = [
-  { items: [{ label: "Panel", icon: Gauge, to: "/" }] },
+export type NavGroup = { title?: string; items: NavItem[] };
+
+// Main sidebar from PRD §80: only operational pages plus one entry into the settings area.
+export const navGroups: NavGroup[] = [
   { items: [{ label: "En vivo", icon: LayoutGrid, to: "/live", permission: "live.view" }] },
   {
     title: "Investigación",
@@ -28,6 +29,13 @@ export const navGroups: { title?: string; items: NavItem[] }[] = [
       { label: "Casos", icon: FolderLock, milestone: "M8" },
     ],
   },
+  { items: [{ label: "Configuración", icon: Settings, to: "/settings" }] },
+];
+
+// Settings area sub-navigation: the former "Infraestructura"/"Administración" sidebar groups,
+// plus a "Resumen" landing item that shows the former Panel/Dashboard content.
+export const settingsNavGroups: NavGroup[] = [
+  { items: [{ label: "Resumen", icon: Gauge, to: "/settings" }] },
   {
     title: "Infraestructura",
     items: [
