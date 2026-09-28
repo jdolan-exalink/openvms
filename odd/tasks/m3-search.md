@@ -18,7 +18,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 - [x] M3-2: Plate filtering on `/events`: correctness test added; index-backed search deferred (user decision 2026-09-27, see evidence). Route: delegated direct.
 - [x] M3-3: Add `zone` and `sub_label` filters end-to-end (OpenAPI → service SQL → Events UI) plus GIN indexes on `zones`/`sub_labels` (PRD §46). Route: delegated direct.
 - [x] M3-3b: Harden zone/sub_label filters from review findings on commit `195f76a`. Route: delegated direct.
-- [ ] M3-4: Add `camera_group` filter to `/events` and `/lpr/reads`. Route: delegated direct.
+- [x] M3-4: Add `camera_group` filter to `/events` and `/lpr/reads`. Route: delegated direct.
 - [ ] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Route: delegated direct.
 - [ ] M3-6: Web tests for Events and Plates routes (filters, infinite scroll, `lpr.search` gating). Route: delegated direct.
 - [ ] M3-7: Verify LPR ingestion against the real Frigate 0.18; first sync showed events but no plates. Diagnose adapter mapping if plates exist upstream. Route: delegated direct.
@@ -61,5 +61,14 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
   - Full verification: `go test ./...` PASS; `go test -tags integration ./internal/...` PASS (Docker/testcontainers); `pnpm --filter web test` PASS (3 files / 4 tests); `pnpm typecheck` clean; `make lint` clean; `make generate` re-run, clean `git diff` after commit.
   - Commit: `373a580` (`fix(events): gate sub_label search and visibility behind LPR permissions`, not pushed — no remote configured).
 
+- M3-4: `camera_group` filter on `/events` and `/lpr/reads` (PRD §44). Camera groups already existed (`camera_groups`/`camera_group_members`, migration `00002`, `internal/inventory` `CreateCameraGroup`/`ListCameraGroups`, `GET /api/v1/camera-groups`); this task only added the search-side filter.
+  - Contract: `packages/api-contract/openapi.yaml` adds `camera_group_id` (array, form, explode) to `listEvents` and `listPlateReads`, matching the existing `camera_id` param style; `make generate` re-run (byte-identical on a second run).
+  - `internal/events/service.go`: `Filter.CameraGroupIDs` / `PlateFilter.CameraGroupIDs`; SQL adds `EXISTS (SELECT 1 FROM camera_group_members m WHERE m.camera_id = e.camera_id AND m.group_id = ANY(?))` (and the `l.camera_id` equivalent for plates), appended *after* the existing `e.camera_id = ANY(cams)` / `l.camera_id = ANY(cams)` permission-scoping clause, so the group filter only narrows an already-permitted camera set and can never widen access. `camera_group_members` carries its own tenant RLS, so a cross-tenant group id matches zero membership rows and yields zero results without any extra tenant check. No permission escalation added for this filter (mirrors `camera_id`/`site_id`, not `zone`/`sub_label`/`plate`): grouping is scoping, not a search capability.
+  - `internal/api/events_handlers.go`: `ListEvents` and `ListPlateReads` map `p.CameraGroupId` into the new filter field.
+  - RED: `go test -tags integration ./internal/events/... -run TestCameraGroupFilterCorrectness -v` with the two new SQL clauses temporarily disabled (`if false && len(...)`) — 6 of 7 subtests failed as expected (group filter was a no-op, so cross-camera/cross-tenant events leaked through); the 7th subtest (denied-camera-inside-group) passed even disabled because it is also protected by the pre-existing base permission scoping, which is expected and noted in the test. GREEN: same command with the real clauses restored, all 7 subtests PASS. New file `internal/events/camera_group_filter_integration_test.go`.
+  - Web: `apps/web/src/api/queries.ts` `EventFilter`/`PlateFilter` gain `camera_group_id`; `apps/web/src/routes/Events.tsx` and `apps/web/src/routes/Plates.tsx` add a "Grupo de cámaras" `Select` sourced from the existing `cameraGroupsQuery` (`GET /api/v1/camera-groups`, already used elsewhere in the app). RED: `pnpm --filter web exec vitest run src/routes/Events.test.tsx` / `Plates.test.tsx` failed on `findByLabelText("Grupo de cámaras")` with the two `Field`/`Select` blocks temporarily removed. GREEN: same commands pass after restoring them. New file `apps/web/src/routes/Plates.test.tsx` (Plates had no test file yet; full route coverage is M3-6's job, this only covers the new param).
+  - Full verification: `go test ./...` PASS; `go test -tags integration ./internal/...` PASS (Docker/testcontainers); `pnpm --filter web test` PASS (4 files / 6 tests); `pnpm typecheck` clean; `make lint` clean; `make generate` re-run, clean after commit.
+  - Commit: `7039ec7` (`feat(search): filter events and plate reads by camera group`, not pushed — no remote configured).
+
 ## Next step
-M3-4.
+M3-5.

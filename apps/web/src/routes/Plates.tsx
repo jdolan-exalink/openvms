@@ -2,7 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { History } from "lucide-react";
 import { useState } from "react";
-import { meQuery, type PlateFilter, platesQuery, sitesQuery } from "@/api/queries";
+import { cameraGroupsQuery, meQuery, type PlateFilter, platesQuery, sitesQuery } from "@/api/queries";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, TextInput, Th } from "@/components/ui";
 import { fmtDateTime, fromLocalInput, labelName } from "@/lib/format";
 import { can } from "@/lib/perm";
@@ -11,7 +11,8 @@ import { can } from "@/lib/perm";
 export function Plates() {
   const me = useQuery(meQuery);
   const sites = useQuery(sitesQuery);
-  const [form, setForm] = useState({ plate: "", exact: false, site: "", from: "", to: "" });
+  const cameraGroups = useQuery(cameraGroupsQuery);
+  const [form, setForm] = useState({ plate: "", exact: false, site: "", cameraGroup: "", from: "", to: "" });
   const [filter, setFilter] = useState<PlateFilter>({});
   const reads = useInfiniteQuery(platesQuery(filter));
   const items = reads.data?.pages.flatMap((p) => p.items) ?? [];
@@ -27,6 +28,7 @@ export function Plates() {
             plate: form.plate.trim() || undefined,
             exact: form.exact || undefined,
             site_id: form.site ? [form.site] : undefined,
+            camera_group_id: form.cameraGroup ? [form.cameraGroup] : undefined,
             from: fromLocalInput(form.from),
             to: fromLocalInput(form.to),
           });
@@ -47,6 +49,16 @@ export function Plates() {
             {sites.data?.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Grupo de cámaras">
+          <Select value={form.cameraGroup} onChange={(e) => setForm({ ...form, cameraGroup: e.target.value })}>
+            <option value="">Todos</option>
+            {cameraGroups.data?.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
               </option>
             ))}
           </Select>

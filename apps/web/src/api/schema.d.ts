@@ -2225,6 +2225,8 @@ export interface operations {
                 site_id?: string[];
                 server_id?: string[];
                 camera_id?: string[];
+                /** @description Restricts to cameras belonging to any of these groups, intersected with the cameras the caller can already see. */
+                camera_group_id?: string[];
                 label?: string[];
                 zone?: string[];
                 sub_label?: string[];
@@ -2368,6 +2370,8 @@ export interface operations {
                 exact?: boolean;
                 site_id?: string[];
                 camera_id?: string[];
+                /** @description Restricts to cameras belonging to any of these groups, intersected with the cameras the caller can already see. */
+                camera_group_id?: string[];
                 from?: string;
                 to?: string;
                 cursor?: string;

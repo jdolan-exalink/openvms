@@ -58,6 +58,7 @@ export type EventFilter = {
   site_id?: string[];
   server_id?: string[];
   camera_id?: string[];
+  camera_group_id?: string[];
   label?: string[];
   zone?: string[];
   sub_label?: string[];
@@ -79,7 +80,15 @@ export const eventsQuery = (filter: EventFilter) =>
     refetchInterval: 15_000,
   });
 
-export type PlateFilter = { plate?: string; exact?: boolean; site_id?: string[]; camera_id?: string[]; from?: string; to?: string };
+export type PlateFilter = {
+  plate?: string;
+  exact?: boolean;
+  site_id?: string[];
+  camera_id?: string[];
+  camera_group_id?: string[];
+  from?: string;
+  to?: string;
+};
 
 export const platesQuery = (filter: PlateFilter) =>
   infiniteQueryOptions({

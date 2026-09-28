@@ -42,7 +42,8 @@ func (h *Handlers) ListEvents(ctx context.Context, r gen.ListEventsRequestObject
 	p := r.Params
 	f := events.Filter{
 		SiteIDs: uuids(p.SiteId), ServerIDs: uuids(p.ServerId), CameraIDs: uuids(p.CameraId),
-		Plate: deref(p.Plate), From: p.From, To: p.To, Reviewed: p.Reviewed,
+		CameraGroupIDs: uuids(p.CameraGroupId),
+		Plate:          deref(p.Plate), From: p.From, To: p.To, Reviewed: p.Reviewed,
 		Cursor: deref(p.Cursor), Limit: deref(p.Limit),
 	}
 	if p.Label != nil {
@@ -131,7 +132,8 @@ func (h *Handlers) ListPlateReads(ctx context.Context, r gen.ListPlateReadsReque
 	p := r.Params
 	page, err := h.Events.ListPlates(ctx, a, events.PlateFilter{
 		Plate: deref(p.Plate), Exact: deref(p.Exact), SiteIDs: uuids(p.SiteId), CameraIDs: uuids(p.CameraId),
-		From: p.From, To: p.To, Cursor: deref(p.Cursor), Limit: deref(p.Limit),
+		CameraGroupIDs: uuids(p.CameraGroupId),
+		From:           p.From, To: p.To, Cursor: deref(p.Cursor), Limit: deref(p.Limit),
 	})
 	if err != nil {
 		return nil, err

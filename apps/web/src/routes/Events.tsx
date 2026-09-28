@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { CheckCheck, Download, History, X } from "lucide-react";
 import { useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { camerasQuery, type EventFilter, eventsQuery, meQuery, sitesQuery } from "@/api/queries";
+import { cameraGroupsQuery, camerasQuery, type EventFilter, eventsQuery, meQuery, sitesQuery } from "@/api/queries";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { commonLabels, fmtDateTime, fmtDuration, fromLocalInput, labelName } from "@/lib/format";
@@ -12,6 +12,7 @@ import { can } from "@/lib/perm";
 type Form = {
   site: string;
   camera: string;
+  cameraGroup: string;
   label: string;
   zone: string;
   subLabel: string;
@@ -22,12 +23,25 @@ type Form = {
   pending: boolean;
 };
 
-const emptyForm: Form = { site: "", camera: "", label: "", zone: "", subLabel: "", severity: "", plate: "", from: "", to: "", pending: false };
+const emptyForm: Form = {
+  site: "",
+  camera: "",
+  cameraGroup: "",
+  label: "",
+  zone: "",
+  subLabel: "",
+  severity: "",
+  plate: "",
+  from: "",
+  to: "",
+  pending: false,
+};
 
 function toFilter(f: Form): EventFilter {
   return {
     site_id: f.site ? [f.site] : undefined,
     camera_id: f.camera ? [f.camera] : undefined,
+    camera_group_id: f.cameraGroup ? [f.cameraGroup] : undefined,
     label: f.label ? [f.label] : undefined,
     zone: f.zone.trim() ? [f.zone.trim()] : undefined,
     sub_label: f.subLabel.trim() ? [f.subLabel.trim()] : undefined,
@@ -45,6 +59,7 @@ export function Events() {
   const me = useQuery(meQuery);
   const sites = useQuery(sitesQuery);
   const cameras = useQuery(camerasQuery({}));
+  const cameraGroups = useQuery(cameraGroupsQuery);
   const [form, setForm] = useState<Form>(emptyForm);
   const [filter, setFilter] = useState<EventFilter>(toFilter(emptyForm));
   const events = useInfiniteQuery(eventsQuery(filter));
@@ -79,6 +94,16 @@ export function Events() {
             {camsOfSite.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.display_name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Grupo de cámaras">
+          <Select value={form.cameraGroup} onChange={(e) => set("cameraGroup", e.target.value)}>
+            <option value="">Todos</option>
+            {cameraGroups.data?.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
               </option>
             ))}
           </Select>

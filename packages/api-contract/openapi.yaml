@@ -565,6 +565,7 @@ paths:
         - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: camera_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: camera_group_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } }, description: "Restricts to cameras belonging to any of these groups, intersected with the cameras the caller can already see." }
         - { name: label, in: query, style: form, explode: true, schema: { type: array, items: { type: string } } }
         - { name: zone, in: query, style: form, explode: true, schema: { type: array, items: { type: string } } }
         - { name: sub_label, in: query, style: form, explode: true, schema: { type: array, items: { type: string } } }
@@ -667,6 +668,7 @@ paths:
         - { name: exact, in: query, schema: { type: boolean, default: false } }
         - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: camera_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: camera_group_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } }, description: "Restricts to cameras belonging to any of these groups, intersected with the cameras the caller can already see." }
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
         - { name: cursor, in: query, schema: { type: string } }

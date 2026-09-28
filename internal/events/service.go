@@ -59,10 +59,13 @@ type Filter struct {
 	SiteIDs   []uuid.UUID
 	ServerIDs []uuid.UUID
 	CameraIDs []uuid.UUID
-	Labels    []string
-	Zones     []string
-	SubLabels []string
-	Severity  string
+	// CameraGroupIDs restricts to cameras belonging to any of these groups, intersected with
+	// (never widening) the cameras the actor may otherwise see.
+	CameraGroupIDs []uuid.UUID
+	Labels         []string
+	Zones          []string
+	SubLabels      []string
+	Severity       string
 	// Plate matches events with a plate containing this text (normalized).
 	Plate    string
 	From     *time.Time
@@ -195,6 +198,12 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 		}
 		if len(f.CameraIDs) > 0 {
 			b.add("e.camera_id = ANY(?)", f.CameraIDs)
+		}
+		if len(f.CameraGroupIDs) > 0 {
+			// Membership rows are tenant-scoped (RLS), so a cross-tenant group id matches no
+			// row here; combined with the e.camera_id = ANY(cams) clause above, a group that
+			// contains a camera the actor cannot otherwise see never leaks it.
+			b.add("EXISTS (SELECT 1 FROM camera_group_members m WHERE m.camera_id = e.camera_id AND m.group_id = ANY(?))", f.CameraGroupIDs)
 		}
 		if len(f.Labels) > 0 {
 			b.add("e.labels && ?", f.Labels)
@@ -402,10 +411,13 @@ type PlateFilter struct {
 	Exact     bool
 	SiteIDs   []uuid.UUID
 	CameraIDs []uuid.UUID
-	From      *time.Time
-	To        *time.Time
-	Cursor    string
-	Limit     int
+	// CameraGroupIDs restricts to cameras belonging to any of these groups, intersected with
+	// (never widening) the cameras the actor may otherwise see.
+	CameraGroupIDs []uuid.UUID
+	From           *time.Time
+	To             *time.Time
+	Cursor         string
+	Limit          int
 }
 
 // ListPlates searches plate reads across every Frigate the actor can see (PRD §42).
@@ -435,6 +447,11 @@ func (s *Service) ListPlates(ctx context.Context, actor authz.Actor, f PlateFilt
 		}
 		if len(f.CameraIDs) > 0 {
 			b.add("l.camera_id = ANY(?)", f.CameraIDs)
+		}
+		if len(f.CameraGroupIDs) > 0 {
+			// Same reasoning as ListEvents: membership rows are tenant-scoped (RLS), and this
+			// clause only narrows the already-permitted l.camera_id = ANY(cams) set above.
+			b.add("EXISTS (SELECT 1 FROM camera_group_members m WHERE m.camera_id = l.camera_id AND m.group_id = ANY(?))", f.CameraGroupIDs)
 		}
 		if f.From != nil {
 			b.add("l.seen_at >= ?", *f.From)
