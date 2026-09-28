@@ -90,6 +90,15 @@ func (s *Server) objects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, out)
 }
 
+// eventSnapshot serves a fake JPEG for a tracked object's (Frigate "event" in the events API
+// sense) full-frame snapshot, the same endpoint eventSnapshot/lprReadSnapshot in
+// internal/media/gateway.go relay through. Real Frigate 404s for an unknown id; this mock never
+// tracks tracked-object existence separately from reviews, so it always serves an image keyed by
+// id, deterministic like the other mock thumbnails.
+func (s *Server) eventSnapshot(w http.ResponseWriter, r *http.Request) {
+	writeJPEG(w, "event-"+r.PathValue("id"))
+}
+
 type recordingSegment struct {
 	ID        string  `json:"id"`
 	StartTime float64 `json:"start_time"`

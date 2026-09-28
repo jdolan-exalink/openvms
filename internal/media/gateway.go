@@ -43,7 +43,8 @@ type ActorFunc func(ctx context.Context) (authz.Actor, bool)
 //	GET /media/v1/cameras/{id}/snapshot.jpg                  latest frame        live.view
 //	GET /media/v1/cameras/{id}/live?quality=sub|main         MSE over websocket  live.view
 //	GET /media/v1/cameras/{id}/vod/{start}/{end}/{file}      HLS recordings      recordings.view
-//	GET /media/v1/events/{id}/snapshot.jpg                   event snapshot      snapshots.view
+//	GET /media/v1/events/{id}/snapshot.jpg                   event snapshot       snapshots.view
+//	GET /media/v1/lpr/reads/{id}/snapshot.jpg                plate read snapshot  snapshots.view + lpr.view
 //	GET /media/v1/exports/{id}/download                      finished export     exports.download
 type Gateway struct {
 	Svc   *Service
@@ -59,6 +60,7 @@ func (g *Gateway) Routes() http.Handler {
 	r.Get("/cameras/{id}/live", g.live)
 	r.Get("/cameras/{id}/vod/{start}/{end}/{file}", g.vod)
 	r.Get("/events/{id}/snapshot.jpg", g.eventSnapshot)
+	r.Get("/lpr/reads/{id}/snapshot.jpg", g.lprReadSnapshot)
 	r.Get("/exports/{id}/download", g.exportDownload)
 	return r
 }
@@ -245,6 +247,52 @@ func (g *Gateway) eventSnapshot(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Disposition", `attachment; filename="snapshot-`+id.String()+`.jpg"`)
 		g.audit(r.Context(), a, cam.TenantID, ActionSnapshotViewed, "event", id, nil)
+	}
+	relay(w, resp, "private, max-age=3600")
+}
+
+// lprReadSnapshot serves the Frigate tracked-object snapshot for one LPR read
+// (lpr_reads.remote_event_id), full frame with the detection bounding box (bbox=1), so the
+// plate photo shown on hover in the Plates page shows the actual read instead of another
+// object from the same event (which the event's own /events/{id}/snapshot.jpg endpoint would,
+// since it always uses detections[0]).
+func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
+	a, ok := g.actorOr401(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid read id")
+		return
+	}
+	var cameraID uuid.UUID
+	var remoteEventID string
+	err = g.Svc.Store.TxRaw(r.Context(), store.ScopeFor(a), func(tx pgx.Tx) error {
+		return tx.QueryRow(r.Context(), `SELECT camera_id, remote_event_id FROM lpr_reads WHERE id = $1`, id).Scan(&cameraID, &remoteEventID)
+	})
+	if err != nil {
+		g.fail(w, r, store.Classify(err))
+		return
+	}
+	cam, err := g.Svc.Authorize(r.Context(), a, cameraID, authz.SnapshotsView)
+	if err != nil {
+		g.fail(w, r, err)
+		return
+	}
+	if !g.can(r.Context(), a, cameraID, authz.LPRView) {
+		writeErr(w, http.StatusForbidden, "forbidden", "you do not have permission to view plate reads for this camera")
+		return
+	}
+	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
+	if err != nil {
+		g.fail(w, r, err)
+		return
+	}
+	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(remoteEventID)+"/snapshot.jpg", url.Values{"bbox": {"1"}}, r.Header)
+	if err != nil {
+		g.fail(w, r, err)
+		return
 	}
 	relay(w, resp, "private, max-age=3600")
 }
