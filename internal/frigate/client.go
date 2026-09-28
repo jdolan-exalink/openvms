@@ -278,7 +278,11 @@ func (c *client) WebSocket(ctx context.Context, path string, query url.Values) (
 	} else {
 		u.Scheme = "ws"
 	}
-	return u.String(), h, c.tls, nil
+	// The HTTP transport adds h2 to the shared config's ALPN list; a websocket upgrade
+	// needs HTTP/1.1, so hand out a copy pinned to it.
+	wsTLS := c.tls.Clone()
+	wsTLS.NextProtos = []string{"http/1.1"}
+	return u.String(), h, wsTLS, nil
 }
 
 func snippet(b []byte) string {
