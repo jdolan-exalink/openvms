@@ -75,6 +75,24 @@ type CameraGroupMember struct {
 	TenantID uuid.UUID
 }
 
+type ClipWatermarkJob struct {
+	ID            uuid.UUID
+	TenantID      uuid.UUID
+	SiteID        uuid.UUID
+	ServerID      uuid.UUID
+	CameraID      uuid.UUID
+	LprReadID     uuid.UUID
+	RemoteEventID string
+	RequestedBy   uuid.UUID
+	WatermarkText string
+	LogoKey       string
+	Status        string
+	Error         string
+	OutputKey     string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type Event struct {
 	ID            uuid.UUID
 	TenantID      uuid.UUID

@@ -6,6 +6,7 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/branding"
+	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
@@ -37,6 +38,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "conflict", "a resource with the same name already exists"
 	case errors.Is(err, inventory.ErrSiteNotEmpty):
 		return http.StatusConflict, "site_not_empty", err.Error()
+	case errors.Is(err, clipwatermark.ErrNotReady):
+		return http.StatusConflict, "not_ready", "the clip watermark job is not ready yet"
 	case errors.As(err, &fe):
 		msg := "could not reach Frigate"
 		if errors.Is(err, frigate.ErrUnauthorized) {

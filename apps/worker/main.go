@@ -18,6 +18,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/media"
@@ -108,6 +109,12 @@ func run() error {
 
 	tracker := &media.ExportTracker{Store: st, Adapters: adapters, Interval: 3 * time.Second, Log: log}
 	go tracker.Run(ctx)
+
+	// clipWorker (PDW-4) burns the plate detail watermark into requested clips via ffmpeg,
+	// installed only in this image's runtime stage (deploy/docker/go.Dockerfile
+	// runtime-ffmpeg target) — the api/other images stay distroless without it.
+	clipWorker := &clipwatermark.Worker{Store: st, Adapters: adapters, Blobs: objects, Log: log}
+	go clipWorker.Run(ctx)
 
 	poller := &inventory.HealthPoller{
 		Svc:         inv,

@@ -26,7 +26,7 @@ feature extends.
 - [x] PDW-1: Owner branding settings (migration, contract, service, audit, Configuración page). Route: delegated direct (writer: this session).
 - [x] PDW-2: Plate detail modal — full-quality photo + clip playback via gateway (Range) + CSS watermark overlay. Route: delegated direct (writer: this session).
 - [x] PDW-3: Watermarked photo download (Go burn-in, embedded font, logo composited). Route: delegated direct (writer: this session).
-- [ ] PDW-4: Clip watermark job in the worker (ffmpeg image, job table/state, object store, status + download endpoints).
+- [x] PDW-4: Clip watermark job in the worker (ffmpeg image, job table/state, object store, status + download endpoints). Route: delegated direct (writer: this session).
 - [ ] PDW-5: Modal download UI for photo and clip job (progress, errors), audit labels.
 
 ## Verification mode
@@ -271,6 +271,138 @@ feature extends.
   `pnpm typecheck` clean; `pnpm lint` clean. No contract change, so no `make generate` step.
 - Commit: pending (this task's own commit, created immediately after this document update).
 
+### PDW-4: Clip watermark job in the worker
+- Route: delegated direct (writer: this session; this task's write session was resumed once
+  after an API rate-limit interruption mid-task — noted per the coordinator's resume
+  instruction. Work in progress at the interruption (migration, sqlc queries/generated code,
+  `internal/clipwatermark/{service,ffmpeg}.go` and `service_test.go`'s
+  `TestDecodeAndValidateLogo`-style scaffolding had NOT yet been RED-proven) was re-verified
+  from scratch after resuming, and the `escapeDrawtext` RED/GREEN below was captured fresh
+  after resume — no RED evidence from before the interruption is claimed as still valid
+  without re-running it.
+- Contract: `packages/api-contract/openapi.yaml` — `POST
+  /api/v1/lpr/reads/{readId}/clip-watermark-jobs` (create, 202 queued),
+  `GET .../clip-watermark-jobs/{jobId}` (poll status), `GET .../clip-watermark-jobs/{jobId}/download`
+  (binary `video/mp4`, 409 `Conflict` while not done) — `ClipWatermarkJob`/
+  `ClipWatermarkJobStatus` schemas. `make generate` re-run twice after the final state,
+  stable file list both times.
+- Migration `migrations/00011_clip_watermark_jobs.sql`: `clip_watermark_jobs` (tenant/site/
+  server/camera/lpr_read ids, `remote_event_id`, `requested_by`, `watermark_text`,
+  `logo_key`, `status` CHECK IN queued/running/done/failed, `error`, `output_key`), RLS via
+  `app_tenant_visible` mirroring `exports`/`views`. `watermark_text` and (a copy of) the
+  logo are frozen at request time — decision: matches the photo download's own synchronous
+  burn-in (current branding at the moment of the click), so the result is consistent
+  regardless of whether the browser downloads a photo instantly or a clip job that sits
+  queued for a while; also means the worker never needs a `branding.Service`/actor of its
+  own, only `Store`/`Adapters`/`Blobs`.
+- New package `internal/clipwatermark`:
+  - `Service` (`CreateJob`/`GetJob`/`Download`): authorization mirrors
+    `internal/media/gateway.go`'s `lprReadCamera` (recordings.view + lpr.view for any clip
+    access), reusing `media.Service.Authorize` rather than reimplementing camera-ancestry
+    permission checks — `CreateJob` additionally requires `exports.create`, `Download`
+    additionally requires `exports.download` (decision, per the task's own instruction:
+    reuse the existing export permissions rather than add dedicated ones — a clip watermark
+    job is conceptually "another way to export a clip"). Denied access is audited centrally
+    by the existing `h.auditDenied` (router.go's `ResponseErrorHandlerFunc`), so the service
+    does not call it itself, only returns `access.ErrForbidden`-wrapped errors — confirmed
+    by reading `internal/api/router.go` before writing this, per the task's own note that
+    this is "already audited centrally on this branch."
+  - `buildFFmpegArgs`/`escapeDrawtext` (`ffmpeg.go`): pure functions, H.264/AAC output,
+    `-preset veryfast`, a fixed `-threads 2`, `-movflags +faststart`, a 120s output cap as a
+    defensive limit. With a logo, switches from `-vf` to `-filter_complex` (scale + overlay
+    + drawtext chained). Escaping order (backslash, then quote, then colon, then percent)
+    follows ffmpeg's own documented drawtext escaping rules.
+  - `Worker` (`worker.go`): `Once` claims and processes queued jobs one at a time
+    (`ClaimNextClipWatermarkJob`'s `FOR UPDATE SKIP LOCKED`, matching the task's
+    "concurrency 1"), fetches the clip from the camera's Frigate via
+    `ad.Media().Open(ctx, "/api/events/"+remote_event_id+"/clip.mp4", nil, nil)` (the same
+    path `lprReadClip` proxies), stages it to a temp file, runs ffmpeg via an exported,
+    overridable `RunFFmpeg` field (nil uses the real `exec.CommandContext`; tests substitute
+    a fake — this dev host confirmed to have no `ffmpeg` on PATH before writing this
+    feature, per the task's own instruction not to install packages here), uploads the
+    result to the object store, and marks the job done/failed. A per-job
+    `context.WithTimeout` (default 5 minutes) bounds a stuck run.
+  - `internal/api/errors.go` gained a `clipwatermark.ErrNotReady` → 409 case in `statusFor`.
+- Docker: `deploy/docker/go.Dockerfile` gained two named runtime stages —
+  `runtime-ffmpeg` (`debian:bookworm-slim` + `ffmpeg` + a non-root `appuser`) and `runtime`
+  (unchanged distroless, kept as the LAST stage so a build with no `--target` still defaults
+  to it — verified this matters: Docker defaults to the last stage when `--target` is
+  omitted, so `runtime-ffmpeg` had to be reordered before `runtime`, not just added).
+  `docker-compose.yml`'s `worker` service gained `target: runtime-ffmpeg`; every other Go
+  service (`api`, `frigate-helvecia`, `frigate-cayasta`) is untouched and stays distroless.
+- Worker wiring: `apps/worker/main.go` gained a `clipwatermark.Worker{Store, Adapters,
+  Blobs: objects, Log}` alongside the existing `events.Syncer`/`media.ExportTracker`/
+  `inventory.HealthPoller` goroutines. `apps/api/main.go` gained
+  `clipwatermark.Service{Store, Media: mediaSvc, Branding: brandingSvc, Blobs: store, Log}`
+  wired into `Handlers.ClipWatermark`.
+- Added `golang.org/x/image` was already a direct dependency from PDW-3; no new Go
+  dependency was needed for PDW-4 (ffmpeg is an external binary, not a Go import).
+- RED/GREEN #1 (unit, `internal/clipwatermark/ffmpeg_test.go`, captured fresh after the
+  resume): temporarily replaced `escapeDrawtext`'s single `strings.Replacer` (which performs
+  one non-overlapping pass, so ordering does not matter) with four sequential
+  `strings.ReplaceAll` calls in the wrong order (colon/quote/percent before backslash) — a
+  real, easy-to-make bug class for exactly this kind of escaping. RED:
+  `go test ./internal/clipwatermark/... -run 'TestEscapeDrawtext|TestBuildFFmpegArgsNoLogo' -v`
+  — 4 of 5 `TestEscapeDrawtext` subtests failed with double-escaped backslashes (e.g.
+  `13\\:05\\:30` instead of `13\:05\:30`), and `TestBuildFFmpegArgsNoLogo` failed too (its
+  filter string assertion). GREEN: restored the single-pass `strings.NewReplacer`, same
+  command, all pass, including `TestDrawtextFilterIsWellFormed` (counts unescaped `'` in the
+  built filter, must be exactly 2 — the open/close of `text='...'`).
+- RED/GREEN #2 (integration, `internal/clipwatermark/worker_integration_test.go`
+  `TestClipWatermarkJobLifecycle`): RED via the "temporarily disable" method — added an
+  early `return nil` before the `MarkClipWatermarkJobDone` call. `go test -tags integration
+  ./internal/clipwatermark/... -run TestClipWatermarkJobLifecycle -v` — failed
+  (`job status after processing = "running" ... want done`). GREEN: restored the real call,
+  same command, passes (queued → running → done via a faked `RunFFmpeg` that copies the
+  staged input straight to the output path, since this host has no real ffmpeg; a sibling
+  subtest covers a faked ffmpeg *failure* ending in `status = "failed"` with a non-empty
+  `error`, and `Download` on it returning `ErrNotReady`).
+  - Design note: `worker_integration_test.go` is `package clipwatermark_test` (external),
+    not a white-box `package clipwatermark` test — a white-box version created a real import
+    cycle (`internal/testutil/demofix` → `internal/bootstrap` → `internal/api` →
+    `internal/clipwatermark`, now that `api.Handlers` carries a `ClipWatermark` field),
+    caught by `go vet -tags integration ./internal/...` failing with "import cycle not
+    allowed in test." Fixed by making `Worker.RunFFmpeg` an exported field (it needed to be
+    settable from `internal/api`'s own test anyway, see below) and switching the test file
+    to the external test package, a standard Go pattern for this exact situation.
+  - A second RED/GREEN caught a genuine test-authoring bug, not a product bug: the sibling
+    `TestClipWatermarkJobAuthorization` initially only granted `exports.create` before
+    calling `CreateJob`, which still failed with "forbidden" — turned out `operatorPerms`
+    (`internal/bootstrap/demo.go`) already grants "operador" `recordings.view` but not
+    `lpr.view`, which `authorizeClip` also requires. Fixed by granting both `lpr.view` and
+    `exports.create`; documented in the test's own comment.
+- RED/GREEN #3 (integration, `internal/api/clip_watermark_job_integration_test.go`
+  `TestClipWatermarkJobAPI`, the HTTP-layer test): passed immediately on first run
+  (test-only, no bug found — service/worker logic was already proven above). Proved
+  non-vacuous by temporarily renaming the `ActionClipDownloaded` constant's value; RED:
+  `go test -tags integration ./internal/api/... -run TestClipWatermarkJobAPI -v` failed
+  (`CLIP_DOWNLOADED audit rows = 0, want 1`). GREEN: reverted, same command passes (create
+  returns 202 queued; poll returns 200; download before the worker runs returns 409;
+  download after processing returns 200 `video/mp4` and is audited).
+- An ffmpeg end-to-end test exists (`internal/clipwatermark/ffmpeg_e2e_test.go`,
+  `TestFFmpegEndToEnd`), skip-guarded via `exec.LookPath("ffmpeg")` per the task's own
+  instruction. Ran it here: it skipped, as expected, since this host has no ffmpeg (and the
+  task instructions forbid installing packages on the host) — **this means the real ffmpeg
+  invocation (the actual `drawtext`/`overlay` filter graph accepted by a real ffmpeg binary)
+  has NOT been verified in this environment.** The filter syntax was written to match
+  ffmpeg's documented `drawtext`/`overlay`/`filter_complex` grammar and its own escaping
+  rules, and the argument-list construction is unit-tested, but only a real run (this test,
+  wherever ffmpeg is available — e.g. inside the built `runtime-ffmpeg` worker image) closes
+  that gap. Flagged explicitly per the task's own honesty requirement, not glossed over.
+- Full verification: `go build ./...` clean; `go vet ./...` clean; `golangci-lint run` — 0
+  issues (fixed two `gosec` findings, G204 subprocess-with-variable and G304
+  file-inclusion-with-variable, both `//nolint:gosec` with reasons — `ffmpegPath`/`args` are
+  fixed config and our own `buildFFmpegArgs` output, not user input; `outputPath` is our own
+  `os.CreateTemp` result); `go test -race ./...` PASS (including `internal/clipwatermark`);
+  `go test -tags integration ./internal/...` PASS (all packages, Docker/testcontainers,
+  full re-run for regression safety); `pnpm --filter web test` PASS (12 files / 53 tests,
+  unchanged — no web files touched this task, PDW-5 wires the UI); `pnpm typecheck` clean;
+  `pnpm lint` clean; `make generate` (`go generate ./...` + `pnpm generate`) re-run twice,
+  stable file list both times. `go mod tidy` run, no changes beyond what PDW-3 already
+  introduced.
+- Commit: pending (this task's own commit, created immediately after this document update).
+
 ## Next step
-PDW-4: clip watermark job in the worker (ffmpeg `drawtext`/`overlay`, job table/state,
-object store, status + download endpoints, worker Docker image gains ffmpeg).
+PDW-5: modal download UI (photo download button, clip watermark job button with
+queued/running/done/failed polling UX matching Exports, error display) and audit labels for
+the new actions (`CLIP_WATERMARK_REQUESTED`, `CLIP_DOWNLOADED`) in `apps/web/src/routes/Audit.tsx`.

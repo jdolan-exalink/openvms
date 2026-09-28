@@ -520,6 +520,72 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/lpr/reads/{readId}/clip-watermark-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                readId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a watermarked clip download job for a plate read (PDW-4)
+         * @description Needs lpr.view + recordings.view (to view the clip at all) plus exports.create. The
+         *     worker burns in the detection's date/time and the tenant's current owner branding
+         *     (frozen at request time), the same watermark the plate detail modal already shows
+         *     as a CSS overlay. Poll status with getClipWatermarkJob, then download with
+         *     downloadClipWatermarkJob once status is done.
+         */
+        post: operations["createClipWatermarkJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lpr/reads/{readId}/clip-watermark-jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                readId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /** Poll a clip watermark job's status (lpr.view + recordings.view) */
+        get: operations["getClipWatermarkJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lpr/reads/{readId}/clip-watermark-jobs/{jobId}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                readId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /** Download the finished watermarked clip (+ exports.download) */
+        get: operations["downloadClipWatermarkJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -1247,6 +1313,20 @@ export interface components {
         PlateReadPage: {
             items: components["schemas"]["PlateRead"][];
             next_cursor?: string;
+        };
+        /** @enum {string} */
+        ClipWatermarkJobStatus: "queued" | "running" | "done" | "failed";
+        ClipWatermarkJob: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            lpr_read_id: string;
+            status: components["schemas"]["ClipWatermarkJobStatus"];
+            error: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         LoginRequest: {
             username: string;
@@ -2579,6 +2659,84 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    createClipWatermarkJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                readId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipWatermarkJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getClipWatermarkJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                readId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClipWatermarkJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    downloadClipWatermarkJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                readId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Watermarked clip */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "video/mp4": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     login: {

@@ -750,6 +750,62 @@ paths:
               schema: { $ref: "#/components/schemas/PlateReadPage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/lpr/reads/{readId}/clip-watermark-jobs:
+    parameters:
+      - { name: readId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [lpr]
+      operationId: createClipWatermarkJob
+      summary: Start a watermarked clip download job for a plate read (PDW-4)
+      description: |
+        Needs lpr.view + recordings.view (to view the clip at all) plus exports.create. The
+        worker burns in the detection's date/time and the tenant's current owner branding
+        (frozen at request time), the same watermark the plate detail modal already shows
+        as a CSS overlay. Poll status with getClipWatermarkJob, then download with
+        downloadClipWatermarkJob once status is done.
+      responses:
+        "202":
+          description: Queued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClipWatermarkJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/lpr/reads/{readId}/clip-watermark-jobs/{jobId}:
+    parameters:
+      - { name: readId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [lpr]
+      operationId: getClipWatermarkJob
+      summary: Poll a clip watermark job's status (lpr.view + recordings.view)
+      responses:
+        "200":
+          description: Job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClipWatermarkJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/lpr/reads/{readId}/clip-watermark-jobs/{jobId}/download:
+    parameters:
+      - { name: readId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [lpr]
+      operationId: downloadClipWatermarkJob
+      summary: Download the finished watermarked clip (+ exports.download)
+      responses:
+        "200":
+          description: Watermarked clip
+          content:
+            video/mp4: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/v1/auth/login:
     post:
       tags: [identity]
@@ -1732,6 +1788,19 @@ components:
           type: array
           items: { $ref: "#/components/schemas/PlateRead" }
         next_cursor: { type: string }
+    ClipWatermarkJobStatus:
+      type: string
+      enum: [queued, running, done, failed]
+    ClipWatermarkJob:
+      type: object
+      required: [id, lpr_read_id, status, error, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        lpr_read_id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/ClipWatermarkJobStatus" }
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     LoginRequest:
       type: object
       required: [username, password]
