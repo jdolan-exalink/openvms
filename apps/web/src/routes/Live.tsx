@@ -1,15 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
 import { Button, ErrorNote, PageHeader, Select, StatusBadge, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { liveSelectionKey, parseSelection, placeCameraAt, resizeTiles, serializeSelection, type Tile } from "@/lib/liveGrid";
 import { can } from "@/lib/perm";
-
-type Tile = { camera_id: string; quality: "sub" | "main" } | null;
 
 const GRIDS = [1, 2, 3, 4];
 
@@ -32,25 +31,54 @@ export function Live() {
   const [viewId, setViewId] = useState("");
   const [saveName, setSaveName] = useState("");
   const [shared, setShared] = useState(false);
+  // Set once the saved grid selection (or the default) has been applied, so the persistence
+  // effect below never fires before restoration and overwrites a saved selection with defaults.
+  const [restored, setRestored] = useState(false);
 
   const camById = useMemo(() => new Map(cameras.data?.map((c) => [c.id, c])), [cameras.data]);
 
+  // Restore the last grid selection for this user+tenant once both are known, dropping any
+  // camera the user can no longer see. This adjusts state during render (React's documented
+  // alternative to an Effect for "state that depends on data becoming available"), not inside
+  // an Effect, so it applies before the default grid ever paints and runs at most once.
+  // localStorage can be unavailable (private mode) or hold stale/malformed data, so every step
+  // is guarded.
+  if (!restored && me.data && cameras.data) {
+    setRestored(true);
+    try {
+      const key = liveSelectionKey(me.data.tenant_id, me.data.id);
+      const validIds = new Set(cameras.data.map((c) => c.id));
+      const saved = parseSelection(localStorage.getItem(key), validIds);
+      if (saved) {
+        setColumns(saved.columns);
+        setTiles(saved.tiles);
+      }
+    } catch {
+      // Storage unavailable or corrupt: keep the default empty grid.
+    }
+  }
+
+  // Persist the current grid selection (columns, tile order and camera ids) once restored.
+  useEffect(() => {
+    if (!restored || !me.data) return;
+    try {
+      localStorage.setItem(liveSelectionKey(me.data.tenant_id, me.data.id), serializeSelection(columns, tiles));
+    } catch {
+      // Storage unavailable (private mode, quota): the grid still works for this session.
+    }
+  }, [restored, me.data, columns, tiles]);
+
   const setGrid = (n: number) => {
     setColumns(n);
-    setTiles((t) => {
-      const next = t.slice(0, n * n);
-      while (next.length < n * n) next.push(null);
-      return next;
-    });
+    setTiles((t) => resizeTiles(t, n));
     setSelected((s) => Math.min(s, n * n - 1));
     setFocus(null);
   };
 
   const place = (cameraId: string) => {
     setTiles((t) => {
-      const next = [...t];
       // Fill the selected tile, then move the selection to the next empty one.
-      next[selected] = { camera_id: cameraId, quality: columns === 1 ? "main" : "sub" };
+      const next = placeCameraAt(t, selected, cameraId, columns === 1 ? "main" : "sub");
       const empty = next.findIndex((x, i) => x === null && i !== selected);
       if (empty >= 0) setSelected(empty);
       return next;

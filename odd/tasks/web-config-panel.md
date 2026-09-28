@@ -33,7 +33,7 @@ select-then-pick instead of direct drag and drop.
       for them). Route: direct/delegated mix (single writer, this session).
 - [x] WCP-2: Confirm/lock in "always Live" as the default after login and for "/" with a
       dedicated Login-flow test; audit for any other place assuming "/" shows the dashboard.
-- [ ] WCP-3: Persist the Live grid selection (columns + tile order/camera ids) per user
+- [x] WCP-3: Persist the Live grid selection (columns + tile order/camera ids) per user
       (`tenant_id` + user id from `meQuery`) in `localStorage`, wrapped in try/catch, restored on
       load, gracefully dropping cameras the user can no longer see.
 - [ ] WCP-4: Drag and drop in Live — drag a camera from the list into a grid slot, and
@@ -131,5 +131,44 @@ select-then-pick instead of direct drag and drop.
     warning).
   - Commit: pending (see below).
 
+- WCP-3: Persist the Live grid selection.
+  - `apps/web/src/lib/liveGrid.ts` (new): pure, framework-free helpers shared by Live's grid
+    logic — `resizeTiles`, `placeCameraAt`, `liveSelectionKey(tenantId, userId)` (key
+    `openvms.live.selection.v1:<tenant|"platform">:<userId>`), `serializeSelection`/
+    `parseSelection` (JSON round-trip; drops any camera id not in the caller's valid-id set,
+    leaving that slot `null`; returns `null` — never throws — for missing/malformed/structurally
+    invalid input).
+  - `apps/web/src/routes/Live.tsx`: added a `restored` state flag and a render-time (not
+    Effect) state adjustment — `if (!restored && me.data && cameras.data) { setRestored(true);
+    ...restore from localStorage... }` — that applies the saved selection (or leaves the
+    default grid) before the default grid ever paints, guarded by `restored` so it runs at most
+    once. A separate `useEffect` persists `{columns, tiles}` via `serializeSelection` whenever
+    they change, once `restored` is true. Both localStorage calls are wrapped in try/catch.
+    `setGrid`'s inline resize logic now calls the shared `resizeTiles`; `place` now calls the
+    shared `placeCameraAt`.
+  - Design note: the restore logic was first written as a plain `useEffect` calling
+    `setColumns`/`setTiles` in its body; `make lint` failed on
+    `react-hooks/set-state-in-effect` ("Calling setState synchronously within an effect can
+    trigger cascading renders"). Rewrote it as React's documented alternative — adjusting state
+    directly during render, guarded by a `restored` flag so it is idempotent — which the lint
+    rule doesn't flag (it only targets Effect bodies) and avoids an extra render pass. The
+    *persist* effect keeps using `useEffect` since it has no setState call, only a
+    `localStorage.setItem` side effect keyed to React state.
+  - TDD: `apps/web/src/lib/liveGrid.test.ts` (new, 9 tests) written first — RED:
+    `pnpm exec vitest run src/lib/liveGrid.test.ts` failed (`Failed to resolve import
+    "./liveGrid"`, module didn't exist yet). GREEN after adding `liveGrid.ts`, same command, 9/9
+    pass. `apps/web/src/routes/Live.test.tsx` (new — Live had no test file before this task)
+    written next, also before wiring `Live.tsx`: RED — both new tests failed (restore test:
+    `localStorage.getItem` key never populated so no camera tile rendered; persist test: timed
+    out waiting for a `localStorage` entry that was never written). GREEN after wiring the
+    restore/persist logic into `Live.tsx`, same command, 2/2 pass. One test bug found and fixed
+    along the way: the restore test's first assertion (`findByText("Puerta norte")`) became
+    ambiguous once restore actually worked, since the name then appears both in the camera list
+    and in the restored tile's overlay — changed to `findAllByText(...)` asserting length 2.
+  - Full verification: `pnpm --filter web test` PASS (10 files / 30 tests); `pnpm typecheck`
+    clean; `make lint` clean; `pnpm --filter web build` clean (same pre-existing chunk-size
+    warning).
+  - Commit: pending (see below).
+
 ## Next step
-Commit WCP-2, then start WCP-3 (persist Live grid selection in localStorage).
+Commit WCP-3, then start WCP-4 (drag and drop in Live).
