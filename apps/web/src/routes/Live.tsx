@@ -175,9 +175,14 @@ export function Live() {
                 </label>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button onClick={() => save.mutate(false)} disabled={!saveName.trim() || save.isPending}>
-                  <Save className="size-4" aria-hidden /> {current?.editable ? "Guardar" : "Guardar vista"}
-                </Button>
+                {/* Creating a view needs views.create_private (or views.create_shared once
+                    Compartida is checked); editing an existing view the caller owns or can
+                    manage does not, so the button stays available for that case regardless. */}
+                {(current?.editable || can(me.data, "views.create_private") || can(me.data, "views.create_shared")) && (
+                  <Button onClick={() => save.mutate(false)} disabled={!saveName.trim() || save.isPending}>
+                    <Save className="size-4" aria-hidden /> {current?.editable ? "Guardar" : "Guardar vista"}
+                  </Button>
+                )}
                 {current?.editable && (
                   <>
                     <Button onClick={() => save.mutate(true)} disabled={!saveName.trim() || save.isPending}>

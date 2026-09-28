@@ -30,7 +30,9 @@ function stubBrowserAPIs() {
   vi.stubGlobal("MediaSource", FakeMediaSource as unknown as typeof MediaSource);
 }
 
-function meResponse() {
+function meResponse(grants: { permission: string; effect: "allow" | "deny"; scope_type: string }[] = [
+  { permission: "live.view", effect: "allow", scope_type: "platform" },
+]) {
   return json({
     id: "u1",
     username: "operator",
@@ -39,7 +41,7 @@ function meResponse() {
     must_change_password: false,
     auth_method: "session",
     tenant_id: "t1",
-    grants: [{ permission: "live.view", effect: "allow" as const, scope_type: "platform" as const }],
+    grants,
   });
 }
 
@@ -163,5 +165,69 @@ describe("Live", () => {
       expect(screen.getByLabelText("Cuadro 1").textContent).toContain("Porton sur");
       expect(screen.getByLabelText("Cuadro 2").textContent).toContain("Puerta norte");
     });
+  });
+
+  it("hides Guardar vista when the user has neither views.create_private nor views.create_shared", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": () => meResponse(),
+          "/api/v1/cameras": () => json({ items: [] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+
+    renderPage(Live);
+
+    await screen.findByLabelText("Nombre de la vista");
+    expect(screen.queryByText("Guardar vista")).not.toBeInTheDocument();
+    expect(screen.queryByText("Compartida con mi organización")).not.toBeInTheDocument();
+  });
+
+  it("shows Guardar vista when the user holds views.create_private", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": () => meResponse([{ permission: "views.create_private", effect: "allow", scope_type: "tenant" }]),
+          "/api/v1/cameras": () => json({ items: [] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+
+    renderPage(Live);
+
+    expect(await screen.findByText("Guardar vista")).toBeInTheDocument();
+  });
+
+  it("shows the API error when saving a view fails despite the gate (server-side denial)", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/me") return meResponse([{ permission: "views.create_private", effect: "allow", scope_type: "tenant" }]);
+        if (url.pathname === "/api/v1/cameras") return json({ items: [] });
+        if (url.pathname === "/api/v1/sites") return json({ items: [] });
+        if (url.pathname === "/api/v1/servers") return json({ items: [] });
+        if (url.pathname === "/api/v1/views" && input.method === "GET") return json({ items: [] });
+        if (url.pathname === "/api/v1/views" && input.method === "POST") {
+          return json({ code: "forbidden", message: "No tenés permiso para guardar esta vista." }, 403);
+        }
+        return json({ code: "not_found", message: "not found" }, 404);
+      }),
+    );
+
+    renderPage(Live);
+
+    fireEvent.change(await screen.findByLabelText("Nombre de la vista"), { target: { value: "Turno noche" } });
+    fireEvent.click(screen.getByText("Guardar vista"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("No tenés permiso para guardar esta vista.");
   });
 });
