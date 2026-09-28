@@ -1,0 +1,100 @@
+{
+  "id": "1700000000.000000-fixture2",
+  "label": "car",
+  "sub_label": null,
+  "camera": "portones",
+  "start_time": 1790562980.961093,
+  "end_time": 1790562984.160174,
+  "false_positive": null,
+  "zones": [
+    "lpr"
+  ],
+  "thumbnail": null,
+  "has_clip": true,
+  "has_snapshot": true,
+  "retain_indefinitely": false,
+  "plus_id": null,
+  "model_hash": "35877a6045227082ca72e73d6d34c72a",
+  "detector_type": "edgetpu",
+  "model_type": "yolo-generic",
+  "data": {
+    "box": [
+      0.45,
+      0.08055555555555556,
+      0.284375,
+      0.3
+    ],
+    "region": [
+      0.2578125,
+      0.0,
+      0.5,
+      0.8888888888888888
+    ],
+    "score": 0.9355767369270325,
+    "top_score": 0.9156204462051392,
+    "attributes": [
+      {
+        "box": [
+          0.6984375,
+          0.2777777777777778,
+          0.034375,
+          0.04722222222222222
+        ],
+        "label": "license_plate",
+        "score": 0.7426291108131409
+      }
+    ],
+    "snapshot_clean": true,
+    "snapshot_frame_time": 1790562981.481533,
+    "snapshot_area": 19656,
+    "snapshot_estimated_speed": 0,
+    "average_estimated_speed": 15.765693125331968,
+    "velocity_angle": 17.482240271194215,
+    "type": "object",
+    "max_severity": "alert",
+    "path_data": [
+      [
+        [
+          0.4266,
+          0.225
+        ],
+        1790562981.080993
+      ],
+      [
+        [
+          0.4703,
+          0.2611
+        ],
+        1790562981.361058
+      ],
+      [
+        [
+          0.5922,
+          0.3806
+        ],
+        1790562981.481533
+      ],
+      [
+        [
+          0.6531,
+          0.4389
+        ],
+        1790562981.761149
+      ],
+      [
+        [
+          0.8141,
+          0.6139
+        ],
+        1790562981.880442
+      ],
+      [
+        [
+          0.8562,
+          0.7056
+        ],
+        1790562982.161198
+      ]
+    ]
+  }
+}

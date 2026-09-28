@@ -23,7 +23,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 - [x] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Unblocked 2026-09-28, see evidence. Route: delegated direct.
 - [x] M3-6: Web tests for Events and Plates routes (filters, infinite scroll, `lpr.search` gating). Route: delegated direct.
 - [x] M3-5b: Harden has_snapshot sync and sub_label LPR gating from review findings. Route: delegated direct.
-- [ ] M3-7: Verify LPR ingestion against the real Frigate 0.18; first sync showed events but no plates. Diagnose adapter mapping if plates exist upstream. Route: delegated direct.
+- [x] M3-7: Verify LPR ingestion against the real Frigate 0.18; first sync showed events but no plates. Diagnose adapter mapping if plates exist upstream. Route: delegated direct.
 
 ## Verification mode
 - Strict TDD: enabled (source: global user config `Strict TDD Mode: enabled`). RED → GREEN → REFACTOR with observed evidence.
@@ -325,5 +325,49 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
     `git diff` after commit.
   - Commit: pending (see below).
 
+- M3-7: No ingestion bug — verified live, read-only, against the user's real Frigate
+  0.18.0-77a66e7 (`http://10.1.1.252:5000`). Plates arrive on tracked objects (`GET
+  /api/events`) as `data.recognized_license_plate` (string) and
+  `data.recognized_license_plate_score` (float); the top-level `sub_label` is always
+  `null` on that server, and review items (`GET /api/review`) carry `data.sub_labels: []`
+  with no plate field at all. `internal/frigate/adapter.go` `Connect` correctly selects
+  `v018` for >=0.18; `v018` embeds `v017` and never overrides `TrackedObjects` or
+  `Capabilities`; `internal/frigate/v017_events.go` `objectData`'s json tags
+  (`recognized_license_plate`, `recognized_license_plate_score`) already match the real
+  shape exactly, and `v017.go`'s `cameraConfig.LPR`/`Capabilities` derive LPR correctly.
+  The original "sync shows events but no plates" observation was the very first sync
+  running before any plate on that server had cleared `recognition_threshold=0.5` (only
+  ~9 of ~200 recent car events even carried a `license_plate` attribute box at all); the
+  local DB for that server already holds 9 `lpr_reads` rows and 10 events with plates,
+  and `event_sync_state` is healthy with no `last_error`. No remote host was contacted
+  from any writer/test session — this diagnosis was done in a separate read-only session
+  before this task's write session started.
+  - Regression coverage: two sanitized real fixtures (plate replaced with `ABC123`,
+    camera name lowercased to this repo's naming convention; nothing else identifying)
+    added as `internal/frigate/testdata/frigate018_event_with_plate.json` and
+    `frigate018_event_no_plate.json`. New test file
+    `internal/frigate/frigate018_plate_decode_test.go`:
+    `TestFrigate018RecognizedPlateDecoding` serves both fixtures from an `httptest`
+    server shaped like Frigate 0.18 (`/api/version`, `/api/events`) and decodes them
+    through the real adapter path (`Connect` → `v018.TrackedObjects`, inherited from
+    `v017`), asserting `Plate == "ABC123"` and `PlateScore == 0.5702818274497986` for the
+    first fixture, and an empty plate/nil score for the second; also asserts `SubLabel`
+    stays empty on both (the plate never rides on it). Test-only for already-correct
+    behavior, so no RED phase applies to it; non-vacuity was proven directly instead:
+    temporarily renamed `objectData.Plate`'s json tag in
+    `internal/frigate/v017_events.go` to `recognized_license_plate_BROKEN_FOR_TEST`,
+    reran the test — failed as expected (`plate: want "ABC123", got ""`) — then restored
+    the tag (`git diff` on that file clean again before committing). A second test,
+    `TestObjectDataPlateTagIsLoadBearing`, keeps that same proof executable going forward
+    without touching production code (unmarshals the real fixture through a deliberately
+    mistagged copy of `objectData` and asserts it decodes no plate, then through the real
+    `objectResponse` and asserts it does).
+  - Full verification: `go test ./...` PASS; `go test -tags integration ./internal/...`
+    PASS (Docker/testcontainers); `make lint` clean (`go vet` 0 issues, `eslint .` clean,
+    `tsc --noEmit` clean) after fixing two `revive` unused-parameter findings in the new
+    test's httptest handlers.
+  - Commit: this commit (`test(frigate): pin 0.18 recognized plate decoding with real
+    fixtures`, not pushed — no remote configured).
+
 ## Next step
-M3-7 (descoped from this pass; being handled separately). M3-5b is the only task closed here.
+M3 complete — pending user delivery decision.
