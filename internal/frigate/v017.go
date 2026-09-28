@@ -2,6 +2,8 @@ package frigate
 
 import (
 	"context"
+	"encoding/json"
+	"log/slog"
 	"net/url"
 	"sort"
 	"strconv"
@@ -73,6 +75,16 @@ func (a *v017) ListCameras(ctx context.Context) ([]Camera, error) {
 	if err != nil {
 		return nil, err
 	}
+	// go2rtc is what actually serves live streams; a name that config (or our own naming
+	// guesses) offers but go2rtc doesn't have would only fail later with a generic
+	// go2rtc error. Older Frigate builds (or go2rtc disabled) don't have this endpoint:
+	// streams stays nil and pickStreams falls back to the pre-existing, unchecked
+	// behaviour instead of breaking discovery.
+	streams, err := a.go2rtcStreams(ctx)
+	if err != nil {
+		slog.DebugContext(ctx, "frigate: go2rtc streams unavailable, using legacy stream selection", "error", err)
+		streams = nil
+	}
 	out := make([]Camera, 0, len(cfg.Cameras))
 	for name, cc := range cfg.Cameras {
 		cam := Camera{
@@ -85,16 +97,60 @@ func (a *v017) ListCameras(ctx context.Context) ([]Camera, error) {
 			cam.Zones = append(cam.Zones, z)
 		}
 		sort.Strings(cam.Zones)
-		cam.LiveStream, cam.HQStream = pickStreams(name, cc)
+		cam.LiveStream, cam.HQStream = pickStreams(name, cc, streams)
 		out = append(out, cam)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 
-// pickStreams chooses the grid substream and the high-quality stream from live.streams.
-// Without explicit streams Frigate serves the go2rtc stream named after the camera.
-func pickStreams(name string, cc cameraConfig) (live, hq string) {
+// go2rtcStreams returns the set of stream names go2rtc actually serves, read from
+// GET /api/go2rtc/streams. It returns an error (nil map) when the endpoint doesn't exist
+// or go2rtc is disabled, which callers treat as "unknown" rather than "empty".
+func (a *v017) go2rtcStreams(ctx context.Context) (map[string]bool, error) {
+	var raw map[string]json.RawMessage
+	if err := a.c.getJSON(ctx, "/api/go2rtc/streams", nil, &raw); err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(raw))
+	for name := range raw {
+		out[name] = true
+	}
+	return out, nil
+}
+
+// pickStreams chooses the grid substream and the high-quality stream for a camera.
+//
+// available is the set of stream names go2rtc actually serves (from go2rtcStreams). When
+// it is nil (the endpoint failed or doesn't exist), stream selection falls back to the
+// legacy, unchecked behaviour: trust live.streams, or the camera name when config
+// declares none.
+//
+// When available is non-nil, a configured or guessed name is only used if go2rtc actually
+// has it. Without a usable configured name, the camera name itself, then go2rtc naming
+// conventions (<camera>_sub/_main/_live), are tried against go2rtc, case-insensitively. If
+// nothing matches, the corresponding stream is left empty: this camera has no go2rtc
+// restream, and the media gateway must not dial Frigate for it (see media.Gateway.live).
+func pickStreams(name string, cc cameraConfig, available map[string]bool) (live, hq string) {
+	live, hq = legacyPickStreams(name, cc)
+	if available == nil {
+		return live, hq
+	}
+	live = matchStream(live, available)
+	hq = matchStream(hq, available)
+	if live == "" {
+		live = guessStream(name, available, "_sub")
+	}
+	if hq == "" {
+		hq = guessStream(name, available, "_main")
+	}
+	return live, hq
+}
+
+// legacyPickStreams is the pre-go2rtc-aware selection: prefer live.streams labels that
+// look like a sub/low stream for live and main/high/hq for hq, and fall back to the
+// camera name (Frigate's go2rtc default) when config declares no streams at all.
+func legacyPickStreams(name string, cc cameraConfig) (live, hq string) {
 	if cc.Live == nil || len(cc.Live.Streams) == 0 {
 		return name, name
 	}
@@ -114,6 +170,37 @@ func pickStreams(name string, cc cameraConfig) (live, hq string) {
 		}
 	}
 	return live, hq
+}
+
+// guessStream resolves a camera name against go2rtc's naming conventions: the exact
+// camera name first (case-insensitive), then "<camera><suffix>" (e.g. "_sub"/"_main"),
+// then the single-stream "<camera>_live" convention. Returns "" if nothing matches.
+func guessStream(name string, available map[string]bool, suffix string) string {
+	if s := matchStream(name, available); s != "" {
+		return s
+	}
+	if s := matchStream(name+suffix, available); s != "" {
+		return s
+	}
+	return matchStream(name+"_live", available)
+}
+
+// matchStream returns candidate's actual key in available (exact match first, then
+// case-insensitive), or "" if go2rtc has no such stream.
+func matchStream(candidate string, available map[string]bool) string {
+	if candidate == "" || available == nil {
+		return ""
+	}
+	if available[candidate] {
+		return candidate
+	}
+	low := strings.ToLower(candidate)
+	for s := range available {
+		if strings.ToLower(s) == low {
+			return s
+		}
+	}
+	return ""
 }
 
 func (a *v017) Reviews(ctx context.Context, q ReviewQuery) ([]Review, error) {

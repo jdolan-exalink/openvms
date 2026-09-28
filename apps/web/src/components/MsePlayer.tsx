@@ -54,6 +54,7 @@ export function MsePlayer({
     const connect = () => {
       if (closed) return;
       setState("connecting");
+      setMessage("");
       const MS = window.MediaSource ?? (window as unknown as { ManagedMediaSource?: typeof MediaSource }).ManagedMediaSource;
       if (!MS) {
         setState("error");
@@ -66,6 +67,10 @@ export function MsePlayer({
       let ms: MediaSource | null = null;
       let sb: SourceBuffer | null = null;
       const queue: ArrayBuffer[] = [];
+      // The gateway rejects the handshake outright (no MSE upgrade) when the camera has
+      // no go2rtc restream; the browser never exposes that HTTP status or body to us, so
+      // "never opened" is the only signal we get for that permanent condition.
+      let opened = false;
 
       const pump = () => {
         if (!sb || sb.updating || queue.length === 0) return;
@@ -77,7 +82,10 @@ export function MsePlayer({
         }
       };
 
-      ws.onopen = () => ws?.send(JSON.stringify({ type: "mse", value: supportedCodecs() }));
+      ws.onopen = () => {
+        opened = true;
+        ws?.send(JSON.stringify({ type: "mse", value: supportedCodecs() }));
+      };
       ws.onmessage = (ev) => {
         if (typeof ev.data === "string") {
           const msg = JSON.parse(ev.data) as { type: string; value: string };
@@ -137,6 +145,14 @@ export function MsePlayer({
       };
       ws.onclose = () => {
         if (closed) return;
+        if (!opened) {
+          // Handshake rejected before any go2rtc protocol exchange: a permanent
+          // condition (e.g. this camera has no go2rtc restream), not a dropped
+          // connection. Show a clear message instead of retrying forever on "Conectando…".
+          setState("error");
+          setMessage("La cámara no tiene una transmisión de video disponible.");
+          return;
+        }
         if (retry >= 2) setMessage("Sin conexión con la cámara, reintentando…");
         setState("connecting");
         retry = Math.min(retry + 1, 6);

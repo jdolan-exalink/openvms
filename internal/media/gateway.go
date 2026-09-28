@@ -78,6 +78,8 @@ func (g *Gateway) fail(w http.ResponseWriter, r *http.Request, err error) {
 		writeErr(w, http.StatusNotFound, "not_found", "not found")
 	case errors.Is(err, errBadRequest):
 		writeErr(w, http.StatusBadRequest, "bad_request", err.Error())
+	case errors.Is(err, errNoStream):
+		writeErr(w, http.StatusUnprocessableEntity, "no_stream", "the Frigate server has no go2rtc restream for this camera")
 	case errors.Is(err, context.Canceled):
 	default:
 		g.Svc.Log.WarnContext(r.Context(), "media gateway", "path", r.URL.Path, "error", err)
@@ -86,6 +88,12 @@ func (g *Gateway) fail(w http.ResponseWriter, r *http.Request, err error) {
 }
 
 var errBadRequest = errors.New("bad request")
+
+// errNoStream means a camera has no go2rtc restream on its Frigate: discovery
+// (frigate.pickStreams) found no go2rtc stream matching this camera, so LiveStream and
+// HQStream are both empty. Dialing Frigate anyway would only fail with a generic,
+// unhelpful go2rtc error ("stream not found"), so live() fails fast instead.
+var errNoStream = errors.New("camera has no go2rtc restream")
 
 func (g *Gateway) actorOr401(w http.ResponseWriter, r *http.Request) (authz.Actor, bool) {
 	a, ok := g.Actor(r.Context())
@@ -338,6 +346,21 @@ func (g *Gateway) checkOrigin(r *http.Request) bool {
 	return false
 }
 
+// liveStream picks the go2rtc stream name for a live view request from the camera's
+// discovered LiveStream/HQStream (frigate.pickStreams). It never falls back to the
+// Frigate camera name: since that discovery already resolved both against go2rtc, a name
+// that isn't there would only fail at go2rtc with a generic, unhelpful error.
+func liveStream(cam Camera, quality string) (string, error) {
+	stream := cam.LiveStream
+	if quality == "main" || stream == "" {
+		stream = cam.HQStream
+	}
+	if stream == "" {
+		return "", errNoStream
+	}
+	return stream, nil
+}
+
 // live relays Frigate's go2rtc MSE websocket (/live/mse/api/ws?src=stream). The browser
 // speaks the go2rtc protocol end to end; the gateway only authorizes and copies frames.
 func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
@@ -345,12 +368,10 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	stream := cam.LiveStream
-	if r.URL.Query().Get("quality") == "main" || stream == "" {
-		stream = cam.HQStream
-	}
-	if stream == "" {
-		stream = cam.RemoteName
+	stream, err := liveStream(cam, r.URL.Query().Get("quality"))
+	if err != nil {
+		g.fail(w, r, err)
+		return
 	}
 	target, header, tlsCfg, err := ad.Media().WebSocket(r.Context(), "/live/mse/api/ws", url.Values{"src": {stream}})
 	if err != nil {

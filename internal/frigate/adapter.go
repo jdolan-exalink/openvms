@@ -55,6 +55,7 @@ type Camera struct {
 	Zones   []string
 	LPR     bool
 	// LiveStream is the go2rtc stream for grids (substream); HQStream for single view.
+	// Both are empty when the camera has no go2rtc restream.
 	LiveStream string
 	HQStream   string
 }

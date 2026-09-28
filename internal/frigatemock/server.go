@@ -30,6 +30,10 @@ type Server struct {
 	StartedAt   time.Time
 	// Offline makes every request fail with 503, to simulate an unreachable Frigate.
 	Offline atomic.Bool
+	// Go2RTCStreams is the set of stream names GET /api/go2rtc/streams reports. nil (the
+	// zero value) makes the endpoint 404, simulating an older Frigate or go2rtc disabled;
+	// an empty, non-nil slice reports no streams at all.
+	Go2RTCStreams []string
 
 	token string
 }
@@ -46,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("GET /api/version", s.auth(s.version))
 	mux.HandleFunc("GET /api/config", s.auth(s.config))
+	mux.HandleFunc("GET /api/go2rtc/streams", s.auth(s.go2rtcStreams))
 	mux.HandleFunc("GET /api/stats", s.auth(s.stats))
 	mux.HandleFunc("GET /api/review", s.auth(s.listReviews))
 	mux.HandleFunc("GET /api/review/{id}", s.auth(s.getReview))
@@ -127,6 +132,21 @@ func (s *Server) config(w http.ResponseWriter, _ *http.Request) {
 		"mqtt":    map[string]any{"enabled": true, "topic_prefix": s.TopicPrefix},
 		"version": s.Version,
 	})
+}
+
+// go2rtcStreams serves GET /api/go2rtc/streams, keyed by stream name like real go2rtc
+// (whose values carry producers/consumers we don't need to simulate). Go2RTCStreams == nil
+// 404s, so tests can exercise the "older Frigate / go2rtc disabled" fallback.
+func (s *Server) go2rtcStreams(w http.ResponseWriter, _ *http.Request) {
+	if s.Go2RTCStreams == nil {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		return
+	}
+	out := map[string]any{}
+	for _, name := range s.Go2RTCStreams {
+		out[name] = map[string]any{"producers": []any{}, "consumers": []any{}}
+	}
+	writeJSON(w, out)
 }
 
 func (s *Server) stats(w http.ResponseWriter, _ *http.Request) {
