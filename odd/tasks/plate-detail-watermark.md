@@ -32,10 +32,10 @@ feature extends.
   silent audio loss, stuck jobs, logo decompression bomb, JPEG quality nit), verified against
   real ffmpeg inside the running worker container. Route: delegated direct (writer: this
   session).
-- [ ] PDW-7: Configurable per-tenant watermark timezone (migration, contract, service,
+- [x] PDW-7: Configurable per-tenant watermark timezone (migration, contract, service,
   worker, web UI, Go+web tests incl. DST), tzdata embedded in api/worker. Route: delegated
   direct (writer: this session).
-- [ ] PDW-8: PlateDetailModal tabs (Foto/Clip, accessible tablist, lazy-mounted clip video)
+- [x] PDW-8: PlateDetailModal tabs (Foto/Clip, accessible tablist, lazy-mounted clip video)
   and confirmation that the watermark timestamp is correct (seen_at-sourced, local time,
   overlay matches burned-in output exactly). Route: delegated direct (writer: this session).
 

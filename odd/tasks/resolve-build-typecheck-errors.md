@@ -15,10 +15,10 @@ The first verification exposed a generated Go field-name mismatch and frontend T
 ## Tasks
 - [x] ODD-1: Correct generated camera field usage in media access code. (`cam.HqStream` now matches generated field.)
 - [x] ODD-2: Resolve the remaining frontend TypeScript errors with behavior preserved. (`pnpm typecheck` passed.)
-- [ ] ODD-3: Run frontend typecheck, Go tests, lint, and build checks; record every result. Independent verifier confirms Go tests, typecheck, and temporary-output builds pass; `make lint` fails only on the separate `apps/web/src/routes/Playback.tsx:32` purity finding.
+- [ ] ODD-3: Run frontend typecheck, Go tests, lint, and build checks; record every result. Independent verifier confirms Go tests, typecheck, and temporary-output builds pass; `make lint` fails only on the separate `apps/web/src/routes/Playback.tsx:32` purity finding. Latest `make test` and `make lint` attempts were blocked before source diagnostics because Go could not read `/root/.cache/go-build` on the read-only filesystem; `make lint` stopped at `go vet`.
 - [ ] ODD-7: Obtain scope decision for the newly surfaced, sole remaining lint finding in `apps/web/src/routes/Playback.tsx:32`.
 - [x] ODD-5: Mapped the 14 lint findings in the nine authorized files. Keep TLS-dependent cookie behavior; validate all narrowing conversions; reject negative TOTP times; apply mechanical formatting/unused-parameter/expression fixes.
-- [ ] ODD-6: Fix all authorized lint findings in exactly the nine named files and rerun required checks. Writer reports all 14 original findings cleared; current `make lint` reports one separate frontend purity finding outside authorized paths. Awaiting independent verification.
+- [x] ODD-6: Fix all authorized lint findings in exactly the nine named files and rerun required checks. Independent verification confirmed all 14 original findings cleared; the only remaining source lint finding was the separate frontend purity issue in `apps/web/src/routes/Playback.tsx:32`, outside authorized paths.
 - [x] ODD-4: Diagnose and fix the additional Go build errors (user authorized scope expansion); updated `internal/api/identity_handlers.go` and `internal/api/inventory_handlers.go` to match generated response/enum types and use distinct input mappers; `go test ./...` passed.
 
 ## Verification mode
