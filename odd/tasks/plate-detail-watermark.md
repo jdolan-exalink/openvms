@@ -633,18 +633,25 @@ feature extends.
   branding.ResolveLocation(b.Timezone))` instead of the old two-argument call — the tenant's
   configured zone flows into both burn-in paths identically, no divergence between them.
 - **tzdata embedding**: `apps/api/main.go` and `apps/worker/main.go` both gained a blank
-  `import _ "time/tzdata"`, with a doc comment on each explaining why: the api image's runtime
-  stage is `gcr.io/distroless/static-debian12` (no `/usr/share/zoneinfo` at all — distroless
-  ships nothing beyond the binary and CA certs), and the worker's `runtime-ffmpeg` stage
-  (`debian:bookworm-slim` + `ffmpeg`, no `tzdata` package explicitly installed) is not
-  guaranteed to ship it either; embedding the full IANA database into both binaries makes
-  `time.LoadLocation` work regardless of what the OS image ships. This was **not** re-verified
-  by exec-ing into an actual running distroless container (distroless has no shell to exec
-  into at all), and is instead verified functionally by calling the live (currently running,
-  pre-this-session) `api`/`worker` containers' branding/photo endpoints with a non-default
-  zone after the final `make up` rebuild — see that section below — the strongest available
-  proof, since it exercises the actual built image end to end rather than inspecting its
-  filesystem.
+  `import _ "time/tzdata"`. **Correction of an assumption made while writing the first draft
+  of this change**: the doc comments originally claimed distroless "ships no zoneinfo at all"
+  and that the worker's debian-slim image "does not install tzdata" — both stated as fact
+  without having checked. Verified directly at `make up` time (see below) and found **both
+  claims wrong** for the images this repo actually builds: `docker create
+  gcr.io/distroless/static-debian12:nonroot + docker cp /usr/share/zoneinfo` shows that image
+  does ship the full IANA zoneinfo tree, and `docker compose exec worker dpkg -l | grep
+  tzdata` shows the `tzdata` package present in the worker image too (pulled in transitively
+  by `ffmpeg`/`ca-certificates`, not installed explicitly by
+  `deploy/docker/go.Dockerfile`). So `time.LoadLocation` would in fact already work in both
+  images today, without the embed. The doc comments in both files were corrected to state
+  this accurately rather than leave a false claim in the code. The embed itself is kept
+  regardless — not as a fix for a confirmed gap, but as a correctness guarantee that no
+  longer depends on an incidental, transitive property of the current base images (a
+  future ffmpeg release dropping its tzdata dependency, or switching the api's base image to
+  plain `gcr.io/distroless/static` without the `-debian12` zoneinfo bundle, would otherwise
+  silently break every non-UTC watermark). This is the kind of unverified claim the task's own
+  "verify before stating" instruction exists for, caught before it shipped as a code comment
+  read by future maintainers as fact.
 - **Web**: `apps/web/src/lib/format.ts`'s `fmtWatermarkTimestamp(iso, timeZone)` (was
   `fmtWatermarkTimestamp(iso)`, always UTC) — renders the date/time via
   `Intl.DateTimeFormat(..., { timeZone, hour12: false, ... }).formatToParts` and the numeric

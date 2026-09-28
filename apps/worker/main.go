@@ -21,9 +21,13 @@ import (
 	// PDW-7: the clip watermark job (internal/clipwatermark) burns the tenant's configured
 	// IANA time zone into the watermark text (internal/branding.ResolveLocation,
 	// time.LoadLocation). This binary's runtime image (deploy/docker/go.Dockerfile's
-	// runtime-ffmpeg target, debian:bookworm-slim) does not install the tzdata package, so
-	// /usr/share/zoneinfo is not guaranteed to exist there either; embedding tzdata makes
-	// LoadLocation work regardless of what the OS image ships, matching apps/api.
+	// runtime-ffmpeg target, debian:bookworm-slim + ffmpeg) currently does ship
+	// /usr/share/zoneinfo (verified: `docker compose exec worker dpkg -l | grep tzdata` shows
+	// the tzdata package installed, pulled in transitively by ffmpeg/ca-certificates — this
+	// image's own Dockerfile stage never installs it explicitly). Embedding tzdata here too
+	// removes the dependency on that transitive package staying pulled in, matching apps/api's
+	// same reasoning: the watermark's correctness should not depend on an incidental property
+	// of another package's dependency tree.
 	_ "time/tzdata"
 
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"

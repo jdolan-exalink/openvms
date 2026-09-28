@@ -14,10 +14,15 @@ import (
 
 	// PDW-7: tenant branding lets an operator pick any IANA time zone for the watermark
 	// (internal/branding.ResolveLocation, time.LoadLocation). This binary runs distroless
-	// (gcr.io/distroless/static-debian12, see deploy/docker/go.Dockerfile's "runtime" target),
-	// which ships no /usr/share/zoneinfo at all, so time.LoadLocation would fail for every
-	// zone but "UTC"/"Local" without this: it embeds the full IANA tzdata into the binary,
-	// making LoadLocation work regardless of the OS.
+	// (gcr.io/distroless/static-debian12, see deploy/docker/go.Dockerfile's "runtime" target).
+	// Verified directly (docker create + docker cp) that this particular base image currently
+	// does ship /usr/share/zoneinfo, so time.LoadLocation already works there without this
+	// import — but that is an incidental property of gcr.io/distroless/static-debian12 today,
+	// not something deploy/docker/go.Dockerfile installs or pins, and it is not true of every
+	// minimal base image (e.g. gcr.io/distroless/static, without "-debian12", ships none).
+	// Embedding the full IANA tzdata into the binary removes that dependency on the base
+	// image's own filesystem entirely, so a future base image change can never silently break
+	// every non-UTC watermark.
 	_ "time/tzdata"
 
 	"github.com/jdolan-exalink/openvms/internal/api"
