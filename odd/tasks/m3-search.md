@@ -20,7 +20,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 - [x] M3-3b: Harden zone/sub_label filters from review findings on commit `195f76a`. Route: delegated direct.
 - [x] M3-4: Add `camera_group` filter to `/events` and `/lpr/reads`. Route: delegated direct.
 - [x] M3-3c: Key sub_label LPR gating on camera LPR capability + review test fixes. Route: delegated direct.
-- [ ] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Route: delegated direct.
+- [ ] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). BLOCKED, see evidence — needs a product decision. Route: delegated direct.
 - [ ] M3-6: Web tests for Events and Plates routes (filters, infinite scroll, `lpr.search` gating). Route: delegated direct.
 - [ ] M3-7: Verify LPR ingestion against the real Frigate 0.18; first sync showed events but no plates. Diagnose adapter mapping if plates exist upstream. Route: delegated direct.
 
@@ -115,5 +115,35 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
   - Commit: `b944930` (`fix(events): gate sub_label by LPR only on LPR-capable cameras`, not
     pushed — no remote configured).
 
+- M3-5: STOPPED (real technical/product ambiguity, no code changed) — verified against Frigate's
+  own source (`frigate/models.py`, fetched from GitHub) rather than guessed:
+  - `has_snapshot` and `has_clip` are real per-tracked-object booleans, but they live on Frigate's
+    `Event` model (`GET /api/events`, this codebase's `TrackedObject`/`objectResponse`), **not** on
+    `ReviewSegment` (`GET /api/review`, this codebase's `Review`) — `ReviewSegment` has no
+    snapshot/clip/preview field at all. This app's central `events` table is built from review
+    items, one row aggregating possibly several detections (`detection_ids`); `TrackedObjects`
+    sync (`internal/events/syncer.go` `syncObjects`) currently only runs `if cameraHasLPR(cams)`,
+    as a plate-recognition optimization, not for every camera. Wiring a correct `has_snapshot`
+    would mean either (a) always syncing `TrackedObjects` for every camera regardless of LPR (an
+    unscoped increase in Frigate API load this task was not asked to make), or (b) approximating
+    it from the review's own `thumb_path` (which is not the same fact Frigate reports — a review
+    can have a thumb_path string that 404s, and `has_snapshot` is specifically about the object's
+    own saved snapshot, independent of the review thumbnail).
+  - `has_preview` has **no backing field anywhere** in Frigate's data model (confirmed absent from
+    both `Event` and `ReviewSegment`). Frigate's actual "preview" feature is a separate per-camera
+    timelapse asset over a time range (`/api/preview/<camera>/start/<s>/end/<e>/...`), gated by
+    config and retention, not a stored per-event/per-review boolean. Filtering by it would require
+    either probing that endpoint per event at query time (expensive, and its own availability
+    window is unrelated to the review's row lifetime) or fabricating the value from the
+    server-wide `Capabilities.Preview` flag, which would make the filter trivially true/false for
+    every event on a given server and not a real per-event fact.
+  - This needs a product decision before writing code that would otherwise encode a guessed,
+    Frigate-ungrounded mapping: options include (1) scope `has_snapshot` to LPR cameras only
+    (matching where `TrackedObjects` already syncs) and drop `has_preview` from this milestone, (2)
+    accept the broader `TrackedObjects`-for-every-camera sync cost to get a correct `has_snapshot`
+    everywhere, or (3) redefine "has_preview" in this app's own terms (e.g. "the central preview
+    key is populated", mirroring `thumbnail_key`/`preview_key` in PRD §20) rather than a literal
+    Frigate signal. Continuing to M3-6 in the meantime (independent task).
+
 ## Next step
-M3-5.
+M3-5 (blocked on a product decision, see evidence above) or M3-7.
