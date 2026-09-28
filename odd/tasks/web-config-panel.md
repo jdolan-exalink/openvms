@@ -31,7 +31,7 @@ select-then-pick instead of direct drag and drop.
       entry) + settings landing reusing Dashboard's content + "/" redirects to "/live" (Panel is
       no longer reachable from "/"; existing sub-page URLs are unchanged, so no redirects needed
       for them). Route: direct/delegated mix (single writer, this session).
-- [ ] WCP-2: Confirm/lock in "always Live" as the default after login and for "/" with a
+- [x] WCP-2: Confirm/lock in "always Live" as the default after login and for "/" with a
       dedicated Login-flow test; audit for any other place assuming "/" shows the dashboard.
 - [ ] WCP-3: Persist the Live grid selection (columns + tile order/camera ids) per user
       (`tenant_id` + user id from `meQuery`) in `localStorage`, wrapped in try/catch, restored on
@@ -112,5 +112,24 @@ select-then-pick instead of direct drag and drop.
     clean (pre-existing >500kB single-chunk warning, unrelated to this change).
   - Commit: pending (see below).
 
+- WCP-2: Default-route confirmation.
+  - `apps/web/src/routes/Login.test.tsx` (new): drives the real `router.tsx` `routeTree` from
+    "/login", stubs `/api/v1/auth/login`, submits the password form, and asserts the app ends on
+    the "En vivo" heading at `router.state.location.pathname === "/live"` — this specifically
+    exercises `Login.tsx`'s own `navigate({ to: "/" })` call chained through the WCP-1 redirect
+    (not just the redirect in isolation, which `router.test.tsx` already covers).
+  - Audit: `rg 'to="/"|to: "/"'` across `apps/web/src` now returns only `Login.tsx`'s
+    `navigate({ to: "/" })` (correctly resolves through the redirect); `rg Dashboard` shows the
+    component is only wired at `/settings`. No other place assumes "/" shows a dashboard.
+  - TDD: written after `Login.tsx` already worked unmodified (no code change needed for this
+    task; genuinely new test coverage, not a bugfix). Non-vacuity proven directly: temporarily
+    changed `Login.tsx`'s post-login `navigate({ to: "/" })` to `navigate({ to: "/login" })` —
+    `pnpm exec vitest run src/routes/Login.test.tsx` failed (timed out waiting for "En vivo").
+    Reverted, same command passed (1/1).
+  - Full verification: `pnpm --filter web test` PASS (8 files / 19 tests); `pnpm typecheck`
+    clean; `make lint` clean; `pnpm --filter web build` clean (same pre-existing chunk-size
+    warning).
+  - Commit: pending (see below).
+
 ## Next step
-Commit WCP-1, then start WCP-2 (default-route login-flow test + audit).
+Commit WCP-2, then start WCP-3 (persist Live grid selection in localStorage).
