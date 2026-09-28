@@ -1,9 +1,13 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"image"
+	_ "image/jpeg" // logo format sniffing only
+	_ "image/png"  // logo format sniffing only
 	"io"
 	"net/http"
 	"net/url"
@@ -19,11 +23,13 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/platform/httpx"
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
+	"github.com/jdolan-exalink/openvms/internal/watermark"
 )
 
 // Audit actions for video access (PRD §66).
@@ -48,11 +54,16 @@ type ActorFunc func(ctx context.Context) (authz.Actor, bool)
 //	GET /media/v1/cameras/{id}/vod/{start}/{end}/{file}      HLS recordings      recordings.view
 //	GET /media/v1/events/{id}/snapshot.jpg                   event snapshot       snapshots.view
 //	GET /media/v1/lpr/reads/{id}/snapshot.jpg                plate read snapshot  snapshots.view + lpr.view
+//	GET /media/v1/lpr/reads/{id}/snapshot.jpg?download=1      + watermarked download  + snapshots.download
 //	GET /media/v1/lpr/reads/{id}/clip.mp4                    plate read clip      recordings.view + lpr.view
 //	GET /media/v1/exports/{id}/download                      finished export     exports.download
 type Gateway struct {
 	Svc   *Service
 	Actor ActorFunc
+	// Branding resolves the owner name/logo burned into a plate detail photo download
+	// (PDW-3). Nil disables watermarking (download=1 still 500s with a logged error rather
+	// than silently shipping an un-watermarked file).
+	Branding *branding.Service
 	// AllowedOrigins lists extra origins accepted for websocket upgrades; same-origin
 	// requests are always accepted.
 	AllowedOrigins []string
@@ -265,36 +276,44 @@ func (g *Gateway) eventSnapshot(w http.ResponseWriter, r *http.Request) {
 // itself reveals the plate. lpr.view is checked second and separately audited (a distinct
 // permission from p) so a caller missing only lpr.view gets a message about it rather than
 // the generic camera message.
-func (g *Gateway) lprReadCamera(w http.ResponseWriter, r *http.Request, p authz.Permission) (authz.Actor, Camera, string, bool) {
+// lprRead is what handlers need from an lpr_reads row beyond the camera.
+type lprRead struct {
+	ID            uuid.UUID
+	RemoteEventID string
+	SeenAt        time.Time
+}
+
+func (g *Gateway) lprReadCamera(w http.ResponseWriter, r *http.Request, p authz.Permission) (authz.Actor, Camera, lprRead, bool) {
 	a, ok := g.actorOr401(w, r)
 	if !ok {
-		return a, Camera{}, "", false
+		return a, Camera{}, lprRead{}, false
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid read id")
-		return a, Camera{}, "", false
+		return a, Camera{}, lprRead{}, false
 	}
+	lr := lprRead{ID: id}
 	var cameraID uuid.UUID
-	var remoteEventID string
 	err = g.Svc.Store.TxRaw(r.Context(), store.ScopeFor(a), func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT camera_id, remote_event_id FROM lpr_reads WHERE id = $1`, id).Scan(&cameraID, &remoteEventID)
+		return tx.QueryRow(r.Context(), `SELECT camera_id, remote_event_id, seen_at FROM lpr_reads WHERE id = $1`, id).
+			Scan(&cameraID, &lr.RemoteEventID, &lr.SeenAt)
 	})
 	if err != nil {
 		g.fail(w, r, a, store.Classify(err))
-		return a, Camera{}, "", false
+		return a, Camera{}, lprRead{}, false
 	}
 	cam, err := g.Svc.Authorize(r.Context(), a, cameraID, p)
 	if err != nil {
 		g.fail(w, r, a, err)
-		return a, Camera{}, "", false
+		return a, Camera{}, lprRead{}, false
 	}
 	if _, err := g.Svc.Authorize(r.Context(), a, cameraID, authz.LPRView); err != nil {
 		g.auditDenied(r.Context(), a, err, r.Method, r.URL.Path)
 		writeErr(w, http.StatusForbidden, "forbidden", "you do not have permission to view plate reads for this camera")
-		return a, Camera{}, "", false
+		return a, Camera{}, lprRead{}, false
 	}
-	return a, cam, remoteEventID, true
+	return a, cam, lr, true
 }
 
 // lprReadSnapshot serves the Frigate tracked-object snapshot for one LPR read
@@ -305,7 +324,7 @@ func (g *Gateway) lprReadCamera(w http.ResponseWriter, r *http.Request, p authz.
 // the event's own /events/{id}/snapshot.jpg endpoint would, since it always uses
 // detections[0]).
 func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
-	a, cam, remoteEventID, ok := g.lprReadCamera(w, r, authz.SnapshotsView)
+	a, cam, lr, ok := g.lprReadCamera(w, r, authz.SnapshotsView)
 	if !ok {
 		return
 	}
@@ -318,12 +337,79 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("bbox") != "0" {
 		q.Set("bbox", "1")
 	}
-	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(remoteEventID)+"/snapshot.jpg", q, r.Header)
+	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(lr.RemoteEventID)+"/snapshot.jpg", q, r.Header)
 	if err != nil {
 		g.fail(w, r, a, err)
 		return
 	}
-	relay(w, resp, "private, max-age=3600")
+	if r.URL.Query().Get("download") != "1" {
+		relay(w, resp, "private, max-age=3600")
+		return
+	}
+	g.lprReadSnapshotDownload(w, r, a, cam, lr, resp)
+}
+
+// lprReadSnapshotDownload finishes a ?download=1 request (PDW-3): it needs
+// snapshots.download in addition to what lprReadCamera already checked, burns the watermark
+// (date/time + owner branding) into the photo, and audits SNAPSHOT_DOWNLOADED. resp's body
+// is always closed by this function.
+func (g *Gateway) lprReadSnapshotDownload(w http.ResponseWriter, r *http.Request, a authz.Actor, cam Camera, lr lprRead, resp *http.Response) {
+	defer resp.Body.Close()
+	if _, err := g.Svc.Authorize(r.Context(), a, cam.ID, authz.SnapshotsDownload); err != nil {
+		g.auditDenied(r.Context(), a, err, r.Method, r.URL.Path)
+		writeErr(w, http.StatusForbidden, "forbidden", "you cannot download snapshots of this camera")
+		return
+	}
+	if resp.StatusCode != http.StatusOK {
+		relay(w, resp, "private, no-store")
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		g.Svc.Log.WarnContext(r.Context(), "read snapshot for watermark", "error", err)
+		writeErr(w, http.StatusBadGateway, "frigate_unreachable", "could not read the camera's snapshot")
+		return
+	}
+	out, err := g.burnPhotoWatermark(r.Context(), a, cam.TenantID, lr, body)
+	if err != nil {
+		g.Svc.Log.WarnContext(r.Context(), "burn photo watermark", "error", err)
+		writeErr(w, http.StatusInternalServerError, "internal", "could not prepare the watermarked photo")
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Content-Disposition", `attachment; filename="plate-`+lr.ID.String()+`.jpg"`)
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(out) //nolint:gosec // binary image/jpeg body with an explicit Content-Type, not HTML; no XSS surface
+	g.audit(r.Context(), a, cam.TenantID, ActionSnapshotViewed, "lpr_read", lr.ID, nil)
+}
+
+// burnPhotoWatermark loads tenantID's branding (owner name + optional logo) and burns
+// watermark.Text(lr.SeenAt, ownerName) into jpegBytes via watermark.BurnPhoto. A branding
+// read/logo-decode failure is non-fatal to the owner name (an empty name still yields a
+// correct, just less specific, watermark with the date/time), but a nil Branding service is
+// a configuration error, not something to silently degrade.
+func (g *Gateway) burnPhotoWatermark(ctx context.Context, a authz.Actor, tenantID uuid.UUID, lr lprRead, jpegBytes []byte) ([]byte, error) {
+	if g.Branding == nil {
+		return nil, errors.New("media gateway: Branding service not configured")
+	}
+	b, err := g.Branding.Get(ctx, a, tenantID)
+	if err != nil {
+		g.Svc.Log.WarnContext(ctx, "load branding for watermark", "error", err)
+		b = branding.Branding{}
+	}
+	var logo image.Image
+	if b.HasLogo {
+		data, _, err := g.Branding.Logo(ctx, a, tenantID)
+		if err != nil {
+			g.Svc.Log.WarnContext(ctx, "load branding logo for watermark", "error", err)
+		} else if img, _, err := image.Decode(bytes.NewReader(data)); err != nil {
+			g.Svc.Log.WarnContext(ctx, "decode branding logo for watermark", "error", err)
+		} else {
+			logo = img
+		}
+	}
+	return watermark.BurnPhoto(jpegBytes, watermark.Text(lr.SeenAt, b.OwnerName), logo)
 }
 
 // lprReadClip proxies the Frigate tracked-object clip for one LPR read (PDW-2), needing
@@ -332,7 +418,7 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 // travels through r.Header into Open, and relay copies Content-Range/Accept-Ranges back, so
 // the browser's <video> element can seek without downloading the whole clip.
 func (g *Gateway) lprReadClip(w http.ResponseWriter, r *http.Request) {
-	a, cam, remoteEventID, ok := g.lprReadCamera(w, r, authz.RecordingsView)
+	a, cam, lr, ok := g.lprReadCamera(w, r, authz.RecordingsView)
 	if !ok {
 		return
 	}
@@ -341,7 +427,7 @@ func (g *Gateway) lprReadClip(w http.ResponseWriter, r *http.Request) {
 		g.fail(w, r, a, err)
 		return
 	}
-	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(remoteEventID)+"/clip.mp4", nil, r.Header)
+	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(lr.RemoteEventID)+"/clip.mp4", nil, r.Header)
 	if err != nil {
 		g.fail(w, r, a, err)
 		return

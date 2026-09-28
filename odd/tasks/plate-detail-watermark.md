@@ -25,7 +25,7 @@ feature extends.
 ## Tasks
 - [x] PDW-1: Owner branding settings (migration, contract, service, audit, Configuración page). Route: delegated direct (writer: this session).
 - [x] PDW-2: Plate detail modal — full-quality photo + clip playback via gateway (Range) + CSS watermark overlay. Route: delegated direct (writer: this session).
-- [ ] PDW-3: Watermarked photo download (Go burn-in, embedded font, logo composited).
+- [x] PDW-3: Watermarked photo download (Go burn-in, embedded font, logo composited). Route: delegated direct (writer: this session).
 - [ ] PDW-4: Clip watermark job in the worker (ffmpeg image, job table/state, object store, status + download endpoints).
 - [ ] PDW-5: Modal download UI for photo and clip job (progress, errors), audit labels.
 
@@ -209,7 +209,68 @@ feature extends.
   `pnpm lint` clean. No contract change, so no `make generate` step was needed for this task.
 - Commit: pending (this task's own commit, created immediately after this document update).
 
+### PDW-3: Watermarked photo download
+- Route: delegated direct (writer: this session).
+- No contract change (media gateway is handwritten, see PDW-2's note).
+- New package `internal/watermark`: `Text(seenAt time.Time, ownerName string) string`
+  (shared, single source of truth for the watermark string — must match
+  `apps/web/src/lib/format.ts`'s `fmtWatermarkTimestamp` exactly, since PDW-2's CSS overlay
+  uses that function and the point of a watermark is "what you see is what gets burned in";
+  will also be reused by the ffmpeg `drawtext` argument in PDW-4) and
+  `BurnPhoto(data []byte, text string, logo image.Image) ([]byte, error)` (Go `image/draw` +
+  `golang.org/x/image/draw` for logo scaling, `golang.org/x/image/font/opentype` +
+  `golang.org/x/image/font/gofont/goregular` for anti-aliased text — decision: opentype
+  rendering with the embedded Go font over `font/basicfont`'s bitmap font, per the task's
+  own suggestion and because a bitmap font would look noticeably worse on a watermark meant
+  to be legible evidence). Added `golang.org/x/image` as a new direct dependency (`go get`
+  + `go mod tidy`; also reclassified `golang.org/x/crypto` and `gorilla/websocket` from
+  indirect to direct in `go.mod`, an unrelated pre-existing bookkeeping fix `go mod tidy`
+  made while it was run).
+- `internal/media/gateway.go`: `lprReadCamera` now also returns the read's `id` and
+  `seen_at` (needed for the watermark and the download filename/audit target; the SQL
+  query gained `seen_at`). `lprReadSnapshot` handles `?download=1`: requires
+  `snapshots.download` in addition to what `lprReadCamera` already checked
+  (`snapshots.view` + `lpr.view`), reads the full Frigate response body, calls
+  `g.burnPhotoWatermark` (loads the camera's tenant branding via the new `Branding
+  *branding.Service` field on `Gateway`, decodes the logo if present, calls
+  `watermark.BurnPhoto`), sets `Content-Disposition: attachment`, and audits
+  `SNAPSHOT_DOWNLOADED` (the existing `ActionSnapshotViewed` constant, already used by
+  `eventSnapshot`'s own `download=1` path) with `target_type = "lpr_read"`. A branding
+  read/logo-decode failure degrades to an un-branded (date/time only) watermark rather than
+  failing the download outright — decision: the date/time is the load-bearing evidence; a
+  missing owner name/logo is a lesser degradation than refusing the whole download.
+  `apps/api/main.go` now shares one `branding.Service` instance between `api.Handlers` and
+  `media.Gateway` (previously constructed inline only for `Handlers`).
+- RED/GREEN #1 (unit, `internal/watermark/photo_test.go` `TestBurnPhoto`): forced the bar's
+  fill alpha to 0 (drawing a fully transparent rectangle instead of the semi-opaque black
+  bar) — RED: `go test ./internal/watermark/... -run TestBurnPhoto -v` failed
+  ("bottom-bar pixel barely changed from background (diff=3)"). GREEN: restored alpha 170,
+  same command passes, including the companion assertion that the *top* of the image (well
+  outside the bar) is unchanged, and that output dimensions exactly match the input.
+- RED/GREEN #2 (integration, `internal/api/lpr_read_snapshot_download_integration_test.go`
+  `TestLPRReadSnapshotDownload`): RED via the "temporarily disable" method — replaced the
+  `download=1` check with `if true { relay(...); return }`, forcing every request down the
+  plain-view path. `go test -tags integration ./internal/api/... -run
+  TestLPRReadSnapshotDownload -v`: all 4 assertions in the first subtest failed (no
+  `Content-Disposition` header, output byte-identical to the plain view — i.e. e.g. no
+  watermark burned in, 0 `SNAPSHOT_DOWNLOADED` audit rows) and the second subtest failed too
+  (200 instead of 403, since the `snapshots.download` check never ran). GREEN: restored the
+  real branch, same command, both subtests pass (watermarked attachment with matching
+  dimensions but different bytes than the plain view; exactly 1 audit row; 403 for an actor
+  with `snapshots.view` but not `snapshots.download`). Re-ran the adjacent
+  `TestLPRReadClipEndpoint`/`TestLPRReadSnapshotEndpoint` alongside — unaffected.
+- Full verification: `go build ./...` clean; `go vet ./...` clean; `golangci-lint run` — 0
+  issues (fixed one `gosec` G705 finding on the raw `w.Write(out)` of the watermarked JPEG
+  body, a false positive given the explicit `image/jpeg` Content-Type and no HTML rendering
+  anywhere in the path — `//nolint:gosec` with a reason comment, matching the codebase's
+  existing convention in `internal/secrets/secrets.go`/`internal/frigate/client.go`); `go
+  test ./...` PASS (including the new `internal/watermark` package); `go test -tags
+  integration ./internal/...` PASS (all packages, Docker/testcontainers, re-run for
+  regression safety since `internal/media/gateway.go` changed substantially); `pnpm
+  --filter web test` PASS (12 files / 53 tests, unchanged — no web files touched this task);
+  `pnpm typecheck` clean; `pnpm lint` clean. No contract change, so no `make generate` step.
+- Commit: pending (this task's own commit, created immediately after this document update).
+
 ## Next step
-PDW-3: watermarked photo download (Go `image/draw` burn-in with an embedded font, logo
-composited, date/time + owner name). Extends `internal/media/gateway.go` with a download
-variant of the snapshot endpoint gated additionally by `snapshots.download`.
+PDW-4: clip watermark job in the worker (ffmpeg `drawtext`/`overlay`, job table/state,
+object store, status + download endpoints, worker Docker image gains ffmpeg).

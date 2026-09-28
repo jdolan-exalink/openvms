@@ -105,11 +105,12 @@ func run() error {
 	inv := inventory.New(st, sealer, log)
 	adapters := inventory.NewAdapters(inv)
 	mediaSvc := &media.Service{Store: st, Adapters: adapters, Log: log}
+	brandingSvc := &branding.Service{Store: st, Blobs: store, Log: log}
 	handlers := &api.Handlers{
 		Inv:      inv,
 		Events:   &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Media:    mediaSvc,
-		Branding: &branding.Service{Store: st, Blobs: store, Log: log},
+		Branding: brandingSvc,
 		Identity: &identity.Service{
 			Store: st, Sealer: sealer, Log: log, Issuer: "OpenVMS",
 			SessionTTL: cfg.SessionTTL, IdleTimeout: cfg.SessionIdle,
@@ -131,7 +132,7 @@ func run() error {
 		Queries:           db.New(pool),
 		TrustForwardedFor: cfg.TrustForwardedFor,
 		SessionIdle:       cfg.SessionIdle,
-		Media:             (&media.Gateway{Svc: mediaSvc, Actor: api.ActorFrom}).Routes(),
+		Media:             (&media.Gateway{Svc: mediaSvc, Actor: api.ActorFrom, Branding: brandingSvc}).Routes(),
 	})
 	if err != nil {
 		return err
