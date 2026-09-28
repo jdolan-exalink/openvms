@@ -1,7 +1,9 @@
 package frigatemock
 
 import (
+	"bytes"
 	"fmt"
+	"hash/fnv"
 	"net/http"
 	"sort"
 	"strconv"
@@ -97,6 +99,32 @@ func (s *Server) objects(w http.ResponseWriter, r *http.Request) {
 // id, deterministic like the other mock thumbnails.
 func (s *Server) eventSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeJPEG(w, "event-"+r.PathValue("id"))
+}
+
+// eventClip serves a fake, deterministic MP4-shaped payload for a tracked object's clip
+// (PDW-2's /media/v1/lpr/reads/{id}/clip.mp4 relays this), the same "keyed by id, always
+// exists" convention eventSnapshot uses. http.ServeContent gives it real HTTP Range support
+// (206 Partial Content, Content-Range, Accept-Ranges), the same behaviour real Frigate's
+// static clip serving has, so PDW-2's seekable <video> can be exercised without a real
+// Frigate.
+func (s *Server) eventClip(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	data := clipBytes(id)
+	w.Header().Set("Content-Type", "video/mp4")
+	http.ServeContent(w, r, id+".mp4", time.Time{}, bytes.NewReader(data))
+}
+
+// clipBytes derives a stable, seed-dependent byte slice standing in for an MP4 file: large
+// enough (16 KiB) that Range requests for different byte windows observably differ.
+func clipBytes(seed string) []byte {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(seed))
+	v := h.Sum32()
+	b := make([]byte, 16<<10)
+	for i := range b {
+		b[i] = byte(v>>uint(i%24)) ^ byte(i)
+	}
+	return b
 }
 
 type recordingSegment struct {

@@ -200,6 +200,55 @@ describe("Plates", () => {
     expect(screen.queryByRole("img", { name: /Foto de la lectura de patente/ })).not.toBeInTheDocument();
   });
 
+  it("opens the plate detail modal with photo, clip and watermark overlay", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/lpr/reads") return json({ items: [makePlateRead("r1")] });
+        if (url.pathname === "/api/v1/tenants/t1/branding") {
+          return json({ tenant_id: "t1", owner_name: "Municipalidad de Helvecia", has_logo: false, updated_at: "2024-01-01T00:00:00Z" });
+        }
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.search", "lpr.view", "snapshots.view", "recordings.view"), ...noCatalogs })(input);
+      }),
+    );
+
+    renderPage(Plates);
+    await screen.findByText("AB123CD");
+
+    fireEvent.click(screen.getByRole("button", { name: "Ver detalle" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Patente AB123CD" });
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(screen.getByRole("img", { name: "Foto de la lectura de patente AB123CD" })).toHaveAttribute(
+      "src",
+      "/media/v1/lpr/reads/r1/snapshot.jpg",
+    );
+    const video = dialog.querySelector("video");
+    expect(video).toHaveAttribute("src", "/media/v1/lpr/reads/r1/clip.mp4");
+    const overlays = await screen.findAllByText(/Municipalidad de Helvecia/, { selector: "span" });
+    expect(overlays).toHaveLength(2); // photo overlay + clip overlay
+    expect(overlays[0]).toHaveTextContent("2024-01-01 10:00:00 UTC+00:00");
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("does not offer detail without lpr.view", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/lpr/reads") return json({ items: [makePlateRead("r1")] });
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.search", "snapshots.view"), ...noCatalogs })(input);
+      }),
+    );
+
+    renderPage(Plates);
+    await screen.findByText("AB123CD");
+    expect(screen.queryByRole("button", { name: "Ver detalle" })).not.toBeInTheDocument();
+  });
+
   it('loads the next page via cursor when "Cargar más" is clicked', async () => {
     const readsCalls: URL[] = [];
     vi.stubGlobal(

@@ -24,7 +24,7 @@ feature extends.
 
 ## Tasks
 - [x] PDW-1: Owner branding settings (migration, contract, service, audit, Configuración page). Route: delegated direct (writer: this session).
-- [ ] PDW-2: Plate detail modal — full-quality photo + clip playback via gateway (Range) + CSS watermark overlay.
+- [x] PDW-2: Plate detail modal — full-quality photo + clip playback via gateway (Range) + CSS watermark overlay. Route: delegated direct (writer: this session).
 - [ ] PDW-3: Watermarked photo download (Go burn-in, embedded font, logo composited).
 - [ ] PDW-4: Clip watermark job in the worker (ffmpeg image, job table/state, object store, status + download endpoints).
 - [ ] PDW-5: Modal download UI for photo and clip job (progress, errors), audit labels.
@@ -127,7 +127,89 @@ feature extends.
   interpretation, not a product decision requiring a stop.
 - Commit: pending (this task's own commit, created immediately after this document update).
 
+### PDW-2: Plate detail modal (photo + clip + CSS watermark)
+- Route: delegated direct (writer: this session).
+- No contract change: the media gateway (`internal/media/gateway.go`) is handwritten, not
+  part of `packages/api-contract/openapi.yaml` (per the package's own doc comment), so this
+  task touched no OpenAPI/generated files.
+- Backend: refactored `lprReadSnapshot`'s "load read → authorize snapshots/recordings
+  permission → authorize lpr.view" logic into a shared `lprReadCamera(w, r, p)` helper, used
+  by both the existing snapshot endpoint and the new
+  `GET /media/v1/lpr/reads/{id}/clip.mp4` (`lprReadClip`), which needs `recordings.view` +
+  `lpr.view` (decision: mirrors `/media/v1/cameras/{id}/vod`'s permission, the closest
+  existing precedent for "recorded video access"; documented here as the "clips-appropriate
+  permission" the task description left open). `lprReadSnapshot` now always requests
+  `quality=100` (max quality) from Frigate and accepts `?bbox=0` to turn the bounding box
+  off (default stays on, `bbox=1`, unchanged from before). Range support for the clip needs
+  no new code: `ad.Media().Open` already forwards the full incoming `r.Header` (including
+  `Range`) to Frigate, and the existing `relay()` helper already copies
+  `Content-Range`/`Accept-Ranges`/`Content-Length` and the upstream status code (206) back —
+  the same mechanism `vod` already relies on for HLS segment ranges.
+- `internal/frigatemock`: added `GET /api/events/{id}/clip.mp4` (`eventClip`), a deterministic
+  16 KiB fake payload served via `http.ServeContent` — chosen specifically because it gives
+  genuine HTTP Range semantics (206, Content-Range) for free, unlike the existing
+  `exportFile` mock (a static `w.Write`, no Range support), so the clip endpoint's Range
+  passthrough could be tested against real Range behavior without a real Frigate.
+- Web: new `apps/web/src/components/Modal.tsx` (hand-rolled `role="dialog" aria-modal="true"`
+  with Esc, a close button, a Tab/Shift+Tab focus trap, and focus restored to the trigger on
+  close) — decision: not the native `<dialog>`/`showModal()`, because jsdom (this project's
+  vitest environment) does not implement `showModal` at all (verified directly: `d.showModal
+  is not a function`), which would make every modal test fail outright; a hand-rolled
+  dialog is also easier to keep consistent with the rest of the app's Tailwind styling.
+  `apps/web/src/components/PlateDetailModal.tsx` renders the photo
+  (`/media/v1/lpr/reads/{id}/snapshot.jpg`) and clip (`<video controls>` sourced from
+  `/media/v1/lpr/reads/{id}/clip.mp4`), each gated independently on `lpr.view` +
+  `snapshots.view` / `lpr.view` + `recordings.view` (a caller with only one permission still
+  sees that one section, with a message instead of a broken element for the other), with a
+  `WatermarkOverlay` (date/time + owner name/logo from `brandingQuery`) positioned over each.
+  `apps/web/src/lib/format.ts` gained `fmtWatermarkTimestamp` (decision: always UTC with an
+  explicit `+00:00` offset, not the viewer's browser time zone, so the same text appears for
+  every viewer and — in PDW-3/PDW-4 — matches what gets burned into the downloaded file
+  exactly; a per-camera/site time zone was considered but `PlateRead` carries no time zone
+  field today and adding one was judged out of scope for this task). `Plates.tsx` gained a
+  "Ver detalle" button (shown when the actor holds `lpr.view` and at least one of
+  `snapshots.view`/`recordings.view`) and modal state.
+- Download buttons are intentionally not present yet: photo burn-in (PDW-3) and the clip
+  watermark job (PDW-4) do not exist yet, and PDW-5 is the task that wires the download UI.
+- RED/GREEN #1 (integration, `internal/api/lpr_read_clip_integration_test.go`
+  `TestLPRReadClipEndpoint`): RED via the M3-doc's "temporarily disable" method (commented
+  out the new `r.Get("/lpr/reads/{id}/clip.mp4", ...)` route registration) —
+  `go test -tags integration ./internal/api/... -run TestLPRReadClipEndpoint -v`: 3 of 4
+  subtests failed with 404 (route did not exist), including, expectedly, the
+  "without recordings.view is forbidden" subtest (also 404 pre-route, since chi has nothing
+  to match — noted in the test). GREEN: restored the route, same command, all 4 subtests
+  pass (200 with Content-Type/Accept-Ranges, 206 + Content-Length=100 + Content-Range for a
+  `Range: bytes=0-99` request, 403 without `recordings.view`, 404 for another tenant's read).
+  The pre-existing `TestLPRReadSnapshotEndpoint` was re-run alongside and still passes
+  unchanged (the `quality=100`/`bbox` change did not alter its Content-Type assertion).
+- RED/GREEN #2 (web, `apps/web/src/components/Modal.test.tsx`): written alongside the
+  component (test-only in the M3-doc sense — no bug found by simply running it), so
+  non-vacuousness was proven directly per that same convention: temporarily renamed the Esc
+  key check to `"EscapeBROKEN_FOR_RED_PROOF"`, reran
+  `pnpm --filter web exec vitest run src/components/Modal.test.tsx` — the Esc/close-button/
+  restore-focus test failed as expected (`onClose` called 0 times, want 1); reverted, same
+  command, both tests (Esc/close/restore-focus, Tab focus trap) pass.
+- Web RED/GREEN (`apps/web/src/routes/Plates.test.tsx`, two new tests): initial
+  `screen.findByText(/Municipalidad de Helvecia/)` (no `selector` option) failed with a
+  find-by-text timeout even though the text was visibly present in the rendered output —
+  root cause: the overlay's date/time and owner-name are two separate JSX text-expression
+  children of the same `<span>`, and with two overlays (photo + clip) both containing the
+  same concatenated text, the unscoped query could not resolve to a single element; fixed by
+  querying `findAllByText(..., { selector: "span" })` and asserting `length === 2` (one per
+  overlay) plus the first overlay's full text content — a test-authoring fix, not an app bug
+  (the text was correct and visible in both places). Second new test
+  ("does not offer detail without lpr.view") passed immediately, confirming the "Ver
+  detalle" button's permission gate.
+- Full verification: `go build ./...` clean; `go vet ./...` clean; `golangci-lint run` 0
+  issues; `go test ./...` PASS; `go test -tags integration ./internal/...` PASS (all
+  packages, Docker/testcontainers — re-run after this task's changes since
+  `internal/media`/`internal/frigatemock` are shared by many other integration tests, no
+  regressions); `pnpm --filter web test` PASS (12 files / 53 tests); `pnpm typecheck` clean
+  (fixed two `possibly 'undefined'` findings in `Modal.tsx`'s focus-trap array indexing);
+  `pnpm lint` clean. No contract change, so no `make generate` step was needed for this task.
+- Commit: pending (this task's own commit, created immediately after this document update).
+
 ## Next step
-PDW-2: plate detail modal (full-quality photo + clip playback through the media gateway with
-Range support, CSS watermark overlay). Extends `internal/media/gateway.go` (new clip-proxy
-route) and `apps/web/src/routes/Plates.tsx`.
+PDW-3: watermarked photo download (Go `image/draw` burn-in with an embedded font, logo
+composited, date/time + owner name). Extends `internal/media/gateway.go` with a download
+variant of the snapshot endpoint gated additionally by `snapshots.download`.

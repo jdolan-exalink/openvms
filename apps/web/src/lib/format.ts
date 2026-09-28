@@ -10,6 +10,21 @@ export function fmtTime(iso: string | Date): string {
   return time.format(typeof iso === "string" ? new Date(iso) : iso);
 }
 
+/**
+ * fmtWatermarkTimestamp renders an unambiguous UTC timestamp for the plate detail watermark
+ * (PDW-2): same text on screen (CSS overlay) and burned into downloads, so it is always UTC
+ * with an explicit "+00:00" offset rather than the viewer's local time zone, which would
+ * differ between the person viewing and the file downloaded from them.
+ */
+export function fmtWatermarkTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
+    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC+00:00`
+  );
+}
+
 export function fmtDuration(startIso: string, endIso?: string | null): string {
   if (!endIso) return "en curso";
   const s = Math.max(0, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 1000));

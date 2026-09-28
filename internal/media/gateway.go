@@ -48,6 +48,7 @@ type ActorFunc func(ctx context.Context) (authz.Actor, bool)
 //	GET /media/v1/cameras/{id}/vod/{start}/{end}/{file}      HLS recordings      recordings.view
 //	GET /media/v1/events/{id}/snapshot.jpg                   event snapshot       snapshots.view
 //	GET /media/v1/lpr/reads/{id}/snapshot.jpg                plate read snapshot  snapshots.view + lpr.view
+//	GET /media/v1/lpr/reads/{id}/clip.mp4                    plate read clip      recordings.view + lpr.view
 //	GET /media/v1/exports/{id}/download                      finished export     exports.download
 type Gateway struct {
 	Svc   *Service
@@ -64,6 +65,7 @@ func (g *Gateway) Routes() http.Handler {
 	r.Get("/cameras/{id}/vod/{start}/{end}/{file}", g.vod)
 	r.Get("/events/{id}/snapshot.jpg", g.eventSnapshot)
 	r.Get("/lpr/reads/{id}/snapshot.jpg", g.lprReadSnapshot)
+	r.Get("/lpr/reads/{id}/clip.mp4", g.lprReadClip)
 	r.Get("/exports/{id}/download", g.exportDownload)
 	return r
 }
@@ -257,20 +259,21 @@ func (g *Gateway) eventSnapshot(w http.ResponseWriter, r *http.Request) {
 	relay(w, resp, "private, max-age=3600")
 }
 
-// lprReadSnapshot serves the Frigate tracked-object snapshot for one LPR read
-// (lpr_reads.remote_event_id), full frame with the detection bounding box (bbox=1), so the
-// plate photo shown on hover in the Plates page shows the actual read instead of another
-// object from the same event (which the event's own /events/{id}/snapshot.jpg endpoint would,
-// since it always uses detections[0]).
-func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
+// lprReadCamera loads the camera and remote Frigate event id behind LPR read id, and
+// authorizes p (a snapshot/recording permission) plus lpr.view — the same "both the media
+// permission AND lpr.view" rule PDW-2 requires for every plate detail view, since the media
+// itself reveals the plate. lpr.view is checked second and separately audited (a distinct
+// permission from p) so a caller missing only lpr.view gets a message about it rather than
+// the generic camera message.
+func (g *Gateway) lprReadCamera(w http.ResponseWriter, r *http.Request, p authz.Permission) (authz.Actor, Camera, string, bool) {
 	a, ok := g.actorOr401(w, r)
 	if !ok {
-		return
+		return a, Camera{}, "", false
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid read id")
-		return
+		return a, Camera{}, "", false
 	}
 	var cameraID uuid.UUID
 	var remoteEventID string
@@ -279,16 +282,31 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		g.fail(w, r, a, store.Classify(err))
-		return
+		return a, Camera{}, "", false
 	}
-	cam, err := g.Svc.Authorize(r.Context(), a, cameraID, authz.SnapshotsView)
+	cam, err := g.Svc.Authorize(r.Context(), a, cameraID, p)
 	if err != nil {
 		g.fail(w, r, a, err)
-		return
+		return a, Camera{}, "", false
 	}
 	if _, err := g.Svc.Authorize(r.Context(), a, cameraID, authz.LPRView); err != nil {
 		g.auditDenied(r.Context(), a, err, r.Method, r.URL.Path)
 		writeErr(w, http.StatusForbidden, "forbidden", "you do not have permission to view plate reads for this camera")
+		return a, Camera{}, "", false
+	}
+	return a, cam, remoteEventID, true
+}
+
+// lprReadSnapshot serves the Frigate tracked-object snapshot for one LPR read
+// (lpr_reads.remote_event_id), full frame with the detection bounding box (bbox=1 unless
+// ?bbox=0 is sent) at the highest quality Frigate offers (quality=100, no downscale), so
+// the plate photo shown on hover in the Plates page, and at full size in the plate detail
+// modal (PDW-2), shows the actual read instead of another object from the same event (which
+// the event's own /events/{id}/snapshot.jpg endpoint would, since it always uses
+// detections[0]).
+func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
+	a, cam, remoteEventID, ok := g.lprReadCamera(w, r, authz.SnapshotsView)
+	if !ok {
 		return
 	}
 	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
@@ -296,7 +314,34 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 		g.fail(w, r, a, err)
 		return
 	}
-	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(remoteEventID)+"/snapshot.jpg", url.Values{"bbox": {"1"}}, r.Header)
+	q := url.Values{"quality": {"100"}}
+	if r.URL.Query().Get("bbox") != "0" {
+		q.Set("bbox", "1")
+	}
+	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(remoteEventID)+"/snapshot.jpg", q, r.Header)
+	if err != nil {
+		g.fail(w, r, a, err)
+		return
+	}
+	relay(w, resp, "private, max-age=3600")
+}
+
+// lprReadClip proxies the Frigate tracked-object clip for one LPR read (PDW-2), needing
+// recordings.view (in addition to lpr.view, see lprReadCamera) since it exposes recorded
+// video, the same permission /media/v1/cameras/{id}/vod requires. The incoming Range header
+// travels through r.Header into Open, and relay copies Content-Range/Accept-Ranges back, so
+// the browser's <video> element can seek without downloading the whole clip.
+func (g *Gateway) lprReadClip(w http.ResponseWriter, r *http.Request) {
+	a, cam, remoteEventID, ok := g.lprReadCamera(w, r, authz.RecordingsView)
+	if !ok {
+		return
+	}
+	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
+	if err != nil {
+		g.fail(w, r, a, err)
+		return
+	}
+	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(remoteEventID)+"/clip.mp4", nil, r.Header)
 	if err != nil {
 		g.fail(w, r, a, err)
 		return

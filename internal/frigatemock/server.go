@@ -56,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/review/{id}", s.auth(s.getReview))
 	mux.HandleFunc("GET /api/events", s.auth(s.objects))
 	mux.HandleFunc("GET /api/events/{id}/snapshot.jpg", s.auth(s.eventSnapshot))
+	mux.HandleFunc("GET /api/events/{id}/clip.mp4", s.auth(s.eventClip))
 	mux.HandleFunc("POST /api/export/{camera}/start/{start}/end/{end}", s.auth(s.startExport))
 	mux.HandleFunc("GET /api/exports/{id}", s.auth(s.getExport))
 	mux.HandleFunc("GET /exports/{file}", s.auth(s.exportFile))

@@ -4,6 +4,7 @@ import { History } from "lucide-react";
 import { useState } from "react";
 import type { Schemas } from "@/api/client";
 import { cameraGroupsQuery, meQuery, type PlateFilter, platesQuery, sitesQuery } from "@/api/queries";
+import { PlateDetailModal } from "@/components/PlateDetailModal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, TextInput, Th } from "@/components/ui";
 import { fmtDateTime, fromLocalInput, labelName } from "@/lib/format";
 import { can } from "@/lib/perm";
@@ -43,7 +44,9 @@ export function Plates() {
   const reads = useInfiniteQuery(platesQuery(filter));
   const items = reads.data?.pages.flatMap((p) => p.items) ?? [];
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [detailRead, setDetailRead] = useState<Schemas["PlateRead"] | null>(null);
   const canPreviewSnapshot = can(me.data, "snapshots.view") && can(me.data, "lpr.view");
+  const canViewDetail = can(me.data, "lpr.view") && (can(me.data, "snapshots.view") || can(me.data, "recordings.view"));
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
@@ -148,7 +151,12 @@ export function Plates() {
                   <div className="text-xs text-muted">{r.server_name}</div>
                 </td>
                 <td className="text-right tabular-nums">{r.score != null ? `${Math.round(r.score * 100)}%` : "—"}</td>
-                <td className="text-right">
+                <td className="text-right whitespace-nowrap">
+                  {canViewDetail && (
+                    <Button className="mr-2" onClick={() => setDetailRead(r)}>
+                      Ver detalle
+                    </Button>
+                  )}
                   {can(me.data, "recordings.view") && (
                     <Link
                       to="/playback"
@@ -169,6 +177,7 @@ export function Plates() {
           {reads.isFetchingNextPage ? "Cargando…" : "Cargar más"}
         </Button>
       )}
+      {detailRead && <PlateDetailModal read={detailRead} onClose={() => setDetailRead(null)} />}
     </div>
   );
 }
