@@ -12,9 +12,35 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/platform/httpx"
+	"github.com/jdolan-exalink/openvms/internal/platform/logging"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
+
+// Audit actions for saved views (PRD §66): views were previously never audited.
+const (
+	ActionViewCreated = "VIEW_CREATED"
+	ActionViewUpdated = "VIEW_UPDATED"
+	ActionViewRemoved = "VIEW_REMOVED"
+)
+
+// auditView records a saved-view change in the same transaction as the write it
+// accompanies, so the audit row is committed or rolled back atomically with it — the same
+// pattern internal/inventory's audit() uses for its writes.
+func auditView(ctx context.Context, tx pgx.Tx, actor authz.Actor, tenantID uuid.UUID, action string, targetID uuid.UUID, details map[string]any) error {
+	if details == nil {
+		details = map[string]any{}
+	}
+	b, err := json.Marshal(details)
+	if err != nil {
+		return err
+	}
+	return db.New(tx).InsertAudit(ctx, db.InsertAuditParams{
+		TenantID: &tenantID, ActorID: &actor.UserID, ActorName: actor.Username, Action: action,
+		TargetType: "view", TargetID: &targetID, RequestID: logging.RequestID(ctx), Ip: httpx.ClientIP(ctx), Details: b,
+	})
+}
 
 // Cell is one tile of a view. A nil cell is an empty tile.
 type Cell struct {
@@ -235,8 +261,11 @@ func (s *Service) CreateView(ctx context.Context, actor authz.Actor, in ViewInpu
 			return err
 		}
 		raw, _ := json.Marshal(in.Layout)
-		return tx.QueryRow(ctx, `INSERT INTO views (tenant_id, owner_id, name, shared, layout) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-			tenantID, actor.UserID, in.Name, in.Shared, raw).Scan(&id)
+		if err := tx.QueryRow(ctx, `INSERT INTO views (tenant_id, owner_id, name, shared, layout) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+			tenantID, actor.UserID, in.Name, in.Shared, raw).Scan(&id); err != nil {
+			return err
+		}
+		return auditView(ctx, tx, actor, tenantID, ActionViewCreated, id, map[string]any{"name": in.Name, "shared": in.Shared})
 	})
 	if err != nil {
 		return View{}, err
@@ -275,8 +304,10 @@ func (s *Service) ReplaceView(ctx context.Context, actor authz.Actor, id uuid.UU
 			}
 		}
 		raw, _ := json.Marshal(merged)
-		_, err = tx.Exec(ctx, `UPDATE views SET name = $2, shared = $3, layout = $4, updated_at = now() WHERE id = $1`, id, in.Name, in.Shared, raw)
-		return err
+		if _, err := tx.Exec(ctx, `UPDATE views SET name = $2, shared = $3, layout = $4, updated_at = now() WHERE id = $1`, id, in.Name, in.Shared, raw); err != nil {
+			return err
+		}
+		return auditView(ctx, tx, actor, v.TenantID, ActionViewUpdated, id, map[string]any{"name": in.Name, "shared": in.Shared})
 	})
 	if err != nil {
 		return View{}, err
@@ -293,8 +324,10 @@ func (s *Service) DeleteView(ctx context.Context, actor authz.Actor, id uuid.UUI
 		if !canEdit(actor, c, v) {
 			return access.ErrForbidden
 		}
-		_, err = tx.Exec(ctx, `UPDATE views SET deleted_at = now() WHERE id = $1`, id)
-		return err
+		if _, err := tx.Exec(ctx, `UPDATE views SET deleted_at = now() WHERE id = $1`, id); err != nil {
+			return err
+		}
+		return auditView(ctx, tx, actor, v.TenantID, ActionViewRemoved, id, map[string]any{"name": v.Name})
 	})
 }
 

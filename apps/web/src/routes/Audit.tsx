@@ -31,6 +31,9 @@ const actions: Record<string, string> = {
   EXPORT_CREATED: "Exportación creada",
   EXPORT_DOWNLOADED: "Exportación descargada",
   SNAPSHOT_DOWNLOADED: "Captura descargada",
+  VIEW_CREATED: "Vista creada",
+  VIEW_UPDATED: "Vista modificada",
+  VIEW_REMOVED: "Vista eliminada",
 };
 
 /** Audit is the append-only audit trail (PRD §66). */
