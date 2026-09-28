@@ -28,6 +28,16 @@ feature extends.
 - [x] PDW-3: Watermarked photo download (Go burn-in, embedded font, logo composited). Route: delegated direct (writer: this session).
 - [x] PDW-4: Clip watermark job in the worker (ffmpeg image, job table/state, object store, status + download endpoints). Route: delegated direct (writer: this session).
 - [x] PDW-5: Modal download UI for photo and clip job (progress, errors), audit labels. Route: delegated direct (writer: this session).
+- [x] PDW-6: Fix independent-verification findings (ffmpeg drawtext injection/escaping,
+  silent audio loss, stuck jobs, logo decompression bomb, JPEG quality nit), verified against
+  real ffmpeg inside the running worker container. Route: delegated direct (writer: this
+  session).
+- [ ] PDW-7: Configurable per-tenant watermark timezone (migration, contract, service,
+  worker, web UI, Go+web tests incl. DST), tzdata embedded in api/worker. Route: delegated
+  direct (writer: this session).
+- [ ] PDW-8: PlateDetailModal tabs (Foto/Clip, accessible tablist, lazy-mounted clip video)
+  and confirmation that the watermark timestamp is correct (seen_at-sourced, local time,
+  overlay matches burned-in output exactly). Route: delegated direct (writer: this session).
 
 ## Verification mode
 - Strict TDD: enabled (source: global user config `Strict TDD Mode: enabled`). RED → GREEN → REFACTOR with observed evidence.
@@ -444,9 +454,155 @@ feature extends.
   contract change, so no `make generate` step.
 - Commit: pending (this task's own commit, created immediately after this document update).
 
+### PDW-6: Fix independent-verification findings
+- Route: delegated direct (writer: this session, resumed continuation of the same bounded
+  writer that did PDW-1..5; not a fresh session).
+- No contract change (no OpenAPI surface touched by any of these fixes).
+- **Finding 1+2 (ffmpeg drawtext injection + literal `\:` rendering), `internal/clipwatermark/ffmpeg.go`:**
+  root cause confirmed by re-reading ffmpeg's own filtergraph quoting rules: content inside
+  `drawtext=text='...'` single quotes is copied by ffmpeg *literally* — backslash has **no**
+  escaping meaning there at all, and there is no way to represent a literal `'` inside a
+  single-quoted value (ffmpeg's own docs: close the quote, insert an escaped quote *outside*
+  it, reopen the quote). The old `escapeDrawtext` backslash-then-colon-then-quote-then-percent
+  `strings.NewReplacer` therefore did two wrong things at once: escaping colons as `\:`
+  rendered as a **literal** backslash-colon in every clip (finding 2, since backslash isn't an
+  escape inside quotes), and "escaping" a quote as `\'` did not close/reopen — it emitted a
+  literal backslash then ended the quoted value early, so an owner name containing `'`
+  corrupted the filtergraph (finding 1). Confirmed empirically against the *real* ffmpeg binary
+  (5.1.9, worker container — see below): the old code's exact args for owner name
+  `O'Brien's Towing` do not error, but ffmpeg's parser absorbs everything after the stray quote
+  — including `:fontcolor=white:fontsize=24:box=1:boxcolor=...:x=10:y=...` — into the drawn
+  text itself, so `fontcolor`/`box`/positioning are silently never applied (the black
+  background bar disappears) and the burned-in text ends with literal garbage
+  (`...Towing':fontcolor=white:fontsize=24:...`). A real, observable defect, not merely
+  theoretical.
+  - **Fix**: the watermark text is no longer embedded in the filtergraph string at all. The
+    worker (`worker.go`'s new `writeTempText`) writes it verbatim (unescaped — it is just file
+    content) to a fixed-name file (`watermark.txt`) inside a fresh private temp directory
+    (`os.MkdirTemp`), and `buildFFmpegArgs` now takes a `textFilePath`, building
+    `drawtext=textfile='<path>':expansion=none:...`. `expansion=none` stops drawtext from
+    interpreting `%{...}` sequences in the file's content (the old percent-escaping is no
+    longer needed for the same reason). Only the (server-generated, non-attacker-controlled)
+    file path is still embedded inline, quoted via a new `quoteFilterValue`, which — having
+    read the real quoting rules this time — *refuses* (returns an error) rather than
+    mis-escapes if the path ever contained a `'`; `buildFFmpegArgs` now returns `([]string,
+    error)`, propagated through `runJob`.
+- **Finding 3 (silent audio loss with a logo), `ffmpeg.go`:** the `-filter_complex` branch had
+  no `-map`, so ffmpeg's default stream selection kept only the filtered video pad and dropped
+  the source audio (a plain `-vf`, used in the no-logo branch, keeps ffmpeg's normal implicit
+  "map everything from the single input" behavior, so it was unaffected). Fix: label the video
+  output (`...,drawtext=...[vout]`) and add `-map "[vout]" -map "0:a?"` (audio optional, so a
+  silent source clip still succeeds) to the logo branch only.
+- **Finding 4 (stuck jobs), `internal/clipwatermark/worker.go`:**
+  - `runJobRecovered` wraps `runJob` with `recover()`, turning a panic anywhere in job
+    processing into a normal "failed" job instead of crashing the whole worker process (which
+    also runs `events.Syncer`/`media.ExportTracker`/`inventory.HealthPoller` on the same
+    process — a single clip-job panic would have taken all of them down).
+  - `Worker.SweepStuck` (exported, called periodically from `Run` on a new `SweepInterval`
+    ticker, default 1 minute) fails every job still `status='running'` after `stuckTimeout` (15
+    minutes), mirroring `internal/media/exports.go`'s `exportTimeout` sweep — for a worker
+    process that is *killed* (not merely panicking) mid-job, `recover()` never runs at all,
+    since the process itself is gone, so only a periodic external sweep can ever unstick that
+    row. New sqlc query `FailStuckClipWatermarkJobs` (`internal/store/queries/clipwatermark.sql`
+    → generated `internal/store/db/clipwatermark.sql.go`).
+- **Finding 5 (logo decompression bomb), `internal/branding/service.go`:** `image.DecodeConfig`
+  only reads the image header, so a highly-compressible solid-color PNG can declare an
+  enormous width/height while staying tiny on disk (well under `MaxLogoBytes`); that file would
+  previously pass validation and later be fully decoded (`BurnPhoto` for photo downloads, and
+  again when staged for ffmpeg's overlay filter for clip jobs), allocating gigabytes for a
+  small upload. Added `MaxLogoPixels = 1024*1024` and reject `cfg.Width*cfg.Height >
+  MaxLogoPixels` (400 `ValidationError`, already wired through `statusFor`).
+- **Finding 6 (JPEG quality nit), `internal/watermark/photo.go`:** `jpeg.Options{Quality: 95}`
+  → named constant `photoJPEGQuality = 100` (user asked for maximum quality; the download is
+  evidence).
+- **RED/GREEN #1** (`internal/clipwatermark/ffmpeg_test.go`, rewritten): new tests for the
+  desired textfile-based behavior (`TestBuildFFmpegArgsNoLogo/WithLogo`,
+  `TestBuildFFmpegArgsNeverInlinesRawText`, `TestQuoteFilterValueRejectsSingleQuote`,
+  `TestBuildFFmpegArgsRejectsUnquotableTextPath`) were written against the new
+  `buildFFmpegArgs`/`quoteFilterValue` signatures before either existed. RED: `git stash push
+  -- internal/clipwatermark/ffmpeg.go && go test ./internal/clipwatermark/... -run
+  'TestBuildFFmpegArgs|TestQuoteFilterValue' -v` — build failure (`assignment mismatch: 2
+  variables but buildFFmpegArgs returns 1 value`, `undefined: quoteFilterValue`) against the
+  pre-PDW-6 `ffmpeg.go`. GREEN: `git stash pop`, same command, all 5 pass.
+- **RED/GREEN #2** (`internal/clipwatermark/worker_text_test.go`, new,
+  `TestWriteTempTextContentMatchesWatermarkTextExactly`): proves finding 2's explicit ask (the
+  textfile content equals `watermark.Text`'s output exactly). Non-vacuousness proven directly:
+  temporarily made `writeTempText` append a stray `!` to the written bytes; RED: `go test
+  ./internal/clipwatermark/... -run TestWriteTempTextContentMatchesWatermarkTextExactly -v` —
+  failed (`got ...Towing!, want ...Towing`). GREEN: reverted, same command passes.
+- **RED/GREEN #3** (integration, `internal/clipwatermark/worker_integration_test.go`
+  `TestClipWatermarkJobRecoversFromPanic`): temporarily called `w.runJob` directly instead of
+  `w.runJobRecovered` in `process`. RED: `go test -tags integration ./internal/clipwatermark/...
+  -run TestClipWatermarkJobRecoversFromPanic -v` — the panic was **not** caught: the test
+  *binary itself* panicked and crashed (`panic: simulated panic inside job processing
+  [recovered, repanicked]`), the strongest possible non-vacuous RED signal (without `recover()`
+  there is no test failure to report — the whole process dies). GREEN: reverted to
+  `runJobRecovered`, same command passes (job ends `status=failed`, error mentions "panic").
+- **RED/GREEN #4** (integration, `TestSweepStuckClipWatermarkJobs`): two jobs forced to
+  `status='running'` at different `updated_at` ages (20 min and 10 s ago) via a raw SQL update
+  through `env.Store.TxRaw`. RED: temporarily made `SweepStuck` an early `return`. `go test
+  -tags integration ./internal/clipwatermark/... -run TestSweepStuckClipWatermarkJobs -v` —
+  failed (`swept job status = "running", want failed`). GREEN: reverted, same command passes
+  (the 20-minute-old job is failed with a non-empty error; the 10-second-old job is left
+  running, proving the sweep does not touch recently-claimed jobs).
+- **RED/GREEN #5** (`internal/branding/service_test.go`, new subtest "huge declared dimensions
+  despite small byte size (decompression bomb)"): a 2000×2000 solid-color PNG (`png.Encode`
+  compresses it to well under `MaxLogoBytes`, asserted by the fixture generator itself). RED:
+  `go test ./internal/branding/... -run TestDecodeAndValidateLogo -v` — failed (`want error,
+  got nil`) before `MaxLogoPixels`/the bound existed. GREEN: same command, all 8 subtests pass.
+- **RED/GREEN #6** (`internal/watermark/photo_test.go`, new `TestPhotoJPEGQualityIsMaximum`):
+  written to reference an as-yet-undefined `photoJPEGQuality` constant. RED: `go test
+  ./internal/watermark/... -run TestPhotoJPEGQualityIsMaximum -v` — compile failure (`undefined:
+  photoJPEGQuality`). GREEN: added the constant (100) and used it in `BurnPhoto`'s
+  `jpeg.Encode` call, same command passes.
+- **Real ffmpeg check (the whole point of this task's own explicit instruction):** the host
+  still has no ffmpeg (confirmed again), but the already-running `openvms-worker-1` container
+  does (ffmpeg 5.1.9-0+deb12u1, built with `--enable-libx265`/`--enable-libx264`, `ffprobe`
+  present). Compiled a static integration-tagged test binary
+  (`CGO_ENABLED=0 go test -tags integration -c -o cw.test ./internal/clipwatermark`), `docker
+  cp`'d it into the container, and ran it there
+  (`docker exec -w /tmp openvms-worker-1 /tmp/cw.test -test.v -test.run FFmpeg`) — the *only*
+  docker commands used, no restart/rebuild. All 12 `TestFFmpegEndToEnd` subtests passed against
+  the real binary:
+  - plain watermark burn-in (valid output produced).
+  - **six** owner-name subtests covering `'`, `:`, `%`, `,`, `;`, `[` — every one renders and
+    exits 0 with the textfile fix (this is the same real binary that, per the "old bug" repro
+    below, mishandles the `'` case under the pre-fix code).
+  - source with a sine-wave audio track **and** a generated PNG logo → both an audio and a
+    video stream present in the output (checked via `ffprobe -show_entries stream=codec_type`,
+    present in this image), proving finding 3's `-map` fix.
+  - an HEVC (`libx265`) source, re-encoded to H.264 output (this ffmpeg build has `libx265`, so
+    the subtest ran rather than skipped) — output has a video stream.
+  - Additionally, to *prove* findings 1/2 were real and not just a misreading of ffmpeg's docs:
+    wrote a small standalone Go program reproducing the **pre-fix** `buildFFmpegArgs`/
+    `escapeDrawtext` byte-for-byte, compiled it statically, ran it in the same container
+    against the same real ffmpeg with owner name `O'Brien's Towing`. Result: ffmpeg did **not**
+    error (exit 0, 3211-byte output) — but per ffmpeg's quoting rules the stray `'` ends the
+    quoted text value early, so everything from `Brien...` through the final `y=h-th-10` gets
+    re-parsed and, because the final quote is never closed, the *entire* remainder
+    (`:fontcolor=white:fontsize=24:box=1:boxcolor=black@0.6:boxborderw=8:x=10:y=h-th-10`) is
+    absorbed as literal drawn text instead of being applied as filter options — the background
+    box, font color and position are silently never applied, and the burned-in text ends with
+    visible filter-syntax garbage. A real, silent corruption bug, confirmed against the actual
+    binary, not merely inferred from documentation.
+  - Container cleanup: the container's non-root user could not `rm` the root-owned files
+    `docker cp` placed under `/tmp` (`Operation not permitted`) — left in place; they are
+    ephemeral container state, not part of the image or repo, and the container is recreated
+    by the final `make up` anyway. No image rebuild or container restart was performed before
+    that final step.
+- **Full verification**: `go build ./...` clean; `go vet ./...` clean; `golangci-lint run
+  ./...` — 0 issues; `go test ./...` PASS (all packages); `go test -tags integration
+  ./internal/...` PASS (all packages, Docker/testcontainers, full re-run for regression
+  safety); `go test -race ./...` PASS; `make generate` (`go generate ./...` + `pnpm generate`)
+  re-run twice, stable file list both times (only the intentional
+  `internal/store/db/clipwatermark.sql.go` diff, no drift) — no contract change, so no web
+  types regenerated differently. `pnpm --filter web test`/`pnpm typecheck`/`pnpm lint` not
+  re-run for this task (no web files touched by PDW-6; will be covered again at the end-of-
+  session combined verification pass).
+- Commit: pending (this task's own commit, created immediately after this document update).
+
 ## Next step
-All five PDW tasks are implemented and committed on `feat/plate-detail-watermark` (not
-pushed — per instructions, this writer does not push/merge). Remaining: final full
-verification pass (already run per-task; one more combined run before reporting), then a
-single `make up` at the very end to confirm the stack deploys and
-`docker compose exec worker ffmpeg -version` works, per the task's own closing instruction.
+PDW-1 through PDW-6 are implemented and committed on `feat/plate-detail-watermark` (not
+pushed). Remaining: PDW-7 (configurable timezone) and PDW-8 (modal tabs + timestamp
+confirmation), then a final combined verification pass and a single `make up` at the very end
+to confirm the stack deploys and the new migration(s) applied.

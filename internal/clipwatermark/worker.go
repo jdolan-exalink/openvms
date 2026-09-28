@@ -10,7 +10,10 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -41,6 +44,9 @@ type Worker struct {
 	// without a real ffmpeg binary (which this dev host does not have). nil uses the real
 	// exec.CommandContext-based implementation.
 	RunFFmpeg func(ctx context.Context, ffmpegPath string, args []string) error
+
+	// SweepInterval bounds how often SweepStuck runs from Run. Defaults to 1 minute.
+	SweepInterval time.Duration
 }
 
 func (w *Worker) ffmpegPath() string {
@@ -64,6 +70,21 @@ func (w *Worker) timeout() time.Duration {
 	return 5 * time.Minute
 }
 
+func (w *Worker) sweepInterval() time.Duration {
+	if w.SweepInterval > 0 {
+		return w.SweepInterval
+	}
+	return time.Minute
+}
+
+// stuckTimeout bounds how long a job may stay "running" before SweepStuck fails it — mirrors
+// internal/media/exports.go's exportTimeout. A worker process that is killed mid-job (OOM,
+// deploy, crash) never reaches runJobRecovered's own recover(), so without this sweep the row
+// stays "running" forever: the single-worker slot's next claim is unaffected (claim only
+// selects "queued" rows), but the requester would poll GetJob forever waiting for a job that
+// will never finish.
+const stuckTimeout = 15 * time.Minute
+
 func (w *Worker) run(ctx context.Context, ffmpegPath string, args []string) error {
 	if w.RunFFmpeg != nil {
 		return w.RunFFmpeg(ctx, ffmpegPath, args)
@@ -78,17 +99,43 @@ func (w *Worker) run(ctx context.Context, ffmpegPath string, args []string) erro
 }
 
 // Run polls forever until ctx is cancelled, processing at most one job per Once call before
-// checking again — a queue with several jobs drains one at a time on this same goroutine.
+// checking again — a queue with several jobs drains one at a time on this same goroutine — and
+// periodically sweeping stuck "running" jobs (see stuckTimeout).
 func (w *Worker) Run(ctx context.Context) {
 	t := time.NewTicker(w.interval())
 	defer t.Stop()
+	sweepT := time.NewTicker(w.sweepInterval())
+	defer sweepT.Stop()
 	for {
 		w.Once(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-sweepT.C:
+			w.SweepStuck(ctx)
 		}
+	}
+}
+
+// SweepStuck fails every job still "running" after stuckTimeout (see its doc comment).
+// Exported so the worker's own Run loop and tests can both call it directly.
+func (w *Worker) SweepStuck(ctx context.Context) {
+	var ids []uuid.UUID
+	err := w.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		var err error
+		ids, err = q.FailStuckClipWatermarkJobs(ctx, db.FailStuckClipWatermarkJobsParams{
+			Error:  "worker did not finish this job in time",
+			Cutoff: time.Now().Add(-stuckTimeout),
+		})
+		return err
+	})
+	if err != nil {
+		w.Log.WarnContext(ctx, "sweep stuck clip watermark jobs", "error", err)
+		return
+	}
+	for _, id := range ids {
+		w.Log.WarnContext(ctx, "swept stuck clip watermark job", "job", id)
 	}
 }
 
@@ -127,7 +174,7 @@ func (w *Worker) claim(ctx context.Context) (db.ClipWatermarkJob, bool, error) {
 func (w *Worker) process(ctx context.Context, job db.ClipWatermarkJob) {
 	cctx, cancel := context.WithTimeout(ctx, w.timeout())
 	defer cancel()
-	if err := w.runJob(cctx, job); err != nil {
+	if err := w.runJobRecovered(cctx, job); err != nil {
 		w.Log.WarnContext(ctx, "clip watermark job failed", "job", job.ID, "error", err)
 		msg := err.Error()
 		if len(msg) > 2000 {
@@ -139,6 +186,22 @@ func (w *Worker) process(ctx context.Context, job db.ClipWatermarkJob) {
 			w.Log.ErrorContext(ctx, "mark clip watermark job failed", "job", job.ID, "error", markErr)
 		}
 	}
+}
+
+// runJobRecovered wraps runJob with a recover(): a panic anywhere in the ffmpeg pipeline (a
+// third-party library bug, an unexpected malformed clip, etc.) previously crashed this whole
+// worker process, silently abandoning every job it was holding (including this one, stuck
+// "running" until SweepStuck's stuckTimeout eventually caught it) and killing every other
+// goroutine sharing the process (events.Syncer, media.ExportTracker, inventory.HealthPoller).
+// Recovering here fails just this one job immediately and lets the worker keep claiming the
+// next one.
+func (w *Worker) runJobRecovered(ctx context.Context, job db.ClipWatermarkJob) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return w.runJob(ctx, job)
 }
 
 // runJob does the actual work: fetch the source clip, optionally the logo, run ffmpeg,
@@ -165,6 +228,15 @@ func (w *Worker) runJob(ctx context.Context, job db.ClipWatermarkJob) error {
 	}
 	defer cleanupInput()
 
+	// PDW-6 fix: the watermark text is never embedded inline in the ffmpeg filtergraph string
+	// (see ffmpeg.go's buildFFmpegArgs doc comment for why); it is written verbatim to its own
+	// private temp file instead, which drawtext reads via textfile=.
+	textPath, cleanupText, err := writeTempText(job.WatermarkText)
+	if err != nil {
+		return fmt.Errorf("stage watermark text: %w", err)
+	}
+	defer cleanupText()
+
 	var logoPath string
 	if job.LogoKey != "" {
 		data, _, err := w.Blobs.Get(ctx, job.LogoKey)
@@ -187,7 +259,10 @@ func (w *Worker) runJob(ctx context.Context, job db.ClipWatermarkJob) error {
 	}
 	defer cleanupOutput()
 
-	args := buildFFmpegArgs(inputPath, outputPath, job.WatermarkText, logoPath)
+	args, err := buildFFmpegArgs(inputPath, outputPath, textPath, logoPath)
+	if err != nil {
+		return fmt.Errorf("build ffmpeg args: %w", err)
+	}
 	if err := w.run(ctx, w.ffmpegPath(), args); err != nil {
 		return fmt.Errorf("ffmpeg: %w", err)
 	}
@@ -213,6 +288,28 @@ func (w *Worker) server(ctx context.Context, job db.ClipWatermarkJob) (db.Frigat
 		return err
 	})
 	return srv, err
+}
+
+// writeTempText writes text to a fixed-name file ("watermark.txt") inside a fresh, private temp
+// directory, rather than a randomized filename: drawtext's textfile= value is still embedded
+// inline in the filtergraph string (quoted, see ffmpeg.go's quoteFilterValue), so keeping the
+// file's own name fixed and predictable — only the OS-chosen directory component varies —
+// keeps that embedded path free of characters that would need filtergraph escaping, on top of
+// quoteFilterValue's own defensive check. text itself is written byte-for-byte, unescaped: it
+// is read back by ffmpeg as literal file content (expansion=none), never interpreted as
+// filtergraph syntax, which is the whole point of this fix (see ffmpeg.go).
+func writeTempText(text string) (string, func(), error) {
+	dir, err := os.MkdirTemp("", "clip-wm-text-*")
+	if err != nil {
+		return "", func() {}, err
+	}
+	cleanup := func() { _ = os.RemoveAll(dir) }
+	path := filepath.Join(dir, "watermark.txt")
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	return path, cleanup, nil
 }
 
 // writeTemp creates a temp file matching pattern, copying r into it if r is not nil

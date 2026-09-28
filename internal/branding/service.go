@@ -39,6 +39,16 @@ const (
 // MaxLogoBytes limits the uploaded logo image, validated server-side.
 const MaxLogoBytes = 512 << 10 // 512 KB
 
+// MaxLogoPixels bounds the logo's *declared* pixel count (width * height), independent of its
+// encoded byte size. PDW-6 finding: image.DecodeConfig only reads the header, so a highly
+// compressible solid-color PNG can declare an enormous width/height while staying well under
+// MaxLogoBytes on disk — a classic decompression bomb. Without this bound, that file would
+// pass validation and later be fully decoded (BurnPhoto for photo downloads, and again when
+// staged for ffmpeg's overlay filter for clip jobs), allocating gigabytes of pixel data for a
+// tiny upload. 1024x1024 is already generous for a logo meant to sit in the corner of a
+// watermark bar a few dozen pixels tall.
+const MaxLogoPixels = 1024 * 1024
+
 // Blobs stores the logo bytes; *objectstore.Store implements it.
 type Blobs interface {
 	Put(ctx context.Context, key string, body []byte, contentType string) error
@@ -184,6 +194,10 @@ func decodeAndValidateLogo(data []byte, contentType string) error {
 	}
 	if (format != "png" && format != "jpeg") || cfg.Width <= 0 || cfg.Height <= 0 {
 		return invalid("logo must be a valid PNG or JPEG image")
+	}
+	// PDW-6: bound declared pixel count, not just encoded byte size — see MaxLogoPixels.
+	if int64(cfg.Width)*int64(cfg.Height) > MaxLogoPixels {
+		return invalid("logo dimensions (%dx%d) are too large (max %d pixels)", cfg.Width, cfg.Height, MaxLogoPixels)
 	}
 	// The declared Content-Type must match the sniffed bytes: a caller cannot smuggle a
 	// JPEG in under an image/png declaration (or vice versa) past this check.

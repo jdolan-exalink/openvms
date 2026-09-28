@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -44,6 +45,41 @@ func (q *Queries) ClaimNextClipWatermarkJob(ctx context.Context) (ClipWatermarkJ
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const failStuckClipWatermarkJobs = `-- name: FailStuckClipWatermarkJobs :many
+UPDATE clip_watermark_jobs SET status = 'failed', error = $1, updated_at = now()
+WHERE status = 'running' AND updated_at < $2
+RETURNING id
+`
+
+type FailStuckClipWatermarkJobsParams struct {
+	Error  string
+	Cutoff time.Time
+}
+
+// PDW-6: a worker process killed between claiming a job (status -> 'running') and marking it
+// done/failed leaves the row stuck "running" forever, since nothing else ever revisits it.
+// Fails every job that has been "running" since before @cutoff (the caller computes
+// now() - stuckTimeout), mirroring internal/media/exports.go's exportTimeout sweep.
+func (q *Queries) FailStuckClipWatermarkJobs(ctx context.Context, arg FailStuckClipWatermarkJobsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, failStuckClipWatermarkJobs, arg.Error, arg.Cutoff)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getClipWatermarkJob = `-- name: GetClipWatermarkJob :one

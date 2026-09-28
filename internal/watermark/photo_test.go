@@ -84,6 +84,14 @@ func TestBurnPhoto(t *testing.T) {
 	}
 }
 
+// TestPhotoJPEGQualityIsMaximum covers the PDW-6 nit: the user asked for maximum JPEG
+// quality on watermarked photo downloads, since the file is evidence.
+func TestPhotoJPEGQualityIsMaximum(t *testing.T) {
+	if photoJPEGQuality != 100 {
+		t.Errorf("photoJPEGQuality = %d, want 100 (maximum)", photoJPEGQuality)
+	}
+}
+
 func absInt(n int) int {
 	if n < 0 {
 		return -n

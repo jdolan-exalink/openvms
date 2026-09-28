@@ -28,6 +28,10 @@ func init() {
 	baseFont = f
 }
 
+// photoJPEGQuality is maximum: the watermarked download is evidence, so it must never lose
+// more fidelity to re-encoding than strictly necessary (PDW-6 nit: was 95).
+const photoJPEGQuality = 100
+
 func faceForHeight(px int) (font.Face, error) {
 	return opentype.NewFace(baseFont, &opentype.FaceOptions{Size: float64(px), DPI: 72, Hinting: font.HintingFull})
 }
@@ -72,7 +76,7 @@ func BurnPhoto(data []byte, text string, logo stdimg.Image) ([]byte, error) {
 	d.DrawString(text)
 
 	var out bytes.Buffer
-	if err := jpeg.Encode(&out, dst, &jpeg.Options{Quality: 95}); err != nil {
+	if err := jpeg.Encode(&out, dst, &jpeg.Options{Quality: photoJPEGQuality}); err != nil {
 		return nil, fmt.Errorf("encode photo: %w", err)
 	}
 	return out.Bytes(), nil

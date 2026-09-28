@@ -1,18 +1,36 @@
 package clipwatermark
 
 import (
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 )
 
-// TestBuildFFmpegArgsNoLogo covers PDW-4: without a logo, the filter is a plain -vf
-// drawtext, H.264/AAC output, veryfast preset, a fixed low thread count.
+// TestBuildFFmpegArgsNoLogo covers PDW-4/PDW-6: without a logo, the filter is a plain -vf
+// drawtext reading the watermark text from a file (textfile=), never inlined into the
+// filtergraph, with expansion disabled; H.264/AAC output, veryfast preset, a fixed low thread
+// count.
 func TestBuildFFmpegArgsNoLogo(t *testing.T) {
-	args := buildFFmpegArgs("/tmp/in.mp4", "/tmp/out.mp4", "2026-09-28 13:05:30 UTC+00:00", "")
+	textPath := filepath.Join(t.TempDir(), "watermark.txt")
+	args, err := buildFFmpegArgs("/tmp/in.mp4", "/tmp/out.mp4", textPath, "")
+	if err != nil {
+		t.Fatalf("buildFFmpegArgs: %v", err)
+	}
 
 	mustContainSeq(t, args, []string{"-i", "/tmp/in.mp4"})
-	mustContainSeq(t, args, []string{"-vf", "drawtext=text='2026-09-28 13\\:05\\:30 UTC+00\\:00':fontcolor=white:fontsize=24:box=1:boxcolor=black@0.6:boxborderw=8:x=10:y=h-th-10"})
+	idx := indexOf(args, "-vf")
+	if idx == -1 || idx+1 >= len(args) {
+		t.Fatalf("missing -vf, got %v", args)
+	}
+	filter := args[idx+1]
+	if !strings.Contains(filter, "drawtext=textfile='"+textPath+"'") {
+		t.Errorf("filter = %q, want drawtext=textfile='%s'", filter, textPath)
+	}
+	if !strings.Contains(filter, "expansion=none") {
+		t.Errorf("filter = %q, want expansion=none so drawtext never interprets %%{...} in the text file", filter)
+	}
 	mustContainSeq(t, args, []string{"-c:v", "libx264"})
 	mustContainSeq(t, args, []string{"-preset", "veryfast"})
 	mustContainSeq(t, args, []string{"-threads", "2"})
@@ -25,10 +43,16 @@ func TestBuildFFmpegArgsNoLogo(t *testing.T) {
 	}
 }
 
-// TestBuildFFmpegArgsWithLogo covers PDW-4: a logo adds a second input and switches to
-// -filter_complex compositing it with overlay before drawtext.
+// TestBuildFFmpegArgsWithLogo covers PDW-4/PDW-6: a logo adds a second input and switches to
+// -filter_complex compositing it with overlay before drawtext, and explicitly maps the
+// filtered video plus the source's (optional) audio stream, since -filter_complex drops
+// ffmpeg's implicit "map everything" default that -vf keeps (PDW-6 finding: silent audio loss).
 func TestBuildFFmpegArgsWithLogo(t *testing.T) {
-	args := buildFFmpegArgs("/tmp/in.mp4", "/tmp/out.mp4", "text", "/tmp/logo.png")
+	textPath := filepath.Join(t.TempDir(), "watermark.txt")
+	args, err := buildFFmpegArgs("/tmp/in.mp4", "/tmp/out.mp4", textPath, "/tmp/logo.png")
+	if err != nil {
+		t.Fatalf("buildFFmpegArgs: %v", err)
+	}
 
 	mustContainSeq(t, args, []string{"-i", "/tmp/in.mp4"})
 	mustContainSeq(t, args, []string{"-i", "/tmp/logo.png"})
@@ -40,54 +64,66 @@ func TestBuildFFmpegArgsWithLogo(t *testing.T) {
 	if !strings.Contains(filter, "overlay=") {
 		t.Errorf("filter_complex = %q, want an overlay stage", filter)
 	}
-	if !strings.Contains(filter, "drawtext=") {
-		t.Errorf("filter_complex = %q, want the drawtext stage too", filter)
+	if !strings.Contains(filter, "drawtext=textfile='"+textPath+"'") {
+		t.Errorf("filter_complex = %q, want the drawtext-from-file stage too", filter)
+	}
+	if !strings.Contains(filter, "[vout]") {
+		t.Errorf("filter_complex = %q, want a labeled video output ([vout]) to -map explicitly", filter)
 	}
 	if slices.Contains(args, "-vf") {
 		t.Errorf("with logo: must not also use -vf, got %v", args)
 	}
+	mustContainSeq(t, args, []string{"-map", "[vout]"})
+	mustContainSeq(t, args, []string{"-map", "0:a?"})
 }
 
-// TestEscapeDrawtext covers PDW-4's explicit requirement: drawtext escaping of the
-// timestamp (colons) and owner name (which may contain quotes, backslashes or percent
-// signs) must not let user-configured branding text break out of the filter value or be
-// misinterpreted as strftime expansion.
-func TestEscapeDrawtext(t *testing.T) {
-	tests := []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{"colon", "13:05:30", `13\:05\:30`},
-		{"single quote", "O'Brien's Garage", `O\'Brien\'s Garage`},
-		{"backslash", `C:\Users`, `C\:\\Users`},
-		{"percent", "100% Towing", `100\% Towing`},
-		{"plain text has no escapes", "Municipalidad de Helvecia", "Municipalidad de Helvecia"},
+// TestBuildFFmpegArgsNeverInlinesRawText is PDW-6's core regression guard: previously the
+// owner-configured watermark text (untrusted) was formatted directly into the filtergraph
+// string passed as an ffmpeg argument, which is exactly the injection vector PDW-6 fixes. Now
+// buildFFmpegArgs never receives the raw text at all (only a file path), so no argument can
+// ever contain it — this test proves that structurally, by construction, rather than by
+// re-deriving ffmpeg's escaping rules.
+func TestBuildFFmpegArgsNeverInlinesRawText(t *testing.T) {
+	dangerous := "O'Brien's; rm -rf / #% :: [evil]"
+	dir := t.TempDir()
+	textPath := filepath.Join(dir, "watermark.txt")
+	if err := os.WriteFile(textPath, []byte(dangerous), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := escapeDrawtext(tt.input); got != tt.want {
-				t.Errorf("escapeDrawtext(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
+	args, err := buildFFmpegArgs("/tmp/in.mp4", "/tmp/out.mp4", textPath, "/tmp/logo.png")
+	if err != nil {
+		t.Fatalf("buildFFmpegArgs: %v", err)
 	}
-}
-
-// TestDrawtextFilterIsWellFormed guards against a regression where an unescaped owner name
-// containing a single quote would prematurely close the text='...' value, corrupting the
-// rest of the filter graph (e.g. turning boxcolor into literal drawtext output).
-func TestDrawtextFilterIsWellFormed(t *testing.T) {
-	filter := drawtextFilter("2026-09-28 13:05:30 UTC+00:00 · O'Brien's Towing")
-	// Exactly two unescaped single quotes should remain: the ones opening/closing the text
-	// value. Count quotes not preceded by a backslash.
-	unescaped := 0
-	for i, r := range filter {
-		if r == '\'' && (i == 0 || filter[i-1] != '\\') {
-			unescaped++
+	for _, a := range args {
+		if strings.Contains(a, dangerous) {
+			t.Fatalf("arg %q contains the raw watermark text; it must only ever appear inside the text file, never inline in an ffmpeg argument", a)
 		}
 	}
-	if unescaped != 2 {
-		t.Errorf("filter has %d unescaped single quotes, want exactly 2 (open/close of text='...'): %s", unescaped, filter)
+}
+
+// TestQuoteFilterValueRejectsSingleQuote covers PDW-6: since ffmpeg's filtergraph quoting has
+// no way to represent a literal single quote inside a single-quoted value, quoteFilterValue
+// must refuse such a value outright instead of emitting a broken or (as the original bug did)
+// exploitable filtergraph.
+func TestQuoteFilterValueRejectsSingleQuote(t *testing.T) {
+	if _, err := quoteFilterValue("/tmp/it's-a-trap"); err == nil {
+		t.Fatal("quoteFilterValue accepted a value containing a single quote, want an error")
+	}
+	got, err := quoteFilterValue("/tmp/clip-wm-text-123/watermark.txt")
+	if err != nil {
+		t.Fatalf("quoteFilterValue: %v", err)
+	}
+	if want := "'/tmp/clip-wm-text-123/watermark.txt'"; got != want {
+		t.Errorf("quoteFilterValue = %q, want %q", got, want)
+	}
+}
+
+// TestBuildFFmpegArgsRejectsUnquotableTextPath covers the error path end to end: a text file
+// path containing a single quote (should never happen in practice — see writeTempText — but
+// defensively checked) must fail buildFFmpegArgs rather than build a broken filtergraph.
+func TestBuildFFmpegArgsRejectsUnquotableTextPath(t *testing.T) {
+	if _, err := buildFFmpegArgs("/tmp/in.mp4", "/tmp/out.mp4", "/tmp/it's-a-trap/watermark.txt", ""); err == nil {
+		t.Fatal("buildFFmpegArgs accepted a text file path containing a single quote, want an error")
 	}
 }
 

@@ -26,3 +26,12 @@ UPDATE clip_watermark_jobs SET status = 'failed', error = @error, updated_at = n
 
 -- name: SetClipWatermarkJobLogoKey :exec
 UPDATE clip_watermark_jobs SET logo_key = @logo_key, updated_at = now() WHERE id = @id;
+
+-- name: FailStuckClipWatermarkJobs :many
+-- PDW-6: a worker process killed between claiming a job (status -> 'running') and marking it
+-- done/failed leaves the row stuck "running" forever, since nothing else ever revisits it.
+-- Fails every job that has been "running" since before @cutoff (the caller computes
+-- now() - stuckTimeout), mirroring internal/media/exports.go's exportTimeout sweep.
+UPDATE clip_watermark_jobs SET status = 'failed', error = @error, updated_at = now()
+WHERE status = 'running' AND updated_at < @cutoff
+RETURNING id;

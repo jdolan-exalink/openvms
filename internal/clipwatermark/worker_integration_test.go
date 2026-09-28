@@ -11,11 +11,13 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/branding"
@@ -23,6 +25,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/media"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
 	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
 )
@@ -217,5 +220,107 @@ func TestClipWatermarkJobAuthorization(t *testing.T) {
 
 	if _, err := svc.Download(ctx, operator, readID, job.ID); err == nil {
 		t.Fatal("operador without exports.download was able to Download")
+	}
+}
+
+// TestClipWatermarkJobRecoversFromPanic covers PDW-6: a panic anywhere inside a job's
+// processing (simulated here via a RunFFmpeg fake that panics, standing in for e.g. a bug in
+// a future ffmpeg-args builder or a malformed clip triggering an out-of-bounds access) must
+// mark that one job failed instead of crashing the whole worker process. Without
+// runJobRecovered's recover(), w.Once(ctx) below would itself panic and crash this entire test
+// binary rather than fail this one assertion — a strong, hard-to-miss RED signal that was
+// observed before recover() was added (see the PDW-6 ODD doc).
+func TestClipWatermarkJobRecoversFromPanic(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	blobs := &memBlobs{}
+	svc, adapters := setupService(env, blobs)
+
+	camA := env.Cameras["frigate-h01/acceso_norte"]
+	readID := firstPlateRead(t, env, adapters, camA.ID)
+
+	job, err := svc.CreateJob(ctx, env.Admin, readID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := &clipwatermark.Worker{
+		Store: env.Store, Adapters: adapters, Blobs: blobs, Log: pgtest.Discard(),
+		RunFFmpeg: func(context.Context, string, []string) error {
+			panic("simulated panic inside job processing")
+		},
+	}
+	w.Once(ctx)
+
+	failed, err := svc.GetJob(ctx, env.Admin, readID, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failed.Status != "failed" {
+		t.Fatalf("job status after a panicking run = %q, want failed (recover() should have caught the panic)", failed.Status)
+	}
+	if !strings.Contains(failed.Error, "panic") {
+		t.Errorf("failed job error = %q, want it to mention the panic", failed.Error)
+	}
+}
+
+// TestSweepStuckClipWatermarkJobs covers PDW-6: a job whose worker process was killed after
+// claiming it (status -> "running") but before it could finish — so recover() itself never
+// ran, since the process is gone, not merely panicking — must eventually be failed by the
+// periodic sweep rather than staying "running" forever and leaving the requester polling
+// indefinitely.
+func TestSweepStuckClipWatermarkJobs(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	blobs := &memBlobs{}
+	svc, adapters := setupService(env, blobs)
+
+	camA := env.Cameras["frigate-h01/acceso_norte"]
+	readID := firstPlateRead(t, env, adapters, camA.ID)
+
+	stuckJob, err := svc.CreateJob(ctx, env.Admin, readID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recentJob, err := svc.CreateJob(ctx, env.Admin, readID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate the worker having claimed both jobs (status -> running) at different times:
+	// stuckJob well past the 15-minute stuckTimeout, recentJob just now — only the former
+	// should be swept.
+	setRunningSince := func(id uuid.UUID, since time.Duration) {
+		t.Helper()
+		if err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE clip_watermark_jobs SET status = 'running', updated_at = $2 WHERE id = $1`, id, time.Now().Add(-since))
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setRunningSince(stuckJob.ID, 20*time.Minute)
+	setRunningSince(recentJob.ID, 10*time.Second)
+
+	w := &clipwatermark.Worker{Store: env.Store, Adapters: adapters, Blobs: blobs, Log: pgtest.Discard()}
+	w.SweepStuck(ctx)
+
+	stuck, err := svc.GetJob(ctx, env.Admin, readID, stuckJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stuck.Status != "failed" {
+		t.Errorf("swept job status = %q, want failed", stuck.Status)
+	}
+	if stuck.Error == "" {
+		t.Error("swept job has no error message")
+	}
+
+	recent, err := svc.GetJob(ctx, env.Admin, readID, recentJob.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recent.Status != "running" {
+		t.Errorf("recently-claimed job status = %q, want it left alone as running", recent.Status)
 	}
 }
