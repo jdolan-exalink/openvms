@@ -741,8 +741,70 @@ feature extends.
   specified default zone name.
 - Commit: pending (this task's own commit, created immediately after this document update).
 
+### PDW-8: PlateDetailModal tabs + watermark timestamp confirmation
+- Route: delegated direct (writer: this session, same continued session). Web-only; no Go
+  changes (the timestamp-source confirmation below found the backend already correct).
+- **Timestamp confirmation (user report: "the watermark date/time is wrong")**: traced the
+  full source chain before touching any code.
+  - Backend: `internal/media/gateway.go`'s `burnPhotoWatermark` reads `lr.SeenAt` (populated
+    by `lprReadCamera`'s SQL, `SELECT ... seen_at FROM lpr_reads`) — the same
+    `lpr_reads.seen_at` column the API serves as `PlateRead.seen_at`. `internal/clipwatermark
+    /service.go`'s `CreateJob` reads the identical `lr.SeenAt` (its own `lookupRead` query,
+    `SELECT ... seen_at FROM lpr_reads WHERE id = $1`) and freezes it into
+    `watermark_text` at request time. Both burn-in paths and the API response are the exact
+    same database column — never re-derived, never a different field (e.g. `created_at`) —
+    so there was no source-mismatch bug to find.
+  - The actual bug was PDW-7's own subject: before PDW-7, `watermark.Text` and
+    `fmtWatermarkTimestamp` both hardcoded UTC (`"... UTC+00:00"` always), so a tenant not in
+    UTC (e.g. Argentina, UTC-03:00) saw a time three hours ahead of their own clock — which is
+    exactly "the date/time is wrong" from that tenant's point of view, not a wrong data
+    source. PDW-7 already fixes this (tenant-configured IANA zone, real computed offset); this
+    task's job was to confirm that, not re-fix it.
+  - **Confirmed identical rendering**: `internal/watermark/photo_test.go`'s `TestText`
+    "Buenos Aires (no DST)" case and `apps/web/src/lib/format.test.ts`'s "matches Go's
+    watermark.Text format exactly" case both assert the exact same output
+    (`"2026-09-28 13:05:30 -03:00"`/`"2026-09-28 13:05:30 -03:00"`, respectively, for the
+    same instant translated by hand) for the same instant/zone; `PlateDetailModal.test.tsx`'s
+    "renders the watermark timestamp in the tenant's configured time zone" test (from PDW-7,
+    still passing) exercises the real component end to end. No new test was needed here
+    beyond re-confirming PDW-7's own passing suite (re-run as part of this task's own full
+    verification below) — this is a confirmation, not a fix, and is recorded as such rather
+    than manufacturing busywork test churn.
+- **Tabs**: `apps/web/src/components/PlateDetailModal.tsx` restructured from two
+  always-rendered sections (photo, then clip, stacked) into a `role="tablist"` with two
+  `role="tab"` buttons ("Foto"/"Clip", `id`s `plate-detail-tab-{id}`, `aria-controls` pointing
+  at `plate-detail-panel-{id}`, `aria-selected`, roving `tabIndex` (0 for the active tab, -1
+  for the other, standard WAI-ARIA Tabs pattern) and one `role="tabpanel"`
+  (`aria-labelledby`, `tabIndex={0}`) that renders **only** the active tab's content — a
+  single dynamically-swapped panel, not both panels toggled by CSS `hidden`, specifically so
+  the `<video>` element is never even created in the DOM until the Clip tab is selected
+  (`preload="metadata"` alone does not prevent the browser from starting a fetch the instant
+  the element mounts). Arrow-key navigation (`ArrowLeft`/`ArrowRight`, wrapping) moves both
+  focus and the active tab together, matching the WAI-ARIA APG's "automatic activation" tabs
+  pattern. Each tab's panel keeps its own `WatermarkOverlay` and its own download control
+  (photo's download link / `ClipWatermarkDownload`), unchanged from PDW-2/PDW-5 otherwise —
+  only their container moved.
+- **RED/GREEN** (`apps/web/src/components/PlateDetailModal.test.tsx`, new `describe("tabs
+  (PDW-8)")` block, 4 tests: default-tab/no-video-yet, mount-on-switch/photo-unmounts,
+  arrow-key navigation, per-tab overlay+download): written against the tabbed structure before
+  it existed. RED: `git stash push -- apps/web/src/components/PlateDetailModal.tsx && pnpm
+  --filter web exec vitest run src/components/PlateDetailModal.test.tsx` — 7 of 9 tests
+  failed against the pre-PDW-8 component (no `role="tab"` elements existed at all,
+  `findByRole("tab", ...)` failed outright, cascading into the tests that click a tab to reach
+  the clip UI). GREEN: `git stash pop`, same command, all 9 pass (5 pre-existing + 4 new).
+  Two pre-existing tests in this file (and `apps/web/src/routes/Plates.test.tsx`'s modal test)
+  needed mechanical updates for the new tab-gated flow (click "Clip" before the
+  clip-job UI is reachable; assert `video` absent until then) — proven via the same
+  stash/RED/GREEN cycle against `Plates.test.tsx` (1 failure: the "no video yet" assertion,
+  since the pre-PDW-8 component always rendered it) before restoring.
+- **Full verification**: `pnpm --filter web test` PASS (14 files / 67 tests); `pnpm typecheck`
+  clean; `pnpm lint` clean. Go side untouched this task — `go build ./...`, `go vet ./...`,
+  `go test ./...` re-run anyway for safety (all clean/PASS), no `golangci-lint`/integration
+  re-run needed (no Go files changed) beyond the combined final pass below.
+- Commit: pending (this task's own commit, created immediately after this document update).
+
 ## Next step
-PDW-1 through PDW-7 are implemented and committed on `feat/plate-detail-watermark` (not
-pushed). Remaining: PDW-8 (modal tabs + timestamp confirmation), then a final combined
-verification pass and a single `make up` at the very end to confirm the stack deploys and the
-new migrations applied.
+PDW-1 through PDW-8 are implemented and committed on `feat/plate-detail-watermark` (not
+pushed). Remaining: one final combined verification pass across every runner, then a single
+`make up` at the very end to confirm the stack deploys, the new migrations (00011, 00012)
+applied, and `docker compose exec worker ffmpeg -version` works.

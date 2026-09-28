@@ -228,15 +228,20 @@ describe("Plates", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Patente AB123CD" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
+    // PDW-8: photo/clip are tabs now, photo selected by default — no <video> mounted yet.
     expect(screen.getByRole("img", { name: "Foto de la lectura de patente AB123CD" })).toHaveAttribute(
       "src",
       "/media/v1/lpr/reads/r1/snapshot.jpg",
     );
+    expect(dialog.querySelector("video")).not.toBeInTheDocument();
+    const photoOverlay = await screen.findByText(/Municipalidad de Helvecia/, { selector: "span" });
+    expect(photoOverlay).toHaveTextContent("2024-01-01 07:00:00 -03:00");
+
+    fireEvent.click(screen.getByRole("tab", { name: "Clip" }));
     const video = dialog.querySelector("video");
     expect(video).toHaveAttribute("src", "/media/v1/lpr/reads/r1/clip.mp4");
-    const overlays = await screen.findAllByText(/Municipalidad de Helvecia/, { selector: "span" });
-    expect(overlays).toHaveLength(2); // photo overlay + clip overlay
-    expect(overlays[0]).toHaveTextContent("2024-01-01 07:00:00 -03:00");
+    const clipOverlay = await screen.findByText(/Municipalidad de Helvecia/, { selector: "span" });
+    expect(clipOverlay).toHaveTextContent("2024-01-01 07:00:00 -03:00");
 
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

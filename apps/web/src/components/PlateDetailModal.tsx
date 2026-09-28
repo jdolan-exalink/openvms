@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { useState } from "react";
+import { type KeyboardEvent, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { brandingQuery, meQuery } from "@/api/queries";
 import { Button, ErrorNote } from "@/components/ui";
@@ -9,6 +9,12 @@ import { can } from "@/lib/perm";
 import { Modal } from "./Modal";
 
 const downloadLinkClass = "inline-flex items-center gap-2 rounded border border-line px-3 py-1.5 text-sm hover:bg-raised";
+
+type DetailTab = "photo" | "clip";
+const TABS: { id: DetailTab; label: string }[] = [
+  { id: "photo", label: "Foto" },
+  { id: "clip", label: "Clip" },
+];
 
 const clipJobStatusText: Record<string, string> = { queued: "En cola", running: "Generando", done: "Lista", failed: "Falló" };
 
@@ -94,14 +100,27 @@ function WatermarkOverlay({
   );
 }
 
+function tabId(id: DetailTab) {
+  return `plate-detail-tab-${id}`;
+}
+function panelId(id: DetailTab) {
+  return `plate-detail-panel-${id}`;
+}
+
 /**
- * PlateDetailModal (PDW-2): the detection photo at maximum quality and a playable/seekable
- * clip, both proxied through the media gateway (internal/media/gateway.go
- * lprReadSnapshot/lprReadClip), each with the CSS watermark overlay above. Photo needs
- * lpr.view + snapshots.view; clip needs lpr.view + recordings.view — sections the caller
- * lacks permission for show a message instead of a broken image/player. Downloads (PDW-5)
- * need the view permission plus snapshots.download (photo, synchronous Go burn-in, PDW-3)
- * or exports.create/exports.download (clip, async ffmpeg job polled to done, PDW-4).
+ * PlateDetailModal (PDW-2, tabs added in PDW-8): the detection photo at maximum quality and a
+ * playable/seekable clip, both proxied through the media gateway (internal/media/gateway.go
+ * lprReadSnapshot/lprReadClip), each with its own CSS watermark overlay and download button,
+ * shown one at a time behind a "Foto"/"Clip" tablist (photo selected by default). The <video>
+ * element is only ever rendered while the Clip tab is the active one — mounting it eagerly
+ * would make the browser start fetching/buffering the clip (even with preload="metadata") the
+ * instant the modal opens, before the user asked for it. Photo needs lpr.view +
+ * snapshots.view; clip needs lpr.view + recordings.view — a tab the caller lacks permission
+ * for shows a message instead of a broken image/player, but the tab itself stays reachable
+ * (consistent with PDW-2's original per-section behavior, just relocated into the panel).
+ * Downloads (PDW-5) need the view permission plus snapshots.download (photo, synchronous Go
+ * burn-in, PDW-3) or exports.create/exports.download (clip, async ffmpeg job polled to done,
+ * PDW-4).
  */
 export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]; onClose: () => void }) {
   const me = useQuery(meQuery);
@@ -116,8 +135,26 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
   // PDW-7: the tenant's configured watermark time zone; the API already defaults it
   // server-side (branding.DefaultTimezone) once a row exists, but before brandingQuery has
   // loaded (or for a tenant with no row at all) this local fallback keeps the overlay from
-  // ever rendering with an undefined time zone.
+  // ever rendering with an undefined time zone. seenAt is always read.seen_at — the same
+  // value the backend uses (internal/media/gateway.go's lr.SeenAt, the lpr_reads.seen_at
+  // column) for both the photo burn-in and the clip job's frozen watermark text, so the
+  // on-screen overlay and the downloaded files always show identical local date/time (PDW-8's
+  // own explicit check, confirming PDW-7 actually fixed the "watermark shows UTC" report).
   const timezone = branding.data?.timezone ?? DEFAULT_WATERMARK_TIMEZONE;
+
+  const [tab, setTab] = useState<DetailTab>("photo");
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const onTabKeyDown = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return;
+    e.preventDefault();
+    const dir = e.key === "ArrowRight" ? 1 : -1;
+    const next = (index + dir + TABS.length) % TABS.length;
+    const nextTab = TABS[next];
+    if (!nextTab) return;
+    setTab(nextTab.id);
+    tabRefs.current[next]?.focus();
+  };
 
   return (
     <Modal title={`Patente ${read.plate_normalized}`} onClose={onClose}>
@@ -141,35 +178,67 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
           </div>
         </dl>
 
-        {canViewPhoto ? (
-          <div className="relative overflow-hidden rounded border border-line">
-            <img
-              src={`/media/v1/lpr/reads/${read.id}/snapshot.jpg`}
-              alt={`Foto de la lectura de patente ${read.plate_normalized}`}
-              className="w-full"
-            />
-            <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
+        <div role="tablist" aria-label="Foto y clip de la lectura" className="flex gap-1 border-b border-line">
+          {TABS.map((t, index) => (
+            <button
+              key={t.id}
+              ref={(el) => {
+                tabRefs.current[index] = el;
+              }}
+              type="button"
+              role="tab"
+              id={tabId(t.id)}
+              aria-controls={panelId(t.id)}
+              aria-selected={tab === t.id}
+              tabIndex={tab === t.id ? 0 : -1}
+              onClick={() => setTab(t.id)}
+              onKeyDown={(e) => onTabKeyDown(e, index)}
+              className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-medium ${
+                tab === t.id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab === "photo" && (
+          <div id={panelId("photo")} role="tabpanel" aria-labelledby={tabId("photo")} tabIndex={0} className="flex flex-col gap-4">
+            {canViewPhoto ? (
+              <div className="relative overflow-hidden rounded border border-line">
+                <img
+                  src={`/media/v1/lpr/reads/${read.id}/snapshot.jpg`}
+                  alt={`Foto de la lectura de patente ${read.plate_normalized}`}
+                  className="w-full"
+                />
+                <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
+              </div>
+            ) : (
+              <p className="text-sm text-muted">No tenés permiso para ver la foto de esta lectura.</p>
+            )}
+            {canDownloadPhoto && (
+              <a href={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?download=1`} className={downloadLinkClass}>
+                <Download className="size-4" aria-hidden /> Descargar foto con marca de agua
+              </a>
+            )}
           </div>
-        ) : (
-          <p className="text-sm text-muted">No tenés permiso para ver la foto de esta lectura.</p>
-        )}
-        {canDownloadPhoto && (
-          <a href={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?download=1`} className={downloadLinkClass}>
-            <Download className="size-4" aria-hidden /> Descargar foto con marca de agua
-          </a>
         )}
 
-        {canViewClip ? (
-          <div className="relative overflow-hidden rounded border border-line">
-            <video controls preload="metadata" className="w-full bg-black" src={`/media/v1/lpr/reads/${read.id}/clip.mp4`}>
-              Tu navegador no puede reproducir este video.
-            </video>
-            <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
+        {tab === "clip" && (
+          <div id={panelId("clip")} role="tabpanel" aria-labelledby={tabId("clip")} tabIndex={0} className="flex flex-col gap-4">
+            {canViewClip ? (
+              <div className="relative overflow-hidden rounded border border-line">
+                <video controls preload="metadata" className="w-full bg-black" src={`/media/v1/lpr/reads/${read.id}/clip.mp4`}>
+                  Tu navegador no puede reproducir este video.
+                </video>
+                <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
+              </div>
+            ) : (
+              <p className="text-sm text-muted">No tenés permiso para ver el clip de esta lectura.</p>
+            )}
+            {canRequestClip && <ClipWatermarkDownload readId={read.id} />}
           </div>
-        ) : (
-          <p className="text-sm text-muted">No tenés permiso para ver el clip de esta lectura.</p>
         )}
-        {canRequestClip && <ClipWatermarkDownload readId={read.id} />}
       </div>
     </Modal>
   );

@@ -53,6 +53,62 @@ function renderModal(...permissions: string[]) {
 }
 
 describe("PlateDetailModal", () => {
+  // PDW-8: photo/clip moved from two always-visible sections into a "Foto"/"Clip" tablist,
+  // photo selected by default, with the clip's <video> only ever mounted while its tab is
+  // active (so the browser never starts fetching/buffering the clip just from opening the
+  // modal).
+  describe("tabs (PDW-8)", () => {
+    it("shows the photo tab selected by default, with no video in the DOM at all", async () => {
+      renderModal("lpr.view", "snapshots.view", "recordings.view");
+      await screen.findByRole("img", { name: /Foto de la lectura de patente/ });
+
+      const photoTab = screen.getByRole("tab", { name: "Foto" });
+      const clipTab = screen.getByRole("tab", { name: "Clip" });
+      expect(photoTab).toHaveAttribute("aria-selected", "true");
+      expect(clipTab).toHaveAttribute("aria-selected", "false");
+      expect(document.querySelector("video")).not.toBeInTheDocument();
+    });
+
+    it("mounts the video only after switching to the Clip tab, and unmounts the photo", async () => {
+      renderModal("lpr.view", "snapshots.view", "recordings.view");
+      await screen.findByRole("img", { name: /Foto de la lectura de patente/ });
+
+      fireEvent.click(screen.getByRole("tab", { name: "Clip" }));
+
+      const video = document.querySelector("video");
+      expect(video).toHaveAttribute("src", "/media/v1/lpr/reads/r1/clip.mp4");
+      expect(screen.getByRole("tab", { name: "Clip" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: "Foto" })).toHaveAttribute("aria-selected", "false");
+      expect(screen.queryByRole("img", { name: /Foto de la lectura de patente/ })).not.toBeInTheDocument();
+    });
+
+    it("navigates between tabs with the arrow keys", async () => {
+      renderModal("lpr.view", "snapshots.view", "recordings.view");
+      const photoTab = await screen.findByRole("tab", { name: "Foto" });
+      photoTab.focus();
+
+      fireEvent.keyDown(photoTab, { key: "ArrowRight" });
+      const clipTab = screen.getByRole("tab", { name: "Clip" });
+      expect(clipTab).toHaveAttribute("aria-selected", "true");
+      expect(clipTab).toHaveFocus();
+
+      fireEvent.keyDown(clipTab, { key: "ArrowLeft" });
+      expect(screen.getByRole("tab", { name: "Foto" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByRole("tab", { name: "Foto" })).toHaveFocus();
+    });
+
+    it("each tab keeps its own watermark overlay and download control", async () => {
+      renderModal("lpr.view", "snapshots.view", "recordings.view", "snapshots.download", "exports.create");
+      await screen.findByRole("img", { name: /Foto de la lectura de patente/ });
+      expect(screen.getByRole("link", { name: /Descargar foto/ })).toBeInTheDocument();
+      expect(screen.getAllByText(/2024-01-01/, { selector: "span" })).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole("tab", { name: "Clip" }));
+      expect(screen.getByRole("button", { name: "Preparar clip con marca de agua" })).toBeInTheDocument();
+      expect(screen.getAllByText(/2024-01-01/, { selector: "span" })).toHaveLength(1);
+    });
+  });
+
   it("shows the photo download link only with snapshots.download", async () => {
     renderModal("lpr.view", "snapshots.view", "recordings.view");
     await screen.findByRole("img", { name: /Foto de la lectura de patente/ });
@@ -82,12 +138,14 @@ describe("PlateDetailModal", () => {
     );
     renderPage(() => <PlateDetailModal read={read} onClose={() => {}} />);
 
-    // The same text appears three times: the "Fecha" field (dd) and both overlays (photo +
-    // clip, each a span) — matching PDW-2's own prior finding for this exact shape. Scope to
-    // the dd to assert the "Fecha" field specifically, and separately confirm both overlay
-    // spans got it too.
+    // The "Fecha" field (dd) always shows it; the active tab's overlay (a span) shows it too —
+    // PDW-8 mounts only the active tab's panel, so only one overlay exists at a time (see the
+    // "each tab keeps its own watermark overlay" test for both tabs individually).
     expect(await screen.findByText("2024-01-01 11:00:00 +01:00", { selector: "dd" })).toBeInTheDocument();
-    expect(await screen.findAllByText("2024-01-01 11:00:00 +01:00", { selector: "span" })).toHaveLength(2);
+    expect(await screen.findAllByText("2024-01-01 11:00:00 +01:00", { selector: "span" })).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Clip" }));
+    expect(await screen.findAllByText("2024-01-01 11:00:00 +01:00", { selector: "span" })).toHaveLength(1);
   });
 
   it("requests, polls and offers the download of a clip watermark job", async () => {
@@ -109,6 +167,7 @@ describe("PlateDetailModal", () => {
       }),
     );
     renderPage(() => <PlateDetailModal read={read} onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Clip" }));
 
     const startButton = await screen.findByRole("button", { name: "Preparar clip con marca de agua" });
     fireEvent.click(startButton);
@@ -137,6 +196,7 @@ describe("PlateDetailModal", () => {
       }),
     );
     renderPage(() => <PlateDetailModal read={read} onClose={() => {}} />);
+    fireEvent.click(await screen.findByRole("tab", { name: "Clip" }));
 
     fireEvent.click(await screen.findByRole("button", { name: "Preparar clip con marca de agua" }));
 
