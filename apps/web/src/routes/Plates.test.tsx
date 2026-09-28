@@ -154,6 +154,52 @@ describe("Plates", () => {
     expect(screen.getByLabelText("Patente")).toBeEnabled();
   });
 
+  it("shows the plate photo on hover with snapshots.view and lpr.view", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/lpr/reads") return json({ items: [makePlateRead("r1")] });
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.search", "snapshots.view", "lpr.view"), ...noCatalogs })(input);
+      }),
+    );
+
+    renderPage(Plates);
+
+    const plate = await screen.findByText("AB123CD");
+    expect(screen.queryByRole("img", { name: /Foto de la lectura de patente/ })).not.toBeInTheDocument();
+
+    fireEvent.mouseEnter(plate);
+
+    const img = await screen.findByRole("img", { name: "Foto de la lectura de patente AB123CD" });
+    expect(img).toHaveAttribute("src", "/media/v1/lpr/reads/r1/snapshot.jpg");
+
+    fireEvent.mouseLeave(plate);
+    await waitFor(() => {
+      expect(screen.queryByRole("img", { name: /Foto de la lectura de patente/ })).not.toBeInTheDocument();
+    });
+  });
+
+  it("does not show the plate photo preview without both snapshots.view and lpr.view", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/lpr/reads") return json({ items: [makePlateRead("r1")] });
+        // Has lpr.search and snapshots.view but not lpr.view: the design requires BOTH
+        // snapshots.view and lpr.view for the preview, since the photo shows the plate.
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.search", "snapshots.view"), ...noCatalogs })(input);
+      }),
+    );
+
+    renderPage(Plates);
+
+    const plate = await screen.findByText("AB123CD");
+    fireEvent.mouseEnter(plate);
+
+    expect(screen.queryByRole("img", { name: /Foto de la lectura de patente/ })).not.toBeInTheDocument();
+  });
+
   it('loads the next page via cursor when "Cargar más" is clicked', async () => {
     const readsCalls: URL[] = [];
     vi.stubGlobal(

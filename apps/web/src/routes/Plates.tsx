@@ -2,10 +2,36 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { History } from "lucide-react";
 import { useState } from "react";
+import type { Schemas } from "@/api/client";
 import { cameraGroupsQuery, meQuery, type PlateFilter, platesQuery, sitesQuery } from "@/api/queries";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, TextInput, Th } from "@/components/ui";
 import { fmtDateTime, fromLocalInput, labelName } from "@/lib/format";
 import { can } from "@/lib/perm";
+
+/**
+ * PlatePreview shows the Frigate tracked-object snapshot for one plate read (its own
+ * remote_event_id, not the event's detections[0] — see internal/media/gateway.go
+ * lprReadSnapshot), lazily requested only while the row is hovered or focused.
+ */
+function PlatePreview({ read }: { read: Schemas["PlateRead"] }) {
+  const [status, setStatus] = useState<"loading" | "loaded" | "error">("loading");
+  return (
+    <div role="tooltip" className="absolute left-0 top-full z-20 mt-1 w-80 rounded border border-line bg-surface p-2 shadow-lg">
+      {status === "loading" && <p className="text-xs text-muted">Cargando foto…</p>}
+      {status === "error" ? (
+        <p className="text-xs text-muted">No se pudo cargar la foto.</p>
+      ) : (
+        <img
+          src={`/media/v1/lpr/reads/${read.id}/snapshot.jpg`}
+          alt={`Foto de la lectura de patente ${read.plate_normalized}`}
+          className="w-full rounded"
+          onLoad={() => setStatus("loaded")}
+          onError={() => setStatus("error")}
+        />
+      )}
+    </div>
+  );
+}
 
 /** Plates is the global LPR search (PRD §41-45) across every authorized Frigate. */
 export function Plates() {
@@ -16,6 +42,8 @@ export function Plates() {
   const [filter, setFilter] = useState<PlateFilter>({});
   const reads = useInfiniteQuery(platesQuery(filter));
   const items = reads.data?.pages.flatMap((p) => p.items) ?? [];
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const canPreviewSnapshot = can(me.data, "snapshots.view") && can(me.data, "lpr.view");
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
@@ -95,9 +123,23 @@ export function Plates() {
           <tbody>
             {items.map((r) => (
               <tr key={r.id} className="border-t border-line">
-                <td>
-                  <span className="rounded bg-raised px-2 py-0.5 font-mono font-medium tracking-wider">{r.plate_normalized}</span>
+                <td className="relative">
+                  <span
+                    className="rounded bg-raised px-2 py-0.5 font-mono font-medium tracking-wider"
+                    {...(canPreviewSnapshot
+                      ? {
+                          tabIndex: 0,
+                          onMouseEnter: () => setHoveredId(r.id),
+                          onMouseLeave: () => setHoveredId((id) => (id === r.id ? null : id)),
+                          onFocus: () => setHoveredId(r.id),
+                          onBlur: () => setHoveredId((id) => (id === r.id ? null : id)),
+                        }
+                      : {})}
+                  >
+                    {r.plate_normalized}
+                  </span>
                   <span className="ml-2 text-xs text-muted">{labelName(r.label)}</span>
+                  {canPreviewSnapshot && hoveredId === r.id && <PlatePreview read={r} />}
                 </td>
                 <td className="whitespace-nowrap">{fmtDateTime(r.seen_at)}</td>
                 <td>{r.camera_name}</td>
