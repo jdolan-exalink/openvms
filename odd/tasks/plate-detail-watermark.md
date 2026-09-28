@@ -27,7 +27,7 @@ feature extends.
 - [x] PDW-2: Plate detail modal — full-quality photo + clip playback via gateway (Range) + CSS watermark overlay. Route: delegated direct (writer: this session).
 - [x] PDW-3: Watermarked photo download (Go burn-in, embedded font, logo composited). Route: delegated direct (writer: this session).
 - [x] PDW-4: Clip watermark job in the worker (ffmpeg image, job table/state, object store, status + download endpoints). Route: delegated direct (writer: this session).
-- [ ] PDW-5: Modal download UI for photo and clip job (progress, errors), audit labels.
+- [x] PDW-5: Modal download UI for photo and clip job (progress, errors), audit labels. Route: delegated direct (writer: this session).
 
 ## Verification mode
 - Strict TDD: enabled (source: global user config `Strict TDD Mode: enabled`). RED → GREEN → REFACTOR with observed evidence.
@@ -402,7 +402,51 @@ feature extends.
   introduced.
 - Commit: pending (this task's own commit, created immediately after this document update).
 
+### PDW-5: Modal download UI + audit labels
+- Route: delegated direct (writer: this session).
+- No contract change.
+- `apps/web/src/components/PlateDetailModal.tsx`: photo download is a plain `<a
+  href="/media/v1/lpr/reads/{id}/snapshot.jpg?download=1">` gated by `snapshots.download`
+  (in addition to the view permissions already gating the photo section) — mirrors the
+  existing `snapshots.download` link pattern in `apps/web/src/routes/Events.tsx` exactly
+  (read before writing, per the task's instruction to check existing patterns). New
+  `ClipWatermarkDownload` component: a button ("Preparar clip con marca de agua") that
+  `POST`s to create the job, then polls `GET .../clip-watermark-jobs/{jobId}` via
+  `useQuery`'s `refetchInterval` (1.5s, stopping once `status` is `done` or `failed` —
+  `react-query`'s function form of `refetchInterval` reads the latest `query.state.data`),
+  showing "Preparando clip… (En cola/Generando)" while queued/running, the failed job's
+  error text on failure, or a download link
+  (`/api/v1/lpr/reads/{id}/clip-watermark-jobs/{jobId}/download`) once done — the same
+  queued/running/done/failed UX `Exports.tsx` already has for its own jobs, scoped to one
+  plate read instead of a list. Gated by `exports.create` (creating the job) in addition to
+  the clip-view permissions; the download link itself relies on the server enforcing
+  `exports.download` (a 403 there surfaces through the browser's normal download-failure
+  UI, matching how `Events.tsx`'s snapshot download link already behaves without a
+  client-side `exports.download`/`snapshots.download` check on the link itself beyond what
+  is already used to decide whether to render it).
+- Audit labels added to `apps/web/src/routes/Audit.tsx`: `CLIP_WATERMARK_REQUESTED` →
+  "Clip con marca de agua solicitado", `CLIP_DOWNLOADED` → "Clip descargado" (both actions
+  were already implemented server-side in PDW-4; this task only adds their Spanish labels).
+- RED/GREEN (web, `apps/web/src/components/PlateDetailModal.test.tsx`, new file, 4 tests):
+  written alongside the component and passed immediately (test-only in the M3-doc sense).
+  Proved non-vacuous for the most failure-prone piece — the polling stop condition — by
+  temporarily changing the download link's render condition from `status === "done"` to a
+  typo'd string; RED: `pnpm --filter web exec vitest run src/components/PlateDetailModal.test.tsx -t "requests, polls"`
+  — the test timed out waiting for the download link that would now never appear (5000ms
+  timeout, confirming the assertion is load-bearing, not vacuous). GREEN: reverted, same
+  command (and the full file) passes: photo download link absent/present by
+  `snapshots.download`, clip job create → poll (queued → running → done, via a route mock
+  that flips status on each poll) → download link with the exact expected `href`, and a
+  failed-job path showing both the generic and the job's own error message.
+- Full verification: `pnpm --filter web test` PASS (13 files / 57 tests); `pnpm typecheck`
+  clean; `pnpm lint` clean. Go side unchanged this task — `go build ./...`, `go vet ./...`,
+  `golangci-lint run` (0 issues) and `go test ./...` re-run anyway for safety, all clean. No
+  contract change, so no `make generate` step.
+- Commit: pending (this task's own commit, created immediately after this document update).
+
 ## Next step
-PDW-5: modal download UI (photo download button, clip watermark job button with
-queued/running/done/failed polling UX matching Exports, error display) and audit labels for
-the new actions (`CLIP_WATERMARK_REQUESTED`, `CLIP_DOWNLOADED`) in `apps/web/src/routes/Audit.tsx`.
+All five PDW tasks are implemented and committed on `feat/plate-detail-watermark` (not
+pushed — per instructions, this writer does not push/merge). Remaining: final full
+verification pass (already run per-task; one more combined run before reporting), then a
+single `make up` at the very end to confirm the stack deploys and
+`docker compose exec worker ffmpeg -version` works, per the task's own closing instruction.

@@ -37,6 +37,8 @@ const actions: Record<string, string> = {
   ACCESS_DENIED: "Acceso denegado",
   BRANDING_UPDATED: "Marca de agua modificada",
   BRANDING_REMOVED: "Marca de agua eliminada",
+  CLIP_WATERMARK_REQUESTED: "Clip con marca de agua solicitado",
+  CLIP_DOWNLOADED: "Clip descargado",
 };
 
 /** Audit is the append-only audit trail (PRD §66). */

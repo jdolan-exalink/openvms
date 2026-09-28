@@ -1,9 +1,67 @@
-import { useQuery } from "@tanstack/react-query";
-import type { Schemas } from "@/api/client";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Download } from "lucide-react";
+import { useState } from "react";
+import { api, type Schemas, unwrap } from "@/api/client";
 import { brandingQuery, meQuery } from "@/api/queries";
+import { Button, ErrorNote } from "@/components/ui";
 import { fmtWatermarkTimestamp } from "@/lib/format";
 import { can } from "@/lib/perm";
 import { Modal } from "./Modal";
+
+const downloadLinkClass = "inline-flex items-center gap-2 rounded border border-line px-3 py-1.5 text-sm hover:bg-raised";
+
+const clipJobStatusText: Record<string, string> = { queued: "En cola", running: "Generando", done: "Lista", failed: "Falló" };
+
+/**
+ * ClipWatermarkDownload (PDW-5): starts a clip watermark job (PDW-4), polls its status while
+ * queued/running, and offers the download once it is done — the same queued/running/done
+ * UX as Exports.tsx, scoped to this one plate read instead of a list.
+ */
+function ClipWatermarkDownload({ readId }: { readId: string }) {
+  const [jobId, setJobId] = useState<string | null>(null);
+  const create = useMutation({
+    mutationFn: async () =>
+      unwrap(await api.POST("/api/v1/lpr/reads/{readId}/clip-watermark-jobs", { params: { path: { readId } } })),
+    onSuccess: (job) => setJobId(job.id),
+  });
+  const job = useQuery({
+    queryKey: ["clip-watermark-job", readId, jobId],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/lpr/reads/{readId}/clip-watermark-jobs/{jobId}", {
+          params: { path: { readId, jobId: jobId as string } },
+        }),
+      ),
+    enabled: jobId !== null,
+    refetchInterval: (query) => (query.state.data && (query.state.data.status === "done" || query.state.data.status === "failed") ? false : 1500),
+  });
+
+  if (jobId === null) {
+    return (
+      <Button onClick={() => create.mutate()} disabled={create.isPending}>
+        <Download className="size-4" aria-hidden /> Preparar clip con marca de agua
+      </Button>
+    );
+  }
+
+  const status = job.data?.status ?? "queued";
+  return (
+    <div className="flex flex-col gap-1">
+      {status === "done" && (
+        <a href={`/api/v1/lpr/reads/${readId}/clip-watermark-jobs/${jobId}/download`} className={downloadLinkClass}>
+          <Download className="size-4" aria-hidden /> Descargar clip
+        </a>
+      )}
+      {status !== "done" && (
+        <p className="text-sm text-muted" role="status">
+          {status === "failed" ? "No se pudo generar el clip." : `Preparando clip… (${clipJobStatusText[status]})`}
+        </p>
+      )}
+      {status === "failed" && job.data?.error && <p className="text-xs text-bad">{job.data.error}</p>}
+      <ErrorNote error={create.error ?? job.error} />
+    </div>
+  );
+}
 
 /**
  * WatermarkOverlay renders the same date/time + owner name/logo shown burned into a
@@ -27,8 +85,9 @@ function WatermarkOverlay({ tenantId, hasLogo, ownerName, seenAt }: { tenantId: 
  * clip, both proxied through the media gateway (internal/media/gateway.go
  * lprReadSnapshot/lprReadClip), each with the CSS watermark overlay above. Photo needs
  * lpr.view + snapshots.view; clip needs lpr.view + recordings.view — sections the caller
- * lacks permission for show a message instead of a broken image/player. Download buttons
- * (photo burn-in, clip watermark job) are wired in PDW-3/PDW-4/PDW-5.
+ * lacks permission for show a message instead of a broken image/player. Downloads (PDW-5)
+ * need the view permission plus snapshots.download (photo, synchronous Go burn-in, PDW-3)
+ * or exports.create/exports.download (clip, async ffmpeg job polled to done, PDW-4).
  */
 export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]; onClose: () => void }) {
   const me = useQuery(meQuery);
@@ -36,6 +95,8 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
   const branding = useQuery(brandingQuery(tenantId));
   const canViewPhoto = can(me.data, "lpr.view") && can(me.data, "snapshots.view");
   const canViewClip = can(me.data, "lpr.view") && can(me.data, "recordings.view");
+  const canDownloadPhoto = canViewPhoto && can(me.data, "snapshots.download");
+  const canRequestClip = canViewClip && can(me.data, "exports.create");
   const ownerName = branding.data?.owner_name ?? "";
   const hasLogo = branding.data?.has_logo ?? false;
 
@@ -73,6 +134,11 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
         ) : (
           <p className="text-sm text-muted">No tenés permiso para ver la foto de esta lectura.</p>
         )}
+        {canDownloadPhoto && (
+          <a href={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?download=1`} className={downloadLinkClass}>
+            <Download className="size-4" aria-hidden /> Descargar foto con marca de agua
+          </a>
+        )}
 
         {canViewClip ? (
           <div className="relative overflow-hidden rounded border border-line">
@@ -84,6 +150,7 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
         ) : (
           <p className="text-sm text-muted">No tenés permiso para ver el clip de esta lectura.</p>
         )}
+        {canRequestClip && <ClipWatermarkDownload readId={read.id} />}
       </div>
     </Modal>
   );
