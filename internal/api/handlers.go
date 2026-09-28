@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
+	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/health"
 	"github.com/jdolan-exalink/openvms/internal/identity"
@@ -20,6 +21,7 @@ type Handlers struct {
 	Events        *events.Service
 	Identity      *identity.Service
 	Media         *media.Service
+	Branding      *branding.Service
 	Log           *slog.Logger
 	Checks        []health.Check
 	CheckTimeout  time.Duration

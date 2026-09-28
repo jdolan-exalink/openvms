@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/api"
+	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/health"
 	"github.com/jdolan-exalink/openvms/internal/identity"
@@ -105,9 +106,10 @@ func run() error {
 	adapters := inventory.NewAdapters(inv)
 	mediaSvc := &media.Service{Store: st, Adapters: adapters, Log: log}
 	handlers := &api.Handlers{
-		Inv:    inv,
-		Events: &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
-		Media:  mediaSvc,
+		Inv:      inv,
+		Events:   &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
+		Media:    mediaSvc,
+		Branding: &branding.Service{Store: st, Blobs: store, Log: log},
 		Identity: &identity.Service{
 			Store: st, Sealer: sealer, Log: log, Issuer: "OpenVMS",
 			SessionTTL: cfg.SessionTTL, IdleTimeout: cfg.SessionIdle,

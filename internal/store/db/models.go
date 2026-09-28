@@ -227,6 +227,15 @@ type Tenant struct {
 	DeletedBy *uuid.UUID
 }
 
+type TenantBranding struct {
+	TenantID        uuid.UUID
+	OwnerName       string
+	LogoKey         string
+	LogoContentType string
+	UpdatedAt       time.Time
+	UpdatedBy       *uuid.UUID
+}
+
 type User struct {
 	ID                 uuid.UUID
 	TenantID           *uuid.UUID

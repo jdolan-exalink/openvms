@@ -197,6 +197,71 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/tenants/{tenantId}/branding:
+    parameters:
+      - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [tenants]
+      operationId: getTenantBranding
+      summary: Get a tenant's owner branding (name/logo burned into plate detail watermarks)
+      description: |
+        Readable by any authenticated member of the tenant (needed to render the on-screen
+        watermark overlay), not only tenant.manage holders. A tenant with no branding
+        configured yet answers with an empty owner_name and has_logo=false, not 404.
+      responses:
+        "200":
+          description: Branding
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantBranding" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [tenants]
+      operationId: updateTenantBranding
+      summary: Update a tenant's owner branding (tenant.manage)
+      description: |
+        Partial update: omitted fields keep their current value. Set remove_logo to clear
+        the logo (owner_name is kept unless also sent). The logo is validated server-side
+        (PNG or JPEG, at most 512 KB decoded) before it is stored.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TenantBrandingInput" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TenantBranding" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [tenants]
+      operationId: deleteTenantBranding
+      summary: Clear a tenant's owner branding entirely (tenant.manage)
+      responses:
+        "204": { description: Cleared }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/tenants/{tenantId}/branding/logo:
+    parameters:
+      - { name: tenantId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [tenants]
+      operationId: getTenantBrandingLogo
+      summary: Download a tenant's branding logo image
+      responses:
+        "200":
+          description: Logo image
+          content:
+            image/*: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/sites:
     get:
       tags: [sites]
@@ -1291,6 +1356,25 @@ components:
           properties:
             id: { type: string, format: uuid }
             created_at: { type: string, format: date-time }
+    TenantBranding:
+      type: object
+      required: [tenant_id, owner_name, has_logo, updated_at]
+      properties:
+        tenant_id: { type: string, format: uuid }
+        owner_name: { type: string }
+        has_logo: { type: boolean }
+        logo_content_type: { type: string }
+        updated_at: { type: string, format: date-time }
+    TenantBrandingInput:
+      type: object
+      properties:
+        owner_name: { type: string, maxLength: 200 }
+        logo:
+          type: string
+          format: byte
+          description: Base64-encoded PNG or JPEG, at most 512 KB decoded.
+        logo_content_type: { type: string, enum: [image/png, image/jpeg] }
+        remove_logo: { type: boolean, default: false, description: Clears the logo; cannot be combined with logo. }
     SiteCreate:
       type: object
       required: [tenant_id, name]

@@ -160,6 +160,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/tenants/{tenantId}/branding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a tenant's owner branding (name/logo burned into plate detail watermarks)
+         * @description Readable by any authenticated member of the tenant (needed to render the on-screen
+         *     watermark overlay), not only tenant.manage holders. A tenant with no branding
+         *     configured yet answers with an empty owner_name and has_logo=false, not 404.
+         */
+        get: operations["getTenantBranding"];
+        /**
+         * Update a tenant's owner branding (tenant.manage)
+         * @description Partial update: omitted fields keep their current value. Set remove_logo to clear
+         *     the logo (owner_name is kept unless also sent). The logo is validated server-side
+         *     (PNG or JPEG, at most 512 KB decoded) before it is stored.
+         */
+        put: operations["updateTenantBranding"];
+        post?: never;
+        /** Clear a tenant's owner branding entirely (tenant.manage) */
+        delete: operations["deleteTenantBranding"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/tenants/{tenantId}/branding/logo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        /** Download a tenant's branding logo image */
+        get: operations["getTenantBrandingLogo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites": {
         parameters: {
             query?: never;
@@ -852,6 +902,30 @@ export interface components {
             id: string;
             /** Format: date-time */
             created_at: string;
+        };
+        TenantBranding: {
+            /** Format: uuid */
+            tenant_id: string;
+            owner_name: string;
+            has_logo: boolean;
+            logo_content_type?: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        TenantBrandingInput: {
+            owner_name?: string;
+            /**
+             * Format: byte
+             * @description Base64-encoded PNG or JPEG, at most 512 KB decoded.
+             */
+            logo?: string;
+            /** @enum {string} */
+            logo_content_type?: "image/png" | "image/jpeg";
+            /**
+             * @description Clears the logo; cannot be combined with logo.
+             * @default false
+             */
+            remove_logo: boolean;
         };
         SiteCreate: {
             /** Format: uuid */
@@ -1689,6 +1763,107 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    getTenantBranding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Branding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantBranding"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateTenantBranding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TenantBrandingInput"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TenantBranding"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteTenantBranding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cleared */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getTenantBrandingLogo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenantId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Logo image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     listSites: {

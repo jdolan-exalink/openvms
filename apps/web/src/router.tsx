@@ -6,6 +6,7 @@ import { Layout } from "./components/Layout";
 import { SettingsLayout } from "./components/SettingsLayout";
 import { Account } from "./routes/Account";
 import { Audit } from "./routes/Audit";
+import { Branding } from "./routes/Branding";
 import { Cameras } from "./routes/Cameras";
 import { Dashboard } from "./routes/Dashboard";
 import { Events } from "./routes/Events";
@@ -99,6 +100,7 @@ export const routeTree = rootRoute.addChildren([
       settingsChild("/groups", Groups),
       permissionsRoute,
       settingsChild("/audit", Audit),
+      settingsChild("/branding", Branding),
       settingsChild("/account", Account),
     ]),
   ]),

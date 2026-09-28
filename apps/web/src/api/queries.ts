@@ -154,6 +154,13 @@ export const cameraGroupsQuery = queryOptions({
   queryFn: async () => unwrap(await api.GET("/api/v1/camera-groups")).items,
 });
 
+export const brandingQuery = (tenantId: string) =>
+  queryOptions({
+    queryKey: ["branding", tenantId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/tenants/{tenantId}/branding", { params: { path: { tenantId } } })),
+    enabled: !!tenantId,
+  });
+
 export type AuditFilter = { action?: string; from?: string; to?: string };
 
 export const auditQuery = (filter: AuditFilter) =>

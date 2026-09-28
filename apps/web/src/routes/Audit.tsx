@@ -35,6 +35,8 @@ const actions: Record<string, string> = {
   VIEW_UPDATED: "Vista modificada",
   VIEW_REMOVED: "Vista eliminada",
   ACCESS_DENIED: "Acceso denegado",
+  BRANDING_UPDATED: "Marca de agua modificada",
+  BRANDING_REMOVED: "Marca de agua eliminada",
 };
 
 /** Audit is the append-only audit trail (PRD §66). */
