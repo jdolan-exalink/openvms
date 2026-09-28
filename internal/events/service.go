@@ -43,9 +43,14 @@ type Event struct {
 	ServerName string
 	CameraID   uuid.UUID
 	CameraName string
-	// CameraLPR is the camera's LPR capability (cameras.lpr), used only to decide whether
-	// sub_labels needs LPR-gated redaction (see ListEvents/getEvent); it is not exposed via the API.
+	// CameraLPR is the camera's CURRENT LPR capability (cameras.lpr). LPR is this event's own
+	// ingestion-time LPR flag (events.lpr). Both are used only to decide whether sub_labels needs
+	// LPR-gated redaction (see ListEvents/getEvent, gated on CameraLPR || LPR): keying on the
+	// current camera flag alone let a camera switched off LPR after ingestion unlock its
+	// historical plate-carrying sub_labels (SECURITY review finding on commit 7658e50). Neither
+	// is exposed via the API.
 	CameraLPR    bool
+	LPR          bool
 	RemoteID     string
 	Severity     string
 	Labels       []string
@@ -158,7 +163,7 @@ func idSet(ids []uuid.UUID) map[uuid.UUID]bool {
 
 const eventColumns = `e.id, e.tenant_id, e.site_id, s.name, e.server_id, fs.name, e.camera_id, c.display_name, c.lpr, e.remote_id,
 e.severity, e.labels, e.sub_labels, e.zones, e.plates, e.start_time, e.end_time, e.reviewed, e.thumb_key <> '',
-e.has_snapshot, e.preview_key <> ''`
+e.has_snapshot, e.preview_key <> '', e.lpr`
 
 const eventJoins = `FROM events e
 JOIN cameras c ON c.id = e.camera_id
@@ -169,7 +174,7 @@ func scanEvent(row pgx.Row) (Event, error) {
 	var e Event
 	err := row.Scan(&e.ID, &e.TenantID, &e.SiteID, &e.SiteName, &e.ServerID, &e.ServerName, &e.CameraID, &e.CameraName, &e.CameraLPR, &e.RemoteID,
 		&e.Severity, &e.Labels, &e.SubLabels, &e.Zones, &e.Plates, &e.StartTime, &e.EndTime, &e.Reviewed, &e.HasThumbnail,
-		&e.HasSnapshot, &e.HasPreview)
+		&e.HasSnapshot, &e.HasPreview, &e.LPR)
 	return e, err
 }
 
@@ -225,18 +230,21 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 			b.add("e.zones && ?", f.Zones)
 		}
 		if len(f.SubLabels) > 0 {
-			// sub_label carries recognized plate text only on LPR-capable cameras
+			// sub_label carries recognized plate text on LPR-capable cameras
 			// (frigatemock.enrich); filtering by it there is gated the same as the Plate filter
 			// above, requiring lpr.search (events.search alone is not enough). On a non-LPR
 			// camera sub_label is an ordinary event field (e.g. a Frigate face-recognition name)
 			// and follows only the normal events.search scoping already applied via `cams` above
-			// (user decision 2026-09-28). c.lpr comes from the cameras join in eventJoins and is
-			// a NOT NULL column, so there is no "unknown" camera to fail open on here.
+			// (user decision 2026-09-28). Gating checks c.lpr (the camera's CURRENT flag) OR e.lpr
+			// (this event's flag at ingestion time): keying on c.lpr alone let a camera switched
+			// off LPR after ingestion unlock its historical events' sub_labels (SECURITY review
+			// finding on commit 7658e50). Both are NOT NULL columns, so there is no "unknown"
+			// camera to fail open on here.
 			lprSearchCams, err := c.CameraIDs(ctx, authz.LPRSearch)
 			if err != nil {
 				return err
 			}
-			b.add("(NOT c.lpr OR e.camera_id = ANY(?))", lprSearchCams)
+			b.add("(NOT (c.lpr OR e.lpr) OR e.camera_id = ANY(?))", lprSearchCams)
 			b.add("e.sub_labels && ?", f.SubLabels)
 		}
 		if f.Severity != "" {
@@ -281,11 +289,13 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 			}
 			if !canPlates[e.CameraID] {
 				e.Plates = []string{}
-				if e.CameraLPR {
-					// sub_labels carry plate text only on LPR-capable cameras, so they are
-					// redacted there under the same lpr.view gate as plates. On a non-LPR camera
-					// sub_label is not plate data (e.g. a face name), so it stays visible to any
-					// actor with events.view (user decision 2026-09-28).
+				if e.CameraLPR || e.LPR {
+					// sub_labels carry plate text on LPR-capable cameras, so they are redacted
+					// there under the same lpr.view gate as plates. On a non-LPR camera sub_label
+					// is not plate data (e.g. a face name), so it stays visible to any actor with
+					// events.view (user decision 2026-09-28). Checking e.LPR (ingestion-time) as
+					// well as e.CameraLPR (current) keeps this gated after the camera is switched
+					// off LPR (SECURITY review finding on commit 7658e50).
 					e.SubLabels = []string{}
 				}
 			}
@@ -323,9 +333,11 @@ func getEvent(ctx context.Context, tx pgx.Tx, c *access.Checker, p authz.Permiss
 	}
 	if !c.Can(authz.LPRView, access.Camera(cam.TenantID, cam.SiteID, cam.ServerID, cam.ID, cam.GroupIds)) {
 		e.Plates = []string{}
-		if cam.Lpr {
-			// See ListEvents: sub_labels are plate data (and stay redacted) only on LPR-capable
+		if cam.Lpr || e.LPR {
+			// See ListEvents: sub_labels are plate data (and stay redacted) on LPR-capable
 			// cameras; on other cameras they follow normal events.view (user decision 2026-09-28).
+			// e.LPR (ingestion-time) keeps this gated even after the camera is switched off LPR
+			// (SECURITY review finding on commit 7658e50).
 			e.SubLabels = []string{}
 		}
 	}

@@ -22,6 +22,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 - [x] M3-3c: Key sub_label LPR gating on camera LPR capability + review test fixes. Route: delegated direct.
 - [x] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Unblocked 2026-09-28, see evidence. Route: delegated direct.
 - [x] M3-6: Web tests for Events and Plates routes (filters, infinite scroll, `lpr.search` gating). Route: delegated direct.
+- [x] M3-5b: Harden has_snapshot sync and sub_label LPR gating from review findings. Route: delegated direct.
 - [ ] M3-7: Verify LPR ingestion against the real Frigate 0.18; first sync showed events but no plates. Diagnose adapter mapping if plates exist upstream. Route: delegated direct.
 
 ## Verification mode
@@ -241,5 +242,88 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
   - Commit: `cbc5656` (`feat(events): expose and filter by snapshot and preview availability`, not
     pushed — no remote configured).
 
+- M3-5b: Hardened four review findings on commits `7658e50..6b8a355`. Scope note: M3-7 was
+  descoped from this pass mid-task by explicit user/coordinator instruction (a separate agent is
+  handling it, and the real Frigate at `http://10.1.1.252:5000` must not be contacted from here);
+  M3-7 remains unchecked above.
+  1. **PlatesOnly contradiction**: `internal/frigate/adapter.go` `ObjectQuery.PlatesOnly` was
+     confirmed dead — `rg` found no adapter (`v017`/`v018`, both backed by the same
+     `TrackedObjects`; `v018` embeds `v017` unchanged for this method) ever reads it, only the
+     syncer set it. Removed the field and the `PlatesOnly: true` argument in
+     `internal/events/syncer.go` `syncObjects`; plate extraction is unaffected since it was
+     already a client-side filter on `o.Plate != ""`, not a request to Frigate. Cleanup only, no
+     RED phase applies (removing a field nothing reads changes no observable behavior).
+  2. **has_snapshot convergence**: `markHasSnapshot` only updated an events row that already
+     existed and already listed the object's id in `detection_ids`, so a fact observed out of
+     sync with the review's own upsert (review not indexed yet, or indexed without that
+     detection yet) was silently lost once the object's own `objectOverlap` re-sync window
+     closed. Added `object_snapshots` (migration `00008_object_snapshots.sql`), the same role
+     `lpr_reads` plays for plates: `syncObjects` now also calls the new `upsertObjectSnapshot`
+     before `markHasSnapshot`, and `upsertReview`'s SQL derives `has_snapshot` from it by
+     `detection_ids` on every insert/upsert (`EXISTS (... object_snapshots ...)`, OR'd with the
+     existing value on conflict, mirroring the append-only `plates` derivation already there).
+     `upsertReview` gained a `cameraLPR bool` parameter (see item 3).
+     - RED: `go test -tags integration ./internal/events/... -run TestHasSnapshotConvergence -v`
+       — new subtest "a has_snapshot fact recorded out of band is picked up on the review's next
+       upsert" failed (`has_snapshot = false` after `object_snapshots` recorded the fact and the
+       review was re-upserted) before the fix; the sibling subtest ("a delayed has_snapshot=true
+       is picked up when Frigate flips it later") already passed on old code — the direct
+       `markHasSnapshot` UPDATE already handled a same-object re-poll correctly, so it is
+       regression coverage, not a bug fix. GREEN: same command, both subtests PASS. New file
+       `internal/events/snapshot_convergence_integration_test.go`. The exact
+       "review-arrives-after-object" race could not be reproduced through the mock's HTTP surface
+       (frigatemock derives tracked objects live from whatever is in `Store` at request time, so a
+       review and its objects are never observed inconsistent through it); the out-of-band
+       scenario is reproduced instead by inserting directly into `object_snapshots`
+       (`putObjectSnapshot` helper) between two `SyncAll` calls, documented in the test.
+  3. **SECURITY: sub_label gating keyed on current camera.lpr, not ingest-time LPR**: confirmed
+     the finding — `internal/events/service.go` gated `sub_labels` redaction (`ListEvents` and
+     `getEvent`) and the `sub_label` search filter on `cameras.lpr`, the camera's CURRENT flag.
+     Switching a camera from LPR to non-LPR after events were ingested made historical
+     plate-carrying `sub_labels` visible and searchable without any `lpr.*` grant. Added
+     `events.lpr boolean NOT NULL DEFAULT false` (migration `00009_events_lpr_at_ingest.sql`),
+     backfilled conservatively as true where the camera is currently LPR or the event already
+     carries a plate. `internal/events/syncer.go` `upsertReview` now sets it from the camera's
+     LPR flag at ingestion time (`cam.LPR`, already available in the `cams` map), OR'd with the
+     existing value on conflict (never reset, same as `has_snapshot`/`plates`). `Event` gained an
+     unexported `LPR bool` field (not exposed via the API); gating now checks
+     `e.CameraLPR || e.LPR` (Go) / `(NOT (c.lpr OR e.lpr) OR ...)` (SQL) everywhere it previously
+     checked only the camera's current flag: `ListEvents`'s `SubLabels` filter clause, its
+     redaction loop, and `getEvent`'s redaction.
+     - RED: `go test -tags integration ./internal/events/... -run
+       TestSubLabelLPRGatingSurvivesCameraToggle -v` — new test's first two subtests failed
+       before the fix (`getEvent` returned the real plate text, and the `sub_label` filter still
+       found the event, both after the camera was switched off LPR) — the third subtest
+       (`lpr.view`/`lpr.search` still reveal it) already passed. GREEN: same command, all three
+       subtests PASS. New file `internal/events/sub_label_lpr_toggle_integration_test.go`.
+  4. **Added test coverage**: `TestGetEventSubLabelRedaction` (same new file) covers `getEvent`
+     directly — redacted on an LPR camera without `lpr.view`, visible on a non-LPR camera under
+     plain `events.view` — mirroring the existing `ListEvents` coverage; both subtests already
+     passed on the fixed code (test-only, no separate bug there; written after the service.go fix
+     above, so no independent RED phase applies to this file's baseline test). API-level coverage
+     added in `internal/api/events_snapshot_preview_integration_test.go`
+     (`TestEventsAPISnapshotAndPreviewFields`): `has_snapshot`/`has_preview` query-param binding
+     and `toEvent`'s response mapping, wiring a real `events.Service` + `Syncer` into
+     `api.Handlers` (the package's only other integration test, `TestHTTPAuthorization`, never
+     wires `Events`). All three subtests passed as written — no bug found at the API layer either
+     (test-only task per this item's own framing).
+  5. **Suggestion (no code change)**: `$2 = ANY(detection_ids)` in `markHasSnapshot` (and the
+     equivalent per-object `UPDATE ... WHERE $2 = ANY(plates)`-style clauses) runs without a
+     supporting index; per the M3-2/M3-3 FORCE RLS findings above, a GIN/array index would not be
+     used through the RLS barrier anyway (same `proleakproof = false` root cause), so none was
+     added.
+  - Flakiness check: `go test -tags integration -count=3 ./internal/events/... -run
+    'TestHasSnapshotConvergence|TestSubLabelLPRGatingSurvivesCameraToggle|TestGetEventSubLabelRedaction'`
+    and `go test -tags integration -count=3 ./internal/api/... -run
+    TestEventsAPISnapshotAndPreviewFields` — both stable PASS across all 3 runs.
+  - Full verification: `go test ./...` PASS; `go test -tags integration ./internal/...` PASS
+    (Docker/testcontainers); `pnpm --filter web test` PASS (4 files / 13 tests, unchanged — no
+    web files touched this task); `pnpm typecheck` clean; `make lint` clean (`go vet` 0 issues,
+    golangci-lint 0 issues, `eslint .` clean); `make generate` re-run twice, byte-identical
+    `internal/store/db/models.go` both times (new `Event.Lpr` field and `ObjectSnapshot` model
+    only; `packages/api-contract/openapi.yaml` untouched, so `schema.d.ts` unchanged) — clean
+    `git diff` after commit.
+  - Commit: pending (see below).
+
 ## Next step
-M3-7.
+M3-7 (descoped from this pass; being handled separately). M3-5b is the only task closed here.

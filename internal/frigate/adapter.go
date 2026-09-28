@@ -90,8 +90,6 @@ type ObjectQuery struct {
 	After   float64
 	Before  float64
 	Limit   int
-	// PlatesOnly asks Frigate for objects with a recognized plate when it can filter.
-	PlatesOnly bool
 }
 
 // TrackedObject is a Frigate event (one tracked object).

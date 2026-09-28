@@ -98,6 +98,7 @@ type Event struct {
 	UpdatedAt     time.Time
 	HasSnapshot   bool
 	PreviewKey    string
+	Lpr           bool
 }
 
 type EventSyncState struct {
@@ -170,6 +171,13 @@ type LprRead struct {
 	SeenAt          time.Time
 	FirstSeenAt     time.Time
 	UpdatedAt       time.Time
+}
+
+type ObjectSnapshot struct {
+	ServerID       uuid.UUID
+	TenantID       uuid.UUID
+	RemoteObjectID string
+	SeenAt         time.Time
 }
 
 type PermissionGrant struct {

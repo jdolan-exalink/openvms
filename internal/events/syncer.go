@@ -252,7 +252,7 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 			if !ok {
 				continue // camera not imported (or removed); the review has nowhere to go
 			}
-			ev, isNew, err := upsertReview(ctx, tx, srv, cam.ID, r)
+			ev, isNew, err := upsertReview(ctx, tx, srv, cam.ID, cam.LPR, r)
 			if err != nil {
 				return err
 			}
@@ -287,7 +287,7 @@ func nonNil(s []string) []string {
 	return s
 }
 
-func upsertReview(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID uuid.UUID, r frigate.Review) (NewEvent, bool, error) {
+func upsertReview(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID uuid.UUID, cameraLPR bool, r frigate.Review) (NewEvent, bool, error) {
 	var end *time.Time
 	if r.EndTime != nil {
 		t := fromUnix(*r.EndTime)
@@ -297,14 +297,20 @@ func upsertReview(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID
 	detections := nonNil(r.Data.Detections)
 	var id uuid.UUID
 	var inserted bool
-	// Plates come from lpr_reads already stored for any of the review's detections; the
-	// object pull adds plates that arrive later.
+	// Plates come from lpr_reads already stored for any of the review's detections, and
+	// has_snapshot from object_snapshots the same way (see markHasSnapshot/upsertObjectSnapshot):
+	// both converge on every upsert regardless of whether the review or its tracked objects were
+	// seen first. lpr records the camera's LPR capability at ingestion time and, like
+	// has_snapshot, is never reset once true (see internal/events/service.go for why: gating
+	// must survive a camera later being switched off LPR).
 	err := tx.QueryRow(ctx, `
 INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, sub_labels, zones, audio,
-                    detection_ids, start_time, end_time, reviewed, plates)
+                    detection_ids, start_time, end_time, reviewed, plates, has_snapshot, lpr)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
         coalesce((SELECT array_agg(DISTINCT l.plate_normalized) FROM lpr_reads l
-                  WHERE l.server_id = $3 AND l.remote_event_id = ANY($11::text[])), '{}'))
+                  WHERE l.server_id = $3 AND l.remote_event_id = ANY($11::text[])), '{}'),
+        EXISTS (SELECT 1 FROM object_snapshots os WHERE os.server_id = $3 AND os.remote_object_id = ANY($11::text[])),
+        $15)
 ON CONFLICT (server_id, remote_id) DO UPDATE SET
     severity = excluded.severity,
     labels = excluded.labels,
@@ -315,11 +321,13 @@ ON CONFLICT (server_id, remote_id) DO UPDATE SET
     end_time = excluded.end_time,
     reviewed = excluded.reviewed,
     plates = (SELECT coalesce(array_agg(DISTINCT p), '{}') FROM unnest(events.plates || excluded.plates) p),
+    has_snapshot = events.has_snapshot OR excluded.has_snapshot,
+    lpr = events.lpr OR excluded.lpr,
     updated_at = now()
 RETURNING id, (xmax = 0)`,
 		srv.TenantID, srv.SiteID, srv.ID, cameraID, r.ID, severity(r.Severity),
 		nonNil(r.Data.Objects), nonNil(r.Data.SubLabels), nonNil(r.Data.Zones), nonNil(r.Data.Audio),
-		detections, start, end, r.HasBeenReviewed,
+		detections, start, end, r.HasBeenReviewed, cameraLPR,
 	).Scan(&id, &inserted)
 	if err != nil {
 		return NewEvent{}, false, fmt.Errorf("upsert review %s: %w", r.ID, err)
@@ -343,8 +351,10 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 	var snapshots []frigate.TrackedObject
 	newest := from
 	for page := 0; page < 40; page++ {
-		// No Cameras filter: every camera's objects are read, not only LPR-tagged ones.
-		items, err := a.TrackedObjects(ctx, frigate.ObjectQuery{After: after, Limit: objectPage, PlatesOnly: true})
+		// No Cameras filter: every camera's objects are read, not only LPR-tagged ones. Plate
+		// extraction below is a client-side filter on o.Plate, not a "plates only" request to
+		// Frigate: this pass also needs every object's HasSnapshot, on every camera.
+		items, err := a.TrackedObjects(ctx, frigate.ObjectQuery{After: after, Limit: objectPage})
 		if err != nil {
 			return err
 		}
@@ -378,11 +388,16 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 			if _, ok := cams[o.Camera]; !ok {
 				continue
 			}
-			// The review this object belongs to may not exist yet on the very first pass that
-			// sees it (syncReviews runs first every pull, so in practice it already does), or
-			// may arrive again on a later pull within objectOverlap; either way this only ever
-			// flips has_snapshot from false to true, never back, mirroring upsertPlate's
-			// append-only union of plates above.
+			// Persist the fact first (mirrors upsertPlate inserting into lpr_reads before
+			// updating events.plates): upsertReview derives has_snapshot from object_snapshots
+			// on every future upsert, so this converges even if the review that will end up
+			// listing this detection is not indexed yet, or does not list it yet.
+			if err := upsertObjectSnapshot(ctx, tx, srv, o.ID); err != nil {
+				return err
+			}
+			// Also flip the review immediately if it is already indexed, instead of waiting for
+			// its next upsert; this only ever flips has_snapshot from false to true, never back,
+			// mirroring upsertPlate's append-only union of plates above.
 			if err := markHasSnapshot(ctx, tx, srv, o.ID); err != nil {
 				return err
 			}
@@ -401,11 +416,26 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 }
 
 // markHasSnapshot sets has_snapshot on the review that contains remoteObjectID, if it is
-// already indexed. See PRD §44 ("Has snapshot" filter) and syncObjects above.
+// already indexed. See PRD §44 ("Has snapshot" filter) and syncObjects above. This is only the
+// immediate best-effort path: upsertObjectSnapshot (called just before this, in syncObjects) is
+// what makes the fact converge even when the review is not indexed yet, or does not list this
+// detection yet.
 func markHasSnapshot(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, remoteObjectID string) error {
 	_, err := tx.Exec(ctx, `
 UPDATE events SET has_snapshot = true, updated_at = now()
 WHERE server_id = $1 AND $2 = ANY(detection_ids) AND NOT has_snapshot`, srv.ID, remoteObjectID)
+	return err
+}
+
+// upsertObjectSnapshot persists that a Frigate tracked object reported has_snapshot=true, the
+// same role upsertPlate's insert into lpr_reads plays for plates. upsertReview derives
+// events.has_snapshot from this table by detection_ids on every review upsert, so the fact
+// survives regardless of arrival order between a review and its tracked objects.
+func upsertObjectSnapshot(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, remoteObjectID string) error {
+	_, err := tx.Exec(ctx, `
+INSERT INTO object_snapshots (server_id, tenant_id, remote_object_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (server_id, remote_object_id) DO NOTHING`, srv.ID, srv.TenantID, remoteObjectID)
 	return err
 }
 
