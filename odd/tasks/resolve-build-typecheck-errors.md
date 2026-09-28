@@ -8,22 +8,23 @@ The first verification exposed a generated Go field-name mismatch and frontend T
 
 ## Scope and constraints
 - Fix the known Go compile error, frontend TypeScript errors, and additional Go build failures explicitly authorized by the user on 2026-09-27.
-- Limit edits to the 9 files implicated by the 14 exact lint diagnostics; user explicitly authorized fixing all 14 findings on 2026-09-27. Do not expand beyond those findings.
+- Original lint scope was the 9 files implicated by 14 diagnostics. The user has now explicitly authorized the additional purity fix in `apps/web/src/routes/Playback.tsx` only; no other scope expansion.
 - Preserve existing generated artifacts and dependency changes from toolchain setup.
-- Do not commit or deploy.
+- A work-unit commit on the feature branch is required before closure; do not deploy or push.
 
 ## Tasks
 - [x] ODD-1: Correct generated camera field usage in media access code. (`cam.HqStream` now matches generated field.)
 - [x] ODD-2: Resolve the remaining frontend TypeScript errors with behavior preserved. (`pnpm typecheck` passed.)
-- [ ] ODD-3: Run frontend typecheck, Go tests, lint, and build checks; record every result. Independent verifier confirms Go tests, typecheck, and temporary-output builds pass; `make lint` fails only on the separate `apps/web/src/routes/Playback.tsx:32` purity finding. Latest `make test` and `make lint` attempts were blocked before source diagnostics because Go could not read `/root/.cache/go-build` on the read-only filesystem; `make lint` stopped at `go vet`.
-- [ ] ODD-7: Obtain scope decision for the newly surfaced, sole remaining lint finding in `apps/web/src/routes/Playback.tsx:32`.
+- [x] ODD-3: Run frontend typecheck, Go tests, lint, and build checks; record every result. Current run results are recorded below; Go cache writes were redirected to `/tmp`.
+- [x] ODD-7: Scope authorization received for the sole remaining `react-hooks/purity` finding in `apps/web/src/routes/Playback.tsx:32`; authorized edits are that source file and the necessary regression test/task tracking changes.
 - [x] ODD-5: Mapped the 14 lint findings in the nine authorized files. Keep TLS-dependent cookie behavior; validate all narrowing conversions; reject negative TOTP times; apply mechanical formatting/unused-parameter/expression fixes.
 - [x] ODD-6: Fix all authorized lint findings in exactly the nine named files and rerun required checks. Independent verification confirmed all 14 original findings cleared; the only remaining source lint finding was the separate frontend purity issue in `apps/web/src/routes/Playback.tsx:32`, outside authorized paths.
 - [x] ODD-4: Diagnose and fix the additional Go build errors (user authorized scope expansion); updated `internal/api/identity_handlers.go` and `internal/api/inventory_handlers.go` to match generated response/enum types and use distinct input mappers; `go test ./...` passed.
+- [x] ODD-8: Fix render-time clock impurity in `Playback.tsx` without changing UI behavior and add regression coverage. The mount refresh now resets the default day, instant, and position together when no explicit `search.t` is present. A delayed-mount test verifies that module initialization at 2025-06-15 followed by route mount at 2025-07-16 displays the latter date and time.
 
 ## Verification mode
-- Strict TDD: disabled by explicit user choice in this session (2026-09-27).
-- Exact verification runner: `go test ./...`; `make lint`; `pnpm typecheck`; `mkdir -p /tmp/openvms-build-check && for app in api worker frigate-mock vmsctl; do go build -trimpath -o /tmp/openvms-build-check/$app ./apps/$app || exit; done`.
+- Strict TDD: enabled by current active project instructions; follow RED -> GREEN -> REFACTOR. Prior disabled selection (2026-09-27) is superseded for this work.
+- Exact verification runner: focused web test; `pnpm --filter web test`; `pnpm typecheck`; `GOCACHE=/tmp/openvms-go-build-cache make lint`; `GOCACHE=/tmp/openvms-go-build-cache make test`; `mkdir -p /tmp/openvms-build-check && for app in api worker frigate-mock vmsctl; do go build -trimpath -o /tmp/openvms-build-check/$app ./apps/$app || exit; done`.
 
 ## Acceptance criteria
 - `pnpm typecheck` succeeds.
@@ -32,6 +33,14 @@ The first verification exposed a generated Go field-name mismatch and frontend T
 - No unrelated source changes are introduced.
 
 ## Verification evidence
+- ODD-8 RED: `pnpm --filter web exec vitest run src/routes/Playback.test.tsx` failed before implementation: the Playback day input had no value instead of the current local date. GREEN: focused test passed after moving the initial clock read outside render and keeping the mount refresh asynchronous.
+- ODD-8 final checks: `pnpm --filter web exec vitest run src/routes/Playback.test.tsx` passed (1 test); `pnpm --filter web test` passed (15 files, 68 tests); `pnpm typecheck` passed.
+- ODD-3 final checks: `GOCACHE=/tmp/openvms-go-build-cache make lint` passed (`go vet`: 0 issues; frontend ESLint and typecheck passed). Go linter emitted cache-write warnings for read-only `/root/.cache/golangci-lint`, but reported no issues and exited successfully.
+- ODD-3 Go tests: initial `GOCACHE=/tmp/openvms-go-build-cache make test` failed because sandbox policy denied loopback `httptest` listeners in `internal/api`, `internal/frigate`, and `internal/frigatemock`; after approval to bind local test ports, the exact command passed (`go test -race ./...` and `pnpm test`; 15 files, 68 tests).
+- ODD-3 temp Go build: exact requested loop initially failed trying to write `/root/.cache/go-build`; rerun with `GOCACHE=/tmp/openvms-go-build-cache` passed for `api`, `worker`, `frigate-mock`, and `vmsctl`. Go logged read-only module-cache stat-cache warnings, but the build loop exited successfully. No `bin/*` files were touched.
+- Follow-up review confirmed the first ODD-8 fix can leave timeline state (`instant`, `day`, `position`) based on the module-load snapshot when Playback mounts later; regression test must simulate distinct module-evaluation and mount times.
+- Reopened ODD-8 RED: `pnpm --filter web test` failed the delayed-mount regression as expected: module-load date `2025-06-15` remained visible instead of mount date `2025-07-16`. GREEN: `pnpm --filter web exec vitest run src/routes/Playback.test.tsx` passed (1 test) after refreshing all dependent default state at mount; the test waits for the deferred refresh.
+- Reopened ODD-8 final checks: `pnpm --filter web test` passed (15 files, 68 tests); `pnpm typecheck` passed; `pnpm --filter web lint` passed. One intermediate lint attempt caught declaration order and effect dependency issues in the timer closure; state hooks were moved above the effect and `search.t` is tracked, after which lint passed.
 - Baseline: `docker compose config --quiet` passed.
 - Baseline: `make generate` completed.
 - Baseline: frontend typecheck then reported five remaining errors in `src/api/queries.ts`, `src/components/HlsPlayer.tsx`, `src/routes/Live.tsx`, and `src/routes/Permissions.tsx`.
@@ -47,7 +56,7 @@ The first verification exposed a generated Go field-name mismatch and frontend T
 - Second lint-fix pass reports all 14 original findings cleared. `go test ./...`, `pnpm typecheck`, and builds to `/tmp/openvms-build-check` passed. `make lint` failed only on `react-hooks/purity` at `apps/web/src/routes/Playback.tsx:32` (`Date.now()`), outside the nine authorized files. `/root/openvms/bin/*` remained untouched.
 - Native assess after this writer again returned `unassessable` because Git untracked enumeration under `/root` exceeded the 8 MiB limit (254,668 paths); independent verification completed. It confirmed Go tests, `pnpm typecheck`, and all four temporary Go builds pass, and none of the 14 authorized findings remain. The sole current lint failure is `react-hooks/purity` at `apps/web/src/routes/Playback.tsx:32` (`Date.now()` during render), outside the authorized paths. Verifier made no repo edits and preserved `bin/`.
 - User explicitly authorized continuing with the additional Go errors.
-- User explicitly selected strict TDD disabled; this is the effective mode source for the continued writer. No files were changed by the first writer because it requested TDD mode clarification.
+- Historical note: a prior writer recorded the 2026-09-27 disabled choice for separate work; it does not override the current active strict-TDD instruction for ODD-8.
 - Read-only `go test ./...` diagnostics: `internal/api/inventory_handlers.go` references missing generated auth-method constants (`MeAuthMethodToken`, `MeAuthMethodSession`), redeclares `groupInput` and passes the wrong input type for `CreateCameraGroup`; `internal/api/identity_handlers.go` uses `Login401JSONResponse.Code` and `.Message` fields absent from generated type and references missing `MeAuthMethodSession`. Further errors were truncated by compiler's 'too many errors'. Many unaffected packages pass.
 - Read-only mapping confirmed generated Go types match `packages/api-contract/openapi.yaml`: generated auth enum values are `Session` and `Token`; Login401 embeds `UnauthorizedJSONResponse`/`Error`; user-group and camera-group inputs are distinct, with camera group needing its own mapper. Minimal code edit surface is the two handwritten handlers; no OpenAPI/generated changes indicated.
 - `bin/worker` and `bin/frigate-mock` exist with timestamps at 2026-09-27 21:04; whether generated by this build cannot be determined. They remain untouched.
@@ -55,4 +64,4 @@ The first verification exposed a generated Go field-name mismatch and frontend T
 - Route: delegated direct implementation; separate verifier was required because native risk assessment was unassessable and RDD is on. Independent verification completed; lint findings await scope decision.
 
 ## Next step
-Ask the user whether to authorize the one additional `Playback.tsx:32` lint fix. Do not edit it without approval.
+Parent may inspect and freeze the candidate; the stale module-load clock risk is covered by delayed-mount regression. Preserve `bin/*`.

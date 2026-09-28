@@ -20,6 +20,7 @@ function startOfDay(unix: number): number {
 }
 
 const unixNow = () => Math.floor(Date.now() / 1000);
+const INITIAL_NOW = unixNow();
 
 /**
  * Playback (PRD §51-55): a day timeline of one camera built from its Frigate's recordings
@@ -31,14 +32,27 @@ export function Playback() {
   const me = useQuery(meQuery);
   const cameras = useQuery(camerasQuery({}));
   const cameraId = search.camera ?? "";
-  const [now, setNow] = useState(unixNow);
-  useEffect(() => {
-    const id = setInterval(() => setNow(unixNow()), 30_000);
-    return () => clearInterval(id);
-  }, []);
+  const [now, setNow] = useState(INITIAL_NOW);
   const [instant, setInstant] = useState<number>(search.t ?? now - 600);
   const [day, setDay] = useState<number>(startOfDay(search.t ?? now));
   const [position, setPosition] = useState<number>(instant);
+  useEffect(() => {
+    const refreshId = setTimeout(() => {
+      const currentNow = unixNow();
+      setNow(currentNow);
+      if (search.t === undefined) {
+        const currentInstant = currentNow - 600;
+        setInstant(currentInstant);
+        setPosition(currentInstant);
+        setDay(startOfDay(currentNow));
+      }
+    }, 0);
+    const id = setInterval(() => setNow(unixNow()), 30_000);
+    return () => {
+      clearTimeout(refreshId);
+      clearInterval(id);
+    };
+  }, [search.t]);
 
   const from = new Date(day * 1000).toISOString();
   const to = new Date((day + DAY) * 1000).toISOString();
