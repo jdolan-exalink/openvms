@@ -20,7 +20,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 - [x] M3-3b: Harden zone/sub_label filters from review findings on commit `195f76a`. Route: delegated direct.
 - [x] M3-4: Add `camera_group` filter to `/events` and `/lpr/reads`. Route: delegated direct.
 - [x] M3-3c: Key sub_label LPR gating on camera LPR capability + review test fixes. Route: delegated direct.
-- [ ] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Unblocked 2026-09-28, see evidence. Route: delegated direct.
+- [x] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Unblocked 2026-09-28, see evidence. Route: delegated direct.
 - [x] M3-6: Web tests for Events and Plates routes (filters, infinite scroll, `lpr.search` gating). Route: delegated direct.
 - [ ] M3-7: Verify LPR ingestion against the real Frigate 0.18; first sync showed events but no plates. Diagnose adapter mapping if plates exist upstream. Route: delegated direct.
 
@@ -172,5 +172,74 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
   - Commit: `6d908db` (`test(web): cover events and plates filters, paging and lpr gating`, not
     pushed — no remote configured).
 
+- M3-5: Unblocked 2026-09-28 by user decision after the M3-5 STOPPED evidence above:
+  - `has_snapshot`: sync Frigate `TrackedObjects` (`GET /api/events`) for **every** camera, not
+    only LPR ones. `internal/events/syncer.go` `SyncServer` no longer gates `syncObjects` on
+    `cameraHasLPR(cams)` (removed, now dead code); `syncObjects` drops the `Cameras: lprCams`
+    filter on the `TrackedObjects` call (an unset `Cameras` list already meant "every camera" —
+    confirmed in `internal/frigate/v017_events.go`/`internal/frigatemock/media.go`, neither ever
+    implemented server-side camera filtering being absent as "none"). Plate extraction is
+    unchanged (still keyed on `o.Plate != ""`, which stays empty on non-LPR cameras). Every
+    object with `HasSnapshot=true` calls the new `markHasSnapshot` (`UPDATE events SET
+    has_snapshot = true ... WHERE $2 = ANY(detection_ids) AND NOT has_snapshot`), mirroring
+    `upsertPlate`'s existing late-arrival/append-only pattern — set once, never unset, safe to
+    see the same object again within `objectOverlap`.
+  - `has_snapshot` is a genuine Frigate fact confirmed against Frigate's own source
+    (`frigate/models.py`, fetched from GitHub during the M3-5 STOPPED investigation):
+    `Event.has_snapshot`/`has_clip` are real per-tracked-object booleans. Added
+    `TrackedObject.HasSnapshot` (`internal/frigate/adapter.go`), mapped from the real Frigate
+    JSON field `has_snapshot` in `objectResponse` (`internal/frigate/v017_events.go`).
+  - `internal/frigatemock/media.go`: `trackedObject` gained `HasSnapshot`, set to
+    `rev.Severity == "alert"` — a mock-only deterministic convention (documented in code) to give
+    every camera, LPR or not, a mix of true/false instead of a flat value; real Frigate ties it to
+    per-object/config state this mock does not simulate.
+  - `has_preview`: defined in OpenVMS's own terms per the user decision, **not** a Frigate
+    signal — Frigate has no per-event "has preview" fact (also confirmed absent from both
+    `Event` and `ReviewSegment` in `frigate/models.py`). Migration `00007_events_snapshot_preview.sql`
+    adds `events.preview_key text NOT NULL DEFAULT ''` (mirroring `thumb_key`/PRD §20) and
+    `events.has_snapshot boolean NOT NULL DEFAULT false`; `has_preview` is computed as
+    `e.preview_key <> ''` (same pattern as the existing `has_thumbnail`/`thumb_key <> ''`), not a
+    stored column. No ingestion path populates `preview_key` yet (no preview-copy job exists,
+    unlike `copyThumbnails`), so `has_preview` reports false for every event until a future task
+    adds that job — documented in the migration comment and the OpenAPI field description.
+  - Contract: `packages/api-contract/openapi.yaml` — `Event.has_snapshot`/`has_preview` (added to
+    `required`), and `has_snapshot`/`has_preview` boolean query params on `listEvents`; `make
+    generate` re-run twice, byte-identical (plus the expected `sqlc`-generated
+    `internal/store/db/models.go` picking up the two new `events` columns).
+  - `internal/events/service.go`: `Event.HasSnapshot`/`HasPreview`, `Filter.HasSnapshot`/`HasPreview
+    *bool`; `eventColumns`/`scanEvent` add `e.has_snapshot, e.preview_key <> ''`; `ListEvents` adds
+    `e.has_snapshot = ?` / `(e.preview_key <> '') = ?` clauses and escalates the required
+    permission to `events.search` when either filter is set (same escalation as zone/sub_label/
+    plate/from). `internal/api/events_handlers.go` wires `p.HasSnapshot`/`p.HasPreview` into the
+    filter and `toEvent` into the response. No LPR gating needed: neither flag carries plate or
+    other sensitive data.
+  - RED: temporarily restored the old `cameraHasLPR` gate (`if syncErr == nil && false { ... }`)
+    and ran `go test -tags integration ./internal/events/... -run
+    TestSnapshotAndPreviewFilterCorrectness -v` — the two subtests depending on object sync
+    running for a non-LPR camera failed as expected (`has_snapshot_is_synced_for_a_non-LPR_camera`
+    and `has_snapshot_filter_finds_only_matching_events`); the two independent of that gate still
+    passed. GREEN: reverted the gate, same command, all 4 subtests PASS. New file
+    `internal/events/snapshot_preview_filter_integration_test.go`.
+  - Flakiness found and fixed during verification: the first run of the new test relied on
+    frigatemock's random per-review severity roll (1/3 chance of "alert" on a non-LPR camera,
+    `internal/frigatemock/generator.go` `buildReview`) to produce at least one alert-severity
+    event on the non-LPR camera under test; a `-count=1` rerun hit the ~6% chance of zero and
+    failed. Fixed by seeding one deterministic alert-severity review directly into the mock's
+    `Store` before syncing (`seedAlertReview`, using the mock's own exported `Store.Put`).
+    Reran 5× with `-count=1` after the fix: stable PASS every time.
+  - Web: `apps/web/src/api/queries.ts` `EventFilter` gains `has_snapshot`/`has_preview`;
+    `apps/web/src/routes/Events.tsx` adds two checkboxes ("Con snapshot", "Con preview"), each a
+    true-only filter when checked (mirroring the existing "Solo sin revisar" pattern). RED:
+    reverted the `Events.tsx`/`queries.ts` changes and ran `pnpm --filter web exec vitest run
+    src/routes/Events.test.tsx` — failed on `getByLabelText("Con snapshot")` not found. GREEN:
+    restored the changes, same command passes, asserting `has_snapshot=true`/`has_preview=true`
+    land in the request query string.
+  - Full verification: `go test ./...` PASS; `go test -tags integration ./internal/...` PASS
+    (Docker/testcontainers, `-count=1`); `pnpm --filter web test` PASS 3/3 runs (4 files / 13
+    tests each); `pnpm typecheck` clean; `make lint` clean; `make generate` re-run twice, clean
+    after commit.
+  - Commit: `cbc5656` (`feat(events): expose and filter by snapshot and preview availability`, not
+    pushed — no remote configured).
+
 ## Next step
-M3-5 (unblocked 2026-09-28, in progress) then M3-7.
+M3-7.

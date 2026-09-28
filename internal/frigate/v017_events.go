@@ -21,15 +21,16 @@ type objectData struct {
 }
 
 type objectResponse struct {
-	ID        string          `json:"id"`
-	Camera    string          `json:"camera"`
-	Label     string          `json:"label"`
-	SubLabel  json.RawMessage `json:"sub_label"`
-	Zones     []string        `json:"zones"`
-	StartTime float64         `json:"start_time"`
-	EndTime   *float64        `json:"end_time"`
-	TopScore  *float64        `json:"top_score"`
-	Data      objectData      `json:"data"`
+	ID          string          `json:"id"`
+	Camera      string          `json:"camera"`
+	Label       string          `json:"label"`
+	SubLabel    json.RawMessage `json:"sub_label"`
+	Zones       []string        `json:"zones"`
+	StartTime   float64         `json:"start_time"`
+	EndTime     *float64        `json:"end_time"`
+	TopScore    *float64        `json:"top_score"`
+	HasSnapshot bool            `json:"has_snapshot"`
+	Data        objectData      `json:"data"`
 }
 
 // subLabel reads Frigate's sub_label, which is null, a string or [name, score].
@@ -72,6 +73,7 @@ func (a *v017) TrackedObjects(ctx context.Context, q ObjectQuery) ([]TrackedObje
 		t := TrackedObject{
 			ID: o.ID, Camera: o.Camera, Label: o.Label, SubLabel: subLabel(o.SubLabel), Zones: o.Zones,
 			StartTime: o.StartTime, EndTime: o.EndTime, TopScore: o.Data.TopScore, PlateScore: o.Data.PlateScore,
+			HasSnapshot: o.HasSnapshot,
 		}
 		if t.TopScore == nil {
 			t.TopScore = o.TopScore

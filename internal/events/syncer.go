@@ -145,7 +145,10 @@ func (s *Syncer) SyncServer(ctx context.Context, srv db.FrigateServer) error {
 		return err
 	}
 	syncErr := s.syncReviews(ctx, srv, a, cams, st)
-	if syncErr == nil && cameraHasLPR(cams) {
+	if syncErr == nil {
+		// Tracked objects are synced for every camera, not only LPR-tagged ones: besides plate
+		// extraction (LPR cameras only, unaffected), each object also carries has_snapshot
+		// (PRD §44), which applies to every camera.
 		syncErr = s.syncObjects(ctx, srv, a, cams, st)
 	}
 	if syncErr != nil {
@@ -162,15 +165,6 @@ func (s *Syncer) SyncServer(ctx context.Context, srv db.FrigateServer) error {
 type cameraRef struct {
 	ID  uuid.UUID
 	LPR bool
-}
-
-func cameraHasLPR(cams map[string]cameraRef) bool {
-	for _, c := range cams {
-		if c.LPR {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Syncer) load(ctx context.Context, srv db.FrigateServer) (map[string]cameraRef, syncState, error) {
@@ -336,23 +330,21 @@ RETURNING id, (xmax = 0)`,
 	}, inserted, nil
 }
 
-// syncObjects reads tracked objects (oldest first) and stores those with a plate.
+// syncObjects reads tracked objects of every camera (oldest first): those with a plate are
+// stored in lpr_reads (LPR cameras only, since only they ever carry one), and every object
+// with has_snapshot=true marks its parent review's has_snapshot flag (every camera, PRD §44).
 func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigate.Adapter, cams map[string]cameraRef, st syncState) error {
 	from := s.clock().Add(-s.Backfill)
 	if st.objectCursor != nil {
 		from = st.objectCursor.Add(-objectOverlap)
 	}
-	var lprCams []string
-	for name, c := range cams {
-		if c.LPR {
-			lprCams = append(lprCams, name)
-		}
-	}
 	after := unix(from)
 	var reads []frigate.TrackedObject
+	var snapshots []frigate.TrackedObject
 	newest := from
 	for page := 0; page < 40; page++ {
-		items, err := a.TrackedObjects(ctx, frigate.ObjectQuery{Cameras: lprCams, After: after, Limit: objectPage, PlatesOnly: true})
+		// No Cameras filter: every camera's objects are read, not only LPR-tagged ones.
+		items, err := a.TrackedObjects(ctx, frigate.ObjectQuery{After: after, Limit: objectPage, PlatesOnly: true})
 		if err != nil {
 			return err
 		}
@@ -362,6 +354,9 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 			}
 			if o.Plate != "" {
 				reads = append(reads, o)
+			}
+			if o.HasSnapshot {
+				snapshots = append(snapshots, o)
 			}
 		}
 		if len(items) < objectPage || items[len(items)-1].StartTime <= after {
@@ -379,6 +374,19 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 				return err
 			}
 		}
+		for _, o := range snapshots {
+			if _, ok := cams[o.Camera]; !ok {
+				continue
+			}
+			// The review this object belongs to may not exist yet on the very first pass that
+			// sees it (syncReviews runs first every pull, so in practice it already does), or
+			// may arrive again on a later pull within objectOverlap; either way this only ever
+			// flips has_snapshot from false to true, never back, mirroring upsertPlate's
+			// append-only union of plates above.
+			if err := markHasSnapshot(ctx, tx, srv, o.ID); err != nil {
+				return err
+			}
+		}
 		// The cursor moves to the newest object seen; the next pull re-reads objectOverlap
 		// before it for plates recognized after an object started.
 		cursor := newest
@@ -390,6 +398,15 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 		}
 		return upsertCursor(ctx, tx, srv, "object_cursor", &cursor)
 	})
+}
+
+// markHasSnapshot sets has_snapshot on the review that contains remoteObjectID, if it is
+// already indexed. See PRD §44 ("Has snapshot" filter) and syncObjects above.
+func markHasSnapshot(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, remoteObjectID string) error {
+	_, err := tx.Exec(ctx, `
+UPDATE events SET has_snapshot = true, updated_at = now()
+WHERE server_id = $1 AND $2 = ANY(detection_ids) AND NOT has_snapshot`, srv.ID, remoteObjectID)
+	return err
 }
 
 // NormalizePlate keeps letters and digits in upper case: "ab 123-cd" → "AB123CD".

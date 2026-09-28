@@ -56,6 +56,11 @@ type Event struct {
 	EndTime      *time.Time
 	Reviewed     bool
 	HasThumbnail bool
+	// HasSnapshot mirrors Frigate's own Event.has_snapshot for any detection of this review.
+	HasSnapshot bool
+	// HasPreview is true once the event's preview clip has been copied to central storage
+	// (preview_key populated); an OpenVMS-internal signal, not a Frigate probe (PRD §20/§44).
+	HasPreview bool
 }
 
 type Filter struct {
@@ -70,12 +75,14 @@ type Filter struct {
 	SubLabels      []string
 	Severity       string
 	// Plate matches events with a plate containing this text (normalized).
-	Plate    string
-	From     *time.Time
-	To       *time.Time
-	Reviewed *bool
-	Cursor   string
-	Limit    int
+	Plate       string
+	From        *time.Time
+	To          *time.Time
+	Reviewed    *bool
+	HasSnapshot *bool
+	HasPreview  *bool
+	Cursor      string
+	Limit       int
 }
 
 type Page[T any] struct {
@@ -150,7 +157,8 @@ func idSet(ids []uuid.UUID) map[uuid.UUID]bool {
 }
 
 const eventColumns = `e.id, e.tenant_id, e.site_id, s.name, e.server_id, fs.name, e.camera_id, c.display_name, c.lpr, e.remote_id,
-e.severity, e.labels, e.sub_labels, e.zones, e.plates, e.start_time, e.end_time, e.reviewed, e.thumb_key <> ''`
+e.severity, e.labels, e.sub_labels, e.zones, e.plates, e.start_time, e.end_time, e.reviewed, e.thumb_key <> '',
+e.has_snapshot, e.preview_key <> ''`
 
 const eventJoins = `FROM events e
 JOIN cameras c ON c.id = e.camera_id
@@ -160,7 +168,8 @@ JOIN frigate_servers fs ON fs.id = e.server_id`
 func scanEvent(row pgx.Row) (Event, error) {
 	var e Event
 	err := row.Scan(&e.ID, &e.TenantID, &e.SiteID, &e.SiteName, &e.ServerID, &e.ServerName, &e.CameraID, &e.CameraName, &e.CameraLPR, &e.RemoteID,
-		&e.Severity, &e.Labels, &e.SubLabels, &e.Zones, &e.Plates, &e.StartTime, &e.EndTime, &e.Reviewed, &e.HasThumbnail)
+		&e.Severity, &e.Labels, &e.SubLabels, &e.Zones, &e.Plates, &e.StartTime, &e.EndTime, &e.Reviewed, &e.HasThumbnail,
+		&e.HasSnapshot, &e.HasPreview)
 	return e, err
 }
 
@@ -172,7 +181,8 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 	n := limit(f.Limit)
 	err := s.tx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
 		perm := authz.EventsView
-		if f.Plate != "" || len(f.Labels) > 0 || len(f.Zones) > 0 || len(f.SubLabels) > 0 || f.From != nil {
+		if f.Plate != "" || len(f.Labels) > 0 || len(f.Zones) > 0 || len(f.SubLabels) > 0 || f.From != nil ||
+			f.HasSnapshot != nil || f.HasPreview != nil {
 			perm = authz.EventsSearch
 		}
 		cams, err := c.CameraIDs(ctx, perm)
@@ -240,6 +250,12 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 		}
 		if f.Reviewed != nil {
 			b.add("e.reviewed = ?", *f.Reviewed)
+		}
+		if f.HasSnapshot != nil {
+			b.add("e.has_snapshot = ?", *f.HasSnapshot)
+		}
+		if f.HasPreview != nil {
+			b.add("(e.preview_key <> '') = ?", *f.HasPreview)
 		}
 		if f.Cursor != "" {
 			t, id, err := decodeCursor(f.Cursor)

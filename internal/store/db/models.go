@@ -96,6 +96,8 @@ type Event struct {
 	ThumbAttempts int32
 	FirstSeenAt   time.Time
 	UpdatedAt     time.Time
+	HasSnapshot   bool
+	PreviewKey    string
 }
 
 type EventSyncState struct {

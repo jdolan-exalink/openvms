@@ -21,6 +21,8 @@ type Form = {
   from: string;
   to: string;
   pending: boolean;
+  hasSnapshot: boolean;
+  hasPreview: boolean;
 };
 
 const emptyForm: Form = {
@@ -35,6 +37,8 @@ const emptyForm: Form = {
   from: "",
   to: "",
   pending: false,
+  hasSnapshot: false,
+  hasPreview: false,
 };
 
 function toFilter(f: Form): EventFilter {
@@ -50,6 +54,8 @@ function toFilter(f: Form): EventFilter {
     from: fromLocalInput(f.from),
     to: fromLocalInput(f.to),
     reviewed: f.pending ? false : undefined,
+    has_snapshot: f.hasSnapshot ? true : undefined,
+    has_preview: f.hasPreview ? true : undefined,
     limit: 48,
   };
 }
@@ -147,6 +153,12 @@ export function Events() {
         <div className="flex flex-col justify-end gap-2">
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.pending} onChange={(e) => set("pending", e.target.checked)} /> Solo sin revisar
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.hasSnapshot} onChange={(e) => set("hasSnapshot", e.target.checked)} /> Con snapshot
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.hasPreview} onChange={(e) => set("hasPreview", e.target.checked)} /> Con preview
           </label>
           <div className="flex gap-2">
             <Button type="submit" variant="primary">

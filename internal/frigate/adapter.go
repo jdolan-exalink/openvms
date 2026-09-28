@@ -107,6 +107,8 @@ type TrackedObject struct {
 	// PlateScore is Frigate's confidence for Plate, 0..1.
 	PlateScore *float64 `json:"-"`
 	TopScore   *float64 `json:"-"`
+	// HasSnapshot mirrors Frigate's own Event.has_snapshot (PRD §44 "Has snapshot" filter).
+	HasSnapshot bool `json:"-"`
 }
 
 // RecordingSegment is a stretch of continuous recording.

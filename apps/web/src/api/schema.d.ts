@@ -1119,6 +1119,10 @@ export interface components {
             reviewed: boolean;
             /** @description The VMS keeps its own copy of the thumbnail. */
             has_thumbnail: boolean;
+            /** @description Frigate reported a saved snapshot for at least one detection of this event. */
+            has_snapshot: boolean;
+            /** @description The VMS has copied this event's preview clip to central storage (an OpenVMS-internal signal, not a probe of Frigate's own preview availability). */
+            has_preview: boolean;
         };
         EventPage: {
             items: components["schemas"]["Event"][];
@@ -2237,6 +2241,10 @@ export interface operations {
                 from?: string;
                 to?: string;
                 reviewed?: boolean;
+                /** @description Only events Frigate reported a saved snapshot for on at least one detection. */
+                has_snapshot?: boolean;
+                /** @description Only events whose preview clip has been copied to central storage. */
+                has_preview?: boolean;
                 cursor?: string;
                 limit?: number;
             };

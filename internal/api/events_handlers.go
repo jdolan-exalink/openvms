@@ -24,6 +24,7 @@ func toEvent(e events.Event) gen.Event {
 		RemoteId: e.RemoteID, Severity: gen.Severity(e.Severity), Labels: e.Labels, SubLabels: e.SubLabels,
 		Zones: e.Zones, Plates: e.Plates, StartTime: e.StartTime, EndTime: e.EndTime,
 		Reviewed: e.Reviewed, HasThumbnail: e.HasThumbnail,
+		HasSnapshot: e.HasSnapshot, HasPreview: e.HasPreview,
 	}
 }
 
@@ -44,6 +45,7 @@ func (h *Handlers) ListEvents(ctx context.Context, r gen.ListEventsRequestObject
 		SiteIDs: uuids(p.SiteId), ServerIDs: uuids(p.ServerId), CameraIDs: uuids(p.CameraId),
 		CameraGroupIDs: uuids(p.CameraGroupId),
 		Plate:          deref(p.Plate), From: p.From, To: p.To, Reviewed: p.Reviewed,
+		HasSnapshot: p.HasSnapshot, HasPreview: p.HasPreview,
 		Cursor: deref(p.Cursor), Limit: deref(p.Limit),
 	}
 	if p.Label != nil {

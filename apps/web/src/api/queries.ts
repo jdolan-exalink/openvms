@@ -67,6 +67,8 @@ export type EventFilter = {
   from?: string;
   to?: string;
   reviewed?: boolean;
+  has_snapshot?: boolean;
+  has_preview?: boolean;
   limit?: number;
 };
 

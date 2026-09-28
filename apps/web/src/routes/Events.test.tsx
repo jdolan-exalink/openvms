@@ -46,6 +46,8 @@ function makeEvent(id: string, overrides: Partial<Schemas["Event"]> = {}): Schem
     end_time: null,
     reviewed: false,
     has_thumbnail: false,
+    has_snapshot: false,
+    has_preview: false,
     ...overrides,
   };
 }
@@ -160,6 +162,8 @@ describe("Events", () => {
     fireEvent.change(screen.getByLabelText("Hasta"), { target: { value: "2024-01-02T10:00" } });
     fireEvent.change(screen.getByLabelText("Patente"), { target: { value: "ab123cd" } });
     fireEvent.click(screen.getByLabelText("Solo sin revisar"));
+    fireEvent.click(screen.getByLabelText("Con snapshot"));
+    fireEvent.click(screen.getByLabelText("Con preview"));
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
 
     await waitFor(() => {
@@ -175,6 +179,8 @@ describe("Events", () => {
       expect(p?.get("from")).toBe(new Date("2024-01-01T10:00").toISOString());
       expect(p?.get("to")).toBe(new Date("2024-01-02T10:00").toISOString());
       expect(p?.get("reviewed")).toBe("false");
+      expect(p?.get("has_snapshot")).toBe("true");
+      expect(p?.get("has_preview")).toBe("true");
       expect(p?.get("limit")).toBe("48");
     });
   });

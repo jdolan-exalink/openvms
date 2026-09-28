@@ -576,6 +576,8 @@ paths:
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
         - { name: reviewed, in: query, schema: { type: boolean } }
+        - { name: has_snapshot, in: query, schema: { type: boolean }, description: "Only events Frigate reported a saved snapshot for on at least one detection." }
+        - { name: has_preview, in: query, schema: { type: boolean }, description: "Only events whose preview clip has been copied to central storage." }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
       responses:
@@ -1551,7 +1553,7 @@ components:
       enum: [alert, detection]
     Event:
       type: object
-      required: [id, tenant_id, site_id, site_name, server_id, server_name, camera_id, camera_name, remote_id, severity, labels, sub_labels, zones, plates, start_time, reviewed, has_thumbnail]
+      required: [id, tenant_id, site_id, site_name, server_id, server_name, camera_id, camera_name, remote_id, severity, labels, sub_labels, zones, plates, start_time, reviewed, has_thumbnail, has_snapshot, has_preview]
       properties:
         id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
@@ -1588,6 +1590,14 @@ components:
         has_thumbnail:
           type: boolean
           description: The VMS keeps its own copy of the thumbnail.
+        has_snapshot:
+          type: boolean
+          description: Frigate reported a saved snapshot for at least one detection of this event.
+        has_preview:
+          type: boolean
+          description: >-
+            The VMS has copied this event's preview clip to central storage (an OpenVMS-internal
+            signal, not a probe of Frigate's own preview availability).
     EventPage:
       type: object
       required: [items]

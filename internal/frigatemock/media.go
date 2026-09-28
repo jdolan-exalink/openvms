@@ -20,18 +20,22 @@ type objectData struct {
 }
 
 type trackedObject struct {
-	ID        string     `json:"id"`
-	Camera    string     `json:"camera"`
-	Label     string     `json:"label"`
-	SubLabel  *string    `json:"sub_label"`
-	Zones     []string   `json:"zones"`
-	StartTime float64    `json:"start_time"`
-	EndTime   *float64   `json:"end_time"`
-	Data      objectData `json:"data"`
+	ID          string     `json:"id"`
+	Camera      string     `json:"camera"`
+	Label       string     `json:"label"`
+	SubLabel    *string    `json:"sub_label"`
+	Zones       []string   `json:"zones"`
+	StartTime   float64    `json:"start_time"`
+	EndTime     *float64   `json:"end_time"`
+	HasSnapshot bool       `json:"has_snapshot"`
+	Data        objectData `json:"data"`
 }
 
 // objects derives one tracked object per review detection. On LPR cameras the plate
 // the generator put in sub_labels becomes the recognized plate, as in Frigate 0.16+.
+// has_snapshot is deterministically true for alert reviews and false for detections: real
+// Frigate ties it to per-object/config state we do not simulate, but this split gives every
+// camera (LPR or not) a mix of both for tests, instead of a flat true/false.
 func (s *Server) objects(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	after, _ := strconv.ParseFloat(q.Get("after"), 64)
@@ -58,7 +62,8 @@ func (s *Server) objects(w http.ResponseWriter, r *http.Request) {
 		for i, det := range rev.Data.Detections {
 			o := trackedObject{
 				ID: det, Camera: rev.Camera, Label: rev.Data.Objects[0], Zones: rev.Data.Zones,
-				StartTime: rev.StartTime + float64(i), EndTime: rev.EndTime, Data: objectData{TopScore: 0.87},
+				StartTime: rev.StartTime + float64(i), EndTime: rev.EndTime, HasSnapshot: rev.Severity == "alert",
+				Data: objectData{TopScore: 0.87},
 			}
 			if lpr[rev.Camera] && len(rev.Data.SubLabels) > 0 {
 				plate := rev.Data.SubLabels[len(rev.Data.SubLabels)-1]
