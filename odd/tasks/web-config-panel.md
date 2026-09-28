@@ -110,7 +110,8 @@ select-then-pick instead of direct drag and drop.
   - Full verification: `pnpm --filter web test` PASS (7 files / 18 tests); `pnpm typecheck`
     clean; `make lint` clean (`go vet` 0 issues, `eslint .` clean); `pnpm --filter web build`
     clean (pre-existing >500kB single-chunk warning, unrelated to this change).
-  - Commit: pending (see below).
+  - Commit: `a2c6e56` (`feat(web): group infrastructure/admin pages into a settings area`, not
+    pushed — no remote configured).
 
 - WCP-2: Default-route confirmation.
   - `apps/web/src/routes/Login.test.tsx` (new): drives the real `router.tsx` `routeTree` from
@@ -129,7 +130,8 @@ select-then-pick instead of direct drag and drop.
   - Full verification: `pnpm --filter web test` PASS (8 files / 19 tests); `pnpm typecheck`
     clean; `make lint` clean; `pnpm --filter web build` clean (same pre-existing chunk-size
     warning).
-  - Commit: pending (see below).
+  - Commit: `39f30c8` (`test(web): cover the post-login default route to Live`, not pushed — no
+    remote configured).
 
 - WCP-3: Persist the Live grid selection.
   - `apps/web/src/lib/liveGrid.ts` (new): pure, framework-free helpers shared by Live's grid
@@ -168,7 +170,8 @@ select-then-pick instead of direct drag and drop.
   - Full verification: `pnpm --filter web test` PASS (10 files / 30 tests); `pnpm typecheck`
     clean; `make lint` clean; `pnpm --filter web build` clean (same pre-existing chunk-size
     warning).
-  - Commit: pending (see below).
+  - Commit: `d56eb76` (`feat(web): persist the Live grid selection per user in localStorage`, not
+    pushed — no remote configured).
 
 - WCP-4: Drag and drop in Live.
   - Dependency: `apps/web/package.json` had no DnD library (checked before starting). Added
@@ -232,7 +235,10 @@ select-then-pick instead of direct drag and drop.
   - Full verification: `pnpm --filter web test` PASS (10 files / 41 tests); `pnpm typecheck`
     clean; `make lint` clean; `pnpm --filter web build` clean (same pre-existing chunk-size
     warning, slightly larger now from the added dnd-kit bundle).
-  - Commit: pending (see below).
+  - Commit: `1d220b6` (`feat(web): drag and drop cameras and tiles in the Live grid`, not pushed
+    — no remote configured).
 
 ## Next step
-Commit WCP-4. All four WCP tasks are done; report to the user.
+All four WCP tasks are done and committed on `feat/web-config-panel`. Nothing pending; delivery
+(push/PR/merge) is the user's decision — this branch was never pushed (no remote configured for
+this session).
