@@ -35,14 +35,17 @@ type Service struct {
 var ErrInvalidCursor = errors.New("invalid cursor")
 
 type Event struct {
-	ID           uuid.UUID
-	TenantID     uuid.UUID
-	SiteID       uuid.UUID
-	SiteName     string
-	ServerID     uuid.UUID
-	ServerName   string
-	CameraID     uuid.UUID
-	CameraName   string
+	ID         uuid.UUID
+	TenantID   uuid.UUID
+	SiteID     uuid.UUID
+	SiteName   string
+	ServerID   uuid.UUID
+	ServerName string
+	CameraID   uuid.UUID
+	CameraName string
+	// CameraLPR is the camera's LPR capability (cameras.lpr), used only to decide whether
+	// sub_labels needs LPR-gated redaction (see ListEvents/getEvent); it is not exposed via the API.
+	CameraLPR    bool
 	RemoteID     string
 	Severity     string
 	Labels       []string
@@ -146,7 +149,7 @@ func idSet(ids []uuid.UUID) map[uuid.UUID]bool {
 	return m
 }
 
-const eventColumns = `e.id, e.tenant_id, e.site_id, s.name, e.server_id, fs.name, e.camera_id, c.display_name, e.remote_id,
+const eventColumns = `e.id, e.tenant_id, e.site_id, s.name, e.server_id, fs.name, e.camera_id, c.display_name, c.lpr, e.remote_id,
 e.severity, e.labels, e.sub_labels, e.zones, e.plates, e.start_time, e.end_time, e.reviewed, e.thumb_key <> ''`
 
 const eventJoins = `FROM events e
@@ -156,7 +159,7 @@ JOIN frigate_servers fs ON fs.id = e.server_id`
 
 func scanEvent(row pgx.Row) (Event, error) {
 	var e Event
-	err := row.Scan(&e.ID, &e.TenantID, &e.SiteID, &e.SiteName, &e.ServerID, &e.ServerName, &e.CameraID, &e.CameraName, &e.RemoteID,
+	err := row.Scan(&e.ID, &e.TenantID, &e.SiteID, &e.SiteName, &e.ServerID, &e.ServerName, &e.CameraID, &e.CameraName, &e.CameraLPR, &e.RemoteID,
 		&e.Severity, &e.Labels, &e.SubLabels, &e.Zones, &e.Plates, &e.StartTime, &e.EndTime, &e.Reviewed, &e.HasThumbnail)
 	return e, err
 }
@@ -212,14 +215,18 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 			b.add("e.zones && ?", f.Zones)
 		}
 		if len(f.SubLabels) > 0 {
-			// sub_label carries recognized plate text on LPR cameras (frigatemock.enrich), so
-			// filtering by it is gated the same as the Plate filter above: events.search alone
-			// is not enough to probe it, only lpr.search.
-			subLabelCams, err := c.CameraIDs(ctx, authz.LPRSearch)
+			// sub_label carries recognized plate text only on LPR-capable cameras
+			// (frigatemock.enrich); filtering by it there is gated the same as the Plate filter
+			// above, requiring lpr.search (events.search alone is not enough). On a non-LPR
+			// camera sub_label is an ordinary event field (e.g. a Frigate face-recognition name)
+			// and follows only the normal events.search scoping already applied via `cams` above
+			// (user decision 2026-09-28). c.lpr comes from the cameras join in eventJoins and is
+			// a NOT NULL column, so there is no "unknown" camera to fail open on here.
+			lprSearchCams, err := c.CameraIDs(ctx, authz.LPRSearch)
 			if err != nil {
 				return err
 			}
-			b.add("e.camera_id = ANY(?)", subLabelCams)
+			b.add("(NOT c.lpr OR e.camera_id = ANY(?))", lprSearchCams)
 			b.add("e.sub_labels && ?", f.SubLabels)
 		}
 		if f.Severity != "" {
@@ -257,12 +264,14 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 				return err
 			}
 			if !canPlates[e.CameraID] {
-				// sub_labels can carry plate text on LPR cameras, so they are redacted under
-				// the same lpr.view gate as plates (conservative: sub_label is a generic Frigate
-				// field that could also carry non-plate values such as face names on other
-				// camera types, but this codebase has no such consumer today).
 				e.Plates = []string{}
-				e.SubLabels = []string{}
+				if e.CameraLPR {
+					// sub_labels carry plate text only on LPR-capable cameras, so they are
+					// redacted there under the same lpr.view gate as plates. On a non-LPR camera
+					// sub_label is not plate data (e.g. a face name), so it stays visible to any
+					// actor with events.view (user decision 2026-09-28).
+					e.SubLabels = []string{}
+				}
 			}
 			out.Items = append(out.Items, e)
 		}
@@ -298,7 +307,11 @@ func getEvent(ctx context.Context, tx pgx.Tx, c *access.Checker, p authz.Permiss
 	}
 	if !c.Can(authz.LPRView, access.Camera(cam.TenantID, cam.SiteID, cam.ServerID, cam.ID, cam.GroupIds)) {
 		e.Plates = []string{}
-		e.SubLabels = []string{}
+		if cam.Lpr {
+			// See ListEvents: sub_labels are plate data (and stay redacted) only on LPR-capable
+			// cameras; on other cameras they follow normal events.view (user decision 2026-09-28).
+			e.SubLabels = []string{}
+		}
 	}
 	return e, nil
 }

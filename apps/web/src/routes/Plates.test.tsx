@@ -38,7 +38,10 @@ describe("Plates", () => {
     renderPage(Plates);
 
     expect(await screen.findByText("No hay lecturas que coincidan.")).toBeInTheDocument();
-    fireEvent.change(await screen.findByLabelText("Grupo de cámaras"), { target: { value: "g1" } });
+    // Wait for the "Perimeter" option itself (loaded async from /api/v1/camera-groups), not
+    // just the select element, so fireEvent.change below does not race the option's render.
+    await screen.findByRole("option", { name: "Perimeter" });
+    fireEvent.change(screen.getByLabelText("Grupo de cámaras"), { target: { value: "g1" } });
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
 
     await waitFor(() => {

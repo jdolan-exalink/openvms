@@ -4,15 +4,42 @@ package events_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/bootstrap"
 	"github.com/jdolan-exalink/openvms/internal/events"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
 )
+
+// setSubLabelOnOneEvent directly sets sub_labels on the newest event of camID, bypassing the
+// normal Frigate ingestion path: frigatemock only ever writes sub_label/plate text on LPR-tagged
+// cameras (internal/frigatemock/generator.go, enrich). This simulates the ordinary, non-plate use
+// of sub_label on a non-LPR camera (e.g. a Frigate face-recognition name).
+func setSubLabelOnOneEvent(t *testing.T, env *demofix.Env, camID uuid.UUID, subLabel string) {
+	t.Helper()
+	ctx := context.Background()
+	err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		ct, err := tx.Exec(ctx, `
+UPDATE events SET sub_labels = ARRAY[$1::text]
+WHERE id = (SELECT id FROM events WHERE camera_id = $2 ORDER BY start_time DESC LIMIT 1)`, subLabel, camID)
+		if err != nil {
+			return err
+		}
+		if ct.RowsAffected() != 1 {
+			return fmt.Errorf("expected to update 1 event on camera %s, updated %d", camID, ct.RowsAffected())
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("set sub_label on camera %s: %v", camID, err)
+	}
+}
 
 // firstZoneOnCamera returns a zone carried by an event of camID, as seen with full access.
 // acceso_norte and ruta_1 are both seeded with a zone on every review (demofix.go), so this
@@ -59,7 +86,7 @@ func TestZoneAndSubLabelFilterCorrectness(t *testing.T) {
 	syncer.SyncAll(ctx)
 
 	camA := env.Cameras["frigate-h01/acceso_norte"] // zones: entrada, salida; LPR-enabled
-	camB := env.Cameras["frigate-c01/ruta_1"]        // zone: ingreso; LPR-enabled, different server
+	camB := env.Cameras["frigate-c01/ruta_1"]       // zone: ingreso; LPR-enabled, different server
 
 	zoneA := firstZoneOnCamera(t, env, svc, camA.ID)
 	zoneB := firstZoneOnCamera(t, env, svc, camB.ID)
@@ -257,6 +284,64 @@ func TestZoneAndSubLabelFilterCorrectness(t *testing.T) {
 		}
 		if len(bySubLabel.Items) != 0 {
 			t.Errorf("actor with only events.view filtered by sub_label %q and got %d events, want 0", subLabelA, len(bySubLabel.Items))
+		}
+	})
+
+	// User decision (2026-09-28): sub_label LPR gating applies only to LPR-capable cameras. On a
+	// non-LPR camera, sub_label is an ordinary event field (e.g. a Frigate face-recognition name)
+	// and follows normal events.view/events.search permissions, with no LPR grant required at all.
+	t.Run("sub_label on a non-LPR camera follows normal events permissions, not LPR", func(t *testing.T) {
+		camNonLPR := env.Cameras["frigate-h01/plaza"] // no LPR capability
+		faceLabel := "face-juan-perez"
+		setSubLabelOnOneEvent(t, env, camNonLPR.ID, faceLabel)
+
+		searchOnly, _, err := bootstrap.TenantUser(ctx, env.Store, env.Demo.TenantID, "sublabel-nonlpr-search-only")
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Only events.search - no lpr.search/lpr.view grant at all.
+		grantCameraPermission(t, env, env.Demo.TenantID, searchOnly.UserID, camNonLPR.ID, authz.EventsSearch)
+
+		page, err := svc.ListEvents(ctx, searchOnly, events.Filter{SubLabels: []string{faceLabel}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(page.Items) == 0 {
+			t.Fatalf("actor with events.search (no LPR grant) on non-LPR camera %s could not filter by sub_label %q", camNonLPR.RemoteName, faceLabel)
+		}
+		for _, e := range page.Items {
+			if e.CameraID != camNonLPR.ID {
+				t.Errorf("event %s carries camera %s, want only %s", e.ID, e.CameraID, camNonLPR.ID)
+			}
+			if len(e.SubLabels) == 0 {
+				t.Errorf("event %s sub_labels redacted on a non-LPR camera without any LPR grant, want visible under events.view", e.ID)
+			}
+		}
+
+		viewOnly, _, err := bootstrap.TenantUser(ctx, env.Store, env.Demo.TenantID, "sublabel-nonlpr-view-only")
+		if err != nil {
+			t.Fatal(err)
+		}
+		grantCameraPermission(t, env, env.Demo.TenantID, viewOnly.UserID, camNonLPR.ID, authz.EventsView)
+
+		// events.view alone cannot use the sub_label filter (same escalation as zone), but the
+		// field itself must still be visible on an unfiltered list, unredacted, since it is not
+		// plate data on this camera.
+		unfiltered, err := svc.ListEvents(ctx, viewOnly, events.Filter{CameraIDs: []uuid.UUID{camNonLPR.ID}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, e := range unfiltered.Items {
+			if e.ID == page.Items[0].ID {
+				found = true
+				if len(e.SubLabels) == 0 || e.SubLabels[0] != faceLabel {
+					t.Errorf("event %s sub_labels %v, want visible %q under events.view alone on a non-LPR camera", e.ID, e.SubLabels, faceLabel)
+				}
+			}
+		}
+		if !found {
+			t.Fatalf("actor with events.view on non-LPR camera %s did not see the event carrying sub_label %q", camNonLPR.RemoteName, faceLabel)
 		}
 	})
 }

@@ -7,11 +7,13 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/bootstrap"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
 )
 
@@ -28,6 +30,25 @@ func createCameraGroup(t *testing.T, env *demofix.Env, tenantID uuid.UUID, name 
 	return g.ID
 }
 
+// addForeignGroupMember inserts a camera_group_members row directly, bypassing the normal
+// CreateCameraGroup validation (which refuses a camera belonging to a different tenant than the
+// group). This lets the cross-tenant tests below prove that camera_group_members' own tenant RLS
+// - not merely "the foreign group happens to have no members" - is what keeps a group id from
+// another tenant from ever matching a camera the actor can see.
+func addForeignGroupMember(t *testing.T, env *demofix.Env, groupID, cameraID, tenantID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx,
+			`INSERT INTO camera_group_members (group_id, camera_id, tenant_id) VALUES ($1, $2, $3)`,
+			groupID, cameraID, tenantID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("insert foreign group member: %v", err)
+	}
+}
+
 // TestCameraGroupFilterCorrectness proves the camera_group filter on ListEvents and ListPlates
 // (PRD §44) narrows results to cameras belonging to the given group(s), stays intersected with
 // (never widens) the actor's permitted cameras, and never leaks another tenant's group.
@@ -37,8 +58,8 @@ func TestCameraGroupFilterCorrectness(t *testing.T) {
 	syncer.SyncAll(ctx)
 
 	camA := env.Cameras["frigate-h01/acceso_norte"] // LPR-enabled
-	camB := env.Cameras["frigate-c01/ruta_1"]        // LPR-enabled, different server
-	camC := env.Cameras["frigate-h01/plaza"]         // member of no test group
+	camB := env.Cameras["frigate-c01/ruta_1"]       // LPR-enabled, different server
+	camC := env.Cameras["frigate-h01/plaza"]        // member of no test group
 
 	groupA := createCameraGroup(t, env, env.Demo.TenantID, "group-a", []uuid.UUID{camA.ID})
 	groupAB := createCameraGroup(t, env, env.Demo.TenantID, "group-ab", []uuid.UUID{camA.ID, camB.ID})
@@ -106,21 +127,30 @@ func TestCameraGroupFilterCorrectness(t *testing.T) {
 		}
 	})
 
-	t.Run("events: another tenant's camera_group id yields nothing", func(t *testing.T) {
+	t.Run("events: another tenant's camera_group id yields nothing, even with a real member the actor can see", func(t *testing.T) {
 		tenantB, err := env.Svc.CreateTenant(ctx, env.Admin, "camera-group-cross-tenant-events", "Camera Group Cross Tenant Events")
 		if err != nil {
 			t.Fatal(err)
 		}
-		// What matters is that tenant A cannot use tenant B's group id to find or widen
-		// anything through it; the group's own membership is irrelevant to that.
 		foreignGroup := createCameraGroup(t, env, tenantB.ID, "foreign-group", nil)
+		// Give the foreign (tenant B) group a real membership row pointing at camA, a camera the
+		// scoped actor below can actually see in tenant A. An empty foreign group would make this
+		// test vacuous (zero members trivially yields zero results); this proves camera_group_members'
+		// own tenant RLS, not an empty membership set, is what keeps the filter from leaking camA.
+		addForeignGroupMember(t, env, foreignGroup, camA.ID, tenantB.ID)
 
-		page, err := svc.ListEvents(ctx, env.Admin, events.Filter{CameraGroupIDs: []uuid.UUID{foreignGroup}, Limit: 500})
+		u, _, err := bootstrap.TenantUser(ctx, env.Store, env.Demo.TenantID, "group-cross-tenant-events")
+		if err != nil {
+			t.Fatal(err)
+		}
+		grantCameraPermission(t, env, env.Demo.TenantID, u.UserID, camA.ID, authz.EventsSearch)
+
+		page, err := svc.ListEvents(ctx, u, events.Filter{CameraGroupIDs: []uuid.UUID{foreignGroup}, Limit: 500})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(page.Items) != 0 {
-			t.Errorf("cross-tenant camera_group %s matched %d events, want 0", foreignGroup, len(page.Items))
+			t.Errorf("cross-tenant camera_group %s (with a real member the actor can see) matched %d events, want 0", foreignGroup, len(page.Items))
 		}
 	})
 
@@ -139,19 +169,26 @@ func TestCameraGroupFilterCorrectness(t *testing.T) {
 		}
 	})
 
-	t.Run("plates: another tenant's camera_group id yields nothing", func(t *testing.T) {
+	t.Run("plates: another tenant's camera_group id yields nothing, even with a real member the actor can see", func(t *testing.T) {
 		tenantB, err := env.Svc.CreateTenant(ctx, env.Admin, "camera-group-cross-tenant-plates", "Camera Group Cross Tenant Plates")
 		if err != nil {
 			t.Fatal(err)
 		}
 		foreignGroup := createCameraGroup(t, env, tenantB.ID, "foreign-group-plates", nil)
+		addForeignGroupMember(t, env, foreignGroup, camA.ID, tenantB.ID)
 
-		page, err := svc.ListPlates(ctx, env.Admin, events.PlateFilter{CameraGroupIDs: []uuid.UUID{foreignGroup}, Limit: 500})
+		u, _, err := bootstrap.TenantUser(ctx, env.Store, env.Demo.TenantID, "group-cross-tenant-plates")
+		if err != nil {
+			t.Fatal(err)
+		}
+		grantCameraPermission(t, env, env.Demo.TenantID, u.UserID, camA.ID, authz.LPRView)
+
+		page, err := svc.ListPlates(ctx, u, events.PlateFilter{CameraGroupIDs: []uuid.UUID{foreignGroup}, Limit: 500})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if len(page.Items) != 0 {
-			t.Errorf("cross-tenant camera_group %s matched %d plate reads, want 0", foreignGroup, len(page.Items))
+			t.Errorf("cross-tenant camera_group %s (with a real member the actor can see) matched %d plate reads, want 0", foreignGroup, len(page.Items))
 		}
 	})
 }

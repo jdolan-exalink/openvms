@@ -19,6 +19,7 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 - [x] M3-3: Add `zone` and `sub_label` filters end-to-end (OpenAPI → service SQL → Events UI) plus GIN indexes on `zones`/`sub_labels` (PRD §46). Route: delegated direct.
 - [x] M3-3b: Harden zone/sub_label filters from review findings on commit `195f76a`. Route: delegated direct.
 - [x] M3-4: Add `camera_group` filter to `/events` and `/lpr/reads`. Route: delegated direct.
+- [x] M3-3c: Key sub_label LPR gating on camera LPR capability + review test fixes. Route: delegated direct.
 - [ ] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Route: delegated direct.
 - [ ] M3-6: Web tests for Events and Plates routes (filters, infinite scroll, `lpr.search` gating). Route: delegated direct.
 - [ ] M3-7: Verify LPR ingestion against the real Frigate 0.18; first sync showed events but no plates. Diagnose adapter mapping if plates exist upstream. Route: delegated direct.
@@ -69,6 +70,50 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
   - Web: `apps/web/src/api/queries.ts` `EventFilter`/`PlateFilter` gain `camera_group_id`; `apps/web/src/routes/Events.tsx` and `apps/web/src/routes/Plates.tsx` add a "Grupo de cámaras" `Select` sourced from the existing `cameraGroupsQuery` (`GET /api/v1/camera-groups`, already used elsewhere in the app). RED: `pnpm --filter web exec vitest run src/routes/Events.test.tsx` / `Plates.test.tsx` failed on `findByLabelText("Grupo de cámaras")` with the two `Field`/`Select` blocks temporarily removed. GREEN: same commands pass after restoring them. New file `apps/web/src/routes/Plates.test.tsx` (Plates had no test file yet; full route coverage is M3-6's job, this only covers the new param).
   - Full verification: `go test ./...` PASS; `go test -tags integration ./internal/...` PASS (Docker/testcontainers); `pnpm --filter web test` PASS (4 files / 6 tests); `pnpm typecheck` clean; `make lint` clean; `make generate` re-run, clean after commit.
   - Commit: `7039ec7` (`feat(search): filter events and plate reads by camera group`, not pushed — no remote configured).
+
+- M3-3c: User decision (2026-09-28): sub_label LPR gating (introduced in M3-3b) applies only to
+  cameras with LPR capability. On a non-LPR camera, sub_label is an ordinary event field (e.g. a
+  Frigate face-recognition name) and follows normal `events.view`/`events.search` only; on an
+  LPR-capable camera the existing gating from commit `e59dc1f` is unchanged (filter requires
+  `lpr.search`, visibility requires `lpr.view`).
+  - `internal/events/service.go`: `Event` gained an unexported `CameraLPR bool` (from `cameras.lpr`,
+    already joined via `eventJoins`/`eventColumns`; not exposed through `toEvent`/the API). The
+    `SubLabels` filter clause changed from `e.camera_id = ANY(lprSearchCams)` to
+    `(NOT c.lpr OR e.camera_id = ANY(lprSearchCams))` — an LPR camera still needs `lpr.search`, a
+    non-LPR camera only needs the baseline `events.search` scoping already applied via `cams`.
+    `ListEvents`'s redaction loop and `getEvent` now only blank `SubLabels` when
+    `!lpr.view && cam.LPR`; `Plates` redaction is unchanged (still keyed on `lpr.view` alone).
+    `cameras.lpr` is a `NOT NULL DEFAULT false` column (migration `00002`) populated by inventory
+    sync (`internal/store/queries/inventory.sql` upsert), so there is no literal "unknown" camera
+    to fail open on in this query path; the "treat unknown as LPR" instruction has no code path to
+    attach to today given that schema guarantee.
+  - RED: `go test -tags integration ./internal/events/... -run TestZoneAndSubLabelFilterCorrectness -v`
+    — new subtest `sub_label_on_a_non-LPR_camera_follows_normal_events_permissions,_not_LPR` failed
+    (`could not filter by sub_label "face-juan-perez"` on non-LPR camera `plaza`) before the fix.
+    GREEN: same command, all 9 subtests PASS. Test helper `setSubLabelOnOneEvent` directly sets
+    `sub_labels` on one event of a non-LPR camera via raw SQL (`store.AllTenants` scope), since
+    `frigatemock`'s `enrich` only ever writes sub_label text on LPR-tagged cameras.
+  - Review test fix (a): `internal/events/camera_group_filter_integration_test.go` — the two
+    cross-tenant `camera_group_id` subtests (events and plates) were vacuous (the foreign-tenant
+    group had no members, so "denied" and "empty" were indistinguishable). Added
+    `addForeignGroupMember` (raw insert into `camera_group_members`, `store.AllTenants` scope,
+    bypassing `CreateCameraGroup`'s same-tenant validation) to give the foreign group a real
+    membership row pointing at `camA` (a camera a newly scoped tenant-A actor can see), then assert
+    the scoped actor still gets zero results — proving `camera_group_members`' own tenant RLS, not
+    an empty membership set, is what blocks the leak. Test-only, no RED phase (the underlying
+    isolation was already correct; confirmed by these tests passing unmodified after being added).
+  - Review test fix (b): `apps/web/src/routes/Events.test.tsx` and `Plates.test.tsx` — the
+    camera-group filter tests awaited the `<select>` element (`findByLabelText`) but not the
+    "Perimeter" `<option>` inside it (populated async from `/api/v1/camera-groups`), so
+    `fireEvent.change` could race the option's render. Both now `await screen.findByRole("option",
+    { name: "Perimeter" })` before firing the change event.
+  - OpenAPI: `listEvents` description and the `Event.sub_labels` field description updated to state
+    the LPR-capability-gated semantics; `make generate` re-run twice, byte-identical diff both times.
+  - Full verification: `go test ./...` PASS; `go test -tags integration ./internal/...` PASS
+    (Docker/testcontainers); `pnpm --filter web test` PASS 3/3 runs (4 files / 6 tests each); `pnpm
+    typecheck` clean; `make lint` clean; `make generate` clean after commit.
+  - Commit: `b944930` (`fix(events): gate sub_label by LPR only on LPR-capable cameras`, not
+    pushed — no remote configured).
 
 ## Next step
 M3-5.
