@@ -120,6 +120,11 @@ func TestTenantBrandingAPI(t *testing.T) {
 	if body["owner_name"] != "" || body["has_logo"] != false {
 		t.Errorf("empty branding = %v, want owner_name=\"\" has_logo=false", body)
 	}
+	// PDW-7: a tenant with no branding row yet still answers with the default time zone, not
+	// an empty string.
+	if body["timezone"] != branding.DefaultTimezone {
+		t.Errorf("empty branding timezone = %v, want %s", body["timezone"], branding.DefaultTimezone)
+	}
 
 	// An actor without tenant.manage cannot write branding.
 	code, body = do(t, operatorToken, "PUT", brandingPath, `{"owner_name":"Municipalidad"}`)
@@ -127,15 +132,25 @@ func TestTenantBrandingAPI(t *testing.T) {
 		t.Fatalf("operator PUT branding: %d %v, want 403", code, body)
 	}
 
-	// The platform admin (holds every permission, including tenant.manage) can set it.
+	// The platform admin (holds every permission, including tenant.manage) can set it,
+	// including a non-default time zone (PDW-7).
 	logo := base64.StdEncoding.EncodeToString(testPNG(t))
-	payload := `{"owner_name":"Municipalidad de Helvecia","logo":"` + logo + `","logo_content_type":"image/png"}`
+	payload := `{"owner_name":"Municipalidad de Helvecia","timezone":"Europe/Madrid","logo":"` + logo + `","logo_content_type":"image/png"}`
 	code, body = do(t, env.AdminToken, "PUT", brandingPath, payload)
 	if code != http.StatusOK {
 		t.Fatalf("admin PUT branding: %d %v", code, body)
 	}
 	if body["owner_name"] != "Municipalidad de Helvecia" || body["has_logo"] != true {
 		t.Fatalf("updated branding = %v", body)
+	}
+	if body["timezone"] != "Europe/Madrid" {
+		t.Fatalf("updated branding timezone = %v, want Europe/Madrid", body["timezone"])
+	}
+
+	// An invalid IANA time zone name is rejected (400), not silently accepted or defaulted.
+	code, body = do(t, env.AdminToken, "PUT", brandingPath, `{"timezone":"Not/AZone"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("invalid timezone: %d %v, want 400", code, body)
 	}
 
 	// The logo image itself downloads through the dedicated endpoint.
@@ -181,6 +196,9 @@ func TestTenantBrandingAPI(t *testing.T) {
 	code, body = do(t, operatorToken, "GET", brandingPath, "")
 	if code != http.StatusOK || body["owner_name"] != "" || body["has_logo"] != false {
 		t.Fatalf("branding after delete: %d %v", code, body)
+	}
+	if body["timezone"] != branding.DefaultTimezone {
+		t.Errorf("branding timezone after delete = %v, want %s (reset to default)", body["timezone"], branding.DefaultTimezone)
 	}
 
 	var updated, removed int

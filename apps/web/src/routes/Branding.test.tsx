@@ -19,10 +19,11 @@ function meResponse(...permissions: string[]) {
   });
 }
 
-function brandingResponse(overrides: Partial<{ owner_name: string; has_logo: boolean }> = {}) {
+function brandingResponse(overrides: Partial<{ owner_name: string; timezone: string; has_logo: boolean }> = {}) {
   return json({
     tenant_id: "t1",
     owner_name: "",
+    timezone: "America/Argentina/Buenos_Aires",
     has_logo: false,
     updated_at: "2024-01-01T00:00:00Z",
     ...overrides,
@@ -75,6 +76,39 @@ describe("Branding", () => {
 
     await waitFor(() => {
       expect(putBody).toEqual({ owner_name: "Nueva Municipalidad", remove_logo: false });
+    });
+  });
+
+  // PDW-7: the timezone select shows the tenant's currently configured branding.timezone, and
+  // changing it sends the new IANA name in the PUT body (owner_name is left unsent, since it
+  // was not touched — mirrors the "only send what changed" behavior owner_name/logo already
+  // have).
+  it("shows and saves the configured watermark time zone", async () => {
+    let putBody: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/tenants/t1/branding" && input.method === "PUT") {
+          putBody = await input.json();
+          return brandingResponse({ timezone: "Europe/Madrid" });
+        }
+        if (url.pathname === "/api/v1/tenants/t1/branding") return brandingResponse({ timezone: "Europe/Madrid" });
+        if (url.pathname === "/api/v1/me") return meResponse("tenant.manage");
+        return json({ code: "not_found", message: "not found" }, 404);
+      }),
+    );
+
+    renderPage(Branding);
+
+    const select = await screen.findByLabelText(/Zona horaria/);
+    await waitFor(() => expect(select).toHaveValue("Europe/Madrid"));
+
+    fireEvent.change(select, { target: { value: "America/Argentina/Buenos_Aires" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+
+    await waitFor(() => {
+      expect(putBody).toEqual({ timezone: "America/Argentina/Buenos_Aires", remove_logo: false });
     });
   });
 

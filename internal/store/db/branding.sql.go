@@ -12,7 +12,7 @@ import (
 )
 
 const getTenantBranding = `-- name: GetTenantBranding :one
-SELECT tenant_id, owner_name, logo_key, logo_content_type, updated_at, updated_by FROM tenant_branding WHERE tenant_id = $1
+SELECT tenant_id, owner_name, logo_key, logo_content_type, updated_at, updated_by, timezone FROM tenant_branding WHERE tenant_id = $1
 `
 
 func (q *Queries) GetTenantBranding(ctx context.Context, tenantID uuid.UUID) (TenantBranding, error) {
@@ -25,20 +25,22 @@ func (q *Queries) GetTenantBranding(ctx context.Context, tenantID uuid.UUID) (Te
 		&i.LogoContentType,
 		&i.UpdatedAt,
 		&i.UpdatedBy,
+		&i.Timezone,
 	)
 	return i, err
 }
 
 const upsertTenantBranding = `-- name: UpsertTenantBranding :one
-INSERT INTO tenant_branding (tenant_id, owner_name, logo_key, logo_content_type, updated_by)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO tenant_branding (tenant_id, owner_name, logo_key, logo_content_type, timezone, updated_by)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (tenant_id) DO UPDATE SET
     owner_name = EXCLUDED.owner_name,
     logo_key = EXCLUDED.logo_key,
     logo_content_type = EXCLUDED.logo_content_type,
+    timezone = EXCLUDED.timezone,
     updated_at = now(),
     updated_by = EXCLUDED.updated_by
-RETURNING tenant_id, owner_name, logo_key, logo_content_type, updated_at, updated_by
+RETURNING tenant_id, owner_name, logo_key, logo_content_type, updated_at, updated_by, timezone
 `
 
 type UpsertTenantBrandingParams struct {
@@ -46,6 +48,7 @@ type UpsertTenantBrandingParams struct {
 	OwnerName       string
 	LogoKey         string
 	LogoContentType string
+	Timezone        string
 	UpdatedBy       *uuid.UUID
 }
 
@@ -55,6 +58,7 @@ func (q *Queries) UpsertTenantBranding(ctx context.Context, arg UpsertTenantBran
 		arg.OwnerName,
 		arg.LogoKey,
 		arg.LogoContentType,
+		arg.Timezone,
 		arg.UpdatedBy,
 	)
 	var i TenantBranding
@@ -65,6 +69,7 @@ func (q *Queries) UpsertTenantBranding(ctx context.Context, arg UpsertTenantBran
 		&i.LogoContentType,
 		&i.UpdatedAt,
 		&i.UpdatedBy,
+		&i.Timezone,
 	)
 	return i, err
 }

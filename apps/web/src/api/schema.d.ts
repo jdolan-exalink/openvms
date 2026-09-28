@@ -973,6 +973,12 @@ export interface components {
             /** Format: uuid */
             tenant_id: string;
             owner_name: string;
+            /**
+             * @description IANA time zone name used to render the watermark's date/time (PDW-7). Defaults to
+             *     America/Argentina/Buenos_Aires when the tenant has not configured one explicitly.
+             * @example America/Argentina/Buenos_Aires
+             */
+            timezone: string;
             has_logo: boolean;
             logo_content_type?: string;
             /** Format: date-time */
@@ -980,6 +986,11 @@ export interface components {
         };
         TenantBrandingInput: {
             owner_name?: string;
+            /**
+             * @description IANA time zone name (validated server-side); omit to keep the current value.
+             * @example America/Argentina/Buenos_Aires
+             */
+            timezone?: string;
             /**
              * Format: byte
              * @description Base64-encoded PNG or JPEG, at most 512 KB decoded.

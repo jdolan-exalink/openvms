@@ -12,6 +12,14 @@ import (
 	"syscall"
 	"time"
 
+	// PDW-7: tenant branding lets an operator pick any IANA time zone for the watermark
+	// (internal/branding.ResolveLocation, time.LoadLocation). This binary runs distroless
+	// (gcr.io/distroless/static-debian12, see deploy/docker/go.Dockerfile's "runtime" target),
+	// which ships no /usr/share/zoneinfo at all, so time.LoadLocation would fail for every
+	// zone but "UTC"/"Local" without this: it embeds the full IANA tzdata into the binary,
+	// making LoadLocation work regardless of the OS.
+	_ "time/tzdata"
+
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"

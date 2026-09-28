@@ -11,18 +11,47 @@ export function fmtTime(iso: string | Date): string {
 }
 
 /**
- * fmtWatermarkTimestamp renders an unambiguous UTC timestamp for the plate detail watermark
- * (PDW-2): same text on screen (CSS overlay) and burned into downloads, so it is always UTC
- * with an explicit "+00:00" offset rather than the viewer's local time zone, which would
- * differ between the person viewing and the file downloaded from them.
+ * DEFAULT_WATERMARK_TIMEZONE mirrors internal/branding.DefaultTimezone (Go): used before
+ * brandingQuery has loaded (or for a tenant with no branding row yet, which the API itself
+ * already defaults server-side) so the overlay never renders with an undefined time zone.
  */
-export function fmtWatermarkTimestamp(iso: string): string {
+export const DEFAULT_WATERMARK_TIMEZONE = "America/Argentina/Buenos_Aires";
+
+/**
+ * fmtWatermarkTimestamp renders the plate detail watermark's date/time (PDW-2/PDW-7): same
+ * text on screen (CSS overlay) and burned into downloads (internal/watermark.Text), in the
+ * tenant's configured IANA time zone (branding.timezone), with its real numeric UTC offset —
+ * e.g. "2026-09-28 10:05:30 -03:00" — computed from the actual tz database (via Intl's
+ * "longOffset" time zone name), not hardcoded, so it reflects DST correctly for zones that
+ * observe it. This must match Go's watermark.Text byte-for-byte for the same instant/zone,
+ * since the point of a watermark is that what you see is what gets burned in.
+ */
+export function fmtWatermarkTimestamp(iso: string, timeZone: string): string {
   const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())} ` +
-    `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC+00:00`
-  );
+
+  const dateTimeParts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+  const part = (type: string) => dateTimeParts.find((p) => p.type === type)?.value ?? "";
+  // Some engines render midnight as hour "24" with hour12:false; normalize to "00" so the
+  // date/time stay a valid ISO-shaped local timestamp (matches Go's time.Format, which never
+  // does this).
+  const hour = part("hour") === "24" ? "00" : part("hour");
+  const datePart = `${part("year")}-${part("month")}-${part("day")}`;
+  const timePart = `${hour}:${part("minute")}:${part("second")}`;
+
+  const offsetParts = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "longOffset" }).formatToParts(d);
+  const rawOffset = offsetParts.find((p) => p.type === "timeZoneName")?.value ?? "GMT+00:00";
+  const offset = rawOffset.replace("GMT", "") || "+00:00";
+
+  return `${datePart} ${timePart} ${offset}`;
 }
 
 export function fmtDuration(startIso: string, endIso?: string | null): string {

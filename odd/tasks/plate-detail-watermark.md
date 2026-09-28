@@ -601,8 +601,148 @@ feature extends.
   session combined verification pass).
 - Commit: pending (this task's own commit, created immediately after this document update).
 
+### PDW-7: configurable per-tenant watermark timezone
+- Route: delegated direct (writer: this session, same continued session as PDW-1..6).
+- **Contract**: `packages/api-contract/openapi.yaml` — `TenantBranding` gains required
+  `timezone` (string), `TenantBrandingInput` gains optional `timezone`. `make generate`
+  (`go generate ./...` + `pnpm generate`) re-run twice after the final state, stable file list
+  both times.
+- **Migration** `migrations/00012_tenant_branding_timezone.sql`: `ALTER TABLE tenant_branding
+  ADD COLUMN timezone text NOT NULL DEFAULT 'America/Argentina/Buenos_Aires'` (Down: `DROP
+  COLUMN`). sqlc query `UpsertTenantBranding` (`internal/store/queries/branding.sql`) updated
+  to insert/update the new column.
+- **`internal/branding` (service.go)**: `Branding.Timezone string`; new `DefaultTimezone`
+  constant and `ResolveLocation(tz string) *time.Location` (empty → `DefaultTimezone`; a name
+  that fails `time.LoadLocation` → `time.UTC`, defensive — should be unreachable once
+  `Update`'s own validation runs and tzdata is embedded, but a watermark download must never
+  fail outright over a time zone lookup). `Get`'s zero-value `Branding` (no row configured
+  yet) now carries `Timezone: DefaultTimezone`. `Input.Timezone *string`; `Update` validates it
+  (trim, reject empty, `time.LoadLocation` must succeed) before ever reaching the database,
+  same synchronous-validation shape as the existing owner-name-length and
+  remove-logo-plus-logo checks. `Delete` resets `timezone` to `DefaultTimezone` alongside
+  clearing owner name/logo.
+- **`internal/watermark/text.go`**: `Text(seenAt time.Time, ownerName string, loc
+  *time.Location) string` (was `Text(seenAt, ownerName)`, always UTC). Renders
+  `seenAt.In(loc)` with Go's `"2006-01-02 15:04:05 -07:00"` layout — a real, explicit numeric
+  offset computed by the Go runtime's own (now embedded, see tzdata below) IANA tz database,
+  not a fixed `"UTC+00:00"` placeholder. `loc == nil` still defaults to UTC (used by one
+  existing test's owner-less case, and as a safe zero-value).
+- **Callers updated**: `internal/media/gateway.go`'s `burnPhotoWatermark` (photo download,
+  PDW-3) and `internal/clipwatermark/service.go`'s `CreateJob` (clip job, frozen at request
+  time, PDW-4) both now call `watermark.Text(lr.SeenAt, b.OwnerName,
+  branding.ResolveLocation(b.Timezone))` instead of the old two-argument call — the tenant's
+  configured zone flows into both burn-in paths identically, no divergence between them.
+- **tzdata embedding**: `apps/api/main.go` and `apps/worker/main.go` both gained a blank
+  `import _ "time/tzdata"`, with a doc comment on each explaining why: the api image's runtime
+  stage is `gcr.io/distroless/static-debian12` (no `/usr/share/zoneinfo` at all — distroless
+  ships nothing beyond the binary and CA certs), and the worker's `runtime-ffmpeg` stage
+  (`debian:bookworm-slim` + `ffmpeg`, no `tzdata` package explicitly installed) is not
+  guaranteed to ship it either; embedding the full IANA database into both binaries makes
+  `time.LoadLocation` work regardless of what the OS image ships. This was **not** re-verified
+  by exec-ing into an actual running distroless container (distroless has no shell to exec
+  into at all), and is instead verified functionally by calling the live (currently running,
+  pre-this-session) `api`/`worker` containers' branding/photo endpoints with a non-default
+  zone after the final `make up` rebuild — see that section below — the strongest available
+  proof, since it exercises the actual built image end to end rather than inspecting its
+  filesystem.
+- **Web**: `apps/web/src/lib/format.ts`'s `fmtWatermarkTimestamp(iso, timeZone)` (was
+  `fmtWatermarkTimestamp(iso)`, always UTC) — renders the date/time via
+  `Intl.DateTimeFormat(..., { timeZone, hour12: false, ... }).formatToParts` and the numeric
+  offset via a second `Intl.DateTimeFormat(..., { timeZone, timeZoneName: "longOffset" })`
+  call (yields `"GMT-03:00"`/`"GMT+00:00"`; stripping `"GMT"` gives the same `±HH:MM` shape Go
+  produces). New export `DEFAULT_WATERMARK_TIMEZONE` mirrors `branding.DefaultTimezone`.
+  `apps/web/src/components/PlateDetailModal.tsx`: `WatermarkOverlay` and the "Fecha" field
+  both take a `timezone` prop, sourced from `branding.data?.timezone ??
+  DEFAULT_WATERMARK_TIMEZONE`. `apps/web/src/routes/Branding.tsx`: new "Zona horaria" field
+  (a `<Select>` populated via `Intl.supportedValuesOf("timeZone")`), gated the same way as the
+  existing owner-name field (disabled without `tenant.manage`), sent in the PUT body only when
+  changed (same "send only what changed" pattern as `owner_name`).
+  - **Real bug found and fixed during this task's own RED/GREEN cycle** (not a pre-existing
+    finding, a fresh one from building the `<select>`): `Intl.supportedValuesOf("timeZone")`
+    only enumerates ICU's *canonical* zone identifiers — it does **not** include
+    `"America/Argentina/Buenos_Aires"` itself (ICU's canonical form for that offset is
+    `"America/Buenos_Aires"`), even though the alias is a perfectly valid IANA name that both
+    `Intl.DateTimeFormat` and Go's `time.LoadLocation` accept directly (confirmed with a
+    one-line check of each). Discovered via this task's own new integration test (below):
+    setting the select to `America/Argentina/Buenos_Aires` — the *task-specified default* —
+    silently sent `timezone: ""` in the PUT body, because setting a `<select>`'s `.value` to a
+    string with no matching `<option>` resets it to `""` per the HTML spec. Fixed by having
+    `timeZoneOptions()` always union in `current` and `DEFAULT_WATERMARK_TIMEZONE`, regardless
+    of whether the canonical enumeration includes them.
+- **RED/GREEN #1** (`internal/watermark/photo_test.go`, rewritten `TestText` +
+  new `TestTextComputesDSTOffsetFromRealTZData`): written against the new 3-arg signature
+  before it existed. RED: `git stash push -- internal/watermark/text.go && go test
+  ./internal/watermark/... -run TestText -v` — build failure (`too many arguments in call to
+  Text`) against the pre-PDW-7 `text.go`. GREEN: `git stash pop`, same command, all 6 subtests
+  pass, including Europe/Madrid rendering `+01:00` in January and `+02:00` in July for the
+  same code path — proving the offset is computed from real tzdata, not hardcoded.
+- **RED/GREEN #2** (`internal/branding/service_test.go`, new `TestUpdateRejectsInvalidTimezone`
+  + `TestResolveLocation`): written against `Input.Timezone`/`ResolveLocation`/
+  `DefaultTimezone` before any of them existed. RED: `go test ./internal/branding/... -run
+  'TestUpdateRejectsInvalidTimezone|TestResolveLocation' -v` — compile failure (`unknown field
+  Timezone in struct literal`, `undefined: ResolveLocation`, `undefined: DefaultTimezone`).
+  GREEN: same command after implementing, all pass (rejects a non-IANA name, empty, and
+  whitespace-only; `ResolveLocation` defaults empty to `DefaultTimezone`, degrades an invalid
+  name to UTC, passes a valid name through).
+- **RED/GREEN #3** (web, `apps/web/src/lib/format.test.ts`, new file): written against the new
+  2-arg `fmtWatermarkTimestamp` signature before the implementation changed. RED: `git stash
+  push -- apps/web/src/lib/format.ts && pnpm --filter web exec vitest run
+  src/lib/format.test.ts` — 3 of 4 tests failed (old code ignored the new `timeZone` argument
+  entirely and always returned the fixed `"... UTC+00:00"` string). GREEN: `git stash pop`,
+  same command, all 4 pass.
+- **RED/GREEN #4** (web, `apps/web/src/components/PlateDetailModal.test.tsx`, new test
+  "renders the watermark timestamp in the tenant's configured time zone"): RED via `git stash
+  push -- apps/web/src/components/PlateDetailModal.tsx && pnpm --filter web exec vitest run
+  src/components/PlateDetailModal.test.tsx -t "configured time zone"` — failed (old
+  single-argument call site rendered `"2024-01-01 10:00:00 +00:00"`, not the expected Madrid
+  `"...11:00:00 +01:00"`). GREEN: `git stash pop`, same command passes. This test run also
+  surfaced a genuine test-authoring issue (not an app bug): the "Fecha" `dd` and both overlay
+  `span`s render the identical string when `ownerName` is empty, so an unscoped
+  `findByText` threw "found multiple elements" — fixed by scoping with `{ selector: "dd" }` /
+  `{ selector: "span" }`, the same fix shape PDW-2's own doc already used for this exact
+  ambiguity.
+- **RED/GREEN #5** (web, `apps/web/src/routes/Branding.test.tsx`, new test "shows and saves
+  the configured watermark time zone"): RED (no select existed yet): `pnpm --filter web exec
+  vitest run src/routes/Branding.test.tsx` — failed (`findByLabelText(/Zona horaria/)` timed
+  out). First GREEN attempt (the `<select>` from `Intl.supportedValuesOf` alone, no union with
+  `current`/default) still failed — this is the real bug described above, caught by this very
+  test, not a separate contrived RED — fixed by the `timeZoneOptions` union fix. Final GREEN:
+  same command, all 4 subtests pass.
+- **Existing tests updated for the new format** (not new coverage, a mechanical consequence of
+  the timestamp format change): `apps/web/src/routes/Plates.test.tsx`'s
+  "opens the plate detail modal..." test's branding stub gained `timezone:
+  "America/Argentina/Buenos_Aires"` and its expected overlay text changed from `"2024-01-01
+  10:00:00 UTC+00:00"` to `"2024-01-01 07:00:00 -03:00"` (10:00 UTC in a fixed -03:00 zone).
+  Ran before/after to confirm it would have failed unmodified against the new `format.ts`
+  (UTC+00:00 no longer appears anywhere) and passes with the update.
+- **Integration** (`internal/api/branding_integration_test.go`, extended
+  `TestTenantBrandingAPI`): empty branding now asserts `timezone == branding.DefaultTimezone`;
+  the admin PUT now also sets `timezone: "Europe/Madrid"` and asserts it round-trips; a new
+  assertion PUTs `{"timezone":"Not/AZone"}` and expects 400; DELETE now also asserts
+  `timezone` resets to `DefaultTimezone`. Non-vacuousness proven by targeted mutation (not a
+  full revert, since half the repo depends on the new `branding.Branding.Timezone` field and
+  won't build without it): temporarily hardcoded `toTenantBranding` to always emit
+  `Timezone: "BROKEN"`. RED: `go test -tags integration ./internal/api/... -run
+  TestTenantBrandingAPI -v` — failed on both new timezone assertions (`empty branding timezone
+  = BROKEN, want America/Argentina/Buenos_Aires`; `updated branding timezone = BROKEN, want
+  Europe/Madrid`). GREEN: reverted, same command passes in full (5.1s, includes the
+  logo/audit/cross-tenant assertions from PDW-1, unaffected).
+- **Full verification**: `go build ./...` clean; `go vet ./...` clean; `golangci-lint run
+  ./...` — 0 issues; `go test ./...` PASS (all packages); `go test -tags integration
+  ./internal/...` PASS (all packages, Docker/testcontainers, full re-run); `go test -race
+  ./...` PASS; `pnpm --filter web test` PASS (14 files / 63 tests); `pnpm typecheck` clean;
+  `pnpm lint` clean; `make generate` (`go generate ./...` + `pnpm generate`) re-run twice,
+  stable `git status` both times (contract, sqlc, and openapi-typescript outputs all
+  regenerate identically).
+- Deviation/decision documented inline above (not a stop-worthy product decision, a
+  discovered-during-implementation correctness fix): the `<select>`'s option list is the union
+  of `Intl.supportedValuesOf("timeZone")` with the tenant's current value and the default,
+  rather than the canonical list alone, because the canonical list omits the task's own
+  specified default zone name.
+- Commit: pending (this task's own commit, created immediately after this document update).
+
 ## Next step
-PDW-1 through PDW-6 are implemented and committed on `feat/plate-detail-watermark` (not
-pushed). Remaining: PDW-7 (configurable timezone) and PDW-8 (modal tabs + timestamp
-confirmation), then a final combined verification pass and a single `make up` at the very end
-to confirm the stack deploys and the new migration(s) applied.
+PDW-1 through PDW-7 are implemented and committed on `feat/plate-detail-watermark` (not
+pushed). Remaining: PDW-8 (modal tabs + timestamp confirmation), then a final combined
+verification pass and a single `make up` at the very end to confirm the stack deploys and the
+new migrations applied.

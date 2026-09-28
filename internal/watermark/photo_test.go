@@ -24,23 +24,59 @@ func solidJPEG(t *testing.T, w, h int, c color.Color) []byte {
 	return buf.Bytes()
 }
 
+func mustLoadLocation(t *testing.T, name string) *time.Location {
+	t.Helper()
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		t.Fatalf("time.LoadLocation(%q): %v (tzdata missing? see PDW-7's time/tzdata import)", name, err)
+	}
+	return loc
+}
+
+// TestText covers PDW-7: seenAt is rendered in the given *time.Location with its real numeric
+// UTC offset, not fixed UTC — including a nil location (defaults to UTC, e.g. a tenant with
+// no branding row at all).
 func TestText(t *testing.T) {
-	seenAt := time.Date(2026, 9, 28, 13, 5, 30, 0, time.FixedZone("ART", -3*3600))
+	seenAt := time.Date(2026, 9, 28, 16, 5, 30, 0, time.UTC) // 2026-09-28T16:05:30Z
+
 	tests := []struct {
 		name      string
 		ownerName string
+		loc       *time.Location
 		want      string
 	}{
-		{"with owner", "Municipalidad de Helvecia", "2026-09-28 16:05:30 UTC+00:00 · Municipalidad de Helvecia"},
-		{"empty owner", "", "2026-09-28 16:05:30 UTC+00:00"},
-		{"whitespace-only owner", "   ", "2026-09-28 16:05:30 UTC+00:00"},
+		{"UTC (nil location)", "Municipalidad de Helvecia", nil, "2026-09-28 16:05:30 +00:00 · Municipalidad de Helvecia"},
+		{"empty owner", "", mustLoadLocation(t, "UTC"), "2026-09-28 16:05:30 +00:00"},
+		{"whitespace-only owner", "   ", mustLoadLocation(t, "UTC"), "2026-09-28 16:05:30 +00:00"},
+		// America/Argentina/Buenos_Aires has been a fixed -03:00 with no DST since 2009: this
+		// is PDW-7's own documented default zone.
+		{"Buenos Aires (no DST)", "Municipalidad de Helvecia", mustLoadLocation(t, "America/Argentina/Buenos_Aires"), "2026-09-28 13:05:30 -03:00 · Municipalidad de Helvecia"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := Text(seenAt, tt.ownerName); got != tt.want {
+			if got := Text(seenAt, tt.ownerName, tt.loc); got != tt.want {
 				t.Errorf("Text() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// TestTextComputesDSTOffsetFromRealTZData covers PDW-7's own explicit "prove the offset is
+// computed, not hardcoded" requirement: Europe/Madrid is +01:00 (CET) in winter and +02:00
+// (CEST) in summer. Both instants below are the *same* UTC instant class rendered through the
+// same *time.Location — if the offset were ever hardcoded (e.g. copy-pasted from the zone's
+// "standard" offset) this would fail for one of the two seasons.
+func TestTextComputesDSTOffsetFromRealTZData(t *testing.T) {
+	madrid := mustLoadLocation(t, "Europe/Madrid")
+
+	winter := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
+	if got, want := Text(winter, "", madrid), "2026-01-15 13:00:00 +01:00"; got != want {
+		t.Errorf("winter (CET) Text() = %q, want %q", got, want)
+	}
+
+	summer := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	if got, want := Text(summer, "", madrid), "2026-07-15 14:00:00 +02:00"; got != want {
+		t.Errorf("summer (CEST) Text() = %q, want %q", got, want)
 	}
 }
 

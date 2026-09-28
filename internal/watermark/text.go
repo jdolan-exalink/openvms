@@ -11,11 +11,17 @@ import (
 	"time"
 )
 
-// Text returns "<UTC date> <UTC time> UTC+00:00[ · <owner name>]" for seenAt/ownerName. UTC
-// with an explicit offset is always unambiguous, unlike a bare local time, and needs no
-// extra data (PlateRead carries no time zone field); see the ODD doc (PDW-2) for the reasoning.
-func Text(seenAt time.Time, ownerName string) string {
-	ts := seenAt.UTC().Format("2006-01-02 15:04:05") + " UTC+00:00"
+// Text returns "<local date> <local time> <±HH:MM>[ · <owner name>]" for seenAt/ownerName,
+// rendered in loc (PDW-7: the tenant's configured IANA time zone, resolved by
+// branding.ResolveLocation — nil falls back to UTC). The numeric offset is always explicit
+// (Go's "-07:00" layout verb), so the timestamp stays unambiguous like PDW-2's original
+// UTC-only design, but now shows the real local time and its real offset — including DST,
+// computed from loc's own transition rules, never hardcoded — instead of always UTC+00:00.
+func Text(seenAt time.Time, ownerName string, loc *time.Location) string {
+	if loc == nil {
+		loc = time.UTC
+	}
+	ts := seenAt.In(loc).Format("2006-01-02 15:04:05 -07:00")
 	ownerName = strings.TrimSpace(ownerName)
 	if ownerName == "" {
 		return ts

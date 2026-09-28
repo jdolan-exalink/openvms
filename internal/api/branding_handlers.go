@@ -9,7 +9,7 @@ import (
 )
 
 func toTenantBranding(b branding.Branding) gen.TenantBranding {
-	out := gen.TenantBranding{TenantId: b.TenantID, OwnerName: b.OwnerName, HasLogo: b.HasLogo, UpdatedAt: b.UpdatedAt}
+	out := gen.TenantBranding{TenantId: b.TenantID, OwnerName: b.OwnerName, Timezone: b.Timezone, HasLogo: b.HasLogo, UpdatedAt: b.UpdatedAt}
 	if b.LogoContentType != "" {
 		out.LogoContentType = &b.LogoContentType
 	}
@@ -37,7 +37,7 @@ func (h *Handlers) UpdateTenantBranding(ctx context.Context, r gen.UpdateTenantB
 	if body == nil {
 		body = &gen.UpdateTenantBrandingJSONRequestBody{}
 	}
-	in := branding.Input{OwnerName: body.OwnerName, RemoveLogo: body.RemoveLogo != nil && *body.RemoveLogo}
+	in := branding.Input{OwnerName: body.OwnerName, Timezone: body.Timezone, RemoveLogo: body.RemoveLogo != nil && *body.RemoveLogo}
 	if body.Logo != nil {
 		in.Logo = *body.Logo
 	}

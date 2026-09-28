@@ -39,6 +39,30 @@ const (
 // MaxLogoBytes limits the uploaded logo image, validated server-side.
 const MaxLogoBytes = 512 << 10 // 512 KB
 
+// DefaultTimezone is used when a tenant has not configured a watermark time zone explicitly:
+// a missing tenant_branding row (Get's zero-value Branding), or an explicit clear (Delete).
+// America/Argentina/Buenos_Aires is this deployment's home market (PDW-7); the DB column
+// itself also defaults to this value (migrations/00012_tenant_branding_timezone.sql) for any
+// row Update creates without an explicit timezone.
+const DefaultTimezone = "America/Argentina/Buenos_Aires"
+
+// ResolveLocation resolves tz (an IANA name, expected already validated by Update) to a
+// *time.Location: an empty tz (Get's zero-value Branding before any row exists) resolves to
+// DefaultTimezone, and a name that fails to load falls back to time.UTC — should be
+// unreachable once Update's own validation is in place and time/tzdata is embedded in the
+// api/worker binaries (see apps/api, apps/worker main packages), but a watermark download
+// must never fail outright over a time zone lookup.
+func ResolveLocation(tz string) *time.Location {
+	if tz == "" {
+		tz = DefaultTimezone
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.UTC
+	}
+	return loc
+}
+
 // MaxLogoPixels bounds the logo's *declared* pixel count (width * height), independent of its
 // encoded byte size. PDW-6 finding: image.DecodeConfig only reads the header, so a highly
 // compressible solid-color PNG can declare an enormous width/height while staying well under
@@ -72,8 +96,11 @@ func invalid(format string, args ...any) error {
 
 // Branding is one tenant's configured owner branding.
 type Branding struct {
-	TenantID        uuid.UUID
-	OwnerName       string
+	TenantID  uuid.UUID
+	OwnerName string
+	// Timezone is the IANA name used to render the watermark's date/time (PDW-7); always a
+	// valid, loadable name — see ResolveLocation.
+	Timezone        string
 	HasLogo         bool
 	LogoContentType string
 	UpdatedAt       time.Time
@@ -85,7 +112,7 @@ func logoKey(tenantID uuid.UUID) string {
 
 func toBranding(row db.TenantBranding) Branding {
 	return Branding{
-		TenantID: row.TenantID, OwnerName: row.OwnerName,
+		TenantID: row.TenantID, OwnerName: row.OwnerName, Timezone: row.Timezone,
 		HasLogo: row.LogoKey != "", LogoContentType: row.LogoContentType, UpdatedAt: row.UpdatedAt,
 	}
 }
@@ -129,7 +156,7 @@ func (s *Service) Get(ctx context.Context, actor authz.Actor, tenantID uuid.UUID
 	if err := authorizeTenant(actor, tenantID); err != nil {
 		return Branding{}, err
 	}
-	out := Branding{TenantID: tenantID}
+	out := Branding{TenantID: tenantID, Timezone: DefaultTimezone}
 	err := s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
 		row, ok, err := getRow(ctx, q, tenantID)
 		if err != nil {
@@ -171,7 +198,10 @@ func (s *Service) Logo(ctx context.Context, actor authz.Actor, tenantID uuid.UUI
 // Input is a partial update: nil/zero fields keep the current value. RemoveLogo clears the
 // logo regardless of Logo/LogoContentType.
 type Input struct {
-	OwnerName       *string
+	OwnerName *string
+	// Timezone is an IANA name, validated by Update (time.LoadLocation must succeed); nil
+	// keeps the current value (or DefaultTimezone if none is set yet).
+	Timezone        *string
 	Logo            []byte
 	LogoContentType string
 	RemoveLogo      bool
@@ -219,6 +249,16 @@ func (s *Service) Update(ctx context.Context, actor authz.Actor, tenantID uuid.U
 		}
 		in.OwnerName = &trimmed
 	}
+	if in.Timezone != nil {
+		trimmed := strings.TrimSpace(*in.Timezone)
+		if trimmed == "" {
+			return Branding{}, invalid("timezone is required")
+		}
+		if _, err := time.LoadLocation(trimmed); err != nil {
+			return Branding{}, invalid("%q is not a valid IANA time zone", trimmed)
+		}
+		in.Timezone = &trimmed
+	}
 	if in.RemoveLogo && len(in.Logo) > 0 {
 		return Branding{}, invalid("cannot set and remove the logo in the same request")
 	}
@@ -241,6 +281,13 @@ func (s *Service) Update(ctx context.Context, actor authz.Actor, tenantID uuid.U
 		if in.OwnerName != nil {
 			ownerName = *in.OwnerName
 		}
+		timezone := current.Timezone
+		if timezone == "" {
+			timezone = DefaultTimezone
+		}
+		if in.Timezone != nil {
+			timezone = *in.Timezone
+		}
 		logoKeyVal, logoContentType := current.LogoKey, current.LogoContentType
 		switch {
 		case in.RemoveLogo:
@@ -251,12 +298,12 @@ func (s *Service) Update(ctx context.Context, actor authz.Actor, tenantID uuid.U
 		}
 		row, err := q.UpsertTenantBranding(ctx, db.UpsertTenantBrandingParams{
 			TenantID: tenantID, OwnerName: ownerName, LogoKey: logoKeyVal, LogoContentType: logoContentType,
-			UpdatedBy: &actor.UserID,
+			Timezone: timezone, UpdatedBy: &actor.UserID,
 		})
 		if err != nil {
 			return store.Classify(err)
 		}
-		details := map[string]any{"owner_name": ownerName, "has_logo": logoKeyVal != ""}
+		details := map[string]any{"owner_name": ownerName, "has_logo": logoKeyVal != "", "timezone": timezone}
 		b, _ := json.Marshal(details)
 		if err := q.InsertAudit(ctx, db.InsertAuditParams{
 			TenantID: &tenantID, ActorID: &actor.UserID, ActorName: actor.Username, Action: ActionBrandingUpdated,
@@ -292,7 +339,7 @@ func (s *Service) Delete(ctx context.Context, actor authz.Actor, tenantID uuid.U
 			return err
 		}
 		if _, err := q.UpsertTenantBranding(ctx, db.UpsertTenantBrandingParams{
-			TenantID: tenantID, OwnerName: "", LogoKey: "", LogoContentType: "", UpdatedBy: &actor.UserID,
+			TenantID: tenantID, OwnerName: "", LogoKey: "", LogoContentType: "", Timezone: DefaultTimezone, UpdatedBy: &actor.UserID,
 		}); err != nil {
 			return store.Classify(err)
 		}

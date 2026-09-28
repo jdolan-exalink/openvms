@@ -124,7 +124,7 @@ func (s *Service) CreateJob(ctx context.Context, actor authz.Actor, readID uuid.
 		s.Log.WarnContext(ctx, "load branding for clip watermark job", "error", err)
 		b = branding.Branding{}
 	}
-	text := watermark.Text(lr.SeenAt, b.OwnerName)
+	text := watermark.Text(lr.SeenAt, b.OwnerName, branding.ResolveLocation(b.Timezone))
 
 	var row db.ClipWatermarkJob
 	err = s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {

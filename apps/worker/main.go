@@ -18,6 +18,14 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	// PDW-7: the clip watermark job (internal/clipwatermark) burns the tenant's configured
+	// IANA time zone into the watermark text (internal/branding.ResolveLocation,
+	// time.LoadLocation). This binary's runtime image (deploy/docker/go.Dockerfile's
+	// runtime-ffmpeg target, debian:bookworm-slim) does not install the tzdata package, so
+	// /usr/share/zoneinfo is not guaranteed to exist there either; embedding tzdata makes
+	// LoadLocation work regardless of what the OS image ships, matching apps/api.
+	_ "time/tzdata"
+
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/inventory"

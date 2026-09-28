@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { brandingQuery, meQuery } from "@/api/queries";
 import { Button, ErrorNote } from "@/components/ui";
-import { fmtWatermarkTimestamp } from "@/lib/format";
+import { DEFAULT_WATERMARK_TIMEZONE, fmtWatermarkTimestamp } from "@/lib/format";
 import { can } from "@/lib/perm";
 import { Modal } from "./Modal";
 
@@ -66,14 +66,28 @@ function ClipWatermarkDownload({ readId }: { readId: string }) {
 /**
  * WatermarkOverlay renders the same date/time + owner name/logo shown burned into a
  * download (PDW-3/PDW-4, Go image/draw and ffmpeg drawtext respectively) as a CSS overlay
- * over the on-screen photo/clip — no re-encode, so it costs nothing to render.
+ * over the on-screen photo/clip — no re-encode, so it costs nothing to render. timezone
+ * (PDW-7) must be the tenant's configured branding.timezone (already defaulted server-side to
+ * DefaultTimezone), so the on-screen text matches the burned-in file exactly.
  */
-function WatermarkOverlay({ tenantId, hasLogo, ownerName, seenAt }: { tenantId: string; hasLogo: boolean; ownerName: string; seenAt: string }) {
+function WatermarkOverlay({
+  tenantId,
+  hasLogo,
+  ownerName,
+  seenAt,
+  timezone,
+}: {
+  tenantId: string;
+  hasLogo: boolean;
+  ownerName: string;
+  seenAt: string;
+  timezone: string;
+}) {
   return (
     <div className="pointer-events-none absolute top-0 left-0 flex items-center gap-1.5 bg-black/60 px-2 py-1 text-xs text-white">
       {hasLogo && <img src={`/api/v1/tenants/${tenantId}/branding/logo`} alt="" className="h-4 w-4 object-contain" />}
       <span>
-        {fmtWatermarkTimestamp(seenAt)}
+        {fmtWatermarkTimestamp(seenAt, timezone)}
         {ownerName ? ` · ${ownerName}` : ""}
       </span>
     </div>
@@ -99,6 +113,11 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
   const canRequestClip = canViewClip && can(me.data, "exports.create");
   const ownerName = branding.data?.owner_name ?? "";
   const hasLogo = branding.data?.has_logo ?? false;
+  // PDW-7: the tenant's configured watermark time zone; the API already defaults it
+  // server-side (branding.DefaultTimezone) once a row exists, but before brandingQuery has
+  // loaded (or for a tenant with no row at all) this local fallback keeps the overlay from
+  // ever rendering with an undefined time zone.
+  const timezone = branding.data?.timezone ?? DEFAULT_WATERMARK_TIMEZONE;
 
   return (
     <Modal title={`Patente ${read.plate_normalized}`} onClose={onClose}>
@@ -106,7 +125,7 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
           <div>
             <dt className="text-xs text-muted">Fecha</dt>
-            <dd>{fmtWatermarkTimestamp(read.seen_at)}</dd>
+            <dd>{fmtWatermarkTimestamp(read.seen_at, timezone)}</dd>
           </div>
           <div>
             <dt className="text-xs text-muted">Cámara</dt>
@@ -129,7 +148,7 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
               alt={`Foto de la lectura de patente ${read.plate_normalized}`}
               className="w-full"
             />
-            <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} />
+            <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
           </div>
         ) : (
           <p className="text-sm text-muted">No tenés permiso para ver la foto de esta lectura.</p>
@@ -145,7 +164,7 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
             <video controls preload="metadata" className="w-full bg-black" src={`/media/v1/lpr/reads/${read.id}/clip.mp4`}>
               Tu navegador no puede reproducir este video.
             </video>
-            <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} />
+            <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
           </div>
         ) : (
           <p className="text-sm text-muted">No tenés permiso para ver el clip de esta lectura.</p>

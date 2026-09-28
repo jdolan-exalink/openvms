@@ -1,11 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { type ChangeEvent, type FormEvent, useState } from "react";
+import { type ChangeEvent, type FormEvent, useMemo, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { brandingQuery, meQuery } from "@/api/queries";
-import { Button, ErrorNote, Field, PageHeader, TextInput } from "@/components/ui";
+import { Button, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
+import { DEFAULT_WATERMARK_TIMEZONE } from "@/lib/format";
 import { can } from "@/lib/perm";
 
 const MAX_LOGO_BYTES = 512 * 1024;
+
+/**
+ * timeZoneOptions (PDW-7) lists every IANA zone the runtime knows about, via the standard
+ * Intl.supportedValuesOf API (no hardcoded/maintained list to fall out of date), always
+ * including current and DEFAULT_WATERMARK_TIMEZONE even if the runtime's canonical enumeration omits
+ * them: Intl.supportedValuesOf("timeZone") only lists ICU's *canonical* zone identifiers, not
+ * every legacy alias — notably "America/Argentina/Buenos_Aires" itself is one such omitted
+ * alias (ICU's canonical form is "America/Buenos_Aires"), even though it is a perfectly valid
+ * IANA name that both Intl.DateTimeFormat and Go's time.LoadLocation accept directly. Without
+ * this, a tenant whose branding.timezone is that alias (including every tenant that has not
+ * configured one, per the DB column's own default) would see a <select> with no matching
+ * <option>, and changing anything else would silently corrupt it to "". Falls back to just
+ * current/DEFAULT_WATERMARK_TIMEZONE if the runtime predates Intl.supportedValuesOf entirely (Baseline
+ * widely-available since 2023).
+ */
+function timeZoneOptions(current: string): string[] {
+  const known = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
+  return Array.from(new Set([...known, DEFAULT_WATERMARK_TIMEZONE, current])).sort();
+}
 
 /** readAsBase64 returns the file's base64 payload (without the data: URL prefix). */
 function readAsBase64(file: File): Promise<string> {
@@ -34,8 +54,10 @@ export function Branding() {
   const manage = can(me.data, "tenant.manage");
 
   const [ownerName, setOwnerName] = useState<string | null>(null);
+  const [timezone, setTimezone] = useState<string | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
+  const timeZoneList = useMemo(() => timeZoneOptions(branding.data?.timezone ?? DEFAULT_WATERMARK_TIMEZONE), [branding.data?.timezone]);
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["branding", tenantId] });
@@ -44,8 +66,11 @@ export function Branding() {
 
   const save = useMutation({
     mutationFn: async () => {
-      const body: { owner_name?: string; logo?: string; logo_content_type?: "image/png" | "image/jpeg"; remove_logo: boolean } = { remove_logo: false };
+      const body: { owner_name?: string; timezone?: string; logo?: string; logo_content_type?: "image/png" | "image/jpeg"; remove_logo: boolean } = {
+        remove_logo: false,
+      };
       if (ownerName !== null) body.owner_name = ownerName;
+      if (timezone !== null) body.timezone = timezone;
       if (logoFile) {
         body.logo = await readAsBase64(logoFile);
         body.logo_content_type = logoFile.type === "image/jpeg" ? "image/jpeg" : "image/png";
@@ -54,6 +79,7 @@ export function Branding() {
     },
     onSuccess: () => {
       setOwnerName(null);
+      setTimezone(null);
       invalidate();
     },
   });
@@ -107,6 +133,15 @@ export function Branding() {
               placeholder="Municipalidad de Helvecia"
             />
           </Field>
+          <Field label="Zona horaria" hint="Se usa para calcular la hora local y el desfase horario de la marca de agua.">
+            <Select value={timezone ?? branding.data.timezone} disabled={!manage} onChange={(e) => setTimezone(e.target.value)}>
+              {timeZoneList.map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </Select>
+          </Field>
           <Field label="Logo (PNG o JPEG, hasta 512 KB)">
             <div className="flex items-center gap-3">
               {branding.data.has_logo && !logoFile && (
@@ -118,7 +153,7 @@ export function Branding() {
           </Field>
           {manage && (
             <div className="flex gap-2">
-              <Button type="submit" variant="primary" disabled={save.isPending || (ownerName === null && !logoFile)}>
+              <Button type="submit" variant="primary" disabled={save.isPending || (ownerName === null && timezone === null && !logoFile)}>
                 Guardar
               </Button>
               {branding.data.has_logo && (

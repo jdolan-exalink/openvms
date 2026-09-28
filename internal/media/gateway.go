@@ -409,7 +409,7 @@ func (g *Gateway) burnPhotoWatermark(ctx context.Context, a authz.Actor, tenantI
 			logo = img
 		}
 	}
-	return watermark.BurnPhoto(jpegBytes, watermark.Text(lr.SeenAt, b.OwnerName), logo)
+	return watermark.BurnPhoto(jpegBytes, watermark.Text(lr.SeenAt, b.OwnerName, branding.ResolveLocation(b.Timezone)), logo)
 }
 
 // lprReadClip proxies the Frigate tracked-object clip for one LPR read (PDW-2), needing

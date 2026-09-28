@@ -2,12 +2,19 @@ package branding
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/jdolan-exalink/openvms/internal/authz"
 )
 
 func pngBytes(t *testing.T) []byte {
@@ -87,5 +94,53 @@ func TestDecodeAndValidateLogo(t *testing.T) {
 				t.Errorf("error = %q, want to contain %q", err.Error(), tt.errContains)
 			}
 		})
+	}
+}
+
+// TestUpdateRejectsInvalidTimezone covers PDW-7: an invalid or empty time zone must be
+// rejected as a ValidationError before ever reaching the database — validation runs
+// synchronously ahead of s.tx, so a zero-value *Service (no Store) can exercise it directly,
+// exactly like the existing OwnerName-length and RemoveLogo+Logo checks above it.
+func TestUpdateRejectsInvalidTimezone(t *testing.T) {
+	tenantID := uuid.New()
+	actor := authz.Actor{UserID: uuid.New(), TenantID: &tenantID}
+	s := &Service{}
+
+	tests := []struct {
+		name string
+		tz   string
+	}{
+		{"not a real IANA name", "Not/AZone"},
+		{"empty", ""},
+		{"whitespace only", "   "},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tz := tt.tz
+			_, err := s.Update(context.Background(), actor, tenantID, Input{Timezone: &tz})
+			if err == nil {
+				t.Fatalf("Update with timezone %q: want error, got nil", tt.tz)
+			}
+			var ve *ValidationError
+			if !errors.As(err, &ve) {
+				t.Errorf("err = %v (%T), want a *ValidationError", err, err)
+			}
+		})
+	}
+}
+
+// TestResolveLocation covers PDW-7: an empty timezone (a tenant with no branding row at all)
+// resolves to DefaultTimezone, an invalid one degrades to UTC rather than failing outright
+// (should be unreachable in practice once Update's own validation is in place, but a watermark
+// download must never fail over a time zone lookup), and a valid IANA name resolves to itself.
+func TestResolveLocation(t *testing.T) {
+	if got := ResolveLocation(""); got.String() != DefaultTimezone {
+		t.Errorf(`ResolveLocation("") = %v, want %s`, got, DefaultTimezone)
+	}
+	if got := ResolveLocation("not/a-real-zone"); got != time.UTC {
+		t.Errorf("ResolveLocation(invalid) = %v, want time.UTC", got)
+	}
+	if got := ResolveLocation("Europe/Madrid"); got.String() != "Europe/Madrid" {
+		t.Errorf("ResolveLocation(Europe/Madrid) = %v, want Europe/Madrid", got)
 	}
 }

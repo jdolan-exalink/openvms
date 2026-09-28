@@ -1414,10 +1414,16 @@ components:
             created_at: { type: string, format: date-time }
     TenantBranding:
       type: object
-      required: [tenant_id, owner_name, has_logo, updated_at]
+      required: [tenant_id, owner_name, timezone, has_logo, updated_at]
       properties:
         tenant_id: { type: string, format: uuid }
         owner_name: { type: string }
+        timezone:
+          type: string
+          description: |
+            IANA time zone name used to render the watermark's date/time (PDW-7). Defaults to
+            America/Argentina/Buenos_Aires when the tenant has not configured one explicitly.
+          example: America/Argentina/Buenos_Aires
         has_logo: { type: boolean }
         logo_content_type: { type: string }
         updated_at: { type: string, format: date-time }
@@ -1425,6 +1431,10 @@ components:
       type: object
       properties:
         owner_name: { type: string, maxLength: 200 }
+        timezone:
+          type: string
+          description: IANA time zone name (validated server-side); omit to keep the current value.
+          example: America/Argentina/Buenos_Aires
         logo:
           type: string
           format: byte

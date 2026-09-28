@@ -207,7 +207,15 @@ describe("Plates", () => {
         const url = new URL(input.url);
         if (url.pathname === "/api/v1/lpr/reads") return json({ items: [makePlateRead("r1")] });
         if (url.pathname === "/api/v1/tenants/t1/branding") {
-          return json({ tenant_id: "t1", owner_name: "Municipalidad de Helvecia", has_logo: false, updated_at: "2024-01-01T00:00:00Z" });
+          return json({
+            tenant_id: "t1",
+            owner_name: "Municipalidad de Helvecia",
+            // PDW-7: America/Argentina/Buenos_Aires is -03:00 year-round (no DST); seen_at
+            // 10:00:00Z -> 07:00:00 -03:00.
+            timezone: "America/Argentina/Buenos_Aires",
+            has_logo: false,
+            updated_at: "2024-01-01T00:00:00Z",
+          });
         }
         return stubApi({ "/api/v1/me": () => meResponse("lpr.search", "lpr.view", "snapshots.view", "recordings.view"), ...noCatalogs })(input);
       }),
@@ -228,7 +236,7 @@ describe("Plates", () => {
     expect(video).toHaveAttribute("src", "/media/v1/lpr/reads/r1/clip.mp4");
     const overlays = await screen.findAllByText(/Municipalidad de Helvecia/, { selector: "span" });
     expect(overlays).toHaveLength(2); // photo overlay + clip overlay
-    expect(overlays[0]).toHaveTextContent("2024-01-01 10:00:00 UTC+00:00");
+    expect(overlays[0]).toHaveTextContent("2024-01-01 07:00:00 -03:00");
 
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());

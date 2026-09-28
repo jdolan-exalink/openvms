@@ -19,8 +19,8 @@ function meResponse(...permissions: string[]) {
   });
 }
 
-function brandingResponse() {
-  return json({ tenant_id: "t1", owner_name: "", has_logo: false, updated_at: "2024-01-01T00:00:00Z" });
+function brandingResponse(timezone = "America/Argentina/Buenos_Aires") {
+  return json({ tenant_id: "t1", owner_name: "", timezone, has_logo: false, updated_at: "2024-01-01T00:00:00Z" });
 }
 
 const read: Schemas["PlateRead"] = {
@@ -63,6 +63,31 @@ describe("PlateDetailModal", () => {
     renderModal("lpr.view", "snapshots.view", "snapshots.download");
     const link = await screen.findByRole("link", { name: /Descargar foto/ });
     expect(link).toHaveAttribute("href", "/media/v1/lpr/reads/r1/snapshot.jpg?download=1");
+  });
+
+  // PDW-7: the watermark's date/time must render in the tenant's configured branding.timezone
+  // (fetched via brandingQuery), not a fixed UTC — and it must be the *real* seasonal offset
+  // for that zone, proving the value flows all the way from the branding API response through
+  // fmtWatermarkTimestamp to the rendered "Fecha" field. read.seen_at is
+  // "2024-01-01T10:00:00Z"; Europe/Madrid is CET (+01:00) in January, so the local time is
+  // 11:00:00.
+  it("renders the watermark timestamp in the tenant's configured time zone", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/tenants/t1/branding") return brandingResponse("Europe/Madrid");
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.view", "snapshots.view", "recordings.view") })(input);
+      }),
+    );
+    renderPage(() => <PlateDetailModal read={read} onClose={() => {}} />);
+
+    // The same text appears three times: the "Fecha" field (dd) and both overlays (photo +
+    // clip, each a span) — matching PDW-2's own prior finding for this exact shape. Scope to
+    // the dd to assert the "Fecha" field specifically, and separately confirm both overlay
+    // spans got it too.
+    expect(await screen.findByText("2024-01-01 11:00:00 +01:00", { selector: "dd" })).toBeInTheDocument();
+    expect(await screen.findAllByText("2024-01-01 11:00:00 +01:00", { selector: "span" })).toHaveLength(2);
   });
 
   it("requests, polls and offers the download of a clip watermark job", async () => {

@@ -252,6 +252,7 @@ type TenantBranding struct {
 	LogoContentType string
 	UpdatedAt       time.Time
 	UpdatedBy       *uuid.UUID
+	Timezone        string
 }
 
 type User struct {

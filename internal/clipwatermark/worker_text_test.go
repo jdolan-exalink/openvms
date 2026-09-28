@@ -15,7 +15,7 @@ import (
 // what gets burned in").
 func TestWriteTempTextContentMatchesWatermarkTextExactly(t *testing.T) {
 	seenAt := time.Date(2026, 9, 28, 13, 5, 30, 0, time.UTC)
-	want := watermark.Text(seenAt, "O'Brien's 100% Towing · Étoile")
+	want := watermark.Text(seenAt, "O'Brien's 100% Towing · Étoile", nil)
 
 	path, cleanup, err := writeTempText(want)
 	if err != nil {
