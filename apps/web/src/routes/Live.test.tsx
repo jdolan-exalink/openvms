@@ -115,4 +115,53 @@ describe("Live", () => {
       expect(saved?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
     });
   });
+
+  it("reorders two tiles with the keyboard (dnd-kit's built-in accessibility)", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte"), camera("cam-2", "Porton sur")] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    fireEvent.click(await screen.findByText("Porton sur"));
+    // Grid is 2x2 by default: tile 1 = Puerta norte, tile 2 = Porton sur.
+    expect(screen.getByLabelText("Cuadro 1").textContent).toContain("Puerta norte");
+    expect(screen.getByLabelText("Cuadro 2").textContent).toContain("Porton sur");
+
+    // jsdom never lays out elements, so dnd-kit's keyboard sensor (which picks a directional
+    // neighbor by comparing real getBoundingClientRect() rects) has nothing to compare. Give the
+    // tiles distinct, side-by-side rects matching the 2x2 grid's actual layout so ArrowRight has
+    // a real neighbor to resolve to — the same technique dnd-kit's own test suite uses.
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const index = /Cuadro (\d+)/.exec(this.getAttribute?.("aria-label") ?? "")?.[1];
+      const col = index ? (Number(index) - 1) % 2 : 0;
+      const row = index ? Math.floor((Number(index) - 1) / 2) : 0;
+      const x = col * 200;
+      const y = row * 150;
+      return { x, y, top: y, left: x, right: x + 200, bottom: y + 150, width: 200, height: 150, toJSON: () => ({}) } as DOMRect;
+    });
+
+    // Tab to the drag handle dnd-kit exposes (role="button", tabIndex=0), pick it up with
+    // Space, move right with the arrow key, and drop with Space again.
+    const tile1 = screen.getByLabelText("Cuadro 1");
+    tile1.focus();
+    fireEvent.keyDown(tile1, { code: "Space" });
+    await new Promise((r) => setTimeout(r, 0));
+    fireEvent.keyDown(document.activeElement ?? tile1, { code: "ArrowRight" });
+    await new Promise((r) => setTimeout(r, 0));
+    fireEvent.keyDown(document.activeElement ?? tile1, { code: "Space" });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Cuadro 1").textContent).toContain("Porton sur");
+      expect(screen.getByLabelText("Cuadro 2").textContent).toContain("Puerta norte");
+    });
+  });
 });

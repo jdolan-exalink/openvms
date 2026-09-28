@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { liveSelectionKey, parseSelection, resizeTiles, serializeSelection, type Tile } from "./liveGrid";
+import {
+  cameraDragId, liveSelectionKey, parseSelection, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, tileDragId, type Tile,
+} from "./liveGrid";
 
 describe("resizeTiles", () => {
   it("pads with null up to n*n", () => {
@@ -9,6 +11,73 @@ describe("resizeTiles", () => {
   it("truncates to n*n, keeping the first ones", () => {
     const tiles: Tile[] = [{ camera_id: "a", quality: "sub" }, { camera_id: "b", quality: "sub" }, { camera_id: "c", quality: "sub" }];
     expect(resizeTiles(tiles, 1)).toEqual([{ camera_id: "a", quality: "sub" }]);
+  });
+});
+
+describe("reorderTiles", () => {
+  const tiles: Tile[] = [
+    { camera_id: "a", quality: "sub" },
+    { camera_id: "b", quality: "sub" },
+    { camera_id: "c", quality: "sub" },
+    { camera_id: "d", quality: "sub" },
+  ];
+
+  it("moves a tile forward, shifting the ones in between back one slot", () => {
+    expect(reorderTiles(tiles, 0, 2)).toEqual([
+      { camera_id: "b", quality: "sub" },
+      { camera_id: "c", quality: "sub" },
+      { camera_id: "a", quality: "sub" },
+      { camera_id: "d", quality: "sub" },
+    ]);
+  });
+
+  it("moves a tile backward, shifting the ones in between forward one slot", () => {
+    expect(reorderTiles(tiles, 3, 1)).toEqual([
+      { camera_id: "a", quality: "sub" },
+      { camera_id: "d", quality: "sub" },
+      { camera_id: "b", quality: "sub" },
+      { camera_id: "c", quality: "sub" },
+    ]);
+  });
+
+  it("swaps two adjacent tiles", () => {
+    expect(reorderTiles(tiles, 1, 2)).toEqual([
+      { camera_id: "a", quality: "sub" },
+      { camera_id: "c", quality: "sub" },
+      { camera_id: "b", quality: "sub" },
+      { camera_id: "d", quality: "sub" },
+    ]);
+  });
+
+  it("is a no-op moving a tile to its own slot", () => {
+    expect(reorderTiles(tiles, 2, 2)).toEqual(tiles);
+  });
+
+  it("is a no-op for an out-of-range index", () => {
+    expect(reorderTiles(tiles, 0, 99)).toEqual(tiles);
+    expect(reorderTiles(tiles, -1, 2)).toEqual(tiles);
+  });
+});
+
+describe("resolveDragEnd", () => {
+  it("resolves dropping a camera list item onto a tile as a placement", () => {
+    expect(resolveDragEnd(cameraDragId("cam-1"), tileDragId(2))).toEqual({ type: "place", index: 2, cameraId: "cam-1" });
+  });
+
+  it("resolves dropping a tile onto another tile as a reorder", () => {
+    expect(resolveDragEnd(tileDragId(0), tileDragId(3))).toEqual({ type: "reorder", from: 0, to: 3 });
+  });
+
+  it("is a no-op dropping a tile onto itself", () => {
+    expect(resolveDragEnd(tileDragId(1), tileDragId(1))).toBeNull();
+  });
+
+  it("is a no-op when dropped outside any droppable", () => {
+    expect(resolveDragEnd(tileDragId(1), null)).toBeNull();
+  });
+
+  it("is a no-op when dropped onto something that isn't a tile", () => {
+    expect(resolveDragEnd(cameraDragId("cam-1"), "not-a-tile")).toBeNull();
   });
 });
 

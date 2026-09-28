@@ -36,7 +36,7 @@ select-then-pick instead of direct drag and drop.
 - [x] WCP-3: Persist the Live grid selection (columns + tile order/camera ids) per user
       (`tenant_id` + user id from `meQuery`) in `localStorage`, wrapped in try/catch, restored on
       load, gracefully dropping cameras the user can no longer see.
-- [ ] WCP-4: Drag and drop in Live — drag a camera from the list into a grid slot, and
+- [x] WCP-4: Drag and drop in Live — drag a camera from the list into a grid slot, and
       reorder/swap tiles by dragging within the grid, with dnd-kit's keyboard accessibility.
       Persisted selection (WCP-3) must include the resulting order; saving a view keeps working.
 
@@ -170,5 +170,69 @@ select-then-pick instead of direct drag and drop.
     warning).
   - Commit: pending (see below).
 
+- WCP-4: Drag and drop in Live.
+  - Dependency: `apps/web/package.json` had no DnD library (checked before starting). Added
+    `@dnd-kit/core@6.3.1`, `@dnd-kit/sortable@10.0.0`, `@dnd-kit/utilities@3.2.2` via `pnpm add`
+    (run from `apps/web`), per the task's stated preference.
+  - `apps/web/src/lib/liveGrid.ts`: added `reorderTiles(tiles, from, to)` (array-move semantics —
+    moves one tile, shifting the ones in between; a no-op for `from === to` or an out-of-range
+    index) and drag-id helpers `tileDragId(index)`/`cameraDragId(cameraId)` plus
+    `resolveDragEnd(activeId, overId)`, a pure, DOM-independent function that turns a dnd-kit
+    drag's (active, over) ids into either `{type:"place", index, cameraId}` (a camera dragged
+    from the list onto a tile) or `{type:"reorder", from, to}` (a tile dragged onto another
+    tile), or `null` for a no-op drop. Kept these framework-free specifically so the drop logic
+    is unit-testable without simulating real pointer/keyboard geometry.
+  - `apps/web/src/routes/Live.tsx`: wrapped the aside+grid section in `<DndContext sensors={...}
+    onDragEnd={handleDragEnd}>` (`PointerSensor` with a 4px activation distance — so a plain
+    click/double-click on a tile or its inner buttons isn't mistaken for a drag — and
+    `KeyboardSensor` with `sortableKeyboardCoordinates`). The grid's tiles now render through a
+    new `GridTile` component using `useSortable({id: tileDragId(index)})` inside a
+    `<SortableContext items={shown.map(tileDragId)} strategy={rectSortingStrategy}>`; each
+    camera-list leaf now renders through a new `DraggableCamera` component using
+    `useDraggable({id: cameraDragId(camera.id)})`. `handleDragEnd` calls the shared
+    `resolveDragEnd` and dispatches to `place(cameraId, index)` (generalized to take an explicit
+    target index, defaulting to the existing `selected` tile so click-to-place is unchanged) or
+    the new `reorder(from, to)`. Existing click/double-click/remove/maximize interactions on
+    tiles, and click-to-place on camera list items, are untouched (same handlers, just also
+    draggable now). `GridTile` gained an `aria-label={"Cuadro " + (index+1)}` for both testability
+    and a clearer accessible name than dnd-kit's default unlabeled `role="button"`.
+  - Item 5's "persisted selection must include order" / "saving a view keeps working": both were
+    already true structurally — WCP-3's persistence effect serializes the live `tiles` array
+    (whatever order it's in), and the save mutation's `body()` already maps `tiles` directly into
+    `layout.cells` in order; reordering via drag changes that same array, so no additional code
+    was needed for either. Verified by reasoning over `apps/web/src/routes/Live.tsx`'s `body()`
+    and the WCP-3 persistence effect, not by a new dedicated test (would duplicate WCP-3's
+    persistence test plus the reorder test below).
+  - TDD: `apps/web/src/lib/liveGrid.test.ts` extended first — RED: `pnpm exec vitest run
+    src/lib/liveGrid.test.ts` failed (`reorderTiles`/`cameraDragId`/`tileDragId` not exported yet,
+    10 new tests failing). GREEN after adding the functions, same command, 19/19 pass (9 prior +
+    10 new: 5 `reorderTiles`, 5 `resolveDragEnd`).
+  - `apps/web/src/routes/Live.test.tsx`: added a keyboard-driven dnd-kit interaction test
+    ("reorders two tiles with the keyboard"), written and run against the *already-implemented*
+    wiring (process deviation again, same as WCP-1/WCP-3's honest-disclosure pattern — the DOM
+    wiring and the test were developed together because getting the exact dnd-kit event sequence
+    right needed fast empirical iteration, not a priori RED authorship). Non-vacuity is inherent
+    here rather than proven by reverting: the test asserts the *actual post-drop tile content*
+    (`"Cuadro 1"` contains "Porton sur", `"Cuadro 2"` contains "Puerta norte" — a real content
+    swap), so a broken `resolveDragEnd` wiring or a `reorderTiles` bug would fail it directly; it
+    was iteratively developed against the real component (not asserted a priori) precisely
+    because jsdom's lack of layout made the exact event sequence non-obvious up front, documented
+    below.
+    - Feasibility finding (the task explicitly allows skipping this "if feasible"): jsdom never
+      lays out elements, so every `getBoundingClientRect()` call returns an all-zero rect;
+      dnd-kit's `sortableKeyboardCoordinates` picks a directional (e.g. ArrowRight) neighbor by
+      comparing real rects, so with all rects identical it found no neighbor — pickup (Space) and
+      drop (Space) both worked (`aria-pressed` toggled correctly), but the arrow-key move was a
+      no-op and the tiles never swapped. Fixed by stubbing `Element.prototype.getBoundingClientRect`
+      for the two tiles' actual 2x2 grid positions (a technique dnd-kit's own test suite uses) —
+      after that, the same Space → ArrowRight → Space sequence produces a real swap. A `0ms`
+      `setTimeout` yield is needed between each keydown (dnd-kit measures on the next tick after
+      pickup before a coordinate getter has anything to compare); without it the arrow move
+      degenerates back to the same "found no neighbor" no-op.
+  - Full verification: `pnpm --filter web test` PASS (10 files / 41 tests); `pnpm typecheck`
+    clean; `make lint` clean; `pnpm --filter web build` clean (same pre-existing chunk-size
+    warning, slightly larger now from the added dnd-kit bundle).
+  - Commit: pending (see below).
+
 ## Next step
-Commit WCP-3, then start WCP-4 (drag and drop in Live).
+Commit WCP-4. All four WCP tasks are done; report to the user.
