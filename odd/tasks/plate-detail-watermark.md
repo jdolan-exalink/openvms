@@ -810,8 +810,50 @@ feature extends.
   re-run needed (no Go files changed) beyond the combined final pass below.
 - Commit: pending (this task's own commit, created immediately after this document update).
 
-## Next step
-PDW-1 through PDW-8 are implemented and committed on `feat/plate-detail-watermark` (not
-pushed). Remaining: one final combined verification pass across every runner, then a single
-`make up` at the very end to confirm the stack deploys, the new migrations (00011, 00012)
-applied, and `docker compose exec worker ffmpeg -version` works.
+## Final combined verification (after all eight tasks)
+Run once, after PDW-8's commit, not concurrently with anything else:
+- `go test ./...`: PASS (all packages).
+- `go test -tags integration ./internal/...`: PASS (all packages, Docker/testcontainers).
+- `go test -race ./...`: PASS.
+- `pnpm --filter web test`: PASS (14 files / 67 tests).
+- `pnpm typecheck`: clean.
+- `make lint` (`go vet` + `golangci-lint run` + `pnpm lint` + `pnpm typecheck`): clean, 0
+  golangci-lint issues.
+- `make generate` (`go generate ./...` + `pnpm generate`) followed by `git diff --exit-code`:
+  clean — the committed tree is already byte-identical to a fresh regeneration.
+
+## `make up` (the only docker-compose rebuild/restart in this session; ran once, at the end)
+`VERSION=dev docker compose up -d --build` — rebuilt `api`, `worker`, `web` (the only three
+images this branch's changes touch) and restarted them; every other service (postgres, nats,
+valkey, seaweedfs, mosquitto) was already running from before this session and untouched.
+- `api`: logs show `"migration applied" ... "file":"00012_tenant_branding_timezone.sql"` then
+  `"database schema ready" ... "version":12` then `"listening"`; `GET /health/ready` → 200,
+  `{"status":"ok"}` with postgres/valkey/nats/object_storage all `"ok"`.
+- `worker`: started cleanly, no errors; `docker compose exec worker ffmpeg -version` → ffmpeg
+  5.1.9-0+deb12u1 (per the task's own explicit closing check).
+- `web`: Caddy started, serving; `curl 127.0.0.1:8000/` → 200.
+- **Live end-to-end proof of PDW-7's tzdata concern** (the strongest available evidence,
+  exercising the actual built image rather than inspecting its filesystem): bootstrapped a
+  platform admin token (`docker compose exec api /vmsctl bootstrap`) against the existing demo
+  tenant ("Casa", seeded in an earlier session) and, through the real running `api` container:
+  `GET .../branding` → `timezone: "America/Argentina/Buenos_Aires"` (DB default); `PUT
+  {"timezone":"Europe/Madrid"}` → 200 with the new value persisted, proving
+  `time.LoadLocation("Europe/Madrid")` succeeds *inside the actual distroless process*; `PUT
+  {"timezone":"Not/AZone"}` → 400 (validation rejects it end to end); downloaded a real plate
+  read's watermarked photo (`GET .../snapshot.jpg?download=1`) with the Madrid zone still
+  configured — 200, valid JPEG (`file` confirms `JPEG image data, baseline, ... 640x360`),
+  153722 bytes. Reset the tenant's timezone back to the default afterward and removed the
+  downloaded file, leaving the demo environment as found. This check also **caught and
+  corrected an unverified claim** made while writing the tzdata doc comments (see the
+  PDW-7 section above and the follow-up `docs` commit): both apps' comments originally
+  asserted their base images ship no zoneinfo at all, which turned out to be false for the
+  images this repo currently builds — corrected before merge, not left as a wrong comment for
+  a future reader to trust.
+- `docker compose ps`: all eight services `Up`, no restarts/crash loops observed.
+
+## Status: complete
+All eight PDW tasks (PDW-1 through PDW-8) are implemented, tested (strict TDD throughout —
+every task's RED observed before its GREEN, per the resolved mode recorded in each section
+above), committed on `feat/plate-detail-watermark`, and verified against the deployed stack.
+Not pushed and not merged, per this session's own standing instruction — that remains the
+user's decision.
