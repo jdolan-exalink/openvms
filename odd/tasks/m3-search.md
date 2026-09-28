@@ -20,8 +20,8 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
 - [x] M3-3b: Harden zone/sub_label filters from review findings on commit `195f76a`. Route: delegated direct.
 - [x] M3-4: Add `camera_group` filter to `/events` and `/lpr/reads`. Route: delegated direct.
 - [x] M3-3c: Key sub_label LPR gating on camera LPR capability + review test fixes. Route: delegated direct.
-- [ ] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). BLOCKED, see evidence — needs a product decision. Route: delegated direct.
-- [ ] M3-6: Web tests for Events and Plates routes (filters, infinite scroll, `lpr.search` gating). Route: delegated direct.
+- [ ] M3-5: Add `has_snapshot` / `has_preview` event flags and filters (PRD §44). Unblocked 2026-09-28, see evidence. Route: delegated direct.
+- [x] M3-6: Web tests for Events and Plates routes (filters, infinite scroll, `lpr.search` gating). Route: delegated direct.
 - [ ] M3-7: Verify LPR ingestion against the real Frigate 0.18; first sync showed events but no plates. Diagnose adapter mapping if plates exist upstream. Route: delegated direct.
 
 ## Verification mode
@@ -145,5 +145,32 @@ Core M3 plumbing already exists (central-index search, plate partial/exact searc
     key is populated", mirroring `thumbnail_key`/`preview_key` in PRD §20) rather than a literal
     Frigate signal. Continuing to M3-6 in the meantime (independent task).
 
+- M3-6: Web tests for Events and Plates (filters, infinite scroll, `lpr.search` gating). Test-only
+  task for already-correct behavior (no bug found; no RED phase applies) — flagged here per the
+  task's own instruction to say so, rather than staging synthetic RED evidence.
+  - `apps/web/src/routes/Events.test.tsx`: added `meResponse(...permissions)` and `makeEvent(id,
+    overrides)` helpers (DRYing up the repeated `/api/v1/me` grants payload and event fixtures);
+    kept the two pre-existing tests, refactored onto the new helper. Added: (1) "sends every filter
+    field as query params" — fills site, camera, camera_group, label, zone, sub_label, severity,
+    plate, from, to and the "Solo sin revisar" checkbox in one submit and asserts every resulting
+    query param (including the constant `limit=48`); (2) "hides the Patente filter without
+    lpr.search" — `screen.queryByLabelText("Patente")` is absent for an actor without `lpr.search`
+    (the field is conditionally not rendered at all in `Events.tsx`, not merely disabled); (3)
+    "loads the next page via cursor" — first page returns `next_cursor`, clicking "Cargar más"
+    re-fetches with `cursor=<value>` and both pages' items render.
+  - `apps/web/src/routes/Plates.test.tsx`: same `meResponse`/`makePlateRead` helpers. Added: (1)
+    "sends every filter field as query params" (plate, exact, site, camera_group, from, to); (2)
+    "disables the Patente filter without lpr.search" / "enables ... with lpr.search" —
+    `Plates.tsx` always renders the field (unlike Events' plate field) but `disabled={!can(me,
+    "lpr.search")}`; the route itself is reachable by direct URL regardless of permission (only the
+    sidebar nav link is gated on `lpr.view`, in `components/nav.ts`), and an actor without any LPR
+    grant gets zero rows from the backend (`ListPlates` requires `lpr.view`/`lpr.search`), so no
+    leak; (3) "loads the next page via cursor" (same pattern as Events, asserting table row count).
+  - Full verification: `go test ./...` PASS; `pnpm --filter web test` PASS 3/3 runs (4 files / 13
+    tests each); `pnpm typecheck` clean; `make lint` clean; `make generate` clean (only the two test
+    files changed).
+  - Commit: `6d908db` (`test(web): cover events and plates filters, paging and lpr gating`, not
+    pushed — no remote configured).
+
 ## Next step
-M3-5 (blocked on a product decision, see evidence above) or M3-7.
+M3-5 (unblocked 2026-09-28, in progress) then M3-7.
