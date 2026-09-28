@@ -33,6 +33,9 @@ const (
 	ActionExportCreated  = "EXPORT_CREATED"
 	ActionExportDownload = "EXPORT_DOWNLOADED"
 	ActionSnapshotViewed = "SNAPSHOT_DOWNLOADED"
+	// ActionAccessDenied audits a denied (403) media request. The PRD's action catalog
+	// names no such action, so this follows its existing PAST_TENSE naming convention.
+	ActionAccessDenied = "ACCESS_DENIED"
 )
 
 // ActorFunc returns the authenticated actor of a request.
@@ -71,10 +74,12 @@ func writeErr(w http.ResponseWriter, status int, code, msg string) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"code": code, "message": msg})
 }
 
-// fail maps service errors like the JSON API does.
-func (g *Gateway) fail(w http.ResponseWriter, r *http.Request, err error) {
+// fail maps service errors like the JSON API does. a is the authenticated actor, used to
+// audit a denied (403) request; it is the zero Actor for errors that can never be Forbidden.
+func (g *Gateway) fail(w http.ResponseWriter, r *http.Request, a authz.Actor, err error) {
 	switch {
 	case errors.Is(err, access.ErrForbidden):
+		g.auditDenied(r.Context(), a, err, r.Method, r.URL.Path)
 		writeErr(w, http.StatusForbidden, "forbidden", "you do not have permission for this camera")
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, frigate.ErrNotFound):
 		writeErr(w, http.StatusNotFound, "not_found", "not found")
@@ -117,12 +122,12 @@ func (g *Gateway) camera(w http.ResponseWriter, r *http.Request, p authz.Permiss
 	}
 	cam, err := g.Svc.Authorize(r.Context(), a, id, p)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return a, Camera{}, nil, false
 	}
 	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return a, Camera{}, nil, false
 	}
 	return a, cam, ad, true
@@ -144,7 +149,7 @@ func relay(w http.ResponseWriter, resp *http.Response, cache string) {
 }
 
 func (g *Gateway) snapshot(w http.ResponseWriter, r *http.Request) {
-	_, cam, ad, ok := g.camera(w, r, authz.LiveView)
+	a, cam, ad, ok := g.camera(w, r, authz.LiveView)
 	if !ok {
 		return
 	}
@@ -154,7 +159,7 @@ func (g *Gateway) snapshot(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := ad.Media().Open(r.Context(), "/api/"+url.PathEscape(cam.RemoteName)+"/latest.jpg", q, r.Header)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	relay(w, resp, "private, no-store")
@@ -191,7 +196,7 @@ func (g *Gateway) vod(w http.ResponseWriter, r *http.Request) {
 	path := "/vod/" + url.PathEscape(cam.RemoteName) + "/start/" + start + "/end/" + end + "/" + file
 	resp, err := ad.Media().Open(r.Context(), path, nil, r.Header)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	cache := "private, max-age=300"
@@ -217,31 +222,32 @@ func (g *Gateway) eventSnapshot(w http.ResponseWriter, r *http.Request) {
 		return tx.QueryRow(r.Context(), `SELECT camera_id, detection_ids FROM events WHERE id = $1`, id).Scan(&cameraID, &detections)
 	})
 	if err != nil {
-		g.fail(w, r, store.Classify(err))
+		g.fail(w, r, a, store.Classify(err))
 		return
 	}
 	cam, err := g.Svc.Authorize(r.Context(), a, cameraID, authz.SnapshotsView)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	if len(detections) == 0 {
-		g.fail(w, r, store.ErrNotFound)
+		g.fail(w, r, a, store.ErrNotFound)
 		return
 	}
 	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(detections[0])+"/snapshot.jpg", url.Values{"bbox": {"1"}}, r.Header)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	if r.URL.Query().Get("download") == "1" {
-		if !g.can(r.Context(), a, cameraID, authz.SnapshotsDownload) {
+		if _, err := g.Svc.Authorize(r.Context(), a, cameraID, authz.SnapshotsDownload); err != nil {
 			resp.Body.Close()
+			g.auditDenied(r.Context(), a, err, r.Method, r.URL.Path)
 			writeErr(w, http.StatusForbidden, "forbidden", "you cannot download snapshots of this camera")
 			return
 		}
@@ -272,34 +278,30 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 		return tx.QueryRow(r.Context(), `SELECT camera_id, remote_event_id FROM lpr_reads WHERE id = $1`, id).Scan(&cameraID, &remoteEventID)
 	})
 	if err != nil {
-		g.fail(w, r, store.Classify(err))
+		g.fail(w, r, a, store.Classify(err))
 		return
 	}
 	cam, err := g.Svc.Authorize(r.Context(), a, cameraID, authz.SnapshotsView)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
-	if !g.can(r.Context(), a, cameraID, authz.LPRView) {
+	if _, err := g.Svc.Authorize(r.Context(), a, cameraID, authz.LPRView); err != nil {
+		g.auditDenied(r.Context(), a, err, r.Method, r.URL.Path)
 		writeErr(w, http.StatusForbidden, "forbidden", "you do not have permission to view plate reads for this camera")
 		return
 	}
 	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(remoteEventID)+"/snapshot.jpg", url.Values{"bbox": {"1"}}, r.Header)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	relay(w, resp, "private, max-age=3600")
-}
-
-func (g *Gateway) can(ctx context.Context, a authz.Actor, cameraID uuid.UUID, p authz.Permission) bool {
-	_, err := g.Svc.Authorize(ctx, a, cameraID, p)
-	return err == nil
 }
 
 func (g *Gateway) exportDownload(w http.ResponseWriter, r *http.Request) {
@@ -314,7 +316,7 @@ func (g *Gateway) exportDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	ex, err := g.Svc.GetExport(r.Context(), a, id)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	if ex.Status != "ready" || ex.RemotePath == "" {
@@ -323,17 +325,17 @@ func (g *Gateway) exportDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	cam, err := g.Svc.Authorize(r.Context(), a, ex.CameraID, authz.ExportsDownload)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	resp, err := ad.Media().Open(r.Context(), ex.RemotePath, nil, r.Header)
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	if r.Header.Get("Range") == "" {
@@ -369,6 +371,46 @@ func (g *Gateway) audit(ctx context.Context, a authz.Actor, tenantID uuid.UUID, 
 	})
 	if err != nil {
 		g.Svc.Log.ErrorContext(ctx, "media audit", "action", action, "error", err)
+	}
+}
+
+// auditDenied records one ACCESS_DENIED row (PRD §66) for a request an authenticated actor
+// was refused. It runs in a transaction detached from the request's own, the same way audit
+// does, so the row survives regardless of the denied operation's outcome. It never fails the
+// request: a write failure is only logged. Unauthenticated (401) requests never reach here.
+func (g *Gateway) auditDenied(ctx context.Context, a authz.Actor, err error, method, path string) {
+	details := map[string]any{"method": method, "path": path}
+	tenantID := a.TenantID
+	var targetType string
+	var targetID *uuid.UUID
+	var fe *access.ForbiddenError
+	if errors.As(err, &fe) {
+		details["permission"] = string(fe.Permission)
+		if fe.Resource.Kind != "" {
+			targetType = string(fe.Resource.Kind)
+		}
+		if fe.Resource.ID != uuid.Nil {
+			id := fe.Resource.ID
+			targetID = &id
+		}
+		if tenantID == nil && fe.Resource.TenantID != uuid.Nil {
+			t := fe.Resource.TenantID
+			tenantID = &t
+		}
+	}
+	b, marshalErr := json.Marshal(details)
+	if marshalErr != nil {
+		g.Svc.Log.ErrorContext(ctx, "access-denied audit", "error", marshalErr)
+		return
+	}
+	writeErr := g.Svc.Store.Tx(context.WithoutCancel(ctx), store.ScopeFor(a), func(q *db.Queries) error {
+		return q.InsertAudit(ctx, db.InsertAuditParams{
+			TenantID: tenantID, ActorID: &a.UserID, ActorName: a.Username, Action: ActionAccessDenied,
+			TargetType: targetType, TargetID: targetID, RequestID: logging.RequestID(ctx), Ip: httpx.ClientIP(ctx), Details: b,
+		})
+	})
+	if writeErr != nil {
+		g.Svc.Log.ErrorContext(ctx, "access-denied audit", "error", writeErr)
 	}
 }
 
@@ -418,12 +460,12 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 	}
 	stream, err := liveStream(cam, r.URL.Query().Get("quality"))
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	target, header, tlsCfg, err := ad.Media().WebSocket(r.Context(), "/live/mse/api/ws", url.Values{"src": {stream}})
 	if err != nil {
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, TLSClientConfig: tlsCfg, ReadBufferSize: 64 << 10}
@@ -432,7 +474,7 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		g.fail(w, r, err)
+		g.fail(w, r, a, err)
 		return
 	}
 	defer upstream.Close()

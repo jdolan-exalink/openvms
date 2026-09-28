@@ -5,6 +5,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/platform/httpx"
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
@@ -66,6 +68,13 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 			status, code, msg := statusFor(err)
 			if status >= 500 && status != http.StatusBadGateway {
 				log.ErrorContext(r.Context(), "handler error", "path", r.URL.Path, "error", err)
+			}
+			// Audit denied access (PRD §66). This never sees the 401s from Authenticate: those
+			// respond directly, without an actor, before a strict handler ever runs.
+			if errors.Is(err, access.ErrForbidden) {
+				if actor, ok := ActorFrom(r.Context()); ok {
+					h.auditDenied(r.Context(), actor, err, r.Method, r.URL.Path)
+				}
 			}
 			writeError(w, r, status, code, msg)
 		},

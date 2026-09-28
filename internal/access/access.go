@@ -16,6 +16,17 @@ import (
 // ErrForbidden means the actor lacks the permission on the resource.
 var ErrForbidden = errors.New("forbidden")
 
+// ForbiddenError wraps ErrForbidden with the permission and resource that were checked, so
+// a caller can audit exactly what was denied (PRD §66) without re-deriving it. errors.Is
+// against ErrForbidden still matches it.
+type ForbiddenError struct {
+	Permission authz.Permission
+	Resource   authz.Resource
+}
+
+func (e *ForbiddenError) Error() string { return "forbidden" }
+func (e *ForbiddenError) Unwrap() error { return ErrForbidden }
+
 // Checker is built once per transaction for one actor.
 type Checker struct {
 	Actor  authz.Actor
@@ -53,10 +64,11 @@ func (c *Checker) Can(p authz.Permission, r authz.Resource) bool {
 	return authz.Decide(c.grants, p, r.Covering())
 }
 
-// Require returns ErrForbidden unless the actor has p on r.
+// Require returns a *ForbiddenError (matching ErrForbidden via errors.Is) unless the actor
+// has p on r.
 func (c *Checker) Require(p authz.Permission, r authz.Resource) error {
 	if !c.Can(p, r) {
-		return ErrForbidden
+		return &ForbiddenError{Permission: p, Resource: r}
 	}
 	return nil
 }

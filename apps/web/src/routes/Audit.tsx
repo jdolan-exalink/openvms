@@ -34,6 +34,7 @@ const actions: Record<string, string> = {
   VIEW_CREATED: "Vista creada",
   VIEW_UPDATED: "Vista modificada",
   VIEW_REMOVED: "Vista eliminada",
+  ACCESS_DENIED: "Acceso denegado",
 };
 
 /** Audit is the append-only audit trail (PRD §66). */
