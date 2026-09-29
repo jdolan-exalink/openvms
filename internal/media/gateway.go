@@ -67,6 +67,14 @@ type Gateway struct {
 	// AllowedOrigins lists extra origins accepted for websocket upgrades; same-origin
 	// requests are always accepted.
 	AllowedOrigins []string
+	// Live tunes the live websocket (audit window, keepalive, revalidation); zero = defaults.
+	Live LiveConfig
+	// Session returns the revalidator of the request's credential (api.RevalidatorFrom) so a
+	// live socket ends when its session or token is revoked. Nil skips the credential check
+	// (the camera permission is still rechecked).
+	Session func(ctx context.Context) func(context.Context) (bool, error)
+
+	views viewTracker
 }
 
 func (g *Gateway) Routes() http.Handler {
@@ -490,19 +498,23 @@ func safeFilename(s string) string {
 }
 
 func (g *Gateway) audit(ctx context.Context, a authz.Actor, tenantID uuid.UUID, action, targetType string, targetID uuid.UUID, details map[string]any) {
+	if err := g.auditTx(ctx, a, tenantID, action, targetType, targetID, details); err != nil {
+		g.Svc.Log.ErrorContext(ctx, "media audit", "action", action, "error", err)
+	}
+}
+
+// auditTx writes one audit row detached from the request's transaction and returns the error.
+func (g *Gateway) auditTx(ctx context.Context, a authz.Actor, tenantID uuid.UUID, action, targetType string, targetID uuid.UUID, details map[string]any) error {
 	if details == nil {
 		details = map[string]any{}
 	}
 	b, _ := json.Marshal(details)
-	err := g.Svc.Store.Tx(context.WithoutCancel(ctx), store.ScopeFor(a), func(q *db.Queries) error {
+	return g.Svc.Store.Tx(context.WithoutCancel(ctx), store.ScopeFor(a), func(q *db.Queries) error {
 		return q.InsertAudit(ctx, db.InsertAuditParams{
 			TenantID: &tenantID, ActorID: &a.UserID, ActorName: a.Username, Action: action,
 			TargetType: targetType, TargetID: &targetID, RequestID: logging.RequestID(ctx), Ip: httpx.ClientIP(ctx), Details: b,
 		})
 	})
-	if err != nil {
-		g.Svc.Log.ErrorContext(ctx, "media audit", "action", action, "error", err)
-	}
 }
 
 // auditDenied records one ACCESS_DENIED row (PRD §66) for a request an authenticated actor
@@ -566,57 +578,294 @@ func liveStream(cam Camera, quality string) (string, error) {
 	return stream, nil
 }
 
+// liveEnd is why a live session stopped. A non-empty code makes the gateway tell the browser
+// with an error frame before closing; an empty code is a plain peer disconnect.
+type liveEnd struct{ code, msg string }
+
 // live relays Frigate's go2rtc MSE websocket (/live/mse/api/ws?src=stream). The browser
-// speaks the go2rtc protocol end to end; the gateway only authorizes and copies frames.
+// speaks the go2rtc protocol end to end; the gateway authorizes, copies frames, keeps both
+// legs alive, revalidates the caller while the socket lives, and reports failures to the
+// browser as a JSON error frame (see errorFrame) instead of a bare close.
 func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
-	a, cam, ad, ok := g.camera(w, r, authz.LiveView)
-	if !ok {
+	if !websocket.IsWebSocketUpgrade(r) {
+		// Plain HTTP callers still get the JSON error contract.
+		if _, _, _, ok := g.camera(w, r, authz.LiveView); ok {
+			writeErr(w, http.StatusBadRequest, "bad_request", "websocket upgrade required")
+		}
 		return
 	}
-	stream, err := liveStream(cam, r.URL.Query().Get("quality"))
+	cfg := g.Live
+	up := websocket.Upgrader{ReadBufferSize: 4 << 10, WriteBufferSize: 64 << 10, CheckOrigin: g.checkOrigin}
+	raw, err := up.Upgrade(w, r, nil)
 	if err != nil {
-		g.fail(w, r, a, err)
+		return // Upgrade already answered the client
+	}
+	client := &wsConn{c: raw, timeout: cfg.writeTimeout()}
+	defer raw.Close()
+
+	// reject reports a pre-stream failure to the browser and closes.
+	reject := func(code, msg string) {
+		g.sendLiveError(client, code, msg)
+	}
+	a, ok := g.Actor(r.Context())
+	if !ok {
+		reject(CodeUnauthorized, "authentication required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		reject(CodeCameraOffline, "invalid camera id")
+		return
+	}
+	cam, err := g.Svc.Authorize(r.Context(), a, id, authz.LiveView)
+	if err != nil {
+		code, msg := g.liveAuthError(r, a, err)
+		if code != "" {
+			reject(code, msg)
+		}
+		return
+	}
+	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
+	if err != nil {
+		g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "error", err)
+		reject(CodeUpstreamUnreachable, "could not reach the camera's Frigate server")
+		return
+	}
+	quality := qualityLabel(r.URL.Query().Get("quality"))
+	stream, err := liveStream(cam, quality)
+	if err != nil {
+		reject(CodeCameraOffline, "the camera has no live stream available")
 		return
 	}
 	target, header, tlsCfg, err := ad.Media().WebSocket(r.Context(), "/live/mse/api/ws", url.Values{"src": {stream}})
 	if err != nil {
-		g.fail(w, r, a, err)
+		g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "error", err)
+		reject(CodeUpstreamUnreachable, "could not reach the camera's Frigate server")
 		return
 	}
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, TLSClientConfig: tlsCfg, ReadBufferSize: 64 << 10}
-	upstream, resp, err := dialer.DialContext(r.Context(), target, header)
+	upConn, resp, err := dialer.DialContext(r.Context(), target, header)
 	if err != nil {
+		rejected := resp != nil // Frigate answered but refused the stream
 		if resp != nil {
 			resp.Body.Close()
 		}
-		g.fail(w, r, a, err)
+		if r.Context().Err() != nil {
+			return
+		}
+		g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "error", err)
+		if rejected {
+			reject(CodeCameraOffline, "the camera stream is not available")
+		} else {
+			reject(CodeUpstreamUnreachable, "could not reach the camera's Frigate server")
+		}
 		return
 	}
-	defer upstream.Close()
+	upstream := &wsConn{c: upConn, timeout: cfg.writeTimeout()}
+	defer upConn.Close()
 
-	up := websocket.Upgrader{ReadBufferSize: 4 << 10, WriteBufferSize: 64 << 10, CheckOrigin: g.checkOrigin}
-	client, err := up.Upgrade(w, r, nil)
-	if err != nil {
-		return // Upgrade already answered the client
+	// One audit row per viewing session: a reconnect within the window is the same session.
+	key := viewKey{a.UserID, cam.ID}
+	if g.views.begin(key, time.Now(), cfg.auditWindow()) {
+		if err := g.auditTx(r.Context(), a, cam.TenantID, ActionLiveViewed, "camera", cam.ID, map[string]any{"stream": stream}); err != nil {
+			g.Svc.Log.ErrorContext(r.Context(), "media audit", "action", ActionLiveViewed, "error", err)
+			g.views.forget(key) // do not lose a genuinely new view
+		}
+	} else {
+		liveReconnects.Inc()
 	}
-	defer client.Close()
-	g.audit(r.Context(), a, cam.TenantID, ActionLiveViewed, "camera", cam.ID, map[string]any{"stream": stream})
+	liveOpened.WithLabelValues(quality).Inc()
+	liveActive.WithLabelValues(quality).Inc()
+	defer liveActive.WithLabelValues(quality).Dec()
 
-	done := make(chan struct{}, 2)
-	pipe := func(dst, src *websocket.Conn) {
-		defer func() { done <- struct{}{} }()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	done := make(chan liveEnd, 4)
+	finish := func(e liveEnd) {
+		select {
+		case done <- e:
+		default:
+		}
+	}
+
+	pongWait := cfg.pongWait()
+	for _, c := range []*websocket.Conn{raw, upConn} {
+		c := c
+		_ = c.SetReadDeadline(time.Now().Add(pongWait))
+		c.SetPongHandler(func(string) error { return c.SetReadDeadline(time.Now().Add(pongWait)) })
+	}
+	raw.SetReadLimit(clientReadLimit)
+	upConn.SetReadLimit(upstreamReadLimit)
+
+	// browser -> Frigate
+	go func() {
 		for {
-			mt, data, err := src.ReadMessage()
+			mt, data, err := raw.ReadMessage()
 			if err != nil {
+				finish(liveEnd{})
 				return
 			}
-			_ = dst.SetWriteDeadline(time.Now().Add(10 * time.Second))
-			if err := dst.WriteMessage(mt, data); err != nil {
+			_ = raw.SetReadDeadline(time.Now().Add(pongWait))
+			if err := upstream.write(mt, data); err != nil {
+				finish(liveEnd{CodeCameraOffline, "lost the connection to the camera stream"})
 				return
+			}
+			liveBytes.WithLabelValues("up").Add(float64(len(data)))
+		}
+	}()
+	// Frigate -> browser. Messages are copied one at a time under a write deadline, so a slow
+	// browser stalls (and is then dropped) instead of buffering without bound.
+	go func() {
+		for {
+			mt, data, err := upConn.ReadMessage()
+			if err != nil {
+				finish(liveEnd{CodeCameraOffline, "the camera stream ended"})
+				return
+			}
+			_ = upConn.SetReadDeadline(time.Now().Add(pongWait))
+			if mt == websocket.TextMessage {
+				if e, isErr := upstreamError(data); isErr {
+					finish(e)
+					return
+				}
+			}
+			if err := client.write(mt, data); err != nil {
+				finish(liveEnd{})
+				return
+			}
+			liveBytes.WithLabelValues("down").Add(float64(len(data)))
+		}
+	}()
+	// keepalive on both legs
+	go func() {
+		t := time.NewTicker(cfg.pingEvery())
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				dl := time.Now().Add(cfg.writeTimeout())
+				if err := raw.WriteControl(websocket.PingMessage, nil, dl); err != nil {
+					finish(liveEnd{})
+					return
+				}
+				if err := upConn.WriteControl(websocket.PingMessage, nil, dl); err != nil {
+					finish(liveEnd{CodeCameraOffline, "lost the connection to the camera stream"})
+					return
+				}
+			}
+		}
+	}()
+	// authorization revalidation for the socket's whole life
+	go func() {
+		var check func(context.Context) (bool, error)
+		if g.Session != nil {
+			check = g.Session(r.Context())
+		}
+		if e := g.watchAccess(ctx, r, a, id, check, cfg.revalidateEvery()); e.code != "" {
+			finish(e)
+		}
+	}()
+
+	e := <-done
+	cancel()
+	if e.code != "" {
+		g.sendLiveError(client, e.code, e.msg)
+	} else {
+		client.closeWith(websocket.CloseNormalClosure, "")
+	}
+	upstream.closeWith(websocket.CloseNormalClosure, "")
+}
+
+// sendLiveError writes the error frame, then a close frame, and counts it.
+func (g *Gateway) sendLiveError(c *wsConn, code, msg string) {
+	liveErrors.WithLabelValues(code).Inc()
+	_ = c.write(websocket.TextMessage, newErrorFrame(code, msg))
+	closeCode := websocket.CloseInternalServerErr
+	if code == CodeUnauthorized || code == CodeForbidden {
+		closeCode = websocket.ClosePolicyViolation
+	}
+	c.closeWith(closeCode, code)
+}
+
+// liveAuthError maps an Authorize failure to an error frame; an empty code means the caller
+// went away and nothing should be sent.
+func (g *Gateway) liveAuthError(r *http.Request, a authz.Actor, err error) (code, msg string) {
+	switch {
+	case errors.Is(err, access.ErrForbidden):
+		g.auditDenied(r.Context(), a, err, r.Method, r.URL.Path)
+		return CodeForbidden, "you do not have permission for this camera"
+	case errors.Is(err, store.ErrNotFound), errors.Is(err, frigate.ErrNotFound):
+		return CodeCameraOffline, "camera not found"
+	case errors.Is(err, context.Canceled):
+		return "", ""
+	default:
+		g.Svc.Log.WarnContext(r.Context(), "live gateway", "path", r.URL.Path, "error", err)
+		return CodeServerError, "internal error"
+	}
+}
+
+// upstreamError recognises go2rtc's own {"type":"error","value":"..."} frame and maps it to
+// the gateway's structured codes.
+func upstreamError(data []byte) (liveEnd, bool) {
+	if len(data) > 4<<10 || !bytes.Contains(data, []byte(`"error"`)) {
+		return liveEnd{}, false
+	}
+	var m struct{ Type, Value string }
+	if json.Unmarshal(data, &m) != nil || m.Type != "error" {
+		return liveEnd{}, false
+	}
+	if strings.Contains(strings.ToLower(m.Value), "codec") {
+		return liveEnd{CodeCodecUnsupported, "the camera codec is not supported"}, true
+	}
+	return liveEnd{CodeCameraOffline, "the camera stream is not available"}, true
+}
+
+// watchAccess re-checks the caller's credential and camera permission every interval until
+// ctx ends and returns why the socket must close. One undecidable check is tolerated; two in
+// a row fail closed, like the realtime feed. The camera check goes through Svc.Authorize, so
+// a revoked grant takes effect within its cache TTL plus one interval.
+func (g *Gateway) watchAccess(ctx context.Context, r *http.Request, a authz.Actor, camID uuid.UUID, check func(context.Context) (bool, error), every time.Duration) liveEnd {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	failures := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return liveEnd{}
+		case <-t.C:
+		}
+		if check != nil {
+			valid, err := check(ctx)
+			if ctx.Err() != nil {
+				return liveEnd{}
+			}
+			switch {
+			case err != nil:
+				if failures++; failures >= maxRevalidateFailures {
+					return liveEnd{CodeServerError, "could not verify the session"}
+				}
+				continue
+			case !valid:
+				return liveEnd{CodeUnauthorized, "session ended"}
+			}
+		}
+		_, err := g.Svc.Authorize(ctx, a, camID, authz.LiveView)
+		switch {
+		case ctx.Err() != nil:
+			return liveEnd{}
+		case err == nil:
+			failures = 0
+		case errors.Is(err, access.ErrForbidden):
+			g.auditDenied(ctx, a, err, r.Method, r.URL.Path)
+			return liveEnd{CodeForbidden, "you no longer have permission for this camera"}
+		case errors.Is(err, store.ErrNotFound):
+			return liveEnd{CodeForbidden, "camera no longer available"}
+		default:
+			if failures++; failures >= maxRevalidateFailures {
+				return liveEnd{CodeServerError, "could not verify access"}
 			}
 		}
 	}
-	go pipe(upstream, client)
-	go pipe(client, upstream)
-	<-done
 }
