@@ -177,7 +177,7 @@ export function Live() {
                 <optgroup key={group.label} label={group.label}>
                   {group.items.map((v) => (
                     <option key={v.id} value={v.id}>
-                      {v.name}
+                      {v.shared && v.owner_name ? `${v.name} · ${v.owner_name}` : v.name}
                     </option>
                   ))}
                 </optgroup>
@@ -186,7 +186,7 @@ export function Live() {
         </Select>
         <p role="status" aria-label="Vista activa" className="px-1 text-xs text-muted">
           {current
-            ? `${current.name} · ${current.shared ? "Compartida" : "Privada"}${current.editable ? "" : " · Solo lectura: guardar crea una copia propia"}`
+            ? `${current.name} · ${current.shared ? (current.owner_name ? `Compartida por ${current.owner_name}` : "Compartida") : "Privada"}${current.editable ? "" : " · Solo lectura: guardar crea una copia propia"}`
             : "Vista sin guardar"}
         </p>
         <TextInput aria-label="Nombre de la vista" placeholder="Nombre de la vista" value={saveName} onChange={(e) => setSaveName(e.target.value)} />

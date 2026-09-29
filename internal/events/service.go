@@ -428,6 +428,45 @@ func (s *Service) SetReviewed(ctx context.Context, actor authz.Actor, id uuid.UU
 	return out, err
 }
 
+// MaxBulkReview bounds one SetReviewedBulk call.
+const MaxBulkReview = 200
+
+// SetReviewedBulk applies SetReviewed to many events in ONE transaction: every id must exist and
+// pass the same events.review check as the single path, otherwise nothing changes and the first
+// failure (forbidden or not found) is returned. Duplicate ids are collapsed; results keep the
+// order of first appearance.
+func (s *Service) SetReviewedBulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, reviewed bool) ([]Event, error) {
+	if len(ids) == 0 || len(ids) > MaxBulkReview {
+		return nil, &inventory.ValidationError{Msg: fmt.Sprintf("ids must hold between 1 and %d events", MaxBulkReview)}
+	}
+	seen := make(map[uuid.UUID]bool, len(ids))
+	unique := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, id)
+		}
+	}
+	out := make([]Event, 0, len(unique))
+	err := s.tx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
+		out = out[:0]
+		for _, id := range unique {
+			e, err := getEvent(ctx, tx, c, authz.EventsReview, id)
+			if err != nil {
+				return err
+			}
+			e.Reviewed = reviewed
+			out = append(out, e)
+		}
+		_, err := tx.Exec(ctx, `UPDATE events SET reviewed = $2, updated_at = now() WHERE id = ANY($1)`, unique, reviewed)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 type PlateRead struct {
 	ID         uuid.UUID
 	SiteID     uuid.UUID

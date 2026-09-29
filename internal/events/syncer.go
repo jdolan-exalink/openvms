@@ -319,7 +319,8 @@ ON CONFLICT (server_id, remote_id) DO UPDATE SET
     audio = excluded.audio,
     detection_ids = excluded.detection_ids,
     end_time = excluded.end_time,
-    reviewed = excluded.reviewed,
+    -- Sticky: a review made in the VMS survives Frigate still reporting "not reviewed".
+    reviewed = events.reviewed OR excluded.reviewed,
     plates = (SELECT coalesce(array_agg(DISTINCT p), '{}') FROM unnest(events.plates || excluded.plates) p),
     has_snapshot = events.has_snapshot OR excluded.has_snapshot,
     lpr = events.lpr OR excluded.lpr,

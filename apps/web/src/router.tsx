@@ -9,6 +9,7 @@ import { Audit } from "./routes/Audit";
 import { Branding } from "./routes/Branding";
 import { Cameras } from "./routes/Cameras";
 import { Dashboard } from "./routes/Dashboard";
+import { parseEventsSearch } from "./lib/eventsSearch";
 import { Events } from "./routes/Events";
 import { Exports } from "./routes/Exports";
 import { Groups } from "./routes/Groups";
@@ -56,6 +57,9 @@ const playbackRoute = createRoute({
   }),
 });
 
+// Applied Events filters live in the query string, so a filtered list is shareable and reload-safe.
+const eventsRoute = createRoute({ getParentRoute: () => appRoute, path: "/events", component: Events, validateSearch: parseEventsSearch });
+
 // "/" always resolves to Live (En vivo): the operational landing page.
 const indexRoute = createRoute({
   getParentRoute: () => appRoute,
@@ -95,7 +99,7 @@ export const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     indexRoute,
     child("/live", Live),
-    child("/events", Events),
+    eventsRoute,
     child("/plates", Plates),
     playbackRoute,
     child("/exports", Exports),

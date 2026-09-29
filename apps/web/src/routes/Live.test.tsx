@@ -386,10 +386,11 @@ describe("Live", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No tenés permiso para guardar esta vista.");
   });
-  const savedView = (id: string, name: string, shared: boolean, editable: boolean) => ({
+  const savedView = (id: string, name: string, shared: boolean, editable: boolean, ownerName?: string) => ({
     id,
     tenant_id: "t1",
     owner_id: "u1",
+    owner_name: ownerName,
     name,
     shared,
     editable,
@@ -437,6 +438,18 @@ describe("Live", () => {
     expect(status).toHaveTextContent("Perímetro");
     expect(status).toHaveTextContent("Compartida");
     expect(status).toHaveTextContent("Solo lectura");
+  });
+
+  it("shows who owns a shared view in the selector and the status line", async () => {
+    viewsApi([savedView("v1", "Turno noche", false, true, "Ana"), savedView("v2", "Perímetro", true, false, "Marta Gómez")]);
+
+    renderPage(Live);
+
+    expect(await screen.findByRole("option", { name: "Perímetro · Marta Gómez" })).toBeInTheDocument();
+    // Private views are the caller's own: no owner suffix.
+    expect(screen.getByRole("option", { name: "Turno noche" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Vista guardada"), { target: { value: "v2" } });
+    expect(screen.getByRole("status", { name: "Vista activa" })).toHaveTextContent("Compartida por Marta Gómez");
   });
 
   it("labels the layout picker as a group", async () => {

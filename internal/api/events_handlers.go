@@ -114,6 +114,22 @@ func (h *Handlers) UpdateEvent(ctx context.Context, r gen.UpdateEventRequestObje
 	return gen.UpdateEvent200JSONResponse(toEvent(e)), nil
 }
 
+func (h *Handlers) ReviewEvents(ctx context.Context, r gen.ReviewEventsRequestObject) (gen.ReviewEventsResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	evs, err := h.Events.SetReviewedBulk(ctx, a, r.Body.Ids, r.Body.Reviewed)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ReviewEvents200JSONResponse{Items: make([]gen.Event, 0, len(evs))}
+	for _, e := range evs {
+		out.Items = append(out.Items, toEvent(e))
+	}
+	return out, nil
+}
+
 func (h *Handlers) GetEventThumbnail(ctx context.Context, r gen.GetEventThumbnailRequestObject) (gen.GetEventThumbnailResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {

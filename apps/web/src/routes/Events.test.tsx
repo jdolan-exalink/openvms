@@ -346,4 +346,114 @@ describe("Events", () => {
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Marcar revisado" })).toBeEnabled();
   });
+
+  describe("filters in the URL", () => {
+    /** stubEventsUrlApi records the last GET /events URL. */
+    function stubEventsUrlApi() {
+      const seen: { url?: URL } = {};
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: Request) => {
+          const url = new URL(input.url);
+          if (url.pathname === "/api/v1/events") {
+            seen.url = url;
+            return json({ items: [] });
+          }
+          return stubApi({ "/api/v1/me": () => meResponse("events.search"), ...noCatalogs })(input);
+        }),
+      );
+      return seen;
+    }
+
+    it("applies the filters found in the URL on load, in the form and the chips", async () => {
+      const seen = stubEventsUrlApi();
+      renderPage(Events, "/?zone=entrada&pending=true&severity=alert");
+      await waitFor(() => {
+        expect(seen.url?.searchParams.getAll("zone")).toEqual(["entrada"]);
+        expect(seen.url?.searchParams.get("reviewed")).toBe("false");
+        expect(seen.url?.searchParams.get("severity")).toBe("alert");
+      });
+      expect((screen.getByLabelText("Zona") as HTMLInputElement).value).toBe("entrada");
+      expect(await screen.findByRole("list", { name: "Filtros aplicados" })).toHaveTextContent("Zona: entrada");
+    });
+
+    it("writes the applied filters to the URL on submit and clears them on Limpiar", async () => {
+      stubEventsUrlApi();
+      const { router } = renderPage(Events);
+      await screen.findByText("No hay eventos que coincidan.");
+      fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "entrada" } });
+      // Draft edits alone never touch the URL.
+      expect(router.state.location.search).toEqual({});
+      fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
+      await waitFor(() => expect(router.state.location.search).toEqual({ zone: "entrada" }));
+      fireEvent.click(screen.getByRole("button", { name: "Limpiar" }));
+      await waitFor(() => expect(router.state.location.search).toEqual({}));
+    });
+  });
+
+  describe("bulk review", () => {
+    const two = [makeEvent("e1"), makeEvent("e2", { camera_name: "Camera Two" })];
+
+    function stubBulkApi(permissions: string[], onReview?: (body: unknown) => Response | Promise<Response>) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (input: Request) => {
+          const url = new URL(input.url);
+          if (url.pathname === "/api/v1/events" && input.method === "GET") return json({ items: two });
+          if (url.pathname === "/api/v1/events/review" && input.method === "POST" && onReview) return onReview(await input.json());
+          return stubApi({ "/api/v1/me": () => meResponse(...permissions), ...noCatalogs })(input);
+        }),
+      );
+    }
+
+    it("offers no selection without events.review", async () => {
+      stubBulkApi(["events.search"]);
+      renderPage(Events);
+      await screen.findByRole("button", { name: /Camera One/ });
+      expect(screen.queryByRole("checkbox", { name: /Seleccionar evento/ })).not.toBeInTheDocument();
+    });
+
+    it("marks the selected events reviewed in one request with pending then success feedback", async () => {
+      let release: (r: Response) => void = () => {};
+      const gate = new Promise<Response>((r) => (release = r));
+      let body: unknown;
+      stubBulkApi(["events.search", "events.review"], (b) => {
+        body = b;
+        return gate;
+      });
+      renderPage(Events);
+      fireEvent.click(await screen.findByRole("checkbox", { name: /Seleccionar evento.*Camera One/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Seleccionar evento.*Camera Two/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Marcar 2 como revisados" }));
+      expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
+      release(json({ items: [makeEvent("e1", { reviewed: true }), makeEvent("e2", { reviewed: true })] }));
+      expect(await screen.findByText("2 eventos marcados como revisados.")).toBeInTheDocument();
+      expect(body).toEqual({ ids: ["e1", "e2"], reviewed: true });
+      // The selection is spent once applied.
+      expect(screen.queryByRole("button", { name: /Marcar \d+ como/ })).not.toBeInTheDocument();
+    });
+
+    it("can mark the selection as not reviewed", async () => {
+      let body: unknown;
+      stubBulkApi(["events.search", "events.review"], (b) => {
+        body = b;
+        return json({ items: [makeEvent("e1")] });
+      });
+      renderPage(Events);
+      fireEvent.click(await screen.findByRole("checkbox", { name: /Seleccionar evento.*Camera One/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Marcar 1 como sin revisar" }));
+      expect(await screen.findByText("1 evento marcado como sin revisar.")).toBeInTheDocument();
+      expect(body).toEqual({ ids: ["e1"], reviewed: false });
+    });
+
+    it("keeps the selection and shows the error when the server refuses the batch", async () => {
+      stubBulkApi(["events.search", "events.review"], () => json({ error: { code: "forbidden", message: "Sin permiso" } }, 403));
+      renderPage(Events);
+      fireEvent.click(await screen.findByRole("checkbox", { name: /Seleccionar evento.*Camera One/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Marcar 1 como revisados" }));
+      expect(await screen.findByRole("alert")).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: /Seleccionar evento.*Camera One/ })).toBeChecked();
+      expect(screen.getByRole("button", { name: "Marcar 1 como revisados" })).toBeEnabled();
+    });
+  });
 });

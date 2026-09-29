@@ -54,9 +54,11 @@ type Layout struct {
 }
 
 type View struct {
-	ID        uuid.UUID
-	TenantID  uuid.UUID
-	OwnerID   uuid.UUID
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	OwnerID  uuid.UUID
+	// OwnerName is the owner's display name; nil when the owner row is not readable.
+	OwnerName *string
 	Name      string
 	Shared    bool
 	Layout    Layout
@@ -99,7 +101,7 @@ func (in *ViewInput) validate() error {
 func scanView(row pgx.Row) (View, error) {
 	var v View
 	var raw []byte
-	err := row.Scan(&v.ID, &v.TenantID, &v.OwnerID, &v.Name, &v.Shared, &raw, &v.CreatedAt, &v.UpdatedAt)
+	err := row.Scan(&v.ID, &v.TenantID, &v.OwnerID, &v.OwnerName, &v.Name, &v.Shared, &raw, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		return v, err
 	}
@@ -107,7 +109,10 @@ func scanView(row pgx.Row) (View, error) {
 	return v, err
 }
 
-const viewColumns = `id, tenant_id, owner_id, name, shared, layout, created_at, updated_at`
+const viewColumns = `v.id, v.tenant_id, v.owner_id, u.display_name, v.name, v.shared, v.layout, v.created_at, v.updated_at`
+
+// viewFrom joins the owner's display name; users carry no RLS and a missing owner yields NULL.
+const viewFrom = ` FROM views v LEFT JOIN users u ON u.id = v.owner_id`
 
 func (s *Service) rawTx(ctx context.Context, actor authz.Actor, fn func(tx pgx.Tx, c *access.Checker) error) error {
 	return s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
@@ -156,8 +161,8 @@ func (s *Service) ListViews(ctx context.Context, actor authz.Actor) ([]View, err
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT `+viewColumns+` FROM views
-WHERE deleted_at IS NULL AND (owner_id = $1 OR shared) ORDER BY shared, lower(name)`, actor.UserID)
+		rows, err := tx.Query(ctx, `SELECT `+viewColumns+viewFrom+`
+WHERE v.deleted_at IS NULL AND (v.owner_id = $1 OR v.shared) ORDER BY v.shared, lower(v.name)`, actor.UserID)
 		if err != nil {
 			return err
 		}
@@ -183,7 +188,7 @@ WHERE deleted_at IS NULL AND (owner_id = $1 OR shared) ORDER BY shared, lower(na
 }
 
 func getView(ctx context.Context, tx pgx.Tx, actor authz.Actor, id uuid.UUID) (View, error) {
-	v, err := scanView(tx.QueryRow(ctx, `SELECT `+viewColumns+` FROM views WHERE id = $1 AND deleted_at IS NULL`, id))
+	v, err := scanView(tx.QueryRow(ctx, `SELECT `+viewColumns+viewFrom+` WHERE v.id = $1 AND v.deleted_at IS NULL`, id))
 	if err != nil {
 		return v, store.Classify(err)
 	}

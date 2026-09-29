@@ -43,7 +43,7 @@ func fromLayout(l gen.ViewLayout) media.Layout {
 
 func toView(v media.View) gen.View {
 	return gen.View{
-		Id: v.ID, TenantId: v.TenantID, OwnerId: v.OwnerID, Name: v.Name, Shared: v.Shared,
+		Id: v.ID, TenantId: v.TenantID, OwnerId: v.OwnerID, OwnerName: v.OwnerName, Name: v.Name, Shared: v.Shared,
 		Layout: toLayout(v.Layout), Editable: v.Editable, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
 	}
 }

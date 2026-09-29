@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { CheckCheck, Download, History } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraGroupsQuery, camerasQuery, type EventFilter, eventsQuery, meQuery, sitesQuery } from "@/api/queries";
 import { SearchSummary, type FilterChip } from "@/components/SearchSummary";
@@ -9,39 +9,11 @@ import { Modal } from "@/components/Modal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { commonLabels, fmtDateTime, fmtDuration, fromLocalInput, labelName } from "@/lib/format";
+import { emptyEventsForm as emptyForm, type EventsForm as Form, formToSearch, parseEventsSearch, searchToForm } from "@/lib/eventsSearch";
 import { can } from "@/lib/perm";
 
-type Form = {
-  site: string;
-  camera: string;
-  cameraGroup: string;
-  label: string;
-  zone: string;
-  subLabel: string;
-  severity: "" | "alert" | "detection";
-  plate: string;
-  from: string;
-  to: string;
-  pending: boolean;
-  hasSnapshot: boolean;
-  hasPreview: boolean;
-};
-
-const emptyForm: Form = {
-  site: "",
-  camera: "",
-  cameraGroup: "",
-  label: "",
-  zone: "",
-  subLabel: "",
-  severity: "",
-  plate: "",
-  from: "",
-  to: "",
-  pending: false,
-  hasSnapshot: false,
-  hasPreview: false,
-};
+/** MAX_BULK mirrors the server limit of one bulk review request. */
+const MAX_BULK = 200;
 
 function toFilter(f: Form): EventFilter {
   return {
@@ -89,13 +61,42 @@ export function Events() {
   const sites = useQuery(sitesQuery);
   const cameras = useQuery(camerasQuery({}));
   const cameraGroups = useQuery(cameraGroupsQuery);
-  const [form, setForm] = useState<Form>(emptyForm);
-  const [applied, setApplied] = useState<Form>(emptyForm);
+  // The applied filters live in the URL (shareable, survives reload); `form` is the editable draft.
+  const search = useSearch({ strict: false }) as Record<string, unknown>;
+  const navigate = useNavigate();
+  const searchKey = JSON.stringify(search);
+  // Memoized on the serialized search so `applied` keeps its identity between unrelated renders.
+  const applied = useMemo(() => searchToForm(parseEventsSearch(JSON.parse(searchKey) as Record<string, unknown>)), [searchKey]);
+  const [form, setForm] = useState<Form>(applied);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const apply = useCallback(
+    (f: Form) => {
+      setSelected(new Set());
+      void navigate({ to: ".", search: formToSearch(f) as never });
+    },
+    [navigate],
+  );
+  // Back/forward or an edited URL replaces the draft with what is applied (state adjusted during
+  // render, the React-recommended alternative to an effect).
+  const [syncedApplied, setSyncedApplied] = useState(applied);
+  if (syncedApplied !== applied) {
+    setSyncedApplied(applied);
+    setForm(applied);
+  }
   const events = useInfiniteQuery(eventsQuery(toFilter(applied)));
   const [open, setOpen] = useState<Schemas["Event"] | null>(null);
   const closeDetail = useCallback(() => setOpen(null), []);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
   const items = events.data?.pages.flatMap((p) => p.items) ?? [];
+  const canReview = can(me.data, "events.review");
+  // Only events still in the list count as selected (a refresh may drop some).
+  const selectedIds = items.filter((e) => selected.has(e.id)).map((e) => e.id);
+  const toggle = (id: string) =>
+    setSelected((cur) => {
+      const next = new Set(cur);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
   const chips = appliedChips(applied, {
     site: sites.data?.find((x) => x.id === applied.site)?.name,
     camera: cameras.data?.find((x) => x.id === applied.camera)?.display_name,
@@ -103,9 +104,7 @@ export function Events() {
   }).map<FilterChip>((c) => ({
     ...c,
     onRemove: () => {
-      const patch = c.clear;
-      setForm((f) => ({ ...f, ...patch }));
-      setApplied((f) => ({ ...f, ...patch }));
+      apply({ ...applied, ...c.clear });
     },
   }));
   const camsOfSite = (cameras.data ?? []).filter((c) => !form.site || c.site_id === form.site);
@@ -117,7 +116,7 @@ export function Events() {
         className="grid gap-3 rounded border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={(e) => {
           e.preventDefault();
-          setApplied(form);
+          apply(form);
         }}
       >
         <Field label="Sitio">
@@ -201,10 +200,7 @@ export function Events() {
               Buscar
             </Button>
             <Button
-              onClick={() => {
-                setForm(emptyForm);
-                setApplied(emptyForm);
-              }}
+              onClick={() => apply(emptyForm)}
             >
               Limpiar
             </Button>
@@ -218,22 +214,38 @@ export function Events() {
         hasMore={!!events.hasNextPage}
         loading={events.isPending}
         chips={chips}
-        onClear={() => {
-          setForm(emptyForm);
-          setApplied(emptyForm);
-        }}
+        onClear={() => apply(emptyForm)}
       />
       <ErrorNote error={events.error} />
+      {canReview && items.length > 0 && (
+        <BulkReviewBar
+          visible={items.map((e) => e.id)}
+          selectedIds={selectedIds}
+          onSelectVisible={() => setSelected(new Set(items.map((e) => e.id)))}
+          onClearSelection={() => setSelected(new Set())}
+        />
+      )}
       {events.isSuccess && items.length === 0 && <Empty>No hay eventos que coincidan.</Empty>}
       <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {items.map((e) => (
-          <li key={e.id}>
+          <li key={e.id} className="relative">
+            {canReview && (
+              <label className="absolute left-2 top-2 z-10 flex items-center rounded bg-bg/80 p-1">
+                <input
+                  type="checkbox"
+                  checked={selected.has(e.id)}
+                  onChange={() => toggle(e.id)}
+                  aria-label={`Seleccionar evento ${e.camera_name} ${fmtDateTime(e.start_time)}`}
+                />
+              </label>
+            )}
             <button
               type="button"
               onClick={() => setOpen(e)}
               className={cn(
                 "flex w-full flex-col overflow-hidden rounded border border-line border-l-4 bg-surface text-left hover:border-accent focus-visible:outline-2 focus-visible:outline-accent",
                 e.severity === "alert" ? "border-l-bad" : "border-l-line",
+                selected.has(e.id) && "border-accent ring-2 ring-accent",
               )}
             >
               <Thumb event={e} />
@@ -263,6 +275,67 @@ export function Events() {
         </Button>
       )}
       {open && <EventDetail event={open} me={me.data} onClose={closeDetail} />}
+    </div>
+  );
+}
+
+/**
+ * BulkReviewBar reviews the selected events in one all-or-nothing request. Gating on events.review is
+ * a convenience: the server authorizes every event and rejects the whole batch if any is refused.
+ */
+function BulkReviewBar({
+  visible,
+  selectedIds,
+  onSelectVisible,
+  onClearSelection,
+}: {
+  visible: string[];
+  selectedIds: string[];
+  onSelectVisible: () => void;
+  onClearSelection: () => void;
+}) {
+  const qc = useQueryClient();
+  const n = selectedIds.length;
+  const [done, setDone] = useState("");
+  const bulk = useMutation({
+    mutationFn: async (reviewed: boolean) => unwrap(await api.POST("/api/v1/events/review", { body: { ids: selectedIds, reviewed } })),
+    onSuccess: (res, reviewed) => {
+      onClearSelection();
+      void qc.invalidateQueries({ queryKey: ["events"] });
+      const count = res.items.length;
+      const state = reviewed ? (count === 1 ? "revisado" : "revisados") : "sin revisar";
+      setDone(`${count} ${count === 1 ? "evento marcado" : "eventos marcados"} como ${state}.`);
+    },
+  });
+  const tooMany = n > MAX_BULK;
+  const busy = bulk.isPending;
+  const label = (reviewed: boolean) =>
+    busy && bulk.variables === reviewed ? "Guardando…" : `Marcar ${n} como ${reviewed ? "revisados" : "sin revisar"}`;
+  return (
+    <div className="flex flex-col gap-2 rounded border border-line bg-surface p-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-muted">{n === 0 ? "Seleccioná eventos para revisarlos en lote." : `${n} ${n === 1 ? "seleccionado" : "seleccionados"}`}</span>
+        <Button onClick={n === visible.length ? onClearSelection : onSelectVisible} disabled={busy}>
+          {n === visible.length ? "Deseleccionar todo" : "Seleccionar visibles"}
+        </Button>
+        {n > 0 && (
+          <>
+            <Button variant="primary" onClick={() => (setDone(""), bulk.mutate(true))} disabled={busy || tooMany}>
+              <CheckCheck className="size-4" aria-hidden /> {label(true)}
+            </Button>
+            <Button onClick={() => (setDone(""), bulk.mutate(false))} disabled={busy || tooMany}>
+              {label(false)}
+            </Button>
+          </>
+        )}
+      </div>
+      {tooMany && <p className="text-xs text-warn">Máximo {MAX_BULK} eventos por lote: deseleccioná algunos.</p>}
+      <ErrorNote error={bulk.error} />
+      {done && (
+        <p role="status" className="text-ok">
+          {done}
+        </p>
+      )}
     </div>
   );
 }

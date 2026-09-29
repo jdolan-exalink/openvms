@@ -16,11 +16,12 @@ export function renderPage(Page: () => React.ReactNode, entry = "/") {
     routeTree: root.addChildren([page, ...paths]),
     history: createMemoryHistory({ initialEntries: [entry] }),
   });
-  return render(
+  const result = render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return { ...result, router };
 }
 
 export function json(body: unknown, status = 200) {

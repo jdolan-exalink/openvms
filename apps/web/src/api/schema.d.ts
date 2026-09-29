@@ -458,6 +458,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/events/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark several events reviewed or not, all or nothing (events.review on every event)
+         * @description Applies the same per-event authorization as PATCH /events/{eventId} inside one transaction: if any id is missing (404) or not reviewable by the caller (403) nothing is changed. Duplicate ids are collapsed.
+         */
+        post: operations["reviewEvents"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/events/{eventId}": {
         parameters: {
             query?: never;
@@ -1490,6 +1510,8 @@ export interface components {
             tenant_id: string;
             /** Format: uuid */
             owner_id: string;
+            /** @description The owner's display name. */
+            owner_name?: string | null;
             name: string;
             shared: boolean;
             layout: components["schemas"]["ViewLayout"];
@@ -2554,6 +2576,39 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    reviewEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    ids: string[];
+                    reviewed: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The updated events, in order of first appearance */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Event"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getEvent: {
