@@ -107,6 +107,7 @@ export function Cameras() {
           siteName={siteName.get(editing.site_id)}
           serverName={serverName.get(editing.server_id)}
           canManage={can(me.data, "cameras.manage")}
+          canConfigServer={can(me.data, "servers.config")}
           onClose={closeDrawer}
         />
       )}

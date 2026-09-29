@@ -46,4 +46,40 @@ describe("Servers", () => {
     expect(screen.getByText(/^1 de 2 servidores/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Quitar filtro de sitio" })).toHaveAttribute("href", "/servers");
   });
+
+  it("shows restart button only for users with servers.restart and handles confirmation", async () => {
+    const fetchMock = vi.fn(
+      stubApi({
+        "/api/v1/servers": () => json({ items: [server("a", "frigate-h01", "s1")] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.restart", effect: "allow" }] }),
+        "/api/v1/servers/a/restart": () => json({ success: true }),
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Servers);
+
+    const restartBtn = await screen.findByRole("button", { name: /Reiniciar/i });
+    expect(restartBtn).toBeInTheDocument();
+
+    // Click restart -> shows confirmation
+    restartBtn.click();
+    expect(await screen.findByText("¿Reiniciar?")).toBeInTheDocument();
+    const confirmBtn = screen.getByRole("button", { name: "Sí, reiniciar" });
+
+    // Confirm restart -> calls POST /api/v1/servers/a/restart
+    confirmBtn.click();
+    expect(await screen.findByText("Reinicio solicitado")).toBeInTheDocument();
+
+    const postCall = fetchMock.mock.calls.find(([r]) => (r as Request).method === "POST" && (r as Request).url.includes("/api/v1/servers/a/restart"));
+    expect(postCall).toBeDefined();
+  });
+
+  it("does not show restart button without servers.restart permission", async () => {
+    stub();
+    renderPage(Servers);
+    await screen.findByText("frigate-h01");
+    expect(screen.queryByRole("button", { name: /Reiniciar/i })).not.toBeInTheDocument();
+  });
 });
+

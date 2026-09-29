@@ -54,6 +54,17 @@ export const camerasQuery = (filter: CameraFilter = {}) =>
     refetchInterval: 15_000,
   });
 
+export const cameraFrigateConfigQuery = (cameraId: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "frigate-config"],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/cameras/{cameraId}/config", {
+          params: { path: { cameraId } },
+        }),
+      ),
+  });
+
 export type EventFilter = {
   site_id?: string[];
   server_id?: string[];

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, RefreshCw } from "lucide-react";
+import { Plus, RefreshCw, RotateCcw } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
@@ -98,7 +98,12 @@ export function Servers() {
                 <td className="text-xs">
                   <SyncCell status={syncOf.get(s.id)} />
                 </td>
-                <td className="text-right">{can(me.data, "servers.manage") && <SyncButton server={s} />}</td>
+                <td className="text-right">
+                  <div className="flex items-center justify-end gap-2">
+                    {can(me.data, "servers.restart") && <RestartButton server={s} />}
+                    {can(me.data, "servers.manage") && <SyncButton server={s} />}
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -129,6 +134,53 @@ function StorageBar({ storage }: { storage?: Schemas["ServerStorage"] }) {
       <span className="font-mono text-[11px] text-muted tabular-nums">
         {(storage.used_mb / 1024).toFixed(0)} / {(storage.total_mb / 1024).toFixed(0)} GB
       </span>
+    </div>
+  );
+}
+
+function RestartButton({ server }: { server: Schemas["Server"] }) {
+  const qc = useQueryClient();
+  const [confirming, setConfirming] = useState(false);
+  const restart = useMutation({
+    mutationFn: async () =>
+      unwrap(await api.POST("/api/v1/servers/{serverId}/restart", { params: { path: { serverId: server.id } } })),
+    onSuccess: () => {
+      setConfirming(false);
+      return qc.invalidateQueries({ queryKey: ["servers"] });
+    },
+  });
+
+  if (confirming) {
+    return (
+      <div className="flex items-center gap-1.5 justify-end">
+        <span className="text-xs text-muted">¿Reiniciar?</span>
+        <Button
+          className="text-bad border-bad/40 hover:bg-bad/10 text-xs px-2 py-1"
+          disabled={restart.isPending}
+          onClick={() => restart.mutate()}
+        >
+          {restart.isPending ? "Reiniciando…" : "Sí, reiniciar"}
+        </Button>
+        <Button className="text-xs px-2 py-1" onClick={() => setConfirming(false)}>
+          Cancelar
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <Button
+        className="text-xs px-2 py-1"
+        disabled={restart.isPending}
+        onClick={() => setConfirming(true)}
+        title="Reiniciar servicio Frigate"
+      >
+        <RotateCcw className={restart.isPending ? "size-3.5 animate-spin" : "size-3.5"} aria-hidden />
+        Reiniciar
+      </Button>
+      {restart.isSuccess && <span className="text-xs text-accent">Reinicio solicitado</span>}
+      {restart.error && <span role="alert" className="text-xs text-bad">{restart.error.message}</span>}
     </div>
   );
 }
