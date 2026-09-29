@@ -18,6 +18,9 @@ x-go-env: &go-env
   # Internal WhatsApp gateway (WAHA) used by WhatsApp notification channels.
   WAHA_BASE_URL: http://waha:3000
   WAHA_API_KEY: ${WAHA_API_KEY:-openvms-dev-waha-key}
+  # Feature flags (comma-separated, docs/live-view-architecture.md). The code defaults every
+  # flag to off; the local stack enables the Live View P0 flags for testing.
+  OPENVMS_FEATURES: ${OPENVMS_FEATURES:-persistentPlayers,videoSurfaceLayer}
 
 services:
   postgres:

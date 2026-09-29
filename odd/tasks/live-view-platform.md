@@ -37,7 +37,7 @@ navigation) must not reconnect media; no black tiles while connecting.
 - [x] LV-5 — Tiles keyed by camera: DnD swap semantics, layout change and expand without reconnect; 25/32 grids with visibility pausing. Mandatory tests: cell1→cell8 same session 0 reconnects; grid→expand same session 0 reconnects. Done: 656b5d9.
 - [x] LV-6 — Snapshot poster + last frame, offline/unauthorized/error states with Retry, jittered backoff grouped per server; snapshot cache headers. Test: offline shows last snapshot + auto reconnect. Done: 7d91c84.
 - [x] LV-7 — Gateway hardening: one audit row per session, ping/deadlines, structured error frame to client, Prometheus counters. Done: 813f791 (worktree feat/live-view-gateway), merged 3a80d80. Error frame {type:error,code,message,value}; knobs LIVE_AUDIT_WINDOW/LIVE_REVALIDATE_INTERVAL/LIVE_PING_INTERVAL/LIVE_PONG_WAIT; metrics openvms_live_*. Checks after merge: go build/test OK, golangci-lint, vitest (see progress). Route: delegated (parallel worktree). Gap: no e2e WS test; dedupe per API process; socket upgraded before auth (PO decision pending).
-- [ ] LV-8 — Rollout (flag default), `docs/live-view-architecture.md`, changelog.
+- [x] LV-8 — Rollout (flag default), `docs/live-view-architecture.md`, changelog. Done: docs/live-view-architecture.md (architecture, config, errors, metrics, troubleshooting, changelog); local compose enables OPENVMS_FEATURES=persistentPlayers,videoSurfaceLayer (code default off). Route: inline (docs + 1 config line). Deploy recorded in progress.
 
 ## Acceptance
 Brief §"Core acceptance principle" and mandatory UI tests; reconnect counter shows 0 for
