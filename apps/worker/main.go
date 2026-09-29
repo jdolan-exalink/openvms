@@ -116,6 +116,14 @@ func run() error {
 				log.WarnContext(ctx, "publish new event", "error", err)
 			}
 		},
+		OnAlarm: func(ctx context.Context, alarms []events.OpenedAlarm) {
+			for _, a := range alarms {
+				data, _ := json.Marshal(a)
+				if _, err := js.Publish(ctx, "alarm.opened."+a.TenantID.String(), data); err != nil {
+					log.WarnContext(ctx, "publish opened alarm", "error", err, "alarm_id", a.ID)
+				}
+			}
+		},
 	}
 	go syncer.Run(ctx)
 

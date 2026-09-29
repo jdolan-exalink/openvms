@@ -15,6 +15,9 @@ const (
 	EventsSearch Permission = "events.search"
 	EventsReview Permission = "events.review"
 
+	AlarmsView   Permission = "alarms.view"
+	AlarmsManage Permission = "alarms.manage"
+
 	SnapshotsView     Permission = "snapshots.view"
 	SnapshotsDownload Permission = "snapshots.download"
 
@@ -81,6 +84,8 @@ var Catalog = []Definition{
 	{EventsView, "Ver eventos", ScopeCamera},
 	{EventsSearch, "Buscar eventos", ScopeCamera},
 	{EventsReview, "Marcar eventos como revisados", ScopeCamera},
+	{AlarmsView, "Ver alarmas", ScopeCamera},
+	{AlarmsManage, "Reconocer, asignar y resolver alarmas", ScopeCamera},
 	{SnapshotsView, "Ver snapshots", ScopeCamera},
 	{SnapshotsDownload, "Descargar snapshots", ScopeCamera},
 	{LPRView, "Ver lecturas de patentes", ScopeCamera},

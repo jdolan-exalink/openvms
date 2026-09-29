@@ -12,6 +12,28 @@ import (
 	"github.com/google/uuid"
 )
 
+type Alarm struct {
+	ID             uuid.UUID
+	TenantID       uuid.UUID
+	SiteID         uuid.UUID
+	CameraID       uuid.UUID
+	EventID        uuid.UUID
+	Source         string
+	Status         string
+	AssignedTo     *uuid.UUID
+	AcknowledgedBy *uuid.UUID
+	AcknowledgedAt *time.Time
+	ResolvedBy     *uuid.UUID
+	ResolvedAt     *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type AlarmSetting struct {
+	Singleton bool
+	EnabledAt time.Time
+}
+
 type ApiToken struct {
 	ID         uuid.UUID
 	UserID     uuid.UUID

@@ -30,6 +30,7 @@ type DemoResult struct {
 // operatorPerms is what the Operator-A group holds on its cameras (PRD §129).
 var operatorPerms = []authz.Permission{
 	authz.CamerasView, authz.LiveView, authz.EventsView, authz.EventsSearch,
+	authz.AlarmsView, authz.AlarmsManage,
 	authz.RecordingsView, authz.RecordingsSeek, authz.SnapshotsView,
 }
 

@@ -50,6 +50,8 @@ type Syncer struct {
 	Concurrency int
 	// OnNew is called for each review item seen for the first time (optional).
 	OnNew func(ctx context.Context, e NewEvent)
+	// OnAlarm is called after commit with the alarms opened by one review pull (optional).
+	OnAlarm func(ctx context.Context, alarms []OpenedAlarm)
 
 	now func() time.Time
 }
@@ -64,6 +66,17 @@ type NewEvent struct {
 	Severity string    `json:"severity"`
 	Labels   []string  `json:"labels"`
 	Start    time.Time `json:"start_time"`
+}
+
+// OpenedAlarm is published when an alert event opens an alarm.
+type OpenedAlarm struct {
+	ID        uuid.UUID `json:"id"`
+	TenantID  uuid.UUID `json:"tenant_id"`
+	SiteID    uuid.UUID `json:"site_id"`
+	CameraID  uuid.UUID `json:"camera_id"`
+	EventID   uuid.UUID `json:"event_id"`
+	Status    string    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 const (
@@ -246,6 +259,7 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	}
 
 	var created []NewEvent
+	var opened []OpenedAlarm
 	err := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		for _, r := range all {
 			cam, ok := cams[r.Camera]
@@ -259,6 +273,17 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 			if isNew {
 				created = append(created, ev)
 			}
+			// On every upsert, not only inserts: a detection promoted to alert opens its
+			// alarm later. A downgrade leaves an existing alarm untouched.
+			if ev.Severity == "alert" {
+				alarm, err := openAlarm(ctx, tx, ev)
+				if err != nil {
+					return err
+				}
+				if alarm != nil {
+					opened = append(opened, *alarm)
+				}
+			}
 		}
 		return upsertCursor(ctx, tx, srv, "review_cursor", &next)
 	})
@@ -270,7 +295,32 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 			s.OnNew(ctx, ev)
 		}
 	}
+	if s.OnAlarm != nil && len(opened) > 0 {
+		s.OnAlarm(ctx, opened)
+	}
 	return nil
+}
+
+// openAlarm opens the event's alarm unless one already exists (unique per event and source, so
+// re-reads are idempotent) or the event started before alarms were enabled (alarm_settings:
+// there is no backfill). It returns nil when nothing was opened.
+func openAlarm(ctx context.Context, tx pgx.Tx, ev NewEvent) (*OpenedAlarm, error) {
+	a := OpenedAlarm{TenantID: ev.TenantID, SiteID: ev.SiteID, CameraID: ev.CameraID, EventID: ev.ID}
+	err := tx.QueryRow(ctx, `
+INSERT INTO alarms (tenant_id, site_id, camera_id, event_id, source)
+SELECT $1, $2, $3, $4, 'event'
+WHERE $5::timestamptz >= (SELECT enabled_at FROM alarm_settings)
+ON CONFLICT (event_id, source) DO NOTHING
+RETURNING id, status, created_at`,
+		a.TenantID, a.SiteID, a.CameraID, a.EventID, ev.Start,
+	).Scan(&a.ID, &a.Status, &a.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open alarm for event %s: %w", ev.ID, err)
+	}
+	return &a, nil
 }
 
 func severity(v string) string {
