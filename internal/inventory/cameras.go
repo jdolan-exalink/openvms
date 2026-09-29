@@ -65,8 +65,62 @@ func (s *Service) GetCamera(ctx context.Context, actor authz.Actor, id uuid.UUID
 }
 
 type CameraUpdate struct {
-	DisplayName *string
-	Enabled     *bool
+	DisplayName        *string
+	Enabled            *bool
+	DefaultLiveQuality *string
+	Description        *string
+	Location           *string
+	Tags               *[]string
+}
+
+// Limits for the VMS-side camera settings; they mirror maxLength/maxItems in the OpenAPI contract.
+const (
+	maxCameraDescription = 1000
+	maxCameraLocation    = 200
+	maxCameraTags        = 20
+	maxCameraTagLength   = 40
+)
+
+// normalizeCameraUpdate validates the VMS-side settings in place: text is trimmed, the live
+// quality must be "sub" or "main", and tags are trimmed, de-duplicated case-insensitively
+// (first spelling wins) and bounded. display_name is handled by UpdateCamera itself.
+func normalizeCameraUpdate(in *CameraUpdate) error {
+	if in.DefaultLiveQuality != nil && *in.DefaultLiveQuality != "sub" && *in.DefaultLiveQuality != "main" {
+		return invalid("default_live_quality must be sub or main")
+	}
+	if in.Description != nil {
+		in.Description = ptr(strings.TrimSpace(*in.Description))
+		if len(*in.Description) > maxCameraDescription {
+			return invalid("description is too long (max %d characters)", maxCameraDescription)
+		}
+	}
+	if in.Location != nil {
+		in.Location = ptr(strings.TrimSpace(*in.Location))
+		if len(*in.Location) > maxCameraLocation {
+			return invalid("location is too long (max %d characters)", maxCameraLocation)
+		}
+	}
+	if in.Tags != nil {
+		seen := map[string]bool{}
+		tags := []string{}
+		for _, raw := range *in.Tags {
+			tag := strings.TrimSpace(raw)
+			key := strings.ToLower(tag)
+			if tag == "" || seen[key] {
+				continue
+			}
+			if len(tag) > maxCameraTagLength {
+				return invalid("tag is too long (max %d characters)", maxCameraTagLength)
+			}
+			seen[key] = true
+			tags = append(tags, tag)
+		}
+		if len(tags) > maxCameraTags {
+			return invalid("too many tags (max %d)", maxCameraTags)
+		}
+		in.Tags = &tags
+	}
+	return nil
 }
 
 func (s *Service) UpdateCamera(ctx context.Context, actor authz.Actor, id uuid.UUID, in CameraUpdate) (db.GetCameraRow, error) {
@@ -74,6 +128,9 @@ func (s *Service) UpdateCamera(ctx context.Context, actor authz.Actor, id uuid.U
 		if in.DisplayName = ptr(strings.TrimSpace(*in.DisplayName)); *in.DisplayName == "" {
 			return db.GetCameraRow{}, invalid("display_name cannot be empty")
 		}
+	}
+	if err := normalizeCameraUpdate(&in); err != nil {
+		return db.GetCameraRow{}, err
 	}
 	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		cam, err := q.GetCamera(ctx, id)
@@ -83,11 +140,20 @@ func (s *Service) UpdateCamera(ctx context.Context, actor authz.Actor, id uuid.U
 		if err := c.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
 			return err
 		}
-		if err := q.UpdateCamera(ctx, db.UpdateCameraParams{ID: id, DisplayName: in.DisplayName, Enabled: in.Enabled}); err != nil {
+		params := db.UpdateCameraParams{
+			ID: id, DisplayName: in.DisplayName, Enabled: in.Enabled,
+			DefaultLiveQuality: in.DefaultLiveQuality, Description: in.Description, Location: in.Location,
+		}
+		if in.Tags != nil {
+			params.Tags = *in.Tags
+		}
+		if err := q.UpdateCamera(ctx, params); err != nil {
 			return err
 		}
 		return audit(ctx, q, actor, &cam.TenantID, ActionCameraUpdated, "camera", id, map[string]any{
 			"display_name": in.DisplayName, "enabled": in.Enabled,
+			"default_live_quality": in.DefaultLiveQuality, "description": in.Description,
+			"location": in.Location, "tags": in.Tags,
 		})
 	})
 	if err != nil {

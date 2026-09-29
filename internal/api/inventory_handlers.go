@@ -355,6 +355,8 @@ func toCamera(c db.GetCameraRow) gen.Camera {
 		RemoteName: c.RemoteName, DisplayName: c.DisplayName, Enabled: c.Enabled,
 		Zones: c.Zones, Lpr: c.Lpr, Status: gen.HealthStatus(c.Status),
 		MissingSince: c.MissingSince, GroupIds: c.GroupIds, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		DefaultLiveQuality: gen.CameraLiveQuality(c.DefaultLiveQuality), Description: c.Description, Location: c.Location,
+		Tags: append([]string{}, c.Tags...),
 	}
 	if c.Fps != nil {
 		out.Fps = c.Fps
@@ -391,12 +393,23 @@ func (h *Handlers) GetCamera(ctx context.Context, r gen.GetCameraRequestObject) 
 	return gen.GetCamera200JSONResponse(toCamera(c)), nil
 }
 
+func cameraUpdate(b *gen.CameraUpdate) inventory.CameraUpdate {
+	out := inventory.CameraUpdate{
+		DisplayName: b.DisplayName, Enabled: b.Enabled, Description: b.Description, Location: b.Location, Tags: b.Tags,
+	}
+	if b.DefaultLiveQuality != nil {
+		q := string(*b.DefaultLiveQuality)
+		out.DefaultLiveQuality = &q
+	}
+	return out
+}
+
 func (h *Handlers) UpdateCamera(ctx context.Context, r gen.UpdateCameraRequestObject) (gen.UpdateCameraResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	c, err := h.Inv.UpdateCamera(ctx, a, r.CameraId, inventory.CameraUpdate{DisplayName: r.Body.DisplayName, Enabled: r.Body.Enabled})
+	c, err := h.Inv.UpdateCamera(ctx, a, r.CameraId, cameraUpdate(r.Body))
 	if err != nil {
 		return nil, err
 	}

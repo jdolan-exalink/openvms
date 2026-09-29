@@ -96,7 +96,8 @@ export function Live() {
   // list onto a specific slot passes that slot's index explicitly instead.
   const place = (cameraId: string, index: number = selected) => {
     setTiles((t) => {
-      const next = placeCameraAt(t, index, cameraId, columns === 1 ? "main" : "sub");
+      const defaultQuality = cameras.data?.find((c) => c.id === cameraId)?.default_live_quality ?? "sub";
+      const next = placeCameraAt(t, index, cameraId, columns === 1 ? "main" : defaultQuality);
       // After a click (not a drag), move the selection to the next empty tile.
       const empty = next.findIndex((x, i) => x === null && i !== index);
       if (empty >= 0) setSelected(empty);

@@ -517,7 +517,7 @@ paths:
     patch:
       tags: [cameras]
       operationId: updateCamera
-      summary: Rename or enable/disable a camera in the VMS
+      summary: Update a camera's VMS-side settings (name, enabled, default live quality, description, location, tags)
       requestBody:
         required: true
         content:
@@ -1624,7 +1624,7 @@ components:
           description: Cameras no longer present in Frigate. They are kept and flagged, not deleted.
     Camera:
       type: object
-      required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, created_at, updated_at]
+      required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, default_live_quality, description, location, tags, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
@@ -1641,13 +1641,31 @@ components:
         fps: { type: number, nullable: true }
         missing_since: { type: string, format: date-time, nullable: true }
         group_ids: { type: array, items: { type: string, format: uuid } }
+        default_live_quality:
+          $ref: "#/components/schemas/CameraLiveQuality"
+        description: { type: string, maxLength: 1000 }
+        location: { type: string, maxLength: 200 }
+        tags: { type: array, items: { type: string, maxLength: 40 }, maxItems: 20 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    CameraLiveQuality:
+      type: string
+      enum: [sub, main]
+      description: Stream a camera gets when it is added to a Live grid tile. VMS-owned; the Frigate sync never overwrites it.
     CameraUpdate:
       type: object
       properties:
         display_name: { type: string, minLength: 1, maxLength: 200 }
         enabled: { type: boolean }
+        default_live_quality:
+          $ref: "#/components/schemas/CameraLiveQuality"
+        description: { type: string, maxLength: 1000 }
+        location: { type: string, maxLength: 200 }
+        tags:
+          type: array
+          items: { type: string, maxLength: 40 }
+          maxItems: 20
+          description: Replaces the camera's tags. Values are trimmed and de-duplicated case-insensitively.
     CameraGroupInput:
       type: object
       required: [tenant_id, name, camera_ids]

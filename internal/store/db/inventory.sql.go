@@ -168,7 +168,7 @@ func (q *Queries) CreateTenant(ctx context.Context, arg CreateTenantParams) (Ten
 }
 
 const getCamera = `-- name: GetCamera :one
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -176,25 +176,29 @@ FROM cameras c WHERE c.id = $1 AND c.deleted_at IS NULL
 `
 
 type GetCameraRow struct {
-	ID           uuid.UUID
-	TenantID     uuid.UUID
-	SiteID       uuid.UUID
-	ServerID     uuid.UUID
-	RemoteName   string
-	DisplayName  string
-	Enabled      bool
-	Zones        []string
-	Lpr          bool
-	LiveStream   string
-	HqStream     string
-	Status       string
-	Fps          *float32
-	MissingSince *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
-	DeletedBy    *uuid.UUID
-	GroupIds     []uuid.UUID
+	ID                 uuid.UUID
+	TenantID           uuid.UUID
+	SiteID             uuid.UUID
+	ServerID           uuid.UUID
+	RemoteName         string
+	DisplayName        string
+	Enabled            bool
+	Zones              []string
+	Lpr                bool
+	LiveStream         string
+	HqStream           string
+	Status             string
+	Fps                *float32
+	MissingSince       *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+	DeletedBy          *uuid.UUID
+	DefaultLiveQuality string
+	Description        string
+	Location           string
+	Tags               []string
+	GroupIds           []uuid.UUID
 }
 
 func (q *Queries) GetCamera(ctx context.Context, id uuid.UUID) (GetCameraRow, error) {
@@ -219,6 +223,10 @@ func (q *Queries) GetCamera(ctx context.Context, id uuid.UUID) (GetCameraRow, er
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletedBy,
+		&i.DefaultLiveQuality,
+		&i.Description,
+		&i.Location,
+		&i.Tags,
 		&i.GroupIds,
 	)
 	return i, err
@@ -516,7 +524,7 @@ func (q *Queries) ListCameraGroups(ctx context.Context, tenantID *uuid.UUID) ([]
 }
 
 const listCameras = `-- name: ListCameras :many
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -542,25 +550,29 @@ type ListCamerasParams struct {
 }
 
 type ListCamerasRow struct {
-	ID           uuid.UUID
-	TenantID     uuid.UUID
-	SiteID       uuid.UUID
-	ServerID     uuid.UUID
-	RemoteName   string
-	DisplayName  string
-	Enabled      bool
-	Zones        []string
-	Lpr          bool
-	LiveStream   string
-	HqStream     string
-	Status       string
-	Fps          *float32
-	MissingSince *time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	DeletedAt    *time.Time
-	DeletedBy    *uuid.UUID
-	GroupIds     []uuid.UUID
+	ID                 uuid.UUID
+	TenantID           uuid.UUID
+	SiteID             uuid.UUID
+	ServerID           uuid.UUID
+	RemoteName         string
+	DisplayName        string
+	Enabled            bool
+	Zones              []string
+	Lpr                bool
+	LiveStream         string
+	HqStream           string
+	Status             string
+	Fps                *float32
+	MissingSince       *time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	DeletedAt          *time.Time
+	DeletedBy          *uuid.UUID
+	DefaultLiveQuality string
+	Description        string
+	Location           string
+	Tags               []string
+	GroupIds           []uuid.UUID
 }
 
 func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]ListCamerasRow, error) {
@@ -597,6 +609,10 @@ func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]Lis
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.DeletedBy,
+			&i.DefaultLiveQuality,
+			&i.Description,
+			&i.Location,
+			&i.Tags,
 			&i.GroupIds,
 		); err != nil {
 			return nil, err
@@ -610,7 +626,7 @@ func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]Lis
 }
 
 const listServerCameras = `-- name: ListServerCameras :many
-SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
+SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]Camera, error) {
@@ -641,6 +657,10 @@ func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.DeletedBy,
+			&i.DefaultLiveQuality,
+			&i.Description,
+			&i.Location,
+			&i.Tags,
 		); err != nil {
 			return nil, err
 		}
@@ -932,18 +952,34 @@ const updateCamera = `-- name: UpdateCamera :exec
 UPDATE cameras SET
     display_name = coalesce($1, display_name),
     enabled = coalesce($2, enabled),
+    default_live_quality = coalesce($3, default_live_quality),
+    description = coalesce($4, description),
+    location = coalesce($5, location),
+    tags = coalesce($6::text[], tags),
     updated_at = now()
-WHERE id = $3 AND deleted_at IS NULL
+WHERE id = $7 AND deleted_at IS NULL
 `
 
 type UpdateCameraParams struct {
-	DisplayName *string
-	Enabled     *bool
-	ID          uuid.UUID
+	DisplayName        *string
+	Enabled            *bool
+	DefaultLiveQuality *string
+	Description        *string
+	Location           *string
+	Tags               []string
+	ID                 uuid.UUID
 }
 
 func (q *Queries) UpdateCamera(ctx context.Context, arg UpdateCameraParams) error {
-	_, err := q.db.Exec(ctx, updateCamera, arg.DisplayName, arg.Enabled, arg.ID)
+	_, err := q.db.Exec(ctx, updateCamera,
+		arg.DisplayName,
+		arg.Enabled,
+		arg.DefaultLiveQuality,
+		arg.Description,
+		arg.Location,
+		arg.Tags,
+		arg.ID,
+	)
 	return err
 }
 

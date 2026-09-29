@@ -370,7 +370,7 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Rename or enable/disable a camera in the VMS */
+        /** Update a camera's VMS-side settings (name, enabled, default live quality, description, location, tags) */
         patch: operations["updateCamera"];
         trace?: never;
     };
@@ -1188,14 +1188,28 @@ export interface components {
             /** Format: date-time */
             missing_since?: string | null;
             group_ids: string[];
+            default_live_quality: components["schemas"]["CameraLiveQuality"];
+            description: string;
+            location: string;
+            tags: string[];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
+        /**
+         * @description Stream a camera gets when it is added to a Live grid tile. VMS-owned; the Frigate sync never overwrites it.
+         * @enum {string}
+         */
+        CameraLiveQuality: "sub" | "main";
         CameraUpdate: {
             display_name?: string;
             enabled?: boolean;
+            default_live_quality?: components["schemas"]["CameraLiveQuality"];
+            description?: string;
+            location?: string;
+            /** @description Replaces the camera's tags. Values are trimmed and de-duplicated case-insensitively. */
+            tags?: string[];
         };
         CameraGroupInput: {
             /** Format: uuid */

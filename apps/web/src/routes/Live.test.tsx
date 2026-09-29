@@ -52,7 +52,7 @@ function meResponse(grants: { permission: string; effect: "allow" | "deny"; scop
   });
 }
 
-const camera = (id: string, name: string) => ({
+const camera = (id: string, name: string, extra: object = {}) => ({
   id,
   tenant_id: "t1",
   site_id: "s1",
@@ -65,8 +65,13 @@ const camera = (id: string, name: string) => ({
   status: "online",
   fps: 5,
   group_ids: [],
+  default_live_quality: "sub",
+  description: "",
+  location: "",
+  tags: [],
   created_at: "",
   updated_at: "",
+  ...extra,
 });
 
 const emptyCatalogs = {
@@ -157,6 +162,32 @@ describe("Live", () => {
       const raw = localStorage.getItem(liveSelectionKey("t1", "u1"));
       const saved = parseSelection(raw, new Set(["cam-1"]));
       expect(saved?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
+    });
+  });
+
+  it("places a camera using its default live quality", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () =>
+            json({ items: [camera("cam-1", "Puerta norte", { default_live_quality: "main" }), camera("cam-2", "Patio")] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+
+    renderPage(Live);
+
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    fireEvent.click(await screen.findByText("Patio"));
+
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]));
+      expect(saved?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "main" });
+      expect(saved?.tiles[1]).toEqual({ camera_id: "cam-2", quality: "sub" });
     });
   });
 

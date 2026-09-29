@@ -139,6 +139,10 @@ FROM cameras c WHERE c.id = @id AND c.deleted_at IS NULL;
 UPDATE cameras SET
     display_name = coalesce(sqlc.narg('display_name'), display_name),
     enabled = coalesce(sqlc.narg('enabled'), enabled),
+    default_live_quality = coalesce(sqlc.narg('default_live_quality'), default_live_quality),
+    description = coalesce(sqlc.narg('description'), description),
+    location = coalesce(sqlc.narg('location'), location),
+    tags = coalesce(sqlc.narg('tags')::text[], tags),
     updated_at = now()
 WHERE id = @id AND deleted_at IS NULL;
 

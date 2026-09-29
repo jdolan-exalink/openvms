@@ -18,6 +18,10 @@ const camera = (id: string, name: string, extra: object = {}) => ({
   status: "online",
   fps: 5,
   group_ids: [],
+  default_live_quality: "sub",
+  description: "",
+  location: "",
+  tags: [],
   created_at: "",
   updated_at: "",
   ...extra,
@@ -109,9 +113,57 @@ describe("Cameras", () => {
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH");
       expect(new URL(patch!.url).pathname).toBe("/api/v1/cameras/c1");
-      expect(await patch!.clone().json()).toEqual({ display_name: "nuevo", enabled: false });
+      expect(await patch!.clone().json()).toEqual({
+        display_name: "nuevo",
+        enabled: false,
+        default_live_quality: "sub",
+        description: "",
+        location: "",
+        tags: [],
+      });
       const lists = fetchMock.mock.calls.filter(([r]) => new URL((r as Request).url).pathname === "/api/v1/cameras" && (r as Request).method === "GET");
       expect(lists.length).toBeGreaterThan(1);
+    });
+
+    it("edits default live quality, description, location and tags", async () => {
+      const fetchMock = setup(manager);
+      renderPage(Cameras);
+      fireEvent.click(await screen.findByRole("button", { name: "Ajustes de acceso" }));
+      expect(await screen.findByLabelText(/Calidad en vivo por defecto/)).toHaveValue("sub");
+      fireEvent.change(screen.getByLabelText(/Calidad en vivo por defecto/), { target: { value: "main" } });
+      fireEvent.change(screen.getByLabelText("Descripción"), { target: { value: "Entrada principal" } });
+      fireEvent.change(screen.getByLabelText("Ubicación"), { target: { value: "Planta baja" } });
+      fireEvent.change(screen.getByLabelText(/Etiquetas/), { target: { value: " acceso, exterior ,, " } });
+      fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH");
+      expect(await patch!.clone().json()).toMatchObject({
+        default_live_quality: "main",
+        description: "Entrada principal",
+        location: "Planta baja",
+        tags: ["acceso", "exterior"],
+      });
+    });
+
+    it("prefills the stored VMS settings for users with cameras.manage", async () => {
+      const stored = { default_live_quality: "main", description: "Entrada", location: "Norte", tags: ["a", "b"] };
+      const routes = stubApi({ ...inventory([camera("c1", "acceso", stored)]), "/api/v1/me": () => json(manager) });
+      vi.stubGlobal("fetch", vi.fn(routes));
+      renderPage(Cameras);
+      fireEvent.click(await screen.findByRole("button", { name: "Ajustes de acceso" }));
+      expect(await screen.findByLabelText(/Calidad en vivo por defecto/)).toHaveValue("main");
+      expect(screen.getByLabelText("Descripción")).toHaveValue("Entrada");
+      expect(screen.getByLabelText("Ubicación")).toHaveValue("Norte");
+      expect(screen.getByLabelText(/Etiquetas/)).toHaveValue("a, b");
+    });
+
+    it("does not show the new edit controls without cameras.manage", async () => {
+      setup(viewer);
+      renderPage(Cameras);
+      fireEvent.click(await screen.findByRole("button", { name: "Ajustes de acceso" }));
+      await screen.findByRole("dialog");
+      expect(screen.queryByLabelText(/Calidad en vivo por defecto/)).not.toBeInTheDocument();
+      expect(screen.queryByLabelText(/Etiquetas/)).not.toBeInTheDocument();
     });
 
     it("rejects an empty name without calling the API", async () => {
