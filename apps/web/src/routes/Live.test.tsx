@@ -188,6 +188,92 @@ describe("Live", () => {
     expect(FakeSocket.created).toBe(socketCount);
   });
 
+  it("links each visible camera to its own recordings when recordings.view is granted", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(stubApi({
+        "/api/v1/me": () => meResponse([
+          { permission: "live.view", effect: "allow", scope_type: "platform" },
+          { permission: "recordings.view", effect: "allow", scope_type: "platform" },
+        ]),
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "North gate")] }),
+        ...emptyCatalogs,
+      })),
+    );
+
+    renderPage(Live);
+
+    const link = await screen.findByRole("link", { name: "Grabaciones de North gate" });
+    expect(link).toHaveAttribute("href", "/playback?camera=cam-1");
+  });
+
+  it("does not expose camera recordings links without recordings.view", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "North gate")] }),
+        ...emptyCatalogs,
+      })),
+    );
+
+    renderPage(Live);
+
+    await screen.findByRole("button", { name: /North gate/ });
+    expect(screen.queryByRole("link", { name: "Grabaciones de North gate" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ver grabaciones de North gate" })).not.toBeInTheDocument();
+  });
+
+  it("opens a camera-local recordings timeline and HLS player inside the Live workspace", async () => {
+    stubBrowserAPIs();
+    const fetchMock = vi.fn(stubApi({
+      "/api/v1/me": () => meResponse([
+        { permission: "live.view", effect: "allow", scope_type: "platform" },
+        { permission: "recordings.view", effect: "allow", scope_type: "platform" },
+      ]),
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "North gate")] }),
+      "/api/v1/cameras/cam-1/recordings": () => json({ items: [{ start_time: "2025-06-15T10:00:00Z", end_time: "2025-06-15T11:00:00Z" }] }),
+      "/api/v1/events": () => json({ items: [{ id: "event-1", start_time: "2025-06-15T10:30:00Z", severity: "alert", labels: ["person"] }] }),
+      ...emptyCatalogs,
+    }));
+    vi.stubGlobal(
+      "fetch",
+      fetchMock,
+    );
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: "North gate" }));
+    const liveVideo = await waitFor(() => {
+      const video = screen.getByLabelText("Cuadro 1").querySelector("video");
+      expect(video).not.toBeNull();
+      return video;
+    });
+    const socketCount = FakeSocket.created;
+    fireEvent.click(await screen.findByRole("button", { name: "Ver grabaciones de North gate" }));
+
+    expect(await screen.findByRole("slider", { name: "Línea de tiempo del día" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Reproducción HLS de North gate")).toBeInTheDocument();
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(liveVideo);
+    expect(FakeSocket.created).toBe(socketCount);
+    await waitFor(() => {
+      const recordingRequest = fetchMock.mock.calls
+        .map(([request]) => new URL(request.url))
+        .find((url) => url.pathname === "/api/v1/cameras/cam-1/recordings");
+      expect(recordingRequest?.searchParams.has("from")).toBe(true);
+      expect(recordingRequest?.searchParams.has("to")).toBe(true);
+      const eventRequest = fetchMock.mock.calls
+        .map(([request]) => new URL(request.url))
+        .find((url) => url.pathname === "/api/v1/events");
+      expect(eventRequest?.searchParams.getAll("camera_id")).toContain("cam-1");
+    });
+    expect(screen.getByRole("link", { name: "Abrir página de grabaciones de North gate" })).toHaveAttribute(
+      "href",
+      "/playback?camera=cam-1",
+    );
+  });
+
   it("reorders two tiles with the keyboard (dnd-kit's built-in accessibility)", async () => {
     stubBrowserAPIs();
     vi.stubGlobal(

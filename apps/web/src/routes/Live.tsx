@@ -4,11 +4,12 @@ import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link } from "@tanstack/react-router";
-import { Camera, CircleCheck, CircleHelp, CircleX, ChevronDown, ChevronRight, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
+import { ArrowUpRight, Camera, CircleCheck, CircleHelp, CircleX, ChevronDown, ChevronRight, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
+import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { useContextSidebarPortalTarget } from "@/components/AppShell";
 import { Button, ErrorNote, PageHeader, Select, StatusBadge, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -42,6 +43,7 @@ export function Live() {
   const [focus, setFocus] = useState<number | null>(null);
   const [viewId, setViewId] = useState("");
   const [saveName, setSaveName] = useState("");
+  const [playbackCameraId, setPlaybackCameraId] = useState<string | null>(null);
   const [shared, setShared] = useState(false);
   // Set once the saved grid selection (or the default) has been applied, so the persistence
   // effect below never fires before restoration and overwrites a saved selection with defaults.
@@ -201,7 +203,14 @@ export function Live() {
       </section>
       <div className="flex min-h-0 flex-col gap-2 rounded-xl border border-line bg-bg p-2.5">
         <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">Cámaras</h2>
-        <CameraTree cameras={cameras.data ?? []} sites={sites.data ?? []} servers={servers.data ?? []} onPick={place} />
+        <CameraTree
+          cameras={cameras.data ?? []}
+          sites={sites.data ?? []}
+          servers={servers.data ?? []}
+          onPick={place}
+          onPlayback={setPlaybackCameraId}
+          canViewRecordings={can(me.data, "recordings.view")}
+        />
         <ErrorNote error={cameras.error} />
       </div>
     </div>
@@ -268,6 +277,13 @@ export function Live() {
         </div>
         {sidebar}
       </DndContext>
+      {playbackCameraId && camById.has(playbackCameraId) && (
+        <LivePlaybackPanel
+          cameraId={playbackCameraId}
+          cameraName={camById.get(playbackCameraId)!.display_name}
+          onClose={() => setPlaybackCameraId(null)}
+        />
+      )}
     </div>
   );
 }
@@ -370,11 +386,15 @@ function CameraTree({
   sites,
   servers,
   onPick,
+  onPlayback,
+  canViewRecordings,
 }: {
   cameras: Schemas["Camera"][];
   sites: Schemas["Site"][];
   servers: Schemas["Server"][];
   onPick: (id: string) => void;
+  onPlayback: (id: string) => void;
+  canViewRecordings: boolean;
 }) {
   const [q, setQ] = useState("");
   const [closed, setClosed] = useState<Record<string, boolean>>({});
@@ -408,7 +428,9 @@ function CameraTree({
                     {server.get(srvId) && <span className="ml-auto"><StatusBadge status={server.get(srvId)!.status} /></span>}
                   </button>
                   {!closed[srvId] &&
-                    cams.map((c) => <DraggableCamera key={c.id} camera={c} onPick={onPick} />)}
+                    cams.map((c) => (
+                      <DraggableCamera key={c.id} camera={c} onPick={onPick} onPlayback={onPlayback} canViewRecordings={canViewRecordings} />
+                    ))}
                 </div>
               ))}
           </div>
@@ -420,19 +442,53 @@ function CameraTree({
 }
 
 /** DraggableCamera keeps the existing click-to-place behavior and adds drag-to-place. */
-function DraggableCamera({ camera, onPick }: { camera: Schemas["Camera"]; onPick: (id: string) => void }) {
+function DraggableCamera({
+  camera,
+  onPick,
+  onPlayback,
+  canViewRecordings,
+}: {
+  camera: Schemas["Camera"];
+  onPick: (id: string) => void;
+  onPlayback: (id: string) => void;
+  canViewRecordings: boolean;
+}) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: cameraDragId(camera.id) });
   return (
-    <button
-      ref={setNodeRef}
-      type="button"
-      onClick={() => onPick(camera.id)}
-      className={cn("ml-4 flex w-[calc(100%-1rem)] items-center gap-2 rounded px-1.5 py-0.5 text-left hover:bg-raised", isDragging && "opacity-50")}
-      {...attributes}
-      {...listeners}
-    >
-      <span className={cn("size-1.5 shrink-0 rounded-full", camera.status === "online" ? "bg-ok" : camera.status === "offline" ? "bg-bad" : "bg-muted")} />
-      <span className="truncate">{camera.display_name}</span>
-    </button>
+    <div className="ml-4 flex min-w-0 items-center gap-1">
+      <button
+        ref={setNodeRef}
+        type="button"
+        onClick={() => onPick(camera.id)}
+        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded px-1.5 py-0.5 text-left hover:bg-raised", isDragging && "opacity-50")}
+        {...attributes}
+        {...listeners}
+      >
+        <span className={cn("size-1.5 shrink-0 rounded-full", camera.status === "online" ? "bg-ok" : camera.status === "offline" ? "bg-bad" : "bg-muted")} />
+        <span className="truncate">{camera.display_name}</span>
+      </button>
+      {canViewRecordings && (
+        <>
+          <button
+            type="button"
+            title="Ver grabaciones en vivo"
+            aria-label={`Ver grabaciones de ${camera.display_name}`}
+            onClick={() => onPlayback(camera.id)}
+            className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <History className="size-3.5" aria-hidden />
+          </button>
+          <Link
+            to="/playback"
+            search={{ camera: camera.id }}
+            title="Abrir página de grabaciones"
+            aria-label={`Grabaciones de ${camera.display_name}`}
+            className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          >
+            <ArrowUpRight className="size-3.5" aria-hidden />
+          </Link>
+        </>
+      )}
+    </div>
   );
 }
