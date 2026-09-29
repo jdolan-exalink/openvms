@@ -468,3 +468,46 @@ func (s *Service) seal(info frigate.ConnInfo, id uuid.UUID) ([]byte, error) {
 	}
 	return s.Sealer.Seal([]byte(info.Password), id[:])
 }
+
+// RestartServer calls Frigate's POST /api/restart endpoint after verifying servers.restart permission.
+func (s *Service) RestartServer(ctx context.Context, actor authz.Actor, id uuid.UUID) error {
+	var srv db.GetServerRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		srv, err = q.GetServer(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		return c.Require(authz.ServersRestart, access.Server(srv.TenantID, srv.SiteID, srv.ID))
+	})
+	if err != nil {
+		return err
+	}
+
+	info, err := s.connInfo(db.FrigateServer{
+		ID:             srv.ID,
+		BaseUrl:        srv.BaseUrl,
+		AuthMode:       srv.AuthMode,
+		Username:       srv.Username,
+		PasswordSealed: srv.PasswordSealed,
+		TlsSkipVerify:  srv.TlsSkipVerify,
+	})
+	if err != nil {
+		return err
+	}
+	adapter, err := s.Connect(ctx, info)
+	if err != nil {
+		return &FrigateError{Err: err}
+	}
+	if err := adapter.Restart(ctx); err != nil {
+		return &FrigateError{Err: err}
+	}
+
+	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		return audit(ctx, q, actor, &srv.TenantID, ActionServerRestarted, "server", id, map[string]any{
+			"server_id": srv.ID,
+			"name":      srv.Name,
+		})
+	})
+}
+

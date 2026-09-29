@@ -27,8 +27,29 @@ type Adapter interface {
 	Recordings(ctx context.Context, camera string, after, before float64) ([]RecordingSegment, error)
 	StartExport(ctx context.Context, camera string, start, end float64, name string) (string, error)
 	Export(ctx context.Context, id string) (ExportInfo, error)
+	// CameraFrigateConfig reads detection and analytics configuration from Frigate for one camera.
+	GetCameraConfig(ctx context.Context, camera string) (CameraFrigateConfig, error)
+	// UpdateCameraConfig updates editable configuration properties on Frigate for one camera.
+	UpdateCameraConfig(ctx context.Context, camera string, update CameraFrigateConfigUpdate) (CameraFrigateConfig, error)
+	// Restart triggers Frigate service restart via POST /api/restart.
+	Restart(ctx context.Context) error
 	// Media opens raw media resources for the media gateway.
 	Media() Media
+}
+
+// CameraFrigateConfig holds detection, object tracking and LPR settings for a camera.
+type CameraFrigateConfig struct {
+	DetectEnabled  bool     `json:"detect_enabled"`
+	TrackedObjects []string `json:"tracked_objects"`
+	LPREnabled     bool     `json:"lpr_enabled"`
+	Zones          []string `json:"zones"`
+}
+
+// CameraFrigateConfigUpdate specifies optional fields to update on Frigate.
+type CameraFrigateConfigUpdate struct {
+	DetectEnabled  *bool    `json:"detect_enabled,omitempty"`
+	TrackedObjects []string `json:"tracked_objects,omitempty"`
+	LPREnabled     *bool    `json:"lpr_enabled,omitempty"`
 }
 
 // Media is the raw access the media gateway needs: plain GETs and websockets on Frigate's

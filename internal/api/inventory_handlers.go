@@ -514,3 +514,68 @@ func connInput(baseURL string, mode *gen.AuthMode, username, password *string, s
 	}
 	return in
 }
+
+func toCameraFrigateConfig(v inventory.CameraFrigateConfigView) gen.CameraFrigateConfig {
+	tracked := v.TrackedObjects
+	if tracked == nil {
+		tracked = []string{}
+	}
+	zones := v.Zones
+	if zones == nil {
+		zones = []string{}
+	}
+	return gen.CameraFrigateConfig{
+		CameraId:       v.CameraID,
+		CameraName:     v.CameraName,
+		ServerId:       v.ServerID,
+		DetectEnabled:  v.DetectEnabled,
+		TrackedObjects: tracked,
+		LprEnabled:     v.LPREnabled,
+		Zones:          zones,
+	}
+}
+
+func (h *Handlers) GetCameraFrigateConfig(ctx context.Context, r gen.GetCameraFrigateConfigRequestObject) (gen.GetCameraFrigateConfigResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := h.Inv.GetCameraFrigateConfig(ctx, a, r.CameraId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetCameraFrigateConfig200JSONResponse(toCameraFrigateConfig(cfg)), nil
+}
+
+func (h *Handlers) UpdateCameraFrigateConfig(ctx context.Context, r gen.UpdateCameraFrigateConfigRequestObject) (gen.UpdateCameraFrigateConfigResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	b := r.Body
+	var update frigate.CameraFrigateConfigUpdate
+	if b != nil {
+		update.DetectEnabled = b.DetectEnabled
+		update.LPREnabled = b.LprEnabled
+		if b.TrackedObjects != nil {
+			update.TrackedObjects = *b.TrackedObjects
+		}
+	}
+	cfg, err := h.Inv.UpdateCameraFrigateConfig(ctx, a, r.CameraId, update)
+	if err != nil {
+		return nil, err
+	}
+	return gen.UpdateCameraFrigateConfig200JSONResponse(toCameraFrigateConfig(cfg)), nil
+}
+
+func (h *Handlers) RestartServer(ctx context.Context, r gen.RestartServerRequestObject) (gen.RestartServerResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.Inv.RestartServer(ctx, a, r.ServerId); err != nil {
+		return nil, err
+	}
+	return gen.RestartServer200JSONResponse{Success: true}, nil
+}
+

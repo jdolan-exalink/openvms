@@ -474,6 +474,28 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/restart:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: restartServer
+      summary: Restart the Frigate server
+      description: Requires servers.restart on the server.
+      responses:
+        "200":
+          description: Restart initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras:
     get:
       tags: [cameras]
@@ -533,6 +555,45 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/config:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: getCameraFrigateConfig
+      summary: Get a camera's Frigate detection and analytics configuration
+      description: Requires cameras.view on the camera.
+      responses:
+        "200":
+          description: Configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraFrigateConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+    patch:
+      tags: [cameras]
+      operationId: updateCameraFrigateConfig
+      summary: Update a camera's Frigate detection and analytics configuration
+      description: Requires servers.config on the parent server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraFrigateConfigUpdate" }
+      responses:
+        "200":
+          description: Updated configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraFrigateConfig" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/camera-groups:
     get:
       tags: [cameras]
@@ -1839,6 +1900,23 @@ components:
           items: { type: string, maxLength: 40 }
           maxItems: 20
           description: Replaces the camera's tags. Values are trimmed and de-duplicated case-insensitively.
+    CameraFrigateConfig:
+      type: object
+      required: [camera_id, camera_name, server_id, detect_enabled, tracked_objects, lpr_enabled, zones]
+      properties:
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        server_id: { type: string, format: uuid }
+        detect_enabled: { type: boolean }
+        tracked_objects: { type: array, items: { type: string } }
+        lpr_enabled: { type: boolean }
+        zones: { type: array, items: { type: string } }
+    CameraFrigateConfigUpdate:
+      type: object
+      properties:
+        detect_enabled: { type: boolean }
+        tracked_objects: { type: array, items: { type: string } }
+        lpr_enabled: { type: boolean }
     CameraGroupInput:
       type: object
       required: [tenant_id, name, camera_ids]

@@ -71,9 +71,11 @@ const (
 	ActionServerUpdated      = "SERVER_UPDATED"
 	ActionServerRemoved      = "SERVER_REMOVED"
 	ActionServerSynced       = "SERVER_SYNCED"
-	ActionCameraUpdated      = "CAMERA_UPDATED"
-	ActionCameraGroupChanged = "CAMERA_GROUP_CHANGED"
-	ActionPermissionChanged  = "PERMISSION_CHANGED"
+	ActionCameraUpdated       = "CAMERA_UPDATED"
+	ActionCameraGroupChanged  = "CAMERA_GROUP_CHANGED"
+	ActionPermissionChanged   = "PERMISSION_CHANGED"
+	ActionServerConfigUpdated = "SERVER_CONFIG_UPDATED"
+	ActionServerRestarted     = "SERVER_RESTARTED"
 )
 
 func audit(ctx context.Context, q *db.Queries, actor authz.Actor, tenantID *uuid.UUID, action, targetType string, targetID uuid.UUID, details map[string]any) error {

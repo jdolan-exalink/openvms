@@ -3,7 +3,9 @@ package frigate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -34,11 +36,19 @@ type cameraConfig struct {
 	Live *struct {
 		Streams map[string]string `json:"streams"`
 	} `json:"live"`
+	Detect *toggle `json:"detect"`
+	Objects *struct {
+		Track []string `json:"track"`
+	} `json:"objects"`
 }
 
 type frigateConfig struct {
 	Cameras         map[string]cameraConfig `json:"cameras"`
 	LPR             *toggle                 `json:"lpr"`
+	Detect          *toggle                 `json:"detect"`
+	Objects         *struct {
+		Track []string `json:"track"`
+	} `json:"objects"`
 	FaceRecognition *toggle                 `json:"face_recognition"`
 	SemanticSearch  *toggle                 `json:"semantic_search"`
 }
@@ -254,3 +264,78 @@ func (a *v017) Stats(ctx context.Context) (Stats, error) {
 }
 
 func on(t *toggle) bool { return t != nil && t.Enabled }
+
+func (a *v017) GetCameraConfig(ctx context.Context, camera string) (CameraFrigateConfig, error) {
+	cfg, err := a.config(ctx)
+	if err != nil {
+		return CameraFrigateConfig{}, err
+	}
+	cc, ok := cfg.Cameras[camera]
+	if !ok {
+		return CameraFrigateConfig{}, fmt.Errorf("camera %q: %w", camera, ErrNotFound)
+	}
+
+	detectEnabled := true
+	if cc.Detect != nil {
+		detectEnabled = cc.Detect.Enabled
+	} else if cfg.Detect != nil {
+		detectEnabled = cfg.Detect.Enabled
+	}
+
+	lprEnabled := on(cc.LPR) || (cc.LPR == nil && on(cfg.LPR))
+
+	var tracked []string
+	if cc.Objects != nil && len(cc.Objects.Track) > 0 {
+		tracked = append(tracked, cc.Objects.Track...)
+	} else if cfg.Objects != nil && len(cfg.Objects.Track) > 0 {
+		tracked = append(tracked, cfg.Objects.Track...)
+	}
+	if tracked == nil {
+		tracked = []string{}
+	}
+	sort.Strings(tracked)
+
+	zones := make([]string, 0, len(cc.Zones))
+	for z := range cc.Zones {
+		zones = append(zones, z)
+	}
+	sort.Strings(zones)
+
+	return CameraFrigateConfig{
+		DetectEnabled:  detectEnabled,
+		TrackedObjects: tracked,
+		LPREnabled:     lprEnabled,
+		Zones:          zones,
+	}, nil
+}
+
+func (a *v017) UpdateCameraConfig(ctx context.Context, camera string, update CameraFrigateConfigUpdate) (CameraFrigateConfig, error) {
+	if _, err := a.GetCameraConfig(ctx, camera); err != nil {
+		return CameraFrigateConfig{}, err
+	}
+
+	params := url.Values{}
+	if update.DetectEnabled != nil {
+		params.Set(fmt.Sprintf("cameras.%s.detect.enabled", camera), strconv.FormatBool(*update.DetectEnabled))
+	}
+	if update.LPREnabled != nil {
+		params.Set(fmt.Sprintf("cameras.%s.lpr.enabled", camera), strconv.FormatBool(*update.LPREnabled))
+	}
+	if update.TrackedObjects != nil {
+		params.Set(fmt.Sprintf("cameras.%s.objects.track", camera), strings.Join(update.TrackedObjects, ","))
+	}
+
+	if len(params) > 0 {
+		if _, err := a.c.send(ctx, http.MethodPut, "/api/config/set", params, nil); err != nil {
+			return CameraFrigateConfig{}, err
+		}
+	}
+
+	return a.GetCameraConfig(ctx, camera)
+}
+
+func (a *v017) Restart(ctx context.Context) error {
+	_, err := a.c.send(ctx, http.MethodPost, "/api/restart", nil, nil)
+	return err
+}
+

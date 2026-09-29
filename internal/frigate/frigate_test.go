@@ -223,3 +223,58 @@ func TestMediaURLPath(t *testing.T) {
 		}
 	}
 }
+
+func TestCameraConfigGetAndUpdate(t *testing.T) {
+	ts := startMock(t, "0.17.2-mock")
+	ctx := context.Background()
+	a, err := Connect(ctx, ConnInfo{BaseURL: ts.URL, Username: "vms", Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Initial read
+	cfg, err := a.GetCameraConfig(ctx, "acceso_norte")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DetectEnabled || !cfg.LPREnabled {
+		t.Fatalf("expected detect=true, lpr=true, got %+v", cfg)
+	}
+	if len(cfg.Zones) != 2 || cfg.Zones[0] != "entrada" || cfg.Zones[1] != "salida" {
+		t.Fatalf("unexpected zones: %+v", cfg.Zones)
+	}
+
+	// 2. Update config: turn off detect and change tracked objects
+	f := false
+	updated, err := a.UpdateCameraConfig(ctx, "acceso_norte", CameraFrigateConfigUpdate{
+		DetectEnabled:  &f,
+		TrackedObjects: []string{"car", "motorcycle"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.DetectEnabled {
+		t.Errorf("expected detect=false, got %+v", updated)
+	}
+	if len(updated.TrackedObjects) != 2 || updated.TrackedObjects[0] != "car" || updated.TrackedObjects[1] != "motorcycle" {
+		t.Errorf("expected car and motorcycle, got %+v", updated.TrackedObjects)
+	}
+
+	// 3. Not found for unknown camera
+	if _, err := a.GetCameraConfig(ctx, "unknown"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestRestart(t *testing.T) {
+	ts := startMock(t, "0.17.2-mock")
+	ctx := context.Background()
+	a, err := Connect(ctx, ConnInfo{BaseURL: ts.URL, Username: "vms", Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Restart(ctx); err != nil {
+		t.Fatalf("restart failed: %v", err)
+	}
+}
+

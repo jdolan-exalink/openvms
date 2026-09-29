@@ -12,9 +12,11 @@ import (
 
 // Camera describes one simulated camera.
 type Camera struct {
-	Name  string
-	Zones []string
-	LPR   bool
+	Name           string
+	Zones          []string
+	LPR            bool
+	Detect         *bool
+	TrackedObjects []string
 }
 
 // Publisher sends a payload to an MQTT topic. Nil disables publishing.

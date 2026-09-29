@@ -9,6 +9,7 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
@@ -403,3 +404,140 @@ func contains(ids []uuid.UUID, id uuid.UUID) bool {
 	}
 	return false
 }
+
+// CameraFrigateConfigView presents detection, tracked objects and LPR configuration for a camera.
+type CameraFrigateConfigView struct {
+	CameraID       uuid.UUID `json:"camera_id"`
+	CameraName     string    `json:"camera_name"`
+	ServerID       uuid.UUID `json:"server_id"`
+	DetectEnabled  bool      `json:"detect_enabled"`
+	TrackedObjects []string  `json:"tracked_objects"`
+	LPREnabled     bool      `json:"lpr_enabled"`
+	Zones          []string  `json:"zones"`
+}
+
+// GetCameraFrigateConfig reads the camera's detection and analytics config directly from Frigate.
+func (s *Service) GetCameraFrigateConfig(ctx context.Context, actor authz.Actor, cameraID uuid.UUID) (CameraFrigateConfigView, error) {
+	var cam db.GetCameraRow
+	var srv db.GetServerRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		cam, err = q.GetCamera(ctx, cameraID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		if err := c.Require(authz.CamerasView, cameraResource(cam)); err != nil {
+			return err
+		}
+		srv, err = q.GetServer(ctx, cam.ServerID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		return nil
+	})
+	if err != nil {
+		return CameraFrigateConfigView{}, err
+	}
+
+	info, err := s.connInfo(db.FrigateServer{
+		ID:             srv.ID,
+		BaseUrl:        srv.BaseUrl,
+		AuthMode:       srv.AuthMode,
+		Username:       srv.Username,
+		PasswordSealed: srv.PasswordSealed,
+		TlsSkipVerify:  srv.TlsSkipVerify,
+	})
+	if err != nil {
+		return CameraFrigateConfigView{}, err
+	}
+	adapter, err := s.Connect(ctx, info)
+	if err != nil {
+		return CameraFrigateConfigView{}, &FrigateError{Err: err}
+	}
+	cfg, err := adapter.GetCameraConfig(ctx, cam.RemoteName)
+	if err != nil {
+		return CameraFrigateConfigView{}, &FrigateError{Err: err}
+	}
+
+	return CameraFrigateConfigView{
+		CameraID:       cam.ID,
+		CameraName:     cam.RemoteName,
+		ServerID:       cam.ServerID,
+		DetectEnabled:  cfg.DetectEnabled,
+		TrackedObjects: cfg.TrackedObjects,
+		LPREnabled:     cfg.LPREnabled,
+		Zones:          cfg.Zones,
+	}, nil
+}
+
+// UpdateCameraFrigateConfig updates Frigate config (detect, tracked objects, LPR) and logs SERVER_CONFIG_UPDATED audit.
+func (s *Service) UpdateCameraFrigateConfig(ctx context.Context, actor authz.Actor, cameraID uuid.UUID, update frigate.CameraFrigateConfigUpdate) (CameraFrigateConfigView, error) {
+	var cam db.GetCameraRow
+	var srv db.GetServerRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		cam, err = q.GetCamera(ctx, cameraID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		srv, err = q.GetServer(ctx, cam.ServerID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		// servers.config is required on the server to alter its configuration
+		return c.Require(authz.ServersConfig, access.Server(srv.TenantID, srv.SiteID, srv.ID))
+	})
+	if err != nil {
+		return CameraFrigateConfigView{}, err
+	}
+
+	info, err := s.connInfo(db.FrigateServer{
+		ID:             srv.ID,
+		BaseUrl:        srv.BaseUrl,
+		AuthMode:       srv.AuthMode,
+		Username:       srv.Username,
+		PasswordSealed: srv.PasswordSealed,
+		TlsSkipVerify:  srv.TlsSkipVerify,
+	})
+	if err != nil {
+		return CameraFrigateConfigView{}, err
+	}
+	adapter, err := s.Connect(ctx, info)
+	if err != nil {
+		return CameraFrigateConfigView{}, &FrigateError{Err: err}
+	}
+
+	before, err := adapter.GetCameraConfig(ctx, cam.RemoteName)
+	if err != nil {
+		return CameraFrigateConfigView{}, &FrigateError{Err: err}
+	}
+
+	after, err := adapter.UpdateCameraConfig(ctx, cam.RemoteName, update)
+	if err != nil {
+		return CameraFrigateConfigView{}, &FrigateError{Err: err}
+	}
+
+	err = s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		return audit(ctx, q, actor, &srv.TenantID, ActionServerConfigUpdated, "server", srv.ID, map[string]any{
+			"camera_id":   cam.ID,
+			"camera_name": cam.RemoteName,
+			"server_id":   srv.ID,
+			"before":      before,
+			"after":       after,
+		})
+	})
+	if err != nil {
+		return CameraFrigateConfigView{}, err
+	}
+
+	return CameraFrigateConfigView{
+		CameraID:       cam.ID,
+		CameraName:     cam.RemoteName,
+		ServerID:       cam.ServerID,
+		DetectEnabled:  after.DetectEnabled,
+		TrackedObjects: after.TrackedObjects,
+		LPREnabled:     after.LPREnabled,
+		Zones:          after.Zones,
+	}, nil
+}
+

@@ -59,6 +59,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/events/{id}/clip.mp4", s.auth(s.eventClip))
 	mux.HandleFunc("POST /api/export/{camera}/start/{start}/end/{end}", s.auth(s.startExport))
 	mux.HandleFunc("GET /api/exports/{id}", s.auth(s.getExport))
+	mux.HandleFunc("POST /api/restart", s.auth(s.restart))
+	mux.HandleFunc("PUT /api/config/set", s.auth(s.setConfig))
 	mux.HandleFunc("GET /exports/{file}", s.auth(s.exportFile))
 	mux.HandleFunc("GET /api/{camera}/{file}", s.auth(s.latest))
 	mux.HandleFunc("GET /clips/review/{file}", s.auth(s.thumb))
@@ -119,13 +121,22 @@ func (s *Server) config(w http.ResponseWriter, _ *http.Request) {
 		for _, z := range c.Zones {
 			zones[z] = map[string]any{"coordinates": "0,0,1,0,1,1,0,1"}
 		}
+		detectEnabled := true
+		if c.Detect != nil {
+			detectEnabled = *c.Detect
+		}
+		tracked := c.TrackedObjects
+		if tracked == nil {
+			tracked = []string{"person"}
+		}
 		cams[c.Name] = map[string]any{
 			"name":    c.Name,
 			"enabled": true,
-			"detect":  map[string]any{"enabled": true, "width": 1280, "height": 720, "fps": 5},
+			"detect":  map[string]any{"enabled": detectEnabled, "width": 1280, "height": 720, "fps": 5},
 			"record":  map[string]any{"enabled": true},
 			"live":    map[string]any{"streams": map[string]string{"main": c.Name, "sub": c.Name + "_sub"}},
 			"lpr":     map[string]any{"enabled": c.LPR},
+			"objects": map[string]any{"track": tracked},
 			"zones":   zones,
 		}
 	}
@@ -134,6 +145,42 @@ func (s *Server) config(w http.ResponseWriter, _ *http.Request) {
 		"mqtt":    map[string]any{"enabled": true, "topic_prefix": s.TopicPrefix},
 		"version": s.Version,
 	})
+}
+
+func (s *Server) restart(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, map[string]any{"success": true, "message": "Frigate restarting"})
+}
+
+func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	for i := range s.Cameras {
+		c := &s.Cameras[i]
+		detectKey := "cameras." + c.Name + ".detect.enabled"
+		if v := q.Get(detectKey); v != "" {
+			b, _ := strconv.ParseBool(v)
+			c.Detect = &b
+		}
+		lprKey := "cameras." + c.Name + ".lpr.enabled"
+		if v := q.Get(lprKey); v != "" {
+			b, _ := strconv.ParseBool(v)
+			c.LPR = b
+		}
+		trackKey := "cameras." + c.Name + ".objects.track"
+		if v := q.Get(trackKey); v != "" {
+			var items []string
+			if strings.HasPrefix(v, "[") {
+				_ = json.Unmarshal([]byte(v), &items)
+			} else {
+				for _, p := range strings.Split(v, ",") {
+					if p = strings.TrimSpace(p); p != "" {
+						items = append(items, p)
+					}
+				}
+			}
+			c.TrackedObjects = items
+		}
+	}
+	writeJSON(w, map[string]any{"success": true})
 }
 
 // go2rtcStreams serves GET /api/go2rtc/streams, keyed by stream name like real go2rtc

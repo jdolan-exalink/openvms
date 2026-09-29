@@ -334,6 +334,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restart the Frigate server
+         * @description Requires servers.restart on the server.
+         */
+        post: operations["restartServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras": {
         parameters: {
             query?: never;
@@ -372,6 +394,32 @@ export interface paths {
         head?: never;
         /** Update a camera's VMS-side settings (name, enabled, default live quality, description, location, tags) */
         patch: operations["updateCamera"];
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get a camera's Frigate detection and analytics configuration
+         * @description Requires cameras.view on the camera.
+         */
+        get: operations["getCameraFrigateConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update a camera's Frigate detection and analytics configuration
+         * @description Requires servers.config on the parent server.
+         */
+        patch: operations["updateCameraFrigateConfig"];
         trace?: never;
     };
     "/api/v1/camera-groups": {
@@ -1382,6 +1430,22 @@ export interface components {
             location?: string;
             /** @description Replaces the camera's tags. Values are trimmed and de-duplicated case-insensitively. */
             tags?: string[];
+        };
+        CameraFrigateConfig: {
+            /** Format: uuid */
+            camera_id: string;
+            camera_name: string;
+            /** Format: uuid */
+            server_id: string;
+            detect_enabled: boolean;
+            tracked_objects: string[];
+            lpr_enabled: boolean;
+            zones: string[];
+        };
+        CameraFrigateConfigUpdate: {
+            detect_enabled?: boolean;
+            tracked_objects?: string[];
+            lpr_enabled?: boolean;
         };
         CameraGroupInput: {
             /** Format: uuid */
@@ -2602,6 +2666,34 @@ export interface operations {
             502: components["responses"]["FrigateUnreachable"];
         };
     };
+    restartServer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Restart initiated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        success: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
     listCameras: {
         parameters: {
             query?: {
@@ -2684,6 +2776,63 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    getCameraFrigateConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraFrigateConfig"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    updateCameraFrigateConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraFrigateConfigUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraFrigateConfig"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
         };
     };
     listCameraGroups: {
