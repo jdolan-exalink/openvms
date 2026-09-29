@@ -11,8 +11,8 @@ export type HlsPlayerHandle = { video: HTMLVideoElement | null };
  */
 export const HlsPlayer = forwardRef<
   HlsPlayerHandle,
-  { cameraId: string; start: number; end: number; startOffset?: number; className?: string; onTime?: (unix: number) => void }
->(function HlsPlayer({ cameraId, start, end, startOffset = 0, className, onTime }, ref) {
+  { cameraId: string; start: number; end: number; startOffset?: number; className?: string; onTime?: (unix: number) => void; ariaLabel?: string }
+>(function HlsPlayer({ cameraId, start, end, startOffset = 0, className, onTime, ariaLabel }, ref) {
   const video = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState("");
   useImperativeHandle(ref, () => ({ video: video.current }), []);
@@ -64,6 +64,7 @@ export const HlsPlayer = forwardRef<
         className="size-full object-contain"
         controls
         playsInline
+        aria-label={ariaLabel}
         onTimeUpdate={(e) => onTime?.(start + e.currentTarget.currentTime)}
       />
       {error && <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-white/80">{error}</div>}

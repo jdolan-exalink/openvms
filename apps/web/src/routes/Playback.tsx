@@ -1,17 +1,17 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { camerasQuery, eventsQuery, meQuery, recordingsQuery } from "@/api/queries";
 import { HlsPlayer } from "@/components/HlsPlayer";
+import { RecordingTimeline } from "@/components/RecordingTimeline";
 import { Button, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
-import { fmtDateTime, fmtTime, labelName, toLocalInput } from "@/lib/format";
+import { fmtDateTime, toLocalInput } from "@/lib/format";
+import { vodWindowForInstant } from "@/lib/recordings";
 import { can } from "@/lib/perm";
 
 const DAY = 24 * 3600;
-// Playback loads one hour around the chosen instant; the player scrubs inside it.
-const WINDOW = 3600;
 
 function startOfDay(unix: number): number {
   const d = new Date(unix * 1000);
@@ -63,8 +63,7 @@ export function Playback() {
   });
   const dayEvents = events.data?.pages.flatMap((p) => p.items) ?? [];
 
-  const winStart = Math.max(instant - 60, day);
-  const winEnd = Math.min(winStart + WINDOW, now);
+  const { start: winStart, end: winEnd } = vodWindowForInstant(instant, day, now);
   const camera = cameras.data?.find((c) => c.id === cameraId);
 
   const pick = (id: string) => void navigate({ to: "/playback", search: { camera: id || undefined, t: instant } });
@@ -120,7 +119,7 @@ export function Playback() {
       {!cameraId && <p className="text-sm text-muted">Elegí una cámara para ver su línea de tiempo.</p>}
       {cameraId && (
         <>
-          <Timeline
+          <RecordingTimeline
             day={day}
             spans={recordings.data ?? []}
             events={dayEvents}
@@ -135,6 +134,7 @@ export function Playback() {
             end={winEnd}
             startOffset={instant - winStart}
             onTime={setPosition}
+            ariaLabel={`Reproducción HLS de ${camera?.display_name ?? "la cámara"}`}
             className="aspect-video w-full rounded border border-line"
           />
           <p className="text-sm text-muted">
@@ -143,71 +143,6 @@ export function Playback() {
           {can(me.data, "exports.create") && <ExportForm cameraId={cameraId} position={position} />}
         </>
       )}
-    </div>
-  );
-}
-
-function Timeline({
-  day,
-  spans,
-  events,
-  position,
-  onSeek,
-}: {
-  day: number;
-  spans: { start_time: string; end_time: string }[];
-  events: { id: string; start_time: string; severity: string; labels: string[] }[];
-  position: number;
-  onSeek: (t: number) => void;
-}) {
-  const pct = (t: number) => `${Math.min(100, Math.max(0, ((t - day) / DAY) * 100))}%`;
-  const hours = useMemo(() => Array.from({ length: 25 }, (_, h) => h), []);
-  return (
-    <div className="flex flex-col gap-1">
-      <div
-        className="relative h-12 cursor-pointer overflow-hidden rounded border border-line bg-raised"
-        role="slider"
-        aria-label="Línea de tiempo del día"
-        aria-valuemin={day}
-        aria-valuemax={day + DAY}
-        aria-valuenow={position}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "ArrowRight") onSeek(position + 60);
-          if (e.key === "ArrowLeft") onSeek(position - 60);
-        }}
-        onClick={(e) => {
-          const r = e.currentTarget.getBoundingClientRect();
-          onSeek(Math.floor(day + ((e.clientX - r.left) / r.width) * DAY));
-        }}
-      >
-        {spans.map((s) => {
-          const a = new Date(s.start_time).getTime() / 1000;
-          const b = new Date(s.end_time).getTime() / 1000;
-          return <div key={s.start_time} className="absolute inset-y-0 bg-accent/30" style={{ left: pct(a), width: `calc(${pct(b)} - ${pct(a)})` }} />;
-        })}
-        {events.map((ev) => {
-          const t = new Date(ev.start_time).getTime() / 1000;
-          return (
-            <div
-              key={ev.id}
-              title={`${ev.labels.map(labelName).join(", ")} · ${fmtTime(ev.start_time)}`}
-              className={ev.severity === "alert" ? "absolute top-0 h-3 w-0.5 bg-bad" : "absolute top-0 h-2 w-0.5 bg-warn"}
-              style={{ left: pct(t) }}
-            />
-          );
-        })}
-        <div className="absolute inset-y-0 w-0.5 bg-ink" style={{ left: pct(position) }} />
-      </div>
-      <div className="relative h-4 font-mono text-[10px] text-muted">
-        {hours
-          .filter((h) => h % 3 === 0)
-          .map((h) => (
-            <span key={h} className="absolute -translate-x-1/2" style={{ left: `${(h / 24) * 100}%` }}>
-              {String(h).padStart(2, "0")}
-            </span>
-          ))}
-      </div>
     </div>
   );
 }
