@@ -50,16 +50,29 @@ const appRoute = createRoute({
 // Each route is declared on its own so paths stay literal types for typed <Link to>.
 const child = <P extends string>(path: P, component: RouteComponent) => createRoute({ getParentRoute: () => appRoute, path, component });
 
-type PlaybackSearch = { camera?: string; t?: number };
+type PlaybackSearch = { camera?: string; cameras?: string[]; t?: number };
 
 const playbackRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/playback",
   component: Playback,
-  validateSearch: (s: Record<string, unknown>): PlaybackSearch => ({
-    camera: typeof s.camera === "string" ? s.camera : undefined,
-    t: typeof s.t === "number" ? s.t : typeof s.t === "string" && /^\d+$/.test(s.t) ? Number(s.t) : undefined,
-  }),
+  validateSearch: (s: Record<string, unknown>): PlaybackSearch => {
+    let cameras: string[] | undefined;
+    if (Array.isArray(s.cameras)) {
+      cameras = s.cameras.filter((c): c is string => typeof c === "string" && !!c);
+    } else if (typeof s.cameras === "string" && s.cameras) {
+      cameras = s.cameras.split(",").filter(Boolean);
+    }
+    const singleCamera = typeof s.camera === "string" && s.camera ? s.camera : undefined;
+    if (!cameras && singleCamera) {
+      cameras = [singleCamera];
+    }
+    return {
+      camera: singleCamera ?? cameras?.[0],
+      cameras: cameras && cameras.length > 0 ? cameras : undefined,
+      t: typeof s.t === "number" ? s.t : typeof s.t === "string" && /^\d+$/.test(s.t) ? Number(s.t) : undefined,
+    };
+  },
 });
 
 type AlarmsSearch = {

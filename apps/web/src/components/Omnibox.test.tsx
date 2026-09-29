@@ -55,7 +55,7 @@ describe("Omnibox", () => {
           site_id: "s1",
           site_name: "Sitio Central",
           location: "Portón 1",
-          status: "ok",
+          status: "online",
         },
       ],
       sites: [

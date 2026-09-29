@@ -124,4 +124,48 @@ describe("Playback", () => {
       expect(document.querySelector<HTMLInputElement>('input[type="datetime-local"]')?.value).toBe(expectedInstant);
     });
   });
+
+  it("renders multi-camera synchronized playback grid and handles multiple cameras", async () => {
+    const cam1 = { id: "c1", display_name: "Cámara Acceso Norte", site_id: "s1", status: "online" };
+    const cam2 = { id: "c2", display_name: "Cámara Plaza", site_id: "s1", status: "online" };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": () =>
+            json({
+              id: "u1",
+              username: "operator",
+              display_name: "Operator",
+              mfa_enabled: false,
+              must_change_password: false,
+              auth_method: "session",
+              tenant_id: "t1",
+              grants: [],
+            }),
+          "/api/v1/cameras": () => json({ items: [cam1, cam2] }),
+          "/api/v1/recordings": () => json({ items: [] }),
+          "/api/v1/events": () => json({ items: [] }),
+        }),
+      ),
+    );
+    const { routeTree } = await import("../router");
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({
+      routeTree,
+      context: { queryClient },
+      history: createMemoryHistory({ initialEntries: ["/playback?camera=c1&cameras=c1,c2&t=1749945600"] }),
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Grabaciones")).toBeInTheDocument();
+    expect(await screen.findByText("Cámaras sincronizadas (2/4):")).toBeInTheDocument();
+    expect(screen.getByLabelText("Reproducción HLS de Cámara Acceso Norte")).toBeInTheDocument();
+    expect(screen.getByLabelText("Reproducción HLS de Cámara Plaza")).toBeInTheDocument();
+  });
 });
