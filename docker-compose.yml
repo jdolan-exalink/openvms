@@ -15,6 +15,9 @@ x-go-env: &go-env
   # Seals Frigate credentials (AES-256-GCM). Development value: generate a real one
   # with `openssl rand -base64 32` and keep it out of the repository.
   OPENVMS_MASTER_KEY: ${OPENVMS_MASTER_KEY:-b3BlbnZtcy1kZXYtbWFzdGVyLWtleS0zMmJ5dGVzISE=}
+  # Internal WhatsApp gateway (WAHA) used by WhatsApp notification channels.
+  WAHA_BASE_URL: http://waha:3000
+  WAHA_API_KEY: ${WAHA_API_KEY:-openvms-dev-waha-key}
 
 services:
   postgres:
@@ -113,6 +116,20 @@ services:
       api: { condition: service_started }
     restart: unless-stopped
 
+  # WhatsApp gateway for notification channels (docs/notification-channels.md). WAHA drives
+  # WhatsApp Web, which is unofficial: use a dedicated phone number. It is only reachable from
+  # the compose network (no published port); admins pair the phone from the OpenVMS UI, which
+  # proxies the session status and QR. Core edition supports the single session "default".
+  waha:
+    image: devlikeapro/waha:noweb
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY:-openvms-dev-waha-key}
+      WHATSAPP_DEFAULT_ENGINE: NOWEB
+      WHATSAPP_START_SESSION: default
+    volumes: [waha:/app/.sessions]
+    expose: ["3000"]
+    restart: unless-stopped
+
   web:
     build: { context: ., dockerfile: deploy/docker/web.Dockerfile }
     environment:
@@ -141,3 +158,4 @@ volumes:
   nats:
   seaweedfs:
   caddy:
+  waha:

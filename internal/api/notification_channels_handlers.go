@@ -240,3 +240,47 @@ func (h *Handlers) ListNotificationDeliveries(ctx context.Context, r gen.ListNot
 	}
 	return gen.ListNotificationDeliveries200JSONResponse{Items: out}, nil
 }
+
+func toWhatsAppSession(s notify.WhatsAppSession) gen.WhatsAppSession {
+	out := gen.WhatsAppSession{Name: s.Name, Status: s.Status}
+	if s.Phone != "" {
+		out.Phone = &s.Phone
+	}
+	return out
+}
+
+func (h *Handlers) GetWhatsAppSession(ctx context.Context, r gen.GetWhatsAppSessionRequestObject) (gen.GetWhatsAppSessionResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := h.Notify.WhatsAppSession(ctx, a, r.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetWhatsAppSession200JSONResponse(toWhatsAppSession(sess)), nil
+}
+
+func (h *Handlers) StartWhatsAppSession(ctx context.Context, r gen.StartWhatsAppSessionRequestObject) (gen.StartWhatsAppSessionResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	sess, err := h.Notify.WhatsAppStart(ctx, a, r.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.StartWhatsAppSession200JSONResponse(toWhatsAppSession(sess)), nil
+}
+
+func (h *Handlers) GetWhatsAppQR(ctx context.Context, r gen.GetWhatsAppQRRequestObject) (gen.GetWhatsAppQRResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	qr, err := h.Notify.WhatsAppQR(ctx, a, r.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetWhatsAppQR200JSONResponse{Mimetype: qr.Mimetype, Data: qr.Data}, nil
+}

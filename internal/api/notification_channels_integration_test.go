@@ -241,3 +241,88 @@ func TestNotificationChannelTestSendAndDeliveries(t *testing.T) {
 		t.Fatalf("other channel deliveries = %d %s", code, body)
 	}
 }
+
+func TestWhatsAppPairingEndpoints(t *testing.T) {
+	var status atomic.Value
+	status.Store("SCAN_QR_CODE")
+	waha := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Api-Key") != "waha-key" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/sessions/default":
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "default", "status": status.Load()})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/default/auth/qr":
+			if status.Load() != "SCAN_QR_CODE" {
+				http.Error(w, "no qr", http.StatusUnprocessableEntity)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"mimetype": "image/png", "data": "QVJD"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/sessions/default/start":
+			status.Store("STARTING")
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": "default", "status": "STARTING"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer waha.Close()
+	te, token := setupRulesTestWith(t, notify.Deps{WahaBaseURL: waha.URL, WahaAPIKey: "waha-key"})
+	operator := te.Demo.Tokens["operador"]
+
+	code, body := te.request("POST", "/api/v1/notification-channels", token, map[string]any{
+		"name": "WhatsApp guardia", "type": "whatsapp",
+		"config": map[string]any{"session": "default", "recipients": []string{"+54 9 11 5555-5555"}},
+	})
+	if code != 201 {
+		t.Fatalf("create whatsapp = %d: %s", code, body)
+	}
+	var wa gen.NotificationChannel
+	_ = json.Unmarshal(body, &wa)
+	if wa.Config.Recipients == nil || (*wa.Config.Recipients)[0] != "5491155555555@c.us" {
+		t.Fatalf("recipients not normalized: %+v", wa.Config)
+	}
+	base := "/api/v1/notification-channels/" + wa.Id.String() + "/whatsapp"
+
+	if code, body := te.request("GET", base+"/session", operator, nil); code != 403 {
+		t.Fatalf("operator session = %d, want 403: %s", code, body)
+	}
+	code, body = te.request("GET", base+"/session", token, nil)
+	var sess gen.WhatsAppSession
+	_ = json.Unmarshal(body, &sess)
+	if code != 200 || sess.Status != "SCAN_QR_CODE" || sess.Name != "default" {
+		t.Fatalf("session = %d %s", code, body)
+	}
+	code, body = te.request("GET", base+"/qr", token, nil)
+	var qr gen.WhatsAppQR
+	_ = json.Unmarshal(body, &qr)
+	if code != 200 || qr.Mimetype != "image/png" || qr.Data != "QVJD" {
+		t.Fatalf("qr = %d %s", code, body)
+	}
+	status.Store("WORKING")
+	if code, body := te.request("GET", base+"/qr", token, nil); code != 409 {
+		t.Fatalf("qr while working = %d, want 409: %s", code, body)
+	}
+	code, body = te.request("POST", base+"/session/start", token, nil)
+	_ = json.Unmarshal(body, &sess)
+	if code != 200 || sess.Status != "STARTING" {
+		t.Fatalf("start = %d %s", code, body)
+	}
+
+	// Non-WhatsApp channels are rejected; an unreachable WAHA is a 502.
+	code, body = te.request("POST", "/api/v1/notification-channels", token, map[string]any{
+		"name": "hook", "type": "webhook", "config": map[string]any{"url": "https://example.com/h"},
+	})
+	var hook gen.NotificationChannel
+	_ = json.Unmarshal(body, &hook)
+	if code != 201 {
+		t.Fatalf("create webhook = %d: %s", code, body)
+	}
+	if code, body := te.request("GET", "/api/v1/notification-channels/"+hook.Id.String()+"/whatsapp/session", token, nil); code != 400 {
+		t.Fatalf("session of a webhook channel = %d, want 400: %s", code, body)
+	}
+	waha.Close()
+	if code, body := te.request("GET", base+"/session", token, nil); code != 502 {
+		t.Fatalf("session with WAHA down = %d, want 502: %s", code, body)
+	}
+}

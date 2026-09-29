@@ -23,12 +23,18 @@ import (
 // setupRulesTest returns the shared request helper plus a tenant user holding notifications.manage.
 func setupRulesTest(t *testing.T) (*testAlarmsEnv, string) {
 	t.Helper()
+	return setupRulesTestWith(t, notify.Deps{})
+}
+
+// setupRulesTestWith is setupRulesTest with explicit notification sender settings (WAHA).
+func setupRulesTestWith(t *testing.T, deps notify.Deps) (*testAlarmsEnv, string) {
+	t.Helper()
 	env := demofix.Setup(t)
 	pub := &testPublisher{}
 	handlers := &api.Handlers{
 		Inv:    env.Svc,
 		Rules:  rules.NewService(env.Store, pub, pgtest.Discard()),
-		Notify: notify.NewService(env.Store, env.Sealer, notify.Deps{}, pgtest.Discard()),
+		Notify: notify.NewService(env.Store, env.Sealer, deps, pgtest.Discard()),
 		Log:    pgtest.Discard(),
 	}
 	router, err := api.NewRouter(handlers, pgtest.Discard(), api.Options{Queries: db.New(env.Pool)})

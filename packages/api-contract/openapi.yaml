@@ -1774,6 +1774,75 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/notification-channels/{channelId}/whatsapp/session:
+    parameters:
+      - name: channelId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [notification-channels]
+      operationId: getWhatsAppSession
+      summary: WhatsApp pairing status of a channel's WAHA session
+      description: Proxies WAHA. Only for whatsapp channels. Requires notifications.manage.
+      responses:
+        "200":
+          description: Session status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WhatsAppSession"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/WahaUnavailable" }
+  /api/v1/notification-channels/{channelId}/whatsapp/session/start:
+    parameters:
+      - name: channelId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [notification-channels]
+      operationId: startWhatsAppSession
+      summary: Start (or create) the channel's WAHA session
+      responses:
+        "200":
+          description: Session status after the start request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WhatsAppSession"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/WahaUnavailable" }
+  /api/v1/notification-channels/{channelId}/whatsapp/qr:
+    parameters:
+      - name: channelId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [notification-channels]
+      operationId: getWhatsAppQR
+      summary: Pairing QR of the channel's WAHA session
+      description: Available only while the session status is SCAN_QR_CODE; otherwise 409.
+      responses:
+        "200":
+          description: QR image, base64 encoded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WhatsAppQR"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/WahaUnavailable" }
   /api/v1/notification-deliveries:
     get:
       tags: [notification-channels]
@@ -1895,6 +1964,11 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
     FrigateUnreachable:
       description: Frigate could not be reached or rejected the credentials
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    WahaUnavailable:
+      description: The internal WhatsApp service (WAHA) could not be reached
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -2918,3 +2992,18 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/NotificationDelivery" }
+    WhatsAppSession:
+      type: object
+      required: [name, status]
+      properties:
+        name: { type: string }
+        status:
+          type: string
+          description: WAHA session status (STOPPED, STARTING, SCAN_QR_CODE, WORKING, FAILED) or NOT_FOUND.
+        phone: { type: string, description: Paired phone number when the session is working }
+    WhatsAppQR:
+      type: object
+      required: [mimetype, data]
+      properties:
+        mimetype: { type: string }
+        data: { type: string, description: Base64 image }

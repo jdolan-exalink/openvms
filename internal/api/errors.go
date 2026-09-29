@@ -27,6 +27,7 @@ func statusFor(err error) (int, string, string) {
 	var ave *alarms.ValidationError
 	var rve *rules.ValidationError
 	var nve *notify.ValidationError
+	var we *notify.WahaError
 	var fe *inventory.FrigateError
 	switch {
 	case errors.As(err, &ve):
@@ -39,6 +40,10 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", rve.Msg
 	case errors.As(err, &nve):
 		return http.StatusBadRequest, "invalid", nve.Msg
+	case errors.Is(err, notify.ErrQRUnavailable):
+		return http.StatusConflict, "qr_unavailable", err.Error()
+	case errors.As(err, &we):
+		return http.StatusBadGateway, "waha_unreachable", "could not reach the WhatsApp service (WAHA)"
 	case errors.Is(err, search.ErrQueryTooShort):
 		return http.StatusBadRequest, "invalid", err.Error()
 	case errors.Is(err, alarms.ErrInvalidTransition):
