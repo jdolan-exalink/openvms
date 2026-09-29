@@ -22,6 +22,13 @@ export const systemInfoQuery = queryOptions({
   },
 });
 
+export const featuresQuery = queryOptions({
+  queryKey: ["features"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/features")),
+  staleTime: 5 * 60_000,
+  retry: false,
+});
+
 export const meQuery = queryOptions({
   queryKey: ["me"],
   queryFn: async () => unwrap(await api.GET("/api/v1/me")),

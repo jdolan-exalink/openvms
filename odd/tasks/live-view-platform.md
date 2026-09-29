@@ -24,7 +24,7 @@ navigation) must not reconnect media; no black tiles while connecting.
   timeline, P4 AI (open questions in audit §5).
 
 ## Constraints
-- Strict TDD (source: user config). Runners: web `npx vitest run` (apps/web);
+- TDD: OFF (explicit user decision 2026-09-29: "sin test"); ordinary checks (build, vet, typecheck, lint, existing suites) still run. Previously strict (user config). Runners: web `npx vitest run` (apps/web);
   Go `go test ./...` + `go test -tags integration ./internal/...`.
 - Feature-flagged rollout; backward compatible; no hardcoded hosts/cameras/codecs.
 - ~400 authored changed lines per task (advisory). Conventional Commits, no AI attribution.

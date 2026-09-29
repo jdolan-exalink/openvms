@@ -88,6 +88,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/Me"
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/features:
+    get:
+      tags: [system]
+      operationId: getFeatures
+      summary: Rollout feature flags
+      description: |
+        Read-only flags that gate the Live View platform rollout. Configured by the operator
+        through OPENVMS_FEATURES; every flag is off unless listed there.
+      responses:
+        "200":
+          description: Current flag values
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Features"
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/permissions:
     get:
       tags: [permissions]
@@ -2337,6 +2353,15 @@ components:
           format: int64
         error:
           type: string
+    Features:
+      type: object
+      required: [persistent_players, video_surface_layer, adaptive_streaming, stream_prewarming, seamless_quality_switch]
+      properties:
+        persistent_players: { type: boolean }
+        video_surface_layer: { type: boolean }
+        adaptive_streaming: { type: boolean }
+        stream_prewarming: { type: boolean }
+        seamless_quality_switch: { type: boolean }
     SystemInfo:
       type: object
       required: [name, version, commit, build_time, go_version, schema_version]

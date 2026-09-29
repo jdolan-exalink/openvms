@@ -21,6 +21,9 @@ type Config struct {
 
 	S3 S3Config
 
+	// Features are rollout flags (OPENVMS_FEATURES, comma-separated), all off by default.
+	Features Features
+
 	// Waha is the internal WhatsApp HTTP API (devlikeapro/waha) used by WhatsApp channels.
 	Waha WahaConfig
 
@@ -81,6 +84,7 @@ func Load(service string) (Config, error) {
 			BaseURL: str("WAHA_BASE_URL", "http://waha:3000"),
 			APIKey:  str("WAHA_API_KEY", ""),
 		},
+		Features: ParseFeatures(os.Getenv("OPENVMS_FEATURES")),
 		S3: S3Config{
 			Endpoint:     str("S3_ENDPOINT", "http://localhost:8333"),
 			Region:       str("S3_REGION", "us-east-1"),

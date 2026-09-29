@@ -139,6 +139,7 @@ func run() error {
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Alarms:        alarmsSvc,
 		Media:         mediaSvc,
+		Features:      cfg.Features,
 		Branding:      brandingSvc,
 		ClipWatermark: clipWatermarkSvc,
 		Search:        &search.Service{Store: st},

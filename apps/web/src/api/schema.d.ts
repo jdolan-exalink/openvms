@@ -78,6 +78,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Rollout feature flags
+         * @description Read-only flags that gate the Live View platform rollout. Configured by the operator
+         *     through OPENVMS_FEATURES; every flag is off unless listed there.
+         */
+        get: operations["getFeatures"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/permissions": {
         parameters: {
             query?: never;
@@ -1743,6 +1764,13 @@ export interface components {
             latency_ms: number;
             error?: string;
         };
+        Features: {
+            persistent_players: boolean;
+            video_surface_layer: boolean;
+            adaptive_streaming: boolean;
+            stream_prewarming: boolean;
+            seamless_quality_switch: boolean;
+        };
         SystemInfo: {
             /** @example openvms-api */
             name: string;
@@ -2546,6 +2574,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Me"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getFeatures: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current flag values */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Features"];
                 };
             };
             401: components["responses"]["Unauthorized"];

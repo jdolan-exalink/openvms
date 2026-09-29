@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
+import { observeFirstFrame, playerMetrics } from "@/lib/live/playerMetrics";
 
 // Codecs offered to go2rtc, most preferred first (same list go2rtc's own player uses).
 const CODECS = [
@@ -50,6 +51,7 @@ export function MsePlayer({
     let retry = 0;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let objectURL = "";
+    let cancelFrame: (() => void) | undefined;
 
     const connect = () => {
       if (closed) return;
@@ -62,6 +64,13 @@ export function MsePlayer({
         return;
       }
       const proto = location.protocol === "https:" ? "wss:" : "ws:";
+      playerMetrics.connectAttempt(cameraId, quality);
+      playerMetrics.setState(cameraId, quality, "CONNECTING");
+      cancelFrame?.();
+      cancelFrame = observeFirstFrame(el, () => {
+        playerMetrics.firstFrame(cameraId, quality);
+        playerMetrics.setState(cameraId, quality, "ACTIVE");
+      });
       ws = new WebSocket(`${proto}//${location.host}/media/v1/cameras/${cameraId}/live?quality=${quality}`);
       ws.binaryType = "arraybuffer";
       let ms: MediaSource | null = null;
@@ -171,6 +180,7 @@ export function MsePlayer({
     return () => {
       closed = true;
       clearTimeout(timer);
+      cancelFrame?.();
       document.removeEventListener("visibilitychange", onVisibility);
       ws?.close();
       el.removeAttribute("src");

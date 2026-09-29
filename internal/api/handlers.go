@@ -16,6 +16,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/media"
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
+	"github.com/jdolan-exalink/openvms/internal/platform/config"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 )
@@ -32,6 +33,7 @@ type Handlers struct {
 	Search        *search.Service
 	Rules         *rules.Service
 	Notify        *notify.Service
+	Features      config.Features
 	Log           *slog.Logger
 	Checks        []health.Check
 	CheckTimeout  time.Duration
