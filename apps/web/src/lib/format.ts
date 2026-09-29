@@ -94,3 +94,6 @@ export function labelName(l: string): string {
 }
 
 export const commonLabels = ["person", "car", "motorcycle", "truck", "bicycle", "dog"];
+
+/** Every label with a display name, common ones first: suggestions for label inputs. */
+export const knownLabels = [...new Set([...commonLabels, ...Object.keys(labelNames)])];

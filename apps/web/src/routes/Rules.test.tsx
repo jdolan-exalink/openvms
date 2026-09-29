@@ -35,7 +35,7 @@ function stub(rules: Schemas["Rule"][], extra?: Handler) {
       if (custom) return custom;
       if (url.pathname === "/api/v1/me") return json(manager);
       if (url.pathname === "/api/v1/rules" && req.method === "GET") return json({ items: rules });
-      if (url.pathname === "/api/v1/cameras") return json({ items: [{ id: "c1", display_name: "Cámara Acceso" }, { id: "c2", display_name: "Cámara Patio" }] });
+      if (url.pathname === "/api/v1/cameras") return json({ items: [{ id: "c1", display_name: "Cámara Acceso", zones: ["entrada"] }, { id: "c2", display_name: "Cámara Patio", zones: ["patio", "entrada"] }] });
       if (url.pathname === "/api/v1/sites") return json({ items: [{ id: "site1", name: "Sucursal Central" }, { id: "site2", name: "Depósito" }] });
       if (url.pathname === "/api/v1/servers") return json({ items: [{ id: "s1", name: "Servidor Norte" }] });
       if (url.pathname.startsWith("/api/v1/rules")) return json(makeRule());
@@ -141,6 +141,32 @@ describe("Rules route", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]?.body).toMatchObject({ trigger_type: "server_offline", conditions: { site_ids: ["site1"] } });
+  });
+
+  it("suggests labels and the zones of the selected cameras while still accepting free entry", async () => {
+    const calls = stub([]);
+    renderPage(() => <Rules />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
+    const dialog = await screen.findByRole("dialog");
+    const options = (label: RegExp) => {
+      const list = (within(dialog).getByLabelText(label) as HTMLInputElement).list;
+      return Array.from(list?.querySelectorAll("option") ?? []).map((o) => o.value);
+    };
+    expect(options(/Etiquetas/)).toEqual(expect.arrayContaining(["person", "car", "dog"]));
+    await waitFor(() => expect(options(/Zonas/)).toEqual(["entrada", "patio"]));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Cámara Acceso" }));
+    expect(options(/Zonas/)).toEqual(["entrada"]);
+
+    fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Zonas" } });
+    const labels = within(dialog).getByLabelText(/Etiquetas/);
+    fireEvent.change(labels, { target: { value: "forklift" } });
+    fireEvent.keyDown(labels, { key: "Enter" });
+    const zones = within(dialog).getByLabelText(/Zonas/);
+    fireEvent.change(zones, { target: { value: "entrada" } });
+    fireEvent.keyDown(zones, { key: "Enter" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]?.body).toMatchObject({ conditions: { camera_ids: ["c1"], labels: ["forklift"], zones: ["entrada"] } });
   });
 
   it("requires confirmation before deleting", async () => {

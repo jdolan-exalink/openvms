@@ -5,7 +5,9 @@ import { ApiError, api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, rulesQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
+import { TagInput } from "@/components/TagInput";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
+import { knownLabels } from "@/lib/format";
 
 type Rule = Schemas["Rule"];
 type Trigger = Schemas["RuleTriggerType"];
@@ -140,8 +142,6 @@ function describeActions(a: Schemas["RuleActions"]) {
   return parts.length ? parts.join(" + ") : "Sin acciones";
 }
 
-const parseList = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
-
 function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void; onCancel: () => void }) {
   const cameras = useQuery(camerasQuery({}));
   const servers = useQuery(serversQuery);
@@ -153,8 +153,8 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
     camera_ids: c.camera_ids ?? ([] as string[]),
     server_ids: c.server_ids ?? ([] as string[]),
     site_ids: c.site_ids ?? ([] as string[]),
-    labels: (c.labels ?? []).join(", "),
-    zones: (c.zones ?? []).join(", "),
+    labels: c.labels ?? ([] as string[]),
+    zones: c.zones ?? ([] as string[]),
     severities: c.severities ?? ([] as string[]),
     minutes: String(c.duration_seconds ? Math.round(c.duration_seconds / 60) : defaultMinutes),
     create_alarm: rule?.actions.create_alarm ?? true,
@@ -167,10 +167,8 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
       const out: Schemas["RuleConditions"] = {};
       if (f.site_ids.length) out.site_ids = f.site_ids;
       if (f.camera_ids.length) out.camera_ids = f.camera_ids;
-      const labels = parseList(f.labels);
-      if (labels.length) out.labels = labels;
-      const zones = parseList(f.zones);
-      if (zones.length) out.zones = zones;
+      if (f.labels.length) out.labels = f.labels;
+      if (f.zones.length) out.zones = f.zones;
       if (f.severities.length) out.severities = f.severities;
       return out;
     }
@@ -194,6 +192,11 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
     },
     onSuccess: onDone,
   });
+
+  // Zones come from the cameras the rule watches (all of them when none is selected).
+  const zoneSuggestions = [
+    ...new Set((cameras.data ?? []).filter((cam) => f.camera_ids.length === 0 || f.camera_ids.includes(cam.id)).flatMap((cam) => cam.zones)),
+  ].sort();
 
   const flip = (list: string[], id: string) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
 
@@ -249,12 +252,20 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
         {f.trigger === "event" && (
           <>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Etiquetas" hint="Separadas por coma, p. ej. person, car">
-                <TextInput value={f.labels} onChange={(e) => setF({ ...f, labels: e.target.value })} />
-              </Field>
-              <Field label="Zonas" hint="Separadas por coma">
-                <TextInput value={f.zones} onChange={(e) => setF({ ...f, zones: e.target.value })} />
-              </Field>
+              <TagInput
+                label="Etiquetas"
+                hint="Elegí una sugerencia o escribí otra y presioná Enter."
+                value={f.labels}
+                onChange={(labels) => setF({ ...f, labels })}
+                suggestions={knownLabels}
+              />
+              <TagInput
+                label="Zonas"
+                hint="Sugeridas según las cámaras elegidas; también podés escribir otra."
+                value={f.zones}
+                onChange={(zones) => setF({ ...f, zones })}
+                suggestions={zoneSuggestions}
+              />
             </div>
             <CheckGroup
               legend="Severidad del evento (vacío = todas)"
