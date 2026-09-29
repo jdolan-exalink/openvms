@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { Fragment, type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import {
   cameraGroupsQuery, camerasQuery, grantsQuery, groupsQuery, meQuery, permissionCatalogQuery, serversQuery, sitesQuery, tenantsQuery, usersQuery,
 } from "@/api/queries";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, Th } from "@/components/ui";
+import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 
 type Scope = Schemas["ScopeType"];
 
@@ -43,15 +43,21 @@ function grantable(def: Schemas["PermissionDefinition"], scope: Scope) {
   return scopeDepth[scope] <= scopeDepth[def.narrowest_scope];
 }
 
+function summarizeGrants(n: number) {
+  const noun = n === 1 ? "permiso directo" : "permisos directos";
+  return `${n} ${noun}`;
+}
+
 /** Permissions assigns permission + scope + effect to users and groups (PRD §27-31). */
 export function Permissions() {
-  const search = useSearch({ from: "/app/settings/permissions" });
+  const search = useSearch({ strict: false }) as { subject?: string };
   const navigate = useNavigate();
   const qc = useQueryClient();
   const me = useQuery(meQuery);
   const users = useQuery(usersQuery);
   const groups = useQuery(groupsQuery);
   const catalog = useQuery(permissionCatalogQuery);
+  const [subjectQuery, setSubjectQuery] = useState("");
   const [subjectType, subjectId] = (search.subject ?? ":").split(":") as ["user" | "group" | "", string];
   const grants = useQuery(grantsQuery(subjectType || undefined, subjectId || undefined));
   const describe = useScopeNames();
@@ -65,28 +71,70 @@ export function Permissions() {
   const subjectTenant =
     subjectType === "user" ? users.data?.find((u) => u.id === subjectId)?.tenant_id : groups.data?.find((g) => g.id === subjectId)?.tenant_id;
 
+  const needle = subjectQuery.trim().toLowerCase();
+  const filteredGroups = groups.data?.filter((g) => !needle || g.name.toLowerCase().includes(needle)) ?? [];
+  const filteredUsers =
+    users.data?.filter(
+      (u) => !needle || [u.username, u.display_name, u.email ?? ""].some((v) => v.toLowerCase().includes(needle)),
+    ) ?? [];
+
+  const grouped = groupGrants(grants.data ?? [], describe);
+
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader title="Permisos" description="Un permiso vale en su alcance y todo lo que contiene. Una denegación siempre gana sobre un permiso." />
-      <Field label="Usuario o grupo">
-        <Select value={search.subject ?? ""} onChange={(e) => void navigate({ to: "/permissions", search: { subject: e.target.value || undefined } })}>
-          <option value="">Elegí a quién</option>
-          <optgroup label="Grupos">
-            {groups.data?.map((g) => (
-              <option key={g.id} value={`group:${g.id}`}>
-                {g.name}
-              </option>
-            ))}
-          </optgroup>
-          <optgroup label="Usuarios">
-            {users.data?.map((u) => (
-              <option key={u.id} value={`user:${u.id}`}>
-                {u.display_name} ({u.username})
-              </option>
-            ))}
-          </optgroup>
-        </Select>
-      </Field>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="sm:w-72">
+          <Field label="Buscar sujeto">
+            <TextInput
+              aria-label="Buscar sujeto"
+              placeholder="Filtrar por nombre o usuario"
+              value={subjectQuery}
+              onChange={(e) => setSubjectQuery(e.target.value)}
+            />
+          </Field>
+        </div>
+        <div className="flex-1">
+          <Field label="Usuario o grupo">
+            <Select
+              aria-label="Usuario o grupo"
+              value={search.subject ?? ""}
+              onChange={(e) => {
+                const val = e.target.value;
+                void navigate({
+                  to: ".",
+                  search: (prev: Record<string, unknown>) => {
+                    const next = { ...prev };
+                    if (val) next.subject = val;
+                    else delete next.subject;
+                    return next;
+                  },
+                });
+              }}
+            >
+              <option value="">Elegí a quién</option>
+              {filteredGroups.length > 0 && (
+                <optgroup label="Grupos">
+                  {filteredGroups.map((g) => (
+                    <option key={g.id} value={`group:${g.id}`}>
+                      {g.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {filteredUsers.length > 0 && (
+                <optgroup label="Usuarios">
+                  {filteredUsers.map((u) => (
+                    <option key={u.id} value={`user:${u.id}`}>
+                      {u.display_name} ({u.username})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </Select>
+          </Field>
+        </div>
+      </div>
       {subjectId && (
         <>
           <GrantForm
@@ -98,41 +146,84 @@ export function Permissions() {
           <ErrorNote error={grants.error ?? remove.error} />
           {grants.data?.length === 0 && <Empty>Sin permisos directos.</Empty>}
           {!!grants.data?.length && (
-            <Table label="Permisos otorgados">
-              <thead>
-                <tr>
-                  <Th>Permiso</Th>
-                  <Th>Efecto</Th>
-                  <Th>Alcance</Th>
-                  <Th />
-                </tr>
-              </thead>
-              <tbody>
-                {grants.data.map((g) => (
-                  <tr key={g.id} className="border-t border-line">
-                    <td>
-                      <div className="font-mono text-xs">{g.permission}</div>
-                      <div className="text-xs text-muted">{permDesc.get(g.permission)}</div>
-                    </td>
-                    <td className={g.effect === "deny" ? "text-bad" : "text-ok"}>{g.effect === "deny" ? "Denegar" : "Permitir"}</td>
-                    <td className="text-sm">
-                      {scopeName[g.scope_type]}
-                      {g.scope_id && <span className="text-muted">: {describe(g.scope_type, g.scope_id)}</span>}
-                    </td>
-                    <td className="text-right">
-                      <Button onClick={() => remove.mutate(g.id)} aria-label="Revocar" title="Revocar">
-                        <Trash2 className="size-3.5" aria-hidden />
-                      </Button>
-                    </td>
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-muted">Permisos directos asignados</span>
+                <Summary>{summarizeGrants(grants.data.length)}</Summary>
+              </div>
+              <Table label="Permisos otorgados">
+                <thead>
+                  <tr>
+                    <Th>Alcance / Permiso</Th>
+                    <Th>Efecto</Th>
+                    <Th>Descripción</Th>
+                    <Th />
                   </tr>
-                ))}
-              </tbody>
-            </Table>
+                </thead>
+                <tbody>
+                  {grouped.map((group) => (
+                    <Fragment key={group.label}>
+                      <tr className="border-t-2 border-line bg-surface/60 text-xs font-semibold text-fg">
+                        <td colSpan={4} className="py-2.5 px-3">
+                          <span>{group.label}</span>
+                          <span className="ml-2 font-normal text-muted">({group.grants.length})</span>
+                        </td>
+                      </tr>
+                      {group.grants.map((g) => (
+                        <tr key={g.id} className="border-t border-line">
+                          <td className="pl-6">
+                            <div className="font-mono text-xs font-semibold">{g.permission}</div>
+                          </td>
+                          <td>
+                            <span
+                              className={
+                                g.effect === "deny"
+                                  ? "inline-flex items-center rounded bg-bad/10 px-2 py-0.5 text-xs font-medium text-bad"
+                                  : "inline-flex items-center rounded bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok"
+                              }
+                            >
+                              {g.effect === "deny" ? "Denegar" : "Permitir"}
+                            </span>
+                          </td>
+                          <td className="text-xs text-muted">{permDesc.get(g.permission) ?? "—"}</td>
+                          <td className="text-right">
+                            <Button
+                              onClick={() => remove.mutate(g.id)}
+                              aria-label={`Revocar ${g.permission}`}
+                              title={`Revocar ${g.permission}`}
+                              className="text-muted hover:text-bad"
+                            >
+                              <Trash2 className="size-3.5" aria-hidden />
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </Table>
+            </div>
           )}
         </>
       )}
     </div>
   );
+}
+
+function groupGrants(grants: Schemas["Grant"][], describe: (t: Scope, id: string) => string) {
+  const groups = new Map<string, { label: string; scope: Scope; grants: Schemas["Grant"][] }>();
+  for (const g of grants) {
+    const scopeLabel =
+      g.scope_type === "platform"
+        ? "Plataforma"
+        : `${scopeName[g.scope_type]}: ${g.scope_id ? describe(g.scope_type, g.scope_id) : ""}`;
+    const key = `${g.scope_type}:${g.scope_id ?? ""}`;
+    if (!groups.has(key)) {
+      groups.set(key, { label: scopeLabel, scope: g.scope_type, grants: [] });
+    }
+    groups.get(key)!.grants.push(g);
+  }
+  return Array.from(groups.values());
 }
 
 function useScopeNames() {
