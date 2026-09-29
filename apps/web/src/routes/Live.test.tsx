@@ -160,6 +160,34 @@ describe("Live", () => {
     });
   });
 
+  it("offers the standard 3×2 layout as six tiles in three columns", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "North gate")] }),
+        ...emptyCatalogs,
+      })),
+    );
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("North gate"));
+    const video = await waitFor(() => {
+      const element = screen.getByLabelText("Cuadro 1").querySelector("video");
+      expect(element).not.toBeNull();
+      return element;
+    });
+    const socketCount = FakeSocket.created;
+    expect(screen.getByRole("status", { name: "Status: online" })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Layout 3 by 2" }));
+
+    expect(screen.getAllByLabelText(/^Cuadro \d+$/)).toHaveLength(6);
+    expect(screen.getByLabelText("Grilla de video")).toHaveStyle({ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" });
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video);
+    expect(FakeSocket.created).toBe(socketCount);
+  });
+
   it("reorders two tiles with the keyboard (dnd-kit's built-in accessibility)", async () => {
     stubBrowserAPIs();
     vi.stubGlobal(

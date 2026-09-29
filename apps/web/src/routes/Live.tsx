@@ -4,7 +4,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link } from "@tanstack/react-router";
-import { ChevronDown, ChevronRight, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
+import { Camera, CircleCheck, CircleHelp, CircleX, ChevronDown, ChevronRight, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
@@ -18,7 +18,10 @@ import {
 } from "@/lib/liveGrid";
 import { can } from "@/lib/perm";
 
-const GRIDS = [1, 2, 3, 4];
+const GRID_LAYOUTS = [
+  { columns: 1, rows: 1 }, { columns: 2, rows: 1 }, { columns: 2, rows: 2 },
+  { columns: 3, rows: 2 }, { columns: 3, rows: 3 }, { columns: 4, rows: 3 }, { columns: 4, rows: 4 },
+];
 
 /**
  * Live is the multi-server live screen (PRD §46-49): a camera tree grouped by site and
@@ -33,6 +36,7 @@ export function Live() {
   const qc = useQueryClient();
 
   const [columns, setColumns] = useState(2);
+  const [rows, setRows] = useState(2);
   const [tiles, setTiles] = useState<Tile[]>(() => Array(4).fill(null));
   const [selected, setSelected] = useState(0);
   const [focus, setFocus] = useState<number | null>(null);
@@ -60,6 +64,7 @@ export function Live() {
       const saved = parseSelection(localStorage.getItem(key), validIds);
       if (saved) {
         setColumns(saved.columns);
+        setRows(saved.rows);
         setTiles(saved.tiles);
       }
     } catch {
@@ -71,16 +76,17 @@ export function Live() {
   useEffect(() => {
     if (!restored || !me.data) return;
     try {
-      localStorage.setItem(liveSelectionKey(me.data.tenant_id, me.data.id), serializeSelection(columns, tiles));
+      localStorage.setItem(liveSelectionKey(me.data.tenant_id, me.data.id), serializeSelection(columns, tiles, rows));
     } catch {
       // Storage unavailable (private mode, quota): the grid still works for this session.
     }
-  }, [restored, me.data, columns, tiles]);
+  }, [restored, me.data, columns, rows, tiles]);
 
-  const setGrid = (n: number) => {
-    setColumns(n);
-    setTiles((t) => resizeTiles(t, n));
-    setSelected((s) => Math.min(s, n * n - 1));
+  const setGrid = (nextColumns: number, nextRows: number) => {
+    setColumns(nextColumns);
+    setRows(nextRows);
+    setTiles((t) => resizeTiles(t, nextColumns, nextRows));
+    setSelected((s) => Math.min(s, nextColumns * nextRows - 1));
     setFocus(null);
   };
 
@@ -115,10 +121,11 @@ export function Live() {
     const v = views.data?.find((x) => x.id === id);
     if (!v) return;
     const n = v.layout.columns;
+    const nextRows = v.layout.cells.length ? Math.ceil(v.layout.cells.length / n) : n;
     setColumns(n);
+    setRows(nextRows);
     const next: Tile[] = v.layout.cells.map((c) => (c.camera_id ? { camera_id: c.camera_id, quality: c.quality ?? "sub" } : null));
-    while (next.length < n * n) next.push(null);
-    setTiles(next.slice(0, n * n));
+    setTiles(resizeTiles(next, n, nextRows));
     setSaveName(v.name);
     setShared(v.shared);
     setFocus(null);
@@ -213,23 +220,25 @@ export function Live() {
         <div className="flex min-w-0 flex-col gap-2">
           <section className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="flex items-center gap-1">
-              {GRIDS.map((n) => (
+              {GRID_LAYOUTS.map(({ columns: layoutColumns, rows: layoutRows }) => (
                 <button
-                  key={n}
+                  key={`${layoutColumns}x${layoutRows}`}
                   type="button"
-                  onClick={() => setGrid(n)}
+                  onClick={() => setGrid(layoutColumns, layoutRows)}
+                  aria-pressed={layoutColumns === columns && layoutRows === rows && focus === null}
+                  aria-label={`Layout ${layoutColumns} by ${layoutRows}`}
                   className={cn(
                     "rounded border border-line px-2 py-1 font-mono text-xs",
-                    n === columns && focus === null ? "bg-accent text-bg" : "bg-surface hover:bg-raised",
+                    layoutColumns === columns && layoutRows === rows && focus === null ? "bg-accent text-bg" : "bg-surface hover:bg-raised",
                   )}
                 >
-                  {n}×{n}
+                  {layoutColumns}×{layoutRows}
                 </button>
               ))}
               <span className="ml-2 text-xs text-muted">Elegí un cuadro y después una cámara del árbol, o arrastrala.</span>
             </div>
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={rectSortingStrategy}>
-              <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
+              <div role="group" aria-label="Grilla de video" className="grid gap-1" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
                 {shown.map((i) => {
                   const t = tiles[i] ?? null;
                   const cam = t ? camById.get(t.camera_id) : undefined;
@@ -242,6 +251,7 @@ export function Live() {
                       isSelected={selected === i}
                       isFocused={focus === i}
                       canViewRecordings={can(me.data, "recordings.view")}
+                      status={cam?.status}
                       quality={focus === i || columns === 1 ? "main" : (t?.quality ?? "sub")}
                       onSelect={() => setSelected(i)}
                       onToggleFocus={() => t && setFocus(focus === null ? i : null)}
@@ -269,6 +279,7 @@ function GridTile({
   isSelected,
   isFocused,
   canViewRecordings,
+  status,
   quality,
   onSelect,
   onToggleFocus,
@@ -280,6 +291,7 @@ function GridTile({
   isSelected: boolean;
   isFocused: boolean;
   canViewRecordings: boolean;
+  status?: string;
   quality: "sub" | "main";
   onSelect: () => void;
   onToggleFocus: () => void;
@@ -295,7 +307,7 @@ function GridTile({
       onClick={onSelect}
       onDoubleClick={onToggleFocus}
       className={cn(
-        "group relative aspect-video overflow-hidden rounded border bg-black",
+        "group relative aspect-video overflow-hidden rounded border bg-black outline-none focus-visible:ring-2 focus-visible:ring-accent",
         isSelected ? "border-accent" : "border-line",
         isDragging && "opacity-50",
       )}
@@ -305,18 +317,25 @@ function GridTile({
       {tile && camera ? (
         <>
           <MsePlayer cameraId={tile.camera_id} quality={quality} className="size-full" />
-          <div className="absolute inset-x-0 top-0 flex items-center gap-2 bg-gradient-to-b from-black/70 to-transparent px-2 py-1 text-xs text-white">
+          <div className="absolute inset-x-0 top-0 flex items-center gap-1.5 bg-gradient-to-b from-black/80 via-black/45 to-transparent px-2 py-1.5 text-xs text-white">
+            <Camera className="size-3.5 shrink-0" aria-hidden />
             <span className="truncate font-medium">{camera.display_name}</span>
-            <span className="ml-auto flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">
+              <span className={cn("size-1.5 rounded-full ring-1 ring-white/80", status === "online" ? "bg-emerald-400" : status === "offline" ? "bg-red-400" : "bg-amber-300")} />
+              {status === "online" ? <CircleCheck className="size-3" aria-hidden /> : status === "offline" ? <CircleX className="size-3" aria-hidden /> : <CircleHelp className="size-3" aria-hidden />}
+              <span className="sr-only">{status ?? "unknown"}</span>
+            </span>
+            <span className="ml-auto flex shrink-0 gap-1">
               {canViewRecordings && (
-                <Link to="/playback" search={{ camera: tile.camera_id }} title="Grabaciones" className="rounded p-0.5 hover:bg-white/20">
+                <Link to="/playback" search={{ camera: tile.camera_id }} title="Grabaciones" aria-label={`Grabaciones de ${camera.display_name}`} className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
                   <History className="size-3.5" aria-hidden />
                 </Link>
               )}
               <button
                 type="button"
                 title={isFocused ? "Volver a la grilla" : "Ampliar"}
-                className="rounded p-0.5 hover:bg-white/20"
+                aria-label={isFocused ? "Volver a la grilla" : "Ampliar"}
+                className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
                 onClick={(e) => {
                   e.stopPropagation();
                   onToggleFocus();
@@ -327,7 +346,8 @@ function GridTile({
               <button
                 type="button"
                 title="Quitar"
-                className="rounded p-0.5 hover:bg-white/20"
+                aria-label={`Quitar ${camera.display_name}`}
+                className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
                 onClick={(e) => {
                   e.stopPropagation();
                   onRemove();

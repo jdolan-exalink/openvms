@@ -8,10 +8,11 @@
 export type Quality = "sub" | "main";
 export type Tile = { camera_id: string; quality: Quality } | null;
 
-/** resizeTiles truncates or pads tiles to exactly n*n slots, keeping existing order. */
-export function resizeTiles(tiles: Tile[], n: number): Tile[] {
-  const next = tiles.slice(0, n * n);
-  while (next.length < n * n) next.push(null);
+/** resizeTiles truncates or pads tiles to the requested grid dimensions, keeping existing order. */
+export function resizeTiles(tiles: Tile[], columns: number, rows = columns): Tile[] {
+  const count = columns * rows;
+  const next = tiles.slice(0, count);
+  while (next.length < count) next.push(null);
   return next;
 }
 
@@ -77,7 +78,7 @@ export function resolveDragEnd(activeId: string | number, overId: string | numbe
   return null;
 }
 
-export type StoredSelection = { columns: number; tiles: Tile[] };
+export type StoredSelection = { columns: number; rows: number; tiles: Tile[] };
 
 const STORAGE_PREFIX = "openvms.live.selection.v1";
 
@@ -86,13 +87,13 @@ export function liveSelectionKey(tenantId: string | null, userId: string): strin
   return `${STORAGE_PREFIX}:${tenantId ?? "platform"}:${userId}`;
 }
 
-export function serializeSelection(columns: number, tiles: Tile[]): string {
-  return JSON.stringify({ columns, tiles });
+export function serializeSelection(columns: number, tiles: Tile[], rows = columns): string {
+  return JSON.stringify({ columns, rows, tiles });
 }
 
 /**
  * parseSelection turns a raw localStorage string back into a selection, dropping any camera the
- * user can no longer see (leaving its slot empty) and clamping the tile count to columns*columns.
+ * user can no longer see (leaving its slot empty) and clamping the tile count to the grid dimensions.
  * Returns null for missing, malformed, or structurally invalid input so the caller can fall back
  * to the default grid instead of throwing.
  */
@@ -105,13 +106,15 @@ export function parseSelection(raw: string | null, validCameraIds: ReadonlySet<s
     return null;
   }
   if (!parsed || typeof parsed !== "object") return null;
-  const { columns, tiles } = parsed as { columns?: unknown; tiles?: unknown };
+  const { columns, rows, tiles } = parsed as { columns?: unknown; rows?: unknown; tiles?: unknown };
   if (typeof columns !== "number" || !Number.isInteger(columns) || columns < 1 || !Array.isArray(tiles)) return null;
+  const resolvedRows = rows === undefined ? columns : rows;
+  if (typeof resolvedRows !== "number" || !Number.isInteger(resolvedRows) || resolvedRows < 1) return null;
   const cleaned: Tile[] = tiles.map((t): Tile => {
     if (!t || typeof t !== "object") return null;
     const { camera_id, quality } = t as { camera_id?: unknown; quality?: unknown };
     if (typeof camera_id !== "string" || !validCameraIds.has(camera_id)) return null;
     return { camera_id, quality: quality === "main" ? "main" : "sub" };
   });
-  return { columns, tiles: resizeTiles(cleaned, columns) };
+  return { columns, rows: resolvedRows, tiles: resizeTiles(cleaned, columns, resolvedRows) };
 }

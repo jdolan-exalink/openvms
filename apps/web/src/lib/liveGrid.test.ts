@@ -12,6 +12,12 @@ describe("resizeTiles", () => {
     const tiles: Tile[] = [{ camera_id: "a", quality: "sub" }, { camera_id: "b", quality: "sub" }, { camera_id: "c", quality: "sub" }];
     expect(resizeTiles(tiles, 1)).toEqual([{ camera_id: "a", quality: "sub" }]);
   });
+
+  it("supports a rectangular layout without dropping camera order", () => {
+    const tiles: Tile[] = [{ camera_id: "a", quality: "sub" }, { camera_id: "b", quality: "main" }];
+    expect(resizeTiles(tiles, 2, 1)).toEqual(tiles);
+    expect(resizeTiles(tiles, 3, 2)).toEqual([...tiles, null, null, null, null]);
+  });
 });
 
 describe("reorderTiles", () => {
@@ -97,12 +103,18 @@ describe("serializeSelection / parseSelection", () => {
   it("round-trips a valid selection", () => {
     const tiles: Tile[] = [{ camera_id: "cam-1", quality: "main" }, null, { camera_id: "cam-2", quality: "sub" }, null];
     const raw = serializeSelection(2, tiles);
-    expect(parseSelection(raw, validIds)).toEqual({ columns: 2, tiles });
+    expect(parseSelection(raw, validIds)).toEqual({ columns: 2, rows: 2, tiles });
+  });
+
+  it("restores rectangular selections while accepting legacy square selections", () => {
+    const rectangular = serializeSelection(3, [{ camera_id: "cam-1", quality: "sub" }, null, null, null, null, null], 2);
+    expect(parseSelection(rectangular, validIds)).toEqual({ columns: 3, rows: 2, tiles: [{ camera_id: "cam-1", quality: "sub" }, null, null, null, null, null] });
+    expect(parseSelection(JSON.stringify({ columns: 2, tiles: [null] }), validIds)).toEqual({ columns: 2, rows: 2, tiles: [null, null, null, null] });
   });
 
   it("drops cameras the user can no longer see, keeping their slot empty", () => {
     const raw = serializeSelection(1, [{ camera_id: "gone", quality: "sub" }]);
-    expect(parseSelection(raw, validIds)).toEqual({ columns: 1, tiles: [null] });
+    expect(parseSelection(raw, validIds)).toEqual({ columns: 1, rows: 1, tiles: [null] });
   });
 
   it("returns null for missing input", () => {
