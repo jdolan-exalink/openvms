@@ -39,6 +39,20 @@ The requested redesign spans operational video workflows, administration, naviga
 - [x] UIUX-14 — Phase 9: recompose the existing Sites, Servers, and Cameras inventory into the requested dense operational device-management experience, reusing current routes/contracts. Do not invent a separate device or sensor domain. Separate delegated work unit and commit; strict TDD and applicable frontend checks.
 - [x] UIUX-15 — Phase 10: add a camera context/settings drawer only for currently supported fields (`display_name`, `enabled`) and `cameras.manage`; preserve inventory context and API enforcement. Defer advanced stream/detection/zones/LPR configuration until contracts exist. Separate delegated work unit and commit; strict TDD and applicable frontend checks.
 
+## Stage two — backend gaps (authorized 2026-09-29)
+The user authorized building the missing backend controls for phases 5–11 and finishing their frontend. Backend route: Go (`internal/*`), OpenAPI `packages/api-contract/openapi.yaml` + `make generate`, goose migrations with tenant RLS, authz catalog in `internal/authz/catalog.go`. Checks per unit: `go test -race ./...`, `make test-integration` when DB code changes, web suite, typecheck, lint, `git diff --check`. Strict TDD. Product decisions are asked one at a time; units without open decisions proceed.
+- [ ] S2-1 — Small gaps: bulk event review endpoint + UI; fix event sync overwriting VMS `reviewed`; saved-view `owner_name`; Events filters persisted in the URL. No open product decision.
+- [ ] S2-2 — Realtime `/ws` feed (NATS JetStream consumer → per-connection tenant/permission filter). Blocking decision: WebSocket-only vs SSE fallback.
+- [ ] S2-3 — Alarms inbox (phase 8): alarm state, ack/assign, UI inbox. Blocking decisions: alarm definition, ack semantics, assignment target.
+- [ ] S2-4 — Global search (phase 7): `GET /api/v1/search` grouped by entity + trigram indexes + omnibox UI. Blocking decision: entity scope and result shape.
+- [ ] S2-5 — Camera VMS-side settings (phase 10): stream preference/metadata in `cameras` + drawer fields.
+- [ ] S2-6 — Rules + notifications (phase 11): domain, worker engine, CRUD, UI. Blocking decisions: trigger/action vocabulary, channels, scope.
+- [ ] S2-7 — Frigate config write (phase 10): detection/zones/LPR via adapter with backup/rollback/audit. Blocking decisions: source of truth, editable fields, restart policy.
+- [ ] S2-8 — Synchronized multi-camera playback (phase 5): client orchestration + optional session helper. Blocking decisions: sync tolerance, max cameras, clock skew.
+
+## Phases 6–10 native review
+- Range `dd5e8f2..6d9e10c` (18 paths, 941 lines), medium / `slice_budget_reached`. The user granted review; lens `review-reliability` returned approved; acknowledged, authority burned (lineage `review-b95170ad511c40a2`). Reviewed boundary advances to `6d9e10c`. Full re-check at 6d9e10c: web 20 files / 105 tests, typecheck, lint passed.
+
 ## Phase map from the requested scope
 1. Design tokens + AppShell
 2. Primary Navigation + TopBar
