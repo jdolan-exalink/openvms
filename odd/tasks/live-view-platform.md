@@ -33,9 +33,9 @@ navigation) must not reconnect media; no black tiles while connecting.
 - [x] LV-1 — Feature flags (`GET /api/v1/features` + web hook) and baseline instrumentation: per-session reconnect counter + TTFF, characterization tests that document current reconnect behaviour.
 - [x] LV-2 — Player state machine (UNINITIALIZED…EVICTED, transition cause/timestamp) + `PlayerSession` core; `MsePlayer` becomes a thin adapter.
 - [x] LV-3 — `PlayerSessionManager` + provider mounted in `Layout` (sessions per camera, WARM TTL, eviction).
-- [ ] LV-4 — `VideoSurfaceLayer` + `SurfaceSlot` (persistent `<video>` positioned over cells via ResizeObserver/translate3d), behind flag.
-- [ ] LV-5 — Tiles keyed by camera: DnD swap semantics, layout change and expand without reconnect; 25/32 grids with visibility pausing. Mandatory tests: cell1→cell8 same session 0 reconnects; grid→expand same session 0 reconnects.
-- [ ] LV-6 — Snapshot poster + last frame, offline/unauthorized/error states with Retry, jittered backoff grouped per server; snapshot cache headers. Test: offline shows last snapshot + auto reconnect.
+- [x] LV-4 — `VideoSurfaceLayer` + `SurfaceSlot` (persistent `<video>` positioned over cells via ResizeObserver/translate3d), behind flag. Done: 1f632e0.
+- [x] LV-5 — Tiles keyed by camera: DnD swap semantics, layout change and expand without reconnect; 25/32 grids with visibility pausing. Mandatory tests: cell1→cell8 same session 0 reconnects; grid→expand same session 0 reconnects. Done: 656b5d9.
+- [x] LV-6 — Snapshot poster + last frame, offline/unauthorized/error states with Retry, jittered backoff grouped per server; snapshot cache headers. Test: offline shows last snapshot + auto reconnect. Done: 7d91c84.
 - [x] LV-7 — Gateway hardening: one audit row per session, ping/deadlines, structured error frame to client, Prometheus counters. Done: 813f791 (worktree feat/live-view-gateway), merged 3a80d80. Error frame {type:error,code,message,value}; knobs LIVE_AUDIT_WINDOW/LIVE_REVALIDATE_INTERVAL/LIVE_PING_INTERVAL/LIVE_PONG_WAIT; metrics openvms_live_*. Checks after merge: go build/test OK, golangci-lint, vitest (see progress). Route: delegated (parallel worktree). Gap: no e2e WS test; dedupe per API process; socket upgraded before auth (PO decision pending).
 - [ ] LV-8 — Rollout (flag default), `docs/live-view-architecture.md`, changelog.
 
@@ -63,3 +63,23 @@ golangci-lint 0 issues, web tsc, vitest (227 tests), eslint, vite build.
 - LV-3 (4e84007): PlayerSessionManager (acquire/release refcount, WARM TTL 30 s, maxWarmPlayers 8 LRU, soft
   maxConcurrentPlayers 32, clear on logout/user change/unmount), PlayerSessionProvider mounted in Layout,
   usePlayerSession; MsePlayer persistent prop driven by the persistentPlayers flag in Live GridTile.
+
+- LV-6 (7d91c84), LV-4 (1f632e0), LV-5 (656b5d9). Route: delegated (writer trigger: 2+ non-trivial files). Committed in the
+  order 6, 4, 5 because 4 renders the LV-6 status overlay and 5 uses the session suspend/WARM API from 6; each commit compiles alone.
+  Checks (all green after LV-5): web tsc, eslint, vitest (252 tests), vite build; go build, go vet, go test ./..., golangci-lint 0 issues.
+  * LV-6: streamErrors.ts (code -> label + retryable), PlayerSession `resilient` mode (error frames, 1008 close = unauthorized, stop until
+    retryNow, in-memory last frame via canvas -> blob URL on close/suspend/error and every 20 s while ACTIVE, suspend on hidden tab,
+    resume <video> after DOM-move pause), serverBackoff.ts (one shared timer + single probe per Frigate server, staggered release),
+    PlayerStatusOverlay (last frame else cold `/media/v1/cameras/{id}/snapshot.jpg?h=360`, spinner only without image, Reintentar for
+    stopped errors), snapshot `Cache-Control: private, max-age=5` on 200 (no-store otherwise). markWarm/markActive now only move
+    ACTIVE<->WARM (they used to force ACTIVE on a still-connecting session, hiding the "Conectando" overlay).
+  * LV-4: surfaceLayer.ts controller + SurfaceLayer.tsx (VideoSurfaceLayer in Layout, SurfaceSlot). Layer is fixed, z-1, pointer-events none;
+    tile controls use z-[2]/z-[3]. Duplicate camera policy: one <video> per session, so the grid never mounts a second player for a
+    camera already shown; a repeat (only possible from saved views) renders a snapshot + "Ya visible en otra celda", and placing a camera
+    already on the grid moves it (swap) instead of duplicating.
+  * LV-5: tiles keyed `camera:<id>` (flag on), swapTiles/placeCameraUnique/duplicateTileIndexes in liveGrid (reorderTiles kept for flag off),
+    rectSwappingStrategy, expand keeps all tiles mounted (others `hidden`, session WARM) and never switches quality (flag on: tile quality
+    always used, including 1x1), 5x5 and 8x4 (32) walls, IntersectionObserver suspends off-screen tiles (not tiles hidden by expand),
+    page-hidden suspends every session. Acceptance tests in routes/Live.test.tsx (cell 1->8 via keyboard dnd, grid->expand->grid).
+  * Gaps: not verified in a real browser (video overlay geometry/clipping, z-order over the app shell, suspend/resume, MSE poster capture);
+    flags default off; WARM sessions of an expanded view still count against the 30 s TTL only after the Live page unmounts.

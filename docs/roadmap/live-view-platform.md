@@ -57,12 +57,12 @@ and `apps/api/main.go` if any (both branches add config knobs/wiring). Then
 | # | Task | Status | Evidence |
 |---|---|---|---|
 | LV-1 | Feature flags (`GET /api/v1/features`, `useFeatures()`) + player metrics baseline | ✅ done | `a0f4a62` |
-| LV-2 | Player state machine + `PlayerSession` (owns its `<video>`, attach/detach without teardown) | 🔨 in progress | `apps/web/src/lib/live/playerState.ts`, `backoff.ts` |
-| LV-3 | `PlayerSessionManager` + provider in `Layout` (WARM TTL, LRU, logout clears) | ⏳ | — |
-| LV-4 | `VideoSurfaceLayer` + `SurfaceSlot` (persistent `<video>` over cells; ResizeObserver, translate3d), behind flag | ⏳ | — |
-| LV-5 | Tiles keyed by camera: DnD swap, layout change, expand with 0 reconnects; 25/32 grids + visibility pausing | ⏳ | — |
-| LV-6 | Snapshot poster + last frame; states Connecting/Reconnecting/Offline/Unauthorized/Codec/Error + Retry; jittered backoff grouped per server; **stop retrying on `unauthorized`, `forbidden`, `codec_unsupported`** | ⏳ | — |
-| LV-7 | Gateway hardening | ✅ done (not merged) | `813f791` on `feat/live-view-gateway` |
+| LV-2 | Player state machine + `PlayerSession` (owns its `<video>`, attach/detach without teardown) | ✅ done | `b3d0624` |
+| LV-3 | `PlayerSessionManager` + provider in `Layout` (WARM TTL, LRU, logout clears) | ✅ done | `4e84007` |
+| LV-4 | `VideoSurfaceLayer` + `SurfaceSlot` (persistent `<video>` over cells; ResizeObserver, translate3d), behind flag | ✅ done | `1f632e0` |
+| LV-5 | Tiles keyed by camera: DnD swap, layout change, expand with 0 reconnects; 25/32 grids + visibility pausing | ✅ done | `656b5d9` |
+| LV-6 | Snapshot poster + last frame; states Connecting/Reconnecting/Offline/Unauthorized/Codec/Error + Retry; jittered backoff grouped per server; **stop retrying on `unauthorized`, `forbidden`, `codec_unsupported`** | ✅ done | `7d91c84` |
+| LV-7 | Gateway hardening | ✅ done, merged | `813f791`, merge `3a80d80` |
 | LV-8 | Rollout (flag defaults), `docs/live-view-architecture.md`, changelog, backup + `make up` deploy | ⏳ | — |
 
 Dependencies: LV-2 → LV-3 → LV-4 → LV-5. LV-6 can run in parallel with LV-4/LV-5 if it
