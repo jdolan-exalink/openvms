@@ -1,30 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
-import { observeFirstFrame, playerMetrics } from "@/lib/live/playerMetrics";
-
-// Codecs offered to go2rtc, most preferred first (same list go2rtc's own player uses).
-const CODECS = [
-  "avc1.640029",
-  "avc1.64002A",
-  "avc1.640033",
-  "hvc1.1.6.L153.B0",
-  "mp4a.40.2",
-  "mp4a.40.5",
-  "flac",
-  "opus",
-];
-
-function supportedCodecs(): string {
-  const MS = window.MediaSource ?? (window as unknown as { ManagedMediaSource?: typeof MediaSource }).ManagedMediaSource;
-  if (!MS) return "";
-  return CODECS.filter((c) => MS.isTypeSupported(`video/mp4; codecs="${c}"`)).join();
-}
-
-type State = "connecting" | "playing" | "error";
+import { PlayerSession, type SessionSnapshot } from "@/lib/live/PlayerSession";
 
 /**
  * MsePlayer plays a camera live through the VMS media gateway, which relays Frigate's
- * go2rtc MSE websocket. Reconnects with backoff when the stream drops.
+ * go2rtc MSE websocket. It is a thin view over a PlayerSession (lib/live), which owns the
+ * `<video>`, the websocket and the reconnect policy; this component only renders it.
  */
 export function MsePlayer({
   cameraId,
@@ -39,163 +20,39 @@ export function MsePlayer({
   muted?: boolean;
   onError?: (msg: string) => void;
 }) {
-  const video = useRef<HTMLVideoElement>(null);
-  const [state, setState] = useState<State>("connecting");
-  const [message, setMessage] = useState("");
+  const container = useRef<HTMLDivElement>(null);
+  const session = useRef<PlayerSession | null>(null);
+  const [snapshot, setSnapshot] = useState<SessionSnapshot>({ state: "UNINITIALIZED", message: "" });
+  const onErrorRef = useRef(onError);
+  const mutedRef = useRef(muted);
+  useEffect(() => {
+    onErrorRef.current = onError;
+    mutedRef.current = muted;
+    session.current?.setMuted(muted);
+  });
 
   useEffect(() => {
-    const el = video.current;
-    if (!el) return;
-    let ws: WebSocket | null = null;
-    let closed = false;
-    let retry = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let objectURL = "";
-    let cancelFrame: (() => void) | undefined;
-
-    const connect = () => {
-      if (closed) return;
-      setState("connecting");
-      setMessage("");
-      const MS = window.MediaSource ?? (window as unknown as { ManagedMediaSource?: typeof MediaSource }).ManagedMediaSource;
-      if (!MS) {
-        setState("error");
-        setMessage("El navegador no soporta Media Source Extensions.");
-        return;
-      }
-      const proto = location.protocol === "https:" ? "wss:" : "ws:";
-      playerMetrics.connectAttempt(cameraId, quality);
-      playerMetrics.setState(cameraId, quality, "CONNECTING");
-      cancelFrame?.();
-      cancelFrame = observeFirstFrame(el, () => {
-        playerMetrics.firstFrame(cameraId, quality);
-        playerMetrics.setState(cameraId, quality, "ACTIVE");
-      });
-      ws = new WebSocket(`${proto}//${location.host}/media/v1/cameras/${cameraId}/live?quality=${quality}`);
-      ws.binaryType = "arraybuffer";
-      let ms: MediaSource | null = null;
-      let sb: SourceBuffer | null = null;
-      const queue: ArrayBuffer[] = [];
-      // The gateway rejects the handshake outright (no MSE upgrade) when the camera has
-      // no go2rtc restream; the browser never exposes that HTTP status or body to us, so
-      // "never opened" is the only signal we get for that permanent condition.
-      let opened = false;
-
-      const pump = () => {
-        if (!sb || sb.updating || queue.length === 0) return;
-        try {
-          sb.appendBuffer(queue.shift()!);
-        } catch {
-          // QuotaExceeded: drop the backlog, trimming below frees space
-          queue.length = 0;
-        }
-      };
-
-      ws.onopen = () => {
-        opened = true;
-        ws?.send(JSON.stringify({ type: "mse", value: supportedCodecs() }));
-      };
-      ws.onmessage = (ev) => {
-        if (typeof ev.data === "string") {
-          const msg = JSON.parse(ev.data) as { type: string; value: string };
-          if (msg.type === "mse") {
-            ms = new MS();
-            ms.addEventListener(
-              "sourceopen",
-              () => {
-                if (!ms) return;
-                URL.revokeObjectURL(objectURL);
-                try {
-                  sb = ms.addSourceBuffer(msg.value);
-                } catch {
-                  setState("error");
-                  setMessage("Códec no soportado por el navegador.");
-                  return;
-                }
-                sb.mode = "segments";
-                sb.addEventListener("updateend", () => {
-                  if (!sb || sb.updating) return;
-                  // Keep ~10 s of buffer and stay close to the live edge.
-                  const b = sb.buffered;
-                  if (b.length > 0) {
-                    const end = b.end(b.length - 1);
-                    const start = b.start(0);
-                    if (end - start > 15 && !sb.updating) {
-                      try {
-                        sb.remove(start, end - 10);
-                        return;
-                      } catch {
-                        // ignore; next update trims
-                      }
-                    }
-                    if (el.currentTime < end - 3) el.currentTime = end - 0.5;
-                  }
-                  pump();
-                });
-                pump();
-              },
-              { once: true },
-            );
-            objectURL = URL.createObjectURL(ms);
-            el.src = objectURL;
-            void el.play().catch(() => {});
-          } else if (msg.type === "error") {
-            setState("error");
-            setMessage(msg.value);
-            onError?.(msg.value);
-          }
-          return;
-        }
-        queue.push(ev.data as ArrayBuffer);
-        if (queue.length > 60) queue.splice(0, queue.length - 60);
-        pump();
-        setState("playing");
-        retry = 0;
-      };
-      ws.onclose = () => {
-        if (closed) return;
-        if (!opened) {
-          // Handshake rejected before any go2rtc protocol exchange: a permanent
-          // condition (e.g. this camera has no go2rtc restream), not a dropped
-          // connection. Show a clear message instead of retrying forever on "Conectando…".
-          setState("error");
-          setMessage("La cámara no tiene una transmisión de video disponible.");
-          return;
-        }
-        if (retry >= 2) setMessage("Sin conexión con la cámara, reintentando…");
-        setState("connecting");
-        retry = Math.min(retry + 1, 6);
-        timer = setTimeout(connect, 500 * 2 ** retry);
-      };
-    };
-
-    connect();
-    const onVisibility = () => {
-      if (document.visibilityState === "visible" && ws?.readyState !== WebSocket.OPEN) {
-        clearTimeout(timer);
-        connect();
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
+    const host = container.current;
+    if (!host) return;
+    const s = new PlayerSession({ cameraId, quality, muted: mutedRef.current, onError: (m) => onErrorRef.current?.(m) });
+    session.current = s;
+    setSnapshot(s.getSnapshot());
+    const off = s.subscribe(() => setSnapshot(s.getSnapshot()));
+    s.attach(host);
+    s.connect();
     return () => {
-      closed = true;
-      clearTimeout(timer);
-      cancelFrame?.();
-      document.removeEventListener("visibilitychange", onVisibility);
-      ws?.close();
-      el.removeAttribute("src");
-      el.load();
-      URL.revokeObjectURL(objectURL);
+      off();
+      s.close("unmount");
+      session.current = null;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraId, quality]);
 
+  const showing = snapshot.state === "ACTIVE" || snapshot.state === "WARM";
   return (
-    <div className={cn("relative overflow-hidden bg-black", className)}>
-      <video ref={video} className="size-full object-contain" autoPlay playsInline muted={muted} />
-      {state !== "playing" && (
+    <div ref={container} className={cn("relative overflow-hidden bg-black", className)}>
+      {!showing && (
         <div className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white/70">
-          {state === "error" ? message || "Error de video" : message || "Conectando…"}
+          {snapshot.state === "ERROR" ? snapshot.message || "Error de video" : snapshot.message || "Conectando…"}
         </div>
       )}
     </div>
