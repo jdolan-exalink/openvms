@@ -386,4 +386,65 @@ describe("Live", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No tenés permiso para guardar esta vista.");
   });
+  const savedView = (id: string, name: string, shared: boolean, editable: boolean) => ({
+    id,
+    tenant_id: "t1",
+    owner_id: "u1",
+    name,
+    shared,
+    editable,
+    layout: { columns: 2, cells: [{ quality: "sub" }, { quality: "sub" }, { quality: "sub" }, { quality: "sub" }] },
+    created_at: "",
+    updated_at: "",
+  });
+
+  const viewsApi = (views: unknown[]) => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": () => meResponse([{ permission: "views.create_private", effect: "allow", scope_type: "tenant" }]),
+          "/api/v1/cameras": () => json({ items: [] }),
+          "/api/v1/sites": () => json({ items: [] }),
+          "/api/v1/servers": () => json({ items: [] }),
+          "/api/v1/views": () => json({ items: views }),
+        }),
+      ),
+    );
+  };
+
+  it("groups saved views into private and shared groups", async () => {
+    viewsApi([savedView("v1", "Turno noche", false, true), savedView("v2", "Perímetro", true, false)]);
+
+    renderPage(Live);
+
+    const select = await screen.findByLabelText("Vista guardada");
+    await screen.findByRole("option", { name: /Turno noche/ });
+    expect(select.querySelector('optgroup[label="Privadas"]')).toHaveTextContent("Turno noche");
+    expect(select.querySelector('optgroup[label="Compartidas"]')).toHaveTextContent("Perímetro");
+  });
+
+  it("announces the active view, its visibility and read-only state", async () => {
+    viewsApi([savedView("v2", "Perímetro", true, false)]);
+
+    renderPage(Live);
+
+    await screen.findByRole("option", { name: /Perímetro/ });
+    expect(screen.getByRole("status", { name: "Vista activa" })).toHaveTextContent("Vista sin guardar");
+    fireEvent.change(screen.getByLabelText("Vista guardada"), { target: { value: "v2" } });
+    const status = screen.getByRole("status", { name: "Vista activa" });
+    expect(status).toHaveTextContent("Perímetro");
+    expect(status).toHaveTextContent("Compartida");
+    expect(status).toHaveTextContent("Solo lectura");
+  });
+
+  it("labels the layout picker as a group", async () => {
+    viewsApi([]);
+
+    renderPage(Live);
+
+    const group = await screen.findByRole("group", { name: "Layout de la grilla" });
+    expect(group).toContainElement(screen.getByRole("button", { name: "Layout 2 by 2" }));
+  });
 });

@@ -134,6 +134,8 @@ export function Live() {
   };
 
   const current = views.data?.find((v) => v.id === viewId);
+  const privateViews = views.data?.filter((v) => !v.shared) ?? [];
+  const sharedViews = views.data?.filter((v) => v.shared) ?? [];
   const body = (): Schemas["ViewInput"] => ({
     name: saveName.trim(),
     shared,
@@ -166,13 +168,27 @@ export function Live() {
         <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">Vista</h2>
         <Select aria-label="Vista guardada" value={viewId} onChange={(e) => (e.target.value ? loadView(e.target.value) : setViewId(""))}>
           <option value="">Vista sin guardar</option>
-          {views.data?.map((v) => (
-            <option key={v.id} value={v.id}>
-              {v.name}
-              {v.shared ? " (compartida)" : ""}
-            </option>
-          ))}
+          {[
+            { label: "Privadas", items: privateViews },
+            { label: "Compartidas", items: sharedViews },
+          ].map(
+            (group) =>
+              group.items.length > 0 && (
+                <optgroup key={group.label} label={group.label}>
+                  {group.items.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ),
+          )}
         </Select>
+        <p role="status" aria-label="Vista activa" className="px-1 text-xs text-muted">
+          {current
+            ? `${current.name} · ${current.shared ? "Compartida" : "Privada"}${current.editable ? "" : " · Solo lectura: guardar crea una copia propia"}`
+            : "Vista sin guardar"}
+        </p>
         <TextInput aria-label="Nombre de la vista" placeholder="Nombre de la vista" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
         {can(me.data, "views.create_shared") && (
           <label className="flex items-center gap-2 text-xs">
@@ -228,7 +244,7 @@ export function Live() {
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="flex min-w-0 flex-col gap-2">
           <section className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="flex items-center gap-1">
+            <div role="group" aria-label="Layout de la grilla" className="flex items-center gap-1">
               {GRID_LAYOUTS.map(({ columns: layoutColumns, rows: layoutRows }) => (
                 <button
                   key={`${layoutColumns}x${layoutRows}`}
