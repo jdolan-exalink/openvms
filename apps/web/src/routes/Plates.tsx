@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { Schemas } from "@/api/client";
 import { cameraGroupsQuery, meQuery, type PlateFilter, platesQuery, sitesQuery } from "@/api/queries";
 import { PlateDetailModal } from "@/components/PlateDetailModal";
+import { type FilterChip, SearchSummary } from "@/components/SearchSummary";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, TextInput, Th } from "@/components/ui";
 import { fmtDateTime, fromLocalInput, labelName } from "@/lib/format";
 import { can } from "@/lib/perm";
@@ -34,19 +35,46 @@ function PlatePreview({ read }: { read: Schemas["PlateRead"] }) {
   );
 }
 
+type Form = { plate: string; exact: boolean; site: string; cameraGroup: string; from: string; to: string };
+const emptyForm: Form = { plate: "", exact: false, site: "", cameraGroup: "", from: "", to: "" };
+
+function toFilter(f: Form): PlateFilter {
+  return {
+    plate: f.plate.trim() || undefined,
+    exact: f.exact || undefined,
+    site_id: f.site ? [f.site] : undefined,
+    camera_group_id: f.cameraGroup ? [f.cameraGroup] : undefined,
+    from: fromLocalInput(f.from),
+    to: fromLocalInput(f.to),
+  };
+}
+
 /** Plates is the global LPR search (PRD §41-45) across every authorized Frigate. */
 export function Plates() {
   const me = useQuery(meQuery);
   const sites = useQuery(sitesQuery);
   const cameraGroups = useQuery(cameraGroupsQuery);
-  const [form, setForm] = useState({ plate: "", exact: false, site: "", cameraGroup: "", from: "", to: "" });
-  const [filter, setFilter] = useState<PlateFilter>({});
-  const reads = useInfiniteQuery(platesQuery(filter));
+  const [form, setForm] = useState<Form>(emptyForm);
+  const [applied, setApplied] = useState<Form>(emptyForm);
+  const reads = useInfiniteQuery(platesQuery(toFilter(applied)));
   const items = reads.data?.pages.flatMap((p) => p.items) ?? [];
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [detailRead, setDetailRead] = useState<Schemas["PlateRead"] | null>(null);
   const canPreviewSnapshot = can(me.data, "snapshots.view") && can(me.data, "lpr.view");
   const canViewDetail = can(me.data, "lpr.view") && (can(me.data, "snapshots.view") || can(me.data, "recordings.view"));
+
+  const reset = (patch: Partial<Form>) => {
+    setForm((f) => ({ ...f, ...patch }));
+    setApplied((f) => ({ ...f, ...patch }));
+  };
+  const chips: FilterChip[] = [];
+  if (applied.plate.trim()) chips.push({ key: "plate", label: `Patente: ${applied.plate.trim()}`, onRemove: () => reset({ plate: "" }) });
+  if (applied.exact) chips.push({ key: "exact", label: "Coincidencia exacta", onRemove: () => reset({ exact: false }) });
+  if (applied.site) chips.push({ key: "site", label: `Sitio: ${sites.data?.find((x) => x.id === applied.site)?.name ?? applied.site}`, onRemove: () => reset({ site: "" }) });
+  if (applied.cameraGroup)
+    chips.push({ key: "group", label: `Grupo: ${cameraGroups.data?.find((x) => x.id === applied.cameraGroup)?.name ?? applied.cameraGroup}`, onRemove: () => reset({ cameraGroup: "" }) });
+  if (applied.from) chips.push({ key: "from", label: `Desde: ${applied.from.replace("T", " ")}`, onRemove: () => reset({ from: "" }) });
+  if (applied.to) chips.push({ key: "to", label: `Hasta: ${applied.to.replace("T", " ")}`, onRemove: () => reset({ to: "" }) });
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
@@ -55,14 +83,7 @@ export function Plates() {
         className="grid gap-3 rounded border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-5"
         onSubmit={(e) => {
           e.preventDefault();
-          setFilter({
-            plate: form.plate.trim() || undefined,
-            exact: form.exact || undefined,
-            site_id: form.site ? [form.site] : undefined,
-            camera_group_id: form.cameraGroup ? [form.cameraGroup] : undefined,
-            from: fromLocalInput(form.from),
-            to: fromLocalInput(form.to),
-          });
+          setApplied(form);
         }}
       >
         <Field label="Patente">
@@ -109,6 +130,17 @@ export function Plates() {
           </Button>
         </div>
       </form>
+      <SearchSummary
+        count={items.length}
+        noun={{ one: "lectura", many: "lecturas" }}
+        hasMore={!!reads.hasNextPage}
+        loading={reads.isPending}
+        chips={chips}
+        onClear={() => {
+          setForm(emptyForm);
+          setApplied(emptyForm);
+        }}
+      />
       <ErrorNote error={reads.error} />
       {reads.isSuccess && items.length === 0 && <Empty>No hay lecturas que coincidan.</Empty>}
       {items.length > 0 && (

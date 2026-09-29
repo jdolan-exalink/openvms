@@ -293,4 +293,43 @@ describe("Plates", () => {
       expect(screen.getAllByRole("row")).toHaveLength(3); // header row + 2 data rows
     });
   });
+
+  it("shows applied-filter chips and a result count, and clears them", async () => {
+    let lastReadsUrl: URL | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/lpr/reads") {
+          lastReadsUrl = url;
+          return json({ items: [makePlateRead("r1"), makePlateRead("r2")] });
+        }
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.search"), ...noCatalogs })(input);
+      }),
+    );
+
+    renderPage(Plates);
+    await screen.findByRole("table", { name: "Lecturas de patentes" });
+    expect(screen.getByRole("status")).toHaveTextContent("2 lecturas");
+    expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Patente"), { target: { value: "ab12" } });
+    fireEvent.click(screen.getByLabelText("Coincidencia exacta"));
+    fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
+
+    const chips = await screen.findByRole("list", { name: "Filtros aplicados" });
+    expect(chips).toHaveTextContent("Patente: AB12");
+    expect(chips).toHaveTextContent("Coincidencia exacta");
+
+    fireEvent.click(screen.getByRole("button", { name: "Quitar filtro Coincidencia exacta" }));
+    await waitFor(() => {
+      expect(lastReadsUrl?.searchParams.get("plate")).toBe("AB12");
+      expect(lastReadsUrl?.searchParams.get("exact")).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Limpiar filtros" }));
+    await waitFor(() => expect(lastReadsUrl?.searchParams.get("plate")).toBeNull());
+    expect((screen.getByLabelText("Patente") as HTMLInputElement).value).toBe("");
+    expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
+  });
 });

@@ -232,4 +232,46 @@ describe("Events", () => {
       expect(screen.getAllByRole("listitem")).toHaveLength(2);
     });
   });
+
+  it("shows applied-filter chips, a result count, and removes one filter without dropping the rest", async () => {
+    let lastEventsUrl: URL | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/events") {
+          lastEventsUrl = url;
+          return json({ items: [makeEvent("e1")], next_cursor: "page2" });
+        }
+        return stubApi({ "/api/v1/me": () => meResponse("events.search"), ...noCatalogs })(input);
+      }),
+    );
+
+    renderPage(Events);
+    await screen.findByRole("button", { name: "Cargar más" });
+    expect(screen.getByRole("status")).toHaveTextContent("1+ eventos");
+    expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "entrada" } });
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "alert" } });
+    // Editing without submitting must not show a chip: chips reflect the applied search.
+    expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
+
+    const chips = await screen.findByRole("list", { name: "Filtros aplicados" });
+    expect(chips).toHaveTextContent("Zona: entrada");
+    expect(chips).toHaveTextContent("Tipo: Solo alertas");
+
+    fireEvent.click(screen.getByRole("button", { name: "Quitar filtro Zona: entrada" }));
+    await waitFor(() => {
+      expect(lastEventsUrl?.searchParams.getAll("zone")).toEqual([]);
+      expect(lastEventsUrl?.searchParams.get("severity")).toBe("alert");
+    });
+    expect((screen.getByLabelText("Zona") as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("list", { name: "Filtros aplicados" })).not.toHaveTextContent("Zona");
+
+    fireEvent.click(screen.getByRole("button", { name: "Limpiar filtros" }));
+    await waitFor(() => expect(lastEventsUrl?.searchParams.get("severity")).toBeNull());
+    expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
+  });
 });

@@ -4,6 +4,7 @@ import { CheckCheck, Download, History, X } from "lucide-react";
 import { useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraGroupsQuery, camerasQuery, type EventFilter, eventsQuery, meQuery, sitesQuery } from "@/api/queries";
+import { SearchSummary, type FilterChip } from "@/components/SearchSummary";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { commonLabels, fmtDateTime, fmtDuration, fromLocalInput, labelName } from "@/lib/format";
@@ -60,6 +61,27 @@ function toFilter(f: Form): EventFilter {
   };
 }
 
+type AppliedChip = { key: string; label: string; clear: Partial<Form> };
+
+/** appliedChips describes each non-default applied filter and the form patch that removes it. */
+function appliedChips(f: Form, names: { site?: string; camera?: string; group?: string }): AppliedChip[] {
+  const out: AppliedChip[] = [];
+  if (f.site) out.push({ key: "site", label: `Sitio: ${names.site ?? f.site}`, clear: { site: "", camera: "" } });
+  if (f.camera) out.push({ key: "camera", label: `Cámara: ${names.camera ?? f.camera}`, clear: { camera: "" } });
+  if (f.cameraGroup) out.push({ key: "group", label: `Grupo: ${names.group ?? f.cameraGroup}`, clear: { cameraGroup: "" } });
+  if (f.label) out.push({ key: "label", label: `Objeto: ${labelName(f.label)}`, clear: { label: "" } });
+  if (f.zone.trim()) out.push({ key: "zone", label: `Zona: ${f.zone.trim()}`, clear: { zone: "" } });
+  if (f.subLabel.trim()) out.push({ key: "subLabel", label: `Sub-etiqueta: ${f.subLabel.trim()}`, clear: { subLabel: "" } });
+  if (f.severity) out.push({ key: "severity", label: `Tipo: ${f.severity === "alert" ? "Solo alertas" : "Solo detecciones"}`, clear: { severity: "" } });
+  if (f.plate.trim()) out.push({ key: "plate", label: `Patente: ${f.plate.trim()}`, clear: { plate: "" } });
+  if (f.from) out.push({ key: "from", label: `Desde: ${f.from.replace("T", " ")}`, clear: { from: "" } });
+  if (f.to) out.push({ key: "to", label: `Hasta: ${f.to.replace("T", " ")}`, clear: { to: "" } });
+  if (f.pending) out.push({ key: "pending", label: "Solo sin revisar", clear: { pending: false } });
+  if (f.hasSnapshot) out.push({ key: "hasSnapshot", label: "Con snapshot", clear: { hasSnapshot: false } });
+  if (f.hasPreview) out.push({ key: "hasPreview", label: "Con preview", clear: { hasPreview: false } });
+  return out;
+}
+
 /** Events is the federated event index (PRD §34-40): every authorized Frigate in one list. */
 export function Events() {
   const me = useQuery(meQuery);
@@ -67,11 +89,23 @@ export function Events() {
   const cameras = useQuery(camerasQuery({}));
   const cameraGroups = useQuery(cameraGroupsQuery);
   const [form, setForm] = useState<Form>(emptyForm);
-  const [filter, setFilter] = useState<EventFilter>(toFilter(emptyForm));
-  const events = useInfiniteQuery(eventsQuery(filter));
+  const [applied, setApplied] = useState<Form>(emptyForm);
+  const events = useInfiniteQuery(eventsQuery(toFilter(applied)));
   const [open, setOpen] = useState<Schemas["Event"] | null>(null);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
   const items = events.data?.pages.flatMap((p) => p.items) ?? [];
+  const chips = appliedChips(applied, {
+    site: sites.data?.find((x) => x.id === applied.site)?.name,
+    camera: cameras.data?.find((x) => x.id === applied.camera)?.display_name,
+    group: cameraGroups.data?.find((x) => x.id === applied.cameraGroup)?.name,
+  }).map<FilterChip>((c) => ({
+    ...c,
+    onRemove: () => {
+      const patch = c.clear;
+      setForm((f) => ({ ...f, ...patch }));
+      setApplied((f) => ({ ...f, ...patch }));
+    },
+  }));
   const camsOfSite = (cameras.data ?? []).filter((c) => !form.site || c.site_id === form.site);
 
   return (
@@ -81,7 +115,7 @@ export function Events() {
         className="grid gap-3 rounded border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={(e) => {
           e.preventDefault();
-          setFilter(toFilter(form));
+          setApplied(form);
         }}
       >
         <Field label="Sitio">
@@ -167,7 +201,7 @@ export function Events() {
             <Button
               onClick={() => {
                 setForm(emptyForm);
-                setFilter(toFilter(emptyForm));
+                setApplied(emptyForm);
               }}
             >
               Limpiar
@@ -176,6 +210,17 @@ export function Events() {
         </div>
       </form>
 
+      <SearchSummary
+        count={items.length}
+        noun={{ one: "evento", many: "eventos" }}
+        hasMore={!!events.hasNextPage}
+        loading={events.isPending}
+        chips={chips}
+        onClear={() => {
+          setForm(emptyForm);
+          setApplied(emptyForm);
+        }}
+      />
       <ErrorNote error={events.error} />
       {events.isSuccess && items.length === 0 && <Empty>No hay eventos que coincidan.</Empty>}
       <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
