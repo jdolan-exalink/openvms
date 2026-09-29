@@ -4,7 +4,9 @@ import { KeyRound, Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { groupsQuery, meQuery, tenantsQuery, usersQuery } from "@/api/queries";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, TextInput, Th } from "@/components/ui";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Modal } from "@/components/Modal";
+import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 import { fmtDateTime } from "@/lib/format";
 import { can } from "@/lib/perm";
 
@@ -15,10 +17,17 @@ export function Users() {
   const me = useQuery(meQuery);
   const users = useQuery(usersQuery);
   const groups = useQuery(groupsQuery);
-  const [creating, setCreating] = useState(false);
-  const [editing, setEditing] = useState<Schemas["User"] | null>(null);
+  const [editing, setEditing] = useState<Schemas["User"] | "new" | null>(null);
+  const [q, setQ] = useState("");
+  const [status, setStatus] = useState("");
   const groupName = new Map(groups.data?.map((g) => [g.id, g.name]));
   const manage = can(me.data, "users.manage");
+  const needle = q.trim().toLowerCase();
+  const visible = users.data?.filter(
+    (u) =>
+      (!status || u.status === status) &&
+      (!needle || [u.username, u.display_name, u.email ?? ""].some((v) => v.toLowerCase().includes(needle))),
+  );
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
@@ -26,18 +35,34 @@ export function Users() {
         title="Usuarios"
         description="Cada usuario ve solo lo que sus permisos, directos o por grupo, le otorgan."
         actions={
-          manage && !creating ? (
-            <Button variant="primary" onClick={() => setCreating(true)}>
+          manage ? (
+            <Button variant="primary" onClick={() => setEditing("new")}>
               <Plus className="size-4" aria-hidden /> Nuevo usuario
             </Button>
           ) : null
         }
       />
-      {creating && <UserForm groups={groups.data ?? []} onDone={() => setCreating(false)} />}
-      {editing && <UserForm user={editing} groups={groups.data ?? []} onDone={() => setEditing(null)} />}
+      {editing && <UserForm user={editing === "new" ? undefined : editing} groups={groups.data ?? []} onDone={() => setEditing(null)} />}
       <ErrorNote error={users.error} />
       {users.data?.length === 0 && <Empty>No hay usuarios visibles.</Empty>}
       {!!users.data?.length && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <TextInput className="sm:w-72" aria-label="Buscar usuario" placeholder="Buscar por usuario, nombre o email" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Select className="sm:w-44" aria-label="Filtrar por estado" value={status} onChange={(e) => setStatus(e.target.value)}>
+              <option value="">Todos los estados</option>
+              {Object.entries(statusText).map(([value, label]) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <Summary>{summarize(users.data.length, visible?.length ?? 0)}</Summary>
+        </div>
+      )}
+      {!!users.data?.length && visible?.length === 0 && <Empty>Ningún usuario coincide con el filtro.</Empty>}
+      {!!visible?.length && (
         <Table label="Usuarios">
           <thead>
             <tr>
@@ -49,7 +74,7 @@ export function Users() {
             </tr>
           </thead>
           <tbody>
-            {users.data.map((u) => (
+            {visible.map((u) => (
               <tr key={u.id} className="border-t border-line align-top">
                 <td>
                   <div className="font-medium">{u.display_name}</div>
@@ -71,7 +96,11 @@ export function Users() {
                       <KeyRound className="size-3.5" aria-hidden /> Permisos
                     </Link>
                   )}
-                  {manage && <Button onClick={() => setEditing(u)}>Editar</Button>}
+                  {manage && (
+                    <Button aria-label={`Editar ${u.username}`} onClick={() => setEditing(u)}>
+                      Editar
+                    </Button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -82,10 +111,16 @@ export function Users() {
   );
 }
 
+function summarize(total: number, shown: number) {
+  const noun = total === 1 ? "usuario" : "usuarios";
+  return shown === total ? `${total} ${noun}` : `${shown} de ${total} ${noun}`;
+}
+
 function UserForm({ user, groups, onDone }: { user?: Schemas["User"]; groups: Schemas["UserGroup"][]; onDone: () => void }) {
   const qc = useQueryClient();
   const me = useQuery(meQuery);
   const tenants = useQuery({ ...tenantsQuery, enabled: me.data?.tenant_id === null && !user });
+  const [confirming, setConfirming] = useState(false);
   const [f, setF] = useState({
     tenant_id: "",
     username: user?.username ?? "",
@@ -150,9 +185,23 @@ function UserForm({ user, groups, onDone }: { user?: Schemas["User"]; groups: Sc
   const toggleGroup = (id: string) =>
     setF((x) => ({ ...x, group_ids: x.group_ids.includes(id) ? x.group_ids.filter((g) => g !== id) : [...x.group_ids, id] }));
 
+  if (confirming && user) {
+    return (
+      <ConfirmDialog
+        title="Eliminar usuario"
+        message={`¿Eliminar a ${user.username}?`}
+        confirmLabel="Eliminar"
+        pending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => remove.mutate()}
+        onCancel={() => setConfirming(false)}
+      />
+    );
+  }
+
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 rounded border border-line bg-surface p-4">
-      <h2 className="font-semibold">{user ? `Editar ${user.username}` : "Nuevo usuario"}</h2>
+    <Modal title={user ? `Editar ${user.username}` : "Nuevo usuario"} onClose={onDone}>
+    <form onSubmit={submit} className="flex flex-col gap-4">
       <div className="grid gap-4 sm:grid-cols-2">
         {!user && me.data?.tenant_id === null && (
           <Field label="Organización" hint="Vacío crea un usuario de plataforma.">
@@ -219,11 +268,12 @@ function UserForm({ user, groups, onDone }: { user?: Schemas["User"]; groups: Sc
         </Button>
         <Button onClick={onDone}>Cancelar</Button>
         {user && user.id !== me.data?.id && (
-          <Button className="ml-auto text-bad" onClick={() => confirm(`¿Eliminar a ${user.username}?`) && remove.mutate()}>
+          <Button className="ml-auto text-bad" onClick={() => setConfirming(true)}>
             Eliminar usuario
           </Button>
         )}
       </div>
     </form>
+    </Modal>
   );
 }

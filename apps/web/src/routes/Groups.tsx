@@ -4,7 +4,9 @@ import { KeyRound, Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { groupsQuery, meQuery, tenantsQuery, usersQuery } from "@/api/queries";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, TextInput, Th } from "@/components/ui";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Modal } from "@/components/Modal";
+import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
 /** Groups of users. Grants given to a group apply to all its members. */
@@ -15,6 +17,9 @@ export function Groups() {
   const [editing, setEditing] = useState<Schemas["UserGroup"] | "new" | null>(null);
   const userName = new Map(users.data?.map((u) => [u.id, u.username]));
   const manage = can(me.data, "groups.manage");
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const visible = groups.data?.filter((g) => !needle || g.name.toLowerCase().includes(needle));
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
@@ -22,7 +27,7 @@ export function Groups() {
         title="Grupos"
         description="Los permisos que le des a un grupo valen para todos sus miembros."
         actions={
-          manage && editing === null ? (
+          manage ? (
             <Button variant="primary" onClick={() => setEditing("new")}>
               <Plus className="size-4" aria-hidden /> Nuevo grupo
             </Button>
@@ -33,6 +38,13 @@ export function Groups() {
       <ErrorNote error={groups.error} />
       {groups.data?.length === 0 && <Empty>No hay grupos.</Empty>}
       {!!groups.data?.length && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TextInput className="sm:w-72" aria-label="Buscar grupo" placeholder="Buscar por nombre" value={q} onChange={(e) => setQ(e.target.value)} />
+          <Summary>{summarize(groups.data.length, visible?.length ?? 0)}</Summary>
+        </div>
+      )}
+      {!!groups.data?.length && visible?.length === 0 && <Empty>Ningún grupo coincide con el filtro.</Empty>}
+      {!!visible?.length && (
         <Table label="Grupos">
           <thead>
             <tr>
@@ -42,7 +54,7 @@ export function Groups() {
             </tr>
           </thead>
           <tbody>
-            {groups.data.map((g) => (
+            {visible.map((g) => (
               <tr key={g.id} className="border-t border-line align-top">
                 <td>
                   <div className="font-medium">{g.name}</div>
@@ -55,7 +67,11 @@ export function Groups() {
                       <KeyRound className="size-3.5" aria-hidden /> Permisos
                     </Link>
                   )}
-                  {manage && <Button onClick={() => setEditing(g)}>Editar</Button>}
+                  {manage && (
+                    <Button aria-label={`Editar ${g.name}`} onClick={() => setEditing(g)}>
+                      Editar
+                    </Button>
+                  )}
                 </td>
               </tr>
             ))}
@@ -66,10 +82,16 @@ export function Groups() {
   );
 }
 
+function summarize(total: number, shown: number) {
+  const noun = total === 1 ? "grupo" : "grupos";
+  return shown === total ? `${total} ${noun}` : `${shown} de ${total} ${noun}`;
+}
+
 function GroupForm({ group, users, onDone }: { group?: Schemas["UserGroup"]; users: Schemas["User"][]; onDone: () => void }) {
   const qc = useQueryClient();
   const me = useQuery(meQuery);
   const tenants = useQuery({ ...tenantsQuery, enabled: me.data?.tenant_id === null && !group });
+  const [confirming, setConfirming] = useState(false);
   const [f, setF] = useState({
     tenant_id: group?.tenant_id ?? "",
     name: group?.name ?? "",
@@ -99,13 +121,28 @@ function GroupForm({ group, users, onDone }: { group?: Schemas["UserGroup"]; use
   const toggle = (id: string) =>
     setF((x) => ({ ...x, member_ids: x.member_ids.includes(id) ? x.member_ids.filter((m) => m !== id) : [...x.member_ids, id] }));
 
+  if (confirming && group) {
+    return (
+      <ConfirmDialog
+        title="Eliminar grupo"
+        message={`¿Eliminar el grupo ${group.name}?`}
+        confirmLabel="Eliminar"
+        pending={remove.isPending}
+        error={remove.error}
+        onConfirm={() => remove.mutate()}
+        onCancel={() => setConfirming(false)}
+      />
+    );
+  }
+
   return (
+    <Modal title={group ? `Editar ${group.name}` : "Nuevo grupo"} onClose={onDone}>
     <form
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         save.mutate();
       }}
-      className="flex flex-col gap-4 rounded border border-line bg-surface p-4"
+      className="flex flex-col gap-4"
     >
       <div className="grid gap-4 sm:grid-cols-3">
         {!group && me.data?.tenant_id === null && (
@@ -145,11 +182,12 @@ function GroupForm({ group, users, onDone }: { group?: Schemas["UserGroup"]; use
         </Button>
         <Button onClick={onDone}>Cancelar</Button>
         {group && (
-          <Button className="ml-auto text-bad" onClick={() => confirm(`¿Eliminar el grupo ${group.name}?`) && remove.mutate()}>
+          <Button className="ml-auto text-bad" onClick={() => setConfirming(true)}>
             Eliminar grupo
           </Button>
         )}
       </div>
     </form>
+    </Modal>
   );
 }
