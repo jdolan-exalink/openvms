@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
-import { camerasQuery, rulesQuery, serversQuery, sitesQuery } from "@/api/queries";
+import { camerasQuery, channelsQuery, rulesQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { TagInput } from "@/components/TagInput";
@@ -138,7 +138,12 @@ export function Rules() {
 }
 
 function describeActions(a: Schemas["RuleActions"]) {
-  const parts = [a.create_alarm && "Crear alarma", a.notify_in_app && "Notificar en la app"].filter(Boolean);
+  const n = a.channel_ids?.length ?? 0;
+  const parts = [
+    a.create_alarm && "Crear alarma",
+    a.notify_in_app && "Notificar en la app",
+    n > 0 && (n === 1 ? "1 canal externo" : `${n} canales externos`),
+  ].filter(Boolean);
   return parts.length ? parts.join(" + ") : "Sin acciones";
 }
 
@@ -146,6 +151,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
   const cameras = useQuery(camerasQuery({}));
   const servers = useQuery(serversQuery);
   const sites = useQuery(sitesQuery);
+  const channels = useQuery(channelsQuery);
   const c = rule?.conditions ?? {};
   const [f, setF] = useState({
     name: rule?.name ?? "",
@@ -160,6 +166,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
     create_alarm: rule?.actions.create_alarm ?? true,
     notify_in_app: rule?.actions.notify_in_app ?? true,
     severity: (rule?.actions.severity ?? "warning") as NotifSeverity,
+    channel_ids: rule?.actions.channel_ids ?? ([] as string[]),
   });
 
   const buildConditions = (): Schemas["RuleConditions"] => {
@@ -185,7 +192,12 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
         name: f.name.trim(),
         trigger_type: f.trigger,
         conditions: buildConditions(),
-        actions: { create_alarm: f.create_alarm, notify_in_app: f.notify_in_app, severity: f.severity },
+        actions: {
+          create_alarm: f.create_alarm,
+          notify_in_app: f.notify_in_app,
+          severity: f.severity,
+          ...(f.channel_ids.length ? { channel_ids: f.channel_ids } : {}),
+        },
       };
       if (rule) return unwrap(await api.PATCH("/api/v1/rules/{ruleId}", { params: { path: { ruleId: rule.id } }, body }));
       return unwrap(await api.POST("/api/v1/rules", { body: { ...body, enabled: true } }));
@@ -299,6 +311,14 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
             </Select>
           </Field>
         </fieldset>
+
+        <CheckGroup
+          legend="Canales externos (además de las acciones anteriores)"
+          options={(channels.data ?? []).map((ch) => ({ value: ch.id, label: ch.enabled ? ch.name : `${ch.name} (desactivado)` }))}
+          selected={f.channel_ids}
+          onToggle={(id) => setF({ ...f, channel_ids: flip(f.channel_ids, id) })}
+          empty="No hay canales configurados. Creálos en Canales."
+        />
 
         <ErrorNote error={save.error} />
         <div className="flex items-center gap-2 pt-2">

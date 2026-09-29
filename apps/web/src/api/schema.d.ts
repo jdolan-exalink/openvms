@@ -1186,6 +1186,162 @@ export interface paths {
         patch: operations["updateRule"];
         trace?: never;
     };
+    "/api/v1/notification-channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List external notification channels
+         * @description Returns the tenant's channels. Secrets are never returned, only the names of those that are set. Requires notifications.manage.
+         */
+        get: operations["listNotificationChannels"];
+        put?: never;
+        /**
+         * Create a notification channel
+         * @description Requires notifications.manage. Secrets are write-only and stored sealed.
+         */
+        post: operations["createNotificationChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{channelId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        /** Get a notification channel */
+        get: operations["getNotificationChannel"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a notification channel
+         * @description Removes the channel from every rule that used it. Delivery history is kept.
+         */
+        delete: operations["deleteNotificationChannel"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a notification channel
+         * @description Omitted secrets keep their value; names in clear_secrets are removed. The channel type cannot change.
+         */
+        patch: operations["updateNotificationChannel"];
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{channelId}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test message through a channel
+         * @description Sends synchronously to every destination and reports the outcome of each one. Works on disabled channels.
+         */
+        post: operations["testNotificationChannel"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{channelId}/whatsapp/session": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * WhatsApp pairing status of a channel's WAHA session
+         * @description Proxies WAHA. Only for whatsapp channels. Requires notifications.manage.
+         */
+        get: operations["getWhatsAppSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{channelId}/whatsapp/session/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start (or create) the channel's WAHA session */
+        post: operations["startWhatsAppSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{channelId}/whatsapp/qr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Pairing QR of the channel's WAHA session
+         * @description Available only while the session status is SCAN_QR_CODE; otherwise 409.
+         */
+        get: operations["getWhatsAppQR"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List recent external notification deliveries
+         * @description Newest first. Requires notifications.manage.
+         */
+        get: operations["listNotificationDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -2058,6 +2214,8 @@ export interface components {
             notify_in_app?: boolean;
             /** @enum {string} */
             severity?: "info" | "warning" | "critical";
+            /** @description External notification channels to deliver to, in addition to the in-app notification and alarm. */
+            channel_ids?: string[];
         };
         Rule: {
             /** Format: uuid */
@@ -2116,6 +2274,120 @@ export interface components {
             items: components["schemas"]["Notification"][];
             unread_count: number;
         };
+        /** @enum {string} */
+        NotificationChannelType: "webhook" | "email" | "whatsapp" | "telegram";
+        /** @description Non-secret settings; only the fields of the channel type are used. */
+        NotificationChannelConfig: {
+            /** @description webhook: http(s) URL; link-local and metadata addresses are refused */
+            url?: string;
+            /** @description email: SMTP host */
+            host?: string;
+            port?: number;
+            /** @enum {string} */
+            tls?: "none" | "starttls" | "tls";
+            /** @description email: SMTP user */
+            username?: string;
+            /** @description email: sender address */
+            from?: string;
+            /** @description email: addresses; whatsapp: phone numbers or chat ids (stored as <number>@c.us or <id>@g.us) */
+            recipients?: string[];
+            /** @description whatsapp: WAHA session name */
+            session?: string;
+            /** @description telegram: chat ids or @channel names */
+            chat_ids?: string[];
+        };
+        /** @description Write-only values. They are never returned. */
+        NotificationChannelSecrets: {
+            /** @description webhook: HMAC-SHA256 key for X-OpenVMS-Signature */
+            signing_secret?: string;
+            /** @description webhook: custom request headers */
+            headers?: {
+                [key: string]: string;
+            };
+            smtp_password?: string;
+            /** @description telegram: Bot API token */
+            bot_token?: string;
+        };
+        NotificationChannel: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            name: string;
+            type: components["schemas"]["NotificationChannelType"];
+            enabled: boolean;
+            config: components["schemas"]["NotificationChannelConfig"];
+            /** @description Names of the secrets that hold a value. */
+            secrets_set: string[];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        NotificationChannelCreate: {
+            name: string;
+            type: components["schemas"]["NotificationChannelType"];
+            /** @default true */
+            enabled: boolean;
+            config?: components["schemas"]["NotificationChannelConfig"];
+            secrets?: components["schemas"]["NotificationChannelSecrets"];
+        };
+        NotificationChannelUpdate: {
+            name?: string;
+            enabled?: boolean;
+            config?: components["schemas"]["NotificationChannelConfig"];
+            secrets?: components["schemas"]["NotificationChannelSecrets"];
+            clear_secrets?: ("signing_secret" | "headers" | "smtp_password" | "bot_token")[];
+        };
+        NotificationChannelList: {
+            items: components["schemas"]["NotificationChannel"][];
+        };
+        NotificationChannelTestResult: {
+            results: {
+                /** @description Recipient, chat id or empty for webhooks */
+                destination: string;
+                ok: boolean;
+                error?: string;
+            }[];
+        };
+        NotificationDelivery: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            channel_id?: string | null;
+            channel_name: string;
+            channel_type: components["schemas"]["NotificationChannelType"];
+            /** Format: uuid */
+            rule_id?: string | null;
+            /** Format: uuid */
+            notification_id?: string | null;
+            destination: string;
+            /** @enum {string} */
+            status: "pending" | "sent" | "failed";
+            attempts: number;
+            last_error?: string | null;
+            /** Format: date-time */
+            next_attempt_at: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            sent_at?: string | null;
+        };
+        NotificationDeliveryList: {
+            items: components["schemas"]["NotificationDelivery"][];
+        };
+        WhatsAppSession: {
+            name: string;
+            /** @description WAHA session status (STOPPED, STARTING, SCAN_QR_CODE, WORKING, FAILED) or NOT_FOUND. */
+            status: string;
+            /** @description Paired phone number when the session is working */
+            phone?: string;
+        };
+        WhatsAppQR: {
+            mimetype: string;
+            /** @description Base64 image */
+            data: string;
+        };
     };
     responses: {
         /** @description The request is invalid */
@@ -2165,6 +2437,15 @@ export interface components {
         };
         /** @description Frigate could not be reached or rejected the credentials */
         FrigateUnreachable: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
+        /** @description The internal WhatsApp service (WAHA) could not be reached */
+        WahaUnavailable: {
             headers: {
                 [name: string]: unknown;
             };
@@ -4494,6 +4775,268 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listNotificationChannels: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Channels */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannelList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    createNotificationChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationChannelCreate"];
+            };
+        };
+        responses: {
+            /** @description Created channel */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getNotificationChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The channel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteNotificationChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Channel deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateNotificationChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationChannelUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated channel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    testNotificationChannel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per-destination outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannelTestResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getWhatsAppSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WhatsAppSession"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["WahaUnavailable"];
+        };
+    };
+    startWhatsAppSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session status after the start request */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WhatsAppSession"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["WahaUnavailable"];
+        };
+    };
+    getWhatsAppQR: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                channelId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description QR image, base64 encoded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WhatsAppQR"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["WahaUnavailable"];
+        };
+    };
+    listNotificationDeliveries: {
+        parameters: {
+            query?: {
+                channel_id?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deliveries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationDeliveryList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listNotifications: {

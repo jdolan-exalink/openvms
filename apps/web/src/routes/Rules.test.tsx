@@ -37,6 +37,10 @@ function stub(rules: Schemas["Rule"][], extra?: Handler) {
       if (url.pathname === "/api/v1/rules" && req.method === "GET") return json({ items: rules });
       if (url.pathname === "/api/v1/cameras") return json({ items: [{ id: "c1", display_name: "Cámara Acceso", zones: ["entrada"] }, { id: "c2", display_name: "Cámara Patio", zones: ["patio", "entrada"] }] });
       if (url.pathname === "/api/v1/sites") return json({ items: [{ id: "site1", name: "Sucursal Central" }, { id: "site2", name: "Depósito" }] });
+      if (url.pathname === "/api/v1/notification-channels") return json({ items: [
+        { id: "ch1", tenant_id: "t1", name: "Telegram guardia", type: "telegram", enabled: true, config: {}, secrets_set: ["bot_token"], created_at: "x", updated_at: "x" },
+        { id: "ch2", tenant_id: "t1", name: "Correo operaciones", type: "email", enabled: true, config: {}, secrets_set: [], created_at: "x", updated_at: "x" },
+      ] });
       if (url.pathname === "/api/v1/servers") return json({ items: [{ id: "s1", name: "Servidor Norte" }] });
       if (url.pathname.startsWith("/api/v1/rules")) return json(makeRule());
       return json({}, 404);
@@ -180,5 +184,27 @@ describe("Rules route", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Eliminar Alertas de acceso" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Eliminar" }));
     await waitFor(() => expect(calls).toContainEqual({ method: "DELETE", path: "/api/v1/rules/r1", body: undefined }));
+  });
+
+  it("selects external channels for a rule and sends their ids", async () => {
+    const calls = stub([]);
+    renderPage(() => <Rules />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Con canales" } });
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /Telegram guardia/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]?.body).toMatchObject({ actions: { create_alarm: true, notify_in_app: true, severity: "warning", channel_ids: ["ch1"] } });
+  });
+
+  it("preselects the channels of an existing rule and lists them in the actions column", async () => {
+    stub([makeRule({ actions: { notify_in_app: true, channel_ids: ["ch2"] } })]);
+    renderPage(() => <Rules />);
+    expect(await screen.findByText(/1 canal externo/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Editar Alertas de acceso" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByRole("checkbox", { name: /Correo operaciones/ })).toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: /Telegram guardia/ })).not.toBeChecked();
   });
 });

@@ -222,6 +222,34 @@ export const rulesQuery = queryOptions({
   queryFn: async () => unwrap(await api.GET("/api/v1/rules")).items,
 });
 
+export const channelsQuery = queryOptions({
+  queryKey: ["channels"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/notification-channels")).items,
+});
+
+export const deliveriesQuery = (limit = 20) =>
+  queryOptions({
+    queryKey: ["deliveries", limit],
+    queryFn: async () => unwrap(await api.GET("/api/v1/notification-deliveries", { params: { query: { limit } } })).items,
+    refetchInterval: 15_000,
+  });
+
+export const whatsappSessionQuery = (channelId: string) =>
+  queryOptions({
+    queryKey: ["whatsapp-session", channelId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/notification-channels/{channelId}/whatsapp/session", { params: { path: { channelId } } })),
+    refetchInterval: 3_000,
+  });
+
+export const whatsappQrQuery = (channelId: string, enabled: boolean) =>
+  queryOptions({
+    queryKey: ["whatsapp-qr", channelId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/notification-channels/{channelId}/whatsapp/qr", { params: { path: { channelId } } })),
+    enabled,
+    refetchInterval: 15_000,
+    retry: false,
+  });
+
 export type NotificationFilter = { unread_only?: boolean; limit?: number };
 
 export const notificationsQuery = (filter: NotificationFilter = {}) =>
