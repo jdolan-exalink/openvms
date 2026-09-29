@@ -7,34 +7,56 @@
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-bg: #0d1312;
-  --color-surface: #141c1a;
-  --color-raised: #1b2522;
-  --color-line: #26332f;
-  --color-ink: #e1eae7;
-  --color-muted: #95a6a1;
-  --color-accent: #45c3ad;
-  --color-ok: #6ccb93;
-  --color-warn: #e3ae5b;
-  --color-bad: #ee8080;
-}
-
-:root.light {
-  --color-bg: #f4f6f5;
-  --color-surface: #ffffff;
-  --color-raised: #eef2f0;
-  --color-line: #d6dfdc;
-  --color-ink: #15201d;
-  --color-muted: #586864;
-  --color-accent: #0e7565;
-  --color-ok: #2e7d4f;
-  --color-warn: #9a6212;
-  --color-bad: #a83434;
-  color-scheme: light;
+  /* Legacy Tailwind color names stay mapped to the semantic design tokens. */
+  --color-bg: var(--bg-app);
+  --color-surface: var(--bg-panel);
+  --color-raised: var(--bg-panel-elevated);
+  --color-line: var(--border-default);
+  --color-ink: var(--text-primary);
+  --color-muted: var(--text-secondary);
+  --color-accent: var(--accent);
+  --color-ok: var(--success);
+  --color-warn: var(--warning);
+  --color-bad: var(--danger);
+  --color-info: var(--info);
 }
 
 :root {
+  --bg-app: #0e1523;
+  --bg-nav: #101827;
+  --bg-panel: #151f30;
+  --bg-panel-elevated: #1b2638;
+  --bg-panel-hover: #222e42;
+  --border-default: #29364a;
+  --text-primary: #f5f7fa;
+  --text-secondary: #b5c0ce;
+  --text-muted: #7e8a9a;
+  --accent: #1683f8;
+  --accent-hover: #2794ff;
+  --success: #21b45b;
+  --warning: #f59e0b;
+  --danger: #ef3f46;
+  /* No separate info brand color exists; info remains a semantic accent alias. */
+  --info: var(--accent);
   color-scheme: dark;
+}
+
+:root.light {
+  --bg-app: #f4f6f5;
+  --bg-nav: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-panel-elevated: #eef2f0;
+  --bg-panel-hover: #e6ece9;
+  --border-default: #d6dfdc;
+  --text-primary: #15201d;
+  --text-secondary: #586864;
+  --text-muted: #74827e;
+  --accent: #0e7565;
+  --accent-hover: #0a6255;
+  --success: #2e7d4f;
+  --warning: #9a6212;
+  --danger: #a83434;
+  color-scheme: light;
 }
 
 body {

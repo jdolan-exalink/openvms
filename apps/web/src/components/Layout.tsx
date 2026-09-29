@@ -7,13 +7,14 @@ import { api } from "@/api/client";
 import { meQuery } from "@/api/queries";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
+import { AppShell } from "./AppShell";
 import { brandIcon as Brand, navGroups } from "./nav";
 
 export function Layout() {
   const me = useQuery(meQuery);
   return (
-    <div className="flex min-h-dvh">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface md:flex">
+    <AppShell primaryNav={
+      <div className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface md:flex">
         <div className="flex items-center gap-2 px-4 py-4">
           <Brand className="size-5 text-accent" aria-hidden />
           <span className="font-semibold tracking-tight">OpenVMS</span>
@@ -54,11 +55,10 @@ export function Layout() {
           <UserBox />
           <ThemeToggle />
         </div>
-      </aside>
-      <main className="min-w-0 flex-1 px-4 py-6 md:px-8">
-        <Outlet />
-      </main>
-    </div>
+      </div>
+    }>
+      <Outlet />
+    </AppShell>
   );
 }
 
