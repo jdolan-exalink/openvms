@@ -27,6 +27,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
@@ -109,6 +110,10 @@ func run() error {
 	if err := natsx.EnsureStreams(ctx, nc); err != nil {
 		return err
 	}
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return err
+	}
 
 	store, err := objectstore.New(ctx, cfg.S3)
 	if err != nil {
@@ -124,9 +129,11 @@ func run() error {
 	mediaSvc := &media.Service{Store: st, Adapters: adapters, Log: log}
 	brandingSvc := &branding.Service{Store: st, Blobs: store, Log: log}
 	clipWatermarkSvc := &clipwatermark.Service{Store: st, Media: mediaSvc, Branding: brandingSvc, Blobs: store, Log: log}
+	alarmsSvc := &alarms.Service{Store: st, Pub: &jetstreamPublisher{js: js}, Log: log}
 	handlers := &api.Handlers{
 		Inv:           inv,
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
+		Alarms:        alarmsSvc,
 		Media:         mediaSvc,
 		Branding:      brandingSvc,
 		ClipWatermark: clipWatermarkSvc,
@@ -146,10 +153,6 @@ func run() error {
 		SchemaVersion: func(ctx context.Context) (int64, error) {
 			return postgres.SchemaVersion(ctx, pool)
 		},
-	}
-	js, err := jetstream.New(nc)
-	if err != nil {
-		return err
 	}
 	// The push feed: one ordered consumer per stream feeds the hub; the handler filters per
 	// connection by tenant and by the same authorized-ID queries the list endpoints use.
@@ -195,4 +198,13 @@ func run() error {
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	return srv.Shutdown(sctx)
+}
+
+type jetstreamPublisher struct {
+	js jetstream.JetStream
+}
+
+func (p *jetstreamPublisher) Publish(ctx context.Context, subject string, data []byte) error {
+	_, err := p.js.Publish(ctx, subject, data)
+	return err
 }

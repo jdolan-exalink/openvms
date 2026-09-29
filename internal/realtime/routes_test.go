@@ -98,3 +98,34 @@ func TestSubjectMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeAlarmUpdated(t *testing.T) {
+	tenant, cam, site, ev := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	alarmID := uuid.New()
+	payload, _ := json.Marshal(map[string]any{
+		"id":         alarmID,
+		"tenant_id":  tenant,
+		"site_id":    site,
+		"camera_id":  cam,
+		"event_id":   ev,
+		"status":     "acknowledged",
+		"updated_at": time.Unix(100, 0).UTC(),
+	})
+	m, err := realtime.Decode(realtime.DefaultRoutes(), "alarm.acknowledged."+tenant.String(), payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Envelope.Type != realtime.TypeAlarmUpdated || m.Envelope.TenantID != tenant {
+		t.Fatalf("envelope = %+v", m.Envelope)
+	}
+	if m.Scope.Kind != authz.ScopeCamera || m.Scope.ID != cam || m.Scope.Permission != authz.AlarmsView {
+		t.Fatalf("scope = %+v", m.Scope)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(m.Envelope.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["id"] != alarmID.String() || data["status"] != "acknowledged" || data["camera_id"] != cam.String() {
+		t.Fatalf("data = %v", data)
+	}
+}

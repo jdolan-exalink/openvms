@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
@@ -20,6 +21,7 @@ import (
 type Handlers struct {
 	Inv           *inventory.Service
 	Events        *events.Service
+	Alarms        *alarms.Service
 	Identity      *identity.Service
 	Media         *media.Service
 	Branding      *branding.Service

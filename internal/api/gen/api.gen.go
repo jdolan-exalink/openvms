@@ -24,6 +24,63 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AlarmSource.
+const (
+	AlarmSourceEvent AlarmSource = "event"
+	AlarmSourceRule  AlarmSource = "rule"
+)
+
+// Valid indicates whether the value is a known member of the AlarmSource enum.
+func (e AlarmSource) Valid() bool {
+	switch e {
+	case AlarmSourceEvent:
+		return true
+	case AlarmSourceRule:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AlarmBulkInputAction.
+const (
+	Acknowledge AlarmBulkInputAction = "acknowledge"
+	Resolve     AlarmBulkInputAction = "resolve"
+)
+
+// Valid indicates whether the value is a known member of the AlarmBulkInputAction enum.
+func (e AlarmBulkInputAction) Valid() bool {
+	switch e {
+	case Acknowledge:
+		return true
+	case Resolve:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AlarmStatus.
+const (
+	Acknowledged AlarmStatus = "acknowledged"
+	Open         AlarmStatus = "open"
+	Resolved     AlarmStatus = "resolved"
+)
+
+// Valid indicates whether the value is a known member of the AlarmStatus enum.
+func (e AlarmStatus) Valid() bool {
+	switch e {
+	case Acknowledged:
+		return true
+	case Open:
+		return true
+	case Resolved:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuthMode.
 const (
 	Credentials AuthMode = "credentials"
@@ -365,6 +422,66 @@ func (e ViewCellQuality) Valid() bool {
 		return false
 	}
 }
+
+// Alarm defines model for Alarm.
+type Alarm struct {
+	AcknowledgedAt     *time.Time          `json:"acknowledged_at,omitempty"`
+	AcknowledgedBy     *openapi_types.UUID `json:"acknowledged_by,omitempty"`
+	AcknowledgedByName *string             `json:"acknowledged_by_name,omitempty"`
+	AssignedTo         *openapi_types.UUID `json:"assigned_to,omitempty"`
+	AssignedToName     *string             `json:"assigned_to_name,omitempty"`
+	CameraId           openapi_types.UUID  `json:"camera_id"`
+	CameraName         string              `json:"camera_name"`
+	CreatedAt          time.Time           `json:"created_at"`
+	EventEndTime       *time.Time          `json:"event_end_time,omitempty"`
+	EventId            openapi_types.UUID  `json:"event_id"`
+	EventLabels        []string            `json:"event_labels"`
+	EventSeverity      string              `json:"event_severity"`
+	EventStartTime     time.Time           `json:"event_start_time"`
+	EventSubLabels     []string            `json:"event_sub_labels"`
+	Id                 openapi_types.UUID  `json:"id"`
+	ResolvedAt         *time.Time          `json:"resolved_at,omitempty"`
+	ResolvedBy         *openapi_types.UUID `json:"resolved_by,omitempty"`
+	ResolvedByName     *string             `json:"resolved_by_name,omitempty"`
+	SiteId             openapi_types.UUID  `json:"site_id"`
+	SiteName           string              `json:"site_name"`
+	Source             AlarmSource         `json:"source"`
+	Status             AlarmStatus         `json:"status"`
+	TenantId           openapi_types.UUID  `json:"tenant_id"`
+	UpdatedAt          time.Time           `json:"updated_at"`
+}
+
+// AlarmSource defines model for Alarm.Source.
+type AlarmSource string
+
+// AlarmAssignInput defines model for AlarmAssignInput.
+type AlarmAssignInput struct {
+	UserId openapi_types.UUID `json:"user_id"`
+}
+
+// AlarmAssignee defines model for AlarmAssignee.
+type AlarmAssignee struct {
+	DisplayName string             `json:"display_name"`
+	Id          openapi_types.UUID `json:"id"`
+	Username    string             `json:"username"`
+}
+
+// AlarmBulkInput defines model for AlarmBulkInput.
+type AlarmBulkInput struct {
+	Action   AlarmBulkInputAction `json:"action"`
+	AlarmIds []openapi_types.UUID `json:"alarm_ids"`
+}
+
+// AlarmBulkInputAction defines model for AlarmBulkInput.Action.
+type AlarmBulkInputAction string
+
+// AlarmBulkResult defines model for AlarmBulkResult.
+type AlarmBulkResult struct {
+	Updated int `json:"updated"`
+}
+
+// AlarmStatus defines model for AlarmStatus.
+type AlarmStatus string
 
 // AuditEntry defines model for AuditEntry.
 type AuditEntry struct {
@@ -1101,6 +1218,15 @@ type NotFound = Error
 // Unauthorized defines model for Unauthorized.
 type Unauthorized = Error
 
+// ListAlarmsParams defines parameters for ListAlarms.
+type ListAlarmsParams struct {
+	Status     *AlarmStatus        `form:"status,omitempty" json:"status,omitempty"`
+	SiteId     *openapi_types.UUID `form:"site_id,omitempty" json:"site_id,omitempty"`
+	CameraId   *openapi_types.UUID `form:"camera_id,omitempty" json:"camera_id,omitempty"`
+	AssignedTo *openapi_types.UUID `form:"assigned_to,omitempty" json:"assigned_to,omitempty"`
+	Limit      *int                `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListAuditParams defines parameters for ListAudit.
 type ListAuditParams struct {
 	TenantId *openapi_types.UUID `form:"tenant_id,omitempty" json:"tenant_id,omitempty"`
@@ -1225,6 +1351,12 @@ type ListUsersParams struct {
 	TenantId *openapi_types.UUID `form:"tenant_id,omitempty" json:"tenant_id,omitempty"`
 }
 
+// BulkAlarmActionJSONRequestBody defines body for BulkAlarmAction for application/json ContentType.
+type BulkAlarmActionJSONRequestBody = AlarmBulkInput
+
+// AssignAlarmJSONRequestBody defines body for AssignAlarm for application/json ContentType.
+type AssignAlarmJSONRequestBody = AlarmAssignInput
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -1299,6 +1431,27 @@ type ReplaceViewJSONRequestBody = ViewInput
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAlarms List alarms
+	// (GET /api/v1/alarms)
+	ListAlarms(w http.ResponseWriter, r *http.Request, params ListAlarmsParams)
+	// BulkAlarmAction Acknowledge or resolve multiple alarms in one request
+	// (POST /api/v1/alarms/bulk)
+	BulkAlarmAction(w http.ResponseWriter, r *http.Request)
+	// GetAlarm Get an alarm by ID
+	// (GET /api/v1/alarms/{alarmId})
+	GetAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID)
+	// AcknowledgeAlarm Acknowledge an alarm
+	// (POST /api/v1/alarms/{alarmId}/acknowledge)
+	AcknowledgeAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID)
+	// AssignAlarm Assign an alarm to a user
+	// (POST /api/v1/alarms/{alarmId}/assign)
+	AssignAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID)
+	// ListAlarmAssignees List users who can be assigned to this alarm
+	// (GET /api/v1/alarms/{alarmId}/assignees)
+	ListAlarmAssignees(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID)
+	// ResolveAlarm Resolve an alarm
+	// (POST /api/v1/alarms/{alarmId}/resolve)
+	ResolveAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID)
 	// ListAudit Read the audit trail (audit.view)
 	// (GET /api/v1/audit)
 	ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams)
@@ -1517,6 +1670,48 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// ListAlarms List alarms
+// (GET /api/v1/alarms)
+func (_ Unimplemented) ListAlarms(w http.ResponseWriter, r *http.Request, params ListAlarmsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// BulkAlarmAction Acknowledge or resolve multiple alarms in one request
+// (POST /api/v1/alarms/bulk)
+func (_ Unimplemented) BulkAlarmAction(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetAlarm Get an alarm by ID
+// (GET /api/v1/alarms/{alarmId})
+func (_ Unimplemented) GetAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcknowledgeAlarm Acknowledge an alarm
+// (POST /api/v1/alarms/{alarmId}/acknowledge)
+func (_ Unimplemented) AcknowledgeAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AssignAlarm Assign an alarm to a user
+// (POST /api/v1/alarms/{alarmId}/assign)
+func (_ Unimplemented) AssignAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListAlarmAssignees List users who can be assigned to this alarm
+// (GET /api/v1/alarms/{alarmId}/assignees)
+func (_ Unimplemented) ListAlarmAssignees(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ResolveAlarm Resolve an alarm
+// (POST /api/v1/alarms/{alarmId}/resolve)
+func (_ Unimplemented) ResolveAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // ListAudit Read the audit trail (audit.view)
 // (GET /api/v1/audit)
@@ -1952,6 +2147,235 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListAlarms operation middleware
+func (siw *ServerInterfaceWrapper) ListAlarms(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAlarmsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "site_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "site_id", r.URL.Query(), &params.SiteId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "site_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "site_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "camera_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "camera_id", r.URL.Query(), &params.CameraId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "camera_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "camera_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "assigned_to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "assigned_to", r.URL.Query(), &params.AssignedTo, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "assigned_to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "assigned_to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAlarms(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// BulkAlarmAction operation middleware
+func (siw *ServerInterfaceWrapper) BulkAlarmAction(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.BulkAlarmAction(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAlarm operation middleware
+func (siw *ServerInterfaceWrapper) GetAlarm(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "alarmId" -------------
+	var alarmId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "alarmId", chi.URLParam(r, "alarmId"), &alarmId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "alarmId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAlarm(w, r, alarmId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcknowledgeAlarm operation middleware
+func (siw *ServerInterfaceWrapper) AcknowledgeAlarm(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "alarmId" -------------
+	var alarmId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "alarmId", chi.URLParam(r, "alarmId"), &alarmId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "alarmId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcknowledgeAlarm(w, r, alarmId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AssignAlarm operation middleware
+func (siw *ServerInterfaceWrapper) AssignAlarm(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "alarmId" -------------
+	var alarmId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "alarmId", chi.URLParam(r, "alarmId"), &alarmId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "alarmId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AssignAlarm(w, r, alarmId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAlarmAssignees operation middleware
+func (siw *ServerInterfaceWrapper) ListAlarmAssignees(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "alarmId" -------------
+	var alarmId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "alarmId", chi.URLParam(r, "alarmId"), &alarmId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "alarmId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAlarmAssignees(w, r, alarmId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResolveAlarm operation middleware
+func (siw *ServerInterfaceWrapper) ResolveAlarm(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "alarmId" -------------
+	var alarmId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "alarmId", chi.URLParam(r, "alarmId"), &alarmId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "alarmId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResolveAlarm(w, r, alarmId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListAudit operation middleware
 func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Request) {
@@ -4340,6 +4764,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/exports/{exportId}", wrapper.GetExport)
 	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/alarms", wrapper.ListAlarms)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/alarms/bulk", wrapper.BulkAlarmAction)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/alarms/{alarmId}", wrapper.GetAlarm)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/alarms/{alarmId}/acknowledge", wrapper.AcknowledgeAlarm)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/alarms/{alarmId}/assign", wrapper.AssignAlarm)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/alarms/{alarmId}/resolve", wrapper.ResolveAlarm)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/alarms/{alarmId}/assignees", wrapper.ListAlarmAssignees)
+	})
 
 	return r
 }
@@ -4355,6 +4800,487 @@ type FrigateUnreachableJSONResponse Error
 type NotFoundJSONResponse Error
 
 type UnauthorizedJSONResponse Error
+
+type ListAlarmsRequestObject struct {
+	Params ListAlarmsParams
+}
+
+type ListAlarmsResponseObject interface {
+	VisitListAlarmsResponse(w http.ResponseWriter) error
+}
+
+type ListAlarms200JSONResponse struct {
+	Items []Alarm `json:"items"`
+}
+
+func (response ListAlarms200JSONResponse) VisitListAlarmsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAlarms400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListAlarms400JSONResponse) VisitListAlarmsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAlarms401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListAlarms401JSONResponse) VisitListAlarmsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BulkAlarmActionRequestObject struct {
+	Body *BulkAlarmActionJSONRequestBody
+}
+
+type BulkAlarmActionResponseObject interface {
+	VisitBulkAlarmActionResponse(w http.ResponseWriter) error
+}
+
+type BulkAlarmAction200JSONResponse AlarmBulkResult
+
+func (response BulkAlarmAction200JSONResponse) VisitBulkAlarmActionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BulkAlarmAction400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response BulkAlarmAction400JSONResponse) VisitBulkAlarmActionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BulkAlarmAction401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response BulkAlarmAction401JSONResponse) VisitBulkAlarmActionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type BulkAlarmAction403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response BulkAlarmAction403JSONResponse) VisitBulkAlarmActionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAlarmRequestObject struct {
+	AlarmId openapi_types.UUID `json:"alarmId"`
+}
+
+type GetAlarmResponseObject interface {
+	VisitGetAlarmResponse(w http.ResponseWriter) error
+}
+
+type GetAlarm200JSONResponse Alarm
+
+func (response GetAlarm200JSONResponse) VisitGetAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAlarm401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetAlarm401JSONResponse) VisitGetAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAlarm403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetAlarm403JSONResponse) VisitGetAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetAlarm404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetAlarm404JSONResponse) VisitGetAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcknowledgeAlarmRequestObject struct {
+	AlarmId openapi_types.UUID `json:"alarmId"`
+}
+
+type AcknowledgeAlarmResponseObject interface {
+	VisitAcknowledgeAlarmResponse(w http.ResponseWriter) error
+}
+
+type AcknowledgeAlarm200JSONResponse Alarm
+
+func (response AcknowledgeAlarm200JSONResponse) VisitAcknowledgeAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcknowledgeAlarm401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response AcknowledgeAlarm401JSONResponse) VisitAcknowledgeAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcknowledgeAlarm403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AcknowledgeAlarm403JSONResponse) VisitAcknowledgeAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcknowledgeAlarm404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AcknowledgeAlarm404JSONResponse) VisitAcknowledgeAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AcknowledgeAlarm409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AcknowledgeAlarm409JSONResponse) VisitAcknowledgeAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AssignAlarmRequestObject struct {
+	AlarmId openapi_types.UUID `json:"alarmId"`
+	Body    *AssignAlarmJSONRequestBody
+}
+
+type AssignAlarmResponseObject interface {
+	VisitAssignAlarmResponse(w http.ResponseWriter) error
+}
+
+type AssignAlarm200JSONResponse Alarm
+
+func (response AssignAlarm200JSONResponse) VisitAssignAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AssignAlarm400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response AssignAlarm400JSONResponse) VisitAssignAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AssignAlarm401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response AssignAlarm401JSONResponse) VisitAssignAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AssignAlarm403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response AssignAlarm403JSONResponse) VisitAssignAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AssignAlarm404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response AssignAlarm404JSONResponse) VisitAssignAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type AssignAlarm409JSONResponse struct{ ConflictJSONResponse }
+
+func (response AssignAlarm409JSONResponse) VisitAssignAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAlarmAssigneesRequestObject struct {
+	AlarmId openapi_types.UUID `json:"alarmId"`
+}
+
+type ListAlarmAssigneesResponseObject interface {
+	VisitListAlarmAssigneesResponse(w http.ResponseWriter) error
+}
+
+type ListAlarmAssignees200JSONResponse struct {
+	Items []AlarmAssignee `json:"items"`
+}
+
+func (response ListAlarmAssignees200JSONResponse) VisitListAlarmAssigneesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAlarmAssignees401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListAlarmAssignees401JSONResponse) VisitListAlarmAssigneesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAlarmAssignees403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListAlarmAssignees403JSONResponse) VisitListAlarmAssigneesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListAlarmAssignees404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListAlarmAssignees404JSONResponse) VisitListAlarmAssigneesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveAlarmRequestObject struct {
+	AlarmId openapi_types.UUID `json:"alarmId"`
+}
+
+type ResolveAlarmResponseObject interface {
+	VisitResolveAlarmResponse(w http.ResponseWriter) error
+}
+
+type ResolveAlarm200JSONResponse Alarm
+
+func (response ResolveAlarm200JSONResponse) VisitResolveAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveAlarm401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ResolveAlarm401JSONResponse) VisitResolveAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveAlarm403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ResolveAlarm403JSONResponse) VisitResolveAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveAlarm404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ResolveAlarm404JSONResponse) VisitResolveAlarmResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
 
 type ListAuditRequestObject struct {
 	Params ListAuditParams
@@ -5661,20 +6587,6 @@ func (response DeleteExport403JSONResponse) VisitDeleteExportResponse(w http.Res
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type DeleteExport404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response DeleteExport404JSONResponse) VisitDeleteExportResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -8702,6 +9614,27 @@ func (response GetReadiness503JSONResponse) VisitGetReadinessResponse(w http.Res
 
 // StrictServerInterface represents all server handlers.
 type StrictServerInterface interface {
+	// ListAlarms List alarms
+	// (GET /api/v1/alarms)
+	ListAlarms(ctx context.Context, request ListAlarmsRequestObject) (ListAlarmsResponseObject, error)
+	// BulkAlarmAction Acknowledge or resolve multiple alarms in one request
+	// (POST /api/v1/alarms/bulk)
+	BulkAlarmAction(ctx context.Context, request BulkAlarmActionRequestObject) (BulkAlarmActionResponseObject, error)
+	// GetAlarm Get an alarm by ID
+	// (GET /api/v1/alarms/{alarmId})
+	GetAlarm(ctx context.Context, request GetAlarmRequestObject) (GetAlarmResponseObject, error)
+	// AcknowledgeAlarm Acknowledge an alarm
+	// (POST /api/v1/alarms/{alarmId}/acknowledge)
+	AcknowledgeAlarm(ctx context.Context, request AcknowledgeAlarmRequestObject) (AcknowledgeAlarmResponseObject, error)
+	// AssignAlarm Assign an alarm to a user
+	// (POST /api/v1/alarms/{alarmId}/assign)
+	AssignAlarm(ctx context.Context, request AssignAlarmRequestObject) (AssignAlarmResponseObject, error)
+	// ListAlarmAssignees List users who can be assigned to this alarm
+	// (GET /api/v1/alarms/{alarmId}/assignees)
+	ListAlarmAssignees(ctx context.Context, request ListAlarmAssigneesRequestObject) (ListAlarmAssigneesResponseObject, error)
+	// ResolveAlarm Resolve an alarm
+	// (POST /api/v1/alarms/{alarmId}/resolve)
+	ResolveAlarm(ctx context.Context, request ResolveAlarmRequestObject) (ResolveAlarmResponseObject, error)
 	// ListAudit Read the audit trail (audit.view)
 	// (GET /api/v1/audit)
 	ListAudit(ctx context.Context, request ListAuditRequestObject) (ListAuditResponseObject, error)
@@ -8954,6 +9887,200 @@ type strictHandler struct {
 	ssi         StrictServerInterface
 	middlewares []StrictMiddlewareFunc
 	options     StrictHTTPServerOptions
+}
+
+// ListAlarms operation middleware
+func (sh *strictHandler) ListAlarms(w http.ResponseWriter, r *http.Request, params ListAlarmsParams) {
+	var request ListAlarmsRequestObject
+
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAlarms(ctx, request.(ListAlarmsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAlarms")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAlarmsResponseObject); ok {
+		if err := validResponse.VisitListAlarmsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// BulkAlarmAction operation middleware
+func (sh *strictHandler) BulkAlarmAction(w http.ResponseWriter, r *http.Request) {
+	var request BulkAlarmActionRequestObject
+
+	var body BulkAlarmActionJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.BulkAlarmAction(ctx, request.(BulkAlarmActionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "BulkAlarmAction")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(BulkAlarmActionResponseObject); ok {
+		if err := validResponse.VisitBulkAlarmActionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetAlarm operation middleware
+func (sh *strictHandler) GetAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	var request GetAlarmRequestObject
+
+	request.AlarmId = alarmId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetAlarm(ctx, request.(GetAlarmRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetAlarm")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetAlarmResponseObject); ok {
+		if err := validResponse.VisitGetAlarmResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AcknowledgeAlarm operation middleware
+func (sh *strictHandler) AcknowledgeAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	var request AcknowledgeAlarmRequestObject
+
+	request.AlarmId = alarmId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AcknowledgeAlarm(ctx, request.(AcknowledgeAlarmRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AcknowledgeAlarm")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AcknowledgeAlarmResponseObject); ok {
+		if err := validResponse.VisitAcknowledgeAlarmResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// AssignAlarm operation middleware
+func (sh *strictHandler) AssignAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	var request AssignAlarmRequestObject
+
+	request.AlarmId = alarmId
+
+	var body AssignAlarmJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.AssignAlarm(ctx, request.(AssignAlarmRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "AssignAlarm")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(AssignAlarmResponseObject); ok {
+		if err := validResponse.VisitAssignAlarmResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListAlarmAssignees operation middleware
+func (sh *strictHandler) ListAlarmAssignees(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	var request ListAlarmAssigneesRequestObject
+
+	request.AlarmId = alarmId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListAlarmAssignees(ctx, request.(ListAlarmAssigneesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListAlarmAssignees")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListAlarmAssigneesResponseObject); ok {
+		if err := validResponse.VisitListAlarmAssigneesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResolveAlarm operation middleware
+func (sh *strictHandler) ResolveAlarm(w http.ResponseWriter, r *http.Request, alarmId openapi_types.UUID) {
+	var request ResolveAlarmRequestObject
+
+	request.AlarmId = alarmId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResolveAlarm(ctx, request.(ResolveAlarmRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResolveAlarm")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResolveAlarmResponseObject); ok {
+		if err := validResponse.VisitResolveAlarmResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
 }
 
 // ListAudit operation middleware
@@ -10924,178 +12051,191 @@ func (sh *strictHandler) GetReadiness(w http.ResponseWriter, r *http.Request) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
+	"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",
+	"/w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

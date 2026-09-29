@@ -921,6 +921,156 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/alarms": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List alarms
+         * @description Alarms for alert-severity events the caller can view via alarms.view, newest first.
+         */
+        get: operations["listAlarms"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge or resolve multiple alarms in one request
+         * @description Requires alarms.manage on the camera of every targeted alarm.
+         */
+        post: operations["bulkAlarmAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/{alarmId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get an alarm by ID
+         * @description Requires alarms.view on the alarm's camera.
+         */
+        get: operations["getAlarm"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/{alarmId}/acknowledge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge an alarm
+         * @description Requires alarms.manage on the alarm's camera.
+         */
+        post: operations["acknowledgeAlarm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/{alarmId}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Assign an alarm to a user
+         * @description Requires alarms.manage on the alarm's camera.
+         */
+        post: operations["assignAlarm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/{alarmId}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve an alarm
+         * @description Requires alarms.manage on the alarm's camera.
+         */
+        post: operations["resolveAlarm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/{alarmId}/assignees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List users who can be assigned to this alarm
+         * @description Returns users in the tenant holding alarms.manage on the alarm's camera.
+         */
+        get: operations["listAlarmAssignees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1586,6 +1736,67 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @enum {string} */
+        AlarmStatus: "open" | "acknowledged" | "resolved";
+        Alarm: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            site_id: string;
+            site_name: string;
+            /** Format: uuid */
+            camera_id: string;
+            camera_name: string;
+            /** Format: uuid */
+            event_id: string;
+            event_severity: string;
+            /** Format: date-time */
+            event_start_time: string;
+            /** Format: date-time */
+            event_end_time?: string | null;
+            event_labels: string[];
+            event_sub_labels: string[];
+            /** @enum {string} */
+            source: "event" | "rule";
+            status: components["schemas"]["AlarmStatus"];
+            /** Format: uuid */
+            assigned_to?: string | null;
+            assigned_to_name?: string | null;
+            /** Format: uuid */
+            acknowledged_by?: string | null;
+            acknowledged_by_name?: string | null;
+            /** Format: date-time */
+            acknowledged_at?: string | null;
+            /** Format: uuid */
+            resolved_by?: string | null;
+            resolved_by_name?: string | null;
+            /** Format: date-time */
+            resolved_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        AlarmAssignInput: {
+            /** Format: uuid */
+            user_id: string;
+        };
+        AlarmBulkInput: {
+            alarm_ids: string[];
+            /** @enum {string} */
+            action: "acknowledge" | "resolve";
+        };
+        AlarmBulkResult: {
+            updated: number;
+        };
+        AlarmAssignee: {
+            /** Format: uuid */
+            id: string;
+            username: string;
+            display_name: string;
         };
     };
     responses: {
@@ -3535,6 +3746,196 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listAlarms: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["AlarmStatus"];
+                site_id?: string;
+                camera_id?: string;
+                assigned_to?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A list of alarms */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Alarm"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    bulkAlarmAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlarmBulkInput"];
+            };
+        };
+        responses: {
+            /** @description Bulk result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlarmBulkResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    getAlarm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description An alarm */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alarm"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    acknowledgeAlarm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Acknowledged alarm */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alarm"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    assignAlarm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AlarmAssignInput"];
+            };
+        };
+        responses: {
+            /** @description Assigned alarm */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alarm"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    resolveAlarm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Resolved alarm */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alarm"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listAlarmAssignees: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Assignable users */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["AlarmAssignee"][];
+                    };
+                };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

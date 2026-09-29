@@ -1330,6 +1330,151 @@ paths:
         "204": { description: Removed }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/alarms:
+    get:
+      tags: [alarms]
+      operationId: listAlarms
+      summary: List alarms
+      description: |
+        Alarms for alert-severity events the caller can view via alarms.view, newest first.
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/AlarmStatus" } }
+        - { name: site_id, in: query, schema: { type: string, format: uuid } }
+        - { name: camera_id, in: query, schema: { type: string, format: uuid } }
+        - { name: assigned_to, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        "200":
+          description: A list of alarms
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Alarm" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/alarms/bulk:
+    post:
+      tags: [alarms]
+      operationId: bulkAlarmAction
+      summary: Acknowledge or resolve multiple alarms in one request
+      description: Requires alarms.manage on the camera of every targeted alarm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AlarmBulkInput" }
+      responses:
+        "200":
+          description: Bulk result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlarmBulkResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/alarms/{alarmId}:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [alarms]
+      operationId: getAlarm
+      summary: Get an alarm by ID
+      description: Requires alarms.view on the alarm's camera.
+      responses:
+        "200":
+          description: An alarm
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Alarm" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/alarms/{alarmId}/acknowledge:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [alarms]
+      operationId: acknowledgeAlarm
+      summary: Acknowledge an alarm
+      description: Requires alarms.manage on the alarm's camera.
+      responses:
+        "200":
+          description: Acknowledged alarm
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Alarm" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/alarms/{alarmId}/assign:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [alarms]
+      operationId: assignAlarm
+      summary: Assign an alarm to a user
+      description: Requires alarms.manage on the alarm's camera.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AlarmAssignInput" }
+      responses:
+        "200":
+          description: Assigned alarm
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Alarm" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/alarms/{alarmId}/resolve:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [alarms]
+      operationId: resolveAlarm
+      summary: Resolve an alarm
+      description: Requires alarms.manage on the alarm's camera.
+      responses:
+        "200":
+          description: Resolved alarm
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Alarm" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/alarms/{alarmId}/assignees:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [alarms]
+      operationId: listAlarmAssignees
+      summary: List users who can be assigned to this alarm
+      description: Returns users in the tenant holding alarms.manage on the alarm's camera.
+      responses:
+        "200":
+          description: Assignable users
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AlarmAssignee" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 components:
   securitySchemes:
@@ -2036,3 +2181,61 @@ components:
         error: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AlarmStatus:
+      type: string
+      enum: [open, acknowledged, resolved]
+    Alarm:
+      type: object
+      required: [id, tenant_id, site_id, site_name, camera_id, camera_name, event_id, event_severity, event_start_time, event_labels, event_sub_labels, source, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        site_name: { type: string }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        event_id: { type: string, format: uuid }
+        event_severity: { type: string }
+        event_start_time: { type: string, format: date-time }
+        event_end_time: { type: string, format: date-time, nullable: true }
+        event_labels: { type: array, items: { type: string } }
+        event_sub_labels: { type: array, items: { type: string } }
+        source: { type: string, enum: [event, rule] }
+        status: { $ref: "#/components/schemas/AlarmStatus" }
+        assigned_to: { type: string, format: uuid, nullable: true }
+        assigned_to_name: { type: string, nullable: true }
+        acknowledged_by: { type: string, format: uuid, nullable: true }
+        acknowledged_by_name: { type: string, nullable: true }
+        acknowledged_at: { type: string, format: date-time, nullable: true }
+        resolved_by: { type: string, format: uuid, nullable: true }
+        resolved_by_name: { type: string, nullable: true }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AlarmAssignInput:
+      type: object
+      required: [user_id]
+      properties:
+        user_id: { type: string, format: uuid }
+    AlarmBulkInput:
+      type: object
+      required: [alarm_ids, action]
+      properties:
+        alarm_ids:
+          type: array
+          items: { type: string, format: uuid }
+        action:
+          type: string
+          enum: [acknowledge, resolve]
+    AlarmBulkResult:
+      type: object
+      required: [updated]
+      properties:
+        updated: { type: integer }
+    AlarmAssignee:
+      type: object
+      required: [id, username, display_name]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        display_name: { type: string }

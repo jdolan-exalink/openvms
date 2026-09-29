@@ -15,6 +15,7 @@ import (
 const (
 	TypeEventCreated = "event.created"
 	TypeServerStatus = "server.status"
+	TypeAlarmUpdated = "alarm.updated"
 )
 
 // Envelope is what a client receives.
@@ -57,6 +58,7 @@ func DefaultRoutes() []Route {
 	return []Route{
 		{Stream: "FRIGATE", Subject: "frigate.event.new.*", Decode: decodeEventCreated},
 		{Stream: "PLATFORM", Subject: "server.*", Decode: decodeServerStatus},
+		{Stream: "PLATFORM", Subject: "alarm.*.*", Decode: decodeAlarmUpdated},
 	}
 }
 
@@ -147,5 +149,37 @@ func decodeServerStatus(_ string, raw []byte) (Message, error) {
 	return Message{
 		Envelope: Envelope{Type: TypeServerStatus, TenantID: p.TenantID, Data: data},
 		Scope:    Scope{Kind: authz.ScopeServer, ID: p.ServerID, Permission: authz.ServersView},
+	}, nil
+}
+
+// alarmPayload is the shape alarms.Service publishes on alarm.<action>.<tenant>.
+type alarmPayload struct {
+	ID        uuid.UUID `json:"id"`
+	TenantID  uuid.UUID `json:"tenant_id"`
+	SiteID    uuid.UUID `json:"site_id"`
+	CameraID  uuid.UUID `json:"camera_id"`
+	EventID   uuid.UUID `json:"event_id"`
+	Status    string    `json:"status"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func decodeAlarmUpdated(_ string, raw []byte) (Message, error) {
+	var p alarmPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return Message{}, err
+	}
+	if p.TenantID == uuid.Nil {
+		return Message{}, errNoTenant
+	}
+	if p.CameraID == uuid.Nil {
+		return Message{}, errors.New("realtime: alarm has no camera")
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return Message{}, err
+	}
+	return Message{
+		Envelope: Envelope{Type: TypeAlarmUpdated, TenantID: p.TenantID, Data: data},
+		Scope:    Scope{Kind: authz.ScopeCamera, ID: p.CameraID, Permission: authz.AlarmsView},
 	}, nil
 }

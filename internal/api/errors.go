@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
+	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
@@ -20,12 +21,17 @@ var errUnauthenticated = errors.New("unauthenticated")
 func statusFor(err error) (int, string, string) {
 	var ve *inventory.ValidationError
 	var be *branding.ValidationError
+	var ave *alarms.ValidationError
 	var fe *inventory.FrigateError
 	switch {
 	case errors.As(err, &ve):
 		return http.StatusBadRequest, "invalid", ve.Msg
 	case errors.As(err, &be):
 		return http.StatusBadRequest, "invalid", be.Msg
+	case errors.As(err, &ave):
+		return http.StatusBadRequest, "invalid", ave.Msg
+	case errors.Is(err, alarms.ErrInvalidTransition):
+		return http.StatusConflict, "invalid_transition", err.Error()
 	case errors.Is(err, events.ErrInvalidCursor):
 		return http.StatusBadRequest, "invalid_cursor", "the pagination cursor is not valid"
 	case errors.Is(err, errUnauthenticated):
