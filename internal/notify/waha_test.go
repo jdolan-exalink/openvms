@@ -3,6 +3,7 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -69,7 +70,7 @@ func TestWahaQRUnavailableWhenNotWaitingForScan(t *testing.T) {
 		http.Error(w, `{"message":"not in SCAN_QR_CODE"}`, http.StatusUnprocessableEntity)
 	}))
 	defer srv.Close()
-	if _, err := newWahaClient(srv.URL).QR(context.Background(), "default"); err != ErrQRUnavailable {
+	if _, err := newWahaClient(srv.URL).QR(context.Background(), "default"); !errors.Is(err, ErrQRUnavailable) {
 		t.Fatalf("err = %v, want ErrQRUnavailable", err)
 	}
 }
