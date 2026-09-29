@@ -104,7 +104,13 @@ func Authenticate(q *db.Queries, opts AuthOptions) func(http.Handler) http.Handl
 				}
 				_ = q.TouchAPIToken(r.Context(), row.TokenID)
 				actor := authz.Actor{UserID: row.ID, Username: row.Username, TenantID: row.TenantID}
-				next.ServeHTTP(w, r.WithContext(WithActor(r.Context(), actor)))
+				hash := HashToken(token)
+				revalidate := Revalidator(func(ctx context.Context) (bool, error) {
+					_, err := q.GetActorByTokenHash(ctx, hash)
+					return lookupValid(err)
+				})
+				ctx := context.WithValue(WithActor(r.Context(), actor), revalidateKey{}, revalidate)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 			c, err := r.Cookie(SessionCookie)
@@ -116,9 +122,8 @@ func Authenticate(q *db.Queries, opts AuthOptions) func(http.Handler) http.Handl
 				writeError(w, r, http.StatusForbidden, "csrf", "missing "+CSRFHeader+" header")
 				return
 			}
-			row, err := q.GetActorBySessionHash(r.Context(), db.GetActorBySessionHashParams{
-				TokenHash: identity.HashToken(c.Value), IdleSeconds: idle.Seconds(),
-			})
+			sessionParams := db.GetActorBySessionHashParams{TokenHash: identity.HashToken(c.Value), IdleSeconds: idle.Seconds()}
+			row, err := q.GetActorBySessionHash(r.Context(), sessionParams)
 			if errors.Is(err, pgx.ErrNoRows) {
 				clearSessionCookie(w, r)
 				writeError(w, r, http.StatusUnauthorized, "unauthorized", "session expired")
@@ -132,6 +137,10 @@ func Authenticate(q *db.Queries, opts AuthOptions) func(http.Handler) http.Handl
 			sid := row.SessionID
 			actor := authz.Actor{UserID: row.ID, Username: row.Username, TenantID: row.TenantID, SessionID: &sid}
 			ctx := context.WithValue(WithActor(r.Context(), actor), sessionTokenKey{}, c.Value)
+			ctx = context.WithValue(ctx, revalidateKey{}, Revalidator(func(ctx context.Context) (bool, error) {
+				_, err := q.GetActorBySessionHash(ctx, sessionParams)
+				return lookupValid(err)
+			}))
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
