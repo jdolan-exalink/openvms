@@ -161,7 +161,7 @@ export const brandingQuery = (tenantId: string) =>
     enabled: !!tenantId,
   });
 
-export type AuditFilter = { action?: string; from?: string; to?: string };
+export type AuditFilter = { action?: string; actor_id?: string; from?: string; to?: string };
 
 export const auditQuery = (filter: AuditFilter) =>
   infiniteQueryOptions({

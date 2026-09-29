@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { camerasQuery, readinessQuery, serversQuery, sitesQuery, systemInfoQuery } from "@/api/queries";
+import { camerasQuery, readinessQuery, serversQuery, sitesQuery, syncStatusQuery, systemInfoQuery } from "@/api/queries";
+import { PageHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { fmtDateTime } from "@/lib/format";
 
 const dependencyLabels: Record<string, string> = {
   postgres: "PostgreSQL",
@@ -16,16 +18,16 @@ export function Dashboard() {
   const sites = useQuery(sitesQuery);
   const servers = useQuery(serversQuery);
   const cameras = useQuery(camerasQuery());
+  const syncStatus = useQuery({ ...syncStatusQuery, retry: false });
+  const syncMap = new Map(syncStatus.data?.map((s) => [s.server_id, s]));
   const online = (items?: { status: string }[]) => items?.filter((i) => i.status === "online").length ?? 0;
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-8">
-      <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">Panel</h1>
-        <p className="text-sm text-muted">
-          Estado de la plataforma central y del inventario que tu usuario puede ver.
-        </p>
-      </header>
+      <PageHeader
+        title="Resumen"
+        description="Estado de la plataforma central y del inventario que tu usuario puede ver."
+      />
 
       <section aria-labelledby="inventory" className="flex flex-col gap-3">
         <h2 id="inventory" className="text-lg font-semibold">Inventario</h2>
@@ -45,6 +47,33 @@ export function Dashboard() {
             detail={cameras.data ? `${online(cameras.data)} en línea` : undefined}
             warn={!!cameras.data && online(cameras.data) < cameras.data.filter((c) => c.enabled).length}
           />
+        </ul>
+      </section>
+
+      <section aria-labelledby="event-sync" className="flex flex-col gap-3">
+        <h2 id="event-sync" className="text-lg font-semibold">Sincronización de eventos</h2>
+        {servers.data && servers.data.length === 0 && (
+          <p className="text-sm text-muted">No hay servidores registrados.</p>
+        )}
+        <ul className="grid gap-3 sm:grid-cols-2">
+          {servers.data?.map((srv) => {
+            const st = syncMap.get(srv.id);
+            return (
+              <li key={srv.id} className="flex flex-col gap-1 rounded border border-line bg-surface p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{srv.name}</span>
+                  <StatusDot ok={!st?.last_error} />
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted">
+                  <span>Eventos sincronizados: {st?.event_count ?? 0}</span>
+                  {st?.last_success_at && (
+                    <span>Último éxito: {fmtDateTime(st.last_success_at)}</span>
+                  )}
+                </div>
+                {st?.last_error && <span className="text-xs text-bad">{st.last_error}</span>}
+              </li>
+            );
+          })}
         </ul>
       </section>
 
