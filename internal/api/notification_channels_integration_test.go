@@ -6,12 +6,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
+	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/store"
 )
 
@@ -162,5 +167,77 @@ func assertNoSecrets(t *testing.T, what string, body []byte) {
 		if bytes.Contains(body, []byte(s)) {
 			t.Fatalf("%s leaks %q: %s", what, s, body)
 		}
+	}
+}
+
+func TestNotificationChannelTestSendAndDeliveries(t *testing.T) {
+	te, token := setupRulesTest(t)
+	operator := te.Demo.Tokens["operador"]
+
+	var hits atomic.Int32
+	var gotSig atomic.Value
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		gotSig.Store(r.Header.Get("X-OpenVMS-Signature"))
+	}))
+	defer srv.Close()
+
+	code, body := te.request("POST", "/api/v1/notification-channels", token, map[string]any{
+		"name": "Local", "type": "webhook", "config": map[string]any{"url": srv.URL},
+		"secrets": map[string]any{"signing_secret": "topsecret-value"},
+	})
+	if code != 201 {
+		t.Fatalf("create = %d: %s", code, body)
+	}
+	var ch gen.NotificationChannel
+	_ = json.Unmarshal(body, &ch)
+	path := "/api/v1/notification-channels/" + ch.Id.String() + "/test"
+
+	if code, body := te.request("POST", path, operator, nil); code != 403 {
+		t.Fatalf("operator test = %d, want 403: %s", code, body)
+	}
+	code, body = te.request("POST", path, token, nil)
+	if code != 200 {
+		t.Fatalf("test = %d: %s", code, body)
+	}
+	var res gen.NotificationChannelTestResult
+	_ = json.Unmarshal(body, &res)
+	if len(res.Results) != 1 || !res.Results[0].Ok || hits.Load() != 1 {
+		t.Fatalf("results = %+v hits = %d", res, hits.Load())
+	}
+	if sig, _ := gotSig.Load().(string); !strings.HasPrefix(sig, "sha256=") {
+		t.Fatalf("test message was not signed: %q", sig)
+	}
+
+	// A failing receiver is reported per destination instead of failing the request.
+	srv.Close()
+	code, body = te.request("POST", path, token, nil)
+	_ = json.Unmarshal(body, &res)
+	if code != 200 || len(res.Results) != 1 || res.Results[0].Ok || res.Results[0].Error == nil {
+		t.Fatalf("failing test = %d %s", code, body)
+	}
+
+	// Deliveries: enqueue through the outbox and list, filtered by channel.
+	if err := te.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		_, err := notify.Enqueue(context.Background(), tx, notify.EnqueueInput{
+			TenantID: te.Demo.TenantID, ChannelIDs: []uuid.UUID{ch.Id}, Title: "t", Body: "b", Severity: "info",
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := te.request("GET", "/api/v1/notification-deliveries", operator, nil); code != 403 {
+		t.Fatalf("operator deliveries = %d, want 403: %s", code, body)
+	}
+	code, body = te.request("GET", "/api/v1/notification-deliveries?channel_id="+ch.Id.String(), token, nil)
+	var list gen.NotificationDeliveryList
+	_ = json.Unmarshal(body, &list)
+	if code != 200 || len(list.Items) != 1 || list.Items[0].Status != gen.NotificationDeliveryStatusPending || list.Items[0].ChannelName != "Local" {
+		t.Fatalf("deliveries = %d %s", code, body)
+	}
+	code, body = te.request("GET", "/api/v1/notification-deliveries?channel_id="+uuid.NewString(), token, nil)
+	_ = json.Unmarshal(body, &list)
+	if code != 200 || len(list.Items) != 0 {
+		t.Fatalf("other channel deliveries = %d %s", code, body)
 	}
 }

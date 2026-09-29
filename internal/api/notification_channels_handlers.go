@@ -191,3 +191,52 @@ func (h *Handlers) DeleteNotificationChannel(ctx context.Context, r gen.DeleteNo
 	}
 	return gen.DeleteNotificationChannel204Response{}, nil
 }
+
+func (h *Handlers) TestNotificationChannel(ctx context.Context, r gen.TestNotificationChannelRequestObject) (gen.TestNotificationChannelResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	results, err := h.Notify.SendTest(ctx, a, r.ChannelId)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.NotificationChannelTestResult{Results: make([]struct {
+		Destination string  `json:"destination"`
+		Error       *string `json:"error,omitempty"`
+		Ok          bool    `json:"ok"`
+	}, len(results))}
+	for i, res := range results {
+		out.Results[i].Destination, out.Results[i].Ok = res.Destination, res.OK
+		if res.Error != "" {
+			msg := res.Error
+			out.Results[i].Error = &msg
+		}
+	}
+	return gen.TestNotificationChannel200JSONResponse(out), nil
+}
+
+func (h *Handlers) ListNotificationDeliveries(ctx context.Context, r gen.ListNotificationDeliveriesRequestObject) (gen.ListNotificationDeliveriesResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	limit := 0
+	if r.Params.Limit != nil {
+		limit = *r.Params.Limit
+	}
+	items, err := h.Notify.ListDeliveries(ctx, a, r.Params.ChannelId, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]gen.NotificationDelivery, len(items))
+	for i, d := range items {
+		out[i] = gen.NotificationDelivery{
+			Id: d.ID, ChannelId: d.ChannelID, ChannelName: d.ChannelName, ChannelType: gen.NotificationChannelType(d.ChannelType),
+			RuleId: d.RuleID, NotificationId: d.NotificationID, Destination: d.Destination,
+			Status: gen.NotificationDeliveryStatus(d.Status), Attempts: d.Attempts, LastError: d.LastError,
+			NextAttemptAt: d.NextAttemptAt, CreatedAt: d.CreatedAt, SentAt: d.SentAt,
+		}
+	}
+	return gen.ListNotificationDeliveries200JSONResponse{Items: out}, nil
+}

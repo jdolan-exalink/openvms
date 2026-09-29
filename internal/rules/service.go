@@ -14,6 +14,7 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
@@ -476,47 +477,19 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 				}
 			}
 
-			if rule.Actions.NotifyInApp {
-				severity := rule.Actions.Severity
-				if severity == "" {
-					severity = "warning"
-				}
-				title := rule.Name
-				labelsStr := strings.Join(ev.Labels, ", ")
-				body := fmt.Sprintf("Evento detectado en cámara %s: %s", ev.CameraName, labelsStr)
-				if len(ev.Labels) == 0 {
-					body = fmt.Sprintf("Evento detectado en cámara %s (%s)", ev.CameraName, ev.Severity)
-				}
-				link := fmt.Sprintf("/events?selected=%s", ev.ID)
-				if alarmID != nil {
-					link = "/alarms"
-				}
-
-				notifRow, err := q.CreateNotification(ctx, db.CreateNotificationParams{
-					TenantID: ev.TenantID,
-					UserID:   nil, // tenant-wide
-					RuleID:   &rule.ID,
-					Title:    title,
-					Body:     body,
-					Link:     &link,
-					Severity: severity,
-				})
-				if err == nil && s.Pub != nil {
-					payload, _ := json.Marshal(NotificationCreatedPayload{
-						ID:        notifRow.ID,
-						TenantID:  notifRow.TenantID,
-						RuleID:    notifRow.RuleID,
-						Title:     notifRow.Title,
-						Body:      notifRow.Body,
-						Link:      notifRow.Link,
-						Severity:  notifRow.Severity,
-						CreatedAt: notifRow.CreatedAt,
-					})
-					_ = s.Pub.Publish(ctx, "notification.created."+ev.TenantID.String(), payload)
-				} else if err != nil {
-					s.Log.WarnContext(ctx, "failed to create notification", "error", err, "rule_id", rule.ID)
-				}
+			severity := rule.Actions.Severity
+			if severity == "" {
+				severity = "warning"
 			}
+			body := fmt.Sprintf("Evento detectado en cámara %s: %s", ev.CameraName, strings.Join(ev.Labels, ", "))
+			if len(ev.Labels) == 0 {
+				body = fmt.Sprintf("Evento detectado en cámara %s (%s)", ev.CameraName, ev.Severity)
+			}
+			link := fmt.Sprintf("/events?selected=%s", ev.ID)
+			if alarmID != nil {
+				link = "/alarms"
+			}
+			s.deliver(ctx, tx, q, rule, ev.TenantID, rule.Name, body, link, severity)
 		}
 		return nil
 	})
@@ -576,46 +549,61 @@ func (s *Service) EvaluateOffline(ctx context.Context, triggerType TriggerType, 
 				continue
 			}
 
-			if rule.Actions.NotifyInApp {
-				severity := rule.Actions.Severity
-				if severity == "" {
-					severity = "critical"
-				}
-				title := rule.Name
-				kind := "Cámara"
-				link := "/cameras"
-				if triggerType == TriggerServerOffline {
-					kind = "Servidor"
-					link = "/servers"
-				}
-				body := fmt.Sprintf("%s '%s' está desconectado.", kind, resourceName)
-
-				notifRow, err := q.CreateNotification(ctx, db.CreateNotificationParams{
-					TenantID: tenantID,
-					UserID:   nil,
-					RuleID:   &rule.ID,
-					Title:    title,
-					Body:     body,
-					Link:     &link,
-					Severity: severity,
-				})
-				if err == nil && s.Pub != nil {
-					payload, _ := json.Marshal(NotificationCreatedPayload{
-						ID:        notifRow.ID,
-						TenantID:  notifRow.TenantID,
-						RuleID:    notifRow.RuleID,
-						Title:     notifRow.Title,
-						Body:      notifRow.Body,
-						Link:      notifRow.Link,
-						Severity:  notifRow.Severity,
-						CreatedAt: notifRow.CreatedAt,
-					})
-					_ = s.Pub.Publish(ctx, "notification.created."+tenantID.String(), payload)
-				}
+			severity := rule.Actions.Severity
+			if severity == "" {
+				severity = "critical"
 			}
+			kind, link := "Cámara", "/cameras"
+			if triggerType == TriggerServerOffline {
+				kind, link = "Servidor", "/servers"
+			}
+			body := fmt.Sprintf("%s '%s' está desconectado.", kind, resourceName)
+			s.deliver(ctx, tx, q, rule, tenantID, rule.Name, body, link, severity)
 		}
 		return nil
 	})
+}
+
+// deliver runs the notification actions of a fired rule: the in-app notification (published on
+// the bus) and the external channel deliveries. The deliveries are enqueued in the caller's
+// transaction, atomically with the firing claim; sending happens later in the worker.
+func (s *Service) deliver(ctx context.Context, tx pgx.Tx, q *db.Queries, rule Rule, tenantID uuid.UUID, title, body, link, severity string) {
+	var notifID *uuid.UUID
+	if rule.Actions.NotifyInApp {
+		notifRow, err := q.CreateNotification(ctx, db.CreateNotificationParams{
+			TenantID: tenantID,
+			UserID:   nil, // tenant-wide
+			RuleID:   &rule.ID,
+			Title:    title,
+			Body:     body,
+			Link:     &link,
+			Severity: severity,
+		})
+		if err != nil {
+			s.Log.WarnContext(ctx, "failed to create notification", "error", err, "rule_id", rule.ID)
+		} else {
+			notifID = &notifRow.ID
+			if s.Pub != nil {
+				payload, _ := json.Marshal(NotificationCreatedPayload{
+					ID:        notifRow.ID,
+					TenantID:  notifRow.TenantID,
+					RuleID:    notifRow.RuleID,
+					Title:     notifRow.Title,
+					Body:      notifRow.Body,
+					Link:      notifRow.Link,
+					Severity:  notifRow.Severity,
+					CreatedAt: notifRow.CreatedAt,
+				})
+				_ = s.Pub.Publish(ctx, "notification.created."+tenantID.String(), payload)
+			}
+		}
+	}
+	if len(rule.Actions.ChannelIDs) > 0 {
+		notify.EnqueueLogged(ctx, tx, s.Log, notify.EnqueueInput{
+			TenantID: tenantID, RuleID: &rule.ID, NotificationID: notifID, ChannelIDs: rule.Actions.ChannelIDs,
+			Title: title, Body: body, Link: link, Severity: severity, OccurredAt: time.Now(),
+		})
+	}
 }
 
 // checkChannels rejects channel ids that do not belong to the tenant.

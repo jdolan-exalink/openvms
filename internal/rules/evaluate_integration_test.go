@@ -378,3 +378,115 @@ func TestEvaluateOfflineClaimsAgainstOutageStart(t *testing.T) {
 		t.Fatalf("later outage created %d notifications in total, want 2", n)
 	}
 }
+
+type deliveryInfo struct {
+	Channel     uuid.UUID
+	Destination string
+	Status      string
+	HasNotif    bool
+	Title       string
+}
+
+func (f *fixture) addChannel(typ, config string, enabled bool) uuid.UUID {
+	f.t.Helper()
+	id := uuid.New()
+	err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(),
+			`INSERT INTO notification_channels (id, tenant_id, name, type, config, enabled) VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+			id, f.env.Demo.TenantID, typ+"-"+id.String(), typ, config, enabled)
+		return err
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return id
+}
+
+func (f *fixture) deliveries(ruleID uuid.UUID) []deliveryInfo {
+	f.t.Helper()
+	var out []deliveryInfo
+	err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		rows, err := tx.Query(context.Background(),
+			`SELECT channel_id, destination, status, notification_id IS NOT NULL, payload->>'title'
+			   FROM notification_deliveries WHERE rule_id = $1 ORDER BY channel_name, destination`, ruleID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var d deliveryInfo
+			if err := rows.Scan(&d.Channel, &d.Destination, &d.Status, &d.HasNotif, &d.Title); err != nil {
+				return err
+			}
+			out = append(out, d)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return out
+}
+
+func TestEvaluateEventEnqueuesDeliveriesForSelectedChannels(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	hook := f.addChannel("webhook", `{"url":"https://example.com/h"}`, true)
+	tg := f.addChannel("telegram", `{"chat_ids":["1","2"]}`, true)
+	disabled := f.addChannel("webhook", `{"url":"https://example.com/off"}`, false)
+	f.addChannel("webhook", `{"url":"https://example.com/unselected"}`, true)
+	id := f.addRule("Personas", rules.TriggerEvent, rules.Conditions{}, rules.Actions{NotifyInApp: true, ChannelIDs: []uuid.UUID{hook, tg, disabled}}, true)
+
+	if err := f.svc.EvaluateEvent(ctx, f.eventCtx("person")); err != nil {
+		t.Fatal(err)
+	}
+	got := f.deliveries(id)
+	if len(got) != 3 {
+		t.Fatalf("deliveries = %+v, want 3 (1 webhook + 2 telegram chats; disabled and unselected channels skipped)", got)
+	}
+	for _, d := range got {
+		if d.Status != "pending" || !d.HasNotif || d.Title != "Personas" || d.Channel == disabled {
+			t.Errorf("unexpected delivery %+v", d)
+		}
+	}
+
+	// Debounced firing does not enqueue again.
+	if err := f.svc.EvaluateEvent(ctx, f.eventCtx("person")); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(f.deliveries(id)); n != 3 {
+		t.Fatalf("debounced event enqueued more deliveries: %d", n)
+	}
+}
+
+func TestEvaluateEventChannelsWorkWithoutInAppNotification(t *testing.T) {
+	f := newFixture(t)
+	hook := f.addChannel("webhook", `{"url":"https://example.com/h"}`, true)
+	id := f.addRule("Solo canal", rules.TriggerEvent, rules.Conditions{}, rules.Actions{ChannelIDs: []uuid.UUID{hook}}, true)
+	if err := f.svc.EvaluateEvent(context.Background(), f.eventCtx("person")); err != nil {
+		t.Fatal(err)
+	}
+	got := f.deliveries(id)
+	if len(got) != 1 || got[0].HasNotif {
+		t.Fatalf("deliveries = %+v, want one delivery without an in-app notification", got)
+	}
+	if n := f.notifications(id); n != 0 {
+		t.Fatalf("in-app notifications = %d, want 0", n)
+	}
+}
+
+func TestEvaluateOfflineEnqueuesDeliveries(t *testing.T) {
+	f := newFixture(t)
+	hook := f.addChannel("webhook", `{"url":"https://example.com/h"}`, true)
+	cam := f.env.Cameras["frigate-h01/plaza"]
+	id := f.addRule("Camara caida", rules.TriggerCameraOffline, rules.Conditions{}, rules.Actions{NotifyInApp: true, ChannelIDs: []uuid.UUID{hook}}, true)
+	o := rules.Outage{TenantID: cam.TenantID, ResourceID: cam.ID, SiteID: cam.SiteID, Name: cam.DisplayName, Since: time.Now().Add(-time.Hour), Duration: time.Hour}
+	for i := 0; i < 2; i++ {
+		if err := f.svc.EvaluateOffline(context.Background(), rules.TriggerCameraOffline, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := f.deliveries(id); len(got) != 1 {
+		t.Fatalf("deliveries = %+v, want exactly one for the outage", got)
+	}
+}

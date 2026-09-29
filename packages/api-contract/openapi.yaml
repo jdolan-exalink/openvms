@@ -1752,6 +1752,52 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/notification-channels/{channelId}/test:
+    parameters:
+      - name: channelId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [notification-channels]
+      operationId: testNotificationChannel
+      summary: Send a test message through a channel
+      description: Sends synchronously to every destination and reports the outcome of each one. Works on disabled channels.
+      responses:
+        "200":
+          description: Per-destination outcome
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationChannelTestResult"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/notification-deliveries:
+    get:
+      tags: [notification-channels]
+      operationId: listNotificationDeliveries
+      summary: List recent external notification deliveries
+      description: Newest first. Requires notifications.manage.
+      parameters:
+        - name: channel_id
+          in: query
+          required: false
+          schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Deliveries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationDeliveryList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /api/v1/notifications:
     get:
       tags: [notifications]
@@ -2835,3 +2881,40 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/NotificationChannel" }
+    NotificationChannelTestResult:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [destination, ok]
+            properties:
+              destination: { type: string, description: "Recipient, chat id or empty for webhooks" }
+              ok: { type: boolean }
+              error: { type: string }
+    NotificationDelivery:
+      type: object
+      required: [id, channel_name, channel_type, destination, status, attempts, next_attempt_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        channel_id: { type: string, format: uuid, nullable: true }
+        channel_name: { type: string }
+        channel_type: { $ref: "#/components/schemas/NotificationChannelType" }
+        rule_id: { type: string, format: uuid, nullable: true }
+        notification_id: { type: string, format: uuid, nullable: true }
+        destination: { type: string }
+        status: { type: string, enum: [pending, sent, failed] }
+        attempts: { type: integer }
+        last_error: { type: string, nullable: true }
+        next_attempt_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        sent_at: { type: string, format: date-time, nullable: true }
+    NotificationDeliveryList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/NotificationDelivery" }

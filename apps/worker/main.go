@@ -34,6 +34,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/media"
+	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 	"github.com/jdolan-exalink/openvms/internal/platform/config"
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
@@ -129,6 +130,13 @@ func run() error {
 		},
 	}
 	go syncer.Run(ctx)
+
+	// Delivers the outbox rows that rule firings enqueue for external channels.
+	deliveries := &notify.Worker{
+		Store: st, Sealer: sealer, Log: log,
+		Deps: notify.Deps{WahaBaseURL: cfg.Waha.BaseURL, WahaAPIKey: cfg.Waha.APIKey},
+	}
+	go deliveries.Run(ctx)
 
 	offline := &rules.OfflineDetector{Store: st, Rules: rulesSvc, Log: log, Interval: cfg.HealthInterval}
 	go offline.Run(ctx)
