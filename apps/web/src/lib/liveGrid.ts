@@ -34,6 +34,42 @@ export function reorderTiles(tiles: Tile[], from: number, to: number): Tile[] {
   return next;
 }
 
+/**
+ * swapTiles exchanges the tiles at `a` and `b`, leaving every other tile where it is. Unlike
+ * reorderTiles it never shifts intermediate tiles, so with tiles keyed by camera only the two
+ * swapped cameras change cell (and none of them reconnects) — a no-op for an out-of-range
+ * index or when `a === b`.
+ */
+export function swapTiles(tiles: Tile[], a: number, b: number): Tile[] {
+  if (a === b || a < 0 || b < 0 || a >= tiles.length || b >= tiles.length) return tiles;
+  const next = tiles.slice();
+  next[a] = tiles[b] ?? null;
+  next[b] = tiles[a] ?? null;
+  return next;
+}
+
+/**
+ * placeCameraUnique places a camera at `index` without ever showing it twice: when it is
+ * already in the grid it swaps with the tile at `index` (keeping its stream and quality),
+ * otherwise it behaves like placeCameraAt.
+ */
+export function placeCameraUnique(tiles: Tile[], index: number, cameraId: string, quality: Quality): Tile[] {
+  const at = tiles.findIndex((t) => t?.camera_id === cameraId);
+  return at >= 0 ? swapTiles(tiles, at, index) : placeCameraAt(tiles, index, cameraId, quality);
+}
+
+/** duplicateTileIndexes lists the cells that repeat a camera already shown in an earlier cell. */
+export function duplicateTileIndexes(tiles: Tile[]): Set<number> {
+  const seen = new Set<string>();
+  const duplicates = new Set<number>();
+  tiles.forEach((t, i) => {
+    if (!t) return;
+    if (seen.has(t.camera_id)) duplicates.add(i);
+    else seen.add(t.camera_id);
+  });
+  return duplicates;
+}
+
 // Drag-and-drop ids: a camera list item drags as "camera:<id>", a grid tile drags/drops as
 // "tile:<index>". Kept as plain string ids (dnd-kit accepts string | number) so the drag
 // resolution logic below stays framework-free and independently testable.

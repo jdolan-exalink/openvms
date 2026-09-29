@@ -1,5 +1,5 @@
 import { DndContext, type DragEndEvent, KeyboardSensor, PointerSensor, useDraggable, useSensor, useSensors } from "@dnd-kit/core";
-import { rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
+import { rectSortingStrategy, rectSwappingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
@@ -15,7 +15,8 @@ import { useContextSidebarPortalTarget } from "@/components/AppShell";
 import { Button, ErrorNote, PageHeader, Select, StatusBadge, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  cameraDragId, liveSelectionKey, parseSelection, placeCameraAt, resizeTiles, resolveDragEnd, reorderTiles, serializeSelection, tileDragId,
+  cameraDragId, duplicateTileIndexes, liveSelectionKey, parseSelection, placeCameraAt, placeCameraUnique, resizeTiles, resolveDragEnd, reorderTiles,
+  serializeSelection, swapTiles, tileDragId,
   type Tile,
 } from "@/lib/liveGrid";
 import { can } from "@/lib/perm";
@@ -24,6 +25,8 @@ const GRID_LAYOUTS = [
   { columns: 1, rows: 1 }, { columns: 2, rows: 1 }, { columns: 2, rows: 2 },
   { columns: 3, rows: 2 }, { columns: 3, rows: 3 }, { columns: 4, rows: 3 }, { columns: 4, rows: 4 },
 ];
+// Large walls (25 and 32 cameras); offered with persistent players, which pause off-screen tiles.
+const LARGE_GRID_LAYOUTS = [{ columns: 5, rows: 5 }, { columns: 8, rows: 4 }];
 
 /**
  * Live is the multi-server live screen (PRD §46-49): a camera tree grouped by site and
@@ -50,6 +53,8 @@ export function Live() {
   // effect below never fires before restoration and overwrites a saved selection with defaults.
   const [restored, setRestored] = useState(false);
   const sidebarMount = useContextSidebarPortalTarget();
+  const { persistentPlayers, videoSurfaceLayer } = useFeatures();
+  const layouts = persistentPlayers ? [...GRID_LAYOUTS, ...LARGE_GRID_LAYOUTS] : GRID_LAYOUTS;
 
   const camById = useMemo(() => new Map(cameras.data?.map((c) => [c.id, c])), [cameras.data]);
 
@@ -98,7 +103,10 @@ export function Live() {
   const place = (cameraId: string, index: number = selected) => {
     setTiles((t) => {
       const defaultQuality = cameras.data?.find((c) => c.id === cameraId)?.default_live_quality ?? "sub";
-      const next = placeCameraAt(t, index, cameraId, columns === 1 ? "main" : defaultQuality);
+      const quality = columns === 1 ? "main" : defaultQuality;
+      // With persistent players a camera is never shown twice: placing one that is already on
+      // the grid moves it here (swapping cells), keeping its running session.
+      const next = persistentPlayers ? placeCameraUnique(t, index, cameraId, quality) : placeCameraAt(t, index, cameraId, quality);
       // After a click (not a drag), move the selection to the next empty tile.
       const empty = next.findIndex((x, i) => x === null && i !== index);
       if (empty >= 0) setSelected(empty);
@@ -106,7 +114,8 @@ export function Live() {
     });
   };
 
-  const reorder = (from: number, to: number) => setTiles((t) => reorderTiles(t, from, to));
+  // Swapping (not shifting) keeps every other tile in its cell, so only the two swapped cameras move.
+  const reorder = (from: number, to: number) => setTiles((t) => (persistentPlayers ? swapTiles(t, from, to) : reorderTiles(t, from, to)));
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
@@ -162,8 +171,11 @@ export function Live() {
     },
   });
 
-  const shown = focus !== null ? [focus] : tiles.map((_, i) => i);
+  // With persistent players the other tiles stay mounted (hidden, sessions WARM) while one is
+  // expanded, so leaving the expanded view resumes them instantly instead of reconnecting.
+  const shown = focus !== null && !persistentPlayers ? [focus] : tiles.map((_, i) => i);
   const gridCols = focus !== null ? 1 : columns;
+  const duplicates = useMemo(() => (persistentPlayers ? duplicateTileIndexes(tiles) : new Set<number>()), [persistentPlayers, tiles]);
   const sidebarContent = (
     <div className="flex min-h-0 flex-col gap-3" data-live-sidebar="true">
       <section aria-label="Vistas guardadas" className="flex flex-col gap-2 rounded-xl border border-line bg-bg p-2.5">
@@ -247,7 +259,7 @@ export function Live() {
         <div className="flex min-w-0 flex-col gap-2">
           <section className="flex min-w-0 flex-1 flex-col gap-2">
             <div role="group" aria-label="Layout de la grilla" className="flex items-center gap-1">
-              {GRID_LAYOUTS.map(({ columns: layoutColumns, rows: layoutRows }) => (
+              {layouts.map(({ columns: layoutColumns, rows: layoutRows }) => (
                 <button
                   key={`${layoutColumns}x${layoutRows}`}
                   type="button"
@@ -264,22 +276,27 @@ export function Live() {
               ))}
               <span className="ml-2 text-xs text-muted">Elegí un cuadro y después una cámara del árbol, o arrastrala.</span>
             </div>
-            <SortableContext items={shown.map((i) => tileDragId(i))} strategy={rectSortingStrategy}>
+            <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
               <div role="group" aria-label="Grilla de video" className="grid gap-1" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
                 {shown.map((i) => {
                   const t = tiles[i] ?? null;
                   const cam = t ? camById.get(t.camera_id) : undefined;
                   return (
                     <GridTile
-                      key={i}
+                      key={persistentPlayers ? (t && !duplicates.has(i) ? `camera:${t.camera_id}` : `cell:${i}`) : i}
                       index={i}
                       tile={t}
                       camera={cam}
                       isSelected={selected === i}
                       isFocused={focus === i}
+                      isHidden={focus !== null && focus !== i}
+                      isDuplicate={duplicates.has(i)}
+                      persistent={persistentPlayers}
+                      surface={persistentPlayers && videoSurfaceLayer}
+                      serverId={cam?.server_id}
                       canViewRecordings={can(me.data, "recordings.view")}
                       status={cam?.status}
-                      quality={focus === i || columns === 1 ? "main" : (t?.quality ?? "sub")}
+                      quality={persistentPlayers ? (t?.quality ?? "sub") : focus === i || columns === 1 ? "main" : (t?.quality ?? "sub")}
                       onSelect={() => setSelected(i)}
                       onToggleFocus={() => t && setFocus(focus === null ? i : null)}
                       onRemove={() => {
@@ -312,6 +329,11 @@ function GridTile({
   camera,
   isSelected,
   isFocused,
+  isHidden,
+  isDuplicate,
+  persistent,
+  surface,
+  serverId,
   canViewRecordings,
   status,
   quality,
@@ -324,6 +346,13 @@ function GridTile({
   camera: Schemas["Camera"] | undefined;
   isSelected: boolean;
   isFocused: boolean;
+  /** Another tile is expanded: keep this one mounted (its session WARM) but not displayed. */
+  isHidden: boolean;
+  /** The camera is already shown in an earlier cell; this one shows a snapshot instead. */
+  isDuplicate: boolean;
+  persistent: boolean;
+  surface: boolean;
+  serverId?: string;
   canViewRecordings: boolean;
   status?: string;
   quality: "sub" | "main";
@@ -331,8 +360,7 @@ function GridTile({
   onToggleFocus: () => void;
   onRemove: () => void;
 }) {
-  const { persistentPlayers } = useFeatures();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index) });
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
   const style = { transform: CSS.Transform.toString(transform), transition };
   return (
     <div
@@ -345,14 +373,22 @@ function GridTile({
         "group relative aspect-video overflow-hidden rounded border bg-black outline-none focus-visible:ring-2 focus-visible:ring-accent",
         isSelected ? "border-accent" : "border-line",
         isDragging && "opacity-50",
+        isHidden && "hidden",
       )}
       {...attributes}
       {...listeners}
     >
       {tile && camera ? (
         <>
-          <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistentPlayers} className="size-full" />
-          <div className="absolute inset-x-0 top-0 flex items-center gap-1.5 bg-gradient-to-b from-black/80 via-black/45 to-transparent px-2 py-1.5 text-xs text-white">
+          {isDuplicate ? (
+            <div className="relative size-full">
+              <img src={`/media/v1/cameras/${tile.camera_id}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-contain opacity-60" />
+              <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white">Ya visible en otra celda</span>
+            </div>
+          ) : (
+            <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} className="size-full" />
+          )}
+          <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 bg-gradient-to-b from-black/80 via-black/45 to-transparent px-2 py-1.5 text-xs text-white">
             <Camera className="size-3.5 shrink-0" aria-hidden />
             <span className="truncate font-medium">{camera.display_name}</span>
             <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">

@@ -24,6 +24,11 @@ type MsePlayerProps = {
   surface?: boolean;
   /** Frigate server of the camera; its sessions share reconnect backoff. */
   serverId?: string;
+  /**
+   * False while the tile is hidden on purpose (another tile is expanded): the session is kept
+   * WARM and streaming so it resumes instantly. Default true.
+   */
+  active?: boolean;
 };
 
 /**
@@ -69,9 +74,11 @@ const noSubscribe = () => () => {};
 
 /** usePersistentSession acquires the manager-owned session of a camera and mirrors its state. */
 function usePersistentSession(
-  { cameraId, quality = "sub", serverId, onError }: Pick<MsePlayerProps, "cameraId" | "quality" | "serverId" | "onError">,
+  { cameraId, quality = "sub", serverId, active = true, onError }: Pick<MsePlayerProps, "cameraId" | "quality" | "serverId" | "active" | "onError">,
+  host: React.RefObject<HTMLElement | null>,
 ) {
   const session = usePlayerSession(cameraId, quality, serverId);
+  const inViewport = useInViewport(host);
   const snapshot = useSyncExternalStore(session?.subscribe ?? noSubscribe, session?.getSnapshot ?? (() => IDLE_SNAPSHOT));
   const onErrorRef = useRef(onError);
   useEffect(() => {
@@ -81,13 +88,42 @@ function usePersistentSession(
     if (!session) return;
     return session.onServerError((m) => onErrorRef.current?.(m));
   }, [session]);
+  useEffect(() => {
+    if (!session) return;
+    if (active) session.markActive("visible");
+    else session.markWarm("hidden");
+  }, [session, active]);
+  // Tiles scrolled out of view stop their transport and keep the last frame; they resume on return.
+  // A tile hidden by expand is not "offscreen": it stays WARM (above) instead of reconnecting later.
+  useEffect(() => {
+    session?.setSuspended("offscreen", active && !inViewport);
+  }, [session, active, inViewport]);
   return { session, snapshot };
 }
 
+/** useInViewport reports whether the element intersects the viewport (true when unsupported). */
+function useInViewport(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [inViewport, setInViewport] = useState(true);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const last = entries[entries.length - 1];
+        if (last) setInViewport(last.isIntersecting);
+      },
+      { rootMargin: "120px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return inViewport;
+}
+
 /** PersistentMsePlayer shows a manager-owned session; unmounting only detaches the `<video>`. */
-function PersistentMsePlayer({ cameraId, quality = "sub", serverId, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const host = useRef<HTMLDivElement>(null);
-  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, onError });
+  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, onError }, host);
   useEffect(() => {
     const el = host.current;
     if (!session || !el) return;
@@ -99,9 +135,9 @@ function PersistentMsePlayer({ cameraId, quality = "sub", serverId, className, m
 }
 
 /** SurfaceMsePlayer leaves the `<video>` in the VideoSurfaceLayer and only reserves its slot here. */
-function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const host = useRef<HTMLDivElement>(null);
-  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, onError });
+  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, onError }, host);
   useEffect(() => {
     session?.setMuted(muted);
   }, [session, muted]);

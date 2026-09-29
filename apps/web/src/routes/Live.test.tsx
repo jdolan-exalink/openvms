@@ -3,6 +3,9 @@ import { AppShell } from "@/components/AppShell";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import { json, renderPage, stubApi } from "@/test-utils";
+import { FEATURES_OVERRIDE_KEY } from "@/lib/features";
+import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
+import { playerMetrics } from "@/lib/live/playerMetrics";
 import { Live } from "./Live";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -490,5 +493,103 @@ describe("Live", () => {
 
     const group = await screen.findByRole("group", { name: "Layout de la grilla" });
     expect(group).toContainElement(screen.getByRole("button", { name: "Layout 2 by 2" }));
+  });
+});
+
+describe("Live with persistent players (P0 acceptance)", () => {
+  const LiveWithSessions = () => (
+    <PlayerSessionProvider userId="u1">
+      <Live />
+    </PlayerSessionProvider>
+  );
+
+  async function renderPersistent() {
+    localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true }));
+    playerMetrics.reset();
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte"), camera("cam-2", "Porton sur")] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+    renderPage(LiveWithSessions);
+    fireEvent.click(await screen.findByRole("button", { name: /Puerta norte/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Porton sur/ }));
+    await waitFor(() => expect(screen.getByLabelText("Cuadro 1").querySelector("video")).not.toBeNull());
+  }
+
+  it("moving a camera from cell 1 to cell 8 keeps the same session and does not reconnect", async () => {
+    await renderPersistent();
+    fireEvent.click(screen.getByRole("button", { name: "Layout 3 by 3" }));
+    const video = screen.getByLabelText("Cuadro 1").querySelector("video");
+    expect(video).not.toBeNull();
+    expect(FakeSocket.created).toBe(2);
+
+    // jsdom has no layout: give the cells the rects of a 3x3 grid so keyboard dragging can navigate it.
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+      const index = /Cuadro (\d+)/.exec(this.getAttribute?.("aria-label") ?? "")?.[1];
+      const col = index ? (Number(index) - 1) % 3 : 0;
+      const row = index ? Math.floor((Number(index) - 1) / 3) : 0;
+      const x = col * 200;
+      const y = row * 150;
+      return { x, y, top: y, left: x, right: x + 200, bottom: y + 150, width: 200, height: 150, toJSON: () => ({}) } as DOMRect;
+    });
+    const tile1 = screen.getByLabelText("Cuadro 1");
+    tile1.focus();
+    fireEvent.keyDown(tile1, { code: "Space" });
+    for (const code of ["ArrowDown", "ArrowDown", "ArrowRight"]) {
+      await new Promise((r) => setTimeout(r, 0));
+      fireEvent.keyDown(document.activeElement ?? tile1, { code });
+    }
+    await new Promise((r) => setTimeout(r, 0));
+    fireEvent.keyDown(document.activeElement ?? tile1, { code: "Space" });
+
+    await waitFor(() => expect(screen.getByLabelText("Cuadro 8").textContent).toContain("Puerta norte"));
+    // Swap semantics: nothing else moved, nothing reconnected.
+    expect(screen.getByLabelText("Cuadro 2").textContent).toContain("Porton sur");
+    expect(screen.getByLabelText("Cuadro 8").querySelector("video")).toBe(video);
+    expect(FakeSocket.created).toBe(2);
+    expect(playerMetrics.get("cam-1", "sub")?.connectAttempts).toBe(1);
+    expect(playerMetrics.get("cam-2", "sub")?.connectAttempts).toBe(1);
+  });
+
+  it("grid -> expand -> grid keeps every session and does not reconnect", async () => {
+    await renderPersistent();
+    const video1 = screen.getByLabelText("Cuadro 1").querySelector("video");
+    const video2 = screen.getByLabelText("Cuadro 2").querySelector("video");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Ampliar" })[0]!);
+    // The other tile stays mounted (its session WARM) but is not displayed.
+    expect(screen.getByLabelText("Cuadro 2")).toHaveClass("hidden");
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Volver a la grilla" }));
+    expect(screen.getByLabelText("Cuadro 2")).not.toHaveClass("hidden");
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video1);
+    expect(screen.getByLabelText("Cuadro 2").querySelector("video")).toBe(video2);
+    expect(FakeSocket.created).toBe(2);
+    expect(playerMetrics.get("cam-1", "sub")?.connectAttempts).toBe(1);
+    expect(playerMetrics.get("cam-1", "sub")?.reconnectCount).toBe(0);
+    expect(playerMetrics.get("cam-2", "sub")?.reconnectCount).toBe(0);
+  });
+
+  it("changing the layout keeps the sessions of cameras that stay visible", async () => {
+    await renderPersistent();
+    const video = screen.getByLabelText("Cuadro 1").querySelector("video");
+    fireEvent.click(screen.getByRole("button", { name: "Layout 4 by 4" }));
+    fireEvent.click(screen.getByRole("button", { name: "Layout 3 by 2" }));
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video);
+    expect(FakeSocket.created).toBe(2);
+  });
+
+  it("offers the 25 and 32 camera walls only with persistent players", async () => {
+    await renderPersistent();
+    expect(screen.getByRole("button", { name: "Layout 5 by 5" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Layout 8 by 4" })).toBeInTheDocument();
   });
 });

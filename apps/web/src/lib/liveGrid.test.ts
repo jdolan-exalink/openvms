@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraDragId, liveSelectionKey, parseSelection, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, tileDragId, type Tile,
+  cameraDragId, liveSelectionKey, parseSelection, duplicateTileIndexes, placeCameraUnique, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, type Tile,
 } from "./liveGrid";
 
 describe("resizeTiles", () => {
@@ -129,5 +129,31 @@ describe("serializeSelection / parseSelection", () => {
     expect(parseSelection(JSON.stringify({ tiles: [] }), validIds)).toBeNull();
     expect(parseSelection(JSON.stringify({ columns: 0, tiles: [] }), validIds)).toBeNull();
     expect(parseSelection(JSON.stringify({ columns: 1.5, tiles: [] }), validIds)).toBeNull();
+  });
+});
+
+describe("swapTiles / placeCameraUnique / duplicateTileIndexes", () => {
+  const a: Tile = { camera_id: "a", quality: "sub" };
+  const b: Tile = { camera_id: "b", quality: "sub" };
+  const c: Tile = { camera_id: "c", quality: "sub" };
+
+  it("swaps two cells without shifting the ones in between", () => {
+    expect(swapTiles([a, b, c, null], 0, 3)).toEqual([null, b, c, a]);
+    expect(swapTiles([a, b, c], 0, 2)).toEqual([c, b, a]);
+  });
+
+  it("ignores identical or out-of-range indexes", () => {
+    const tiles = [a, b];
+    expect(swapTiles(tiles, 1, 1)).toBe(tiles);
+    expect(swapTiles(tiles, 0, 5)).toBe(tiles);
+  });
+
+  it("moves a camera that is already on the grid instead of duplicating it", () => {
+    expect(placeCameraUnique([a, b, null], 2, "a", "main")).toEqual([null, b, a]);
+    expect(placeCameraUnique([a, b, null], 2, "z", "main")).toEqual([a, b, { camera_id: "z", quality: "main" }]);
+  });
+
+  it("finds cells that repeat an earlier camera", () => {
+    expect([...duplicateTileIndexes([a, b, a, null, b])]).toEqual([2, 4]);
   });
 });
