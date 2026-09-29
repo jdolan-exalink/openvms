@@ -11,6 +11,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/search"
 	"github.com/jdolan-exalink/openvms/internal/store"
 )
 
@@ -30,6 +31,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", be.Msg
 	case errors.As(err, &ave):
 		return http.StatusBadRequest, "invalid", ave.Msg
+	case errors.Is(err, search.ErrQueryTooShort):
+		return http.StatusBadRequest, "invalid", err.Error()
 	case errors.Is(err, alarms.ErrInvalidTransition):
 		return http.StatusConflict, "invalid_transition", err.Error()
 	case errors.Is(err, events.ErrInvalidCursor):

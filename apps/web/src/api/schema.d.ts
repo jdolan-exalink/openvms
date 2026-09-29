@@ -1071,6 +1071,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Global search across entities
+         * @description Searches cameras, sites, servers, events, and plates matching query string q.
+         *     Results in each category are gated by the caller's permissions (cameras.view,
+         *     servers.view, events.search, lpr.search).
+         */
+        get: operations["globalSearch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1797,6 +1819,62 @@ export interface components {
             id: string;
             username: string;
             display_name: string;
+        };
+        SearchResult: {
+            cameras: components["schemas"]["SearchCameraHit"][];
+            sites: components["schemas"]["SearchSiteHit"][];
+            servers: components["schemas"]["SearchServerHit"][];
+            events: components["schemas"]["SearchEventHit"][];
+            plates: components["schemas"]["SearchPlateHit"][];
+        };
+        SearchCameraHit: {
+            /** Format: uuid */
+            id: string;
+            display_name: string;
+            /** Format: uuid */
+            site_id: string;
+            site_name: string;
+            location?: string;
+            status: components["schemas"]["HealthStatus"];
+        };
+        SearchSiteHit: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            camera_count: number;
+        };
+        SearchServerHit: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: uuid */
+            site_id: string;
+            site_name: string;
+            status: components["schemas"]["HealthStatus"];
+        };
+        SearchEventHit: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            camera_id: string;
+            camera_name: string;
+            site_name: string;
+            severity: components["schemas"]["Severity"];
+            labels: string[];
+            /** Format: date-time */
+            start_time: string;
+            has_thumbnail: boolean;
+        };
+        SearchPlateHit: {
+            plate: string;
+            /** Format: uuid */
+            camera_id: string;
+            camera_name: string;
+            site_name: string;
+            /** Format: date-time */
+            seen_at: string;
+            /** Format: uuid */
+            event_id?: string | null;
         };
     };
     responses: {
@@ -3940,6 +4018,30 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    globalSearch: {
+        parameters: {
+            query: {
+                q: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Search results grouped by entity */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
         };
     };
 }

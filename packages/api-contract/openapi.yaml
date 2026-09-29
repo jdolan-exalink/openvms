@@ -1476,6 +1476,34 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/search:
+    get:
+      tags: [search]
+      operationId: globalSearch
+      summary: Global search across entities
+      description: |
+        Searches cameras, sites, servers, events, and plates matching query string q.
+        Results in each category are gated by the caller's permissions (cameras.view,
+        servers.view, events.search, lpr.search).
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 2
+            maxLength: 100
+      responses:
+        "200":
+          description: Search results grouped by entity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 components:
   securitySchemes:
     bearerAuth:
@@ -2239,3 +2267,71 @@ components:
         id: { type: string, format: uuid }
         username: { type: string }
         display_name: { type: string }
+    SearchResult:
+      type: object
+      required: [cameras, sites, servers, events, plates]
+      properties:
+        cameras:
+          type: array
+          items: { $ref: "#/components/schemas/SearchCameraHit" }
+        sites:
+          type: array
+          items: { $ref: "#/components/schemas/SearchSiteHit" }
+        servers:
+          type: array
+          items: { $ref: "#/components/schemas/SearchServerHit" }
+        events:
+          type: array
+          items: { $ref: "#/components/schemas/SearchEventHit" }
+        plates:
+          type: array
+          items: { $ref: "#/components/schemas/SearchPlateHit" }
+    SearchCameraHit:
+      type: object
+      required: [id, display_name, site_id, site_name, status]
+      properties:
+        id: { type: string, format: uuid }
+        display_name: { type: string }
+        site_id: { type: string, format: uuid }
+        site_name: { type: string }
+        location: { type: string }
+        status: { $ref: "#/components/schemas/HealthStatus" }
+    SearchSiteHit:
+      type: object
+      required: [id, name, camera_count]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        camera_count: { type: integer }
+    SearchServerHit:
+      type: object
+      required: [id, name, site_id, site_name, status]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        site_id: { type: string, format: uuid }
+        site_name: { type: string }
+        status: { $ref: "#/components/schemas/HealthStatus" }
+    SearchEventHit:
+      type: object
+      required: [id, camera_id, camera_name, site_name, severity, labels, start_time, has_thumbnail]
+      properties:
+        id: { type: string, format: uuid }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        site_name: { type: string }
+        severity: { $ref: "#/components/schemas/Severity" }
+        labels: { type: array, items: { type: string } }
+        start_time: { type: string, format: date-time }
+        has_thumbnail: { type: boolean }
+    SearchPlateHit:
+      type: object
+      required: [plate, camera_id, camera_name, site_name, seen_at]
+      properties:
+        plate: { type: string }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        site_name: { type: string }
+        seen_at: { type: string, format: date-time }
+        event_id: { type: string, format: uuid, nullable: true }
+

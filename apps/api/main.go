@@ -41,6 +41,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
 	"github.com/jdolan-exalink/openvms/internal/platform/natsx"
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
+	"github.com/jdolan-exalink/openvms/internal/search"
 	"github.com/jdolan-exalink/openvms/internal/platform/postgres"
 	"github.com/jdolan-exalink/openvms/internal/platform/telemetry"
 	"github.com/jdolan-exalink/openvms/internal/platform/valkeyx"
@@ -137,6 +138,7 @@ func run() error {
 		Media:         mediaSvc,
 		Branding:      brandingSvc,
 		ClipWatermark: clipWatermarkSvc,
+		Search:        &search.Service{Store: st},
 		Identity: &identity.Service{
 			Store: st, Sealer: sealer, Log: log, Issuer: "OpenVMS",
 			SessionTTL: cfg.SessionTTL, IdleTimeout: cfg.SessionIdle,
