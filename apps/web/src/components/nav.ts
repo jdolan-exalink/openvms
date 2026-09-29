@@ -22,6 +22,7 @@ export const navGroups: NavGroup[] = [
   {
     title: "Investigación",
     items: [
+      { label: "Alarmas", icon: Bell, to: "/alarms", permission: "alarms.view" },
       { label: "Eventos", icon: ListVideo, to: "/events", permission: "events.view" },
       { label: "Patentes", icon: ScanLine, to: "/plates", permission: "lpr.view" },
       { label: "Grabaciones", icon: History, to: "/playback", permission: "recordings.view" },

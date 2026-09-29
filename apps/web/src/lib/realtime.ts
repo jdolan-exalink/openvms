@@ -14,6 +14,7 @@ import { useEffect, useRef, useState } from "react";
 const invalidationsByType: Record<string, readonly (readonly string[])[]> = {
   "event.created": [["events"], ["plates"]],
   "server.status": [["servers"], ["health"], ["cameras"]],
+  "alarm.updated": [["alarms"]],
 };
 const catchUpKeys = [...new Set(Object.values(invalidationsByType).flat().map((k) => JSON.stringify(k)))].map((k) => JSON.parse(k) as string[]);
 

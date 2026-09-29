@@ -171,3 +171,28 @@ export const auditQuery = (filter: AuditFilter) =>
       unwrap(await api.GET("/api/v1/audit", { params: { query: { ...filter, before_id: pageParam, limit: 100 } } })).items,
     getNextPageParam: (last) => (last.length === 100 ? last[last.length - 1]?.id : undefined),
   });
+
+export type AlarmFilter = {
+  status?: "open" | "acknowledged" | "resolved";
+  site_id?: string;
+  camera_id?: string;
+  assigned_to?: string;
+  limit?: number;
+};
+
+export const alarmsQuery = (filter: AlarmFilter = {}) =>
+  queryOptions({
+    queryKey: ["alarms", filter],
+    queryFn: async () => unwrap(await api.GET("/api/v1/alarms", { params: { query: filter } })).items,
+    refetchInterval: 15_000,
+  });
+
+export const alarmAssigneesQuery = (alarmId?: string) =>
+  queryOptions({
+    queryKey: ["alarms", alarmId, "assignees"],
+    queryFn: async () => {
+      if (!alarmId) return [];
+      return unwrap(await api.GET("/api/v1/alarms/{alarmId}/assignees", { params: { path: { alarmId } } })).items;
+    },
+    enabled: !!alarmId,
+  });

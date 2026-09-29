@@ -9,6 +9,7 @@ import { SettingsLayout } from "./components/SettingsLayout";
 import { parseEventsSearch } from "./lib/eventsSearch";
 
 const Account = lazyRouteComponent(() => import("./routes/Account"), "Account");
+const Alarms = lazyRouteComponent(() => import("./routes/Alarms"), "Alarms");
 const Audit = lazyRouteComponent(() => import("./routes/Audit"), "Audit");
 const Branding = lazyRouteComponent(() => import("./routes/Branding"), "Branding");
 const CameraGroups = lazyRouteComponent(() => import("./routes/CameraGroups"), "CameraGroups");
@@ -61,6 +62,23 @@ const playbackRoute = createRoute({
   }),
 });
 
+type AlarmsSearch = {
+  status?: "open" | "acknowledged" | "resolved";
+  camera_id?: string;
+  site_id?: string;
+};
+
+const alarmsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/alarms",
+  component: Alarms,
+  validateSearch: (s: Record<string, unknown>): AlarmsSearch => ({
+    status: s.status === "open" || s.status === "acknowledged" || s.status === "resolved" ? s.status : undefined,
+    camera_id: typeof s.camera_id === "string" && s.camera_id ? s.camera_id : undefined,
+    site_id: typeof s.site_id === "string" && s.site_id ? s.site_id : undefined,
+  }),
+});
+
 // Applied Events filters live in the query string, so a filtered list is shareable and reload-safe.
 const eventsRoute = createRoute({ getParentRoute: () => appRoute, path: "/events", component: Events, validateSearch: parseEventsSearch });
 
@@ -103,6 +121,7 @@ export const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     indexRoute,
     child("/live", Live),
+    alarmsRoute,
     eventsRoute,
     child("/plates", Plates),
     playbackRoute,
