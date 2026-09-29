@@ -1,10 +1,11 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { CheckCheck, Download, History, X } from "lucide-react";
-import { useState } from "react";
+import { CheckCheck, Download, History } from "lucide-react";
+import { useCallback, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraGroupsQuery, camerasQuery, type EventFilter, eventsQuery, meQuery, sitesQuery } from "@/api/queries";
 import { SearchSummary, type FilterChip } from "@/components/SearchSummary";
+import { Modal } from "@/components/Modal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { commonLabels, fmtDateTime, fmtDuration, fromLocalInput, labelName } from "@/lib/format";
@@ -92,6 +93,7 @@ export function Events() {
   const [applied, setApplied] = useState<Form>(emptyForm);
   const events = useInfiniteQuery(eventsQuery(toFilter(applied)));
   const [open, setOpen] = useState<Schemas["Event"] | null>(null);
+  const closeDetail = useCallback(() => setOpen(null), []);
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
   const items = events.data?.pages.flatMap((p) => p.items) ?? [];
   const chips = appliedChips(applied, {
@@ -229,7 +231,10 @@ export function Events() {
             <button
               type="button"
               onClick={() => setOpen(e)}
-              className="flex w-full flex-col overflow-hidden rounded border border-line bg-surface text-left hover:border-accent focus-visible:outline-2 focus-visible:outline-accent"
+              className={cn(
+                "flex w-full flex-col overflow-hidden rounded border border-line border-l-4 bg-surface text-left hover:border-accent focus-visible:outline-2 focus-visible:outline-accent",
+                e.severity === "alert" ? "border-l-bad" : "border-l-line",
+              )}
             >
               <Thumb event={e} />
               <div className="flex flex-col gap-1 p-2 text-sm">
@@ -238,7 +243,7 @@ export function Events() {
                     {e.severity === "alert" ? "Alerta" : "Detección"}
                   </span>
                   <span className="truncate font-medium">{e.labels.map(labelName).join(", ") || "—"}</span>
-                  {e.reviewed && <CheckCheck className="ml-auto size-4 text-ok" aria-label="Revisado" />}
+                  <ReviewBadge reviewed={e.reviewed} />
                 </div>
                 <div className="truncate text-xs text-muted">
                   {e.camera_name} · {e.site_name}
@@ -257,8 +262,19 @@ export function Events() {
           {events.isFetchingNextPage ? "Cargando…" : "Cargar más"}
         </Button>
       )}
-      {open && <EventDetail event={open} me={me.data} onClose={() => setOpen(null)} />}
+      {open && <EventDetail event={open} me={me.data} onClose={closeDetail} />}
     </div>
+  );
+}
+
+/** ReviewBadge states the review status in text so it never depends on color alone. */
+function ReviewBadge({ reviewed }: { reviewed: boolean }) {
+  return reviewed ? (
+    <span className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-ok">
+      <CheckCheck className="size-4" aria-hidden /> Revisado
+    </span>
+  ) : (
+    <span className="ml-auto shrink-0 rounded border border-warn/40 px-1.5 text-xs text-warn">Sin revisar</span>
   );
 }
 
@@ -304,19 +320,18 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
   const t = Math.floor(new Date(e.start_time).getTime() / 1000) - 5;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="Detalle del evento" onClick={onClose}>
-      <div className="flex max-h-full w-full max-w-3xl flex-col gap-3 overflow-y-auto rounded border border-line bg-surface p-4" onClick={(x) => x.stopPropagation()}>
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <h2 className="text-lg font-semibold">{e.labels.map(labelName).join(", ") || "Evento"}</h2>
-            <p className="text-sm text-muted">
-              {e.camera_name} · {e.server_name} · {e.site_name}
-            </p>
-          </div>
-          <button type="button" onClick={onClose} aria-label="Cerrar" className="rounded p-1 hover:bg-raised">
-            <X className="size-5" />
-          </button>
-        </div>
+    <Modal title="Detalle del evento" onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <h3 className="text-base font-medium">{e.labels.map(labelName).join(", ") || "Evento"}</h3>
+        <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
+          <span className={cn("rounded px-1.5 py-0.5 font-mono text-[10px] uppercase", e.severity === "alert" ? "bg-bad/20 text-bad" : "bg-raised text-muted")}>
+            {e.severity === "alert" ? "Alerta" : "Detección"}
+          </span>
+          <span>
+            {e.camera_name} · {e.server_name} · {e.site_name}
+          </span>
+          <ReviewBadge reviewed={e.reviewed} />
+        </p>
         <img
           src={can(me, "snapshots.view") ? `/media/v1/events/${e.id}/snapshot.jpg` : `/api/v1/events/${e.id}/thumbnail`}
           onError={(x) => ((x.currentTarget as HTMLImageElement).src = `/api/v1/events/${e.id}/thumbnail`)}
@@ -334,7 +349,12 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
           <dd className="font-mono">{e.plates.join(" ") || "—"}</dd>
         </dl>
         <ErrorNote error={review.error ?? exp.error} />
-        {exp.data && <p className="text-sm text-ok">Exportación iniciada. La vas a encontrar en Exportaciones.</p>}
+        {exp.data && <p role="status" className="text-sm text-ok">Exportación iniciada. La vas a encontrar en Exportaciones.</p>}
+        {review.isSuccess && (
+          <p role="status" className="text-sm text-ok">
+            {e.reviewed ? "Evento marcado como revisado." : "Evento marcado como sin revisar."}
+          </p>
+        )}
         <div className="flex flex-wrap gap-2">
           {can(me, "recordings.view") && (
             <Link to="/playback" search={{ camera: e.camera_id, t }} className="inline-flex items-center gap-2 rounded bg-accent px-3 py-1.5 text-sm font-medium text-bg hover:bg-accent/90">
@@ -348,7 +368,8 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
           )}
           {can(me, "events.review") && (
             <Button onClick={() => review.mutate()} disabled={review.isPending}>
-              <CheckCheck className="size-4" aria-hidden /> {e.reviewed ? "Marcar sin revisar" : "Marcar revisado"}
+              <CheckCheck className="size-4" aria-hidden />{" "}
+              {review.isPending ? "Guardando…" : e.reviewed ? "Marcar sin revisar" : "Marcar revisado"}
             </Button>
           )}
           {can(me, "snapshots.download") && (
@@ -358,6 +379,6 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
           )}
         </div>
       </div>
-    </div>
+    </Modal>
   );
 }

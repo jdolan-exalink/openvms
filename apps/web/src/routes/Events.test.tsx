@@ -274,4 +274,76 @@ describe("Events", () => {
     await waitFor(() => expect(lastEventsUrl?.searchParams.get("severity")).toBeNull());
     expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
   });
+  /** stubEvents serves one event plus the given /me permissions; PATCH is delegated to onPatch. */
+  function stubEventsApi(permissions: string[], event: Schemas["Event"], onPatch?: () => Response | Promise<Response>) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/events" && input.method === "GET") return json({ items: [event] });
+        if (url.pathname === `/api/v1/events/${event.id}` && input.method === "PATCH" && onPatch) return onPatch();
+        return stubApi({ "/api/v1/me": () => meResponse(...permissions), ...noCatalogs })(input);
+      }),
+    );
+  }
+
+  it("marks review state and severity on each card in text, not only color", async () => {
+    stubEventsApi(["events.search"], makeEvent("e1", { severity: "alert" }));
+    renderPage(Events);
+    const card = await screen.findByRole("button", { name: /Camera One/ });
+    expect(card).toHaveTextContent("Alerta");
+    expect(card).toHaveTextContent("Sin revisar");
+  });
+
+  it("opens the detail as a dialog that closes with Escape and restores focus to the card", async () => {
+    stubEventsApi(["events.search"], makeEvent("e1"));
+    renderPage(Events);
+    const card = await screen.findByRole("button", { name: /Camera One/ });
+    card.focus();
+    fireEvent.click(card);
+    expect(await screen.findByRole("dialog", { name: "Detalle del evento" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(card).toHaveFocus();
+  });
+
+  it("gates the playback link on recordings.view and points it at the event camera and time", async () => {
+    stubEventsApi(["events.search", "recordings.view"], makeEvent("e1"));
+    renderPage(Events);
+    fireEvent.click(await screen.findByRole("button", { name: /Camera One/ }));
+    const link = await screen.findByRole("link", { name: /Ver grabación/ });
+    expect(link.getAttribute("href")).toContain("camera=cam1");
+  });
+
+  it("hides the playback link and review action without their permissions", async () => {
+    stubEventsApi(["events.search"], makeEvent("e1"));
+    renderPage(Events);
+    fireEvent.click(await screen.findByRole("button", { name: /Camera One/ }));
+    await screen.findByRole("dialog");
+    expect(screen.queryByRole("link", { name: /Ver grabación/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Marcar revisado/ })).not.toBeInTheDocument();
+  });
+
+  it("shows pending then success feedback when marking reviewed, and refreshes the card", async () => {
+    let release: (r: Response) => void = () => {};
+    const gate = new Promise<Response>((r) => (release = r));
+    stubEventsApi(["events.search", "events.review"], makeEvent("e1"), () => gate);
+    renderPage(Events);
+    fireEvent.click(await screen.findByRole("button", { name: /Camera One/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Marcar revisado" }));
+    const pending = await screen.findByRole("button", { name: "Guardando…" });
+    expect(pending).toBeDisabled();
+    release(json(makeEvent("e1", { reviewed: true })));
+    expect(await screen.findByText("Evento marcado como revisado.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Marcar sin revisar" })).toBeEnabled();
+  });
+
+  it("surfaces a review failure without changing the review state", async () => {
+    stubEventsApi(["events.search", "events.review"], makeEvent("e1"), () => json({ error: { code: "boom", message: "No se pudo" } }, 500));
+    renderPage(Events);
+    fireEvent.click(await screen.findByRole("button", { name: /Camera One/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Marcar revisado" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Marcar revisado" })).toBeEnabled();
+  });
 });
