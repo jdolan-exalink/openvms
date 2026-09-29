@@ -33,6 +33,9 @@ func toRule(r rules.Rule) gen.Rule {
 	}
 	createAlarm, notify := r.Actions.CreateAlarm, r.Actions.NotifyInApp
 	act := gen.RuleActions{CreateAlarm: &createAlarm, NotifyInApp: &notify}
+	if len(r.Actions.ChannelIDs) > 0 {
+		act.ChannelIds = &r.Actions.ChannelIDs
+	}
 	if r.Actions.Severity != "" {
 		sev := gen.RuleActionsSeverity(r.Actions.Severity)
 		act.Severity = &sev
@@ -92,6 +95,9 @@ func fromRuleActions(a *gen.RuleActions) rules.Actions {
 	}
 	if a.Severity != nil {
 		out.Severity = string(*a.Severity)
+	}
+	if a.ChannelIds != nil {
+		out.ChannelIDs = *a.ChannelIds
 	}
 	return out
 }

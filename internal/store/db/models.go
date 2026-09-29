@@ -236,6 +236,36 @@ type Notification struct {
 	CreatedAt time.Time
 }
 
+type NotificationChannel struct {
+	ID            uuid.UUID
+	TenantID      uuid.UUID
+	Name          string
+	Type          string
+	Config        json.RawMessage
+	SecretsSealed []byte
+	Enabled       bool
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
+type NotificationDelivery struct {
+	ID             uuid.UUID
+	TenantID       uuid.UUID
+	ChannelID      *uuid.UUID
+	ChannelName    string
+	ChannelType    string
+	RuleID         *uuid.UUID
+	NotificationID *uuid.UUID
+	Destination    string
+	Payload        json.RawMessage
+	Status         string
+	Attempts       int32
+	LastError      *string
+	NextAttemptAt  time.Time
+	CreatedAt      time.Time
+	SentAt         *time.Time
+}
+
 type ObjectSnapshot struct {
 	ServerID       uuid.UUID
 	TenantID       uuid.UUID

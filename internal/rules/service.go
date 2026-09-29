@@ -171,6 +171,9 @@ func (s *Service) CreateRule(ctx context.Context, actor authz.Actor, req CreateR
 		if err := chk.Require(authz.NotificationsManage, access.Tenant(*actor.TenantID)); err != nil {
 			return err
 		}
+		if err := checkChannels(ctx, q, *actor.TenantID, req.Actions.ChannelIDs); err != nil {
+			return err
+		}
 
 		row, err := q.CreateRule(ctx, db.CreateRuleParams{
 			TenantID:    *actor.TenantID,
@@ -241,6 +244,11 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 		}
 		if err := chk.Require(authz.NotificationsManage, access.Tenant(*actor.TenantID)); err != nil {
 			return err
+		}
+		if req.Actions != nil {
+			if err := checkChannels(ctx, q, *actor.TenantID, req.Actions.ChannelIDs); err != nil {
+				return err
+			}
 		}
 
 		row, err := q.UpdateRule(ctx, db.UpdateRuleParams{
@@ -608,6 +616,25 @@ func (s *Service) EvaluateOffline(ctx context.Context, triggerType TriggerType, 
 		}
 		return nil
 	})
+}
+
+// checkChannels rejects channel ids that do not belong to the tenant.
+func checkChannels(ctx context.Context, q *db.Queries, tenantID uuid.UUID, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	unique := map[uuid.UUID]struct{}{}
+	for _, id := range ids {
+		unique[id] = struct{}{}
+	}
+	n, err := q.CountNotificationChannelsByIDs(ctx, db.CountNotificationChannelsByIDsParams{TenantID: tenantID, Ids: ids})
+	if err != nil {
+		return store.Classify(err)
+	}
+	if int(n) != len(unique) {
+		return &ValidationError{Msg: "unknown notification channel in actions.channel_ids"}
+	}
+	return nil
 }
 
 func ruleFromRow(row db.Rule) (Rule, error) {

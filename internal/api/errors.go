@@ -11,6 +11,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -25,6 +26,7 @@ func statusFor(err error) (int, string, string) {
 	var be *branding.ValidationError
 	var ave *alarms.ValidationError
 	var rve *rules.ValidationError
+	var nve *notify.ValidationError
 	var fe *inventory.FrigateError
 	switch {
 	case errors.As(err, &ve):
@@ -35,6 +37,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", ave.Msg
 	case errors.As(err, &rve):
 		return http.StatusBadRequest, "invalid", rve.Msg
+	case errors.As(err, &nve):
+		return http.StatusBadRequest, "invalid", nve.Msg
 	case errors.Is(err, search.ErrQueryTooShort):
 		return http.StatusBadRequest, "invalid", err.Error()
 	case errors.Is(err, alarms.ErrInvalidTransition):

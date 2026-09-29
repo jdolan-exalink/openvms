@@ -21,6 +21,9 @@ type Config struct {
 
 	S3 S3Config
 
+	// Waha is the internal WhatsApp HTTP API (devlikeapro/waha) used by WhatsApp channels.
+	Waha WahaConfig
+
 	// TrustForwardedFor takes the client IP from X-Forwarded-For (API behind Caddy).
 	TrustForwardedFor bool
 	// HealthInterval is how often the worker polls each Frigate server.
@@ -38,6 +41,12 @@ type Config struct {
 	LoginLockout     time.Duration
 
 	ShutdownTimeout time.Duration
+}
+
+// WahaConfig locates the WAHA service. An empty BaseURL disables WhatsApp channels.
+type WahaConfig struct {
+	BaseURL string
+	APIKey  string
 }
 
 type S3Config struct {
@@ -68,6 +77,10 @@ func Load(service string) (Config, error) {
 		SessionIdle:       duration("SESSION_IDLE", 2*time.Hour),
 		LoginMaxFailures:  integer("LOGIN_MAX_FAILURES", 5),
 		LoginLockout:      duration("LOGIN_LOCKOUT", 15*time.Minute),
+		Waha: WahaConfig{
+			BaseURL: str("WAHA_BASE_URL", "http://waha:3000"),
+			APIKey:  str("WAHA_API_KEY", ""),
+		},
 		S3: S3Config{
 			Endpoint:     str("S3_ENDPOINT", "http://localhost:8333"),
 			Region:       str("S3_REGION", "us-east-1"),

@@ -29,6 +29,10 @@ type Actions struct {
 	CreateAlarm bool   `json:"create_alarm,omitempty"`
 	NotifyInApp bool   `json:"notify_in_app,omitempty"`
 	Severity    string `json:"severity,omitempty"`
+	// ChannelIDs selects external notification channels (internal/notify). It lives in the
+	// actions JSON rather than a join table: rules are always read whole, and delete/validate
+	// paths keep the ids consistent (see Service.checkChannels and notify.Service.Delete).
+	ChannelIDs []uuid.UUID `json:"channel_ids,omitempty"`
 }
 
 type Rule struct {

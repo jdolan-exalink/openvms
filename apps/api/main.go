@@ -36,6 +36,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/media"
+	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 	"github.com/jdolan-exalink/openvms/internal/platform/config"
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
@@ -142,6 +143,9 @@ func run() error {
 		ClipWatermark: clipWatermarkSvc,
 		Search:        &search.Service{Store: st},
 		Rules:         rules.NewService(st, &jetstreamPublisher{js: js}, log),
+		Notify: notify.NewService(st, sealer, notify.Deps{
+			WahaBaseURL: cfg.Waha.BaseURL, WahaAPIKey: cfg.Waha.APIKey,
+		}, log),
 		Identity: &identity.Service{
 			Store: st, Sealer: sealer, Log: log, Issuer: "OpenVMS",
 			SessionTTL: cfg.SessionTTL, IdleTimeout: cfg.SessionIdle,

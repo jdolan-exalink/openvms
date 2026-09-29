@@ -13,6 +13,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/bootstrap"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
@@ -25,9 +26,10 @@ func setupRulesTest(t *testing.T) (*testAlarmsEnv, string) {
 	env := demofix.Setup(t)
 	pub := &testPublisher{}
 	handlers := &api.Handlers{
-		Inv:   env.Svc,
-		Rules: rules.NewService(env.Store, pub, pgtest.Discard()),
-		Log:   pgtest.Discard(),
+		Inv:    env.Svc,
+		Rules:  rules.NewService(env.Store, pub, pgtest.Discard()),
+		Notify: notify.NewService(env.Store, env.Sealer, notify.Deps{}, pgtest.Discard()),
+		Log:    pgtest.Discard(),
 	}
 	router, err := api.NewRouter(handlers, pgtest.Discard(), api.Options{Queries: db.New(env.Pool)})
 	if err != nil {

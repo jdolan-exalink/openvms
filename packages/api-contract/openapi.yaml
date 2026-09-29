@@ -23,6 +23,7 @@ tags:
   - name: playback
   - name: rules
   - name: notifications
+  - name: notification-channels
 security:
   - bearerAuth: []
   - cookieAuth: []
@@ -1660,6 +1661,97 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/notification-channels:
+    get:
+      tags: [notification-channels]
+      operationId: listNotificationChannels
+      summary: List external notification channels
+      description: Returns the tenant's channels. Secrets are never returned, only the names of those that are set. Requires notifications.manage.
+      responses:
+        "200":
+          description: Channels
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationChannelList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [notification-channels]
+      operationId: createNotificationChannel
+      summary: Create a notification channel
+      description: Requires notifications.manage. Secrets are write-only and stored sealed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationChannelCreate"
+      responses:
+        "201":
+          description: Created channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationChannel"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/notification-channels/{channelId}:
+    parameters:
+      - name: channelId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [notification-channels]
+      operationId: getNotificationChannel
+      summary: Get a notification channel
+      responses:
+        "200":
+          description: The channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationChannel"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [notification-channels]
+      operationId: updateNotificationChannel
+      summary: Update a notification channel
+      description: Omitted secrets keep their value; names in clear_secrets are removed. The channel type cannot change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NotificationChannelUpdate"
+      responses:
+        "200":
+          description: Updated channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationChannel"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [notification-channels]
+      operationId: deleteNotificationChannel
+      summary: Delete a notification channel
+      description: Removes the channel from every rule that used it. Delivery history is kept.
+      responses:
+        "204":
+          description: Channel deleted
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/notifications:
     get:
       tags: [notifications]
@@ -2602,6 +2694,10 @@ components:
         severity:
           type: string
           enum: [info, warning, critical]
+        channel_ids:
+          type: array
+          description: External notification channels to deliver to, in addition to the in-app notification and alarm.
+          items: { type: string, format: uuid }
     Rule:
       type: object
       required: [id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at]
@@ -2664,5 +2760,78 @@ components:
           type: array
           items: { $ref: "#/components/schemas/Notification" }
         unread_count: { type: integer }
-
-
+    NotificationChannelType:
+      type: string
+      enum: [webhook, email, whatsapp, telegram]
+    NotificationChannelConfig:
+      type: object
+      description: Non-secret settings; only the fields of the channel type are used.
+      properties:
+        url: { type: string, description: "webhook: http(s) URL; link-local and metadata addresses are refused" }
+        host: { type: string, description: "email: SMTP host" }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        tls: { type: string, enum: [none, starttls, tls] }
+        username: { type: string, description: "email: SMTP user" }
+        from: { type: string, description: "email: sender address" }
+        recipients:
+          type: array
+          description: "email: addresses; whatsapp: phone numbers or chat ids (stored as <number>@c.us or <id>@g.us)"
+          items: { type: string }
+        session: { type: string, description: "whatsapp: WAHA session name" }
+        chat_ids:
+          type: array
+          description: "telegram: chat ids or @channel names"
+          items: { type: string }
+    NotificationChannelSecrets:
+      type: object
+      description: Write-only values. They are never returned.
+      properties:
+        signing_secret: { type: string, description: "webhook: HMAC-SHA256 key for X-OpenVMS-Signature" }
+        headers:
+          type: object
+          description: "webhook: custom request headers"
+          additionalProperties: { type: string }
+        smtp_password: { type: string }
+        bot_token: { type: string, description: "telegram: Bot API token" }
+    NotificationChannel:
+      type: object
+      required: [id, tenant_id, name, type, enabled, config, secrets_set, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        type: { $ref: "#/components/schemas/NotificationChannelType" }
+        enabled: { type: boolean }
+        config: { $ref: "#/components/schemas/NotificationChannelConfig" }
+        secrets_set:
+          type: array
+          description: Names of the secrets that hold a value.
+          items: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    NotificationChannelCreate:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        type: { $ref: "#/components/schemas/NotificationChannelType" }
+        enabled: { type: boolean, default: true }
+        config: { $ref: "#/components/schemas/NotificationChannelConfig" }
+        secrets: { $ref: "#/components/schemas/NotificationChannelSecrets" }
+    NotificationChannelUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        enabled: { type: boolean }
+        config: { $ref: "#/components/schemas/NotificationChannelConfig" }
+        secrets: { $ref: "#/components/schemas/NotificationChannelSecrets" }
+        clear_secrets:
+          type: array
+          items: { type: string, enum: [signing_secret, headers, smtp_password, bot_token] }
+    NotificationChannelList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/NotificationChannel" }
