@@ -63,7 +63,7 @@ function ClipWatermarkDownload({ readId }: { readId: string }) {
           {status === "failed" ? "No se pudo generar el clip." : `Preparando clip… (${clipJobStatusText[status]})`}
         </p>
       )}
-      {status === "failed" && job.data?.error && <p className="text-xs text-bad">{job.data.error}</p>}
+      {status === "failed" && job.data?.error && <p role="alert" className="text-xs text-bad">{job.data.error}</p>}
       <ErrorNote error={create.error ?? job.error} />
     </div>
   );

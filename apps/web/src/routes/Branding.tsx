@@ -149,7 +149,7 @@ export function Branding() {
               )}
               {manage && <input type="file" accept="image/png,image/jpeg" onChange={onLogoChange} className="text-sm" />}
             </div>
-            {logoError && <p className="text-sm text-bad">{logoError}</p>}
+            {logoError && <p role="alert" className="text-sm text-bad">{logoError}</p>}
           </Field>
           {manage && (
             <div className="flex gap-2">

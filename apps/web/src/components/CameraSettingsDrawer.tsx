@@ -81,7 +81,7 @@ export function CameraSettingsDrawer({
           <Field label="Nombre">
             <TextInput value={name} onChange={(e) => setName(e.target.value)} aria-invalid={invalid} />
           </Field>
-          {invalid && <p className="text-xs text-bad">El nombre no puede estar vacío.</p>}
+          {invalid && <p role="alert" className="text-xs text-bad">El nombre no puede estar vacío.</p>}
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
             Habilitada

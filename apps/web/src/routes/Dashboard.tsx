@@ -70,7 +70,7 @@ export function Dashboard() {
                     <span>Último éxito: {fmtDateTime(st.last_success_at)}</span>
                   )}
                 </div>
-                {st?.last_error && <span className="text-xs text-bad">{st.last_error}</span>}
+                {st?.last_error && <span role="alert" className="text-xs text-bad">{st.last_error}</span>}
               </li>
             );
           })}
@@ -92,7 +92,7 @@ export function Dashboard() {
             <li key={c.name} className="flex items-center justify-between gap-3 rounded border border-line bg-surface px-4 py-3">
               <div className="flex flex-col">
                 <span className="font-medium">{dependencyLabels[c.name] ?? c.name}</span>
-                {c.error && <span className="text-xs break-all text-bad">{c.error}</span>}
+                {c.error && <span role="alert" className="text-xs break-all text-bad">{c.error}</span>}
               </div>
               <div className="flex items-center gap-3">
                 <span className="font-mono text-xs text-muted tabular-nums">{c.latency_ms} ms</span>

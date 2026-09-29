@@ -76,7 +76,7 @@ export function Cameras() {
                     {c.lpr && <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] text-muted">LPR</span>}
                   </div>
                   {c.display_name !== c.remote_name && <div className="font-mono text-xs text-muted">{c.remote_name}</div>}
-                  {c.missing_since && <div className="text-xs text-warn">Ya no aparece en Frigate</div>}
+                  {c.missing_since && <div role="status" className="text-xs text-warn">Ya no aparece en Frigate</div>}
                 </td>
                 <td>{siteName.get(c.site_id) ?? "—"}</td>
                 <td>

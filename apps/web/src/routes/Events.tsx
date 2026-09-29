@@ -329,7 +329,7 @@ function BulkReviewBar({
           </>
         )}
       </div>
-      {tooMany && <p className="text-xs text-warn">Máximo {MAX_BULK} eventos por lote: deseleccioná algunos.</p>}
+      {tooMany && <p role="status" className="text-xs text-warn">Máximo {MAX_BULK} eventos por lote: deseleccioná algunos.</p>}
       <ErrorNote error={bulk.error} />
       {done && (
         <p role="status" className="text-ok">

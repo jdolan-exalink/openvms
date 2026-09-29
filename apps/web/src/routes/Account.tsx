@@ -11,7 +11,7 @@ export function Account() {
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <PageHeader title="Mi cuenta" description={me.data ? `${me.data.display_name} (${me.data.username})` : undefined} />
       {me.data?.must_change_password && (
-        <p className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">Un administrador te pidió que cambies la contraseña.</p>
+        <p role="status" className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">Un administrador te pidió que cambies la contraseña.</p>
       )}
       <PasswordForm />
       <MfaSection enabled={!!me.data?.mfa_enabled} />

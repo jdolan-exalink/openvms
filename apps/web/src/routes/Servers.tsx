@@ -84,7 +84,7 @@ export function Servers() {
                 </td>
                 <td>
                   <StatusBadge status={s.status} />
-                  {s.last_error && <div className="mt-1 max-w-56 text-xs break-words text-bad">{s.last_error}</div>}
+                  {s.last_error && <div role="alert" className="mt-1 max-w-56 text-xs break-words text-bad">{s.last_error}</div>}
                 </td>
                 <td className="font-mono text-xs whitespace-nowrap">{s.frigate_version || "—"}</td>
                 <td className="text-right tabular-nums">
@@ -152,7 +152,7 @@ function SyncButton({ server }: { server: Schemas["Server"] }) {
           +{r.added} nuevas · {r.updated} actualizadas · {r.missing} faltantes
         </span>
       )}
-      {sync.error && <span className="text-xs text-bad">{sync.error.message}</span>}
+      {sync.error && <span role="alert" className="text-xs text-bad">{sync.error.message}</span>}
     </div>
   );
 }
@@ -317,7 +317,7 @@ function SyncCell({ status }: { status?: Schemas["EventSyncStatus"] }) {
       {status.last_success_at && (
         <span className="text-muted">al día {new Date(status.last_success_at).toLocaleTimeString("es-AR")}</span>
       )}
-      {status.last_error && <span className="max-w-48 break-words text-bad">{status.last_error}</span>}
+      {status.last_error && <span role="alert" className="max-w-48 break-words text-bad">{status.last_error}</span>}
     </div>
   );
 }

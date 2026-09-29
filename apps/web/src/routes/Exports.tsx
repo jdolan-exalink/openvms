@@ -50,7 +50,7 @@ export function Exports() {
                 <td className="text-sm">
                   <span className={x.status === "ready" ? "text-ok" : x.status === "failed" ? "text-bad" : "text-warn"}>{statusText[x.status]}</span>
                   {x.status === "running" && x.progress > 0 && <span className="ml-1 text-xs text-muted">{Math.round(x.progress)}%</span>}
-                  {x.error && <div className="max-w-56 text-xs text-bad">{x.error}</div>}
+                  {x.error && <div role="alert" className="max-w-56 text-xs text-bad">{x.error}</div>}
                 </td>
                 <td className="text-right whitespace-nowrap">
                   {x.status === "ready" && (
