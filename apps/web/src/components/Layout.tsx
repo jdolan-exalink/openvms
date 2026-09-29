@@ -7,6 +7,7 @@ import { api, type Schemas } from "@/api/client";
 import { meQuery } from "@/api/queries";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
+import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { useRealtimeFeed } from "@/lib/realtime";
 import { AppShell } from "./AppShell";
 import { brandIcon as Brand, navGroups, settingsNavGroups, type NavGroup } from "./nav";
@@ -48,7 +49,7 @@ export function Layout() {
   ];
 
   return (
-    <>
+    <PlayerSessionProvider userId={me.data?.id}>
       <AppShell
         primaryNav={
           <div className="hidden w-16 shrink-0 flex-col items-center border-r border-line bg-surface py-3 md:flex">
@@ -207,7 +208,7 @@ export function Layout() {
           </div>
         </div>
       )}
-    </>
+    </PlayerSessionProvider>
   );
 }
 

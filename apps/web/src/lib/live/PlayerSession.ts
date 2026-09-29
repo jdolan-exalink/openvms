@@ -59,7 +59,7 @@ export class PlayerSession {
   private readonly metrics: PlayerMetrics;
   private readonly createSocket: (url: string) => WebSocket;
   private readonly random: () => number;
-  private readonly onError?: (message: string) => void;
+  private readonly errorListeners = new Set<(message: string) => void>();
   private readonly listeners = new Set<() => void>();
   private snapshot: SessionSnapshot = { state: "UNINITIALIZED", message: "" };
 
@@ -79,7 +79,7 @@ export class PlayerSession {
     this.metrics = opts.metrics ?? playerMetrics;
     this.createSocket = opts.createSocket ?? ((url) => new WebSocket(url));
     this.random = opts.random ?? Math.random;
-    this.onError = opts.onError;
+    if (opts.onError) this.errorListeners.add(opts.onError);
     this.machine = new PlayerStateMachine({
       cameraId: opts.cameraId,
       quality: opts.quality,
@@ -109,6 +109,12 @@ export class PlayerSession {
   }
 
   /** useSyncExternalStore-compatible: the returned object only changes when the snapshot does. */
+  /** onServerError subscribes to stream errors reported by the gateway; returns an unsubscribe. */
+  onServerError = (listener: (message: string) => void): (() => void) => {
+    this.errorListeners.add(listener);
+    return () => this.errorListeners.delete(listener);
+  };
+
   getSnapshot = (): SessionSnapshot => this.snapshot;
 
   subscribe = (listener: () => void): (() => void) => {
@@ -172,6 +178,7 @@ export class PlayerSession {
     this.video.remove();
     this.move("EVICTED", cause);
     this.listeners.clear();
+    this.errorListeners.clear();
   }
 
   // ---- internals --------------------------------------------------------------------
@@ -299,7 +306,7 @@ export class PlayerSession {
           void el.play()?.catch(() => {});
         } else if (msg.type === "error") {
           this.move("ERROR", "server-error", msg.value);
-          this.onError?.(msg.value);
+          this.errorListeners.forEach((l) => l(msg.value));
         }
         return;
       }

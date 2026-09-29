@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
+import { useFeatures } from "@/lib/features";
 import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { useContextSidebarPortalTarget } from "@/components/AppShell";
 import { Button, ErrorNote, PageHeader, Select, StatusBadge, TextInput } from "@/components/ui";
@@ -330,6 +331,7 @@ function GridTile({
   onToggleFocus: () => void;
   onRemove: () => void;
 }) {
+  const { persistentPlayers } = useFeatures();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index) });
   const style = { transform: CSS.Transform.toString(transform), transition };
   return (
@@ -349,7 +351,7 @@ function GridTile({
     >
       {tile && camera ? (
         <>
-          <MsePlayer cameraId={tile.camera_id} quality={quality} className="size-full" />
+          <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistentPlayers} className="size-full" />
           <div className="absolute inset-x-0 top-0 flex items-center gap-1.5 bg-gradient-to-b from-black/80 via-black/45 to-transparent px-2 py-1.5 text-xs text-white">
             <Camera className="size-3.5 shrink-0" aria-hidden />
             <span className="truncate font-medium">{camera.display_name}</span>
