@@ -30,9 +30,9 @@ navigation) must not reconnect media; no black tiles while connecting.
 - ~400 authored changed lines per task (advisory). Conventional Commits, no AI attribution.
 
 ## Tasks
-- [ ] LV-1 — Feature flags (`GET /api/v1/features` + web hook) and baseline instrumentation: per-session reconnect counter + TTFF, characterization tests that document current reconnect behaviour.
-- [ ] LV-2 — Player state machine (UNINITIALIZED…EVICTED, transition cause/timestamp) + `PlayerSession` core; `MsePlayer` becomes a thin adapter.
-- [ ] LV-3 — `PlayerSessionManager` + provider mounted in `Layout` (sessions per camera, WARM TTL, eviction).
+- [x] LV-1 — Feature flags (`GET /api/v1/features` + web hook) and baseline instrumentation: per-session reconnect counter + TTFF, characterization tests that document current reconnect behaviour.
+- [x] LV-2 — Player state machine (UNINITIALIZED…EVICTED, transition cause/timestamp) + `PlayerSession` core; `MsePlayer` becomes a thin adapter.
+- [x] LV-3 — `PlayerSessionManager` + provider mounted in `Layout` (sessions per camera, WARM TTL, eviction).
 - [ ] LV-4 — `VideoSurfaceLayer` + `SurfaceSlot` (persistent `<video>` positioned over cells via ResizeObserver/translate3d), behind flag.
 - [ ] LV-5 — Tiles keyed by camera: DnD swap semantics, layout change and expand without reconnect; 25/32 grids with visibility pausing. Mandatory tests: cell1→cell8 same session 0 reconnects; grid→expand same session 0 reconnects.
 - [ ] LV-6 — Snapshot poster + last frame, offline/unauthorized/error states with Retry, jittered backoff grouped per server; snapshot cache headers. Test: offline shows last snapshot + auto reconnect.
@@ -47,4 +47,19 @@ DnD/layout/expand in tests.
 Strategy: ask-on-risk (forecast ~2.6k lines > budget; chain strategy to be chosen with the user before opening PRs). Push/PR are user decisions.
 
 ## Progress
-(none yet)
+TDD: off (user decision 2026-09-29). Started strict (RED observed for Go config), then the user turned it off; no
+further tests were added beyond those already written. Ordinary checks run per task.
+Route for LV-1..3: delegated (writer trigger: 2+ non-trivial files).
+Checks per task (all green): go build, go vet, go test ./..., go test -tags integration ./internal/api/ (LV-1),
+golangci-lint 0 issues, web tsc, vitest (227 tests), eslint, vite build.
+
+- LV-1 (a0f4a62): flags via OPENVMS_FEATURES (comma-separated, case-insensitive; config.ParseFeatures) exposed at
+  GET /api/v1/features (authenticated); web useFeatures() with all-off defaults and a DEV-only localStorage override
+  (openvms.features.override); lib/live/playerMetrics.ts (connect attempts, reconnectCount, TTFF, transitions,
+  window.__openvmsPlayerMetrics in DEV). Characterization tests for cell 1->8 / expand were NOT written (TDD off).
+- LV-2 (b3d0624): lib/live/playerState.ts (10 states, allowed-transition table, cause+timestamp, metrics emit,
+  debug via localStorage openvms.live.debug=1), backoff.ts (jittered, capped), PlayerSession.ts (owns <video>, MSE
+  pipeline, reconnect, attach/detach/close); MsePlayer is a thin adapter (legacy path unchanged in behaviour).
+- LV-3 (4e84007): PlayerSessionManager (acquire/release refcount, WARM TTL 30 s, maxWarmPlayers 8 LRU, soft
+  maxConcurrentPlayers 32, clear on logout/user change/unmount), PlayerSessionProvider mounted in Layout,
+  usePlayerSession; MsePlayer persistent prop driven by the persistentPlayers flag in Live GridTile.
