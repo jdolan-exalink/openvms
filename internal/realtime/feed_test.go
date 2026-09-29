@@ -135,3 +135,76 @@ func TestFeedRestartsAFailedConsumerUntilCancelled(t *testing.T) {
 		t.Fatal("Run did not return after cancellation")
 	}
 }
+
+func TestNextRetryDelayBacksOffAndResetsAfterHealthyRun(t *testing.T) {
+	const initial, max, healthy = 2 * time.Second, 30 * time.Second, time.Minute
+	got := []time.Duration{}
+	d := initial
+	for i := 0; i < 6; i++ {
+		got = append(got, d)
+		d = nextRetryDelay(d, initial, max, time.Second, healthy)
+	}
+	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("delays = %v, want %v", got, want)
+		}
+	}
+	if d := nextRetryDelay(30*time.Second, initial, max, 2*time.Minute, healthy); d != initial {
+		t.Fatalf("after a healthy run delay = %v, want reset to %v", d, initial)
+	}
+}
+
+func TestFeedBacksOffBetweenFailedConsumers(t *testing.T) {
+	src := newFakeSource()
+	src.results["S"] = []error{errors.New("1"), errors.New("2"), errors.New("3")}
+	routes := []Route{{Stream: "S", Subject: "a.*"}}
+	feed := &Feed{Source: src, Hub: NewHub(HubConfig{Routes: routes}), Routes: routes, Log: quietLog(),
+		RetryDelay: 20 * time.Millisecond, MaxRetryDelay: 60 * time.Millisecond, HealthyAfter: time.Hour}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	go feed.Run(ctx)
+	waitFor(t, func() bool { return len(src.callsSnapshot()) >= 4 })
+	// delays before calls 2..4 are 20ms + 40ms + 60ms (capped): at least 120ms in total.
+	if el := time.Since(start); el < 120*time.Millisecond {
+		t.Fatalf("4 consumers started in %v, want exponential backoff of at least 120ms", el)
+	}
+}
+
+type fakeConsume struct{ closed chan struct{} }
+
+func (f fakeConsume) Closed() <-chan struct{} { return f.closed }
+
+func TestAwaitConsumeReportsAnyStopOfTheConsumeContext(t *testing.T) {
+	fc := fakeConsume{closed: make(chan struct{})}
+	res := make(chan error, 1)
+	go func() { res <- awaitConsume(context.Background(), fc, make(chan error, 1)) }()
+	close(fc.closed)
+	select {
+	case err := <-res:
+		if err == nil {
+			t.Fatal("a stopped consume context must be reported as an error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("awaitConsume did not notice the consume context stopping")
+	}
+}
+
+func TestAwaitConsumeReturnsContextErrorOnCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := awaitConsume(ctx, fakeConsume{closed: make(chan struct{})}, make(chan error, 1))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context.Canceled", err)
+	}
+}
+
+func TestAwaitConsumeReturnsTerminalError(t *testing.T) {
+	failed := make(chan error, 1)
+	want := errors.New("consumer deleted")
+	failed <- want
+	if err := awaitConsume(context.Background(), fakeConsume{closed: make(chan struct{})}, failed); !errors.Is(err, want) {
+		t.Fatalf("err = %v, want %v", err, want)
+	}
+}

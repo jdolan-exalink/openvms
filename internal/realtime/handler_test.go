@@ -3,9 +3,11 @@ package realtime_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -191,4 +193,107 @@ func TestHandlerDropsConnectionWithoutPong(t *testing.T) {
 	waitConnections(t, f.hub, 1)
 	// The client never reads, so it never answers pings: the server must give up.
 	waitConnections(t, f.hub, 0)
+}
+
+// sessionStub is a scriptable per-connection credential check.
+type sessionStub struct {
+	mu    sync.Mutex
+	calls int
+	fn    func(call int) (bool, error)
+}
+
+func (s *sessionStub) check(context.Context) (bool, error) {
+	s.mu.Lock()
+	s.calls++
+	n := s.calls
+	s.mu.Unlock()
+	return s.fn(n)
+}
+
+func withSession(s *sessionStub) func(*realtime.Handler) {
+	return func(h *realtime.Handler) {
+		h.RevalidateInterval = 20 * time.Millisecond
+		h.Session = func(context.Context) func(context.Context) (bool, error) { return s.check }
+	}
+}
+
+func readClose(t *testing.T, c *websocket.Conn) *websocket.CloseError {
+	t.Helper()
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err := c.ReadMessage()
+	var ce *websocket.CloseError
+	if !errors.As(err, &ce) {
+		t.Fatalf("err = %v, want a close frame", err)
+	}
+	return ce
+}
+
+func TestHandlerClosesWhenSessionEnds(t *testing.T) {
+	s := &sessionStub{fn: func(n int) (bool, error) { return n < 3, nil }}
+	f := newWS(t, withSession(s), realtime.HubConfig{})
+	c, _, err := f.dial(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ce := readClose(t, c)
+	if ce.Code != websocket.ClosePolicyViolation || ce.Text != "session ended" {
+		t.Fatalf("close = %d %q, want 1008 \"session ended\"", ce.Code, ce.Text)
+	}
+	waitConnections(t, f.hub, 0)
+}
+
+func TestHandlerKeepsStreamingWhileSessionIsValid(t *testing.T) {
+	s := &sessionStub{fn: func(int) (bool, error) { return true, nil }}
+	f := newWS(t, withSession(s), realtime.HubConfig{})
+	c, _, err := f.dial(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	waitConnections(t, f.hub, 1)
+	time.Sleep(120 * time.Millisecond) // several revalidations
+	f.hub.Publish(eventMsg(f.tenant, uuid.New()))
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var env realtime.Envelope
+	if err := c.ReadJSON(&env); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHandlerToleratesOneTransientCheckError(t *testing.T) {
+	s := &sessionStub{fn: func(n int) (bool, error) {
+		if n == 1 {
+			return false, errors.New("db blip")
+		}
+		return true, nil
+	}}
+	f := newWS(t, withSession(s), realtime.HubConfig{})
+	c, _, err := f.dial(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	waitConnections(t, f.hub, 1)
+	time.Sleep(120 * time.Millisecond)
+	f.hub.Publish(eventMsg(f.tenant, uuid.New()))
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var env realtime.Envelope
+	if err := c.ReadJSON(&env); err != nil {
+		t.Fatalf("connection dropped after a single transient error: %v", err)
+	}
+}
+
+func TestHandlerClosesAfterConsecutiveCheckErrors(t *testing.T) {
+	s := &sessionStub{fn: func(int) (bool, error) { return false, errors.New("db down") }}
+	f := newWS(t, withSession(s), realtime.HubConfig{})
+	c, _, err := f.dial(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	ce := readClose(t, c)
+	if ce.Code != websocket.CloseTryAgainLater || ce.Text != "session check unavailable" {
+		t.Fatalf("close = %d %q, want 1013 \"session check unavailable\"", ce.Code, ce.Text)
+	}
 }

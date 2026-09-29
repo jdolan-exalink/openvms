@@ -23,6 +23,15 @@ type Handler struct {
 	AllowedOrigins []string
 	Log            *slog.Logger
 
+	// Session returns, for the request that opened the socket, a check that re-validates the
+	// credential it was authenticated with (session cookie or bearer token) using the same
+	// lookup as the Authenticate middleware. The check reports valid=false once the credential
+	// no longer authenticates (logout, revocation, expiry, disabled user) and an error when it
+	// could not tell. Nil disables revalidation.
+	Session func(ctx context.Context) func(ctx context.Context) (valid bool, err error)
+	// RevalidateInterval is how often the credential is re-checked; zero means 30s.
+	RevalidateInterval time.Duration
+
 	// Keepalive tuning; zero values use the defaults below.
 	PingInterval time.Duration
 	PongWait     time.Duration
@@ -33,6 +42,23 @@ const (
 	defaultPingInterval = 25 * time.Second
 	defaultPongWait     = 60 * time.Second
 	defaultWriteTimeout = 10 * time.Second
+
+	defaultRevalidateInterval = 30 * time.Second
+	// maxCheckFailures is how many consecutive undecidable checks are tolerated before the
+	// connection is closed.
+	maxCheckFailures = 2
+)
+
+// Close reasons of a revalidated connection, part of the client contract.
+const (
+	reasonSessionEnded     = "session ended"
+	reasonCheckUnavailable = "session check unavailable"
+)
+
+// errSessionEnded and errCheckUnavailable end serve when revalidation fails.
+var (
+	errSessionEnded     = errors.New("session ended")
+	errCheckUnavailable = errors.New("session check unavailable")
 )
 
 func orDefault(d, def time.Duration) time.Duration {
@@ -70,10 +96,47 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return // Upgrade already answered the client
 	}
 	defer conn.Close()
-	h.serve(r.Context(), conn, sub)
+	var check func(context.Context) (bool, error)
+	if h.Session != nil {
+		check = h.Session(r.Context())
+	}
+	h.serve(r.Context(), conn, sub, check)
 }
 
-func (h *Handler) serve(ctx context.Context, conn *websocket.Conn, sub *Subscription) {
+// revalidate re-checks the connection's credential every interval and returns errSessionEnded
+// when it no longer authenticates. The check is a read-only lookup: it deliberately does not
+// slide the session's idle timeout, so an open but unattended socket cannot keep a session
+// alive forever; user activity through the REST API (which the UI does when it refetches on
+// pushed events) still does. One undecidable check (a transient store error) is tolerated and
+// retried on the next tick; two in a row fail closed with errCheckUnavailable so the client
+// reconnects instead of streaming on an unverifiable credential.
+func revalidate(ctx context.Context, check func(context.Context) (bool, error), every time.Duration) error {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	failures := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+		valid, err := check(ctx)
+		switch {
+		case ctx.Err() != nil:
+			return nil
+		case err != nil:
+			if failures++; failures >= maxCheckFailures {
+				return errCheckUnavailable
+			}
+		case !valid:
+			return errSessionEnded
+		default:
+			failures = 0
+		}
+	}
+}
+
+func (h *Handler) serve(ctx context.Context, conn *websocket.Conn, sub *Subscription, check func(context.Context) (bool, error)) {
 	pingEvery := orDefault(h.PingInterval, defaultPingInterval)
 	pongWait := orDefault(h.PongWait, defaultPongWait)
 	writeTimeout := orDefault(h.WriteTimeout, defaultWriteTimeout)
@@ -94,6 +157,16 @@ func (h *Handler) serve(ctx context.Context, conn *websocket.Conn, sub *Subscrip
 			}
 		}
 	}()
+
+	// Revalidation ends the connection through the same writer loop as any other close.
+	ended := make(chan error, 1)
+	if check != nil {
+		go func() {
+			if err := revalidate(ctx, check, orDefault(h.RevalidateInterval, defaultRevalidateInterval)); err != nil {
+				ended <- err
+			}
+		}()
+	}
 
 	// Messages are pumped by a helper so the writer loop can also service pings.
 	type result struct {
@@ -121,6 +194,9 @@ func (h *Handler) serve(ctx context.Context, conn *websocket.Conn, sub *Subscrip
 		select {
 		case <-ctx.Done():
 			return
+		case err := <-ended:
+			h.closeWith(conn, err, writeTimeout)
+			return
 		case <-ping.C:
 			_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
@@ -144,6 +220,10 @@ func (h *Handler) closeWith(conn *websocket.Conn, err error, timeout time.Durati
 	code, text := websocket.CloseGoingAway, "server shutting down"
 	if errors.Is(err, ErrSlowConsumer) {
 		code, text = websocket.ClosePolicyViolation, "slow consumer"
+	} else if errors.Is(err, errSessionEnded) {
+		code, text = websocket.ClosePolicyViolation, reasonSessionEnded
+	} else if errors.Is(err, errCheckUnavailable) {
+		code, text = websocket.CloseTryAgainLater, reasonCheckUnavailable
 	} else if !errors.Is(err, ErrClosed) {
 		return
 	}

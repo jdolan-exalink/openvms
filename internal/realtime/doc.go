@@ -25,6 +25,9 @@
 // Robustness: each connection has a bounded buffer and is closed when it overflows (the UI
 // then falls back to polling and reconnects), pings keep idle connections honest, the number
 // of connections per user is capped, and Hub.Close ends every connection on server shutdown.
+// The JetStream consumer is watched for any stop (terminal error or a stopped consume
+// context) and recreated with exponential backoff (2s doubling to 30s, reset after a healthy
+// minute); every restart is logged.
 //
 // Extending the feed (alarms, notifications): add a Route with a new Type constant, a subject
 // on a stream in natsx.Streams, and a Decode that returns the Scope to authorize against.
@@ -32,5 +35,10 @@
 //
 // Authentication is not handled here: the router's Authenticate middleware protects /ws with
 // the same session cookie or bearer token as the API and media gateway, and the origin policy
-// is httpx.OriginAllowed, shared with the media gateway.
+// is httpx.OriginAllowed, shared with the media gateway. The credential is then re-validated
+// every 30s through Handler.Session (built from the same lookup, read-only, so it never
+// slides the idle timeout). Close codes a client must handle: 1008 "session ended" (logout,
+// revocation, expiry, disabled user: re-authenticate, do not blindly reconnect), 1013
+// "session check unavailable" (two consecutive undecidable checks: reconnect with backoff),
+// 1008 "slow consumer" and 1001 "server shutting down" (reconnect).
 package realtime

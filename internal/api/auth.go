@@ -19,6 +19,23 @@ type actorKey struct{}
 
 type sessionTokenKey struct{}
 
+type revalidateKey struct{}
+
+// Revalidator re-runs the credential lookup Authenticate performed for a request, without
+// side effects (no last-seen or last-used touch). valid=false means the credential no longer
+// authenticates; a non-nil error means the store could not answer.
+type Revalidator func(ctx context.Context) (valid bool, err error)
+
+// RevalidatorFrom returns the Revalidator of the request's credential, for long-lived
+// connections (the /ws feed) that must notice logout, revocation, expiry or a disabled user.
+func RevalidatorFrom(ctx context.Context) func(context.Context) (bool, error) {
+	r, _ := ctx.Value(revalidateKey{}).(Revalidator)
+	if r == nil {
+		return nil
+	}
+	return r
+}
+
 // ActorFrom returns the authenticated actor. Handlers behind Authenticate always have one.
 func ActorFrom(ctx context.Context) (authz.Actor, bool) {
 	a, ok := ctx.Value(actorKey{}).(authz.Actor)
@@ -118,6 +135,14 @@ func Authenticate(q *db.Queries, opts AuthOptions) func(http.Handler) http.Handl
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// lookupValid maps a credential lookup result: no row means the credential ended.
+func lookupValid(err error) (bool, error) {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // secureRequest reports whether the browser reached us over HTTPS (directly or via Caddy).

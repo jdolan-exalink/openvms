@@ -24,8 +24,26 @@ type Feed struct {
 	Hub    *Hub
 	Routes []Route
 	Log    *slog.Logger
-	// RetryDelay is the pause before a failed consumer is recreated. Zero means 2s.
+	// RetryDelay is the initial pause before a failed consumer is recreated. Zero means 2s.
+	// Consecutive failures double it up to MaxRetryDelay.
 	RetryDelay time.Duration
+	// MaxRetryDelay caps the backoff. Zero means 30s.
+	MaxRetryDelay time.Duration
+	// HealthyAfter is how long a consumer must run before its failure counts as a fresh one
+	// and the backoff resets to RetryDelay. Zero means 60s.
+	HealthyAfter time.Duration
+}
+
+// nextRetryDelay returns the pause to use after the consumer that just ended: doubled up to
+// max, or reset to initial when that consumer had run for at least healthy.
+func nextRetryDelay(cur, initial, max, ranFor, healthy time.Duration) time.Duration {
+	if ranFor >= healthy {
+		return initial
+	}
+	if next := cur * 2; next < max {
+		return next
+	}
+	return max
 }
 
 // Run blocks until ctx is cancelled. Consumer failures are logged and retried, never fatal.
@@ -34,26 +52,41 @@ func (f *Feed) Run(ctx context.Context) {
 	if log == nil {
 		log = slog.Default()
 	}
-	delay := f.RetryDelay
-	if delay <= 0 {
-		delay = 2 * time.Second
+	initial, maxDelay, healthy := f.RetryDelay, f.MaxRetryDelay, f.HealthyAfter
+	if initial <= 0 {
+		initial = 2 * time.Second
+	}
+	if maxDelay <= 0 {
+		maxDelay = 30 * time.Second
+	}
+	if maxDelay < initial {
+		maxDelay = initial
+	}
+	if healthy <= 0 {
+		healthy = time.Minute
 	}
 	var wg sync.WaitGroup
 	for stream, subjects := range subjectsByStream(f.Routes) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			delay := initial
 			for ctx.Err() == nil {
+				began := time.Now()
 				err := f.Source.Consume(ctx, stream, subjects, f.Hub.Dispatch)
 				if ctx.Err() != nil {
 					return
 				}
-				log.Warn("realtime: consumer stopped, restarting", "stream", stream, "error", err)
+				if time.Since(began) >= healthy {
+					delay = initial // it was healthy for a while: this is a fresh failure
+				}
+				log.Warn("realtime: consumer stopped, restarting", "stream", stream, "error", err, "retry_in", delay)
 				select {
 				case <-ctx.Done():
 					return
 				case <-time.After(delay):
 				}
+				delay = nextRetryDelay(delay, initial, maxDelay, 0, healthy)
 			}
 		}()
 	}
@@ -94,8 +127,8 @@ func (s JetStreamSource) Consume(ctx context.Context, stream string, subjects []
 	cc, err := cons.Consume(
 		func(m jetstream.Msg) { handle(m.Subject(), m.Data()) },
 		jetstream.ConsumeErrHandler(func(_ jetstream.ConsumeContext, err error) {
-			// Ordered consumers recreate themselves on gaps; only a terminal error ends the
-			// consume, and it is reported so Feed can rebuild the consumer.
+			// Ordered consumers recreate themselves on gaps; these terminal errors are reported
+			// at once. Any other way the consume can stop is caught by awaitConsume via Closed().
 			if errors.Is(err, jetstream.ErrConsumerDeleted) || errors.Is(err, jetstream.ErrNoHeartbeat) {
 				select {
 				case failed <- err:
@@ -108,10 +141,22 @@ func (s JetStreamSource) Consume(ctx context.Context, stream string, subjects []
 		return fmt.Errorf("consume %s: %w", stream, err)
 	}
 	defer cc.Stop()
+	return awaitConsume(ctx, cc, failed)
+}
+
+// errConsumeStopped reports a consume context that ended without ctx being cancelled.
+var errConsumeStopped = errors.New("consume context stopped")
+
+// awaitConsume blocks until ctx ends, a terminal error arrives, or the consume context stops
+// for any reason (connection closed, drain, ordered-consumer reset failure): a silent stop
+// would otherwise leave the feed stalled with no log and no restart.
+func awaitConsume(ctx context.Context, cc interface{ Closed() <-chan struct{} }, failed <-chan error) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case err := <-failed:
 		return err
+	case <-cc.Closed():
+		return errConsumeStopped
 	}
 }
