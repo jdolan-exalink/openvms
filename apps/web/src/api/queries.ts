@@ -216,3 +216,16 @@ export const searchQuery = (q: string) =>
     staleTime: 5_000,
   });
 
+
+export const rulesQuery = queryOptions({
+  queryKey: ["rules"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/rules")).items,
+});
+
+export type NotificationFilter = { unread_only?: boolean; limit?: number };
+
+export const notificationsQuery = (filter: NotificationFilter = {}) =>
+  queryOptions({
+    queryKey: ["notifications", filter],
+    queryFn: async () => unwrap(await api.GET("/api/v1/notifications", { params: { query: filter } })),
+  });

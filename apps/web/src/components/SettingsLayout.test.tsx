@@ -41,13 +41,12 @@ describe("SettingsLayout", () => {
     expect(screen.queryByRole("link", { name: /Auditoría/ })).not.toBeInTheDocument();
   });
 
-  it("shows a not-yet-built page as an inert entry with its milestone", async () => {
+  it("links Notificaciones now that the inbox is built", async () => {
     vi.stubGlobal("fetch", vi.fn(stubApi({ "/api/v1/me": () => meResponse() })));
 
     renderPage(SettingsLayout);
 
-    expect(await screen.findByText("Notificaciones")).toBeInTheDocument();
-    expect(screen.getByText("M8")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /Notificaciones/ })).not.toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /Notificaciones/ })).toHaveAttribute("href", "/notifications");
+    expect(screen.queryByText("M8")).not.toBeInTheDocument();
   });
 });

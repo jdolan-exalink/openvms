@@ -10,6 +10,7 @@ import { can } from "@/lib/perm";
 import { useRealtimeFeed } from "@/lib/realtime";
 import { AppShell } from "./AppShell";
 import { brandIcon as Brand, navGroups, settingsNavGroups, type NavGroup } from "./nav";
+import { NotificationBell } from "./NotificationBell";
 import { Omnibox } from "./Omnibox";
 
 export function Layout() {
@@ -88,6 +89,7 @@ export function Layout() {
               </div>
             </div>
             <div className="flex items-center gap-3">
+              <NotificationBell />
               <button
                 type="button"
                 onClick={() => setOmniboxOpen(true)}

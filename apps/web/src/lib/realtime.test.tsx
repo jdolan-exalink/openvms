@@ -163,3 +163,12 @@ describe("useRealtimeFeed", () => {
     expect(FakeSocket.instances).toHaveLength(1);
   });
 });
+
+describe("notification frames", () => {
+  it("invalidates the notifications cache on notification.created", () => {
+    const { keys } = setup();
+    sock(0).open();
+    sock(0).message({ type: "notification.created", data: {} });
+    expect(keys()).toContain(JSON.stringify(["notifications"]));
+  });
+});

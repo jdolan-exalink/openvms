@@ -20,9 +20,11 @@ const Exports = lazyRouteComponent(() => import("./routes/Exports"), "Exports");
 const Groups = lazyRouteComponent(() => import("./routes/Groups"), "Groups");
 const Live = lazyRouteComponent(() => import("./routes/Live"), "Live");
 const Login = lazyRouteComponent(() => import("./routes/Login"), "Login");
+const Notifications = lazyRouteComponent(() => import("./routes/Notifications"), "Notifications");
 const Permissions = lazyRouteComponent(() => import("./routes/Permissions"), "Permissions");
 const Plates = lazyRouteComponent(() => import("./routes/Plates"), "Plates");
 import { Playback } from "./routes/Playback";
+const Rules = lazyRouteComponent(() => import("./routes/Rules"), "Rules");
 const Servers = lazyRouteComponent(() => import("./routes/Servers"), "Servers");
 const Sites = lazyRouteComponent(() => import("./routes/Sites"), "Sites");
 const Users = lazyRouteComponent(() => import("./routes/Users"), "Users");
@@ -145,6 +147,8 @@ export const routeTree = rootRoute.addChildren([
       serversRoute,
       camerasRoute,
       settingsChild("/camera-groups", CameraGroups),
+      settingsChild("/rules", Rules),
+      settingsChild("/notifications", Notifications),
       settingsChild("/users", Users),
       settingsChild("/groups", Groups),
       permissionsRoute,
