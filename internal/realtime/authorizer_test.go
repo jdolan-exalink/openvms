@@ -88,8 +88,24 @@ func TestCachedAuthorizerRejectsUnsupportedScope(t *testing.T) {
 	a := realtime.NewCachedAuthorizer(func(context.Context, authz.Actor, authz.ScopeType, authz.Permission) ([]uuid.UUID, error) {
 		return []uuid.UUID{uuid.Nil}, nil
 	}, time.Minute)
-	ok, err := a.Allow(context.Background(), tenantActor(uuid.New()), realtime.Scope{Kind: authz.ScopeTenant, ID: uuid.Nil, Permission: authz.EventsView})
+	ok, err := a.Allow(context.Background(), tenantActor(uuid.New()), realtime.Scope{Kind: authz.ScopePlatform, ID: uuid.Nil, Permission: authz.EventsView})
 	if ok || err == nil {
 		t.Fatalf("unsupported kind = %v, %v; want denied with error", ok, err)
+	}
+}
+
+func TestCachedAuthorizerTenantScope(t *testing.T) {
+	a := realtime.NewCachedAuthorizer(nil, time.Minute)
+	tid := uuid.New()
+	actor := tenantActor(tid)
+
+	// Same tenant matches
+	if ok, err := a.Allow(context.Background(), actor, realtime.Scope{Kind: authz.ScopeTenant, ID: tid}); !ok || err != nil {
+		t.Fatalf("same tenant allow = %v, %v; want true, nil", ok, err)
+	}
+
+	// Different tenant rejected
+	if ok, err := a.Allow(context.Background(), actor, realtime.Scope{Kind: authz.ScopeTenant, ID: uuid.New()}); ok || err != nil {
+		t.Fatalf("different tenant allow = %v, %v; want false, nil", ok, err)
 	}
 }

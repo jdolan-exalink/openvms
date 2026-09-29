@@ -129,3 +129,32 @@ func TestDecodeAlarmUpdated(t *testing.T) {
 		t.Fatalf("data = %v", data)
 	}
 }
+
+func TestDecodeNotificationCreated(t *testing.T) {
+	tenant, notifID := uuid.New(), uuid.New()
+	payload, _ := json.Marshal(map[string]any{
+		"id":         notifID,
+		"tenant_id":  tenant,
+		"title":      "Test alert",
+		"body":       "Something happened",
+		"severity":   "warning",
+		"created_at": time.Unix(100, 0).UTC(),
+	})
+	m, err := realtime.Decode(realtime.DefaultRoutes(), "notification.created."+tenant.String(), payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Envelope.Type != realtime.TypeNotificationCreated || m.Envelope.TenantID != tenant {
+		t.Fatalf("envelope = %+v", m.Envelope)
+	}
+	if m.Scope.Kind != authz.ScopeTenant || m.Scope.ID != tenant {
+		t.Fatalf("scope = %+v", m.Scope)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(m.Envelope.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["id"] != notifID.String() || data["title"] != "Test alert" {
+		t.Fatalf("data = %v", data)
+	}
+}

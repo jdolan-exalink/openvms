@@ -13,9 +13,10 @@ import (
 
 // Message types of the feed. Add new ones here together with a Route.
 const (
-	TypeEventCreated = "event.created"
-	TypeServerStatus = "server.status"
-	TypeAlarmUpdated = "alarm.updated"
+	TypeEventCreated        = "event.created"
+	TypeServerStatus        = "server.status"
+	TypeAlarmUpdated        = "alarm.updated"
+	TypeNotificationCreated = "notification.created"
 )
 
 // Envelope is what a client receives.
@@ -59,6 +60,7 @@ func DefaultRoutes() []Route {
 		{Stream: "FRIGATE", Subject: "frigate.event.new.*", Decode: decodeEventCreated},
 		{Stream: "PLATFORM", Subject: "server.*", Decode: decodeServerStatus},
 		{Stream: "PLATFORM", Subject: "alarm.*.*", Decode: decodeAlarmUpdated},
+		{Stream: "PLATFORM", Subject: "notification.created.*", Decode: decodeNotificationCreated},
 	}
 }
 
@@ -181,5 +183,36 @@ func decodeAlarmUpdated(_ string, raw []byte) (Message, error) {
 	return Message{
 		Envelope: Envelope{Type: TypeAlarmUpdated, TenantID: p.TenantID, Data: data},
 		Scope:    Scope{Kind: authz.ScopeCamera, ID: p.CameraID, Permission: authz.AlarmsView},
+	}, nil
+}
+
+// notificationPayload is the shape rules.Service publishes on notification.created.<tenant>.
+type notificationPayload struct {
+	ID        uuid.UUID  `json:"id"`
+	TenantID  uuid.UUID  `json:"tenant_id"`
+	UserID    *uuid.UUID `json:"user_id,omitempty"`
+	RuleID    *uuid.UUID `json:"rule_id,omitempty"`
+	Title     string     `json:"title"`
+	Body      string     `json:"body"`
+	Link      *string    `json:"link,omitempty"`
+	Severity  string     `json:"severity"`
+	CreatedAt time.Time  `json:"created_at"`
+}
+
+func decodeNotificationCreated(_ string, raw []byte) (Message, error) {
+	var p notificationPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return Message{}, err
+	}
+	if p.TenantID == uuid.Nil {
+		return Message{}, errNoTenant
+	}
+	data, err := json.Marshal(p)
+	if err != nil {
+		return Message{}, err
+	}
+	return Message{
+		Envelope: Envelope{Type: TypeNotificationCreated, TenantID: p.TenantID, Data: data},
+		Scope:    Scope{Kind: authz.ScopeTenant, ID: p.TenantID},
 	}, nil
 }

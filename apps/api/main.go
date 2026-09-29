@@ -45,6 +45,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/telemetry"
 	"github.com/jdolan-exalink/openvms/internal/platform/valkeyx"
 	"github.com/jdolan-exalink/openvms/internal/realtime"
+	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
 	dbstore "github.com/jdolan-exalink/openvms/internal/store"
@@ -139,6 +140,7 @@ func run() error {
 		Branding:      brandingSvc,
 		ClipWatermark: clipWatermarkSvc,
 		Search:        &search.Service{Store: st},
+		Rules:         rules.NewService(st, &jetstreamPublisher{js: js}, log),
 		Identity: &identity.Service{
 			Store: st, Sealer: sealer, Log: log, Issuer: "OpenVMS",
 			SessionTTL: cfg.SessionTTL, IdleTimeout: cfg.SessionIdle,

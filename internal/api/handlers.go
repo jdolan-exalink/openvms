@@ -15,6 +15,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/media"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
+	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 )
 
@@ -28,6 +29,7 @@ type Handlers struct {
 	Branding      *branding.Service
 	ClipWatermark *clipwatermark.Service
 	Search        *search.Service
+	Rules         *rules.Service
 	Log           *slog.Logger
 	Checks        []health.Check
 	CheckTimeout  time.Duration

@@ -25,7 +25,7 @@ var Streams = []jetstream.StreamConfig{
 	{
 		Name:        "PLATFORM",
 		Description: "Server, camera, user, export and alarm lifecycle events",
-		Subjects:    []string{"server.>", "camera.>", "lpr.>", "user.>", "export.>", "alarm.>"},
+		Subjects:    []string{"server.>", "camera.>", "lpr.>", "user.>", "export.>", "alarm.>", "notification.>"},
 		Retention:   jetstream.LimitsPolicy,
 		MaxAge:      7 * 24 * time.Hour,
 		Storage:     jetstream.FileStorage,

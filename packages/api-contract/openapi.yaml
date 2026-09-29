@@ -21,6 +21,8 @@ tags:
   - name: audit
   - name: live
   - name: playback
+  - name: rules
+  - name: notifications
 security:
   - bearerAuth: []
   - cookieAuth: []
@@ -1565,6 +1567,151 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+  /api/v1/rules:
+    get:
+      tags: [rules]
+      operationId: listRules
+      summary: List automation rules for the tenant
+      description: Returns all automation rules for the current tenant. Requires notifications.manage or tenant admin.
+      responses:
+        "200":
+          description: List of rules
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RulesList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [rules]
+      operationId: createRule
+      summary: Create an automation rule
+      description: Creates a new automation rule for the tenant. Requires notifications.manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RuleCreate"
+      responses:
+        "201":
+          description: Created rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rule"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/rules/{ruleId}:
+    parameters:
+      - name: ruleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [rules]
+      operationId: getRule
+      summary: Get rule by ID
+      responses:
+        "200":
+          description: The rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rule"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [rules]
+      operationId: updateRule
+      summary: Update rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RuleUpdate"
+      responses:
+        "200":
+          description: Updated rule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Rule"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [rules]
+      operationId: deleteRule
+      summary: Delete rule
+      responses:
+        "204":
+          description: Rule deleted
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/notifications:
+    get:
+      tags: [notifications]
+      operationId: listNotifications
+      summary: List in-app notifications
+      description: Returns recent notifications for the authenticated user and tenant.
+      parameters:
+        - name: unread_only
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, default: 50, minimum: 1, maximum: 200 }
+      responses:
+        "200":
+          description: Notifications list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/notifications/{id}/read:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      tags: [notifications]
+      operationId: markNotificationRead
+      summary: Mark a notification as read
+      responses:
+        "200":
+          description: Updated notification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Notification"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/notifications/read-all:
+    post:
+      tags: [notifications]
+      operationId: markAllNotificationsRead
+      summary: Mark all notifications as read for current user
+      responses:
+        "200":
+          description: Result count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count]
+                properties:
+                  count: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
 components:
   securitySchemes:
     bearerAuth:
@@ -2412,4 +2559,100 @@ components:
         site_name: { type: string }
         seen_at: { type: string, format: date-time }
         event_id: { type: string, format: uuid, nullable: true }
+    RuleTriggerType:
+      type: string
+      enum: [event, camera_offline, server_offline]
+    RuleConditions:
+      type: object
+      properties:
+        camera_ids:
+          type: array
+          items: { type: string, format: uuid }
+        server_ids:
+          type: array
+          items: { type: string, format: uuid }
+        labels:
+          type: array
+          items: { type: string }
+        zones:
+          type: array
+          items: { type: string }
+        severities:
+          type: array
+          items: { type: string }
+        duration_seconds:
+          type: integer
+    RuleActions:
+      type: object
+      properties:
+        create_alarm:
+          type: boolean
+        notify_in_app:
+          type: boolean
+        severity:
+          type: string
+          enum: [info, warning, critical]
+    Rule:
+      type: object
+      required: [id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        trigger_type: { $ref: "#/components/schemas/RuleTriggerType" }
+        conditions: { $ref: "#/components/schemas/RuleConditions" }
+        actions: { $ref: "#/components/schemas/RuleActions" }
+        enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    RuleCreate:
+      type: object
+      required: [name, trigger_type]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        trigger_type: { $ref: "#/components/schemas/RuleTriggerType" }
+        conditions: { $ref: "#/components/schemas/RuleConditions" }
+        actions: { $ref: "#/components/schemas/RuleActions" }
+        enabled: { type: boolean, default: true }
+    RuleUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        trigger_type: { $ref: "#/components/schemas/RuleTriggerType" }
+        conditions: { $ref: "#/components/schemas/RuleConditions" }
+        actions: { $ref: "#/components/schemas/RuleActions" }
+        enabled: { type: boolean }
+    RulesList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Rule" }
+    NotificationSeverity:
+      type: string
+      enum: [info, warning, critical]
+    Notification:
+      type: object
+      required: [id, tenant_id, title, body, severity, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid, nullable: true }
+        rule_id: { type: string, format: uuid, nullable: true }
+        title: { type: string }
+        body: { type: string }
+        link: { type: string, nullable: true }
+        severity: { $ref: "#/components/schemas/NotificationSeverity" }
+        read_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+    NotificationList:
+      type: object
+      required: [items, unread_count]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Notification" }
+        unread_count: { type: integer }
+
 

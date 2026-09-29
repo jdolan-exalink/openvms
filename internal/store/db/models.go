@@ -217,6 +217,19 @@ type LprRead struct {
 	UpdatedAt       time.Time
 }
 
+type Notification struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	UserID    *uuid.UUID
+	RuleID    *uuid.UUID
+	Title     string
+	Body      string
+	Link      *string
+	Severity  string
+	ReadAt    *time.Time
+	CreatedAt time.Time
+}
+
 type ObjectSnapshot struct {
 	ServerID       uuid.UUID
 	TenantID       uuid.UUID
@@ -235,6 +248,18 @@ type PermissionGrant struct {
 	ScopeID     *uuid.UUID
 	CreatedBy   *uuid.UUID
 	CreatedAt   time.Time
+}
+
+type Rule struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	Name        string
+	TriggerType string
+	Conditions  json.RawMessage
+	Actions     json.RawMessage
+	Enabled     bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type Session struct {

@@ -84,6 +84,8 @@ func (a *CachedAuthorizer) SetClock(now func() time.Time) {
 func (a *CachedAuthorizer) Allow(ctx context.Context, actor authz.Actor, s Scope) (bool, error) {
 	switch s.Kind {
 	case authz.ScopeCamera, authz.ScopeServer, authz.ScopeSite:
+	case authz.ScopeTenant:
+		return actor.TenantID != nil && *actor.TenantID == s.ID, nil
 	default:
 		return false, fmt.Errorf("realtime: unsupported scope kind %q", s.Kind)
 	}
