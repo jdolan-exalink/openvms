@@ -2046,6 +2046,8 @@ export interface components {
         RuleConditions: {
             camera_ids?: string[];
             server_ids?: string[];
+            /** @description Only match cameras, servers and events that belong to one of these sites. Empty means every site. */
+            site_ids?: string[];
             labels?: string[];
             zones?: string[];
             severities?: string[];

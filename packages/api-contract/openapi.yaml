@@ -2577,6 +2577,10 @@ components:
         server_ids:
           type: array
           items: { type: string, format: uuid }
+        site_ids:
+          type: array
+          description: Only match cameras, servers and events that belong to one of these sites. Empty means every site.
+          items: { type: string, format: uuid }
         labels:
           type: array
           items: { type: string }

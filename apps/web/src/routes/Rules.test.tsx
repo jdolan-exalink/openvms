@@ -36,6 +36,7 @@ function stub(rules: Schemas["Rule"][], extra?: Handler) {
       if (url.pathname === "/api/v1/me") return json(manager);
       if (url.pathname === "/api/v1/rules" && req.method === "GET") return json({ items: rules });
       if (url.pathname === "/api/v1/cameras") return json({ items: [{ id: "c1", display_name: "Cámara Acceso" }, { id: "c2", display_name: "Cámara Patio" }] });
+      if (url.pathname === "/api/v1/sites") return json({ items: [{ id: "site1", name: "Sucursal Central" }, { id: "site2", name: "Depósito" }] });
       if (url.pathname === "/api/v1/servers") return json({ items: [{ id: "s1", name: "Servidor Norte" }] });
       if (url.pathname.startsWith("/api/v1/rules")) return json(makeRule());
       return json({}, 404);
@@ -126,6 +127,20 @@ describe("Rules route", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]?.body).toMatchObject({ trigger_type: "camera_offline", conditions: { duration_seconds: 600 } });
+  });
+
+  it("filters a rule by site for every trigger", async () => {
+    const calls = stub([]);
+    renderPage(() => <Rules />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Solo central" } });
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: "Sucursal Central" }));
+    fireEvent.change(within(dialog).getByLabelText("Disparador"), { target: { value: "server_offline" } });
+    expect(within(dialog).getByRole("checkbox", { name: "Sucursal Central" })).toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]?.body).toMatchObject({ trigger_type: "server_offline", conditions: { site_ids: ["site1"] } });
   });
 
   it("requires confirmation before deleting", async () => {

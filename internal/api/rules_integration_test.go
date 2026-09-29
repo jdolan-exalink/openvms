@@ -70,7 +70,7 @@ func TestRulesCRUDAndRBAC(t *testing.T) {
 	code, body := te.request("POST", "/api/v1/rules", token, map[string]any{
 		"name":         "Personas en acceso norte",
 		"trigger_type": "event",
-		"conditions":   map[string]any{"camera_ids": []string{cam.ID.String()}, "labels": []string{"person"}},
+		"conditions":   map[string]any{"camera_ids": []string{cam.ID.String()}, "site_ids": []string{cam.SiteID.String()}, "labels": []string{"person"}},
 		"actions":      map[string]any{"create_alarm": true, "notify_in_app": true, "severity": "warning"},
 	})
 	if code != 201 {
@@ -85,6 +85,9 @@ func TestRulesCRUDAndRBAC(t *testing.T) {
 	}
 	if created.Conditions.Labels == nil || (*created.Conditions.Labels)[0] != "person" {
 		t.Fatalf("labels not round-tripped: %+v", created.Conditions)
+	}
+	if created.Conditions.SiteIds == nil || len(*created.Conditions.SiteIds) != 1 || (*created.Conditions.SiteIds)[0] != cam.SiteID {
+		t.Fatalf("site_ids not round-tripped: %+v", created.Conditions)
 	}
 
 	path := "/api/v1/rules/" + created.Id.String()

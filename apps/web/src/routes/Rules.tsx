@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
-import { camerasQuery, rulesQuery, serversQuery } from "@/api/queries";
+import { camerasQuery, rulesQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
@@ -145,12 +145,14 @@ const parseList = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolea
 function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void; onCancel: () => void }) {
   const cameras = useQuery(camerasQuery({}));
   const servers = useQuery(serversQuery);
+  const sites = useQuery(sitesQuery);
   const c = rule?.conditions ?? {};
   const [f, setF] = useState({
     name: rule?.name ?? "",
     trigger: (rule?.trigger_type ?? "event") as Trigger,
     camera_ids: c.camera_ids ?? ([] as string[]),
     server_ids: c.server_ids ?? ([] as string[]),
+    site_ids: c.site_ids ?? ([] as string[]),
     labels: (c.labels ?? []).join(", "),
     zones: (c.zones ?? []).join(", "),
     severities: c.severities ?? ([] as string[]),
@@ -163,6 +165,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
   const buildConditions = (): Schemas["RuleConditions"] => {
     if (f.trigger === "event") {
       const out: Schemas["RuleConditions"] = {};
+      if (f.site_ids.length) out.site_ids = f.site_ids;
       if (f.camera_ids.length) out.camera_ids = f.camera_ids;
       const labels = parseList(f.labels);
       if (labels.length) out.labels = labels;
@@ -172,6 +175,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
       return out;
     }
     const out: Schemas["RuleConditions"] = { duration_seconds: Math.max(1, Number(f.minutes) || defaultMinutes) * 60 };
+    if (f.site_ids.length) out.site_ids = f.site_ids;
     if (f.trigger === "camera_offline" && f.camera_ids.length) out.camera_ids = f.camera_ids;
     if (f.trigger === "server_offline" && f.server_ids.length) out.server_ids = f.server_ids;
     return out;
@@ -217,6 +221,13 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
           </Field>
         </div>
 
+        <CheckGroup
+          legend="Sitios (vacío = todos)"
+          options={(sites.data ?? []).map((site) => ({ value: site.id, label: site.name }))}
+          selected={f.site_ids}
+          onToggle={(id) => setF({ ...f, site_ids: flip(f.site_ids, id) })}
+          empty="No hay sitios disponibles."
+        />
         {f.trigger !== "server_offline" && (
           <CheckGroup
             legend={f.trigger === "event" ? "Cámaras (vacío = todas)" : "Cámaras a vigilar (vacío = todas)"}

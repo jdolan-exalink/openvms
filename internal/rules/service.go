@@ -516,7 +516,7 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 
 // EvaluateOffline runs the tenant's offline rules for a camera or server that has been down for
 // duration. Callers may invoke it on every tick: each rule notifies once per outage.
-func (s *Service) EvaluateOffline(ctx context.Context, tenantID uuid.UUID, triggerType TriggerType, resourceID uuid.UUID, resourceName string, duration time.Duration) error {
+func (s *Service) EvaluateOffline(ctx context.Context, tenantID uuid.UUID, triggerType TriggerType, resourceID, siteID uuid.UUID, resourceName string, duration time.Duration) error {
 	actor := authz.Actor{TenantID: &tenantID}
 	return s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		q := db.New(tx)
@@ -537,9 +537,9 @@ func (s *Service) EvaluateOffline(ctx context.Context, tenantID uuid.UUID, trigg
 			matched := false
 			switch triggerType {
 			case TriggerCameraOffline:
-				matched = rule.Conditions.MatchesCameraOffline(resourceID, duration)
+				matched = rule.Conditions.MatchesCameraOffline(resourceID, siteID, duration)
 			case TriggerServerOffline:
-				matched = rule.Conditions.MatchesServerOffline(resourceID, duration)
+				matched = rule.Conditions.MatchesServerOffline(resourceID, siteID, duration)
 			}
 			if !matched {
 				continue

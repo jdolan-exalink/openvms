@@ -33,6 +33,7 @@ type OfflineDetector struct {
 
 type outage struct {
 	tenantID uuid.UUID
+	siteID   uuid.UUID
 	id       uuid.UUID
 	name     string
 	duration time.Duration
@@ -64,12 +65,12 @@ func (d *OfflineDetector) Tick(ctx context.Context) {
 		return
 	}
 	for _, o := range cameras {
-		if err := d.Rules.EvaluateOffline(ctx, o.tenantID, TriggerCameraOffline, o.id, o.name, o.duration); err != nil {
+		if err := d.Rules.EvaluateOffline(ctx, o.tenantID, TriggerCameraOffline, o.id, o.siteID, o.name, o.duration); err != nil {
 			d.Log.WarnContext(ctx, "evaluate camera offline rules", "error", err, "camera_id", o.id)
 		}
 	}
 	for _, o := range servers {
-		if err := d.Rules.EvaluateOffline(ctx, o.tenantID, TriggerServerOffline, o.id, o.name, o.duration); err != nil {
+		if err := d.Rules.EvaluateOffline(ctx, o.tenantID, TriggerServerOffline, o.id, o.siteID, o.name, o.duration); err != nil {
 			d.Log.WarnContext(ctx, "evaluate server offline rules", "error", err, "server_id", o.id)
 		}
 	}
@@ -90,12 +91,12 @@ DELETE FROM camera_outages WHERE camera_id NOT IN (SELECT id FROM cameras WHERE 
 		}
 		var err error
 		if cameras, err = readOutages(ctx, tx, `
-SELECT c.tenant_id, c.id, c.display_name, extract(epoch FROM now() - o.since)
+SELECT c.tenant_id, c.site_id, c.id, c.display_name, extract(epoch FROM now() - o.since)
 FROM camera_outages o JOIN cameras c ON c.id = o.camera_id`); err != nil {
 			return err
 		}
 		servers, err = readOutages(ctx, tx, `
-SELECT tenant_id, id, name, extract(epoch FROM now() - coalesce(last_seen_at, created_at))
+SELECT tenant_id, site_id, id, name, extract(epoch FROM now() - coalesce(last_seen_at, created_at))
 FROM frigate_servers WHERE status = 'offline' AND deleted_at IS NULL`)
 		return err
 	})
@@ -112,7 +113,7 @@ func readOutages(ctx context.Context, tx pgx.Tx, query string) ([]outage, error)
 	for rows.Next() {
 		var o outage
 		var secs float64
-		if err := rows.Scan(&o.tenantID, &o.id, &o.name, &secs); err != nil {
+		if err := rows.Scan(&o.tenantID, &o.siteID, &o.id, &o.name, &secs); err != nil {
 			return nil, err
 		}
 		o.duration = time.Duration(secs * float64(time.Second))

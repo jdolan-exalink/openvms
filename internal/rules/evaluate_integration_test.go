@@ -238,3 +238,55 @@ func TestOfflineDetectorNotifiesServerOnce(t *testing.T) {
 		t.Fatalf("server offline for 10 min over two ticks created %d notifications, want 1", n)
 	}
 }
+
+func TestEvaluateEventSiteFilter(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	ev := f.eventCtx("person")
+	id := f.addRule("Otro sitio", rules.TriggerEvent, rules.Conditions{SiteIDs: []uuid.UUID{uuid.New()}}, rules.Actions{NotifyInApp: true}, true)
+	same := f.addRule("Mismo sitio", rules.TriggerEvent, rules.Conditions{SiteIDs: []uuid.UUID{ev.SiteID}}, rules.Actions{NotifyInApp: true}, true)
+
+	if err := f.svc.EvaluateEvent(ctx, ev); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(id); n != 0 {
+		t.Fatalf("rule scoped to another site created %d notifications, want 0", n)
+	}
+	if n := f.notifications(same); n != 1 {
+		t.Fatalf("rule scoped to the event site created %d notifications, want 1", n)
+	}
+}
+
+func TestOfflineDetectorSiteFilter(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	cam := f.env.Cameras["frigate-h01/plaza"]
+	other := f.addRule("Otro sitio", rules.TriggerCameraOffline, rules.Conditions{SiteIDs: []uuid.UUID{uuid.New()}}, rules.Actions{NotifyInApp: true}, true)
+	same := f.addRule("Mismo sitio", rules.TriggerCameraOffline, rules.Conditions{SiteIDs: []uuid.UUID{cam.SiteID}}, rules.Actions{NotifyInApp: true}, true)
+	det := &rules.OfflineDetector{Store: f.env.Store, Rules: f.svc, Log: pgtest.Discard()}
+
+	if err := f.exec(`UPDATE cameras SET status = 'offline' WHERE id = $1`, cam.ID); err != nil {
+		t.Fatal(err)
+	}
+	det.Tick(ctx)
+	if n := f.notifications(other); n != 0 {
+		t.Fatalf("rule scoped to another site created %d notifications, want 0", n)
+	}
+	if n := f.notifications(same); n != 1 {
+		t.Fatalf("rule scoped to the camera site created %d notifications, want 1", n)
+	}
+
+	srv := cam.ServerID
+	srvOther := f.addRule("Servidor otro sitio", rules.TriggerServerOffline, rules.Conditions{SiteIDs: []uuid.UUID{uuid.New()}}, rules.Actions{NotifyInApp: true}, true)
+	srvSame := f.addRule("Servidor mismo sitio", rules.TriggerServerOffline, rules.Conditions{SiteIDs: []uuid.UUID{cam.SiteID}}, rules.Actions{NotifyInApp: true}, true)
+	if err := f.exec(`UPDATE frigate_servers SET status = 'offline' WHERE id = $1`, srv); err != nil {
+		t.Fatal(err)
+	}
+	det.Tick(ctx)
+	if n := f.notifications(srvOther); n != 0 {
+		t.Fatalf("server rule scoped to another site created %d notifications, want 0", n)
+	}
+	if n := f.notifications(srvSame); n != 1 {
+		t.Fatalf("server rule scoped to its site created %d notifications, want 1", n)
+	}
+}

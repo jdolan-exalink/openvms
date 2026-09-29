@@ -75,15 +75,15 @@ func TestConditionsMatchesCameraOffline(t *testing.T) {
 		DurationSeconds: 300,
 	}
 
-	if !c.MatchesCameraOffline(cam1, 5*time.Minute) {
+	if !c.MatchesCameraOffline(cam1, uuid.Nil, 5*time.Minute) {
 		t.Fatal("expected camera offline to match")
 	}
 
-	if c.MatchesCameraOffline(cam1, 4*time.Minute) {
+	if c.MatchesCameraOffline(cam1, uuid.Nil, 4*time.Minute) {
 		t.Fatal("expected camera offline below duration threshold to not match")
 	}
 
-	if c.MatchesCameraOffline(cam2, 10*time.Minute) {
+	if c.MatchesCameraOffline(cam2, uuid.Nil, 10*time.Minute) {
 		t.Fatal("expected different camera to not match")
 	}
 }
@@ -97,15 +97,44 @@ func TestConditionsMatchesServerOffline(t *testing.T) {
 		DurationSeconds: 120,
 	}
 
-	if !c.MatchesServerOffline(srv1, 2*time.Minute) {
+	if !c.MatchesServerOffline(srv1, uuid.Nil, 2*time.Minute) {
 		t.Fatal("expected server offline to match")
 	}
 
-	if c.MatchesServerOffline(srv1, 1*time.Minute) {
+	if c.MatchesServerOffline(srv1, uuid.Nil, 1*time.Minute) {
 		t.Fatal("expected server offline below duration to not match")
 	}
 
-	if c.MatchesServerOffline(srv2, 5*time.Minute) {
+	if c.MatchesServerOffline(srv2, uuid.Nil, 5*time.Minute) {
 		t.Fatal("expected different server to not match")
+	}
+}
+
+func TestConditionsSiteFilter(t *testing.T) {
+	siteA, siteB := uuid.New(), uuid.New()
+	c := rules.Conditions{SiteIDs: []uuid.UUID{siteA}}
+
+	if !c.MatchesEvent(rules.EventContext{SiteID: siteA}) {
+		t.Fatal("expected event in the selected site to match")
+	}
+	if c.MatchesEvent(rules.EventContext{SiteID: siteB}) {
+		t.Fatal("did not expect event in another site to match")
+	}
+	if !c.MatchesCameraOffline(uuid.New(), siteA, time.Minute) {
+		t.Fatal("expected camera in the selected site to match")
+	}
+	if c.MatchesCameraOffline(uuid.New(), siteB, time.Minute) {
+		t.Fatal("did not expect camera in another site to match")
+	}
+	if !c.MatchesServerOffline(uuid.New(), siteA, time.Minute) {
+		t.Fatal("expected server in the selected site to match")
+	}
+	if c.MatchesServerOffline(uuid.New(), siteB, time.Minute) {
+		t.Fatal("did not expect server in another site to match")
+	}
+
+	empty := rules.Conditions{}
+	if !empty.MatchesEvent(rules.EventContext{SiteID: siteB}) || !empty.MatchesCameraOffline(uuid.New(), siteB, 0) || !empty.MatchesServerOffline(uuid.New(), siteB, 0) {
+		t.Fatal("expected empty site filter to match every site")
 	}
 }

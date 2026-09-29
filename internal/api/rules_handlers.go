@@ -16,6 +16,9 @@ func toRule(r rules.Rule) gen.Rule {
 	if len(c.ServerIDs) > 0 {
 		cond.ServerIds = &c.ServerIDs
 	}
+	if len(c.SiteIDs) > 0 {
+		cond.SiteIds = &c.SiteIDs
+	}
 	if len(c.Labels) > 0 {
 		cond.Labels = &c.Labels
 	}
@@ -57,6 +60,9 @@ func fromRuleConditions(c *gen.RuleConditions) rules.Conditions {
 	}
 	if c.ServerIds != nil {
 		out.ServerIDs = *c.ServerIds
+	}
+	if c.SiteIds != nil {
+		out.SiteIDs = *c.SiteIds
 	}
 	if c.Labels != nil {
 		out.Labels = *c.Labels

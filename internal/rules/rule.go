@@ -18,6 +18,7 @@ const (
 type Conditions struct {
 	CameraIDs       []uuid.UUID `json:"camera_ids,omitempty"`
 	ServerIDs       []uuid.UUID `json:"server_ids,omitempty"`
+	SiteIDs         []uuid.UUID `json:"site_ids,omitempty"`
 	Labels          []string    `json:"labels,omitempty"`
 	Zones           []string    `json:"zones,omitempty"`
 	Severities      []string    `json:"severities,omitempty"`
@@ -69,106 +70,67 @@ type EventContext struct {
 	Start      time.Time
 }
 
+func containsID(ids []uuid.UUID, id uuid.UUID) bool {
+	for _, x := range ids {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesAny reports whether any wanted value equals (case-insensitively) any of the candidates.
+func matchesAny(wanted, candidates []string) bool {
+	for _, w := range wanted {
+		for _, c := range candidates {
+			if strings.EqualFold(w, c) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchesSite is true when no site filter is set or siteID is one of the selected sites.
+func (c Conditions) matchesSite(siteID uuid.UUID) bool {
+	return len(c.SiteIDs) == 0 || containsID(c.SiteIDs, siteID)
+}
+
 func (c Conditions) MatchesEvent(ev EventContext) bool {
-	if len(c.CameraIDs) > 0 {
-		matched := false
-		for _, id := range c.CameraIDs {
-			if id == ev.CameraID {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
+	if len(c.CameraIDs) > 0 && !containsID(c.CameraIDs, ev.CameraID) {
+		return false
 	}
-
-	if len(c.Severities) > 0 {
-		matched := false
-		for _, s := range c.Severities {
-			if strings.EqualFold(s, ev.Severity) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
+	if !c.matchesSite(ev.SiteID) {
+		return false
 	}
-
-	if len(c.Labels) > 0 {
-		matched := false
-		for _, l := range c.Labels {
-			for _, evLabel := range ev.Labels {
-				if strings.EqualFold(l, evLabel) {
-					matched = true
-					break
-				}
-			}
-			if matched {
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
+	if len(c.Severities) > 0 && !matchesAny(c.Severities, []string{ev.Severity}) {
+		return false
 	}
-
-	if len(c.Zones) > 0 {
-		matched := false
-		for _, z := range c.Zones {
-			for _, evZone := range ev.Zones {
-				if strings.EqualFold(z, evZone) {
-					matched = true
-					break
-				}
-			}
-			if matched {
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
+	if len(c.Labels) > 0 && !matchesAny(c.Labels, ev.Labels) {
+		return false
 	}
-
-	return true
-}
-
-func (c Conditions) MatchesCameraOffline(cameraID uuid.UUID, duration time.Duration) bool {
-	if len(c.CameraIDs) > 0 {
-		matched := false
-		for _, id := range c.CameraIDs {
-			if id == cameraID {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
-	}
-	if c.DurationSeconds > 0 && duration < time.Duration(c.DurationSeconds)*time.Second {
+	if len(c.Zones) > 0 && !matchesAny(c.Zones, ev.Zones) {
 		return false
 	}
 	return true
 }
 
-func (c Conditions) MatchesServerOffline(serverID uuid.UUID, duration time.Duration) bool {
-	if len(c.ServerIDs) > 0 {
-		matched := false
-		for _, id := range c.ServerIDs {
-			if id == serverID {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
-	}
-	if c.DurationSeconds > 0 && duration < time.Duration(c.DurationSeconds)*time.Second {
+func (c Conditions) MatchesCameraOffline(cameraID, siteID uuid.UUID, duration time.Duration) bool {
+	if len(c.CameraIDs) > 0 && !containsID(c.CameraIDs, cameraID) {
 		return false
 	}
-	return true
+	if !c.matchesSite(siteID) {
+		return false
+	}
+	return c.DurationSeconds <= 0 || duration >= time.Duration(c.DurationSeconds)*time.Second
+}
+
+func (c Conditions) MatchesServerOffline(serverID, siteID uuid.UUID, duration time.Duration) bool {
+	if len(c.ServerIDs) > 0 && !containsID(c.ServerIDs, serverID) {
+		return false
+	}
+	if !c.matchesSite(siteID) {
+		return false
+	}
+	return c.DurationSeconds <= 0 || duration >= time.Duration(c.DurationSeconds)*time.Second
 }
