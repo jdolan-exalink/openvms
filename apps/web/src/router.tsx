@@ -7,6 +7,7 @@ import { SettingsLayout } from "./components/SettingsLayout";
 import { Account } from "./routes/Account";
 import { Audit } from "./routes/Audit";
 import { Branding } from "./routes/Branding";
+import { CameraGroups } from "./routes/CameraGroups";
 import { Cameras } from "./routes/Cameras";
 import { Dashboard } from "./routes/Dashboard";
 import { parseEventsSearch } from "./lib/eventsSearch";
@@ -108,6 +109,7 @@ export const routeTree = rootRoute.addChildren([
       settingsChild("/sites", Sites),
       serversRoute,
       camerasRoute,
+      settingsChild("/camera-groups", CameraGroups),
       settingsChild("/users", Users),
       settingsChild("/groups", Groups),
       permissionsRoute,

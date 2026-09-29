@@ -1,5 +1,5 @@
 import {
-  Bell, Camera, Download, FileSearch, FolderLock, Gauge, History, ImageIcon, KeyRound, LayoutGrid,
+  Bell, Camera, Download, FileSearch, FolderLock, Folders, Gauge, History, ImageIcon, KeyRound, LayoutGrid,
   ListVideo, MapPin, ScanLine, Server, Settings, ShieldCheck, UserCog, Users, UsersRound,
   type LucideIcon,
 } from "lucide-react";
@@ -42,6 +42,7 @@ export const settingsNavGroups: NavGroup[] = [
       { label: "Sitios", icon: MapPin, to: "/sites" },
       { label: "Servidores", icon: Server, to: "/servers", permission: "servers.view" },
       { label: "Cámaras", icon: Camera, to: "/cameras", permission: "cameras.view" },
+      { label: "Grupos de cámaras", icon: Folders, to: "/camera-groups", permission: "cameras.view" },
       { label: "Notificaciones", icon: Bell, milestone: "M8" },
     ],
   },
