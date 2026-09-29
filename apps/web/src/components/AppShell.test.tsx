@@ -12,7 +12,10 @@ describe("AppShell", () => {
 
     expect(screen.getByLabelText("Primary Nav Rail")).toHaveClass("hidden", "md:flex");
     expect(screen.getByRole("complementary", { name: "Primary Nav Rail" })).toHaveTextContent("Existing navigation");
-    expect(screen.getByRole("main", { name: "Main Workspace" })).toContainElement(screen.getByRole("heading", { name: "Current route" }));
+    const main = screen.getByRole("main", { name: "Main Workspace" });
+    expect(main).toContainElement(screen.getByRole("heading", { name: "Current route" }));
+    expect(main).toHaveAttribute("id", "main-content");
+    expect(screen.getByRole("link", { name: "Saltar al contenido" })).toHaveAttribute("href", "#main-content");
     expect(screen.queryByRole("complementary", { name: "Context Sidebar" })).not.toBeInTheDocument();
   });
 

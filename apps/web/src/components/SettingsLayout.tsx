@@ -3,7 +3,6 @@ import { Link, Outlet } from "@tanstack/react-router";
 import { meQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
 import { cn } from "@/lib/cn";
-import { PageHeader } from "./ui";
 import { settingsNavGroups } from "./nav";
 
 /**
@@ -14,9 +13,7 @@ import { settingsNavGroups } from "./nav";
 export function SettingsLayout() {
   const me = useQuery(meQuery);
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader title="Configuración" description="Infraestructura y administración de la plataforma." />
-      <div className="flex flex-col gap-6 lg:flex-row">
+    <div className="flex flex-col gap-6 lg:flex-row">
         <nav aria-label="Configuración" className="flex w-full shrink-0 flex-col gap-4 lg:w-56">
           {settingsNavGroups.map((group, i) => (
             <div key={group.title ?? i} className="flex flex-col gap-0.5">
@@ -53,6 +50,5 @@ export function SettingsLayout() {
           <Outlet />
         </div>
       </div>
-    </div>
   );
 }

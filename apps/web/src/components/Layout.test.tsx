@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, stubApi } from "@/test-utils";
 import { routeTree } from "@/router";
@@ -86,5 +86,62 @@ describe("primary navigation and context header", () => {
     await screen.findByLabelText("Encabezado de página");
     expect(sockets).toHaveLength(1);
     expect(sockets[0]).toMatch(/^wss?:\/\/.+\/ws$/);
+  });
+
+  it("renders a mobile navigation drawer that toggles and contains operational and settings items", async () => {
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": () => json({
+        id: "u1", username: "operator", display_name: "Operator", tenant_id: "t1",
+        mfa_enabled: false, must_change_password: false, auth_method: "session",
+        grants: [
+          { permission: "events.view", effect: "allow", scope_type: "platform" },
+          { permission: "sites.view", effect: "allow", scope_type: "platform" },
+        ],
+      }),
+    })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/events"] }), context: { queryClient: client } });
+    render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+
+    await screen.findByLabelText("Encabezado de página");
+    expect(screen.getByRole("link", { name: "Saltar al contenido" })).toHaveAttribute("href", "#main-content");
+
+    // Open mobile menu
+    const menuBtn = screen.getByRole("button", { name: "Abrir menú de navegación" });
+    expect(menuBtn).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(menuBtn);
+
+    // Drawer is now open
+    const drawer = screen.getByRole("dialog", { name: "Navegación móvil" });
+    expect(drawer).toBeInTheDocument();
+    expect(menuBtn).toHaveAttribute("aria-expanded", "true");
+
+    // Contains operational and settings links
+    expect(screen.getAllByRole("link", { name: "Eventos" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByRole("link", { name: "Sitios" })).toBeInTheDocument();
+
+    // Close button dismisses drawer
+    const closeBtn = screen.getByRole("button", { name: "Cerrar menú" });
+    fireEvent.click(closeBtn);
+    expect(screen.queryByRole("dialog", { name: "Navegación móvil" })).not.toBeInTheDocument();
+  });
+
+  it("closes the mobile drawer when Escape is pressed", async () => {
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": () => json({
+        id: "u1", username: "operator", display_name: "Operator", tenant_id: "t1",
+        mfa_enabled: false, must_change_password: false, auth_method: "session", grants: [],
+      }),
+    })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/live"] }), context: { queryClient: client } });
+    render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+
+    await screen.findByRole("button", { name: "Abrir menú de navegación" });
+    fireEvent.click(screen.getByRole("button", { name: "Abrir menú de navegación" }));
+    expect(screen.getByRole("dialog", { name: "Navegación móvil" })).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Navegación móvil" })).not.toBeInTheDocument();
   });
 });
