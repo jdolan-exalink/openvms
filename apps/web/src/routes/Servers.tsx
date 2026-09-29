@@ -1,9 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, RefreshCw, RotateCcw } from "lucide-react";
+import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { meQuery, serversQuery, sitesQuery, syncStatusQuery } from "@/api/queries";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Modal } from "@/components/Modal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
@@ -19,6 +21,8 @@ export function Servers() {
     (s) => (!siteFilter || s.site_id === siteFilter) && (!needle || `${s.name} ${s.base_url}`.toLowerCase().includes(needle)),
   );
   const siteName = new Map(sites.data?.map((s) => [s.id, s.name]));
+  const [editing, setEditing] = useState<Schemas["Server"] | null>(null);
+  const [deleting, setDeleting] = useState<Schemas["Server"] | null>(null);
   const sync = useQuery(syncStatusQuery);
   const syncOf = new Map(sync.data?.map((s) => [s.server_id, s]));
 
@@ -35,6 +39,8 @@ export function Servers() {
           ) : null
         }
       />
+      {editing && <EditServerModal server={editing} sites={sites.data ?? []} onDone={() => setEditing(null)} />}
+      {deleting && <DeleteServerDialog server={deleting} onDone={() => setDeleting(null)} />}
       {registering && <RegisterServer sites={sites.data ?? []} onDone={() => setRegistering(false)} />}
       <ErrorNote error={servers.error} />
       {servers.data?.length === 0 && <Empty>No hay servidores visibles para tu usuario.</Empty>}
@@ -99,9 +105,21 @@ export function Servers() {
                   <SyncCell status={syncOf.get(s.id)} />
                 </td>
                 <td className="text-right">
-                  <div className="flex items-center justify-end gap-2">
+                  <div className="flex flex-wrap items-start justify-end gap-2">
                     {can(me.data, "servers.restart") && <RestartButton server={s} />}
                     {can(me.data, "servers.manage") && <SyncButton server={s} />}
+                    {can(me.data, "servers.manage") && (
+                      <>
+                        <Button className="text-xs px-2 py-1" onClick={() => setEditing(s)} title="Editar servidor">
+                          <Pencil className="size-3.5" aria-hidden />
+                          Editar
+                        </Button>
+                        <Button className="text-xs px-2 py-1 text-bad" onClick={() => setDeleting(s)} title="Eliminar servidor">
+                          <Trash2 className="size-3.5" aria-hidden />
+                          Eliminar
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -110,6 +128,123 @@ export function Servers() {
         </Table>
       )}
     </div>
+  );
+}
+
+function DeleteServerDialog({ server, onDone }: { server: Schemas["Server"]; onDone: () => void }) {
+  const qc = useQueryClient();
+  const remove = useMutation({
+    mutationFn: async () =>
+      unwrap(await api.DELETE("/api/v1/servers/{serverId}", { params: { path: { serverId: server.id } } })),
+    onSuccess: async () => {
+      await Promise.all(
+        ["servers", "sites", "cameras", "events", "plates", "alarms"].map((k) => qc.invalidateQueries({ queryKey: [k] })),
+      );
+      onDone();
+    },
+  });
+  return (
+    <ConfirmDialog
+      title="Eliminar servidor"
+      message={`¿Está seguro de eliminar el servidor «${server.name}»? Se eliminarán de forma permanente todas sus cámaras, eventos, lecturas, alarmas y exportaciones. Esta acción no se puede deshacer.`}
+      confirmLabel="Eliminar"
+      pending={remove.isPending}
+      error={remove.error}
+      onConfirm={() => remove.mutate()}
+      onCancel={onDone}
+    />
+  );
+}
+
+// EditServerModal patches only what changed: a rename must not re-test the Frigate
+// connection, and a blank password keeps the stored one.
+function EditServerModal({ server, sites, onDone }: { server: Schemas["Server"]; sites: Schemas["Site"][]; onDone: () => void }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    name: server.name,
+    site_id: server.site_id,
+    base_url: server.base_url,
+    auth_mode: server.auth_mode,
+    username: server.username,
+    password: "",
+    tls_skip_verify: server.tls_skip_verify,
+  });
+  const creds = form.auth_mode === "credentials";
+  const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
+  const patch = (): Schemas["ServerUpdate"] => {
+    const body: Schemas["ServerUpdate"] = {};
+    if (form.name !== server.name) body.name = form.name;
+    if (form.site_id !== server.site_id) body.site_id = form.site_id;
+    if (form.base_url !== server.base_url) body.base_url = form.base_url;
+    if (form.auth_mode !== server.auth_mode) body.auth_mode = form.auth_mode;
+    if (creds && form.username !== server.username) body.username = form.username;
+    if (creds && form.password) body.password = form.password;
+    if (form.tls_skip_verify !== server.tls_skip_verify) body.tls_skip_verify = form.tls_skip_verify;
+    return body;
+  };
+  const save = useMutation({
+    mutationFn: async () =>
+      unwrap(await api.PATCH("/api/v1/servers/{serverId}", { params: { path: { serverId: server.id } }, body: patch() })),
+    onSuccess: async () => {
+      await Promise.all(["servers", "sites", "cameras"].map((k) => qc.invalidateQueries({ queryKey: [k] })));
+      onDone();
+    },
+  });
+  return (
+    <Modal title={`Editar servidor ${server.name}`} onClose={onDone}>
+      <form
+        onSubmit={(e: FormEvent) => {
+          e.preventDefault();
+          save.mutate();
+        }}
+        className="flex flex-col gap-4"
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Nombre">
+            <TextInput required value={form.name} onChange={set("name")} />
+          </Field>
+          <Field label="Sitio">
+            <Select required value={form.site_id} onChange={set("site_id")}>
+              {sites.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Acceso a Frigate">
+            <Select value={form.auth_mode} onChange={(e) => setForm({ ...form, auth_mode: e.target.value as Schemas["AuthMode"] })}>
+              <option value="credentials">Con usuario y contraseña (puerto 8971)</option>
+              <option value="none">Sin login (puerto 5000, solo redes de confianza)</option>
+            </Select>
+          </Field>
+          <Field label="URL de Frigate" hint="Si cambia la conexión se vuelve a probar contra Frigate antes de guardar.">
+            <TextInput required type="url" value={form.base_url} onChange={set("base_url")} />
+          </Field>
+          {creds && (
+            <>
+              <Field label="Usuario de Frigate">
+                <TextInput required value={form.username} onChange={set("username")} autoComplete="off" />
+              </Field>
+              <Field label="Contraseña" hint="Dejala en blanco para conservar la actual.">
+                <TextInput type="password" value={form.password} onChange={set("password")} autoComplete="new-password" />
+              </Field>
+            </>
+          )}
+          <label className="flex items-center gap-2 self-center text-sm">
+            <input type="checkbox" checked={form.tls_skip_verify} onChange={(e) => setForm({ ...form, tls_skip_verify: e.target.checked })} />
+            Aceptar certificado autofirmado
+          </label>
+        </div>
+        <ErrorNote error={save.error} />
+        <div className="flex justify-end gap-2">
+          <Button onClick={onDone}>Cancelar</Button>
+          <Button type="submit" variant="primary" disabled={save.isPending}>
+            {save.isPending ? "Guardando…" : "Guardar"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

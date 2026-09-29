@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { Servers } from "./Servers";
@@ -81,5 +81,80 @@ describe("Servers", () => {
     await screen.findByText("frigate-h01");
     expect(screen.queryByRole("button", { name: /Reiniciar/i })).not.toBeInTheDocument();
   });
-});
 
+  describe("edit and delete", () => {
+    const manager = { id: "u", tenant_id: "t", grants: [{ permission: "servers.manage", effect: "allow" }] };
+    function setup(me: object) {
+      const fetchMock = vi.fn(
+        stubApi({
+          "/api/v1/servers": () => json({ items: [server("a", "frigate-h01", "s1", { auth_mode: "credentials", username: "admin", tls_skip_verify: false })] }),
+          "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }, { id: "s2", name: "Rosario" }] }),
+          "/api/v1/me": () => json(me),
+          "/api/v1/servers/a": () => json(server("a", "frigate-h01", "s1")),
+        }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+    const writes = (m: ReturnType<typeof setup>, method: string) =>
+      m.mock.calls.map(([r]) => r as Request).filter((r) => r.method === method && new URL(r.url).pathname === "/api/v1/servers/a");
+
+    it("hides edit and delete without servers.manage", async () => {
+      setup({ id: "u", tenant_id: "t", grants: [] });
+      renderPage(Servers);
+      await screen.findByText("frigate-h01");
+      expect(screen.queryByRole("button", { name: "Editar" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Eliminar" })).not.toBeInTheDocument();
+    });
+
+    it("edits with PATCH sending only the changed fields, blank password stays unchanged", async () => {
+      const fetchMock = setup(manager);
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+      const dialog = await screen.findByRole("dialog", { name: /Editar servidor/ });
+      fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "frigate-nuevo" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      const [patch] = writes(fetchMock, "PATCH");
+      expect(await patch!.clone().json()).toEqual({ name: "frigate-nuevo" });
+    });
+
+    it("sends the new password and connection fields when they change", async () => {
+      const fetchMock = setup(manager);
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+      const dialog = await screen.findByRole("dialog", { name: /Editar servidor/ });
+      fireEvent.change(within(dialog).getByLabelText(/^Contraseña/), { target: { value: "s3cret" } });
+      fireEvent.change(within(dialog).getByLabelText("Sitio"), { target: { value: "s2" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      const [patch] = writes(fetchMock, "PATCH");
+      expect(await patch!.clone().json()).toEqual({ site_id: "s2", password: "s3cret" });
+    });
+
+    it("asks for confirmation and deletes only after confirming", async () => {
+      const fetchMock = setup(manager);
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: "Eliminar" }));
+      const dialog = await screen.findByRole("dialog", { name: "Eliminar servidor" });
+      expect(dialog).toHaveTextContent("¿Está seguro de eliminar el servidor «frigate-h01»?");
+      expect(dialog).toHaveTextContent("Esta acción no se puede deshacer.");
+      expect(writes(fetchMock, "DELETE")).toHaveLength(0);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Eliminar" }));
+      await waitFor(() => expect(writes(fetchMock, "DELETE")).toHaveLength(1));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      const lists = fetchMock.mock.calls.filter(([r]) => new URL((r as Request).url).pathname === "/api/v1/servers" && (r as Request).method === "GET");
+      expect(lists.length).toBeGreaterThan(1);
+    });
+
+    it("cancelling the confirmation does not delete", async () => {
+      const fetchMock = setup(manager);
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: "Eliminar" }));
+      const dialog = await screen.findByRole("dialog", { name: "Eliminar servidor" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      expect(writes(fetchMock, "DELETE")).toHaveLength(0);
+    });
+  });
+});
