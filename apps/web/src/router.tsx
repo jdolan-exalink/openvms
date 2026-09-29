@@ -82,6 +82,14 @@ const permissionsRoute = createRoute({
   }),
 });
 
+type InventorySearch = { site_id?: string; server_id?: string };
+const inventorySearch = (s: Record<string, unknown>): InventorySearch => ({
+  site_id: typeof s.site_id === "string" && s.site_id ? s.site_id : undefined,
+  server_id: typeof s.server_id === "string" && s.server_id ? s.server_id : undefined,
+});
+const serversRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/servers", component: Servers, validateSearch: inventorySearch });
+const camerasRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/cameras", component: Cameras, validateSearch: inventorySearch });
+
 export const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
@@ -94,8 +102,8 @@ export const routeTree = rootRoute.addChildren([
     settingsRoute.addChildren([
       settingsChild("/settings", Dashboard),
       settingsChild("/sites", Sites),
-      settingsChild("/servers", Servers),
-      settingsChild("/cameras", Cameras),
+      serversRoute,
+      camerasRoute,
       settingsChild("/users", Users),
       settingsChild("/groups", Groups),
       permissionsRoute,

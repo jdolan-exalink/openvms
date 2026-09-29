@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw } from "lucide-react";
+import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { meQuery, serversQuery, sitesQuery, syncStatusQuery } from "@/api/queries";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, StatusBadge, Table, TextInput, Th } from "@/components/ui";
+import { Button, Empty, ErrorNote, Field, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
 export function Servers() {
@@ -11,6 +12,12 @@ export function Servers() {
   const servers = useQuery(serversQuery);
   const sites = useQuery(sitesQuery);
   const [registering, setRegistering] = useState(false);
+  const { site_id: siteFilter } = useSearch({ strict: false }) as { site_id?: string };
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const visible = servers.data?.filter(
+    (s) => (!siteFilter || s.site_id === siteFilter) && (!needle || `${s.name} ${s.base_url}`.toLowerCase().includes(needle)),
+  );
   const siteName = new Map(sites.data?.map((s) => [s.id, s.name]));
   const sync = useQuery(syncStatusQuery);
   const syncOf = new Map(sync.data?.map((s) => [s.server_id, s]));
@@ -32,6 +39,20 @@ export function Servers() {
       <ErrorNote error={servers.error} />
       {servers.data?.length === 0 && <Empty>No hay servidores visibles para tu usuario.</Empty>}
       {!!servers.data?.length && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <TextInput className="sm:w-72" aria-label="Buscar servidor" placeholder="Buscar por nombre o URL" value={q} onChange={(e) => setQ(e.target.value)} />
+            {siteFilter && (
+              <Link to="/servers" className="text-xs text-accent hover:underline">
+                Quitar filtro de sitio
+              </Link>
+            )}
+          </div>
+          <Summary>{summarize(servers.data.length, visible ?? [])}</Summary>
+        </div>
+      )}
+      {!!servers.data?.length && visible?.length === 0 && <Empty>Ningún servidor coincide con el filtro.</Empty>}
+      {!!visible?.length && (
         <Table label="Servidores">
           <thead>
             <tr>
@@ -46,19 +67,31 @@ export function Servers() {
             </tr>
           </thead>
           <tbody>
-            {servers.data.map((s) => (
+            {visible.map((s) => (
               <tr key={s.id} className="border-t border-line align-top">
                 <td>
                   <div className="font-medium">{s.name}</div>
                   <div className="font-mono text-xs break-all text-muted">{s.base_url}</div>
                 </td>
-                <td>{siteName.get(s.site_id) ?? "—"}</td>
+                <td>
+                  {siteName.has(s.site_id) ? (
+                    <Link to="/servers" search={{ site_id: s.site_id }} className="hover:underline">
+                      {siteName.get(s.site_id)}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>
                   <StatusBadge status={s.status} />
                   {s.last_error && <div className="mt-1 max-w-56 text-xs break-words text-bad">{s.last_error}</div>}
                 </td>
                 <td className="font-mono text-xs whitespace-nowrap">{s.frigate_version || "—"}</td>
-                <td className="text-right tabular-nums">{s.camera_count}</td>
+                <td className="text-right tabular-nums">
+                  <Link to="/cameras" search={{ server_id: s.id }} className="hover:underline">
+                    {s.camera_count}
+                  </Link>
+                </td>
                 <td className="min-w-36">
                   <StorageBar storage={s.storage} />
                 </td>
@@ -73,6 +106,16 @@ export function Servers() {
       )}
     </div>
   );
+}
+
+function summarize(total: number, visible: { status: string }[]) {
+  const count = (status: string) => visible.filter((s) => s.status === status).length;
+  const parts = [`${count("online")} en línea`];
+  if (count("degraded")) parts.push(`${count("degraded")} degradado${count("degraded") === 1 ? "" : "s"}`);
+  if (count("offline")) parts.push(`${count("offline")} fuera de línea`);
+  const noun = total === 1 ? "servidor" : "servidores";
+  const head = visible.length === total ? `${total} ${noun}` : `${visible.length} de ${total} ${noun}`;
+  return [head, ...parts].join(" · ");
 }
 
 function StorageBar({ storage }: { storage?: Schemas["ServerStorage"] }) {

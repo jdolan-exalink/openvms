@@ -5,7 +5,7 @@ import { render } from "@testing-library/react";
 
 
 /** renderPage mounts a screen at "/" inside a router and a fresh query client. */
-export function renderPage(Page: () => React.ReactNode) {
+export function renderPage(Page: () => React.ReactNode, entry = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const root = createRootRoute();
   const paths = ["/sites", "/servers", "/cameras", "/login"].map((path) =>
@@ -14,7 +14,7 @@ export function renderPage(Page: () => React.ReactNode) {
   const page = createRoute({ getParentRoute: () => root, path: "/", component: Page });
   const router = createRouter({
     routeTree: root.addChildren([page, ...paths]),
-    history: createMemoryHistory({ initialEntries: ["/"] }),
+    history: createMemoryHistory({ initialEntries: [entry] }),
   });
   return render(
     <QueryClientProvider client={client}>

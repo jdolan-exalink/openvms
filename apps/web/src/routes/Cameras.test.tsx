@@ -23,7 +23,31 @@ const camera = (id: string, name: string, extra: object = {}) => ({
   ...extra,
 });
 
+const inventory = (cameras: object[]) => ({
+  "/api/v1/cameras": () => json({ items: cameras }),
+  "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+  "/api/v1/servers": () => json({ items: [{ id: "srv1", name: "frigate-h01" }] }),
+});
+
 describe("Cameras", () => {
+  it("summarizes the inventory and links each server to its site's servers", async () => {
+    vi.stubGlobal("fetch", vi.fn(stubApi(inventory([camera("c1", "acceso"), camera("c2", "muelle", { enabled: false, status: "offline" })]))));
+    renderPage(Cameras);
+    expect(await screen.findByText("2 cámaras · 1 en línea · 1 deshabilitada")).toBeInTheDocument();
+    const link = await screen.findAllByRole("link", { name: "frigate-h01" });
+    expect(link[0]).toHaveAttribute("href", "/servers?site_id=s1");
+  });
+
+  it("starts filtered by the site or server carried in the URL", async () => {
+    const fetchMock = vi.fn(stubApi(inventory([camera("c1", "acceso")])));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras, "/?server_id=srv1");
+    await screen.findByText("acceso");
+    const urls = fetchMock.mock.calls.map(([r]) => (r as Request).url);
+    expect(urls.some((u) => u.includes("/api/v1/cameras") && u.includes("server_id=srv1"))).toBe(true);
+    expect(await screen.findByLabelText("Filtrar por servidor")).toHaveValue("srv1");
+  });
+
   it("lists what the API returns with site, server and state", async () => {
     vi.stubGlobal(
       "fetch",

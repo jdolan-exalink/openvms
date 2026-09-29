@@ -81,6 +81,15 @@ export function Empty({ children }: { children: ReactNode }) {
   return <p className="rounded border border-dashed border-line px-4 py-8 text-center text-sm text-muted">{children}</p>;
 }
 
+/** Live-region line with inventory counts shown above a table. */
+export function Summary({ children }: { children: ReactNode }) {
+  return (
+    <p role="status" className="text-xs text-muted tabular-nums">
+      {children}
+    </p>
+  );
+}
+
 /** Table wrapper that scrolls sideways on narrow screens instead of the page. */
 export function Table({ children, label }: { children: ReactNode; label: string }) {
   return (

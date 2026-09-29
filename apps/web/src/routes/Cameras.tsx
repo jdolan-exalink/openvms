@@ -1,10 +1,20 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link, useSearch } from "@tanstack/react-router";
 import { useState } from "react";
 import { type CameraFilter, camerasQuery, serversQuery, sitesQuery } from "@/api/queries";
-import { Empty, ErrorNote, PageHeader, Select, StatusBadge, Table, TextInput, Th } from "@/components/ui";
+import { Empty, ErrorNote, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
+
+function summarize(cameras: { enabled: boolean; status: string }[]) {
+  const online = cameras.filter((c) => c.enabled && c.status === "online").length;
+  const disabled = cameras.filter((c) => !c.enabled).length;
+  const parts = [`${cameras.length} ${cameras.length === 1 ? "cámara" : "cámaras"}`, `${online} en línea`];
+  if (disabled) parts.push(`${disabled} ${disabled === 1 ? "deshabilitada" : "deshabilitadas"}`);
+  return parts.join(" · ");
+}
 
 export function Cameras() {
-  const [filter, setFilter] = useState<CameraFilter>({});
+  const search = useSearch({ strict: false }) as { site_id?: string; server_id?: string };
+  const [filter, setFilter] = useState<CameraFilter>({ site_id: search.site_id, server_id: search.server_id });
   const cameras = useQuery(camerasQuery(filter));
   const sites = useQuery(sitesQuery);
   const servers = useQuery(serversQuery);
@@ -35,6 +45,7 @@ export function Cameras() {
         </Select>
       </div>
       <ErrorNote error={cameras.error} />
+      {cameras.data && <Summary>{summarize(cameras.data)}</Summary>}
       {cameras.data?.length === 0 && <Empty>No hay cámaras que coincidan.</Empty>}
       {!!cameras.data?.length && (
         <Table label="Cámaras">
@@ -60,7 +71,15 @@ export function Cameras() {
                   {c.missing_since && <div className="text-xs text-warn">Ya no aparece en Frigate</div>}
                 </td>
                 <td>{siteName.get(c.site_id) ?? "—"}</td>
-                <td>{serverName.get(c.server_id) ?? "—"}</td>
+                <td>
+                  {serverName.has(c.server_id) ? (
+                    <Link to="/servers" search={{ site_id: c.site_id }} className="hover:underline">
+                      {serverName.get(c.server_id)}
+                    </Link>
+                  ) : (
+                    "—"
+                  )}
+                </td>
                 <td>{c.enabled ? <StatusBadge status={c.status} /> : <span className="text-xs text-muted">Deshabilitada</span>}</td>
                 <td className="text-right font-mono text-xs tabular-nums">{c.fps != null ? c.fps.toFixed(1) : "—"}</td>
                 <td className="text-xs text-muted">{c.zones.join(", ") || "—"}</td>

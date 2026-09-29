@@ -1,15 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { meQuery, sitesQuery, tenantsQuery } from "@/api/queries";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, TextInput, Th } from "@/components/ui";
+import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
 export function Sites() {
   const me = useQuery(meQuery);
   const sites = useQuery(sitesQuery);
   const [creating, setCreating] = useState(false);
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const visible = sites.data?.filter((s) => !needle || `${s.name} ${s.address ?? ""}`.toLowerCase().includes(needle));
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6">
@@ -28,6 +32,16 @@ export function Sites() {
       <ErrorNote error={sites.error} />
       {sites.data?.length === 0 && <Empty>No hay sitios visibles para tu usuario.</Empty>}
       {!!sites.data?.length && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TextInput className="sm:max-w-xs" aria-label="Buscar sitio" placeholder="Buscar por nombre o dirección" value={q} onChange={(e) => setQ(e.target.value)} />
+          <Summary>
+            {visible?.length === sites.data.length ? "" : `${visible?.length} de `}
+            {sites.data.length} {sites.data.length === 1 ? "sitio" : "sitios"}
+          </Summary>
+        </div>
+      )}
+      {!!sites.data?.length && visible?.length === 0 && <Empty>Ningún sitio coincide con la búsqueda.</Empty>}
+      {!!visible?.length && (
         <Table label="Sitios">
           <thead>
             <tr>
@@ -38,15 +52,23 @@ export function Sites() {
             </tr>
           </thead>
           <tbody>
-            {sites.data.map((s) => (
+            {visible.map((s) => (
               <tr key={s.id} className="border-t border-line first:border-t-0">
                 <td>
                   <div className="font-medium">{s.name}</div>
                   {s.address && <div className="text-xs text-muted">{s.address}</div>}
                 </td>
                 <td className="font-mono text-xs text-muted">{s.timezone}</td>
-                <td className="text-right tabular-nums">{s.server_count}</td>
-                <td className="text-right tabular-nums">{s.camera_count}</td>
+                <td className="text-right tabular-nums">
+                  <Link to="/servers" search={{ site_id: s.id }} className="hover:underline">
+                    {s.server_count}
+                  </Link>
+                </td>
+                <td className="text-right tabular-nums">
+                  <Link to="/cameras" search={{ site_id: s.id }} className="hover:underline">
+                    {s.camera_count}
+                  </Link>
+                </td>
               </tr>
             ))}
           </tbody>
