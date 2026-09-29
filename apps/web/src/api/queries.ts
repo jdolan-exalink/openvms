@@ -196,3 +196,12 @@ export const alarmAssigneesQuery = (alarmId?: string) =>
     },
     enabled: !!alarmId,
   });
+
+export const searchQuery = (q: string) =>
+  queryOptions({
+    queryKey: ["search", q],
+    queryFn: async () => unwrap(await api.GET("/api/v1/search", { params: { query: { q } } })),
+    enabled: q.trim().length >= 2,
+    staleTime: 5_000,
+  });
+

@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { LogOut, Menu, Moon, Sun, X } from "lucide-react";
+import { LogOut, Menu, Moon, Search, Sun, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { clearToken } from "@/api/auth";
 import { api, type Schemas } from "@/api/client";
@@ -10,6 +10,7 @@ import { can } from "@/lib/perm";
 import { useRealtimeFeed } from "@/lib/realtime";
 import { AppShell } from "./AppShell";
 import { brandIcon as Brand, navGroups, settingsNavGroups, type NavGroup } from "./nav";
+import { Omnibox } from "./Omnibox";
 
 export function Layout() {
   const me = useQuery(meQuery);
@@ -17,7 +18,19 @@ export function Layout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const pageContext = getPageContext(pathname);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [omniboxOpen, setOmniboxOpen] = useState(false);
   const logout = useLogout();
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setOmniboxOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -74,10 +87,26 @@ export function Layout() {
                 </p>
               </div>
             </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setOmniboxOpen(true)}
+                aria-label="Buscar en OpenVMS (Ctrl+K)"
+                className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs text-muted hover:bg-raised hover:text-ink transition-colors"
+              >
+                <Search className="size-3.5" aria-hidden />
+                <span className="hidden sm:inline">Buscar...</span>
+                <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-line bg-bg px-1.5 py-0.5 font-mono text-[10px] text-muted">
+                  <span className="text-xs">⌘</span>K
+                </kbd>
+              </button>
+            </div>
           </header>
           <Outlet />
         </div>
       </AppShell>
+
+      <Omnibox isOpen={omniboxOpen} onClose={() => setOmniboxOpen(false)} />
 
       {mobileOpen && (
         <div
