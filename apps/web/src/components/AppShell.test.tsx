@@ -10,6 +10,7 @@ describe("AppShell", () => {
       </AppShell>,
     );
 
+    expect(screen.getByLabelText("Primary Nav Rail")).toHaveClass("hidden", "md:flex");
     expect(screen.getByRole("complementary", { name: "Primary Nav Rail" })).toHaveTextContent("Existing navigation");
     expect(screen.getByRole("main", { name: "Main Workspace" })).toContainElement(screen.getByRole("heading", { name: "Current route" }));
     expect(screen.queryByRole("complementary", { name: "Context Sidebar" })).not.toBeInTheDocument();

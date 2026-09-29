@@ -26,7 +26,8 @@ The requested redesign spans operational video workflows, administration, naviga
 - [x] UIUX-2 — Write this tracker and persist its full text to `odd/ui-ux-refactor/tasks`. Evidence: Engram save confirmed on 2026-09-28.
 - [x] UIUX-3 — Write and read back `docs/UI_REFACTOR_AUDIT.md` with the current-state summary, invariants, dependencies, phase map, and acceptance checks. Evidence: file read back; all 14 phases present.
 - [x] UIUX-4 — Run documentation-only structural checks and report results. Evidence: both paths exist and are non-empty; required headings and tracker items read back; `git diff --check` returned clean. No tests/builds run.
-- [ ] UIUX-5 — Implement phase 1 (Design tokens + AppShell) with strict TDD, preserving current routes, actions, theme preference, and page rendering; run focused and applicable frontend checks; create one work-unit commit on `fix/playback-purity-lint`. Implementation and checks observed; parent commit remains pending.
+- [x] UIUX-5 — Implement phase 1 (Design tokens + AppShell) with strict TDD, preserving current routes, actions, theme preference, and page rendering; run focused and applicable frontend checks. Commit: `aa7c90a` (`feat(web): add semantic app shell foundation`); implementation, 2 focused tests, full web suite (16 files/71 tests), typecheck, lint, and parent focused spot-check passed. Native review was declined for this candidate. Independent verification then identified UIUX-6 findings below.
+- [ ] UIUX-6 — Resolve independent-verification findings before closing phase 1: hide the primary-nav landmark together with its responsive-hidden contents, and record that the audit and phase-1 files were committed together in `aa7c90a`. Add focused accessibility regression coverage, rerun checks, and create a bounded follow-up work-unit commit. Evidence: `AppShell.test.tsx` class assertion failed before the fix (landmark had no responsive class); focused test passed after adding `hidden md:flex`; web suite (16 files/71 tests), typecheck, web lint, and `git diff --check` passed. Runtime smoke: N/A; this landmark-only accessibility correction has no runtime workflow boundary. Follow-up commit remains pending.
 
 ## Phase map from the requested scope
 1. Design tokens + AppShell
@@ -45,7 +46,7 @@ The requested redesign spans operational video workflows, administration, naviga
 14. Polish, performance, and responsive behavior
 
 ## Progress and next step
-Audit is complete and the user explicitly authorized phase 1 on 2026-09-29. Phase 1 implementation and checks are complete; the parent owns candidate freeze/review and the required work-unit commit, which remains pending. Existing uncommitted Playback regression/task changes and audit docs are pre-existing and remain untouched and unstaged by phase 1. The required commit for the earlier audit work remains pending separately; do not bundle unrelated paths.
+Audit and phase-1 implementation are committed together in `aa7c90a`; the audit is not pending as a separate commit. The user explicitly authorized phase 1 on 2026-09-29. Native review consent for that candidate was declined; the independent high-risk-path verifier reported a mobile landmark issue and stale commit tracking, so UIUX-6 is active before phase 1 is closed. Preserve unrelated pending Playback changes and keep them out of the UIUX-6 commit.
 
 ## Phase 1 forecast and commit evidence
 - Forecast: fewer than 400 authored changed lines; phase boundary is tokens + shared shell only. Re-estimate honestly from the diff.
@@ -54,4 +55,5 @@ Audit is complete and the user explicitly authorized phase 1 on 2026-09-29. Phas
 - TDD evidence: focused test was RED before implementation because `./AppShell` did not exist (Vitest failed to resolve the import); `pnpm --filter web exec vitest run src/components/AppShell.test.tsx` GREEN: 1 focused file, 2 tests passed.
 - Checks: `pnpm --filter web test` — 16 files / 71 tests passed; `pnpm typecheck` — passed; `pnpm --filter web lint` — passed; `git diff --check` — passed.
 - Observed authored line estimate: 136 changed lines (additions plus deletions across phase paths), below 400.
-- Commit: pending.
+- Phase-1 commit: `aa7c90a`.
+- UIUX-6 follow-up commit: pending.

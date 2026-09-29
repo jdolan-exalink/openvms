@@ -9,7 +9,7 @@ interface AppShellProps {
 export function AppShell({ primaryNav, contextSidebar, children }: AppShellProps) {
   return (
     <div className="flex min-h-dvh bg-bg" data-shell="openvms">
-      <aside aria-label="Primary Nav Rail" data-shell-region="primary-nav">
+      <aside aria-label="Primary Nav Rail" className="hidden md:flex" data-shell-region="primary-nav">
         {primaryNav}
       </aside>
       {contextSidebar != null && (
