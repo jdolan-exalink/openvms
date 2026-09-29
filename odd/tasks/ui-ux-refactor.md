@@ -62,6 +62,11 @@ The user authorized building the missing backend controls for phases 5–11 and 
 ## Phases 6–10 native review
 - Range `dd5e8f2..6d9e10c` (18 paths, 941 lines), medium / `slice_budget_reached`. The user granted review; lens `review-reliability` returned approved; acknowledged, authority burned (lineage `review-b95170ad511c40a2`). Reviewed boundary advances to `6d9e10c`. Full re-check at 6d9e10c: web 20 files / 105 tests, typecheck, lint passed.
 
+## Stage two native review
+- S2-1 range `6d9e10c..5a7459a` (21 paths, 1277 lines), medium / `slice_budget_reached`. User granted; lens `review-reliability` approved; acknowledged, authority burned (lineage `review-c68c19c154173ffa`). Reviewed boundary advances to `5a7459a`. Advisory follow-ups (non-blocking): R3-sticky-unreview WARNING `internal/events/syncer.go:322-323` (VMS `reviewed` is OR-sticky, so an un-review in Frigate never propagates); R3-viewcolumns-alias SUGGESTION `internal/media/views.go:112-115`.
+- Pre-existing uncommitted `Playback.test.tsx` + `odd/tasks/resolve-build-typecheck-errors.md` (current-changes candidate, medium): user granted; approved; acknowledged (lineage `review-45f9e9cdf80ce5d7`). Advisory: missing negative control (`Playback.test.tsx:62-68`) and timezone-dependent assertions (`:16-60`). Committed as `7eecd8b`.
+- S2-5 range `5a7459a..01b5b52` (16 paths, 1019 lines), high / `high_risk`. User granted a four-lens review; approved; acknowledged, authority burned (lineage `review-c000708436e5f615`). Reviewed boundary advances to `01b5b52`. Advisory follow-ups (non-blocking): three WARNINGs with one root cause — `internal/inventory/cameras.go:91-114` length limits count bytes (`len`) instead of characters, so accented text hits limits early (use `utf8.RuneCountInString`); SUGGESTIONs: duplicated quality enum (`cameras.go:88`), tag limit check order (`:118`), weak audit assertion (`camera_settings_integration_test.go:69-78`), drawer PATCH sends every field (overwrite risk, `CameraSettingsDrawer.tsx:41-48`).
+
 ## Phase map from the requested scope
 1. Design tokens + AppShell
 2. Primary Navigation + TopBar
