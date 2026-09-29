@@ -7,11 +7,13 @@ import { api, type Schemas } from "@/api/client";
 import { meQuery } from "@/api/queries";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
+import { useRealtimeFeed } from "@/lib/realtime";
 import { AppShell } from "./AppShell";
 import { brandIcon as Brand, navGroups, settingsNavGroups, type NavGroup } from "./nav";
 
 export function Layout() {
   const me = useQuery(meQuery);
+  useRealtimeFeed(); // one app-wide push feed; Layout only renders for authenticated routes
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const pageContext = getPageContext(pathname);
   return (

@@ -64,4 +64,27 @@ describe("primary navigation and context header", () => {
     const header = await screen.findByLabelText("Encabezado de página");
     expect(header).toHaveTextContent(/Resumen/);
   });
+  it("opens the app-wide /ws realtime feed once the authenticated shell renders", async () => {
+    const sockets: string[] = [];
+    class FakeSocket {
+      constructor(url: string) {
+        sockets.push(url);
+      }
+      close() {}
+    }
+    vi.stubGlobal("WebSocket", FakeSocket);
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": () => json({
+        id: "u1", username: "operator", display_name: "Operator", tenant_id: "t1",
+        mfa_enabled: false, must_change_password: false, auth_method: "session", grants: [],
+      }),
+    })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/settings"] }), context: { queryClient: client } });
+    render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+
+    await screen.findByLabelText("Encabezado de página");
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]).toMatch(/^wss?:\/\/.+\/ws$/);
+  });
 });
