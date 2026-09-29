@@ -514,9 +514,23 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 	})
 }
 
-// EvaluateOffline runs the tenant's offline rules for a camera or server that has been down for
-// duration. Callers may invoke it on every tick: each rule notifies once per outage.
-func (s *Service) EvaluateOffline(ctx context.Context, tenantID uuid.UUID, triggerType TriggerType, resourceID, siteID uuid.UUID, resourceName string, duration time.Duration) error {
+// Outage describes a camera or server that is currently down. Since is the outage start and
+// Duration how long it has lasted, both measured by the database so that the app clock never
+// enters the once-per-outage decision.
+type Outage struct {
+	TenantID   uuid.UUID
+	ResourceID uuid.UUID
+	SiteID     uuid.UUID
+	Name       string
+	Since      time.Time
+	Duration   time.Duration
+}
+
+// EvaluateOffline runs the tenant's offline rules for a camera or server outage. Callers may
+// invoke it on every tick, and from any process: each rule notifies once per outage, because a
+// firing is only repeated when it predates the outage start.
+func (s *Service) EvaluateOffline(ctx context.Context, triggerType TriggerType, o Outage) error {
+	tenantID, resourceID, resourceName := o.TenantID, o.ResourceID, o.Name
 	actor := authz.Actor{TenantID: &tenantID}
 	return s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		q := db.New(tx)
@@ -537,16 +551,16 @@ func (s *Service) EvaluateOffline(ctx context.Context, tenantID uuid.UUID, trigg
 			matched := false
 			switch triggerType {
 			case TriggerCameraOffline:
-				matched = rule.Conditions.MatchesCameraOffline(resourceID, siteID, duration)
+				matched = rule.Conditions.MatchesCameraOffline(resourceID, o.SiteID, o.Duration)
 			case TriggerServerOffline:
-				matched = rule.Conditions.MatchesServerOffline(resourceID, siteID, duration)
+				matched = rule.Conditions.MatchesServerOffline(resourceID, o.SiteID, o.Duration)
 			}
 			if !matched {
 				continue
 			}
 
 			// Once per outage: skip when the rule already fired since the resource went down.
-			ok, err := claim(ctx, tx, tenantID, rule.ID, resourceID, time.Now().Add(-duration))
+			ok, err := claim(ctx, tx, tenantID, rule.ID, resourceID, o.Since)
 			if err != nil {
 				return store.Classify(err)
 			}

@@ -290,3 +290,91 @@ func TestOfflineDetectorSiteFilter(t *testing.T) {
 		t.Fatalf("server rule scoped to its site created %d notifications, want 1", n)
 	}
 }
+
+// The outage start comes from the database, so a fresh detector (worker restart) sees the same
+// outage and must not notify again; a later outage is a new one.
+func TestOfflineDetectorRestartDoesNotRefire(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	cam := f.env.Cameras["frigate-h01/plaza"]
+	id := f.addRule("Camara caida", rules.TriggerCameraOffline,
+		rules.Conditions{CameraIDs: []uuid.UUID{cam.ID}}, rules.Actions{NotifyInApp: true}, true)
+	newDetector := func() *rules.OfflineDetector {
+		return &rules.OfflineDetector{Store: f.env.Store, Rules: f.svc, Log: pgtest.Discard()}
+	}
+	outageSince := func() time.Time {
+		var since time.Time
+		if err := f.scan(&since, `SELECT since FROM camera_outages WHERE camera_id = $1`, cam.ID); err != nil {
+			t.Fatal(err)
+		}
+		return since
+	}
+
+	if err := f.exec(`UPDATE cameras SET status = 'offline' WHERE id = $1`, cam.ID); err != nil {
+		t.Fatal(err)
+	}
+	newDetector().Tick(ctx)
+	first := outageSince()
+	if n := f.notifications(id); n != 1 {
+		t.Fatalf("first tick created %d notifications, want 1", n)
+	}
+
+	// Worker restarts: new detector instances, several ticks with delays in between.
+	for i := 0; i < 3; i++ {
+		time.Sleep(20 * time.Millisecond)
+		newDetector().Tick(ctx)
+	}
+	if got := outageSince(); !got.Equal(first) {
+		t.Fatalf("outage start moved from %v to %v across restarts", first, got)
+	}
+	if n := f.notifications(id); n != 1 {
+		t.Fatalf("ticks after a restart created %d notifications in total, want 1", n)
+	}
+
+	// Recovery and a later outage notify again.
+	if err := f.exec(`UPDATE cameras SET status = 'online' WHERE id = $1`, cam.ID); err != nil {
+		t.Fatal(err)
+	}
+	newDetector().Tick(ctx)
+	if err := f.exec(`UPDATE rule_firings SET fired_at = now() - interval '30 minutes' WHERE rule_id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.exec(`UPDATE cameras SET status = 'offline' WHERE id = $1`, cam.ID); err != nil {
+		t.Fatal(err)
+	}
+	newDetector().Tick(ctx)
+	newDetector().Tick(ctx)
+	if n := f.notifications(id); n != 2 {
+		t.Fatalf("second outage created %d notifications in total, want 2", n)
+	}
+}
+
+// EvaluateOffline compares the rule's last firing with the outage start it is given, never with
+// a cutoff derived from the caller's clock.
+func TestEvaluateOfflineClaimsAgainstOutageStart(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	cam := f.env.Cameras["frigate-h01/plaza"]
+	id := f.addRule("Camara caida", rules.TriggerCameraOffline, rules.Conditions{}, rules.Actions{NotifyInApp: true}, true)
+	since := time.Now().Add(-time.Minute)
+	o := rules.Outage{TenantID: cam.TenantID, ResourceID: cam.ID, SiteID: cam.SiteID, Name: cam.DisplayName, Since: since, Duration: time.Minute}
+
+	for i := 0; i < 3; i++ {
+		// Whatever duration the caller computed, the same outage start never fires twice.
+		o.Duration = time.Duration(i) * time.Hour
+		if err := f.svc.EvaluateOffline(ctx, rules.TriggerCameraOffline, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := f.notifications(id); n != 1 {
+		t.Fatalf("same outage created %d notifications, want 1", n)
+	}
+
+	o.Since = time.Now().Add(time.Second) // a later outage
+	if err := f.svc.EvaluateOffline(ctx, rules.TriggerCameraOffline, o); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(id); n != 2 {
+		t.Fatalf("later outage created %d notifications in total, want 2", n)
+	}
+}
