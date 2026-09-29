@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { Cameras } from "./Cameras";
@@ -74,5 +74,75 @@ describe("Cameras", () => {
     vi.stubGlobal("fetch", vi.fn(stubApi({ "/api/v1/cameras": () => json({ items: [] }) })));
     renderPage(Cameras);
     expect(await screen.findByText("No hay cámaras que coincidan.")).toBeInTheDocument();
+  });
+
+  describe("settings drawer", () => {
+    const manager = { id: "u", tenant_id: "t", grants: [{ permission: "cameras.manage", effect: "allow" }] };
+    const viewer = { id: "u", tenant_id: "t", grants: [{ permission: "cameras.view", effect: "allow" }] };
+
+    function setup(me: object, patch: (req: Request) => Response = () => json(camera("c1", "nuevo"))) {
+      const routes = stubApi({ ...inventory([camera("c1", "acceso")]), "/api/v1/me": () => json(me) });
+      const fetchMock = vi.fn(async (req: Request) => (req.method === "PATCH" ? patch(req) : routes(req)));
+      vi.stubGlobal("fetch", fetchMock);
+      return fetchMock;
+    }
+
+    it("shows read-only context without edit controls for users without cameras.manage", async () => {
+      setup(viewer);
+      renderPage(Cameras);
+      fireEvent.click(await screen.findByRole("button", { name: "Ajustes de acceso" }));
+      const dialog = await screen.findByRole("dialog", { name: "Ajustes de cámara" });
+      expect(within(dialog).getByText("Helvecia")).toBeInTheDocument();
+      expect(within(dialog).getByText("frigate-h01")).toBeInTheDocument();
+      expect(within(dialog).queryByLabelText("Nombre")).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("button", { name: "Guardar" })).not.toBeInTheDocument();
+    });
+
+    it("saves the name and enabled flag with PATCH and refreshes the inventory", async () => {
+      const fetchMock = setup(manager);
+      renderPage(Cameras);
+      fireEvent.click(await screen.findByRole("button", { name: "Ajustes de acceso" }));
+      const name = await screen.findByLabelText("Nombre");
+      fireEvent.change(name, { target: { value: "nuevo" } });
+      fireEvent.click(screen.getByLabelText("Habilitada"));
+      fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH");
+      expect(new URL(patch!.url).pathname).toBe("/api/v1/cameras/c1");
+      expect(await patch!.clone().json()).toEqual({ display_name: "nuevo", enabled: false });
+      const lists = fetchMock.mock.calls.filter(([r]) => new URL((r as Request).url).pathname === "/api/v1/cameras" && (r as Request).method === "GET");
+      expect(lists.length).toBeGreaterThan(1);
+    });
+
+    it("rejects an empty name without calling the API", async () => {
+      const fetchMock = setup(manager);
+      renderPage(Cameras);
+      fireEvent.click(await screen.findByRole("button", { name: "Ajustes de acceso" }));
+      fireEvent.change(await screen.findByLabelText("Nombre"), { target: { value: "" } });
+      fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+      expect(await screen.findByText("El nombre no puede estar vacío.")).toBeInTheDocument();
+      expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "PATCH")).toBe(false);
+    });
+
+    it("keeps the drawer open and shows the API error when saving fails", async () => {
+      setup(manager, () => json({ code: "forbidden", message: "sin permiso" }, 403));
+      renderPage(Cameras);
+      fireEvent.click(await screen.findByRole("button", { name: "Ajustes de acceso" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Guardar" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("sin permiso");
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+
+    it("closes with Escape and returns focus to the trigger", async () => {
+      setup(viewer);
+      renderPage(Cameras);
+      const trigger = await screen.findByRole("button", { name: "Ajustes de acceso" });
+      trigger.focus();
+      fireEvent.click(trigger);
+      await screen.findByRole("dialog");
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    });
   });
 });

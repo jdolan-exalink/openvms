@@ -1,8 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearch } from "@tanstack/react-router";
-import { useState } from "react";
-import { type CameraFilter, camerasQuery, serversQuery, sitesQuery } from "@/api/queries";
-import { Empty, ErrorNote, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Settings } from "lucide-react";
+import { useCallback, useState } from "react";
+import { type CameraFilter, camerasQuery, meQuery, serversQuery, sitesQuery } from "@/api/queries";
+import { CameraSettingsDrawer } from "@/components/CameraSettingsDrawer";
+import { Button, Empty, ErrorNote, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
+import { can } from "@/lib/perm";
 
 function summarize(cameras: { enabled: boolean; status: string }[]) {
   const online = cameras.filter((c) => c.enabled && c.status === "online").length;
@@ -15,11 +18,15 @@ function summarize(cameras: { enabled: boolean; status: string }[]) {
 export function Cameras() {
   const search = useSearch({ strict: false }) as { site_id?: string; server_id?: string };
   const [filter, setFilter] = useState<CameraFilter>({ site_id: search.site_id, server_id: search.server_id });
+  const [editingId, setEditingId] = useState<string>();
+  const closeDrawer = useCallback(() => setEditingId(undefined), []);
+  const me = useQuery(meQuery);
   const cameras = useQuery(camerasQuery(filter));
   const sites = useQuery(sitesQuery);
   const servers = useQuery(serversQuery);
   const siteName = new Map(sites.data?.map((s) => [s.id, s.name]));
   const serverName = new Map(servers.data?.map((s) => [s.id, s.name]));
+  const editing = cameras.data?.find((c) => c.id === editingId);
   const update = (k: keyof CameraFilter, v: string) => setFilter((f) => ({ ...f, [k]: v || undefined }));
 
   return (
@@ -57,6 +64,7 @@ export function Cameras() {
               <Th>Estado</Th>
               <Th className="text-right">FPS</Th>
               <Th>Zonas</Th>
+              <Th className="text-right">Ajustes</Th>
             </tr>
           </thead>
           <tbody>
@@ -83,10 +91,24 @@ export function Cameras() {
                 <td>{c.enabled ? <StatusBadge status={c.status} /> : <span className="text-xs text-muted">Deshabilitada</span>}</td>
                 <td className="text-right font-mono text-xs tabular-nums">{c.fps != null ? c.fps.toFixed(1) : "—"}</td>
                 <td className="text-xs text-muted">{c.zones.join(", ") || "—"}</td>
+                <td className="text-right">
+                  <Button aria-label={`Ajustes de ${c.display_name}`} onClick={() => setEditingId(c.id)}>
+                    <Settings className="size-4" aria-hidden />
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
         </Table>
+      )}
+      {editing && (
+        <CameraSettingsDrawer
+          camera={editing}
+          siteName={siteName.get(editing.site_id)}
+          serverName={serverName.get(editing.server_id)}
+          canManage={can(me.data, "cameras.manage")}
+          onClose={closeDrawer}
+        />
       )}
     </div>
   );
