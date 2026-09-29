@@ -1,4 +1,5 @@
 import { PlayerSession, type SessionQuality } from "./PlayerSession";
+import { ServerBackoff } from "./serverBackoff";
 
 export type PlayerSessionManagerOptions = {
   /** How long a released session keeps streaming (WARM) before it is evicted. Default 30 s. */
@@ -11,7 +12,9 @@ export type PlayerSessionManagerOptions = {
    */
   maxConcurrentPlayers?: number;
   /** Injectable for tests; defaults to a real PlayerSession that is connected immediately. */
-  createSession?: (cameraId: string, quality: SessionQuality) => PlayerSession;
+  createSession?: (cameraId: string, quality: SessionQuality, serverId?: string) => PlayerSession;
+  /** Shared reconnect coordinator; defaults to a new one owned (and cleared) by the manager. */
+  backoff?: ServerBackoff;
 };
 
 export const DEFAULT_WARM_SESSION_TTL_MS = 30_000;
@@ -34,24 +37,29 @@ export class PlayerSessionManager {
   private readonly warmSessionTTL: number;
   private readonly maxWarmPlayers: number;
   private readonly maxConcurrentPlayers: number;
-  private readonly createSession: (cameraId: string, quality: SessionQuality) => PlayerSession;
+  private readonly createSession: (cameraId: string, quality: SessionQuality, serverId?: string) => PlayerSession;
+  private readonly backoff: ServerBackoff;
   private releaseSeq = 0;
 
   constructor(opts: PlayerSessionManagerOptions = {}) {
     this.warmSessionTTL = opts.warmSessionTTL ?? DEFAULT_WARM_SESSION_TTL_MS;
     this.maxWarmPlayers = opts.maxWarmPlayers ?? DEFAULT_MAX_WARM_PLAYERS;
     this.maxConcurrentPlayers = opts.maxConcurrentPlayers ?? DEFAULT_MAX_CONCURRENT_PLAYERS;
+    this.backoff = opts.backoff ?? new ServerBackoff();
     this.createSession =
       opts.createSession ??
-      ((cameraId, quality) => {
-        const s = new PlayerSession({ cameraId, quality });
+      ((cameraId, quality, serverId) => {
+        const s = new PlayerSession({ cameraId, quality, serverId, resilient: true, backoff: this.backoff });
         s.connect();
         return s;
       });
   }
 
-  /** acquire returns the live session for the camera, creating it when needed. Pair with release(). */
-  acquire(cameraId: string, quality: SessionQuality): PlayerSession {
+  /**
+   * acquire returns the live session for the camera, creating it when needed. Pair with
+   * release(). `serverId` (the camera's Frigate server) groups reconnect backoff.
+   */
+  acquire(cameraId: string, quality: SessionQuality, serverId?: string): PlayerSession {
     const key = keyOf(cameraId, quality);
     let entry = this.entries.get(key);
     if (entry) {
@@ -62,7 +70,7 @@ export class PlayerSessionManager {
       return entry.session;
     }
     this.makeRoom();
-    entry = { session: this.createSession(cameraId, quality), refs: 1, releasedAt: 0 };
+    entry = { session: this.createSession(cameraId, quality, serverId), refs: 1, releasedAt: 0 };
     this.entries.set(key, entry);
     return entry.session;
   }
@@ -83,6 +91,7 @@ export class PlayerSessionManager {
   /** clear closes every session (logout or user change). */
   clear(): void {
     for (const key of [...this.entries.keys()]) this.evict(key, "cleared");
+    this.backoff.clear();
   }
 
   /** stats reports counts for diagnostics. */

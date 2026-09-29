@@ -1,6 +1,8 @@
 import { reconnectDelay } from "./backoff";
 import { PlayerStateMachine, type PlayerState, type StateTransition } from "./playerState";
 import { observeFirstFrame, playerMetrics, type PlayerMetrics } from "./playerMetrics";
+import type { ServerBackoff } from "./serverBackoff";
+import { describeStreamError, streamError, type SessionError } from "./streamErrors";
 
 // Codecs offered to go2rtc, most preferred first (same list go2rtc's own player uses).
 const CODECS = [
@@ -26,8 +28,22 @@ function supportedCodecs(MS: MediaSourceCtor): string {
 
 export type SessionQuality = "sub" | "main";
 
-/** What a view needs to render a session: the lifecycle state and a user-facing message. */
-export type SessionSnapshot = { readonly state: PlayerState; readonly message: string };
+/**
+ * What a view needs to render a session: the lifecycle state, a user-facing message, the
+ * current stream error (resilient sessions only) and an object URL of the last captured frame.
+ */
+export type SessionSnapshot = {
+  readonly state: PlayerState;
+  readonly message: string;
+  readonly error: SessionError | null;
+  readonly poster: string | null;
+};
+
+const INITIAL_SNAPSHOT: SessionSnapshot = { state: "UNINITIALIZED", message: "", error: null, poster: null };
+
+/** How often an active resilient session refreshes its in-memory last frame. */
+const FRAME_CAPTURE_INTERVAL_MS = 20_000;
+const FRAME_MAX_WIDTH = 640;
 
 export type PlayerSessionOptions = {
   cameraId: string;
@@ -41,6 +57,15 @@ export type PlayerSessionOptions = {
   random?: () => number;
   metrics?: PlayerMetrics;
   now?: () => number;
+  /** Frigate server the camera belongs to; sessions of one server back off together. */
+  serverId?: string;
+  /**
+   * Opt in to the Live View platform behaviour: gateway error codes with stop/retry policy,
+   * last-frame capture, group backoff, suspension while the tab is hidden and resuming the
+   * `<video>` after DOM moves. Off keeps the legacy player behaviour.
+   */
+  resilient?: boolean;
+  backoff?: ServerBackoff;
 };
 
 /**
@@ -61,7 +86,16 @@ export class PlayerSession {
   private readonly random: () => number;
   private readonly errorListeners = new Set<(message: string) => void>();
   private readonly listeners = new Set<() => void>();
-  private snapshot: SessionSnapshot = { state: "UNINITIALIZED", message: "" };
+  private snapshot: SessionSnapshot = INITIAL_SNAPSHOT;
+  private readonly serverId?: string;
+  private readonly resilient: boolean;
+  private readonly backoff?: ServerBackoff;
+  private readonly suspendReasons = new Set<string>();
+  private cancelRetry: (() => void) | undefined;
+  private frameTimer: ReturnType<typeof setInterval> | undefined;
+  private canvas: HTMLCanvasElement | null = null;
+  /** True after a permanent error: no automatic retry until retryNow(). */
+  private stopped = false;
 
   private ws: WebSocket | null = null;
   private closed = false;
@@ -79,6 +113,9 @@ export class PlayerSession {
     this.metrics = opts.metrics ?? playerMetrics;
     this.createSocket = opts.createSocket ?? ((url) => new WebSocket(url));
     this.random = opts.random ?? Math.random;
+    this.serverId = opts.serverId;
+    this.resilient = opts.resilient ?? false;
+    this.backoff = opts.backoff;
     if (opts.onError) this.errorListeners.add(opts.onError);
     this.machine = new PlayerStateMachine({
       cameraId: opts.cameraId,
@@ -129,6 +166,14 @@ export class PlayerSession {
     if (this.started || this.closed) return;
     this.started = true;
     document.addEventListener("visibilitychange", this.onVisibility);
+    if (this.resilient) {
+      this.video.addEventListener("pause", this.onPause);
+      this.frameTimer = setInterval(() => {
+        if (this.state === "ACTIVE" && !document.hidden) this.captureFrame();
+      }, FRAME_CAPTURE_INTERVAL_MS);
+      if (document.visibilityState === "hidden") this.suspendReasons.add("page-hidden");
+    }
+    if (this.suspendReasons.size > 0) return; // opens on resume
     this.open();
   }
 
@@ -154,24 +199,61 @@ export class PlayerSession {
   markWarm(cause = "released"): void {
     if (this.closed) return;
     this.warm = true;
-    this.move("WARM", cause);
+    // Only a session that is delivering media becomes WARM; the others reach it with their first media.
+    if (this.state === "ACTIVE") this.move("WARM", cause);
   }
 
   /** markActive flags the session as being watched again. */
   markActive(cause = "acquired"): void {
     if (this.closed) return;
     this.warm = false;
-    this.move("ACTIVE", cause);
+    if (this.state === "WARM") this.move("ACTIVE", cause);
+  }
+
+  /**
+   * setSuspended pauses (on) or resumes (off) the transport for `reason` (e.g. "offscreen",
+   * "page-hidden"). While any reason is set the socket is closed and the last frame stays
+   * available as the poster; resuming reconnects.
+   */
+  setSuspended(reason: string, on: boolean): void {
+    if (this.closed) return;
+    const before = this.suspendReasons.size > 0;
+    if (on) this.suspendReasons.add(reason);
+    else this.suspendReasons.delete(reason);
+    const after = this.suspendReasons.size > 0;
+    if (before === after || !this.started) return;
+    if (after) {
+      if (this.stopped) return;
+      this.captureFrame();
+      this.cancelPendingOpen();
+      this.dropSocket();
+      this.move("SUSPENDED", reason);
+    } else if (!this.stopped) {
+      this.open();
+    }
+  }
+
+  /** retryNow clears a stopped/backing-off state and reconnects immediately ("Reintentar"). */
+  retryNow(): void {
+    if (this.closed || !this.started) return;
+    this.stopped = false;
+    this.retry = 0;
+    this.cancelPendingOpen();
+    this.move(this.state, "retry", "", null);
+    if (this.suspendReasons.size === 0) this.open();
   }
 
   /** close releases the socket, the media pipeline and the `<video>`; the session is unusable afterwards. */
   close(cause = "closed"): void {
     if (this.closed) return;
     this.closed = true;
-    clearTimeout(this.timer);
+    this.cancelPendingOpen();
+    clearInterval(this.frameTimer);
     this.cancelFrame?.();
     document.removeEventListener("visibilitychange", this.onVisibility);
+    this.video.removeEventListener("pause", this.onPause);
     this.dropSocket();
+    if (this.snapshot.poster) URL.revokeObjectURL(this.snapshot.poster);
     this.video.removeAttribute("src");
     this.video.load();
     URL.revokeObjectURL(this.objectURL);
@@ -183,13 +265,78 @@ export class PlayerSession {
 
   // ---- internals --------------------------------------------------------------------
 
-  private move(to: PlayerState, cause: string, message?: string): void {
-    const moved = this.machine.transition(to, cause);
-    const nextMessage = message ?? this.snapshot.message;
-    if (!moved && nextMessage === this.snapshot.message) return;
-    this.snapshot = { state: this.machine.state, message: nextMessage };
+  private move(to: PlayerState, cause: string, message?: string, error?: SessionError | null): void {
+    this.machine.transition(to, cause);
+    this.emit({ message, error });
+  }
+
+  /** emit publishes a new snapshot when something a view renders changed. */
+  private emit(patch: { message?: string; error?: SessionError | null; poster?: string | null }): void {
+    const prev = this.snapshot;
+    const next: SessionSnapshot = {
+      state: this.machine.state,
+      message: patch.message ?? prev.message,
+      error: patch.error === undefined ? prev.error : patch.error,
+      poster: patch.poster === undefined ? prev.poster : patch.poster,
+    };
+    if (next.state === prev.state && next.message === prev.message && next.error === prev.error && next.poster === prev.poster) return;
+    this.snapshot = next;
     this.listeners.forEach((l) => l());
   }
+
+  private cancelPendingOpen(): void {
+    clearTimeout(this.timer);
+    this.cancelRetry?.();
+    this.cancelRetry = undefined;
+  }
+
+  /** stop ends the stream with a permanent error: no automatic retry until retryNow(). */
+  private stop(error: SessionError, cause: string, legacyMessage: string): void {
+    if (!this.resilient) {
+      this.move("ERROR", cause, legacyMessage);
+      return;
+    }
+    this.stopped = true;
+    this.captureFrame();
+    this.cancelPendingOpen();
+    this.dropSocket();
+    this.move("ERROR", cause, error.label, error);
+  }
+
+  /** captureFrame keeps the current picture in memory (never persisted) as the poster for non-playing states. */
+  private captureFrame(): void {
+    if (!this.resilient || this.closed) return;
+    const v = this.video;
+    if (v.readyState < 2 || v.videoWidth === 0 || v.videoHeight === 0) return;
+    try {
+      const w = Math.min(FRAME_MAX_WIDTH, v.videoWidth);
+      const h = Math.max(1, Math.round((w * v.videoHeight) / v.videoWidth));
+      const canvas = (this.canvas ??= document.createElement("canvas"));
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(v, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          if (!blob || this.closed) return;
+          const old = this.snapshot.poster;
+          this.emit({ poster: URL.createObjectURL(blob) });
+          if (old) URL.revokeObjectURL(old);
+        },
+        "image/jpeg",
+        0.7,
+      );
+    } catch {
+      // A frame that cannot be read just means no poster; the cold snapshot covers it.
+    }
+  }
+
+  /** Moving a media element through the DOM pauses it; resume when it is still meant to play. */
+  private onPause = (): void => {
+    if (this.closed || this.video.ended || !this.video.isConnected || this.suspendReasons.size > 0) return;
+    if (this.state === "ACTIVE" || this.state === "WARM") void this.video.play()?.catch(() => {});
+  };
 
   private resumePlayback(): void {
     // Moving a media element through the DOM pauses it; resume, and jump to the live edge.
@@ -208,6 +355,10 @@ export class PlayerSession {
   }
 
   private onVisibility = (): void => {
+    if (this.resilient) {
+      this.setSuspended("page-hidden", document.visibilityState === "hidden");
+      return;
+    }
     if (document.visibilityState === "visible" && this.ws?.readyState !== WebSocket.OPEN && !this.closed) {
       clearTimeout(this.timer);
       this.open();
@@ -225,7 +376,7 @@ export class PlayerSession {
     }
     const MS = mediaSourceCtor();
     if (!MS) {
-      this.move("ERROR", "mse-unsupported", "El navegador no soporta Media Source Extensions.");
+      this.stop(streamError("mse_unsupported"), "mse-unsupported", "El navegador no soporta Media Source Extensions.");
       return;
     }
     this.dropSocket();
@@ -245,6 +396,7 @@ export class PlayerSession {
     // no go2rtc restream; the browser never exposes that HTTP status or body to us, so
     // "never opened" is the only signal we get for that permanent condition.
     let opened = false;
+    let gotMedia = false;
 
     const pump = () => {
       if (!sb || sb.updating || queue.length === 0) return;
@@ -262,7 +414,7 @@ export class PlayerSession {
     };
     ws.onmessage = (ev) => {
       if (typeof ev.data === "string") {
-        const msg = JSON.parse(ev.data) as { type: string; value: string };
+        const msg = JSON.parse(ev.data) as { type: string; value: string; code?: string };
         if (msg.type === "mse") {
           this.move("BUFFERING", "mse-init");
           ms = new MS();
@@ -274,7 +426,7 @@ export class PlayerSession {
               try {
                 sb = ms.addSourceBuffer(msg.value);
               } catch {
-                this.move("ERROR", "codec-unsupported", "Códec no soportado por el navegador.");
+                this.stop(streamError("codec_unsupported"), "codec-unsupported", "Códec no soportado por el navegador.");
                 return;
               }
               sb.mode = "segments";
@@ -305,7 +457,18 @@ export class PlayerSession {
           el.src = this.objectURL;
           void el.play()?.catch(() => {});
         } else if (msg.type === "error") {
-          this.move("ERROR", "server-error", msg.value);
+          if (this.resilient) {
+            const info = describeStreamError(msg);
+            if (info.retryable) {
+              // The gateway closes right after; onclose schedules the retry and keeps this label.
+              this.captureFrame();
+              this.move("RECONNECTING", "server-error", info.label, info);
+            } else {
+              this.stop(info, msg.code ?? "server-error", info.label);
+            }
+          } else {
+            this.move("ERROR", "server-error", msg.value);
+          }
           this.errorListeners.forEach((l) => l(msg.value));
         }
         return;
@@ -313,21 +476,39 @@ export class PlayerSession {
       queue.push(ev.data as ArrayBuffer);
       if (queue.length > 60) queue.splice(0, queue.length - 60);
       pump();
-      this.move(this.warm ? "WARM" : "ACTIVE", "media", "");
+      this.move(this.warm ? "WARM" : "ACTIVE", "media", "", null);
       this.retry = 0;
+      if (!gotMedia) {
+        gotMedia = true;
+        this.backoff?.succeeded(this.serverId);
+      }
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       if (this.closed) return;
+      if (this.resilient) {
+        this.captureFrame();
+        // 1008 is the gateway's policy-violation close for unauthorized/forbidden.
+        if (ev?.code === 1008 && !this.snapshot.error) this.stop(streamError("unauthorized"), "close-1008", "");
+        if (this.stopped) return;
+      }
       if (!opened) {
         // Handshake rejected before any go2rtc protocol exchange: a permanent
         // condition (e.g. this camera has no go2rtc restream), not a dropped
         // connection. Show a clear message instead of retrying forever on "Conectando…".
-        this.move("ERROR", "handshake-rejected", "La cámara no tiene una transmisión de video disponible.");
+        this.stop(streamError("handshake_rejected"), "handshake-rejected", "La cámara no tiene una transmisión de video disponible.");
         return;
       }
-      this.move("RECONNECTING", "socket-closed", this.retry >= 2 ? "Sin conexión con la cámara, reintentando…" : undefined);
+      const waiting = this.snapshot.error?.label ?? (this.retry >= 2 ? "Sin conexión con la cámara, reintentando…" : undefined);
+      this.move("RECONNECTING", "socket-closed", waiting);
       this.retry = Math.min(this.retry + 1, 6);
-      this.timer = setTimeout(() => this.open(), reconnectDelay(this.retry, this.random));
+      if (this.resilient && this.backoff) {
+        this.cancelRetry = this.backoff.schedule(this.serverId, this.retry, () => {
+          this.cancelRetry = undefined;
+          this.open();
+        });
+      } else {
+        this.timer = setTimeout(() => this.open(), reconnectDelay(this.retry, this.random));
+      }
     };
   }
 }

@@ -183,7 +183,13 @@ func (g *Gateway) snapshot(w http.ResponseWriter, r *http.Request) {
 		g.fail(w, r, a, err)
 		return
 	}
-	relay(w, resp, "private, no-store")
+	// The Live grid shows this frame as a poster while streams connect; a few seconds of private
+	// caching avoids a request per tile on every layout change without serving a stale picture.
+	cache := "private, no-store"
+	if resp.StatusCode == http.StatusOK {
+		cache = "private, max-age=5"
+	}
+	relay(w, resp, cache)
 }
 
 // timeRe accepts unix seconds with optional decimals, as Frigate's /vod paths expect.

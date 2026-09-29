@@ -35,16 +35,20 @@ export function PlayerSessionProvider({
  * change or unmount (the session then stays WARM until its TTL). Outside a provider it falls
  * back to a private manager, so the session simply lives as long as the component.
  */
-export function usePlayerSession(cameraId: string, quality: SessionQuality): PlayerSession | null {
+export function usePlayerSession(cameraId: string, quality: SessionQuality, serverId?: string): PlayerSession | null {
   const shared = useContext(ManagerContext);
   const [fallback] = useState(() => (shared ? null : new PlayerSessionManager({ warmSessionTTL: 0 })));
   const manager = shared ?? fallback;
   const [session, setSession] = useState<PlayerSession | null>(null);
+  // Only used when the session is created, so it must not re-acquire when it changes.
+  const serverRef = useRef(serverId);
+  useEffect(() => {
+    serverRef.current = serverId;
+  });
   useEffect(() => {
     if (!manager) return;
     // Acquiring an external resource and publishing it to state is the subscribe pattern the rule allows for.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSession(manager.acquire(cameraId, quality));
+    setSession(manager.acquire(cameraId, quality, serverRef.current));
     return () => {
       manager.release(cameraId, quality);
       if (manager === fallback) manager.clear();
