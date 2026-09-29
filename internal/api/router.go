@@ -32,6 +32,9 @@ type Options struct {
 	// Media serves /media/v1 (live, recordings, snapshots, downloads) behind the same
 	// authentication as the API. Nil disables it.
 	Media http.Handler
+	// Realtime serves the GET /ws push feed behind the same authentication (session cookie or
+	// bearer token); unauthenticated requests get 401 before any upgrade. Nil disables it.
+	Realtime http.Handler
 }
 
 func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error) {
@@ -58,6 +61,10 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 	r.Handle("/metrics", promhttp.Handler())
 	if opts.Media != nil {
 		r.Mount("/media/v1", opts.Media)
+	}
+
+	if opts.Realtime != nil {
+		r.Method(http.MethodGet, "/ws", opts.Realtime)
 	}
 
 	strict := gen.NewStrictHandlerWithOptions(h, nil, gen.StrictHTTPServerOptions{

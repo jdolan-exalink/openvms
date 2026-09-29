@@ -548,23 +548,7 @@ func (g *Gateway) auditDenied(ctx context.Context, a authz.Actor, err error, met
 // --- live video --------------------------------------------------------------------
 
 func (g *Gateway) checkOrigin(r *http.Request) bool {
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		return true // not a browser
-	}
-	u, err := url.Parse(origin)
-	if err != nil {
-		return false
-	}
-	if strings.EqualFold(u.Host, r.Host) {
-		return true
-	}
-	for _, o := range g.AllowedOrigins {
-		if strings.EqualFold(o, origin) {
-			return true
-		}
-	}
-	return false
+	return httpx.OriginAllowed(r, g.AllowedOrigins)
 }
 
 // liveStream picks the go2rtc stream name for a live view request from the camera's

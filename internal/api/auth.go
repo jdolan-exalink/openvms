@@ -62,7 +62,7 @@ type AuthOptions struct {
 }
 
 // Authenticate resolves either "Authorization: Bearer <api token>" (scripts, integrations)
-// or the session cookie (browser) for every /api/v1 and /media route.
+// or the session cookie (browser) for every /api/v1 and /media route and the /ws push feed.
 func Authenticate(q *db.Queries, opts AuthOptions) func(http.Handler) http.Handler {
 	idle := opts.IdleTimeout
 	if idle <= 0 {
@@ -70,7 +70,7 @@ func Authenticate(q *db.Queries, opts AuthOptions) func(http.Handler) http.Handl
 	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			protected := strings.HasPrefix(r.URL.Path, "/api/v1/") || strings.HasPrefix(r.URL.Path, "/media/")
+			protected := strings.HasPrefix(r.URL.Path, "/api/v1/") || strings.HasPrefix(r.URL.Path, "/media/") || r.URL.Path == "/ws"
 			if !protected || publicPaths[r.URL.Path] {
 				next.ServeHTTP(w, r)
 				return

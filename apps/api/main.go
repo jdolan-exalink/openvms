@@ -25,6 +25,8 @@ import (
 	// every non-UTC watermark.
 	_ "time/tzdata"
 
+	"github.com/nats-io/nats.go/jetstream"
+
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
@@ -41,6 +43,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/postgres"
 	"github.com/jdolan-exalink/openvms/internal/platform/telemetry"
 	"github.com/jdolan-exalink/openvms/internal/platform/valkeyx"
+	"github.com/jdolan-exalink/openvms/internal/realtime"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
 	dbstore "github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
@@ -144,11 +147,26 @@ func run() error {
 			return postgres.SchemaVersion(ctx, pool)
 		},
 	}
+	js, err := jetstream.New(nc)
+	if err != nil {
+		return err
+	}
+	// The push feed: one ordered consumer per stream feeds the hub; the handler filters per
+	// connection by tenant and by the same authorized-ID queries the list endpoints use.
+	rtRoutes := realtime.DefaultRoutes()
+	rtHub := realtime.NewHub(realtime.HubConfig{
+		Authorizer: realtime.NewCachedAuthorizer(realtime.StoreLoader(st), 30*time.Second),
+		Log:        log,
+		Routes:     rtRoutes,
+	})
+	defer rtHub.Close()
+	go (&realtime.Feed{Source: realtime.JetStreamSource{JS: js}, Hub: rtHub, Routes: rtRoutes, Log: log}).Run(ctx)
 	router, err := api.NewRouter(handlers, log, api.Options{
 		Queries:           db.New(pool),
 		TrustForwardedFor: cfg.TrustForwardedFor,
 		SessionIdle:       cfg.SessionIdle,
 		Media:             (&media.Gateway{Svc: mediaSvc, Actor: api.ActorFrom, Branding: brandingSvc}).Routes(),
+		Realtime:          &realtime.Handler{Hub: rtHub, Actor: api.ActorFrom, Log: log},
 	})
 	if err != nil {
 		return err

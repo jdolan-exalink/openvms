@@ -13,6 +13,7 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/health"
+	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
 func newTestServer(t *testing.T, checks ...health.Check) *httptest.Server {
@@ -109,5 +110,27 @@ func TestOpenAPIServed(t *testing.T) {
 	}
 	if _, ok := spec["paths"].(map[string]any)["/api/v1/system/info"]; !ok {
 		t.Error("spec is missing /api/v1/system/info")
+	}
+}
+
+func TestWebsocketRouteRequiresAuthenticationBeforeUpgrade(t *testing.T) {
+	h := &Handlers{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), CheckTimeout: time.Second}
+	called := false
+	router, err := NewRouter(h, h.Log, Options{
+		Queries:  db.New(nil),
+		Realtime: http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+	resp, err := http.Get(ts.URL + "/ws")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized || called {
+		t.Fatalf("want 401 without invoking the handler, got %d (called=%v)", resp.StatusCode, called)
 	}
 }
