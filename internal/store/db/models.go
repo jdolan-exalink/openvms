@@ -101,6 +101,12 @@ type CameraGroupMember struct {
 	TenantID uuid.UUID
 }
 
+type CameraOutage struct {
+	CameraID uuid.UUID
+	TenantID uuid.UUID
+	Since    time.Time
+}
+
 type ClipWatermarkJob struct {
 	ID            uuid.UUID
 	TenantID      uuid.UUID
@@ -260,6 +266,13 @@ type Rule struct {
 	Enabled     bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type RuleFiring struct {
+	RuleID     uuid.UUID
+	ResourceID uuid.UUID
+	TenantID   uuid.UUID
+	FiredAt    time.Time
 }
 
 type Session struct {

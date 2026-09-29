@@ -39,11 +39,18 @@ func (e *FrigateError) Unwrap() error { return e.Err }
 // Connector opens an adapter; tests replace it.
 type Connector func(ctx context.Context, info frigate.ConnInfo) (frigate.Adapter, error)
 
+// BlobDeleter removes stored objects; *objectstore.Store implements it.
+type BlobDeleter interface {
+	Delete(ctx context.Context, key string) error
+}
+
 type Service struct {
 	Store   *store.Store
 	Sealer  *secrets.Sealer
 	Log     *slog.Logger
 	Connect Connector
+	// Blobs is optional: when set, DeleteServer removes the server's stored objects.
+	Blobs BlobDeleter
 }
 
 func New(st *store.Store, sealer *secrets.Sealer, log *slog.Logger) *Service {

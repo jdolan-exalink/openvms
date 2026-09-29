@@ -91,3 +91,12 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, string, error) {
 	}
 	return b, aws.ToString(out.ContentType), nil
 }
+
+// Delete removes the object under key. S3 reports success for missing keys.
+func (s *Store) Delete(ctx context.Context, key string) error {
+	_, err := s.Client.DeleteObject(ctx, &s3.DeleteObjectInput{Bucket: aws.String(s.Bucket), Key: aws.String(key)})
+	if err != nil {
+		return fmt.Errorf("delete %s: %w", key, err)
+	}
+	return nil
+}

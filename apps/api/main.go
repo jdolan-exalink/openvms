@@ -127,6 +127,7 @@ func run() error {
 
 	st := &dbstore.Store{Pool: pool}
 	inv := inventory.New(st, sealer, log)
+	inv.Blobs = store
 	adapters := inventory.NewAdapters(inv)
 	mediaSvc := &media.Service{Store: st, Adapters: adapters, Log: log}
 	brandingSvc := &branding.Service{Store: st, Blobs: store, Log: log}

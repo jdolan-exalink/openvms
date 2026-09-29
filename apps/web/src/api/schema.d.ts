@@ -305,8 +305,8 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Remove a server and its cameras from the VMS (soft delete)
-         * @description Frigate itself is not touched.
+         * Permanently delete a server and all its data
+         * @description Hard delete, in one transaction: the server, its cameras and every record that belongs to them (events, plate reads, alarms, exports, clip jobs, sync state, camera group memberships, grants scoped to the server or its cameras). Stored thumbnails and clips are removed best-effort after the commit. The audit log is kept, including a SERVER_REMOVED entry with the deleted counts. Frigate itself and its recordings are not touched. Requires servers.manage on the server.
          */
         delete: operations["deleteServer"];
         options?: never;

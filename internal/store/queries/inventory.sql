@@ -83,14 +83,8 @@ UPDATE frigate_servers SET
     frigate_version = CASE WHEN @frigate_version::text <> '' THEN @frigate_version ELSE frigate_version END
 WHERE id = @id;
 
--- name: SoftDeleteServer :exec
-UPDATE frigate_servers SET deleted_at = now(), deleted_by = @deleted_by WHERE id = @id AND deleted_at IS NULL;
-
 -- name: MoveServerCameras :exec
 UPDATE cameras SET site_id = @site_id, updated_at = now() WHERE server_id = @server_id;
-
--- name: SoftDeleteServerCameras :exec
-UPDATE cameras SET deleted_at = now(), deleted_by = @deleted_by WHERE server_id = @server_id AND deleted_at IS NULL;
 
 -- name: UpsertCamera :one
 INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream)
@@ -189,3 +183,63 @@ SELECT count(*)::int FROM cameras WHERE id = ANY(@ids::uuid[]) AND tenant_id = @
 -- name: GetServerRow :one
 -- Full row with the sealed credentials, for code that connects to Frigate.
 SELECT * FROM frigate_servers WHERE id = @id AND deleted_at IS NULL;
+
+-- Hard delete of a server and everything that hangs off it. Order matters: children first,
+-- because the foreign keys to frigate_servers, cameras, events and lpr_reads do not cascade.
+-- The audit log is append-only and is never touched.
+
+-- name: ListServerBlobKeys :many
+SELECT k::text FROM (
+    SELECT e.thumb_key AS k FROM events e WHERE e.server_id = @server_id
+    UNION ALL SELECT e.preview_key FROM events e WHERE e.server_id = @server_id
+    UNION ALL SELECT j.output_key FROM clip_watermark_jobs j WHERE j.server_id = @server_id
+) keys WHERE k <> '';
+
+-- name: PurgeServerClipJobs :execrows
+DELETE FROM clip_watermark_jobs WHERE server_id = @server_id;
+
+-- name: PurgeServerAlarms :execrows
+DELETE FROM alarms WHERE camera_id IN (SELECT id FROM cameras WHERE server_id = @server_id);
+
+-- name: PurgeServerExports :execrows
+DELETE FROM exports WHERE server_id = @server_id;
+
+-- name: PurgeServerLprReads :execrows
+DELETE FROM lpr_reads WHERE server_id = @server_id;
+
+-- name: PurgeServerEvents :execrows
+DELETE FROM events WHERE server_id = @server_id;
+
+-- name: PurgeServerObjectSnapshots :execrows
+DELETE FROM object_snapshots WHERE server_id = @server_id;
+
+-- name: PurgeServerSyncState :execrows
+DELETE FROM event_sync_state WHERE server_id = @server_id;
+
+-- name: PurgeServerRuleFirings :execrows
+DELETE FROM rule_firings
+WHERE resource_id = @server_id OR resource_id IN (SELECT id FROM cameras WHERE server_id = @server_id);
+
+-- name: PurgeServerGrants :execrows
+DELETE FROM permission_grants
+WHERE (scope_type = 'server' AND scope_id = @server_id::uuid)
+   OR (scope_type = 'camera' AND scope_id IN (SELECT id FROM cameras WHERE server_id = @server_id::uuid));
+
+-- Saved views keep their shape: cells showing a deleted camera become empty.
+-- name: ClearServerViewCells :execrows
+UPDATE views v SET layout = jsonb_set(v.layout, '{cells}', (
+    SELECT coalesce(jsonb_agg(CASE WHEN cell->>'camera_id' IN (SELECT cam.id::text FROM cameras cam WHERE cam.server_id = @server_id)
+                                   THEN 'null'::jsonb ELSE cell END ORDER BY ord), '[]'::jsonb)
+    FROM jsonb_array_elements(v.layout->'cells') WITH ORDINALITY AS t(cell, ord)
+)), updated_at = now()
+WHERE jsonb_typeof(v.layout->'cells') = 'array'
+  AND EXISTS (
+      SELECT 1 FROM jsonb_array_elements(v.layout->'cells') AS c(cell)
+      WHERE cell->>'camera_id' IN (SELECT cam.id::text FROM cameras cam WHERE cam.server_id = @server_id));
+
+-- Camera outages and group memberships cascade with the cameras.
+-- name: PurgeServerCameras :execrows
+DELETE FROM cameras WHERE server_id = @server_id;
+
+-- name: PurgeServer :execrows
+DELETE FROM frigate_servers WHERE id = @id;

@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
@@ -351,9 +352,14 @@ func (s *Service) UpdateServer(ctx context.Context, actor authz.Actor, id uuid.U
 	return s.GetServer(ctx, actor, id)
 }
 
-// DeleteServer removes the server and its cameras from the VMS. Frigate is untouched.
+// DeleteServer permanently removes the server and every record that belongs to it or to its
+// cameras (events, plate reads, alarms, exports, clip jobs, sync state, grants, ...) in one
+// transaction. The audit log is append-only and is kept, including the SERVER_REMOVED entry
+// with the deleted counts. Frigate itself, and its recordings, are untouched. Stored objects
+// (thumbnails, previews, watermarked clips) are removed best-effort after the commit.
 func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.UUID) error {
-	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+	var blobKeys []string
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		srv, err := q.GetServer(ctx, id)
 		if err != nil {
 			return notFoundOr(err)
@@ -361,14 +367,60 @@ func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.U
 		if err := c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID)); err != nil {
 			return err
 		}
-		if err := q.SoftDeleteServerCameras(ctx, db.SoftDeleteServerCamerasParams{ServerID: id, DeletedBy: &actor.UserID}); err != nil {
+		if blobKeys, err = q.ListServerBlobKeys(ctx, id); err != nil {
 			return err
 		}
-		if err := q.SoftDeleteServer(ctx, db.SoftDeleteServerParams{ID: id, DeletedBy: &actor.UserID}); err != nil {
-			return err
+		// Children first: the foreign keys to frigate_servers, cameras, events and lpr_reads
+		// do not cascade, so an explicit order keeps every other delete path unchanged.
+		counts := map[string]int64{}
+		steps := []struct {
+			name string
+			run  func() (int64, error)
+		}{
+			{"clip_watermark_jobs", func() (int64, error) { return q.PurgeServerClipJobs(ctx, id) }},
+			{"alarms", func() (int64, error) { return q.PurgeServerAlarms(ctx, id) }},
+			{"exports", func() (int64, error) { return q.PurgeServerExports(ctx, id) }},
+			{"lpr_reads", func() (int64, error) { return q.PurgeServerLprReads(ctx, id) }},
+			{"events", func() (int64, error) { return q.PurgeServerEvents(ctx, id) }},
+			{"object_snapshots", func() (int64, error) { return q.PurgeServerObjectSnapshots(ctx, id) }},
+			{"sync_state", func() (int64, error) { return q.PurgeServerSyncState(ctx, id) }},
+			{"rule_firings", func() (int64, error) { return q.PurgeServerRuleFirings(ctx, id) }},
+			{"grants", func() (int64, error) { return q.PurgeServerGrants(ctx, id) }},
+			{"view_cells_cleared", func() (int64, error) { return q.ClearServerViewCells(ctx, id) }},
+			{"cameras", func() (int64, error) { return q.PurgeServerCameras(ctx, id) }},
+			{"server", func() (int64, error) { return q.PurgeServer(ctx, id) }},
 		}
-		return audit(ctx, q, actor, &srv.TenantID, ActionServerRemoved, "server", id, map[string]any{"name": srv.Name})
+		for _, st := range steps {
+			n, err := st.run()
+			if err != nil {
+				return fmt.Errorf("delete server %s: %w", st.name, err)
+			}
+			counts[st.name] = n
+		}
+		details := map[string]any{"name": srv.Name}
+		for k, v := range counts {
+			details[k] = v
+		}
+		return audit(ctx, q, actor, &srv.TenantID, ActionServerRemoved, "server", id, details)
 	})
+	if err != nil {
+		return err
+	}
+	s.deleteBlobs(ctx, id, blobKeys)
+	return nil
+}
+
+// deleteBlobs removes stored objects after the database commit. Failures are logged only:
+// an orphaned object is harmless, a failed request after the data is gone is not.
+func (s *Service) deleteBlobs(ctx context.Context, serverID uuid.UUID, keys []string) {
+	if s.Blobs == nil {
+		return
+	}
+	for _, key := range keys {
+		if err := s.Blobs.Delete(ctx, key); err != nil {
+			s.Log.WarnContext(ctx, "inventory: delete stored object of removed server", "server_id", serverID, "key", key, "error", err)
+		}
+	}
 }
 
 type SyncResult struct {

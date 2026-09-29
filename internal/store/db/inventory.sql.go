@@ -40,6 +40,27 @@ func (q *Queries) ClearCameraGroupMembers(ctx context.Context, groupID uuid.UUID
 	return err
 }
 
+const clearServerViewCells = `-- name: ClearServerViewCells :execrows
+UPDATE views v SET layout = jsonb_set(v.layout, '{cells}', (
+    SELECT coalesce(jsonb_agg(CASE WHEN cell->>'camera_id' IN (SELECT cam.id::text FROM cameras cam WHERE cam.server_id = $1)
+                                   THEN 'null'::jsonb ELSE cell END ORDER BY ord), '[]'::jsonb)
+    FROM jsonb_array_elements(v.layout->'cells') WITH ORDINALITY AS t(cell, ord)
+)), updated_at = now()
+WHERE jsonb_typeof(v.layout->'cells') = 'array'
+  AND EXISTS (
+      SELECT 1 FROM jsonb_array_elements(v.layout->'cells') AS c(cell)
+      WHERE cell->>'camera_id' IN (SELECT cam.id::text FROM cameras cam WHERE cam.server_id = $1))
+`
+
+// Saved views keep their shape: cells showing a deleted camera become empty.
+func (q *Queries) ClearServerViewCells(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, clearServerViewCells, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countCamerasInTenant = `-- name: CountCamerasInTenant :one
 SELECT count(*)::int FROM cameras WHERE id = ANY($1::uuid[]) AND tenant_id = $2 AND deleted_at IS NULL
 `
@@ -625,6 +646,38 @@ func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]Lis
 	return items, nil
 }
 
+const listServerBlobKeys = `-- name: ListServerBlobKeys :many
+
+SELECT k::text FROM (
+    SELECT e.thumb_key AS k FROM events e WHERE e.server_id = $1
+    UNION ALL SELECT e.preview_key FROM events e WHERE e.server_id = $1
+    UNION ALL SELECT j.output_key FROM clip_watermark_jobs j WHERE j.server_id = $1
+) keys WHERE k <> ''
+`
+
+// Hard delete of a server and everything that hangs off it. Order matters: children first,
+// because the foreign keys to frigate_servers, cameras, events and lpr_reads do not cascade.
+// The audit log is append-only and is never touched.
+func (q *Queries) ListServerBlobKeys(ctx context.Context, serverID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, listServerBlobKeys, serverID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return nil, err
+		}
+		items = append(items, k)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServerCameras = `-- name: ListServerCameras :many
 SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
 `
@@ -878,6 +931,142 @@ func (q *Queries) MoveServerCameras(ctx context.Context, arg MoveServerCamerasPa
 	return err
 }
 
+const purgeServer = `-- name: PurgeServer :execrows
+DELETE FROM frigate_servers WHERE id = $1
+`
+
+func (q *Queries) PurgeServer(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServer, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerAlarms = `-- name: PurgeServerAlarms :execrows
+DELETE FROM alarms WHERE camera_id IN (SELECT id FROM cameras WHERE server_id = $1)
+`
+
+func (q *Queries) PurgeServerAlarms(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerAlarms, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerCameras = `-- name: PurgeServerCameras :execrows
+DELETE FROM cameras WHERE server_id = $1
+`
+
+// Camera outages and group memberships cascade with the cameras.
+func (q *Queries) PurgeServerCameras(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerCameras, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerClipJobs = `-- name: PurgeServerClipJobs :execrows
+DELETE FROM clip_watermark_jobs WHERE server_id = $1
+`
+
+func (q *Queries) PurgeServerClipJobs(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerClipJobs, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerEvents = `-- name: PurgeServerEvents :execrows
+DELETE FROM events WHERE server_id = $1
+`
+
+func (q *Queries) PurgeServerEvents(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerEvents, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerExports = `-- name: PurgeServerExports :execrows
+DELETE FROM exports WHERE server_id = $1
+`
+
+func (q *Queries) PurgeServerExports(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerExports, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerGrants = `-- name: PurgeServerGrants :execrows
+DELETE FROM permission_grants
+WHERE (scope_type = 'server' AND scope_id = $1::uuid)
+   OR (scope_type = 'camera' AND scope_id IN (SELECT id FROM cameras WHERE server_id = $1::uuid))
+`
+
+func (q *Queries) PurgeServerGrants(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerGrants, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerLprReads = `-- name: PurgeServerLprReads :execrows
+DELETE FROM lpr_reads WHERE server_id = $1
+`
+
+func (q *Queries) PurgeServerLprReads(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerLprReads, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerObjectSnapshots = `-- name: PurgeServerObjectSnapshots :execrows
+DELETE FROM object_snapshots WHERE server_id = $1
+`
+
+func (q *Queries) PurgeServerObjectSnapshots(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerObjectSnapshots, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerRuleFirings = `-- name: PurgeServerRuleFirings :execrows
+DELETE FROM rule_firings
+WHERE resource_id = $1 OR resource_id IN (SELECT id FROM cameras WHERE server_id = $1)
+`
+
+func (q *Queries) PurgeServerRuleFirings(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerRuleFirings, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const purgeServerSyncState = `-- name: PurgeServerSyncState :execrows
+DELETE FROM event_sync_state WHERE server_id = $1
+`
+
+func (q *Queries) PurgeServerSyncState(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerSyncState, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setServerCamerasStatus = `-- name: SetServerCamerasStatus :exec
 UPDATE cameras SET status = $1 WHERE server_id = $2 AND deleted_at IS NULL
 `
@@ -903,34 +1092,6 @@ type SoftDeleteCameraGroupParams struct {
 
 func (q *Queries) SoftDeleteCameraGroup(ctx context.Context, arg SoftDeleteCameraGroupParams) error {
 	_, err := q.db.Exec(ctx, softDeleteCameraGroup, arg.DeletedBy, arg.ID)
-	return err
-}
-
-const softDeleteServer = `-- name: SoftDeleteServer :exec
-UPDATE frigate_servers SET deleted_at = now(), deleted_by = $1 WHERE id = $2 AND deleted_at IS NULL
-`
-
-type SoftDeleteServerParams struct {
-	DeletedBy *uuid.UUID
-	ID        uuid.UUID
-}
-
-func (q *Queries) SoftDeleteServer(ctx context.Context, arg SoftDeleteServerParams) error {
-	_, err := q.db.Exec(ctx, softDeleteServer, arg.DeletedBy, arg.ID)
-	return err
-}
-
-const softDeleteServerCameras = `-- name: SoftDeleteServerCameras :exec
-UPDATE cameras SET deleted_at = now(), deleted_by = $1 WHERE server_id = $2 AND deleted_at IS NULL
-`
-
-type SoftDeleteServerCamerasParams struct {
-	DeletedBy *uuid.UUID
-	ServerID  uuid.UUID
-}
-
-func (q *Queries) SoftDeleteServerCameras(ctx context.Context, arg SoftDeleteServerCamerasParams) error {
-	_, err := q.db.Exec(ctx, softDeleteServerCameras, arg.DeletedBy, arg.ServerID)
 	return err
 }
 
