@@ -47,6 +47,7 @@ DnD/layout/expand in tests.
 Strategy: ask-on-risk (forecast ~2.6k lines > budget; chain strategy to be chosen with the user before opening PRs). Push/PR are user decisions.
 
 ## Progress
+- 2026-09-29: P0 complete (LV-1..LV-8). Review: medium risk, declined by PO (candidate-scoped). Deployed @5db5842 with make up after pg_dumpall backup (openvms-backups/pre-live-p0-*); /health/ready ok; OPENVMS_FEATURES=persistentPlayers,videoSurfaceLayer active. Pending: manual browser verification (see docs/live-view-architecture.md Known limitations).
 TDD: off (user decision 2026-09-29). Started strict (RED observed for Go config), then the user turned it off; no
 further tests were added beyond those already written. Ordinary checks run per task.
 Route for LV-1..3: delegated (writer trigger: 2+ non-trivial files).
