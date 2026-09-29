@@ -178,8 +178,14 @@ func run() error {
 		Queries:           db.New(pool),
 		TrustForwardedFor: cfg.TrustForwardedFor,
 		SessionIdle:       cfg.SessionIdle,
-		Media:             (&media.Gateway{Svc: mediaSvc, Actor: api.ActorFrom, Branding: brandingSvc}).Routes(),
-		Realtime:          &realtime.Handler{Hub: rtHub, Actor: api.ActorFrom, Session: api.RevalidatorFrom, Log: log},
+		Media: (&media.Gateway{
+			Svc: mediaSvc, Actor: api.ActorFrom, Branding: brandingSvc, Session: api.RevalidatorFrom,
+			Live: media.LiveConfig{
+				AuditWindow: cfg.LiveAuditWindow, RevalidateInterval: cfg.LiveRevalidateInterval,
+				PingInterval: cfg.LivePingInterval, PongWait: cfg.LivePongWait,
+			},
+		}).Routes(),
+		Realtime: &realtime.Handler{Hub: rtHub, Actor: api.ActorFrom, Session: api.RevalidatorFrom, Log: log},
 	})
 	if err != nil {
 		return err

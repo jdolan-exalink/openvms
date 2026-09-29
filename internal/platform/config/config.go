@@ -43,6 +43,12 @@ type Config struct {
 	LoginMaxFailures int
 	LoginLockout     time.Duration
 
+	// Live* tune the live-view websocket gateway (internal/media).
+	LiveAuditWindow        time.Duration
+	LiveRevalidateInterval time.Duration
+	LivePingInterval       time.Duration
+	LivePongWait           time.Duration
+
 	ShutdownTimeout time.Duration
 }
 
@@ -64,22 +70,26 @@ type S3Config struct {
 // Load reads the environment. service names the binary for logs and traces.
 func Load(service string) (Config, error) {
 	c := Config{
-		Service:           service,
-		LogLevel:          str("LOG_LEVEL", "info"),
-		HTTPAddr:          str("HTTP_ADDR", ":8080"),
-		DatabaseURL:       str("DATABASE_URL", ""),
-		MigrateOnStart:    boolean("MIGRATE_ON_START", true),
-		ValkeyAddr:        str("VALKEY_ADDR", "localhost:6379"),
-		NATSURL:           str("NATS_URL", "nats://localhost:4222"),
-		ShutdownTimeout:   duration("SHUTDOWN_TIMEOUT", 15*time.Second),
-		TrustForwardedFor: boolean("TRUST_FORWARDED_FOR", false),
-		HealthInterval:    duration("HEALTH_INTERVAL", 30*time.Second),
-		EventSyncInterval: duration("EVENT_SYNC_INTERVAL", 5*time.Second),
-		EventBackfill:     duration("EVENT_BACKFILL", 24*time.Hour),
-		SessionTTL:        duration("SESSION_TTL", 12*time.Hour),
-		SessionIdle:       duration("SESSION_IDLE", 2*time.Hour),
-		LoginMaxFailures:  integer("LOGIN_MAX_FAILURES", 5),
-		LoginLockout:      duration("LOGIN_LOCKOUT", 15*time.Minute),
+		Service:                service,
+		LogLevel:               str("LOG_LEVEL", "info"),
+		HTTPAddr:               str("HTTP_ADDR", ":8080"),
+		DatabaseURL:            str("DATABASE_URL", ""),
+		MigrateOnStart:         boolean("MIGRATE_ON_START", true),
+		ValkeyAddr:             str("VALKEY_ADDR", "localhost:6379"),
+		NATSURL:                str("NATS_URL", "nats://localhost:4222"),
+		ShutdownTimeout:        duration("SHUTDOWN_TIMEOUT", 15*time.Second),
+		TrustForwardedFor:      boolean("TRUST_FORWARDED_FOR", false),
+		HealthInterval:         duration("HEALTH_INTERVAL", 30*time.Second),
+		EventSyncInterval:      duration("EVENT_SYNC_INTERVAL", 5*time.Second),
+		EventBackfill:          duration("EVENT_BACKFILL", 24*time.Hour),
+		SessionTTL:             duration("SESSION_TTL", 12*time.Hour),
+		SessionIdle:            duration("SESSION_IDLE", 2*time.Hour),
+		LoginMaxFailures:       integer("LOGIN_MAX_FAILURES", 5),
+		LoginLockout:           duration("LOGIN_LOCKOUT", 15*time.Minute),
+		LiveAuditWindow:        duration("LIVE_AUDIT_WINDOW", 5*time.Minute),
+		LiveRevalidateInterval: duration("LIVE_REVALIDATE_INTERVAL", 30*time.Second),
+		LivePingInterval:       duration("LIVE_PING_INTERVAL", 20*time.Second),
+		LivePongWait:           duration("LIVE_PONG_WAIT", 60*time.Second),
 		Waha: WahaConfig{
 			BaseURL: str("WAHA_BASE_URL", "http://waha:3000"),
 			APIKey:  str("WAHA_API_KEY", ""),
