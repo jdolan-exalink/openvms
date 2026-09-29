@@ -1,27 +1,30 @@
 import type { QueryClient } from "@tanstack/react-query";
-import type { ReactNode } from "react";
-import { createRootRouteWithContext, createRoute, createRouter, Outlet, redirect } from "@tanstack/react-router";
+import {
+  createRootRouteWithContext, createRoute, createRouter, lazyRouteComponent, Outlet, redirect,
+  type RouteComponent,
+} from "@tanstack/react-router";
 import { meQuery } from "./api/queries";
 import { Layout } from "./components/Layout";
 import { SettingsLayout } from "./components/SettingsLayout";
-import { Account } from "./routes/Account";
-import { Audit } from "./routes/Audit";
-import { Branding } from "./routes/Branding";
-import { CameraGroups } from "./routes/CameraGroups";
-import { Cameras } from "./routes/Cameras";
-import { Dashboard } from "./routes/Dashboard";
 import { parseEventsSearch } from "./lib/eventsSearch";
-import { Events } from "./routes/Events";
-import { Exports } from "./routes/Exports";
-import { Groups } from "./routes/Groups";
-import { Live } from "./routes/Live";
-import { Login } from "./routes/Login";
-import { Permissions } from "./routes/Permissions";
-import { Plates } from "./routes/Plates";
+
+const Account = lazyRouteComponent(() => import("./routes/Account"), "Account");
+const Audit = lazyRouteComponent(() => import("./routes/Audit"), "Audit");
+const Branding = lazyRouteComponent(() => import("./routes/Branding"), "Branding");
+const CameraGroups = lazyRouteComponent(() => import("./routes/CameraGroups"), "CameraGroups");
+const Cameras = lazyRouteComponent(() => import("./routes/Cameras"), "Cameras");
+const Dashboard = lazyRouteComponent(() => import("./routes/Dashboard"), "Dashboard");
+const Events = lazyRouteComponent(() => import("./routes/Events"), "Events");
+const Exports = lazyRouteComponent(() => import("./routes/Exports"), "Exports");
+const Groups = lazyRouteComponent(() => import("./routes/Groups"), "Groups");
+const Live = lazyRouteComponent(() => import("./routes/Live"), "Live");
+const Login = lazyRouteComponent(() => import("./routes/Login"), "Login");
+const Permissions = lazyRouteComponent(() => import("./routes/Permissions"), "Permissions");
+const Plates = lazyRouteComponent(() => import("./routes/Plates"), "Plates");
 import { Playback } from "./routes/Playback";
-import { Servers } from "./routes/Servers";
-import { Sites } from "./routes/Sites";
-import { Users } from "./routes/Users";
+const Servers = lazyRouteComponent(() => import("./routes/Servers"), "Servers");
+const Sites = lazyRouteComponent(() => import("./routes/Sites"), "Sites");
+const Users = lazyRouteComponent(() => import("./routes/Users"), "Users");
 
 export type RouterContext = { queryClient: QueryClient };
 
@@ -44,7 +47,7 @@ const appRoute = createRoute({
 });
 
 // Each route is declared on its own so paths stay literal types for typed <Link to>.
-const child = <P extends string>(path: P, component: () => ReactNode) => createRoute({ getParentRoute: () => appRoute, path, component });
+const child = <P extends string>(path: P, component: RouteComponent) => createRoute({ getParentRoute: () => appRoute, path, component });
 
 type PlaybackSearch = { camera?: string; t?: number };
 
@@ -75,7 +78,7 @@ const indexRoute = createRoute({
 // adds the shared SettingsLayout chrome (sub-nav) around the former Infraestructura/
 // Administración pages and the settings landing page (the former Panel/Dashboard content).
 const settingsRoute = createRoute({ getParentRoute: () => appRoute, id: "settings", component: SettingsLayout });
-const settingsChild = <P extends string>(path: P, component: () => ReactNode) =>
+const settingsChild = <P extends string>(path: P, component: RouteComponent) =>
   createRoute({ getParentRoute: () => settingsRoute, path, component });
 
 const permissionsRoute = createRoute({

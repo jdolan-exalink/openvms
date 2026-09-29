@@ -20,6 +20,16 @@ export default defineConfig({
       "/media": { target: api, ws: true },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/hls.js")) return "hls";
+          if (id.includes("node_modules/@dnd-kit")) return "dnd-kit";
+        },
+      },
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,
