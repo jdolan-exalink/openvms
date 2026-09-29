@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { cn } from "@/lib/cn";
 import { PlayerSession, type SessionSnapshot } from "@/lib/live/PlayerSession";
 import { usePlayerSession } from "@/lib/live/PlayerSessionProvider";
+import { SurfaceSlot, useSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { PlayerStatusOverlay } from "./PlayerStatusOverlay";
 
 type MsePlayerProps = {
@@ -15,6 +16,12 @@ type MsePlayerProps = {
    * so the stream survives remounts. Off by default: the player owns a private session.
    */
   persistent?: boolean;
+  /**
+   * With `persistent`, render the video in the app-wide VideoSurfaceLayer (feature flag
+   * `videoSurfaceLayer`) instead of inside this element, so it is never re-parented by
+   * layout, drag and drop or expand. Ignored outside a layer.
+   */
+  surface?: boolean;
   /** Frigate server of the camera; its sessions share reconnect backoff. */
   serverId?: string;
 };
@@ -24,7 +31,9 @@ type MsePlayerProps = {
  * go2rtc MSE websocket. It is a thin view over a PlayerSession (lib/live), which owns the
  * `<video>`, the websocket and the reconnect policy; this component only renders it.
  */
-export function MsePlayer({ persistent = false, ...props }: MsePlayerProps) {
+export function MsePlayer({ persistent = false, surface = false, ...props }: MsePlayerProps) {
+  const layer = useSurfaceLayer();
+  if (persistent && surface && layer) return <SurfaceMsePlayer {...props} />;
   return persistent ? <PersistentMsePlayer {...props} /> : <PrivateMsePlayer {...props} />;
 }
 
@@ -76,7 +85,7 @@ function usePersistentSession(
 }
 
 /** PersistentMsePlayer shows a manager-owned session; unmounting only detaches the `<video>`. */
-function PersistentMsePlayer({ cameraId, quality = "sub", serverId, className, muted = true, onError }: Omit<MsePlayerProps, "persistent">) {
+function PersistentMsePlayer({ cameraId, quality = "sub", serverId, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const host = useRef<HTMLDivElement>(null);
   const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, onError });
   useEffect(() => {
@@ -89,8 +98,24 @@ function PersistentMsePlayer({ cameraId, quality = "sub", serverId, className, m
   return <PlayerView host={host} snapshot={snapshot} className={className} cameraId={cameraId} onRetry={() => session?.retryNow()} />;
 }
 
+/** SurfaceMsePlayer leaves the `<video>` in the VideoSurfaceLayer and only reserves its slot here. */
+function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
+  const host = useRef<HTMLDivElement>(null);
+  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, onError });
+  useEffect(() => {
+    session?.setMuted(muted);
+  }, [session, muted]);
+  const showing = snapshot.state === "ACTIVE" || snapshot.state === "WARM";
+  return (
+    <div ref={host} className={cn("relative overflow-hidden bg-black", className)}>
+      <SurfaceSlot session={session} className="absolute inset-0" />
+      {!showing && <PlayerStatusOverlay cameraId={cameraId} snapshot={snapshot} onRetry={() => session?.retryNow()} />}
+    </div>
+  );
+}
+
 /** PrivateMsePlayer owns its session: it closes with the component (the legacy behaviour). */
-function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, onError }: Omit<MsePlayerProps, "persistent">) {
+function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const container = useRef<HTMLDivElement>(null);
   const session = useRef<PlayerSession | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot>(IDLE_SNAPSHOT);
