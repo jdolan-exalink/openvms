@@ -503,11 +503,10 @@ func (s *Service) RestartServer(ctx context.Context, actor authz.Actor, id uuid.
 		return &FrigateError{Err: err}
 	}
 
-	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+	return s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
 		return audit(ctx, q, actor, &srv.TenantID, ActionServerRestarted, "server", id, map[string]any{
 			"server_id": srv.ID,
 			"name":      srv.Name,
 		})
 	})
 }
-

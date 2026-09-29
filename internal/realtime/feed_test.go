@@ -137,12 +137,12 @@ func TestFeedRestartsAFailedConsumerUntilCancelled(t *testing.T) {
 }
 
 func TestNextRetryDelayBacksOffAndResetsAfterHealthyRun(t *testing.T) {
-	const initial, max, healthy = 2 * time.Second, 30 * time.Second, time.Minute
+	const initial, maxDelay, healthy = 2 * time.Second, 30 * time.Second, time.Minute
 	got := []time.Duration{}
 	d := initial
 	for i := 0; i < 6; i++ {
 		got = append(got, d)
-		d = nextRetryDelay(d, initial, max, time.Second, healthy)
+		d = nextRetryDelay(d, initial, maxDelay, time.Second, healthy)
 	}
 	want := []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, 30 * time.Second, 30 * time.Second}
 	for i := range want {
@@ -150,7 +150,7 @@ func TestNextRetryDelayBacksOffAndResetsAfterHealthyRun(t *testing.T) {
 			t.Fatalf("delays = %v, want %v", got, want)
 		}
 	}
-	if d := nextRetryDelay(30*time.Second, initial, max, 2*time.Minute, healthy); d != initial {
+	if d := nextRetryDelay(30*time.Second, initial, maxDelay, 2*time.Minute, healthy); d != initial {
 		t.Fatalf("after a healthy run delay = %v, want reset to %v", d, initial)
 	}
 }

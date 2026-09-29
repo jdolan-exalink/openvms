@@ -131,7 +131,7 @@ func (s *Service) List(ctx context.Context, actor authz.Actor, f Filter) ([]Alar
 			SiteID:     f.SiteID,
 			CameraID:   f.CameraID,
 			AssignedTo: f.AssignedTo,
-			LimitCount: int32(limit),
+			LimitCount: int32(limit), //nolint:gosec // bounded to 1000
 		})
 		if err != nil {
 			return store.Classify(err)

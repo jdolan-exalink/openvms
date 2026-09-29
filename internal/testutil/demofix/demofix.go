@@ -33,7 +33,7 @@ type Env struct {
 	// Cameras maps "<server>/<camera>" to the demo cameras.
 	Cameras map[string]db.GetCameraRow
 	// Mocks maps server name to its simulated Frigate (seeded with 30 reviews).
-	Mocks map[string]*Mock
+	Mocks  map[string]*Mock
 	Sealer *secrets.Sealer
 }
 

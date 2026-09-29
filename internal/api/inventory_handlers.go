@@ -578,4 +578,3 @@ func (h *Handlers) RestartServer(ctx context.Context, r gen.RestartServerRequest
 	}
 	return gen.RestartServer200JSONResponse{Success: true}, nil
 }
-

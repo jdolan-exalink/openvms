@@ -36,21 +36,21 @@ type cameraConfig struct {
 	Live *struct {
 		Streams map[string]string `json:"streams"`
 	} `json:"live"`
-	Detect *toggle `json:"detect"`
+	Detect  *toggle `json:"detect"`
 	Objects *struct {
 		Track []string `json:"track"`
 	} `json:"objects"`
 }
 
 type frigateConfig struct {
-	Cameras         map[string]cameraConfig `json:"cameras"`
-	LPR             *toggle                 `json:"lpr"`
-	Detect          *toggle                 `json:"detect"`
-	Objects         *struct {
+	Cameras map[string]cameraConfig `json:"cameras"`
+	LPR     *toggle                 `json:"lpr"`
+	Detect  *toggle                 `json:"detect"`
+	Objects *struct {
 		Track []string `json:"track"`
 	} `json:"objects"`
-	FaceRecognition *toggle                 `json:"face_recognition"`
-	SemanticSearch  *toggle                 `json:"semantic_search"`
+	FaceRecognition *toggle `json:"face_recognition"`
+	SemanticSearch  *toggle `json:"semantic_search"`
 }
 
 func (a *v017) config(ctx context.Context) (frigateConfig, error) {
@@ -338,4 +338,3 @@ func (a *v017) Restart(ctx context.Context) error {
 	_, err := a.c.send(ctx, http.MethodPost, "/api/restart", nil, nil)
 	return err
 }
-

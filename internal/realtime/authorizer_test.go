@@ -16,7 +16,7 @@ func TestCachedAuthorizerLoadsOncePerTTL(t *testing.T) {
 	var loads atomic.Int32
 	cam := uuid.New()
 	now := time.Unix(1000, 0)
-	a := realtime.NewCachedAuthorizer(func(_ context.Context, _ authz.Actor, kind authz.ScopeType, p authz.Permission) ([]uuid.UUID, error) {
+	a := realtime.NewCachedAuthorizer(func(_ context.Context, _ authz.Actor, _ authz.ScopeType, _ authz.Permission) ([]uuid.UUID, error) {
 		loads.Add(1)
 		return []uuid.UUID{cam}, nil
 	}, 30*time.Second)

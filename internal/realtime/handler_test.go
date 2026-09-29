@@ -42,13 +42,22 @@ func newWS(t *testing.T, mutate func(*realtime.Handler), cfg realtime.HubConfig)
 	return &wsFixture{srv: srv, hub: hub, tenant: tenant}
 }
 
-func (f *wsFixture) dial(t *testing.T, origin string) (*websocket.Conn, *http.Response, error) {
+func (f *wsFixture) dialResp(t *testing.T, origin string) (*websocket.Conn, *http.Response, error) {
 	t.Helper()
 	hdr := http.Header{}
 	if origin != "" {
 		hdr.Set("Origin", origin)
 	}
 	return websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(f.srv.URL, "http")+"/ws", hdr)
+}
+
+func (f *wsFixture) dial(t *testing.T, origin string) (*websocket.Conn, error) {
+	t.Helper()
+	c, resp, err := f.dialResp(t, origin)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	return c, err
 }
 
 func waitConnections(t *testing.T, h *realtime.Hub, n int) {
@@ -66,7 +75,10 @@ func TestHandlerRequiresAuthentication(t *testing.T) {
 	f := newWS(t, func(h *realtime.Handler) {
 		h.Actor = func(context.Context) (authz.Actor, bool) { return authz.Actor{}, false }
 	}, realtime.HubConfig{})
-	_, resp, err := f.dial(t, "")
+	_, resp, err := f.dialResp(t, "")
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	if err == nil || resp == nil || resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("resp=%v err=%v, want 401", resp, err)
 	}
@@ -74,10 +86,15 @@ func TestHandlerRequiresAuthentication(t *testing.T) {
 
 func TestHandlerOriginPolicy(t *testing.T) {
 	f := newWS(t, nil, realtime.HubConfig{})
-	if _, resp, err := f.dial(t, "https://evil.example"); err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+	if _, resp, err := f.dialResp(t, "https://evil.example"); err == nil || resp == nil || resp.StatusCode != http.StatusForbidden {
+		if resp != nil && resp.Body != nil {
+			_ = resp.Body.Close()
+		}
 		t.Fatalf("cross-origin: resp=%v err=%v, want 403", resp, err)
+	} else if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
 	}
-	c, _, err := f.dial(t, f.srv.URL) // same host as the request
+	c, err := f.dial(t, f.srv.URL) // same host as the request
 	if err != nil {
 		t.Fatalf("same-origin upgrade refused: %v", err)
 	}
@@ -86,7 +103,7 @@ func TestHandlerOriginPolicy(t *testing.T) {
 
 func TestHandlerStreamsEnvelopes(t *testing.T) {
 	f := newWS(t, nil, realtime.HubConfig{})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -118,13 +135,16 @@ func TestHandlerStreamsEnvelopes(t *testing.T) {
 
 func TestHandlerLimitsConnectionsPerUser(t *testing.T) {
 	f := newWS(t, nil, realtime.HubConfig{MaxPerUser: 1})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer c.Close()
 	waitConnections(t, f.hub, 1)
-	_, resp, err := f.dial(t, "")
+	_, resp, err := f.dialResp(t, "")
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	if err == nil || resp == nil || resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("resp=%v err=%v, want 429", resp, err)
 	}
@@ -132,7 +152,7 @@ func TestHandlerLimitsConnectionsPerUser(t *testing.T) {
 
 func TestHandlerDisconnectReleasesSubscription(t *testing.T) {
 	f := newWS(t, nil, realtime.HubConfig{})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +163,7 @@ func TestHandlerDisconnectReleasesSubscription(t *testing.T) {
 
 func TestHandlerShutdownSendsGoingAway(t *testing.T) {
 	f := newWS(t, nil, realtime.HubConfig{})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +179,7 @@ func TestHandlerShutdownSendsGoingAway(t *testing.T) {
 
 func TestHandlerPingsIdleConnections(t *testing.T) {
 	f := newWS(t, func(h *realtime.Handler) { h.PingInterval = 30 * time.Millisecond }, realtime.HubConfig{})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +205,7 @@ func TestHandlerDropsConnectionWithoutPong(t *testing.T) {
 		h.PingInterval = 20 * time.Millisecond
 		h.PongWait = 60 * time.Millisecond
 	}, realtime.HubConfig{})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +251,7 @@ func readClose(t *testing.T, c *websocket.Conn) *websocket.CloseError {
 func TestHandlerClosesWhenSessionEnds(t *testing.T) {
 	s := &sessionStub{fn: func(n int) (bool, error) { return n < 3, nil }}
 	f := newWS(t, withSession(s), realtime.HubConfig{})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,7 +266,7 @@ func TestHandlerClosesWhenSessionEnds(t *testing.T) {
 func TestHandlerKeepsStreamingWhileSessionIsValid(t *testing.T) {
 	s := &sessionStub{fn: func(int) (bool, error) { return true, nil }}
 	f := newWS(t, withSession(s), realtime.HubConfig{})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +289,7 @@ func TestHandlerToleratesOneTransientCheckError(t *testing.T) {
 		return true, nil
 	}}
 	f := newWS(t, withSession(s), realtime.HubConfig{})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,7 +307,7 @@ func TestHandlerToleratesOneTransientCheckError(t *testing.T) {
 func TestHandlerClosesAfterConsecutiveCheckErrors(t *testing.T) {
 	s := &sessionStub{fn: func(int) (bool, error) { return false, errors.New("db down") }}
 	f := newWS(t, withSession(s), realtime.HubConfig{})
-	c, _, err := f.dial(t, "")
+	c, err := f.dial(t, "")
 	if err != nil {
 		t.Fatal(err)
 	}

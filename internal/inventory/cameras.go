@@ -517,7 +517,7 @@ func (s *Service) UpdateCameraFrigateConfig(ctx context.Context, actor authz.Act
 		return CameraFrigateConfigView{}, &FrigateError{Err: err}
 	}
 
-	err = s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+	err = s.tx(ctx, actor, func(q *db.Queries, _ *access.Checker) error {
 		return audit(ctx, q, actor, &srv.TenantID, ActionServerConfigUpdated, "server", srv.ID, map[string]any{
 			"camera_id":   cam.ID,
 			"camera_name": cam.RemoteName,
@@ -540,4 +540,3 @@ func (s *Service) UpdateCameraFrigateConfig(ctx context.Context, actor authz.Act
 		Zones:          after.Zones,
 	}, nil
 }
-

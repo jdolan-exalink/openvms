@@ -277,4 +277,3 @@ func TestRestart(t *testing.T) {
 		t.Fatalf("restart failed: %v", err)
 	}
 }
-

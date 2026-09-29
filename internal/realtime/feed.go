@@ -35,15 +35,15 @@ type Feed struct {
 }
 
 // nextRetryDelay returns the pause to use after the consumer that just ended: doubled up to
-// max, or reset to initial when that consumer had run for at least healthy.
-func nextRetryDelay(cur, initial, max, ranFor, healthy time.Duration) time.Duration {
+// maxDelay, or reset to initial when that consumer had run for at least healthy.
+func nextRetryDelay(cur, initial, maxDelay, ranFor, healthy time.Duration) time.Duration {
 	if ranFor >= healthy {
 		return initial
 	}
-	if next := cur * 2; next < max {
+	if next := cur * 2; next < maxDelay {
 		return next
 	}
-	return max
+	return maxDelay
 }
 
 // Run blocks until ctx is cancelled. Consumer failures are logged and retried, never fatal.

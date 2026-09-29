@@ -46,12 +46,14 @@ func TestAuthenticateInstallsRevalidatorThatSeesRevocation(t *testing.T) {
 		setup func(r *http.Request)
 	}{
 		{"bearer token", func(r *http.Request) { r.Header.Set("Authorization", "Bearer tok") }},
-		{"session cookie", func(r *http.Request) { r.AddCookie(&http.Cookie{Name: SessionCookie, Value: "sess"}) }},
+		{"session cookie", func(r *http.Request) {
+			r.AddCookie(&http.Cookie{Name: SessionCookie, Value: "sess", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := &revokableDB{}
 			var check func(context.Context) (bool, error)
-			h := Authenticate(db.New(fake), AuthOptions{})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			h := Authenticate(db.New(fake), AuthOptions{})(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 				check = RevalidatorFrom(r.Context())
 			}))
 			req := httptest.NewRequest(http.MethodGet, "/ws", nil)

@@ -63,14 +63,14 @@ func (s *Service) tx(ctx context.Context, actor authz.Actor, fn func(q *db.Queri
 
 // Audit actions (PRD §66).
 const (
-	ActionTenantCreated      = "TENANT_CREATED"
-	ActionSiteCreated        = "SITE_CREATED"
-	ActionSiteUpdated        = "SITE_UPDATED"
-	ActionSiteRemoved        = "SITE_REMOVED"
-	ActionServerAdded        = "SERVER_ADDED"
-	ActionServerUpdated      = "SERVER_UPDATED"
-	ActionServerRemoved      = "SERVER_REMOVED"
-	ActionServerSynced       = "SERVER_SYNCED"
+	ActionTenantCreated       = "TENANT_CREATED"
+	ActionSiteCreated         = "SITE_CREATED"
+	ActionSiteUpdated         = "SITE_UPDATED"
+	ActionSiteRemoved         = "SITE_REMOVED"
+	ActionServerAdded         = "SERVER_ADDED"
+	ActionServerUpdated       = "SERVER_UPDATED"
+	ActionServerRemoved       = "SERVER_REMOVED"
+	ActionServerSynced        = "SERVER_SYNCED"
 	ActionCameraUpdated       = "CAMERA_UPDATED"
 	ActionCameraGroupChanged  = "CAMERA_GROUP_CHANGED"
 	ActionPermissionChanged   = "PERMISSION_CHANGED"
