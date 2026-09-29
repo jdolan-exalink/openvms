@@ -106,7 +106,27 @@ The user authorized building the missing backend controls for phases 5–11 and 
 14. Polish, performance, and responsive behavior
 
 ## Progress and next step
-Audit and phase-1 implementation are committed together in `aa7c90a`; the audit is not pending as a separate commit. Phases 1–4 are complete: phase 2 commit `df3559f`, phase 3 `db89038`, phase 4 `be8c795`. Phase 5 is complete (`ff84881`, `dd5e8f2`). Phase 6 is complete (UIUX-11). Phase 7 is complete (UIUX-12). Phase 8 is complete (UIUX-13). Phase 9 is complete (UIUX-14). Phase 10 is complete (UIUX-15, camera settings drawer; this commit). Phases 5–10 are complete. Next: phase 11 (Rules) awaits a user product decision, since no route, domain, or API exists for it. The user authorized phases 5–10 on 2026-09-29 with an explicit current-API-only boundary; missing backend features remain for stage two. Preserve unrelated pending Playback changes. Combined phases 5–10 are forecast above 400 authored changed lines; the user selected `stacked-to-main`, so each eventual PR slice targets `main`. PR creation remains unauthorized.
+Status as of 2026-09-29 (branch `fix/playback-purity-lint`, 33 commits ahead of `main`; nothing pushed, no PR).
+
+### Done
+- UI refactor phases 1–10 (UIUX-1..15): tokens + AppShell, nav rail + TopBar, video sidebar, grid/tiles, timeline + playback, saved views, event/plate search surfaces, events list/detail/review, device management, camera settings drawer.
+- S2-1 bulk event review + VMS `reviewed` preserved (`5a7459a`, reviewed).
+- S2-2 realtime `/ws` feed: backend `6f7566c` (reviewed), hardening `b57cc92` + correction `84f895f` (reviewed; session revalidation now actually installed), web client `6968f76` (`useRealtimeFeed` in `Layout.tsx`, polling kept as fallback).
+- S2-3a alarms data + ingestion `a8f2069`: migration `00014_alarms.sql`, `alarms.view`/`alarms.manage`, idempotent open on `alert` events after enablement, `alarm.opened.<tenant>` publish.
+- S2-5 camera VMS-side settings (`01b5b52`, reviewed).
+- ODD-9 Playback regression tests (`7eecd8b`, reviewed).
+
+### Pending
+- S2-3b alarms service + API (list/get/ack/assign/resolve/bulk, assignable users, audit, OpenAPI). Blocks S2-3c and S2-3d.
+- S2-3c realtime `alarm.*` route. S2-3d web alarms inbox ("Alarmas").
+- S2-4 global search + omnibox. S2-6 rules + notifications (phase 11 UI depends on it). S2-7 Frigate config write. S2-8 synchronized multi-camera playback.
+- UI phases 12 (Users/RBAC), 13 (System), 14 (polish, performance, responsive): not started, not yet authorized.
+- Review: range `84f895f..a8f2069` (S2-2c + S2-3a) was declined by the user for that candidate; next assessment base is `a8f2069`.
+- Advisory follow-ups (non-blocking): `/ws` nil `Session` fails open and revalidation has no per-call timeout; authorizer load lacks backoff/single-flight; per-tenant buffer fills before permission filtering; byte-based length limits in `internal/inventory/cameras.go`; VMS `reviewed` is OR-sticky in the events syncer.
+- Delivery: strategy `stacked-to-main`; push and PR creation remain unauthorized.
+
+### Next step
+Waiting for the user to choose between UI phases 12–14 and the alarms inbox (which first needs S2-3b).
 
 ## Phase 5 evidence (UIUX-10)
 - Route: delegated direct; strict TDD; chain strategy is `stacked-to-main`. Since the complete phase measured 459 authored changed lines, split into two cohesive stacked slices instead of requesting a size exception; each eventual PR targets `main`, and PR creation remains unauthorized.
