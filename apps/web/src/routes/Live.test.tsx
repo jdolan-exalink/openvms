@@ -1,21 +1,28 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { AppShell } from "@/components/AppShell";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { Live } from "./Live";
 
 afterEach(() => vi.unstubAllGlobals());
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  FakeSocket.created = 0;
+});
 
 /** FakeSocket/FakeMediaSource let MsePlayer mount without a real browser MSE stack. */
 class FakeSocket {
+  static created = 0;
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: unknown }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
   readyState = 0;
   binaryType = "blob";
-  constructor(public url: string) {}
+  constructor(public url: string) {
+    FakeSocket.created += 1;
+  }
   send() {}
   close() {}
 }
@@ -69,6 +76,41 @@ const emptyCatalogs = {
 };
 
 describe("Live", () => {
+  it("places the camera tree in the shell context sidebar without remounting live media", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+        "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" }] }),
+        "/api/v1/views": () => json({ items: [] }),
+      })),
+    );
+    const LiveWithShell = () => (
+      <AppShell primaryNav={<nav aria-label="Primary navigation" />} contextSidebar={<div id="live-context-sidebar" />}>
+        <Live />
+      </AppShell>
+    );
+    renderPage(LiveWithShell);
+
+    const cameraSearch = await screen.findByLabelText("Buscar cámara");
+    const contextSidebar = screen.getByRole("complementary", { name: "Context Sidebar" });
+    expect(contextSidebar).toContainElement(cameraSearch);
+    expect(screen.getByRole("main", { name: "Main Workspace" })).not.toContainElement(cameraSearch);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Puerta norte/ }));
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    const video = tile.querySelector("video");
+    const socketCount = FakeSocket.created;
+    fireEvent.click(screen.getByRole("button", { name: "Campus" }));
+
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video);
+    expect(FakeSocket.created).toBe(socketCount);
+  });
+
   it("restores a previously saved grid selection, dropping cameras the user can no longer see", async () => {
     stubBrowserAPIs();
     localStorage.setItem(

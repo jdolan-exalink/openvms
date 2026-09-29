@@ -2,12 +2,14 @@ import { DndContext, type DragEndEvent, KeyboardSensor, PointerSensor, useDragga
 import { rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createPortal } from "react-dom";
 import { Link } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
+import { useContextSidebarPortalTarget } from "@/components/AppShell";
 import { Button, ErrorNote, PageHeader, Select, StatusBadge, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
@@ -40,6 +42,7 @@ export function Live() {
   // Set once the saved grid selection (or the default) has been applied, so the persistence
   // effect below never fires before restoration and overwrites a saved selection with defaults.
   const [restored, setRestored] = useState(false);
+  const sidebarMount = useContextSidebarPortalTarget();
 
   const camById = useMemo(() => new Map(cameras.data?.map((c) => [c.id, c])), [cameras.data]);
 
@@ -148,6 +151,57 @@ export function Live() {
 
   const shown = focus !== null ? [focus] : tiles.map((_, i) => i);
   const gridCols = focus !== null ? 1 : columns;
+  const sidebarContent = (
+    <div className="flex min-h-0 flex-col gap-3" data-live-sidebar="true">
+      <section aria-label="Vistas guardadas" className="flex flex-col gap-2 rounded-xl border border-line bg-bg p-2.5">
+        <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">Vista</h2>
+        <Select aria-label="Vista guardada" value={viewId} onChange={(e) => (e.target.value ? loadView(e.target.value) : setViewId(""))}>
+          <option value="">Vista sin guardar</option>
+          {views.data?.map((v) => (
+            <option key={v.id} value={v.id}>
+              {v.name}
+              {v.shared ? " (compartida)" : ""}
+            </option>
+          ))}
+        </Select>
+        <TextInput aria-label="Nombre de la vista" placeholder="Nombre de la vista" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
+        {can(me.data, "views.create_shared") && (
+          <label className="flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} /> Compartida con mi organización
+          </label>
+        )}
+        <div className="flex flex-wrap gap-1.5">
+          {/* Creating a view needs views.create_private (or views.create_shared once
+              Compartida is checked); editing an existing view the caller owns or can
+              manage does not, so the button stays available for that case regardless. */}
+          {(current?.editable || can(me.data, "views.create_private") || can(me.data, "views.create_shared")) && (
+            <Button onClick={() => save.mutate(false)} disabled={!saveName.trim() || save.isPending}>
+              <Save className="size-4" aria-hidden /> {current?.editable ? "Guardar" : "Guardar vista"}
+            </Button>
+          )}
+          {current?.editable && (
+            <>
+              <Button onClick={() => save.mutate(true)} disabled={!saveName.trim() || save.isPending}>
+                Guardar como nueva
+              </Button>
+              <Button onClick={() => remove.mutate(current.id)} aria-label="Borrar vista" title="Borrar vista">
+                <Trash2 className="size-4" aria-hidden />
+              </Button>
+            </>
+          )}
+        </div>
+        <ErrorNote error={save.error ?? remove.error} />
+      </section>
+      <div className="flex min-h-0 flex-col gap-2 rounded-xl border border-line bg-bg p-2.5">
+        <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">Cámaras</h2>
+        <CameraTree cameras={cameras.data ?? []} sites={sites.data ?? []} servers={servers.data ?? []} onPick={place} />
+        <ErrorNote error={cameras.error} />
+      </div>
+    </div>
+  );
+  const sidebar = sidebarMount.available
+    ? sidebarMount.target ? createPortal(sidebarContent, sidebarMount.target) : null
+    : <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-64">{sidebarContent}</aside>;
 
   return (
     <div className="flex flex-col gap-4">
@@ -156,55 +210,7 @@ export function Live() {
         description="Cámaras de cualquier servidor Frigate en una misma grilla. Arrastrá una cámara a un cuadro, o arrastrá cuadros entre sí para reordenarlos. Doble clic en un cuadro para ampliarlo."
       />
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        <div className="flex flex-col gap-4 lg:flex-row">
-          <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-64">
-            <div className="flex flex-col gap-2 rounded border border-line bg-surface p-3">
-              <Select aria-label="Vista guardada" value={viewId} onChange={(e) => (e.target.value ? loadView(e.target.value) : setViewId(""))}>
-                <option value="">Vista sin guardar</option>
-                {views.data?.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.name}
-                    {v.shared ? " (compartida)" : ""}
-                  </option>
-                ))}
-              </Select>
-              <TextInput aria-label="Nombre de la vista" placeholder="Nombre de la vista" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
-              {can(me.data, "views.create_shared") && (
-                <label className="flex items-center gap-2 text-sm">
-                  <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} /> Compartida con mi organización
-                </label>
-              )}
-              <div className="flex flex-wrap gap-2">
-                {/* Creating a view needs views.create_private (or views.create_shared once
-                    Compartida is checked); editing an existing view the caller owns or can
-                    manage does not, so the button stays available for that case regardless. */}
-                {(current?.editable || can(me.data, "views.create_private") || can(me.data, "views.create_shared")) && (
-                  <Button onClick={() => save.mutate(false)} disabled={!saveName.trim() || save.isPending}>
-                    <Save className="size-4" aria-hidden /> {current?.editable ? "Guardar" : "Guardar vista"}
-                  </Button>
-                )}
-                {current?.editable && (
-                  <>
-                    <Button onClick={() => save.mutate(true)} disabled={!saveName.trim() || save.isPending}>
-                      Guardar como nueva
-                    </Button>
-                    <Button onClick={() => remove.mutate(current.id)} aria-label="Borrar vista" title="Borrar vista">
-                      <Trash2 className="size-4" aria-hidden />
-                    </Button>
-                  </>
-                )}
-              </div>
-              <ErrorNote error={save.error ?? remove.error} />
-            </div>
-            <CameraTree
-              cameras={cameras.data ?? []}
-              sites={sites.data ?? []}
-              servers={servers.data ?? []}
-              onPick={place}
-            />
-            <ErrorNote error={cameras.error} />
-          </aside>
-
+        <div className="flex min-w-0 flex-col gap-2">
           <section className="flex min-w-0 flex-1 flex-col gap-2">
             <div className="flex items-center gap-1">
               {GRIDS.map((n) => (
@@ -250,6 +256,7 @@ export function Live() {
             </SortableContext>
           </section>
         </div>
+        {sidebar}
       </DndContext>
     </div>
   );
@@ -363,7 +370,7 @@ function CameraTree({
   const toggle = (k: string) => setClosed((c) => ({ ...c, [k]: !c[k] }));
 
   return (
-    <div className="flex flex-col gap-2 rounded border border-line bg-surface p-3">
+    <div className="flex flex-col gap-2">
       <TextInput aria-label="Buscar cámara" placeholder="Buscar cámara" value={q} onChange={(e) => setQ(e.target.value)} />
       <nav aria-label="Cámaras" className="flex max-h-[60vh] flex-col overflow-y-auto text-sm">
         {[...bySite.entries()].map(([siteId, srvs]) => (

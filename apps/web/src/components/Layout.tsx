@@ -30,7 +30,7 @@ export function Layout() {
           <ThemeToggle />
         </div>
       </div>
-    }>
+    } contextSidebar={pathname === "/live" ? <div id="live-context-sidebar" className="flex min-h-0 flex-col gap-3" /> : undefined}>
       <div className="min-w-0">
         <header className="mb-6 flex min-h-14 items-center justify-between border-b border-line pb-4" aria-label="Encabezado de página">
           <div className="min-w-0">

@@ -17,12 +17,15 @@ describe("AppShell", () => {
   });
 
   it("renders the context sidebar only when the current route supplies context", () => {
-    render(
+    const { container } = render(
       <AppShell primaryNav={<nav>Existing navigation</nav>} contextSidebar={<div>Camera context</div>}>
         <h1>Current route</h1>
       </AppShell>,
     );
 
-    expect(screen.getByRole("complementary", { name: "Context Sidebar" })).toHaveTextContent("Camera context");
+    const contextSidebar = screen.getByRole("complementary", { name: "Context Sidebar" });
+    expect(contextSidebar).toHaveTextContent("Camera context");
+    expect(container.querySelector('[data-shell="openvms"]')).toHaveClass("flex-col", "md:flex-row");
+    expect(contextSidebar).toHaveClass("w-full", "md:w-64", "border-b", "md:border-b-0", "md:border-r");
   });
 });
