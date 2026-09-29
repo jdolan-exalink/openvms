@@ -22,6 +22,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
+	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
@@ -52,8 +53,16 @@ type Syncer struct {
 	OnNew func(ctx context.Context, e NewEvent)
 	// OnAlarm is called after commit with the alarms opened by one review pull (optional).
 	OnAlarm func(ctx context.Context, alarms []OpenedAlarm)
+	// Rules is evaluated for each newly inserted event, after commit (optional). Its errors are
+	// logged and never fail the sync.
+	Rules RuleEvaluator
 
 	now func() time.Time
+}
+
+// RuleEvaluator runs the automation rules against a new event (implemented by rules.Service).
+type RuleEvaluator interface {
+	EvaluateEvent(ctx context.Context, ev rules.EventContext) error
 }
 
 // NewEvent is published when an event enters the index.
@@ -65,6 +74,7 @@ type NewEvent struct {
 	CameraID uuid.UUID `json:"camera_id"`
 	Severity string    `json:"severity"`
 	Labels   []string  `json:"labels"`
+	Zones    []string  `json:"zones"`
 	Start    time.Time `json:"start_time"`
 }
 
@@ -176,8 +186,9 @@ func (s *Syncer) SyncServer(ctx context.Context, srv db.FrigateServer) error {
 }
 
 type cameraRef struct {
-	ID  uuid.UUID
-	LPR bool
+	ID   uuid.UUID
+	Name string
+	LPR  bool
 }
 
 func (s *Syncer) load(ctx context.Context, srv db.FrigateServer) (map[string]cameraRef, syncState, error) {
@@ -189,7 +200,7 @@ func (s *Syncer) load(ctx context.Context, srv db.FrigateServer) (map[string]cam
 			return err
 		}
 		for _, c := range rows {
-			cams[c.RemoteName] = cameraRef{ID: c.ID, LPR: c.Lpr}
+			cams[c.RemoteName] = cameraRef{ID: c.ID, Name: c.DisplayName, LPR: c.Lpr}
 		}
 		err = tx.QueryRow(ctx, `SELECT review_cursor, object_cursor FROM event_sync_state WHERE server_id = $1`, srv.ID).
 			Scan(&st.reviewCursor, &st.objectCursor)
@@ -259,6 +270,7 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	}
 
 	var created []NewEvent
+	cameraNames := map[uuid.UUID]string{}
 	var opened []OpenedAlarm
 	err := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		for _, r := range all {
@@ -272,6 +284,7 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 			}
 			if isNew {
 				created = append(created, ev)
+				cameraNames[cam.ID] = cam.Name
 			}
 			// On every upsert, not only inserts: a detection promoted to alert opens its
 			// alarm later. A downgrade leaves an existing alarm untouched.
@@ -297,6 +310,17 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	}
 	if s.OnAlarm != nil && len(opened) > 0 {
 		s.OnAlarm(ctx, opened)
+	}
+	if s.Rules != nil {
+		for _, ev := range created {
+			rc := rules.EventContext{
+				ID: ev.ID, TenantID: ev.TenantID, SiteID: ev.SiteID, ServerID: ev.ServerID, CameraID: ev.CameraID,
+				CameraName: cameraNames[ev.CameraID], Severity: ev.Severity, Labels: ev.Labels, Zones: ev.Zones, Start: ev.Start,
+			}
+			if err := s.Rules.EvaluateEvent(ctx, rc); err != nil {
+				s.Log.WarnContext(ctx, "evaluate rules", "error", err, "event_id", ev.ID)
+			}
+		}
 	}
 	return nil
 }
@@ -385,7 +409,7 @@ RETURNING id, (xmax = 0)`,
 	}
 	return NewEvent{
 		ID: id, TenantID: srv.TenantID, SiteID: srv.SiteID, ServerID: srv.ID, CameraID: cameraID,
-		Severity: severity(r.Severity), Labels: nonNil(r.Data.Objects), Start: start,
+		Severity: severity(r.Severity), Labels: nonNil(r.Data.Objects), Zones: nonNil(r.Data.Zones), Start: start,
 	}, inserted, nil
 }
 

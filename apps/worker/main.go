@@ -41,6 +41,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
 	"github.com/jdolan-exalink/openvms/internal/platform/postgres"
 	"github.com/jdolan-exalink/openvms/internal/platform/telemetry"
+	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
 	"github.com/jdolan-exalink/openvms/internal/store"
 )
@@ -107,8 +108,10 @@ func run() error {
 	inv := inventory.New(st, sealer, log)
 	adapters := inventory.NewAdapters(inv)
 
+	rulesSvc := rules.NewService(st, &jetstreamPublisher{js: js}, log)
 	syncer := &events.Syncer{
 		Store: st, Adapters: adapters, Blobs: objects, Log: log,
+		Rules:    rulesSvc,
 		Interval: cfg.EventSyncInterval, Backfill: cfg.EventBackfill, Concurrency: 8,
 		OnNew: func(ctx context.Context, e events.NewEvent) {
 			data, _ := json.Marshal(e)
@@ -126,6 +129,9 @@ func run() error {
 		},
 	}
 	go syncer.Run(ctx)
+
+	offline := &rules.OfflineDetector{Store: st, Rules: rulesSvc, Log: log, Interval: cfg.HealthInterval}
+	go offline.Run(ctx)
 
 	tracker := &media.ExportTracker{Store: st, Adapters: adapters, Interval: 3 * time.Second, Log: log}
 	go tracker.Run(ctx)
@@ -183,4 +189,14 @@ func probes(checks ...func(context.Context) error) http.Handler {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	return mux
+}
+
+// jetstreamPublisher adapts JetStream to the rules service's Publisher.
+type jetstreamPublisher struct {
+	js jetstream.JetStream
+}
+
+func (p *jetstreamPublisher) Publish(ctx context.Context, subject string, data []byte) error {
+	_, err := p.js.Publish(ctx, subject, data)
+	return err
 }

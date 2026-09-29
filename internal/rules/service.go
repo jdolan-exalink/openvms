@@ -39,17 +39,38 @@ type Publisher interface {
 	Publish(ctx context.Context, subject string, data []byte) error
 }
 
+// DefaultDebounce is how long a rule stays quiet for one camera after it fired on an event.
+const DefaultDebounce = 5 * time.Minute
+
 type Service struct {
 	Store *store.Store
 	Pub   Publisher
 	Log   *slog.Logger
+	// Debounce is the per rule and camera quiet period after an event rule fires (default
+	// DefaultDebounce). Offline rules fire once per outage instead.
+	Debounce time.Duration
 }
 
 func NewService(st *store.Store, pub Publisher, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{Store: st, Pub: pub, Log: log}
+	return &Service{Store: st, Pub: pub, Log: log, Debounce: DefaultDebounce}
+}
+
+// claim records that rule fired for resourceID and reports whether it may run its actions:
+// false when it already fired at or after notBefore. It is one atomic upsert, so concurrent
+// evaluators cannot both win.
+func claim(ctx context.Context, tx pgx.Tx, tenantID, ruleID, resourceID uuid.UUID, notBefore time.Time) (bool, error) {
+	var fired time.Time
+	err := tx.QueryRow(ctx, `
+INSERT INTO rule_firings (rule_id, resource_id, tenant_id, fired_at) VALUES ($1, $2, $3, now())
+ON CONFLICT (rule_id, resource_id) DO UPDATE SET fired_at = now() WHERE rule_firings.fired_at < $4
+RETURNING fired_at`, ruleID, resourceID, tenantID, notBefore).Scan(&fired)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 type CreateRuleRequest struct {
@@ -378,6 +399,14 @@ type OpenedAlarmPayload struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+func (s *Service) debounce() time.Duration {
+	if s.Debounce <= 0 {
+		return DefaultDebounce
+	}
+	return s.Debounce
+}
+
+// EvaluateEvent runs every enabled event rule of the tenant against a newly indexed event.
 func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 	actor := authz.Actor{TenantID: &ev.TenantID}
 	return s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
@@ -397,6 +426,14 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 			}
 			if !rule.Conditions.MatchesEvent(ev) {
 				continue
+			}
+
+			ok, err := claim(ctx, tx, ev.TenantID, rule.ID, ev.CameraID, time.Now().Add(-s.debounce()))
+			if err != nil {
+				return store.Classify(err)
+			}
+			if !ok {
+				continue // fired for this camera inside the debounce window
 			}
 
 			// Matched! Execute actions
@@ -477,6 +514,8 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 	})
 }
 
+// EvaluateOffline runs the tenant's offline rules for a camera or server that has been down for
+// duration. Callers may invoke it on every tick: each rule notifies once per outage.
 func (s *Service) EvaluateOffline(ctx context.Context, tenantID uuid.UUID, triggerType TriggerType, resourceID uuid.UUID, resourceName string, duration time.Duration) error {
 	actor := authz.Actor{TenantID: &tenantID}
 	return s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
@@ -503,6 +542,15 @@ func (s *Service) EvaluateOffline(ctx context.Context, tenantID uuid.UUID, trigg
 				matched = rule.Conditions.MatchesServerOffline(resourceID, duration)
 			}
 			if !matched {
+				continue
+			}
+
+			// Once per outage: skip when the rule already fired since the resource went down.
+			ok, err := claim(ctx, tx, tenantID, rule.ID, resourceID, time.Now().Add(-duration))
+			if err != nil {
+				return store.Classify(err)
+			}
+			if !ok {
 				continue
 			}
 
