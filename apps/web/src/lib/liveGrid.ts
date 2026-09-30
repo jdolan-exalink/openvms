@@ -154,3 +154,42 @@ export function parseSelection(raw: string | null, validCameraIds: ReadonlySet<s
   });
   return { columns, rows: resolvedRows, tiles: resizeTiles(cleaned, columns, resolvedRows) };
 }
+
+export type FillResult = { tiles: Tile[]; added: number; already: number; skipped: number };
+
+/**
+ * fillTiles adds cameras to the first empty cells in order. Cameras already in the grid are not
+ * added twice (`already`); cameras that do not fit are counted in `skipped`.
+ */
+export function fillTiles(tiles: Tile[], cameras: { id: string; quality: Quality }[]): FillResult {
+  const next = tiles.slice();
+  const present = new Set(next.flatMap((t) => (t ? [t.camera_id] : [])));
+  let added = 0;
+  let already = 0;
+  let skipped = 0;
+  for (const c of cameras) {
+    if (present.has(c.id)) {
+      already++;
+      continue;
+    }
+    const empty = next.findIndex((t) => t === null);
+    if (empty < 0) {
+      skipped++;
+      continue;
+    }
+    next[empty] = { camera_id: c.id, quality: c.quality };
+    present.add(c.id);
+    added++;
+  }
+  return { tiles: next, added, already, skipped };
+}
+
+/**
+ * growLayout picks the smallest layout (by cell count) that fits `needed` cameras and is larger
+ * than the current grid, or the largest available one when none fits. Null when the grid cannot grow.
+ */
+export function growLayout(layouts: { columns: number; rows: number }[], currentCells: number, needed: number): { columns: number; rows: number } | null {
+  const bigger = layouts.filter((l) => l.columns * l.rows > currentCells).sort((a, b) => a.columns * a.rows - b.columns * b.rows);
+  if (bigger.length === 0) return null;
+  return bigger.find((l) => l.columns * l.rows >= needed) ?? bigger[bigger.length - 1] ?? null;
+}

@@ -14,11 +14,11 @@ export function Servers() {
   const servers = useQuery(serversQuery);
   const sites = useQuery(sitesQuery);
   const [registering, setRegistering] = useState(false);
-  const { site_id: siteFilter } = useSearch({ strict: false }) as { site_id?: string };
+  const { site_id: siteFilter, server_id: serverFilter } = useSearch({ strict: false }) as { site_id?: string; server_id?: string };
   const [q, setQ] = useState("");
   const needle = q.trim().toLowerCase();
   const visible = servers.data?.filter(
-    (s) => (!siteFilter || s.site_id === siteFilter) && (!needle || `${s.name} ${s.base_url}`.toLowerCase().includes(needle)),
+    (s) => (!siteFilter || s.site_id === siteFilter) && (!serverFilter || s.id === serverFilter) && (!needle || `${s.name} ${s.base_url}`.toLowerCase().includes(needle)),
   );
   const siteName = new Map(sites.data?.map((s) => [s.id, s.name]));
   const [editing, setEditing] = useState<Schemas["Server"] | null>(null);

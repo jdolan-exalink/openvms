@@ -1,14 +1,15 @@
 import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import {
-  faAnglesLeft, faArrowUpRightFromSquare, faBookmark, faBuilding, faChevronDown, faChevronRight, faClockRotateLeft, faFolder, faFolderOpen,
+  faAnglesDown, faAnglesLeft, faAnglesUp, faArrowUpRightFromSquare, faGear, faMap, faTableCells, faBookmark, faBuilding, faChevronDown, faChevronRight, faClockRotateLeft, faFolder, faFolderOpen,
   faFolderPlus, faFolderTree, faGripVertical, faMagnifyingGlass, faPen, faServer, faTrash, faVideo,
 } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { createContext, type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { ErrorNote, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { buildTree, type Camera, type Folder, type FolderNode, loadPrefs, type ServerNode, savePrefs, treeCameraDropId, treeFolderId, treeRootDropId } from "@/lib/explorer";
@@ -16,6 +17,44 @@ import { cameraDragId } from "@/lib/liveGrid";
 import type { useCameraFolders } from "@/lib/useCameraFolders";
 
 type FolderApi = ReturnType<typeof useCameraFolders>;
+
+/** What the explorer's context menus can do; supplied by the Live route, which owns grid and view state. */
+export type ExplorerActions = {
+  /** Saved views the user may edit (targets for "Agregar a vista"). */
+  editableViews: { id: string; name: string }[];
+  addToGrid: (cameraIds: string[]) => void;
+  addToView: (viewId: string, cameraIds: string[]) => void;
+  canConfigureSites: boolean;
+  canConfigureServers: boolean;
+};
+
+type MenuProps = { onContextMenu: (e: MouseEvent<HTMLElement>) => void; onKeyDown: (e: KeyboardEvent<HTMLElement>) => void; "aria-haspopup": "menu" };
+type Bind = (build: () => MenuItem[]) => MenuProps;
+type MenuCtxValue = { bind: Bind; actions: ExplorerActions; navigate: ReturnType<typeof useNavigate> };
+const MenuCtx = createContext<MenuCtxValue | null>(null);
+const useMenuCtx = () => {
+  const ctx = useContext(MenuCtx);
+  if (!ctx) throw new Error("explorer menu context missing");
+  return ctx;
+};
+
+/** "Agregar a vista" submenu: the current grid plus every saved view the user can edit. */
+function addToViewItem(actions: ExplorerActions, ids: string[]): MenuItem {
+  const empty = ids.length === 0;
+  return {
+    id: "add",
+    label: "Agregar a vista",
+    icon: faTableCells,
+    disabled: empty,
+    children: [
+      { id: "add-grid", label: "Grilla actual", icon: faTableCells, onSelect: () => actions.addToGrid(ids) },
+      { separator: true, id: "add-sep" },
+      ...(actions.editableViews.length
+        ? actions.editableViews.map((v): MenuItem => ({ id: `add-view-${v.id}`, label: v.name, icon: faBookmark, onSelect: () => actions.addToView(v.id, ids) }))
+        : [{ id: "add-none", label: "Sin vistas editables", disabled: true } satisfies MenuItem]),
+    ],
+  };
+}
 type DragData = { kind: "camera" | "folder"; serverId: string };
 
 /** Drag state seen from one server's subtree: only same-server, manageable nodes accept a drop. */
@@ -84,6 +123,8 @@ export function LiveExplorer({
   renderViews,
   viewCount,
   notice,
+  noticeTone = "warn",
+  actions,
   error,
 }: {
   cameras: Camera[];
@@ -94,9 +135,12 @@ export function LiveExplorer({
   onPlayback: (id: string) => void;
   canViewRecordings: boolean;
   onCollapse: () => void;
-  renderViews: (query: string) => ReactNode;
+  /** Renders the saved views; `bindViewMenu(build)` gives a row its context-menu handlers. */
+  renderViews: (query: string, bindViewMenu: Bind) => ReactNode;
   viewCount: number;
   notice: string | null;
+  noticeTone?: "ok" | "warn";
+  actions: ExplorerActions;
   error?: unknown;
 }) {
   const [q, setQ] = useState("");
@@ -118,12 +162,39 @@ export function LiveExplorer({
   );
   const total = tree.reduce((n, s) => n + s.count, 0);
 
+  const navigate = useNavigate();
+  const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[]; opener: HTMLElement | null } | null>(null);
+  // Pointer: open at the cursor. Keyboard (ContextMenu key / Shift+F10): open beside the focused row.
+  const bind: Bind = (build) => ({
+    "aria-haspopup": "menu",
+    onContextMenu: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setMenu({ x: e.clientX, y: e.clientY, items: build(), opener: null });
+    },
+    onKeyDown: (e) => {
+      if (e.key !== "ContextMenu" && !(e.shiftKey && e.key === "F10")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const r = e.currentTarget.getBoundingClientRect();
+      setMenu({ x: r.left + Math.min(r.width, 48), y: r.bottom, items: build(), opener: e.currentTarget });
+    },
+  });
+  const setSiteOpen = (site: { id: string; servers: ServerNode[] }, open: boolean) =>
+    update((p) => {
+      const closed = { ...p.closed };
+      const keys = [`site:${site.id}`, ...site.servers.flatMap((s) => [`srv:${s.id}`, ...s.folders.map((f) => `fld:${f.folder.id}`)])];
+      for (const k of keys) closed[k] = !open;
+      return { ...p, closed };
+    });
+
   const [creating, setCreating] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Folder | null>(null);
   const mutationError = folderApi.create.error ?? folderApi.rename.error ?? folderApi.reorder.error ?? error;
 
   return (
+    <MenuCtx.Provider value={{ bind, actions, navigate }}>
     <div className="flex min-h-0 min-w-0 flex-col gap-2 md:flex-1" data-live-sidebar="true" aria-label="Explorador" role="region">
       <div className="flex shrink-0 items-center gap-2">
         <h2 className="min-w-0 truncate px-1 text-sm font-semibold">Explorador</h2>
@@ -146,7 +217,20 @@ export function LiveExplorer({
           <nav aria-label="Cámaras" className="flex min-w-0 flex-col text-sm">
             {tree.map((site) => (
               <div key={site.id} className="min-w-0">
-                <button type="button" onClick={() => toggle(`site:${site.id}`)} aria-expanded={isOpen(`site:${site.id}`)} title={site.name} className="flex w-full min-w-0 items-center gap-1 py-1 text-left font-medium">
+                <button
+                  type="button"
+                  onClick={() => toggle(`site:${site.id}`)}
+                  aria-expanded={isOpen(`site:${site.id}`)}
+                  title={site.name}
+                  className="flex w-full min-w-0 items-center gap-1 py-1 text-left font-medium"
+                  {...bind(() => [
+                    ...(actions.canConfigureSites ? [{ id: "cfg", label: "Configurar", icon: faGear, onSelect: () => void navigate({ to: "/sites" }) } satisfies MenuItem] : []),
+                    { id: "map", label: "Nuevo mapa", icon: faMap, disabled: true, hint: "Próximamente" },
+                    { separator: true, id: "sep" },
+                    { id: "expand", label: "Expandir todo", icon: faAnglesDown, onSelect: () => setSiteOpen(site, true) },
+                    { id: "collapse", label: "Contraer todo", icon: faAnglesUp, onSelect: () => setSiteOpen(site, false) },
+                  ])}
+                >
                   <Chevron open={isOpen(`site:${site.id}`)} />
                   <Icon icon={faBuilding} className={nodeIcon} />
                   <span className="min-w-0 truncate">{site.name}</span>
@@ -157,6 +241,7 @@ export function LiveExplorer({
                     <ServerBranch
                       key={srv.id}
                       server={srv}
+                      siteId={site.id}
                       isOpen={isOpen}
                       toggle={toggle}
                       creating={creating === srv.id}
@@ -177,13 +262,13 @@ export function LiveExplorer({
             {tree.length === 0 && <p className="py-2 text-xs text-muted">{query ? "Sin resultados." : "No hay cámaras visibles."}</p>}
           </nav>
           {notice && (
-            <p role="status" className="rounded border border-warn/40 bg-warn/10 px-2 py-1 text-xs text-warn">
+            <p role="status" className={cn("rounded border px-2 py-1 text-xs", noticeTone === "ok" ? "border-ok/40 bg-ok/10 text-ok" : "border-warn/40 bg-warn/10 text-warn")}>
               {notice}
             </p>
           )}
         </Section>
         <Section title="Vistas guardadas" icon={faBookmark} open={prefs.sections.views} onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, views: !p.sections.views } }))} count={viewCount}>
-          {renderViews(query)}
+          {renderViews(query, bind)}
         </Section>
         <ErrorNote error={mutationError} />
       </div>
@@ -198,12 +283,15 @@ export function LiveExplorer({
           onConfirm={() => folderApi.remove.mutate(confirmDelete.id, { onSuccess: () => setConfirmDelete(null) })}
         />
       )}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} returnFocusTo={menu.opener} onClose={() => setMenu(null)} />}
     </div>
+    </MenuCtx.Provider>
   );
 }
 
 function ServerBranch({
   server,
+  siteId,
   isOpen,
   toggle,
   creating,
@@ -219,6 +307,7 @@ function ServerBranch({
   canViewRecordings,
 }: {
   server: ServerNode;
+  siteId: string;
   isOpen: (key: string) => boolean;
   toggle: (key: string) => void;
   creating: boolean;
@@ -236,10 +325,22 @@ function ServerBranch({
   const key = `srv:${server.id}`;
   const drop = useDropState(server.id, server.canManage, ["camera"]);
   const { setNodeRef, isOver } = useDroppable({ id: treeRootDropId(server.id), disabled: drop.disabled });
+  const { bind, actions, navigate } = useMenuCtx();
+  const cameraIds = [...server.folders.flatMap((f) => f.cameras), ...server.rootCameras].map((c) => c.id);
   return (
     <div className={cn("ml-3 min-w-0", drop.foreign && "opacity-40")} title={drop.foreign ? "No se puede mover entre servidores" : undefined}>
       <div ref={setNodeRef} className={cn("flex min-w-0 items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-accent")}>
-        <button type="button" onClick={() => toggle(key)} aria-expanded={isOpen(key)} title={server.name} className="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left text-muted">
+        <button
+          type="button"
+          onClick={() => toggle(key)}
+          aria-expanded={isOpen(key)}
+          title={server.name}
+          className="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left text-muted"
+          {...bind(() => [
+            addToViewItem(actions, cameraIds),
+            ...(actions.canConfigureServers ? [{ id: "cfg", label: "Configurar", icon: faGear, onSelect: () => void navigate({ to: "/servers", search: { site_id: siteId, server_id: server.id } }) } satisfies MenuItem] : []),
+          ])}
+        >
           <Chevron open={isOpen(key)} />
           <Icon icon={faServer} className={nodeIcon} />
           <span className={cn("size-1.5 shrink-0 rounded-full", dot(server.status))} aria-hidden />
@@ -313,6 +414,7 @@ function FolderBranch({
 }) {
   const { folder } = node;
   const key = `fld:${folder.id}`;
+  const { bind, actions } = useMenuCtx();
   const drop = useDropState(server.id, server.canManage, ["camera", "folder"]);
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: treeFolderId(folder.id), disabled: drop.disabled });
   const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
@@ -347,6 +449,16 @@ function FolderBranch({
               aria-expanded={isOpen(key)}
               title={folder.name}
               className="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left"
+              {...bind(() => [
+                addToViewItem(actions, node.cameras.map((c) => c.id)),
+                ...(server.canManage
+                  ? [
+                      { separator: true, id: "sep" } satisfies MenuItem,
+                      { id: "rename", label: "Renombrar", icon: faPen, onSelect: () => onRenaming(folder.id) } satisfies MenuItem,
+                      { id: "delete", label: "Eliminar", icon: faTrash, danger: true, onSelect: () => onDelete(folder) } satisfies MenuItem,
+                    ]
+                  : []),
+              ])}
             >
               <Chevron open={isOpen(key)} />
               <Icon icon={isOpen(key) ? faFolderOpen : faFolder} className={nodeIcon} />
@@ -392,6 +504,8 @@ function CameraRow({
 }) {
   const drop = useDropState(camera.server_id, canManage, ["camera"]);
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: treeCameraDropId(camera.id), disabled: drop.disabled });
+  const { bind, actions } = useMenuCtx();
+  const menu = bind(() => [addToViewItem(actions, [camera.id])]);
   const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
     id: cameraDragId(camera.id),
     data: { kind: "camera", serverId: camera.server_id } satisfies DragData,
@@ -409,6 +523,11 @@ function CameraRow({
         className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left hover:bg-raised", isDragging && "opacity-50")}
         {...attributes}
         {...listeners}
+        {...menu}
+        onKeyDown={(e) => {
+          menu.onKeyDown(e);
+          if (!e.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(e);
+        }}
       >
         <Icon icon={faVideo} className={nodeIcon} />
         <span className={cn("size-1.5 shrink-0 rounded-full", dot(camera.status))} aria-hidden />

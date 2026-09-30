@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { faAnglesRight } from "@fortawesome/free-solid-svg-icons";
+import { faFolderOpen, faPen, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Camera, CircleCheck, CircleHelp, CircleX, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -17,11 +18,13 @@ import { LiveRecDock } from "@/components/LiveRecDock";
 import { RecTile, type RecTileState } from "@/components/RecTile";
 import { LiveModeToggle } from "@/components/LiveModeToggle";
 import { setContextSidebarCollapsed, useContextSidebarPortalTarget, useTopBarActionsPortalTarget } from "@/components/AppShell";
-import { LiveExplorer } from "@/components/LiveExplorer";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { type ExplorerActions, LiveExplorer } from "@/components/LiveExplorer";
+import type { MenuItem } from "@/components/ContextMenu";
 import { Button, ErrorNote, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  duplicateTileIndexes, liveSelectionKey, parseSelection, placeCameraAt, placeCameraUnique, resizeTiles, resolveDragEnd, reorderTiles,
+  duplicateTileIndexes, fillTiles, growLayout, liveSelectionKey, parseSelection, placeCameraAt, placeCameraUnique, resizeTiles, resolveDragEnd, reorderTiles,
   serializeSelection, swapTiles, tileDragId,
   type Tile,
 } from "@/lib/liveGrid";
@@ -71,6 +74,13 @@ export function Live() {
   const folderApi = useCameraFolders(cameras.data);
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(loadSidebarCollapsed);
   const [treeNotice, setTreeNotice] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<"ok" | "warn">("warn");
+  const [deleteViewId, setDeleteViewId] = useState<string | null>(null);
+  const flash = (text: string, tone: "ok" | "warn" = "ok") => {
+    setNoticeTone(tone);
+    setTreeNotice(text);
+    setTimeout(() => setTreeNotice(null), 4000);
+  };
   const [activeDrag, setActiveDrag] = useState<string | null>(null);
   const setSidebarCollapsed = (next: boolean) => {
     setSidebarCollapsedState(next);
@@ -173,8 +183,7 @@ export function Live() {
     if (!resolution) {
       // Not a grid drop: it may be a move inside the shared explorer tree.
       if (folderApi.drop(event.active.id, event.over?.id ?? null) === "rejected") {
-        setTreeNotice("No se puede mover entre servidores.");
-        setTimeout(() => setTreeNotice(null), 4000);
+        flash("No se puede mover entre servidores.", "warn");
       }
       return;
     }
@@ -223,6 +232,67 @@ export function Live() {
       await qc.invalidateQueries({ queryKey: ["views"] });
     },
   });
+
+  const plural = (n: number) => `${n} ${n === 1 ? "cámara" : "cámaras"}`;
+  const reportFill = (r: { added: number; already: number; skipped: number }, target: string) => {
+    if (r.added > 0 && r.skipped === 0) flash(`Se agregó ${plural(r.added)} ${target}${r.already ? ` (${r.already} ya estaba${r.already === 1 ? "" : "n"})` : ""}.`);
+    else if (r.added > 0) flash(`Se agregó ${plural(r.added)} ${target}; ${r.skipped} no entr${r.skipped === 1 ? "ó" : "aron"}: no hay espacio.`, "warn");
+    else if (r.skipped > 0) flash(`No hay espacio libre ${target}.`, "warn");
+    else flash(r.already > 1 ? `Esas cámaras ya están ${target}.` : `La cámara ya está ${target}.`, "warn");
+  };
+  const cameraQuality = (id: string, cols: number) => (cols === 1 ? "main" : (camById.get(id)?.default_live_quality ?? "sub")) as "main" | "sub";
+
+  // Context menu "Agregar a vista > Grilla actual": fills empty cells and, when full, grows the grid to the next layout.
+  const addToGrid = (ids: string[]) => {
+    const visible = ids.filter((id) => camById.has(id));
+    const present = new Set(tiles.flatMap((t) => (t ? [t.camera_id] : [])));
+    const fresh = visible.filter((id) => !present.has(id));
+    let cols = columns;
+    let base = tiles;
+    const free = tiles.filter((t) => t === null).length;
+    if (fresh.length > free) {
+      const next = growLayout(layouts, tiles.length, tiles.length - free + fresh.length);
+      if (next) {
+        cols = next.columns;
+        base = resizeTiles(tiles, next.columns, next.rows);
+        setGrid(next.columns, next.rows);
+      }
+    }
+    const res = fillTiles(base, visible.map((id) => ({ id, quality: cameraQuality(id, cols) })));
+    setTiles(res.tiles);
+    reportFill(res, "en la grilla");
+  };
+
+  // "Agregar a vista > <vista>": adds to the first free cells of the saved layout, never resizing it.
+  const addToView = useMutation({
+    mutationFn: async (v: { id: string; ids: string[] }) => {
+      const view = views.data?.find((x) => x.id === v.id);
+      if (!view) throw new Error("La vista ya no existe.");
+      const n = view.layout.columns;
+      const nextRows = view.layout.cells.length ? Math.ceil(view.layout.cells.length / n) : n;
+      const existing = resizeTiles(view.layout.cells.map((c): Tile => (c.camera_id ? { camera_id: c.camera_id, quality: c.quality ?? "sub" } : null)), n, nextRows);
+      const res = fillTiles(existing, v.ids.filter((id) => camById.has(id)).map((id) => ({ id, quality: cameraQuality(id, n) })));
+      if (res.added === 0) return { view, res, saved: false };
+      await unwrap(
+        await api.PUT("/api/v1/views/{viewId}", {
+          params: { path: { viewId: view.id } },
+          body: { name: view.name, shared: view.shared, tenant_id: view.tenant_id, layout: { columns: n, cells: res.tiles.map((t) => (t ? { camera_id: t.camera_id, quality: t.quality } : { quality: "sub" as const })) } },
+        }),
+      );
+      await qc.invalidateQueries({ queryKey: ["views"] });
+      if (viewId === view.id) setTiles(res.tiles);
+      return { view, res, saved: true };
+    },
+    onSuccess: ({ view, res }) => reportFill(res, `a la vista «${view.name}»`),
+    onError: (err) => flash(err instanceof Error && err.message ? `No se pudo actualizar la vista: ${err.message}` : "No se pudo actualizar la vista.", "warn"),
+  });
+  const explorerActions: ExplorerActions = {
+    editableViews: (views.data ?? []).filter((v) => v.editable).map((v) => ({ id: v.id, name: v.name })),
+    addToGrid,
+    addToView: (id, ids) => addToView.mutate({ id, ids }),
+    canConfigureSites: can(me.data, "sites.manage"),
+    canConfigureServers: can(me.data, "servers.manage"),
+  };
 
   // With persistent players the other tiles stay mounted (hidden, sessions WARM) while one is
   // expanded, so leaving the expanded view resumes them instantly instead of reconnecting.
@@ -291,7 +361,7 @@ export function Live() {
       : undefined;
   const modeToggle = <LiveModeToggle rec={rec} onChange={setMode} />;
   const topBarActions = canRec && topBar.available && topBar.target ? createPortal(modeToggle, topBar.target) : null;
-  const renderViews = (query: string) => {
+  const renderViews = (query: string, bindViewMenu: (build: () => MenuItem[]) => object) => {
     const match = (v: Schemas["View"]) => !query || v.name.toLowerCase().includes(query);
     const groups = [
       { label: "Privadas", items: privateViews.filter(match) },
@@ -314,7 +384,28 @@ export function Live() {
                   <ul className="flex flex-col">
                     {group.items.map((v) => (
                       <li key={v.id}>
-                        <button type="button" aria-current={viewId === v.id ? "true" : undefined} onClick={() => loadView(v.id)} className={cn(viewButton, viewId === v.id && "bg-raised font-medium")}>
+                        <button
+                          type="button"
+                          aria-current={viewId === v.id ? "true" : undefined}
+                          onClick={() => loadView(v.id)}
+                          className={cn(viewButton, viewId === v.id && "bg-raised font-medium")}
+                          {...bindViewMenu(() => [
+                            { id: "open", label: "Abrir", icon: faFolderOpen, onSelect: () => loadView(v.id) },
+                            {
+                              id: "edit",
+                              label: "Editar",
+                              icon: faPen,
+                              disabled: !v.editable,
+                              hint: v.editable ? undefined : "Solo lectura",
+                              // Edit = load the view and focus its name so the existing Guardar flow applies.
+                              onSelect: () => {
+                                loadView(v.id);
+                                setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Nombre de la vista"]')?.focus(), 0);
+                              },
+                            },
+                            ...(v.editable ? [{ id: "delete", label: "Eliminar", icon: faTrash, danger: true, onSelect: () => setDeleteViewId(v.id) } satisfies MenuItem] : []),
+                          ])}
+                        >
                           <span className="truncate">{v.shared && v.owner_name ? `${v.name} · ${v.owner_name}` : v.name}</span>
                         </button>
                       </li>
@@ -372,6 +463,8 @@ export function Live() {
       renderViews={renderViews}
       viewCount={views.data?.length ?? 0}
       notice={treeNotice}
+      noticeTone={noticeTone}
+      actions={explorerActions}
       error={cameras.error}
     />
   );
@@ -489,6 +582,17 @@ export function Live() {
           {dragLabel ? <div className="pointer-events-none rounded border border-accent bg-surface px-2 py-1 text-xs shadow-lg">{dragLabel}</div> : null}
         </DragOverlay>
       </DndContext>
+      {deleteViewId && (
+        <ConfirmDialog
+          title="Eliminar vista"
+          message={`Se eliminará la vista «${views.data?.find((v) => v.id === deleteViewId)?.name ?? ""}». Esta acción no se puede deshacer.`}
+          confirmLabel="Eliminar"
+          pending={remove.isPending}
+          error={remove.error}
+          onCancel={() => setDeleteViewId(null)}
+          onConfirm={() => remove.mutate(deleteViewId, { onSuccess: () => setDeleteViewId(null) })}
+        />
+      )}
       {playbackCameraId && camById.has(playbackCameraId) && (
         <LivePlaybackPanel
           cameraId={playbackCameraId}
