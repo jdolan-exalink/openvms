@@ -2054,6 +2054,7 @@ export interface components {
             adaptive_streaming: boolean;
             stream_prewarming: boolean;
             seamless_quality_switch: boolean;
+            maps: boolean;
         };
         SystemInfo: {
             /** @example openvms-api */

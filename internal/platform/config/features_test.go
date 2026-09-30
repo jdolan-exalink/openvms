@@ -11,6 +11,7 @@ func TestParseFeatures(t *testing.T) {
 		{"empty is all off", "", Features{}},
 		{"single flag", "persistentPlayers", Features{PersistentPlayers: true}},
 		{"several flags with spaces and case", " persistentplayers , VideoSurfaceLayer ", Features{PersistentPlayers: true, VideoSurfaceLayer: true}},
+		{"maps flag", "maps", Features{Maps: true}},
 		{"reserved flags", "adaptiveStreaming,streamPrewarming,seamlessQualitySwitch", Features{AdaptiveStreaming: true, StreamPrewarming: true, SeamlessQualitySwitch: true}},
 		{"unknown names are ignored", "nope,persistentPlayers", Features{PersistentPlayers: true}},
 	}

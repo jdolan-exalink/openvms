@@ -15,5 +15,6 @@ func (h *Handlers) GetFeatures(context.Context, gen.GetFeaturesRequestObject) (g
 		AdaptiveStreaming:     h.Features.AdaptiveStreaming,
 		StreamPrewarming:      h.Features.StreamPrewarming,
 		SeamlessQualitySwitch: h.Features.SeamlessQualitySwitch,
+		Maps:                  h.Features.Maps,
 	}, nil
 }

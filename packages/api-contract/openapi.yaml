@@ -2723,13 +2723,14 @@ components:
           type: string
     Features:
       type: object
-      required: [persistent_players, video_surface_layer, adaptive_streaming, stream_prewarming, seamless_quality_switch]
+      required: [persistent_players, video_surface_layer, adaptive_streaming, stream_prewarming, seamless_quality_switch, maps]
       properties:
         persistent_players: { type: boolean }
         video_surface_layer: { type: boolean }
         adaptive_streaming: { type: boolean }
         stream_prewarming: { type: boolean }
         seamless_quality_switch: { type: boolean }
+        maps: { type: boolean }
     SystemInfo:
       type: object
       required: [name, version, commit, build_time, go_version, schema_version]

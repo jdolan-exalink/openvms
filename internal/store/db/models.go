@@ -250,6 +250,121 @@ type LprRead struct {
 	UpdatedAt       time.Time
 }
 
+type MapBuilding struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	SiteID    uuid.UUID
+	Name      string
+	Footprint []byte
+	Lat       *float64
+	Lng       *float64
+	Revision  int64
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
+}
+
+type MapDevice struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	SiteID    uuid.UUID
+	Kind      string
+	Name      string
+	Status    string
+	Props     json.RawMessage
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
+}
+
+type MapFloor struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	BuildingID      uuid.UUID
+	Name            string
+	Ordinal         int32
+	PlanKey         string
+	PlanContentType string
+	PlanWidthPx     *int32
+	PlanHeightPx    *int32
+	Georef          []byte
+	Revision        int64
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
+}
+
+type MapPlacement struct {
+	ID         uuid.UUID
+	TenantID   uuid.UUID
+	SiteID     uuid.UUID
+	EntityType string
+	EntityID   uuid.UUID
+	FloorID    *uuid.UUID
+	Lat        *float64
+	Lng        *float64
+	X          *float32
+	Y          *float32
+	BearingDeg *float32
+	FovDeg     *float32
+	RangeM     *float32
+	Props      json.RawMessage
+	Revision   int64
+	CreatedBy  *uuid.UUID
+	UpdatedBy  *uuid.UUID
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+type MapRegion struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	ParentID  *uuid.UUID
+	Name      string
+	CreatedAt time.Time
+}
+
+type MapUserPref struct {
+	UserID    uuid.UUID
+	TenantID  *uuid.UUID
+	Prefs     json.RawMessage
+	UpdatedAt time.Time
+}
+
+type MapView struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	OwnerID   uuid.UUID
+	Name      string
+	Shared    bool
+	State     json.RawMessage
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
+}
+
+type MapZone struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	SiteID    uuid.UUID
+	FloorID   *uuid.UUID
+	Name      string
+	Kind      string
+	Geometry  json.RawMessage
+	MinLat    *float64
+	MinLng    *float64
+	MaxLat    *float64
+	MaxLng    *float64
+	Style     json.RawMessage
+	Metadata  json.RawMessage
+	Revision  int64
+	CreatedBy *uuid.UUID
+	UpdatedBy *uuid.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
+}
+
 type Notification struct {
 	ID        uuid.UUID
 	TenantID  uuid.UUID
@@ -347,15 +462,19 @@ type Session struct {
 }
 
 type Site struct {
-	ID        uuid.UUID
-	TenantID  uuid.UUID
-	Name      string
-	Timezone  string
-	Address   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt *time.Time
-	DeletedBy *uuid.UUID
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	Name        string
+	Timezone    string
+	Address     string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   *time.Time
+	DeletedBy   *uuid.UUID
+	Lat         *float64
+	Lng         *float64
+	DefaultZoom *float32
+	RegionID    *uuid.UUID
 }
 
 type Tenant struct {

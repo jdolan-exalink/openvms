@@ -8,6 +8,7 @@ export type FeatureFlags = {
   adaptiveStreaming: boolean;
   streamPrewarming: boolean;
   seamlessQualitySwitch: boolean;
+  maps: boolean;
 };
 
 /** Every flag is off until the server says otherwise, so a failing endpoint keeps legacy behaviour. */
@@ -17,6 +18,7 @@ export const FEATURE_DEFAULTS: FeatureFlags = {
   adaptiveStreaming: false,
   streamPrewarming: false,
   seamlessQualitySwitch: false,
+  maps: false,
 };
 
 /** Development-only localStorage override, e.g. {"persistentPlayers":true}. Ignored in production builds. */
@@ -49,6 +51,7 @@ export function useFeatures(): FeatureFlags {
       adaptiveStreaming: data?.adaptive_streaming ?? FEATURE_DEFAULTS.adaptiveStreaming,
       streamPrewarming: data?.stream_prewarming ?? FEATURE_DEFAULTS.streamPrewarming,
       seamlessQualitySwitch: data?.seamless_quality_switch ?? FEATURE_DEFAULTS.seamlessQualitySwitch,
+      maps: data?.maps ?? FEATURE_DEFAULTS.maps,
       ...readOverride(),
     }),
     [data],

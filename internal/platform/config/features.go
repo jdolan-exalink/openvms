@@ -10,6 +10,7 @@ type Features struct {
 	AdaptiveStreaming     bool
 	StreamPrewarming      bool
 	SeamlessQualitySwitch bool
+	Maps                  bool
 }
 
 // ParseFeatures reads a comma-separated list of flag names (case-insensitive). Unknown
@@ -28,6 +29,8 @@ func ParseFeatures(raw string) Features {
 			f.StreamPrewarming = true
 		case "seamlessqualityswitch":
 			f.SeamlessQualitySwitch = true
+		case "maps":
+			f.Maps = true
 		}
 	}
 	return f

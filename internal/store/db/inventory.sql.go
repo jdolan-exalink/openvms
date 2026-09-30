@@ -452,7 +452,7 @@ func (q *Queries) GetServerRow(ctx context.Context, id uuid.UUID) (FrigateServer
 }
 
 const getSite = `-- name: GetSite :one
-SELECT s.id, s.tenant_id, s.name, s.timezone, s.address, s.created_at, s.updated_at, s.deleted_at, s.deleted_by,
+SELECT s.id, s.tenant_id, s.name, s.timezone, s.address, s.created_at, s.updated_at, s.deleted_at, s.deleted_by, s.lat, s.lng, s.default_zoom, s.region_id,
     (SELECT count(*) FROM frigate_servers fs WHERE fs.site_id = s.id AND fs.deleted_at IS NULL)::int AS server_count
 FROM sites s WHERE s.id = $1 AND s.deleted_at IS NULL
 `
@@ -467,6 +467,10 @@ type GetSiteRow struct {
 	UpdatedAt   time.Time
 	DeletedAt   *time.Time
 	DeletedBy   *uuid.UUID
+	Lat         *float64
+	Lng         *float64
+	DefaultZoom *float32
+	RegionID    *uuid.UUID
 	ServerCount int32
 }
 
@@ -483,6 +487,10 @@ func (q *Queries) GetSite(ctx context.Context, id uuid.UUID) (GetSiteRow, error)
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletedBy,
+		&i.Lat,
+		&i.Lng,
+		&i.DefaultZoom,
+		&i.RegionID,
 		&i.ServerCount,
 	)
 	return i, err
@@ -947,7 +955,7 @@ func (q *Queries) ListServers(ctx context.Context, arg ListServersParams) ([]Lis
 }
 
 const listSites = `-- name: ListSites :many
-SELECT s.id, s.tenant_id, s.name, s.timezone, s.address, s.created_at, s.updated_at, s.deleted_at, s.deleted_by,
+SELECT s.id, s.tenant_id, s.name, s.timezone, s.address, s.created_at, s.updated_at, s.deleted_at, s.deleted_by, s.lat, s.lng, s.default_zoom, s.region_id,
     (SELECT count(*) FROM frigate_servers fs WHERE fs.site_id = s.id AND fs.deleted_at IS NULL)::int AS server_count
 FROM sites s
 WHERE s.deleted_at IS NULL
@@ -971,6 +979,10 @@ type ListSitesRow struct {
 	UpdatedAt   time.Time
 	DeletedAt   *time.Time
 	DeletedBy   *uuid.UUID
+	Lat         *float64
+	Lng         *float64
+	DefaultZoom *float32
+	RegionID    *uuid.UUID
 	ServerCount int32
 }
 
@@ -993,6 +1005,10 @@ func (q *Queries) ListSites(ctx context.Context, arg ListSitesParams) ([]ListSit
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.DeletedBy,
+			&i.Lat,
+			&i.Lng,
+			&i.DefaultZoom,
+			&i.RegionID,
 			&i.ServerCount,
 		); err != nil {
 			return nil, err
