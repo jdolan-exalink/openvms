@@ -76,9 +76,10 @@ only touches the session/overlay layer. LV-8 last.
 - Metrics: `openvms_live_sessions_active{quality}`, `openvms_live_sessions_opened_total{quality}`,
   `openvms_live_reconnects_total`, `openvms_live_errors_total{code}`, `openvms_live_proxied_bytes_total{direction}`.
 - Known gaps: no end-to-end WS test with fake Frigate; audit dedupe is per API process.
-- **Open PO decision**: the socket is now upgraded *before* authentication so unauthenticated
-  clients get an error frame. Alternative: reject unauthenticated with HTTP 401 before upgrade
-  and keep frames for post-upgrade failures. Pending PO answer.
+- **PO decision (applied in `d73b5db`)**: unauthenticated requests (no session/token) are rejected
+  with the JSON HTTP 401 *before* the WebSocket upgrade. Failures only knowable after resolving
+  the camera (forbidden, camera_offline, upstream_unreachable, ...) and later revalidation
+  failures keep the error-frame behaviour.
 
 ## 6. Acceptance for P0 (from the brief)
 
@@ -105,8 +106,14 @@ Q6 VLM provider + pgvector; whether `playback.view` maps to existing `recordings
 
 - S2-11 channels: PO to pair WhatsApp (QR), test Telegram, add `WAHA_BASE_URL`/`WAHA_API_KEY`
   to `.env.example` (edits to `.env*` are blocked for agents).
-- Debt: notification delivery retention, SMTP TLS mode tests, notifications of deleted servers,
-  dangling IDs in rule conditions, S2-8 playback drift correction.
+- Debt done (backend, `feat/live-view-sessions`):
+  - Live WS auth before upgrade: `d73b5db`.
+  - Notification delivery retention (`NOTIFY_DELIVERY_RETENTION`, `NOTIFY_READ_RETENTION`): `84d131b`.
+  - SMTP `starttls`/`tls` mode tests: `2b73454`.
+  - Server hard delete removes its notifications (new `notifications.server_id`/`camera_id`,
+    migration 00019) and strips its ids from rule conditions (rules left with an empty
+    camera/server filter are disabled, not widened): `3fbddc5`.
+- Debt still open: S2-8 playback drift correction.
 - Delivery: push + chained PRs for `fix/playback-purity-lint` and this feature — PO decision.
 
 ## 9. How to resume (checklist)
