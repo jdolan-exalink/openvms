@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPatch, diffValues, isLiveSection, isSecretPath, type JSchema, kindOf, orderSections, resolve, schemaAt, validateTree } from "./frigateSchema";
+import { buildPatch, diffValues, getIn, isLiveSection, lineDiff, setIn, isSecretPath, type JSchema, kindOf, orderSections, resolve, schemaAt, validateTree } from "./frigateSchema";
 
 const root: JSchema = {
   $ref: "#/$defs/CameraConfig",
@@ -88,5 +88,24 @@ describe("sections, live and secrets", () => {
     expect(isSecretPath(["ffmpeg", "inputs", 0, "path"])).toBe(true);
     expect(isSecretPath(["onvif", "password"])).toBe(true);
     expect(isSecretPath(["onvif", "host"])).toBe(false);
+  });
+});
+
+describe("setIn/getIn and lineDiff", () => {
+  it("sets nested values immutably", () => {
+    const v = { a: { b: 1 } };
+    const n = setIn(v, ["a", "c", "d"], 2) as { a: { b: number; c: { d: number } } };
+    expect(n.a.c.d).toBe(2);
+    expect(v).toEqual({ a: { b: 1 } });
+    expect(getIn(n, ["a", "b"])).toBe(1);
+  });
+
+  it("diffs text by line", () => {
+    const d = lineDiff("a\nb\nc\nd", "a\nB\nc\nd\ne");
+    expect(d.filter((l) => l.kind !== "same")).toEqual([
+      { kind: "del", text: "b" },
+      { kind: "add", text: "B" },
+      { kind: "add", text: "e" },
+    ]);
   });
 });

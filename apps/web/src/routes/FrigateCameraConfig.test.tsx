@@ -12,9 +12,10 @@ const schema = {
   $defs: {
     CameraConfig: {
       type: "object",
-      properties: { detect: { $ref: "#/$defs/Detect" }, onvif: { $ref: "#/$defs/Onvif" } },
+      properties: { detect: { $ref: "#/$defs/Detect" }, onvif: { $ref: "#/$defs/Onvif" }, objects: { $ref: "#/$defs/Objects" } },
     },
     Detect: { type: "object", properties: { enabled: { type: "boolean", default: true }, fps: { type: "integer", minimum: 1, maximum: 30, description: "Frames por segundo" } } },
+    Objects: { type: "object", properties: { track: { type: "array", items: { type: "string" } } } },
     Onvif: { type: "object", properties: { host: { type: "string" }, password: { type: "string" } } },
   },
 };
@@ -22,7 +23,7 @@ const schema = {
 function mount(doc: object, extra: Record<string, () => Response> = {}) {
   const routes = stubApi({
     "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "servers.restart", effect: "allow" }] }),
-    "/api/v1/cameras/c1/frigate-config": () => json({ camera_id: "c1", camera_name: "acceso", server_id: "s1", frigate_version: "0.17.0", editable: true, secrets_visible: false, config: { detect: { enabled: true, fps: 5 }, onvif: { host: "10.0.0.2", password: "********" } }, ...doc }),
+    "/api/v1/cameras/c1/frigate-config": () => json({ camera_id: "c1", camera_name: "acceso", server_id: "s1", frigate_version: "0.17.0", editable: true, secrets_visible: false, config: { detect: { enabled: true, fps: 5 }, onvif: { host: "10.0.0.2", password: "********" }, objects: { track: ["person"] } }, ...doc }),
     "/api/v1/servers/s1/frigate-config/schema": () => json(schema),
     ...extra,
   });
@@ -79,5 +80,35 @@ describe("FrigateCameraConfig", () => {
     expect(await screen.findByText(/requiere 0\.16 o superior/)).toBeInTheDocument();
     expect(await screen.findByLabelText("Fps")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Revisar cambios" })).not.toBeInTheDocument();
+  });
+
+  it("picks tracked objects from an emoji grid", async () => {
+    const fetchMock = mount({});
+    fireEvent.click(await screen.findByRole("button", { name: /^Objetos/ }));
+    const person = await screen.findByRole("checkbox", { name: "Persona" });
+    expect(person).toBeChecked();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Perro" }));
+    fireEvent.click(screen.getByRole("button", { name: "Revisar cambios" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Aplicar" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "PATCH")).toBe(true));
+    const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH")!;
+    expect(await patch.clone().json()).toEqual({ sections: { objects: { track: ["person", "dog"] } } });
+  });
+
+  it("lists revisions and restores one after confirmation", async () => {
+    const rev = { id: "r1", server_id: "s1", camera_id: "c1", actor_name: "ana", kind: "camera_patch", sections: ["detect"], patch: { detect: { fps: 8 } }, before_yaml: "a: 1\nb: 2", after_yaml: "a: 1\nb: 3", created_at: "2026-09-30T10:00:00Z" };
+    const fetchMock = mount({ secrets_visible: true }, {
+      "/api/v1/servers/s1/frigate-config/revisions": () => json({ items: [rev] }),
+      "/api/v1/servers/s1/frigate-config/revisions/r1/rollback": () => json({ revision_id: "r2", restart_required: true }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Historial" }));
+    expect(await screen.findByText("Cambio de cámara")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Ver cambio/ }));
+    expect(await screen.findByLabelText("Diferencias del YAML")).toHaveTextContent("+ b: 3");
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    fireEvent.click(screen.getByRole("button", { name: /Restaurar versión anterior/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restaurar" }));
+    expect(await screen.findByText(/Hay cambios que requieren reiniciar el servidor/)).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "POST" && (r as Request).url.endsWith("/revisions/r1/rollback"))).toBe(true);
   });
 });

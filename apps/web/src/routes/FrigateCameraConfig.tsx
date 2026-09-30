@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraFrigateDocQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FrigateHistory } from "@/components/frigate/FrigateHistory";
 import { SectionPanel } from "@/components/frigate/SectionPanel";
 import { Modal } from "@/components/Modal";
 import { Button, ErrorNote, PageHeader } from "@/components/ui";
@@ -17,6 +18,7 @@ import {
 import { can } from "@/lib/perm";
 
 type SectionResult = Schemas["FrigateSectionResult"];
+const HISTORY = "__history";
 
 const restartKey = (serverId: string) => `openvms.frigate-restart.${serverId}`;
 function loadRestart(serverId: string): boolean {
@@ -158,10 +160,21 @@ export function FrigateCameraConfig() {
               </span>
             </button>
           ))}
+          <button
+            type="button"
+            aria-current={activeSection === HISTORY ? "page" : undefined}
+            onClick={() => setActive(HISTORY)}
+            className={cn("rounded px-3 py-2 text-left text-sm whitespace-nowrap hover:bg-raised md:mt-2 md:border-t md:border-line", activeSection === HISTORY && "bg-raised font-medium")}
+          >
+            Historial
+          </button>
         </nav>
 
-        <section aria-label={sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded border border-line bg-surface p-4">
-          {activeSection && (
+        <section aria-label={activeSection === HISTORY ? "Historial" : sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded border border-line bg-surface p-4">
+          {activeSection === HISTORY ? (
+            <FrigateHistory serverId={doc.data.server_id} cameraId={cameraId} secretsVisible={secretsVisible} canRollback={!readOnly && secretsVisible} onRestored={() => setNeedsRestart(true)} />
+          ) : (
+            activeSection && (
             <SectionPanel
               section={activeSection}
               schema={camProps[activeSection]}
@@ -171,8 +184,9 @@ export function FrigateCameraConfig() {
               camera={doc.data}
               config={config}
             />
+            )
           )}
-          {Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
+          {activeSection !== HISTORY && Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
             <p role="alert" className="text-xs text-bad">Hay valores no válidos en esta sección.</p>
           )}
         </section>
