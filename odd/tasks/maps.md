@@ -23,8 +23,8 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 ## Tasks (design §19; parallel tracks A/B/C for backend)
 - [x] M-B1 — migration 00022 maps core, sqlc, permissions maps.*, feature flag (track A) (`eb53c22`)
 - [x] M-B2 — read endpoints: config, overview, site, entities (RBAC filtering) (track A) (`2dc97be`)
-- [x] M-B3 — placement writes, site coords, unplaced cameras, audit (track A)
-- [ ] M-B4 — zones CRUD, geometry validation, rules ZoneResolver hook (track A)
+- [x] M-B3 — placement writes, site coords, unplaced cameras, audit (track A) (`2307705`)
+- [x] M-B4 — zones CRUD, geometry validation, rules ZoneResolver hook (track A) (`6a981cd`)
 - [ ] M-B5 — normalized realtime envelope, camera status publisher (track B)
 - [ ] M-B6 — client hello/filters, resume buffer, coalescing, batching (track B)
 - [ ] M-B7 — alarm lifecycle migration 00023 + Alarms inbox labels (track C)
@@ -46,5 +46,7 @@ ask-on-risk; push/PR are PO decisions.
 ## Progress
 - 2026-09-30: M-B1 completed (`eb53c22`).
 - 2026-09-30: M-B2 completed (`2dc97be`).
-- 2026-09-30: M-B3 completed (placement write endpoints, optimistic locking via If-Match, site geo PATCH, unplaced cameras tray endpoint, audit logging, and integration tests).
+- 2026-09-30: M-B3 completed (`2307705`: placement write endpoints, optimistic locking via If-Match, site geo PATCH, unplaced cameras tray endpoint, audit logging, and integration tests).
+- 2026-09-30: M-B4 completed (`6a981cd`: zones CRUD endpoints, polygon geometry validation with bowtie/closed-ring checks, rules engine ZoneResolver seam, and integration tests).
+
 
