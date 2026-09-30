@@ -7,18 +7,41 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraFrigateDocQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FrigateHistory } from "@/components/frigate/FrigateHistory";
+import { LabelPicker } from "@/components/frigate/LabelPicker";
 import { SectionPanel } from "@/components/frigate/SectionPanel";
 import { Modal } from "@/components/Modal";
+import { ZoneEditorModal, type ZoneEditorValue } from "@/components/zones/ZoneEditorModal";
 import { Button, ErrorNote, PageHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
   buildPatch, deepEqual, diffValues, formatValue, isLiveSection, type JSchema, kindOf, orderSections, parseVersion, pathLabel, resolve, schemaAt,
   sectionLabel, validateTree,
 } from "@/lib/frigateSchema";
+import { pickerLabels } from "@/lib/labelEmoji";
 import { can } from "@/lib/perm";
 
 type SectionResult = Schemas["FrigateSectionResult"];
 const HISTORY = "__history";
+
+const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const isEmptyMask = (v: unknown) => v == null || v === "" || (Array.isArray(v) && v.length === 0) || (isRec(v) && Object.keys(v).length === 0);
+
+/**
+ * withMask returns `obj` with its `mask` set to `next`. A cleared mask keeps the empty shape of
+ * what the server holds (so the patch clears it) or is dropped when the server never had one.
+ * The same object is returned when nothing changes, so untouched sections stay clean.
+ */
+function withMask(obj: Record<string, unknown> | undefined, server: unknown, next: unknown): Record<string, unknown> | undefined {
+  const current = obj?.mask;
+  if (isEmptyMask(next)) {
+    if (isEmptyMask(current) && (current !== undefined || server === undefined)) return obj;
+    const out = { ...obj };
+    if (server === undefined || server === null) delete out.mask;
+    else out.mask = isRec(server) ? {} : [];
+    return out;
+  }
+  return deepEqual(current, next) ? obj : { ...obj, mask: next };
+}
 
 const restartKey = (serverId: string) => `openvms.frigate-restart.${serverId}`;
 function loadRestart(serverId: string): boolean {
@@ -48,6 +71,7 @@ export function FrigateCameraConfig() {
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [reviewing, setReviewing] = useState(false);
   const [results, setResults] = useState<SectionResult[]>([]);
+  const [zoneEditor, setZoneEditor] = useState(false);
   const [restartPending, setRestartPending] = useState<Record<string, boolean>>({});
 
   const root = schema.data as JSchema | undefined;
@@ -105,6 +129,54 @@ export function FrigateCameraConfig() {
   });
 
   const activeSection = active ?? sections[0];
+
+  const zoneEditorValue = (): ZoneEditorValue => {
+    const objects = (valueOf("objects") ?? {}) as Record<string, unknown>;
+    const filters = (isRec(objects.filters) ? objects.filters : {}) as Record<string, Record<string, unknown>>;
+    const filterMasks: Record<string, unknown> = {};
+    for (const [label, f] of Object.entries(filters)) if (isRec(f) && f.mask !== undefined) filterMasks[label] = f.mask;
+    return {
+      zones: (isRec(valueOf("zones")) ? valueOf("zones") : {}) as ZoneEditorValue["zones"],
+      motionMask: (valueOf("motion") as Record<string, unknown> | undefined)?.mask,
+      objectMask: objects.mask,
+      objectFilterMasks: filterMasks,
+    };
+  };
+
+  /** Folds the modal result into the draft; the normal review/apply flow sends it. Removed zones become null in the patch (map deletion). */
+  const saveZoneEditor = (next: ZoneEditorValue) => {
+    const serverObjects = config.objects as Record<string, unknown> | undefined;
+    const serverFilters = (isRec(serverObjects?.filters) ? serverObjects.filters : {}) as Record<string, Record<string, unknown>>;
+    const draft: Record<string, unknown> = {};
+    draft.zones = Object.keys(next.zones).length || config.zones !== undefined ? next.zones : undefined;
+    draft.motion = withMask(valueOf("motion") as Record<string, unknown> | undefined, (config.motion as Record<string, unknown> | undefined)?.mask, next.motionMask);
+    let objects = withMask(valueOf("objects") as Record<string, unknown> | undefined, serverObjects?.mask, next.objectMask);
+    const filters = { ...(isRec(objects?.filters) ? objects.filters : {}) } as Record<string, Record<string, unknown>>;
+    let filtersChanged = false;
+    for (const label of new Set([...Object.keys(filters), ...Object.keys(next.objectFilterMasks)])) {
+      const before = filters[label];
+      const after = withMask(before, serverFilters[label]?.mask, next.objectFilterMasks[label]);
+      if (after === before) continue;
+      filtersChanged = true;
+      if (after === undefined || (Object.keys(after).length === 0 && serverFilters[label] === undefined)) delete filters[label];
+      else filters[label] = after;
+    }
+    if (filtersChanged) objects = { ...objects, filters };
+    draft.objects = objects;
+    setEdits((e) => {
+      const out = { ...e };
+      for (const [s, v] of Object.entries(draft)) {
+        if (v === valueOf(s) && !(s === "zones" && v === undefined)) continue;
+        if (deepEqual(v, config[s])) delete out[s];
+        else out[s] = v;
+      }
+      return out;
+    });
+    setZoneEditor(false);
+  };
+  const detectDraft = valueOf("detect") as Record<string, unknown> | undefined;
+  const objectsDraft = valueOf("objects") as Record<string, unknown> | undefined;
+  const zoneLabels = pickerLabels(Object.keys(isRec(objectsDraft?.filters) ? objectsDraft.filters : {}), Array.isArray(objectsDraft?.track) ? (objectsDraft.track as string[]) : []);
   const ctx = { root: root ?? {}, secretsVisible, readOnly };
   const header = (
     <PageHeader
@@ -183,6 +255,7 @@ export function FrigateCameraConfig() {
               ctx={ctx}
               camera={doc.data}
               config={config}
+              onEditZones={() => setZoneEditor(true)}
             />
             )
           )}
@@ -203,6 +276,22 @@ export function FrigateCameraConfig() {
             <Button variant="primary" disabled={!dirty.length || errorCount > 0} onClick={() => setReviewing(true)}>Revisar cambios</Button>
           </div>
         </div>
+      )}
+
+      {zoneEditor && (
+        <ZoneEditorModal
+          open
+          onClose={() => setZoneEditor(false)}
+          cameraId={cameraId}
+          snapshotUrl={`/media/v1/cameras/${cameraId}/snapshot.jpg`}
+          frameWidth={typeof detectDraft?.width === "number" ? detectDraft.width : undefined}
+          frameHeight={typeof detectDraft?.height === "number" ? detectDraft.height : undefined}
+          value={zoneEditorValue()}
+          frigateVersion={version}
+          onSave={saveZoneEditor}
+          renderLabelPicker={({ value, onChange, ariaLabel }) => <LabelPicker label={ariaLabel} value={value} onChange={onChange} />}
+          availableLabels={zoneLabels}
+        />
       )}
 
       {reviewing && (
@@ -242,15 +331,29 @@ function DiffList({ sections, before, after, version }: { sections: string[]; be
             {diffValues(before[s], after[s], [s]).map((c) => (
               <li key={c.path.join(".")} className="break-words">
                 <span className="font-mono text-xs text-muted">{pathLabel(c.path)}</span>{" "}
-                <span className="text-bad line-through">{formatValue(c.before)}</span>
+                <DiffValue value={c.before} className="text-bad line-through" />
                 {" → "}
-                <span className="text-ok">{formatValue(c.after)}</span>
+                <DiffValue value={c.after} className="text-ok" />
               </li>
             ))}
           </ul>
         </div>
       ))}
     </div>
+  );
+}
+
+const DIFF_MAX = 120;
+
+/** DiffValue shortens very long values (polygon coordinates, mask maps) behind an expandable detail. */
+function DiffValue({ value, className }: { value: unknown; className: string }) {
+  const text = formatValue(value);
+  if (text.length <= DIFF_MAX) return <span className={className}>{text}</span>;
+  return (
+    <details className="inline align-top">
+      <summary className={cn("inline cursor-pointer", className)}>{text.slice(0, DIFF_MAX)}… ({text.length} caracteres)</summary>
+      <code className={cn("mt-1 block font-mono text-xs break-all whitespace-pre-wrap", className)}>{text}</code>
+    </details>
   );
 }
 

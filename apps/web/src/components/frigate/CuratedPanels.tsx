@@ -343,11 +343,11 @@ function Review({ ed, zones }: { ed: Ed; zones: string[] }) {
   );
 }
 
-function Zones({ onEditZones }: { onEditZones?: () => void }) {
+function Zones({ onEditZones, readOnly }: { onEditZones?: () => void; readOnly: boolean }) {
   return (
     <Group title="Zonas y máscaras">
       <div>
-        <Button disabled={!onEditZones} title={onEditZones ? undefined : "Próximamente"} onClick={onEditZones}>
+        <Button disabled={!onEditZones || readOnly} title={readOnly ? "Solo lectura: requiere el permiso servers.config y Frigate 0.16 o superior" : undefined} onClick={onEditZones}>
           Editar zonas
         </Button>
       </div>
@@ -379,7 +379,7 @@ export function CuratedPanel({
     case "objects": return <Objects ed={ed} />;
     case "motion": return <Motion ed={ed} />;
     case "review": return <Review ed={ed} zones={zones} />;
-    case "zones": return <Zones onEditZones={onEditZones} />;
+    case "zones": return <Zones onEditZones={onEditZones} readOnly={ctx.readOnly} />;
     default: return null;
   }
 }

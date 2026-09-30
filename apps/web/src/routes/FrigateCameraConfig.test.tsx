@@ -5,6 +5,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, stubApi } from "@/test-utils";
 import { FrigateCameraConfig } from "./FrigateCameraConfig";
 
+vi.mock("@/components/zones/ZoneEditorModal", () => ({
+  ZoneEditorModal: ({ value, onSave }: { value: { zones: Record<string, unknown> }; onSave: (v: unknown) => void }) => (
+    <div role="dialog" aria-label="Editor de zonas">
+      <span>{Object.keys(value.zones).join(",")}</span>
+      <button type="button" onClick={() => onSave({ zones: { patio: { coordinates: "0.1,0.1,0.9,0.1,0.5,0.9" } }, motionMask: [], objectMask: undefined, objectFilterMasks: {} })}>guardar zonas</button>
+    </div>
+  ),
+}));
+
 afterEach(() => vi.unstubAllGlobals());
 
 const schema = {
@@ -12,7 +21,7 @@ const schema = {
   $defs: {
     CameraConfig: {
       type: "object",
-      properties: { detect: { $ref: "#/$defs/Detect" }, onvif: { $ref: "#/$defs/Onvif" }, objects: { $ref: "#/$defs/Objects" } },
+      properties: { detect: { $ref: "#/$defs/Detect" }, zones: { type: "object", additionalProperties: { type: "object" } }, onvif: { $ref: "#/$defs/Onvif" }, objects: { $ref: "#/$defs/Objects" } },
     },
     Detect: { type: "object", properties: { enabled: { type: "boolean", default: true }, fps: { type: "integer", minimum: 1, maximum: 30, description: "Frames por segundo" } } },
     Objects: { type: "object", properties: { track: { type: "array", items: { type: "string" } } } },
@@ -110,5 +119,19 @@ describe("FrigateCameraConfig", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Restaurar" }));
     expect(await screen.findByText(/Hay cambios que requieren reiniciar el servidor/)).toBeInTheDocument();
     expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "POST" && (r as Request).url.endsWith("/revisions/r1/rollback"))).toBe(true);
+  });
+
+  it("opens the zone editor, drafts its result and patches removed zones as null", async () => {
+    const fetchMock = mount({ config: { zones: { puerta: { coordinates: "0,0,1,0,1,1" } }, detect: { enabled: true, fps: 5 } } });
+    fireEvent.click(await screen.findByRole("button", { name: /Zonas/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
+    expect(await screen.findByText("puerta")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "guardar zonas" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Revisar cambios" }));
+    const dialog = await screen.findByRole("dialog", { name: "Revisar cambios" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Aplicar" }));
+    await waitFor(() => expect(fetchMock.mock.calls.some(([r]) => (r as Request).method === "PATCH")).toBe(true));
+    const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH")!;
+    expect(await patch.clone().json()).toEqual({ sections: { zones: { puerta: null, patio: { coordinates: "0.1,0.1,0.9,0.1,0.5,0.9" } } } });
   });
 });
