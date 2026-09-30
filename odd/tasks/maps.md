@@ -25,7 +25,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-B2 — read endpoints: config, overview, site, entities (RBAC filtering) (track A) (`2dc97be`)
 - [x] M-B3 — placement writes, site coords, unplaced cameras, audit (track A) (`2307705`)
 - [x] M-B4 — zones CRUD, geometry validation, rules ZoneResolver hook (track A) (`6a981cd`)
-- [ ] M-B5 — normalized realtime envelope, camera status publisher (track B)
+- [x] M-B5 — normalized realtime envelope, camera status publisher (track B) (`23fea3e`)
 - [ ] M-B6 — client hello/filters, resume buffer, coalescing, batching (track B)
 - [ ] M-B7 — alarm lifecycle migration 00023 + Alarms inbox labels (track C)
 - [ ] M-W1 — MapLibre route, canvas, theme styles, tile provider (PMTiles)
@@ -48,5 +48,7 @@ ask-on-risk; push/PR are PO decisions.
 - 2026-09-30: M-B2 completed (`2dc97be`).
 - 2026-09-30: M-B3 completed (`2307705`: placement write endpoints, optimistic locking via If-Match, site geo PATCH, unplaced cameras tray endpoint, audit logging, and integration tests).
 - 2026-09-30: M-B4 completed (`6a981cd`: zones CRUD endpoints, polygon geometry validation with bowtie/closed-ring checks, rules engine ZoneResolver seam, and integration tests).
+- 2026-09-30: M-B5 completed (`23fea3e`: realtime v2 envelope with ID/TS/site_id/camera_id/server_id, JetStream sequence plumbing in Source/Feed, camera.status_changed decoder, HealthPoller per-camera diff computation, and NATS publisher).
+
 
 
