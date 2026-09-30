@@ -354,7 +354,7 @@ func toCamera(c db.GetCameraRow) gen.Camera {
 		Id: c.ID, TenantId: c.TenantID, SiteId: c.SiteID, ServerId: c.ServerID,
 		RemoteName: c.RemoteName, DisplayName: c.DisplayName, Enabled: c.Enabled,
 		Zones: c.Zones, Lpr: c.Lpr, Status: gen.HealthStatus(c.Status),
-		MissingSince: c.MissingSince, GroupIds: c.GroupIds, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		MissingSince: c.MissingSince, GroupIds: c.GroupIds, FolderId: c.FolderID, SortOrder: int(c.SortOrder), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 		DefaultLiveQuality: gen.CameraLiveQuality(c.DefaultLiveQuality), Description: c.Description, Location: c.Location,
 		Tags: append([]string{}, c.Tags...),
 	}
@@ -577,4 +577,78 @@ func (h *Handlers) RestartServer(ctx context.Context, r gen.RestartServerRequest
 		return nil, err
 	}
 	return gen.RestartServer200JSONResponse{Success: true}, nil
+}
+
+func toFolder(f db.CameraFolder) gen.CameraFolder {
+	return gen.CameraFolder{Id: f.ID, TenantId: f.TenantID, ServerId: f.ServerID, Name: f.Name, SortOrder: int(f.SortOrder), CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt}
+}
+
+func (h *Handlers) ListCameraFolders(ctx context.Context, _ gen.ListCameraFoldersRequestObject) (gen.ListCameraFoldersResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := h.Inv.ListCameraFolders(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ListCameraFolders200JSONResponse{Items: make([]gen.CameraFolder, 0, len(res.Folders)), ManageableServerIds: res.ManageableServerIDs}
+	for _, f := range res.Folders {
+		out.Items = append(out.Items, toFolder(f))
+	}
+	return out, nil
+}
+
+func (h *Handlers) CreateCameraFolder(ctx context.Context, r gen.CreateCameraFolderRequestObject) (gen.CreateCameraFolderResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f, err := h.Inv.CreateCameraFolder(ctx, a, r.Body.ServerId, r.Body.Name)
+	if err != nil {
+		return nil, err
+	}
+	return gen.CreateCameraFolder201JSONResponse(toFolder(f)), nil
+}
+
+func (h *Handlers) RenameCameraFolder(ctx context.Context, r gen.RenameCameraFolderRequestObject) (gen.RenameCameraFolderResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	f, err := h.Inv.RenameCameraFolder(ctx, a, r.FolderId, r.Body.Name)
+	if err != nil {
+		return nil, err
+	}
+	return gen.RenameCameraFolder200JSONResponse(toFolder(f)), nil
+}
+
+func (h *Handlers) DeleteCameraFolder(ctx context.Context, r gen.DeleteCameraFolderRequestObject) (gen.DeleteCameraFolderResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.Inv.DeleteCameraFolder(ctx, a, r.FolderId); err != nil {
+		return nil, err
+	}
+	return gen.DeleteCameraFolder204Response{}, nil
+}
+
+func (h *Handlers) ReorderCameraFolders(ctx context.Context, r gen.ReorderCameraFoldersRequestObject) (gen.ReorderCameraFoldersResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var cams []inventory.CameraPlacement
+	for _, c := range deref(r.Body.Cameras) {
+		cams = append(cams, inventory.CameraPlacement{CameraID: c.CameraId, FolderID: c.FolderId, SortOrder: int32(c.SortOrder)}) //nolint:gosec // bounded by the contract (minimum 0, maxItems)
+	}
+	var folders []inventory.FolderPosition
+	for _, f := range deref(r.Body.Folders) {
+		folders = append(folders, inventory.FolderPosition{FolderID: f.FolderId, SortOrder: int32(f.SortOrder)}) //nolint:gosec // see above
+	}
+	if err := h.Inv.ReorderCameraFolders(ctx, a, cams, folders); err != nil {
+		return nil, err
+	}
+	return gen.ReorderCameraFolders204Response{}, nil
 }

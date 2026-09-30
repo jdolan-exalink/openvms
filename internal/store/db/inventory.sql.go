@@ -77,6 +77,45 @@ func (q *Queries) CountCamerasInTenant(ctx context.Context, arg CountCamerasInTe
 	return column_1, err
 }
 
+const countFolderCameras = `-- name: CountFolderCameras :one
+SELECT count(*)::int FROM cameras WHERE folder_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) CountFolderCameras(ctx context.Context, folderID *uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countFolderCameras, folderID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const createCameraFolder = `-- name: CreateCameraFolder :one
+INSERT INTO camera_folders (tenant_id, server_id, name, sort_order)
+VALUES ($1, $2, $3,
+        (SELECT coalesce(max(sort_order) + 1, 0) FROM camera_folders WHERE server_id = $2))
+RETURNING id, tenant_id, server_id, name, sort_order, created_at, updated_at
+`
+
+type CreateCameraFolderParams struct {
+	TenantID uuid.UUID
+	ServerID uuid.UUID
+	Name     string
+}
+
+func (q *Queries) CreateCameraFolder(ctx context.Context, arg CreateCameraFolderParams) (CameraFolder, error) {
+	row := q.db.QueryRow(ctx, createCameraFolder, arg.TenantID, arg.ServerID, arg.Name)
+	var i CameraFolder
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ServerID,
+		&i.Name,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createCameraGroup = `-- name: CreateCameraGroup :one
 INSERT INTO camera_groups (tenant_id, name, description) VALUES ($1, $2, $3) RETURNING id, tenant_id, name, description, created_at, updated_at, deleted_at, deleted_by
 `
@@ -188,8 +227,17 @@ func (q *Queries) CreateTenant(ctx context.Context, arg CreateTenantParams) (Ten
 	return i, err
 }
 
+const deleteCameraFolder = `-- name: DeleteCameraFolder :exec
+DELETE FROM camera_folders WHERE id = $1
+`
+
+func (q *Queries) DeleteCameraFolder(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteCameraFolder, id)
+	return err
+}
+
 const getCamera = `-- name: GetCamera :one
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -219,6 +267,8 @@ type GetCameraRow struct {
 	Description        string
 	Location           string
 	Tags               []string
+	FolderID           *uuid.UUID
+	SortOrder          int32
 	GroupIds           []uuid.UUID
 }
 
@@ -248,7 +298,43 @@ func (q *Queries) GetCamera(ctx context.Context, id uuid.UUID) (GetCameraRow, er
 		&i.Description,
 		&i.Location,
 		&i.Tags,
+		&i.FolderID,
+		&i.SortOrder,
 		&i.GroupIds,
+	)
+	return i, err
+}
+
+const getCameraFolder = `-- name: GetCameraFolder :one
+SELECT f.id, f.tenant_id, f.server_id, f.name, f.sort_order, f.created_at, f.updated_at, s.site_id
+FROM camera_folders f
+JOIN frigate_servers s ON s.id = f.server_id
+WHERE f.id = $1
+`
+
+type GetCameraFolderRow struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	ServerID  uuid.UUID
+	Name      string
+	SortOrder int32
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	SiteID    uuid.UUID
+}
+
+func (q *Queries) GetCameraFolder(ctx context.Context, id uuid.UUID) (GetCameraFolderRow, error) {
+	row := q.db.QueryRow(ctx, getCameraFolder, id)
+	var i GetCameraFolderRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ServerID,
+		&i.Name,
+		&i.SortOrder,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SiteID,
 	)
 	return i, err
 }
@@ -485,6 +571,54 @@ func (q *Queries) ListAllActiveServers(ctx context.Context) ([]FrigateServer, er
 	return items, nil
 }
 
+const listCameraFolders = `-- name: ListCameraFolders :many
+SELECT f.id, f.tenant_id, f.server_id, f.name, f.sort_order, f.created_at, f.updated_at, s.site_id
+FROM camera_folders f
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+ORDER BY f.server_id, f.sort_order, lower(f.name)
+`
+
+type ListCameraFoldersRow struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	ServerID  uuid.UUID
+	Name      string
+	SortOrder int32
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	SiteID    uuid.UUID
+}
+
+// Shared camera folders (LV-13). Folders belong to one server; cameras.folder_id is NULL at the server root.
+func (q *Queries) ListCameraFolders(ctx context.Context) ([]ListCameraFoldersRow, error) {
+	rows, err := q.db.Query(ctx, listCameraFolders)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCameraFoldersRow{}
+	for rows.Next() {
+		var i ListCameraFoldersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ServerID,
+			&i.Name,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SiteID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCameraGroupMembers = `-- name: ListCameraGroupMembers :many
 SELECT camera_id FROM camera_group_members WHERE group_id = $1 ORDER BY camera_id
 `
@@ -545,7 +679,7 @@ func (q *Queries) ListCameraGroups(ctx context.Context, tenantID *uuid.UUID) ([]
 }
 
 const listCameras = `-- name: ListCameras :many
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -559,7 +693,7 @@ WHERE c.deleted_at IS NULL
   AND ($5::text IS NULL
        OR c.display_name ILIKE '%' || $5 || '%'
        OR c.remote_name ILIKE '%' || $5 || '%')
-ORDER BY c.display_name
+ORDER BY c.sort_order, c.display_name
 `
 
 type ListCamerasParams struct {
@@ -593,6 +727,8 @@ type ListCamerasRow struct {
 	Description        string
 	Location           string
 	Tags               []string
+	FolderID           *uuid.UUID
+	SortOrder          int32
 	GroupIds           []uuid.UUID
 }
 
@@ -634,6 +770,8 @@ func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]Lis
 			&i.Description,
 			&i.Location,
 			&i.Tags,
+			&i.FolderID,
+			&i.SortOrder,
 			&i.GroupIds,
 		); err != nil {
 			return nil, err
@@ -679,7 +817,7 @@ func (q *Queries) ListServerBlobKeys(ctx context.Context, serverID uuid.UUID) ([
 }
 
 const listServerCameras = `-- name: ListServerCameras :many
-SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
+SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]Camera, error) {
@@ -714,6 +852,8 @@ func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]
 			&i.Description,
 			&i.Location,
 			&i.Tags,
+			&i.FolderID,
+			&i.SortOrder,
 		); err != nil {
 			return nil, err
 		}
@@ -1080,6 +1220,50 @@ func (q *Queries) PurgeServerSyncState(ctx context.Context, serverID uuid.UUID) 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const renameCameraFolder = `-- name: RenameCameraFolder :exec
+UPDATE camera_folders SET name = $1, updated_at = now() WHERE id = $2
+`
+
+type RenameCameraFolderParams struct {
+	Name string
+	ID   uuid.UUID
+}
+
+func (q *Queries) RenameCameraFolder(ctx context.Context, arg RenameCameraFolderParams) error {
+	_, err := q.db.Exec(ctx, renameCameraFolder, arg.Name, arg.ID)
+	return err
+}
+
+const setCameraFolderOrder = `-- name: SetCameraFolderOrder :exec
+UPDATE camera_folders SET sort_order = $1, updated_at = now() WHERE id = $2
+`
+
+type SetCameraFolderOrderParams struct {
+	SortOrder int32
+	ID        uuid.UUID
+}
+
+func (q *Queries) SetCameraFolderOrder(ctx context.Context, arg SetCameraFolderOrderParams) error {
+	_, err := q.db.Exec(ctx, setCameraFolderOrder, arg.SortOrder, arg.ID)
+	return err
+}
+
+const setCameraPlacement = `-- name: SetCameraPlacement :exec
+UPDATE cameras SET folder_id = $1, sort_order = $2, updated_at = now()
+WHERE id = $3 AND deleted_at IS NULL
+`
+
+type SetCameraPlacementParams struct {
+	FolderID  *uuid.UUID
+	SortOrder int32
+	ID        uuid.UUID
+}
+
+func (q *Queries) SetCameraPlacement(ctx context.Context, arg SetCameraPlacementParams) error {
+	_, err := q.db.Exec(ctx, setCameraPlacement, arg.FolderID, arg.SortOrder, arg.ID)
+	return err
 }
 
 const setServerCamerasStatus = `-- name: SetServerCamerasStatus :exec

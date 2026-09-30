@@ -619,6 +619,133 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/camera-folders:
+    get:
+      tags: [cameras]
+      operationId: listCameraFolders
+      summary: Shared camera folders of the tenant, filtered by what the caller can see
+      description: |
+        Folders are shared by everyone in the tenant (one tree). A folder is listed when it holds at least one
+        camera the caller can view, or when the caller has cameras.manage on its server. manageable_server_ids
+        lists the servers on which the caller may create, rename and delete folders and reorder cameras.
+      responses:
+        "200":
+          description: Folders
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, manageable_server_ids]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/CameraFolder" }
+                  manageable_server_ids:
+                    type: array
+                    items: { type: string, format: uuid }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [cameras]
+      operationId: createCameraFolder
+      summary: Create a folder on a server
+      description: Requires cameras.manage on the server. Names are unique per server, case-insensitively.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_id, name]
+              properties:
+                server_id: { type: string, format: uuid }
+                name: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraFolder" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/camera-folders/reorder:
+    post:
+      tags: [cameras]
+      operationId: reorderCameraFolders
+      summary: Apply a batch of camera placements and folder positions atomically
+      description: |
+        Every camera may only be placed in a folder of its own server (or at the server root, folder_id null).
+        Requires cameras.manage on each camera and on each folder's server. Nothing is applied if any item is rejected.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cameras:
+                  type: array
+                  maxItems: 1000
+                  items:
+                    type: object
+                    required: [camera_id, sort_order]
+                    properties:
+                      camera_id: { type: string, format: uuid }
+                      folder_id: { type: string, format: uuid, nullable: true }
+                      sort_order: { type: integer, minimum: 0 }
+                folders:
+                  type: array
+                  maxItems: 200
+                  items:
+                    type: object
+                    required: [folder_id, sort_order]
+                    properties:
+                      folder_id: { type: string, format: uuid }
+                      sort_order: { type: integer, minimum: 0 }
+      responses:
+        "204": { description: Applied }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/camera-folders/{folderId}:
+    parameters:
+      - { name: folderId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      tags: [cameras]
+      operationId: renameCameraFolder
+      summary: Rename a folder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, minLength: 1, maxLength: 80 }
+      responses:
+        "200":
+          description: Renamed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraFolder" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [cameras]
+      operationId: deleteCameraFolder
+      summary: Delete a folder; its cameras return to the server root
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/camera-groups:
     get:
       tags: [cameras]
@@ -2239,7 +2366,7 @@ components:
           description: Cameras no longer present in Frigate. They are kept and flagged, not deleted.
     Camera:
       type: object
-      required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, default_live_quality, description, location, tags, created_at, updated_at]
+      required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, folder_id, sort_order, default_live_quality, description, location, tags, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
@@ -2256,11 +2383,28 @@ components:
         fps: { type: number, nullable: true }
         missing_since: { type: string, format: date-time, nullable: true }
         group_ids: { type: array, items: { type: string, format: uuid } }
+        folder_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Shared explorer folder of the camera's server; null at the server root.
+        sort_order: { type: integer, description: Shared position inside its folder (or the server root). }
         default_live_quality:
           $ref: "#/components/schemas/CameraLiveQuality"
         description: { type: string, maxLength: 1000 }
         location: { type: string, maxLength: 200 }
         tags: { type: array, items: { type: string, maxLength: 40 }, maxItems: 20 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CameraFolder:
+      type: object
+      required: [id, tenant_id, server_id, name, sort_order, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        server_id: { type: string, format: uuid }
+        name: { type: string }
+        sort_order: { type: integer }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     CameraLiveQuality:

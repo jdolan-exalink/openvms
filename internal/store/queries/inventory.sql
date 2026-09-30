@@ -117,7 +117,7 @@ WHERE c.deleted_at IS NULL
   AND (sqlc.narg('q')::text IS NULL
        OR c.display_name ILIKE '%' || sqlc.narg('q') || '%'
        OR c.remote_name ILIKE '%' || sqlc.narg('q') || '%')
-ORDER BY c.display_name;
+ORDER BY c.sort_order, c.display_name;
 
 -- name: ListServerCameras :many
 SELECT * FROM cameras WHERE server_id = @server_id AND deleted_at IS NULL;
@@ -284,3 +284,38 @@ DELETE FROM cameras WHERE server_id = @server_id;
 
 -- name: PurgeServer :execrows
 DELETE FROM frigate_servers WHERE id = @id;
+
+-- Shared camera folders (LV-13). Folders belong to one server; cameras.folder_id is NULL at the server root.
+-- name: ListCameraFolders :many
+SELECT f.*, s.site_id
+FROM camera_folders f
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+ORDER BY f.server_id, f.sort_order, lower(f.name);
+
+-- name: GetCameraFolder :one
+SELECT f.*, s.site_id
+FROM camera_folders f
+JOIN frigate_servers s ON s.id = f.server_id
+WHERE f.id = @id;
+
+-- name: CreateCameraFolder :one
+INSERT INTO camera_folders (tenant_id, server_id, name, sort_order)
+VALUES (@tenant_id, @server_id, @name,
+        (SELECT coalesce(max(sort_order) + 1, 0) FROM camera_folders WHERE server_id = @server_id))
+RETURNING *;
+
+-- name: RenameCameraFolder :exec
+UPDATE camera_folders SET name = @name, updated_at = now() WHERE id = @id;
+
+-- name: DeleteCameraFolder :exec
+DELETE FROM camera_folders WHERE id = @id;
+
+-- name: CountFolderCameras :one
+SELECT count(*)::int FROM cameras WHERE folder_id = @folder_id AND deleted_at IS NULL;
+
+-- name: SetCameraFolderOrder :exec
+UPDATE camera_folders SET sort_order = @sort_order, updated_at = now() WHERE id = @id;
+
+-- name: SetCameraPlacement :exec
+UPDATE cameras SET folder_id = @folder_id, sort_order = @sort_order, updated_at = now()
+WHERE id = @id AND deleted_at IS NULL;

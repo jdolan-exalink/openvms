@@ -82,6 +82,18 @@ type Camera struct {
 	Description        string
 	Location           string
 	Tags               []string
+	FolderID           *uuid.UUID
+	SortOrder          int32
+}
+
+type CameraFolder struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	ServerID  uuid.UUID
+	Name      string
+	SortOrder int32
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 type CameraGroup struct {
