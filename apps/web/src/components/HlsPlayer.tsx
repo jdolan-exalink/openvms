@@ -11,11 +11,31 @@ export type HlsPlayerHandle = { video: HTMLVideoElement | null };
  */
 export const HlsPlayer = forwardRef<
   HlsPlayerHandle,
-  { cameraId: string; start: number; end: number; startOffset?: number; className?: string; onTime?: (unix: number) => void; ariaLabel?: string }
->(function HlsPlayer({ cameraId, start, end, startOffset = 0, className, onTime, ariaLabel }, ref) {
+  {
+    cameraId: string;
+    start: number;
+    end: number;
+    startOffset?: number;
+    className?: string;
+    onTime?: (unix: number) => void;
+    ariaLabel?: string;
+    /** Native transport controls (default true); the Live REC grid drives playback itself. */
+    controls?: boolean;
+    muted?: boolean;
+    /** Start playing once the playlist is loaded (default true). Read at load time only. */
+    autoPlay?: boolean;
+    /** Playback speed applied once the playlist is loaded (default: leave the browser's). */
+    rate?: number;
+  }
+>(function HlsPlayer({ cameraId, start, end, startOffset = 0, className, onTime, ariaLabel, controls = true, muted, autoPlay = true, rate }, ref) {
   const video = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState("");
   useImperativeHandle(ref, () => ({ video: video.current }), []);
+  // Latest values for the load-time callback below, without reloading the stream when they change.
+  const loadOptions = useRef({ autoPlay, rate });
+  useEffect(() => {
+    loadOptions.current = { autoPlay, rate };
+  });
 
   useEffect(() => {
     const el = video.current;
@@ -24,7 +44,8 @@ export const HlsPlayer = forwardRef<
     const src = `/media/v1/cameras/${cameraId}/vod/${Math.floor(start)}/${Math.ceil(end)}/master.m3u8`;
     const seek = () => {
       if (startOffset > 0) el.currentTime = startOffset;
-      void el.play().catch(() => {});
+      if (loadOptions.current.rate) el.playbackRate = loadOptions.current.rate;
+      if (loadOptions.current.autoPlay) void el.play().catch(() => {});
     };
     if (Hls.isSupported()) {
       // No worker: the Content-Security-Policy does not allow blob: workers.
@@ -62,7 +83,8 @@ export const HlsPlayer = forwardRef<
       <video
         ref={video}
         className="size-full object-contain"
-        controls
+        controls={controls}
+        muted={muted}
         playsInline
         aria-label={ariaLabel}
         onTimeUpdate={(e) => onTime?.(start + e.currentTarget.currentTime)}

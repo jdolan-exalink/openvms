@@ -78,6 +78,19 @@ const playbackRoute = createRoute({
   },
 });
 
+type LiveSearch = { mode?: "rec"; t?: string | number };
+
+// `?mode=rec&t=<ISO>` opens Live in synchronized recorded playback at that instant (LV-9).
+const liveRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/live",
+  component: Live,
+  validateSearch: (s: Record<string, unknown>): LiveSearch => ({
+    mode: s.mode === "rec" ? "rec" : undefined,
+    t: typeof s.t === "string" || typeof s.t === "number" ? s.t : undefined,
+  }),
+});
+
 type AlarmsSearch = {
   status?: "open" | "acknowledged" | "resolved";
   camera_id?: string;
@@ -136,7 +149,7 @@ export const routeTree = rootRoute.addChildren([
   loginRoute,
   appRoute.addChildren([
     indexRoute,
-    child("/live", Live),
+    liveRoute,
     alarmsRoute,
     eventsRoute,
     child("/plates", Plates),

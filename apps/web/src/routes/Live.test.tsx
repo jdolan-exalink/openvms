@@ -592,4 +592,55 @@ describe("Live with persistent players (P0 acceptance)", () => {
     expect(screen.getByRole("button", { name: "Layout 5 by 5" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Layout 8 by 4" })).toBeInTheDocument();
   });
+
+  describe("LIVE/REC mode", () => {
+    const withRecordings = [
+      { permission: "live.view", effect: "allow" as const, scope_type: "platform" },
+      { permission: "recordings.view", effect: "allow" as const, scope_type: "platform" },
+    ];
+    const setup = (grants: Parameters<typeof meResponse>[0], recordings: () => Response = () => json({ items: [] })) => {
+      stubBrowserAPIs();
+      localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [{ camera_id: "cam-1", quality: "sub" }, null, null, null]));
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          stubApi({
+            "/api/v1/me": () => meResponse(grants),
+            "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+            "/api/v1/cameras/cam-1/recordings": recordings,
+            "/api/v1/events": () => json({ items: [] }),
+            ...emptyCatalogs,
+          }),
+        ),
+      );
+    };
+
+    it("hides the toggle without any recordings permission", async () => {
+      setup(undefined);
+      renderPage(Live);
+      await screen.findByLabelText("Cuadro 1");
+      expect(screen.queryByRole("group", { name: "Modo de reproducción" })).toBeNull();
+    });
+
+    it("switches to REC from the toggle and back to LIVE, clearing the URL state", async () => {
+      setup(withRecordings);
+      const { router } = renderPage(Live);
+      fireEvent.click(await screen.findByRole("button", { name: "Grabación" }));
+      expect(await screen.findByRole("region", { name: "Controles de grabación" })).toBeInTheDocument();
+      await waitFor(() => expect(router.state.location.search).toMatchObject({ mode: "rec" }));
+      expect(screen.getByRole("button", { name: "Grabación" })).toHaveAttribute("aria-pressed", "true");
+
+      fireEvent.click(screen.getByRole("button", { name: "En vivo" }));
+      await waitFor(() => expect(screen.queryByRole("region", { name: "Controles de grabación" })).toBeNull());
+      expect(router.state.location.search).not.toHaveProperty("mode");
+      expect(router.state.location.search).not.toHaveProperty("t");
+    });
+
+    it("opens in REC from ?mode=rec&t= and shows tiles without recordings permission", async () => {
+      setup(withRecordings, () => json({ code: "forbidden", message: "forbidden" }, 403));
+      renderPage(Live, "/?mode=rec&t=2026-09-30T12:00:00.000Z");
+      expect(await screen.findByRole("region", { name: "Controles de grabación" })).toBeInTheDocument();
+      expect(await screen.findByText("Sin permiso de grabaciones")).toBeInTheDocument();
+    });
+  });
 });

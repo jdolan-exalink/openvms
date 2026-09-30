@@ -29,6 +29,11 @@ type MsePlayerProps = {
    * WARM and streaming so it resumes instantly. Default true.
    */
   active?: boolean;
+  /**
+   * Pause the transport while something else covers the tile (the Live REC mode): the session
+   * stays alive with its last frame and reconnects when this turns false again. Persistent only.
+   */
+  suspended?: boolean;
 };
 
 /**
@@ -74,7 +79,7 @@ const noSubscribe = () => () => {};
 
 /** usePersistentSession acquires the manager-owned session of a camera and mirrors its state. */
 function usePersistentSession(
-  { cameraId, quality = "sub", serverId, active = true, onError }: Pick<MsePlayerProps, "cameraId" | "quality" | "serverId" | "active" | "onError">,
+  { cameraId, quality = "sub", serverId, active = true, suspended = false, onError }: Pick<MsePlayerProps, "cameraId" | "quality" | "serverId" | "active" | "suspended" | "onError">,
   host: React.RefObject<HTMLElement | null>,
 ) {
   const session = usePlayerSession(cameraId, quality, serverId);
@@ -98,6 +103,9 @@ function usePersistentSession(
   useEffect(() => {
     session?.setSuspended("offscreen", active && !inViewport);
   }, [session, active, inViewport]);
+  useEffect(() => {
+    session?.setSuspended("rec", suspended);
+  }, [session, suspended]);
   return { session, snapshot };
 }
 
@@ -121,9 +129,9 @@ function useInViewport(ref: React.RefObject<HTMLElement | null>): boolean {
 }
 
 /** PersistentMsePlayer shows a manager-owned session; unmounting only detaches the `<video>`. */
-function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const host = useRef<HTMLDivElement>(null);
-  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, onError }, host);
+  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, host);
   useEffect(() => {
     const el = host.current;
     if (!session || !el) return;
@@ -135,9 +143,9 @@ function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, clas
 }
 
 /** SurfaceMsePlayer leaves the `<video>` in the VideoSurfaceLayer and only reserves its slot here. */
-function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const host = useRef<HTMLDivElement>(null);
-  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, onError }, host);
+  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, host);
   useEffect(() => {
     session?.setMuted(muted);
   }, [session, muted]);

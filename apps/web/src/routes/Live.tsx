@@ -3,14 +3,16 @@ import { rectSortingStrategy, rectSwappingStrategy, SortableContext, sortableKey
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowUpRight, Camera, CircleCheck, CircleHelp, CircleX, ChevronDown, ChevronRight, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
 import { useFeatures } from "@/lib/features";
 import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
+import { LiveRecDock } from "@/components/LiveRecDock";
+import { RecTile, type RecTileState } from "@/components/RecTile";
 import { useContextSidebarPortalTarget } from "@/components/AppShell";
 import { Button, ErrorNote, PageHeader, Select, StatusBadge, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -19,7 +21,15 @@ import {
   serializeSelection, swapTiles, tileDragId,
   type Tile,
 } from "@/lib/liveGrid";
+import { assignRecPlayers, parseRecSearch, pickMaster, REC_ENTRY_OFFSET_S, recSearch } from "@/lib/liveRec";
 import { can } from "@/lib/perm";
+import { useRecData } from "@/lib/useRecData";
+import { useRecPlayback } from "@/lib/useRecPlayback";
+import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
+
+const unixNow = () => Math.floor(Date.now() / 1000);
+/** How often the shared REC time is written to the URL while playing. */
+const URL_SYNC_MS = 15_000;
 
 const GRID_LAYOUTS = [
   { columns: 1, rows: 1 }, { columns: 2, rows: 1 }, { columns: 2, rows: 2 },
@@ -57,6 +67,20 @@ export function Live() {
   const layouts = persistentPlayers ? [...GRID_LAYOUTS, ...LARGE_GRID_LAYOUTS] : GRID_LAYOUTS;
 
   const camById = useMemo(() => new Map(cameras.data?.map((c) => [c.id, c])), [cameras.data]);
+
+  // LIVE/REC (LV-9): the mode and shared time live in the URL (?mode=rec&t=<ISO>) so reload and
+  // links work; LIVE clears both. REC needs a recordings grant somewhere, else it never activates.
+  const search = useSearch({ strict: false }) as Record<string, unknown>;
+  const navigate = useNavigate();
+  const canRec = can(me.data, "recordings.view");
+  const { rec: urlRec, t: urlT } = parseRecSearch(search);
+  const rec = urlRec && canRec;
+  const [now, setNow] = useState(unixNow);
+  useEffect(() => {
+    if (!rec) return;
+    const id = setInterval(() => setNow(unixNow()), 30_000);
+    return () => clearInterval(id);
+  }, [rec]);
 
   // Restore the last grid selection for this user+tenant once both are known, dropping any
   // camera the user can no longer see. This adjusts state during render (React's documented
@@ -176,6 +200,61 @@ export function Live() {
   const shown = focus !== null && !persistentPlayers ? [focus] : tiles.map((_, i) => i);
   const gridCols = focus !== null ? 1 : columns;
   const duplicates = useMemo(() => (persistentPlayers ? duplicateTileIndexes(tiles) : new Set<number>()), [persistentPlayers, tiles]);
+
+  const transport = useRecPlayback({ active: rec, seedT: urlT ?? now - REC_ENTRY_OFFSET_S, now });
+  const gridCameraIds = useMemo(() => [...new Set(tiles.flatMap((t) => (t && camById.has(t.camera_id) ? [t.camera_id] : [])))], [tiles, camById]);
+  const recData = useRecData(gridCameraIds, transport.day, rec);
+  const denied = useMemo(() => new Set(recData.denied), [recData.denied]);
+  const focusedCameraId = focus !== null ? tiles[focus]?.camera_id : undefined;
+  const { players: recPlayers, limited: recLimited } = useMemo(
+    () => assignRecPlayers(focusedCameraId ? [focusedCameraId] : gridCameraIds, (id) => !denied.has(id)),
+    [focusedCameraId, gridCameraIds, denied],
+  );
+  const hasCoverage = (id: string) => (recData.spans[id]?.length ?? 0) > 0;
+  const syncIds = useMemo(() => recPlayers.filter((id) => !recData.loaded.includes(id) || (recData.spans[id]?.length ?? 0) > 0), [recPlayers, recData.loaded, recData.spans]);
+  const masterId = pickMaster(syncIds, tiles[selected]?.camera_id, hasCoverage);
+  useSyncedPlayback(rec ? masterId : "", syncIds, (id) => transport.players.current.get(id)?.video);
+  const timelineCameras = useMemo(
+    () => gridCameraIds.filter((id) => !denied.has(id)).map((id) => ({ id, name: camById.get(id)?.display_name ?? id, spans: recData.spans[id] ?? [] })),
+    [gridCameraIds, denied, camById, recData.spans],
+  );
+
+  // Entering REC via the toggle starts at now - 30 s, or at the latest recording when the cameras stopped earlier.
+  const entryPending = useRef(false);
+  const setMode = (next: "live" | "rec") => {
+    entryPending.current = next === "rec";
+    void navigate({ to: ".", search: ((prev: Record<string, unknown>) => ({ ...prev, ...recSearch(next === "rec", unixNow() - REC_ENTRY_OFFSET_S) })) as never });
+  };
+  const { seek } = transport;
+  useEffect(() => {
+    if (!rec) entryPending.current = false;
+  }, [rec]);
+  useEffect(() => {
+    if (!rec || !entryPending.current || recData.loaded.length < gridCameraIds.length - recData.denied.length || recData.loaded.length === 0) return;
+    entryPending.current = false;
+    const ends = recData.loaded.flatMap((id) => (recData.spans[id] ?? []).map((s) => s.end));
+    const latest = ends.length ? Math.max(...ends) : undefined;
+    if (latest !== undefined && latest < now - REC_ENTRY_OFFSET_S - 60) seek(latest - 5);
+  }, [rec, recData, gridCameraIds.length, now, seek]);
+  // Keep ?t= in step with the shared clock so reload and copied links land where the user is:
+  // every URL_SYNC_MS while playing, and shortly after the last seek or pause.
+  const { win, playing, getPosition, subscribePosition } = transport;
+  useEffect(() => {
+    if (!rec) return;
+    const write = () =>
+      void navigate({ to: ".", replace: true, search: ((prev: Record<string, unknown>) => ({ ...prev, ...recSearch(true, Math.floor(getPosition())) })) as never });
+    let debounce: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = subscribePosition(() => {
+      clearTimeout(debounce);
+      debounce = setTimeout(write, 1500);
+    });
+    const interval = playing ? setInterval(write, URL_SYNC_MS) : undefined;
+    return () => {
+      unsubscribe();
+      clearTimeout(debounce);
+      clearInterval(interval);
+    };
+  }, [rec, win, playing, getPosition, subscribePosition, navigate]);
   const sidebarContent = (
     <div className="flex min-h-0 flex-col gap-3" data-live-sidebar="true">
       <section aria-label="Vistas guardadas" className="flex flex-col gap-2 rounded-xl border border-line bg-bg p-2.5">
@@ -275,12 +354,42 @@ export function Live() {
                 </button>
               ))}
               <span className="ml-2 text-xs text-muted">Elegí un cuadro y después una cámara del árbol, o arrastrala.</span>
+              {canRec && (
+                <div role="group" aria-label="Modo de reproducción" className="ml-auto flex overflow-hidden rounded border border-line text-xs">
+                  {(["live", "rec"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      aria-pressed={(m === "rec") === rec}
+                      onClick={() => (m === "rec") !== rec && setMode(m)}
+                      className={cn("px-2.5 py-1 font-medium", (m === "rec") === rec ? "bg-accent text-bg" : "bg-surface hover:bg-raised")}
+                    >
+                      {m === "live" ? "En vivo" : "Grabación"}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
               <div role="group" aria-label="Grilla de video" className="grid gap-1" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
                 {shown.map((i) => {
                   const t = tiles[i] ?? null;
                   const cam = t ? camById.get(t.camera_id) : undefined;
+                  const isHidden = focus !== null && focus !== i;
+                  let recLayer: ReactNode = null;
+                  if (rec && t && cam && !isHidden) {
+                    const id = t.camera_id;
+                    const state: RecTileState = denied.has(id)
+                      ? "denied"
+                      : tiles.findIndex((x) => x?.camera_id === id) !== i
+                        ? "duplicate"
+                        : recLimited.has(id)
+                          ? "limited"
+                          : recData.loaded.includes(id) && !hasCoverage(id)
+                            ? "empty"
+                            : "player";
+                    recLayer = <RecTile cameraId={id} name={cam.display_name} state={state} transport={transport} isMaster={id === masterId} />;
+                  }
                   return (
                     <GridTile
                       key={persistentPlayers ? (t && !duplicates.has(i) ? `camera:${t.camera_id}` : `cell:${i}`) : i}
@@ -289,7 +398,9 @@ export function Live() {
                       camera={cam}
                       isSelected={selected === i}
                       isFocused={focus === i}
-                      isHidden={focus !== null && focus !== i}
+                      isHidden={isHidden}
+                      recLayer={recLayer}
+                      suspended={rec}
                       isDuplicate={duplicates.has(i)}
                       persistent={persistentPlayers}
                       surface={persistentPlayers && videoSurfaceLayer}
@@ -308,6 +419,7 @@ export function Live() {
                 })}
               </div>
             </SortableContext>
+            {rec && <LiveRecDock transport={transport} cameras={timelineCameras} events={recData.events} now={now} />}
           </section>
         </div>
         {sidebar}
@@ -331,6 +443,8 @@ function GridTile({
   isFocused,
   isHidden,
   isDuplicate,
+  recLayer,
+  suspended,
   persistent,
   surface,
   serverId,
@@ -350,6 +464,10 @@ function GridTile({
   isHidden: boolean;
   /** The camera is already shown in an earlier cell; this one shows a snapshot instead. */
   isDuplicate: boolean;
+  /** REC mode: recorded-playback layer covering the live player. */
+  recLayer: ReactNode;
+  /** REC mode: the live session is kept but its transport paused. */
+  suspended: boolean;
   persistent: boolean;
   surface: boolean;
   serverId?: string;
@@ -385,9 +503,12 @@ function GridTile({
               <img src={`/media/v1/cameras/${tile.camera_id}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-contain opacity-60" />
               <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white">Ya visible en otra celda</span>
             </div>
-          ) : (
-            <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} className="size-full" />
+          ) : recLayer && !persistent ? null : (
+            // Without persistent players a live socket would keep streaming under REC, so it is
+            // unmounted there; persistent sessions stay mounted and suspended (last frame kept).
+            <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} className="size-full" />
           )}
+          {recLayer}
           <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 bg-gradient-to-b from-black/80 via-black/45 to-transparent px-2 py-1.5 text-xs text-white">
             <Camera className="size-3.5 shrink-0" aria-hidden />
             <span className="truncate font-medium">{camera.display_name}</span>
