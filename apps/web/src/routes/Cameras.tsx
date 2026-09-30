@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, useSearch } from "@tanstack/react-router";
+import { faSliders } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Settings } from "lucide-react";
 import { useCallback, useState } from "react";
 import { type CameraFilter, camerasQuery, meQuery, serversQuery, sitesQuery } from "@/api/queries";
@@ -26,6 +28,7 @@ export function Cameras() {
   const servers = useQuery(serversQuery);
   const siteName = new Map(sites.data?.map((s) => [s.id, s.name]));
   const serverName = new Map(servers.data?.map((s) => [s.id, s.name]));
+  const canConfigServer = can(me.data, "servers.config");
   const editing = cameras.data?.find((c) => c.id === editingId);
   const update = (k: keyof CameraFilter, v: string) => setFilter((f) => ({ ...f, [k]: v || undefined }));
 
@@ -92,9 +95,22 @@ export function Cameras() {
                 <td className="text-right font-mono text-xs tabular-nums">{c.fps != null ? c.fps.toFixed(1) : "—"}</td>
                 <td className="text-xs text-muted">{c.zones.join(", ") || "—"}</td>
                 <td className="text-right">
-                  <Button aria-label={`Ajustes de ${c.display_name}`} onClick={() => setEditingId(c.id)}>
-                    <Settings className="size-4" aria-hidden />
-                  </Button>
+                  <div className="flex justify-end gap-2">
+                    {canConfigServer && (
+                      <Link
+                        to="/cameras/$cameraId/frigate"
+                        params={{ cameraId: c.id }}
+                        aria-label={`Configuración de Frigate de ${c.display_name}`}
+                        title="Configuración de Frigate"
+                        className="inline-flex items-center justify-center rounded border border-line bg-surface px-3 py-1.5 text-sm hover:bg-raised"
+                      >
+                        <FontAwesomeIcon icon={faSliders} aria-hidden />
+                      </Link>
+                    )}
+                    <Button aria-label={`Ajustes de ${c.display_name}`} onClick={() => setEditingId(c.id)}>
+                      <Settings className="size-4" aria-hidden />
+                    </Button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -107,7 +123,7 @@ export function Cameras() {
           siteName={siteName.get(editing.site_id)}
           serverName={serverName.get(editing.server_id)}
           canManage={can(me.data, "cameras.manage")}
-          canConfigServer={can(me.data, "servers.config")}
+          canConfigServer={canConfigServer}
           onClose={closeDrawer}
         />
       )}

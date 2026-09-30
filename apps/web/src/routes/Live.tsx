@@ -292,6 +292,7 @@ export function Live() {
     addToView: (id, ids) => addToView.mutate({ id, ids }),
     canConfigureSites: can(me.data, "sites.manage"),
     canConfigureServers: can(me.data, "servers.manage"),
+    canConfigureCameras: can(me.data, "servers.config"),
   };
 
   // With persistent players the other tiles stay mounted (hidden, sessions WARM) while one is

@@ -79,6 +79,34 @@ export const cameraFrigateConfigQuery = (cameraId: string) =>
       ),
   });
 
+/** Full effective Frigate config of a camera (schema-driven editor). */
+export const cameraFrigateDocQuery = (cameraId: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "frigate-doc"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/cameras/{cameraId}/frigate-config", { params: { path: { cameraId } } })),
+  });
+
+export const frigateSchemaQuery = (serverId: string | undefined) =>
+  queryOptions({
+    queryKey: ["servers", serverId, "frigate-schema"],
+    enabled: !!serverId,
+    staleTime: 5 * 60_000,
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/servers/{serverId}/frigate-config/schema", { params: { path: { serverId: serverId as string } } })),
+  });
+
+export const frigateRevisionsQuery = (serverId: string | undefined, cameraId: string, includeYaml: boolean) =>
+  queryOptions({
+    queryKey: ["servers", serverId, "frigate-revisions", cameraId, includeYaml],
+    enabled: !!serverId,
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/servers/{serverId}/frigate-config/revisions", {
+          params: { path: { serverId: serverId as string }, query: { camera_id: cameraId, limit: 50, include_yaml: includeYaml } },
+        }),
+      ).items,
+  });
+
 export type EventFilter = {
   site_id?: string[];
   server_id?: string[];

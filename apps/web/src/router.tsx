@@ -17,6 +17,7 @@ const Cameras = lazyRouteComponent(() => import("./routes/Cameras"), "Cameras");
 const Dashboard = lazyRouteComponent(() => import("./routes/Dashboard"), "Dashboard");
 const Events = lazyRouteComponent(() => import("./routes/Events"), "Events");
 const Exports = lazyRouteComponent(() => import("./routes/Exports"), "Exports");
+const FrigateCameraConfig = lazyRouteComponent(() => import("./routes/FrigateCameraConfig"), "FrigateCameraConfig");
 const Groups = lazyRouteComponent(() => import("./routes/Groups"), "Groups");
 const Live = lazyRouteComponent(() => import("./routes/Live"), "Live");
 const Login = lazyRouteComponent(() => import("./routes/Login"), "Login");
@@ -144,6 +145,7 @@ const inventorySearch = (s: Record<string, unknown>): InventorySearch => ({
 });
 const serversRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/servers", component: Servers, validateSearch: inventorySearch });
 const camerasRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/cameras", component: Cameras, validateSearch: inventorySearch });
+const cameraFrigateRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/cameras/$cameraId/frigate", component: FrigateCameraConfig });
 
 export const routeTree = rootRoute.addChildren([
   loginRoute,
@@ -160,6 +162,7 @@ export const routeTree = rootRoute.addChildren([
       settingsChild("/sites", Sites),
       serversRoute,
       camerasRoute,
+      cameraFrigateRoute,
       settingsChild("/camera-groups", CameraGroups),
       settingsChild("/rules", Rules),
       settingsChild("/channels", Channels),

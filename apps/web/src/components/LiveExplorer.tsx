@@ -26,6 +26,8 @@ export type ExplorerActions = {
   addToView: (viewId: string, cameraIds: string[]) => void;
   canConfigureSites: boolean;
   canConfigureServers: boolean;
+  /** servers.config: opens the Frigate camera config editor. */
+  canConfigureCameras: boolean;
 };
 
 type MenuProps = { onContextMenu: (e: MouseEvent<HTMLElement>) => void; onKeyDown: (e: KeyboardEvent<HTMLElement>) => void; "aria-haspopup": "menu" };
@@ -504,8 +506,13 @@ function CameraRow({
 }) {
   const drop = useDropState(camera.server_id, canManage, ["camera"]);
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: treeCameraDropId(camera.id), disabled: drop.disabled });
-  const { bind, actions } = useMenuCtx();
-  const menu = bind(() => [addToViewItem(actions, [camera.id])]);
+  const { bind, actions, navigate } = useMenuCtx();
+  const menu = bind(() => [
+    addToViewItem(actions, [camera.id]),
+    ...(actions.canConfigureCameras
+      ? [{ id: "cfg", label: "Configurar", icon: faGear, onSelect: () => void navigate({ to: "/cameras/$cameraId/frigate", params: { cameraId: camera.id } }) } satisfies MenuItem]
+      : []),
+  ]);
   const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
     id: cameraDragId(camera.id),
     data: { kind: "camera", serverId: camera.server_id } satisfies DragData,

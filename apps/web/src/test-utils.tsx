@@ -8,7 +8,7 @@ import { render } from "@testing-library/react";
 export function renderPage(Page: () => React.ReactNode, entry = "/") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const root = createRootRoute();
-  const paths = ["/sites", "/servers", "/cameras", "/login"].map((path) =>
+  const paths = ["/sites", "/servers", "/cameras", "/cameras/$cameraId/frigate", "/login"].map((path) =>
     createRoute({ getParentRoute: () => root, path, component: () => null }),
   );
   const page = createRoute({ getParentRoute: () => root, path: "/", component: Page });

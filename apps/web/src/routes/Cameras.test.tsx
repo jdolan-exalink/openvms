@@ -197,7 +197,7 @@ describe("Cameras", () => {
       expect(trigger).toHaveFocus();
     });
 
-    it("allows editing Frigate config when user has servers.config", async () => {
+    it("links to the Frigate config editor when user has servers.config", async () => {
       const serverConfigUser = {
         id: "u",
         tenant_id: "t",
@@ -215,46 +215,23 @@ describe("Cameras", () => {
         lpr_enabled: false,
         zones: ["entrada"],
       };
-      const routes = stubApi({
-        ...inventory([camera("c1", "acceso")]),
-        "/api/v1/me": () => json(serverConfigUser),
-        "/api/v1/cameras/c1/config": () => json(frigateCfg),
-      });
-      const fetchMock = vi.fn(async (req: Request) => {
-        if (req.method === "PATCH") {
-          return json(camera("c1", "acceso"));
-        }
-        return routes(req);
-      });
-      vi.stubGlobal("fetch", fetchMock);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(
+          stubApi({
+            ...inventory([camera("c1", "acceso")]),
+            "/api/v1/me": () => json(serverConfigUser),
+            "/api/v1/cameras/c1/config": () => json(frigateCfg),
+          }),
+        ),
+      );
       renderPage(Cameras);
 
       fireEvent.click(await screen.findByRole("button", { name: "Ajustes de acceso" }));
       expect(await screen.findByText("Configuración en Frigate")).toBeInTheDocument();
-
-      const detectCheckbox = await screen.findByLabelText(/Detección habilitada/);
-      expect(detectCheckbox).toBeChecked();
-      fireEvent.click(detectCheckbox);
-
-      const lprCheckbox = await screen.findByLabelText(/LPR habilitado/);
-      expect(lprCheckbox).not.toBeChecked();
-      fireEvent.click(lprCheckbox);
-
-      const trackedInput = screen.getByLabelText(/Objetos rastreados/);
-      fireEvent.change(trackedInput, { target: { value: "person, car, dog" } });
-
-      fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
-      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-
-      const frigatePatch = fetchMock.mock.calls
-        .map(([r]) => r as Request)
-        .find((r) => r.method === "PATCH" && r.url.includes("/api/v1/cameras/c1/config"));
-      expect(frigatePatch).toBeDefined();
-      expect(await frigatePatch!.clone().json()).toEqual({
-        detect_enabled: false,
-        lpr_enabled: true,
-        tracked_objects: ["person", "car", "dog"],
-      });
+      const link = await screen.findByRole("link", { name: /Editar configuración de Frigate/ });
+      expect(link).toHaveAttribute("href", "/cameras/c1/frigate");
+      expect(await screen.findByText("Detección")).toBeInTheDocument();
     });
   });
 });

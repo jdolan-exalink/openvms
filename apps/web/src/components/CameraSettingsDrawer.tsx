@@ -1,4 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { faSliders } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { Link } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraFrigateConfigQuery } from "@/api/queries";
@@ -7,10 +10,25 @@ import { Button, ErrorNote, Field, Select, StatusBadge, TextInput } from "@/comp
 
 type Camera = Schemas["Camera"];
 
+function FrigateSummary({ config }: { config: Schemas["CameraFrigateConfig"] }) {
+  return (
+    <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+      <dt className="text-muted">Zonas</dt>
+      <dd>{config.zones.length > 0 ? config.zones.join(", ") : "Sin zonas"}</dd>
+      <dt className="text-muted">Detección</dt>
+      <dd>{config.detect_enabled ? "Habilitada" : "Deshabilitada"}</dd>
+      <dt className="text-muted">LPR</dt>
+      <dd>{config.lpr_enabled ? "Habilitado" : "Deshabilitado"}</dd>
+      <dt className="text-muted">Objetos</dt>
+      <dd>{config.tracked_objects.join(", ") || "Ninguno"}</dd>
+    </dl>
+  );
+}
+
 /**
  * CameraSettingsDrawer shows a camera's read-only inventory context and, for users
  * who can manage cameras or configure servers, editing forms for VMS-side settings
- * and Frigate-side analytics settings (detection, tracked objects, LPR).
+ * and a link to the full Frigate config editor (FrigateCameraConfig).
  */
 export function CameraSettingsDrawer({
   camera,
@@ -36,19 +54,8 @@ export function CameraSettingsDrawer({
   const [tags, setTags] = useState(camera.tags.join(", "));
   const [invalid, setInvalid] = useState(false);
 
-  // Frigate config
+  // Read-only Frigate summary; the full editor lives on its own page (FrigateCameraConfig).
   const frigateConfig = useQuery(cameraFrigateConfigQuery(camera.id));
-  const [detectEnabled, setDetectEnabled] = useState(true);
-  const [lprEnabled, setLprEnabled] = useState(false);
-  const [trackedObjects, setTrackedObjects] = useState("");
-  const [frigateInitialized, setFrigateInitialized] = useState(false);
-
-  if (frigateConfig.data && !frigateInitialized) {
-    setDetectEnabled(frigateConfig.data.detect_enabled);
-    setLprEnabled(frigateConfig.data.lpr_enabled);
-    setTrackedObjects(frigateConfig.data.tracked_objects.join(", "));
-    setFrigateInitialized(true);
-  }
 
   const save = useMutation({
     mutationFn: async () => {
@@ -67,24 +74,9 @@ export function CameraSettingsDrawer({
           }),
         );
       }
-      if (canConfigServer && frigateConfig.data) {
-        await unwrap(
-          await api.PATCH("/api/v1/cameras/{cameraId}/config", {
-            params: { path: { cameraId: camera.id } },
-            body: {
-              detect_enabled: detectEnabled,
-              lpr_enabled: lprEnabled,
-              tracked_objects: trackedObjects.split(",").map((t) => t.trim()).filter(Boolean),
-            },
-          }),
-        );
-      }
     },
     onSuccess: async () => {
-      await Promise.all([
-        qc.invalidateQueries({ queryKey: ["cameras"] }),
-        qc.invalidateQueries({ queryKey: ["cameras", camera.id, "frigate-config"] }),
-      ]);
+      await qc.invalidateQueries({ queryKey: ["cameras"] });
       onClose();
     },
   });
@@ -150,48 +142,16 @@ export function CameraSettingsDrawer({
             <h3 className="text-sm font-semibold text-foreground mb-2">Configuración en Frigate</h3>
             {frigateConfig.isLoading && <p className="text-xs text-muted">Cargando configuración de Frigate…</p>}
             {frigateConfig.error && <p className="text-xs text-muted">Configuración de Frigate no disponible.</p>}
-            {frigateConfig.data && (
-              <div className="flex flex-col gap-3">
-                <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-                  <dt className="text-muted">Zonas</dt>
-                  <dd>{frigateConfig.data.zones.length > 0 ? frigateConfig.data.zones.join(", ") : "Sin zonas"}</dd>
-                </dl>
-                {canConfigServer ? (
-                  <>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={detectEnabled}
-                        onChange={(e) => setDetectEnabled(e.target.checked)}
-                      />
-                      Detección habilitada
-                    </label>
-                    <label className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={lprEnabled}
-                        onChange={(e) => setLprEnabled(e.target.checked)}
-                      />
-                      LPR habilitado
-                    </label>
-                    <Field label="Objetos rastreados" hint="Separados por comas (ej. person, car, dog).">
-                      <TextInput
-                        value={trackedObjects}
-                        onChange={(e) => setTrackedObjects(e.target.value)}
-                      />
-                    </Field>
-                  </>
-                ) : (
-                  <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-                    <dt className="text-muted">Detección</dt>
-                    <dd>{frigateConfig.data.detect_enabled ? "Habilitada" : "Deshabilitada"}</dd>
-                    <dt className="text-muted">LPR</dt>
-                    <dd>{frigateConfig.data.lpr_enabled ? "Habilitado" : "Deshabilitado"}</dd>
-                    <dt className="text-muted">Objetos</dt>
-                    <dd>{frigateConfig.data.tracked_objects.join(", ") || "Ninguno"}</dd>
-                  </dl>
-                )}
-              </div>
+            {frigateConfig.data && <FrigateSummary config={frigateConfig.data} />}
+            {canConfigServer && (
+              <Link
+                to="/cameras/$cameraId/frigate"
+                params={{ cameraId: camera.id }}
+                onClick={onClose}
+                className="mt-3 inline-flex items-center gap-2 rounded border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:bg-raised"
+              >
+                <FontAwesomeIcon icon={faSliders} aria-hidden /> Editar configuración de Frigate
+              </Link>
             )}
           </div>
 
@@ -209,16 +169,7 @@ export function CameraSettingsDrawer({
           {frigateConfig.data && (
             <div className="border-t border-line pt-2">
               <h3 className="text-sm font-semibold mb-2">Configuración en Frigate</h3>
-              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-                <dt className="text-muted">Zonas</dt>
-                <dd>{frigateConfig.data.zones.length > 0 ? frigateConfig.data.zones.join(", ") : "Sin zonas"}</dd>
-                <dt className="text-muted">Detección</dt>
-                <dd>{frigateConfig.data.detect_enabled ? "Habilitada" : "Deshabilitada"}</dd>
-                <dt className="text-muted">LPR</dt>
-                <dd>{frigateConfig.data.lpr_enabled ? "Habilitado" : "Deshabilitado"}</dd>
-                <dt className="text-muted">Objetos</dt>
-                <dd>{frigateConfig.data.tracked_objects.join(", ") || "Ninguno"}</dd>
-              </dl>
+              <FrigateSummary config={frigateConfig.data} />
             </div>
           )}
         </div>
