@@ -156,7 +156,8 @@ export function DayTimeline({
   events: TimelineEvent[];
   position: number;
   now: number;
-  onSeek: (time: number) => void;
+  /** `detection` is set when the click landed on a detection (the first of a cluster). */
+  onSeek: (time: number, detection?: TimelineEvent & { cameraId: string }) => void;
   /** Camera of the selected grid tile: its row is highlighted. */
   selectedId?: string;
   onSelectCamera?: (cameraId: string) => void;
@@ -532,7 +533,12 @@ export function DayTimeline({
       onSeek(Math.floor(clampTime(xToTime(px, view, width))));
     } else if (!d.moved) {
       const hit = hitAt(event, px);
-      onSeek(Math.floor(hit ? hit.cluster.time : clampTime(xToTime(px, view, width))));
+      if (!hit) {
+        onSeek(Math.floor(clampTime(xToTime(px, view, width))));
+      } else {
+        const first = hit.row.items[hit.cluster.from];
+        onSeek(Math.floor(hit.cluster.time), first?.id ? { ...first, cameraId: hit.row.cam.id } : undefined);
+      }
     }
   };
 

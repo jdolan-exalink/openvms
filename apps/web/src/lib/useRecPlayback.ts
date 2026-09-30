@@ -35,6 +35,9 @@ class PositionStore {
   };
 }
 
+/** Detection whose snapshot stands in for its camera's tile while the recording loads. */
+export type RecPoster = { cameraId: string; eventId: string; key: number };
+
 export type RecTransport = ReturnType<typeof useRecPlayback>;
 
 /**
@@ -49,6 +52,8 @@ export function useRecPlayback({ active, seedT, now }: { active: boolean; seedT:
   const [day, setDay] = useState(() => startOfLocalDay(seedT));
   const [playing, setPlaying] = useState(true);
   const [speed, setSpeedState] = useState(1);
+  const [poster, setPoster] = useState<RecPoster | null>(null);
+  const posterKey = useRef(0);
   const [store] = useState(() => new PositionStore(seedT));
   const [wasActive, setWasActive] = useState(active);
   if (active !== wasActive) {
@@ -85,12 +90,13 @@ export function useRecPlayback({ active, seedT, now }: { active: boolean; seedT:
   );
 
   const seek = useCallback(
-    (t: number, options?: { play?: boolean }) => {
+    (t: number, options?: { play?: boolean; poster?: Omit<RecPoster, "key"> }) => {
       const cur = latest.current;
       const play = options?.play ?? true;
       store.set(t);
       setDay(startOfLocalDay(t));
       setPlaying(play);
+      setPoster(options?.poster ? { ...options.poster, key: ++posterKey.current } : null);
       if (t >= cur.win.start + 1 && t <= cur.win.end - WINDOW_MARGIN_S) {
         each((v) => {
           v.currentTime = t - cur.win.start;
@@ -133,5 +139,5 @@ export function useRecPlayback({ active, seedT, now }: { active: boolean; seedT:
     [seek, store],
   );
 
-  return { win, day, playing, speed, players, bindPlayer, seek, play, pause, setSpeed, onMasterTime, getPosition: store.get, subscribePosition: store.subscribe };
+  return { win, day, poster, playing, speed, players, bindPlayer, seek, play, pause, setSpeed, onMasterTime, getPosition: store.get, subscribePosition: store.subscribe };
 }

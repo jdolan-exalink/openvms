@@ -126,7 +126,7 @@ export function LiveRecDock({
           </div>
         </details>
       </div>
-      <DayTimeline day={day} cameras={cameras} events={events} position={position} now={now} onSeek={(t) => seek(Math.min(t, liveEdge))} selectedId={selectedId} onSelectCamera={onSelectCamera} />
+      <DayTimeline day={day} cameras={cameras} events={events} position={position} now={now} onSeek={(t, detection) => seek(Math.min(t, liveEdge), detection?.id ? { poster: { cameraId: detection.cameraId, eventId: detection.id } } : undefined)} selectedId={selectedId} onSelectCamera={onSelectCamera} />
     </section>
   );
 }
