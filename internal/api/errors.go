@@ -11,6 +11,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/maps"
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
@@ -27,6 +28,7 @@ func statusFor(err error) (int, string, string) {
 	var ave *alarms.ValidationError
 	var rve *rules.ValidationError
 	var nve *notify.ValidationError
+	var mve *maps.ValidationError
 	var we *notify.WahaError
 	var fe *inventory.FrigateError
 	switch {
@@ -40,6 +42,10 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", rve.Msg
 	case errors.As(err, &nve):
 		return http.StatusBadRequest, "invalid", nve.Msg
+	case errors.As(err, &mve):
+		return http.StatusBadRequest, "invalid", mve.Msg
+	case errors.Is(err, maps.ErrOptimisticLockConflict):
+		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, notify.ErrQRUnavailable):
 		return http.StatusConflict, "qr_unavailable", err.Error()
 	case errors.As(err, &we):

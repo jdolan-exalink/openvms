@@ -18,12 +18,12 @@ WHERE id = @id AND tenant_id = @tenant_id;
 
 -- name: UpdateSiteGeo :one
 UPDATE sites
-SET lat = @lat,
-    lng = @lng,
-    default_zoom = @default_zoom,
-    region_id = @region_id,
+SET lat = coalesce(sqlc.narg('lat'), lat),
+    lng = coalesce(sqlc.narg('lng'), lng),
+    default_zoom = coalesce(sqlc.narg('default_zoom'), default_zoom),
+    region_id = coalesce(sqlc.narg('region_id'), region_id),
     updated_at = now()
-WHERE id = @id AND tenant_id = @tenant_id AND deleted_at IS NULL
+WHERE id = @id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')) AND deleted_at IS NULL
 RETURNING id, tenant_id, name, lat, lng, default_zoom, region_id, updated_at;
 
 -- name: GetSiteGeo :one
@@ -143,7 +143,15 @@ WHERE floor_id = @floor_id AND tenant_id = @tenant_id;
 
 -- name: GetMapPlacement :one
 SELECT * FROM map_placements
-WHERE id = @id AND tenant_id = @tenant_id;
+WHERE id = @id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id'));
+
+-- name: GetMapPlacementByEntityGeo :one
+SELECT * FROM map_placements
+WHERE entity_type = @entity_type AND entity_id = @entity_id AND floor_id IS NULL AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id'));
+
+-- name: GetMapPlacementByEntityFloor :one
+SELECT * FROM map_placements
+WHERE entity_type = @entity_type AND entity_id = @entity_id AND floor_id = @floor_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id'));
 
 -- name: UpsertGeoPlacement :one
 INSERT INTO map_placements (
@@ -164,7 +172,7 @@ DO UPDATE SET
     fov_deg = EXCLUDED.fov_deg,
     range_m = EXCLUDED.range_m,
     props = EXCLUDED.props,
-    revision = nextval('map_revision'),
+    revision = EXCLUDED.revision,
     updated_by = EXCLUDED.updated_by,
     updated_at = now()
 RETURNING *;
@@ -188,14 +196,14 @@ DO UPDATE SET
     fov_deg = EXCLUDED.fov_deg,
     range_m = EXCLUDED.range_m,
     props = EXCLUDED.props,
-    revision = nextval('map_revision'),
+    revision = EXCLUDED.revision,
     updated_by = EXCLUDED.updated_by,
     updated_at = now()
 RETURNING *;
 
 -- name: DeleteMapPlacement :exec
 DELETE FROM map_placements
-WHERE id = @id AND tenant_id = @tenant_id;
+WHERE id = @id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id'));
 
 -- name: DeletePlacementByEntity :exec
 DELETE FROM map_placements
@@ -205,7 +213,7 @@ WHERE entity_type = @entity_type AND entity_id = @entity_id AND tenant_id = @ten
 SELECT c.id, c.display_name, c.remote_name, c.site_id, c.status
 FROM cameras c
 WHERE c.site_id = @site_id
-  AND c.tenant_id = @tenant_id
+  AND (sqlc.narg('tenant_id')::uuid IS NULL OR c.tenant_id = sqlc.narg('tenant_id'))
   AND c.deleted_at IS NULL
   AND NOT EXISTS (
       SELECT 1 FROM map_placements p

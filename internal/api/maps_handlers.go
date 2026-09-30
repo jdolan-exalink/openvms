@@ -133,6 +133,155 @@ func (h *Handlers) GetMapSiteEntities(ctx context.Context, req gen.GetMapSiteEnt
 	}, nil
 }
 
+// GetMapUnplacedCameras returns cameras on the site that have no geographic placement.
+func (h *Handlers) GetMapUnplacedCameras(ctx context.Context, req gen.GetMapUnplacedCamerasRequestObject) (gen.GetMapUnplacedCamerasResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.GetMapUnplacedCameras404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	cams, err := h.Maps.GetUnplacedCameras(ctx, a, req.Params.SiteId)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]gen.MapUnplacedCamera, 0, len(cams))
+	for _, c := range cams {
+		items = append(items, gen.MapUnplacedCamera{
+			Id:         c.ID,
+			Name:       c.Name,
+			RemoteName: c.RemoteName,
+			SiteId:     c.SiteID,
+			Status:     c.Status,
+		})
+	}
+	return gen.GetMapUnplacedCameras200JSONResponse{
+		SiteId:  req.Params.SiteId,
+		Cameras: items,
+	}, nil
+}
+
+// UpsertMapPlacement creates or updates a placement for a camera, server, or device.
+func (h *Handlers) UpsertMapPlacement(ctx context.Context, req gen.UpsertMapPlacementRequestObject) (gen.UpsertMapPlacementResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.UpsertMapPlacement404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	if req.Body == nil {
+		return nil, &maps.ValidationError{Msg: "request body is required"}
+	}
+
+	var rawProps json.RawMessage
+	if req.Body.Props != nil {
+		if b, err := json.Marshal(req.Body.Props); err == nil {
+			rawProps = b
+		}
+	}
+
+	p, err := h.Maps.UpsertPlacement(ctx, a, string(req.EntityType), req.EntityId, req.Params.IfMatch, maps.UpsertPlacementRequest{
+		SiteID:     req.Body.SiteId,
+		FloorID:    req.Body.FloorId,
+		Lat:        req.Body.Lat,
+		Lng:        req.Body.Lng,
+		X:          req.Body.X,
+		Y:          req.Body.Y,
+		BearingDeg: req.Body.BearingDeg,
+		FovDeg:     req.Body.FovDeg,
+		RangeM:     req.Body.RangeM,
+		Props:      rawProps,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	etag := fmt.Sprintf(`"%d"`, p.Revision)
+	return gen.UpsertMapPlacement200JSONResponse{
+		Headers: gen.UpsertMapPlacement200ResponseHeaders{
+			ETag: &etag,
+		},
+		Body: toMapPlacementResponse(p),
+	}, nil
+}
+
+// DeleteMapPlacement removes a placement by placement ID.
+func (h *Handlers) DeleteMapPlacement(ctx context.Context, req gen.DeleteMapPlacementRequestObject) (gen.DeleteMapPlacementResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.DeleteMapPlacement404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	if err := h.Maps.DeletePlacement(ctx, a, req.PlacementId, req.Params.IfMatch); err != nil {
+		return nil, err
+	}
+	return gen.DeleteMapPlacement204Response{}, nil
+}
+
+// UpdateSiteGeo updates site geographic coordinates, zoom, and region.
+func (h *Handlers) UpdateSiteGeo(ctx context.Context, req gen.UpdateSiteGeoRequestObject) (gen.UpdateSiteGeoResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.UpdateSiteGeo404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	if req.Body == nil {
+		return nil, &maps.ValidationError{Msg: "request body is required"}
+	}
+	res, err := h.Maps.UpdateSiteGeo(ctx, a, req.SiteId, maps.UpdateSiteGeoRequest{
+		Lat:         req.Body.Lat,
+		Lng:         req.Body.Lng,
+		DefaultZoom: req.Body.DefaultZoom,
+		RegionID:    req.Body.RegionId,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gen.UpdateSiteGeo200JSONResponse{
+		Id:          res.ID,
+		Name:        res.Name,
+		Lat:         res.Lat,
+		Lng:         res.Lng,
+		DefaultZoom: res.DefaultZoom,
+		RegionId:    res.RegionID,
+		UpdatedAt:   &res.UpdatedAt,
+	}, nil
+}
+
+func toMapPlacementResponse(p *maps.Placement) gen.MapPlacement {
+	var props *map[string]interface{}
+	if len(p.Props) > 0 {
+		var pr map[string]interface{}
+		if err := json.Unmarshal(p.Props, &pr); err == nil {
+			props = &pr
+		}
+	}
+	return gen.MapPlacement{
+		Id:         p.ID,
+		SiteId:     p.SiteID,
+		EntityType: gen.MapPlacementEntityType(p.EntityType),
+		EntityId:   p.EntityID,
+		FloorId:    p.FloorID,
+		Lat:        p.Lat,
+		Lng:        p.Lng,
+		X:          p.X,
+		Y:          p.Y,
+		BearingDeg: p.BearingDeg,
+		FovDeg:     p.FovDeg,
+		RangeM:     p.RangeM,
+		Props:      props,
+		Revision:   p.Revision,
+		CreatedAt:  p.CreatedAt,
+		UpdatedAt:  p.UpdatedAt,
+	}
+}
+
 func toMapSiteOverview(s maps.SiteOverview) gen.MapSiteOverview {
 	return gen.MapSiteOverview{
 		Id:              s.ID,

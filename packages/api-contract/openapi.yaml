@@ -2328,6 +2328,115 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/maps/unplaced:
+    get:
+      tags: [maps]
+      operationId: getMapUnplacedCameras
+      summary: Unplaced cameras on site
+      description: Returns cameras on the site that have no geographic placement.
+      parameters:
+        - name: site_id
+          in: query
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: List of unplaced cameras
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapUnplacedCameraList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/maps/placements/{entityType}/{entityId}:
+    put:
+      tags: [maps]
+      operationId: upsertMapPlacement
+      summary: Upsert entity placement
+      description: Place or update position/orientation/FOV of a camera, server, or device.
+      parameters:
+        - name: entityType
+          in: path
+          required: true
+          schema: { type: string, enum: [camera, server, device] }
+        - name: entityId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MapUpsertPlacementRequest"
+      responses:
+        "200":
+          description: Updated placement
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapPlacement"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/maps/placements/{placementId}:
+    delete:
+      tags: [maps]
+      operationId: deleteMapPlacement
+      summary: Delete entity placement
+      description: Removes a placement by placement ID.
+      parameters:
+        - name: placementId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          schema: { type: string }
+      responses:
+        "204":
+          description: Placement removed
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/sites/{siteId}/geo:
+    patch:
+      tags: [maps]
+      operationId: updateSiteGeo
+      summary: Update site geographic position
+      description: Sets site lat/lng, default zoom, and region.
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSiteGeoRequest"
+      responses:
+        "200":
+          description: Updated site geographic details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SiteGeo"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 components:
   securitySchemes:
     bearerAuth:
@@ -3651,4 +3760,74 @@ components:
         entities:
           type: array
           items: { $ref: "#/components/schemas/MapEntity" }
+    MapUnplacedCamera:
+      type: object
+      required: [id, name, site_id, status]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        remote_name: { type: string, nullable: true }
+        site_id: { type: string, format: uuid }
+        status: { type: string }
+    MapUnplacedCameraList:
+      type: object
+      required: [site_id, cameras]
+      properties:
+        site_id: { type: string, format: uuid }
+        cameras:
+          type: array
+          items: { $ref: "#/components/schemas/MapUnplacedCamera" }
+    MapUpsertPlacementRequest:
+      type: object
+      required: [site_id]
+      properties:
+        site_id: { type: string, format: uuid }
+        floor_id: { type: string, format: uuid, nullable: true }
+        lat: { type: number, format: double, nullable: true }
+        lng: { type: number, format: double, nullable: true }
+        x: { type: number, format: float, nullable: true }
+        y: { type: number, format: float, nullable: true }
+        bearing_deg: { type: number, format: float, nullable: true }
+        fov_deg: { type: number, format: float, nullable: true }
+        range_m: { type: number, format: float, nullable: true }
+        props: { type: object, nullable: true }
+    MapPlacement:
+      type: object
+      required: [id, site_id, entity_type, entity_id, revision, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        entity_type: { type: string, enum: [camera, server, device] }
+        entity_id: { type: string, format: uuid }
+        floor_id: { type: string, format: uuid, nullable: true }
+        lat: { type: number, format: double, nullable: true }
+        lng: { type: number, format: double, nullable: true }
+        x: { type: number, format: float, nullable: true }
+        y: { type: number, format: float, nullable: true }
+        bearing_deg: { type: number, format: float, nullable: true }
+        fov_deg: { type: number, format: float, nullable: true }
+        range_m: { type: number, format: float, nullable: true }
+        props: { type: object, nullable: true }
+        revision: { type: integer, format: int64 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    UpdateSiteGeoRequest:
+      type: object
+      properties:
+        lat: { type: number, format: double, nullable: true }
+        lng: { type: number, format: double, nullable: true }
+        default_zoom: { type: number, format: float, nullable: true }
+        region_id: { type: string, format: uuid, nullable: true }
+    SiteGeo:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        lat: { type: number, format: double, nullable: true }
+        lng: { type: number, format: double, nullable: true }
+        default_zoom: { type: number, format: float, nullable: true }
+        region_id: { type: string, format: uuid, nullable: true }
+        updated_at: { type: string, format: date-time }
+
 

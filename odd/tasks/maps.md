@@ -21,9 +21,9 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 ~400 authored lines per unit (advisory).
 
 ## Tasks (design §19; parallel tracks A/B/C for backend)
-- [ ] M-B1 — migration 00022 maps core, sqlc, permissions maps.*, feature flag (track A)
-- [ ] M-B2 — read endpoints: config, overview, site, entities (RBAC filtering) (track A)
-- [ ] M-B3 — placement writes, site coords, unplaced cameras, audit (track A)
+- [x] M-B1 — migration 00022 maps core, sqlc, permissions maps.*, feature flag (track A) (`eb53c22`)
+- [x] M-B2 — read endpoints: config, overview, site, entities (RBAC filtering) (track A) (`2dc97be`)
+- [x] M-B3 — placement writes, site coords, unplaced cameras, audit (track A)
 - [ ] M-B4 — zones CRUD, geometry validation, rules ZoneResolver hook (track A)
 - [ ] M-B5 — normalized realtime envelope, camera status publisher (track B)
 - [ ] M-B6 — client hello/filters, resume buffer, coalescing, batching (track B)
@@ -44,4 +44,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 ask-on-risk; push/PR are PO decisions.
 
 ## Progress
-(none yet)
+- 2026-09-30: M-B1 completed (`eb53c22`).
+- 2026-09-30: M-B2 completed (`2dc97be`).
+- 2026-09-30: M-B3 completed (placement write endpoints, optimistic locking via If-Match, site geo PATCH, unplaced cameras tray endpoint, audit logging, and integration tests).
+

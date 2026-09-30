@@ -330,12 +330,12 @@ func (q *Queries) DeleteMapFloor(ctx context.Context, arg DeleteMapFloorParams) 
 
 const deleteMapPlacement = `-- name: DeleteMapPlacement :exec
 DELETE FROM map_placements
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)
 `
 
 type DeleteMapPlacementParams struct {
 	ID       uuid.UUID
-	TenantID uuid.UUID
+	TenantID *uuid.UUID
 }
 
 func (q *Queries) DeleteMapPlacement(ctx context.Context, arg DeleteMapPlacementParams) error {
@@ -499,16 +499,98 @@ func (q *Queries) GetMapFloor(ctx context.Context, arg GetMapFloorParams) (MapFl
 
 const getMapPlacement = `-- name: GetMapPlacement :one
 SELECT id, tenant_id, site_id, entity_type, entity_id, floor_id, lat, lng, x, y, bearing_deg, fov_deg, range_m, props, revision, created_by, updated_by, created_at, updated_at FROM map_placements
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)
 `
 
 type GetMapPlacementParams struct {
 	ID       uuid.UUID
-	TenantID uuid.UUID
+	TenantID *uuid.UUID
 }
 
 func (q *Queries) GetMapPlacement(ctx context.Context, arg GetMapPlacementParams) (MapPlacement, error) {
 	row := q.db.QueryRow(ctx, getMapPlacement, arg.ID, arg.TenantID)
+	var i MapPlacement
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.SiteID,
+		&i.EntityType,
+		&i.EntityID,
+		&i.FloorID,
+		&i.Lat,
+		&i.Lng,
+		&i.X,
+		&i.Y,
+		&i.BearingDeg,
+		&i.FovDeg,
+		&i.RangeM,
+		&i.Props,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMapPlacementByEntityFloor = `-- name: GetMapPlacementByEntityFloor :one
+SELECT id, tenant_id, site_id, entity_type, entity_id, floor_id, lat, lng, x, y, bearing_deg, fov_deg, range_m, props, revision, created_by, updated_by, created_at, updated_at FROM map_placements
+WHERE entity_type = $1 AND entity_id = $2 AND floor_id = $3 AND ($4::uuid IS NULL OR tenant_id = $4)
+`
+
+type GetMapPlacementByEntityFloorParams struct {
+	EntityType string
+	EntityID   uuid.UUID
+	FloorID    *uuid.UUID
+	TenantID   *uuid.UUID
+}
+
+func (q *Queries) GetMapPlacementByEntityFloor(ctx context.Context, arg GetMapPlacementByEntityFloorParams) (MapPlacement, error) {
+	row := q.db.QueryRow(ctx, getMapPlacementByEntityFloor,
+		arg.EntityType,
+		arg.EntityID,
+		arg.FloorID,
+		arg.TenantID,
+	)
+	var i MapPlacement
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.SiteID,
+		&i.EntityType,
+		&i.EntityID,
+		&i.FloorID,
+		&i.Lat,
+		&i.Lng,
+		&i.X,
+		&i.Y,
+		&i.BearingDeg,
+		&i.FovDeg,
+		&i.RangeM,
+		&i.Props,
+		&i.Revision,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMapPlacementByEntityGeo = `-- name: GetMapPlacementByEntityGeo :one
+SELECT id, tenant_id, site_id, entity_type, entity_id, floor_id, lat, lng, x, y, bearing_deg, fov_deg, range_m, props, revision, created_by, updated_by, created_at, updated_at FROM map_placements
+WHERE entity_type = $1 AND entity_id = $2 AND floor_id IS NULL AND ($3::uuid IS NULL OR tenant_id = $3)
+`
+
+type GetMapPlacementByEntityGeoParams struct {
+	EntityType string
+	EntityID   uuid.UUID
+	TenantID   *uuid.UUID
+}
+
+func (q *Queries) GetMapPlacementByEntityGeo(ctx context.Context, arg GetMapPlacementByEntityGeoParams) (MapPlacement, error) {
+	row := q.db.QueryRow(ctx, getMapPlacementByEntityGeo, arg.EntityType, arg.EntityID, arg.TenantID)
 	var i MapPlacement
 	err := row.Scan(
 		&i.ID,
@@ -1378,7 +1460,7 @@ const listUnplacedCamerasBySite = `-- name: ListUnplacedCamerasBySite :many
 SELECT c.id, c.display_name, c.remote_name, c.site_id, c.status
 FROM cameras c
 WHERE c.site_id = $1
-  AND c.tenant_id = $2
+  AND ($2::uuid IS NULL OR c.tenant_id = $2)
   AND c.deleted_at IS NULL
   AND NOT EXISTS (
       SELECT 1 FROM map_placements p
@@ -1389,7 +1471,7 @@ ORDER BY c.display_name ASC
 
 type ListUnplacedCamerasBySiteParams struct {
 	SiteID   uuid.UUID
-	TenantID uuid.UUID
+	TenantID *uuid.UUID
 }
 
 type ListUnplacedCamerasBySiteRow struct {
@@ -1652,12 +1734,12 @@ func (q *Queries) UpdateMapZone(ctx context.Context, arg UpdateMapZoneParams) (M
 
 const updateSiteGeo = `-- name: UpdateSiteGeo :one
 UPDATE sites
-SET lat = $1,
-    lng = $2,
-    default_zoom = $3,
-    region_id = $4,
+SET lat = coalesce($1, lat),
+    lng = coalesce($2, lng),
+    default_zoom = coalesce($3, default_zoom),
+    region_id = coalesce($4, region_id),
     updated_at = now()
-WHERE id = $5 AND tenant_id = $6 AND deleted_at IS NULL
+WHERE id = $5 AND ($6::uuid IS NULL OR tenant_id = $6) AND deleted_at IS NULL
 RETURNING id, tenant_id, name, lat, lng, default_zoom, region_id, updated_at
 `
 
@@ -1667,7 +1749,7 @@ type UpdateSiteGeoParams struct {
 	DefaultZoom *float32
 	RegionID    *uuid.UUID
 	ID          uuid.UUID
-	TenantID    uuid.UUID
+	TenantID    *uuid.UUID
 }
 
 type UpdateSiteGeoRow struct {
@@ -1723,7 +1805,7 @@ DO UPDATE SET
     fov_deg = EXCLUDED.fov_deg,
     range_m = EXCLUDED.range_m,
     props = EXCLUDED.props,
-    revision = nextval('map_revision'),
+    revision = EXCLUDED.revision,
     updated_by = EXCLUDED.updated_by,
     updated_at = now()
 RETURNING id, tenant_id, site_id, entity_type, entity_id, floor_id, lat, lng, x, y, bearing_deg, fov_deg, range_m, props, revision, created_by, updated_by, created_at, updated_at
@@ -1803,7 +1885,7 @@ DO UPDATE SET
     fov_deg = EXCLUDED.fov_deg,
     range_m = EXCLUDED.range_m,
     props = EXCLUDED.props,
-    revision = nextval('map_revision'),
+    revision = EXCLUDED.revision,
     updated_by = EXCLUDED.updated_by,
     updated_at = now()
 RETURNING id, tenant_id, site_id, entity_type, entity_id, floor_id, lat, lng, x, y, bearing_deg, fov_deg, range_m, props, revision, created_by, updated_by, created_at, updated_at

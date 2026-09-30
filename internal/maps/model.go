@@ -2,6 +2,8 @@ package maps
 
 import (
 	"encoding/json"
+	"errors"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -166,3 +168,79 @@ type EntitiesResult struct {
 	Revision int64    `json:"revision"`
 	Entities []Entity `json:"entities"`
 }
+
+// UnplacedCamera represents a camera without geographic placement.
+type UnplacedCamera struct {
+	ID         uuid.UUID `json:"id"`
+	Name       string    `json:"name"`
+	RemoteName *string   `json:"remote_name,omitempty"`
+	SiteID     uuid.UUID `json:"site_id"`
+	Status     string    `json:"status"`
+}
+
+// Placement represents a placed entity (camera, server, device) in a site.
+type Placement struct {
+	ID         uuid.UUID       `json:"id"`
+	SiteID     uuid.UUID       `json:"site_id"`
+	EntityType string          `json:"entity_type"`
+	EntityID   uuid.UUID       `json:"entity_id"`
+	FloorID    *uuid.UUID      `json:"floor_id,omitempty"`
+	Lat        *float64        `json:"lat,omitempty"`
+	Lng        *float64        `json:"lng,omitempty"`
+	X          *float32        `json:"x,omitempty"`
+	Y          *float32        `json:"y,omitempty"`
+	BearingDeg *float32        `json:"bearing_deg,omitempty"`
+	FovDeg     *float32        `json:"fov_deg,omitempty"`
+	RangeM     *float32        `json:"range_m,omitempty"`
+	Props      json.RawMessage `json:"props,omitempty"`
+	Revision   int64           `json:"revision"`
+	CreatedAt  time.Time       `json:"created_at"`
+	UpdatedAt  time.Time       `json:"updated_at"`
+}
+
+// UpsertPlacementRequest specifies coordinates and attributes for entity placement.
+type UpsertPlacementRequest struct {
+	SiteID     uuid.UUID       `json:"site_id"`
+	FloorID    *uuid.UUID      `json:"floor_id,omitempty"`
+	Lat        *float64        `json:"lat,omitempty"`
+	Lng        *float64        `json:"lng,omitempty"`
+	X          *float32        `json:"x,omitempty"`
+	Y          *float32        `json:"y,omitempty"`
+	BearingDeg *float32        `json:"bearing_deg,omitempty"`
+	FovDeg     *float32        `json:"fov_deg,omitempty"`
+	RangeM     *float32        `json:"range_m,omitempty"`
+	Props      json.RawMessage `json:"props,omitempty"`
+}
+
+// UpdateSiteGeoRequest specifies geographic updates for a site.
+type UpdateSiteGeoRequest struct {
+	Lat         *float64   `json:"lat,omitempty"`
+	Lng         *float64   `json:"lng,omitempty"`
+	DefaultZoom *float32   `json:"default_zoom,omitempty"`
+	RegionID    *uuid.UUID `json:"region_id,omitempty"`
+}
+
+// SiteGeo represents geographic and overview properties of a site.
+type SiteGeo struct {
+	ID          uuid.UUID  `json:"id"`
+	Name        string     `json:"name"`
+	Lat         *float64   `json:"lat,omitempty"`
+	Lng         *float64   `json:"lng,omitempty"`
+	DefaultZoom *float32   `json:"default_zoom,omitempty"`
+	RegionID    *uuid.UUID `json:"region_id,omitempty"`
+	UpdatedAt   time.Time  `json:"updated_at"`
+}
+
+// ValidationError represents an input validation error.
+type ValidationError struct {
+	Msg string
+}
+
+func (e *ValidationError) Error() string {
+	return e.Msg
+}
+
+var (
+	// ErrOptimisticLockConflict is returned when an If-Match revision does not match current state.
+	ErrOptimisticLockConflict = errors.New("optimistic lock conflict: revision mismatch")
+)
