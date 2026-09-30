@@ -70,6 +70,7 @@ and `apps/api/main.go` if any (both branches add config knobs/wiring). Then
 | LV-12 | Detection snapshot shown as poster while the recording loads; last-frame hold on other tiles | ✅ done (not browser-verified) | `fce96d5` |
 | LV-13 | Unified Live "Explorador" sidebar: shared per-server camera folders (manage-only DnD, same server), saved views, collapse to 0 | ✅ done (not browser-verified; migration 00020 not yet deployed) | `d91adc4`, `ba38231` |
 | LV-14 | Font Awesome icons (nav rail, mobile nav, settings nav, Explorer tree), resizable Explorador sidebar (256-480 px, persisted), no horizontal scroll | ✅ done (not browser-verified) | `ed7aca5`, `097ef97` |
+| LV-15 | Explorer right-click context menus (site, server, camera, folder, saved view) with reusable ContextMenu; add to grid or saved view | ✅ done (not browser-verified) | `ff9b115` |
 
 Dependencies: LV-2 → LV-3 → LV-4 → LV-5. LV-6 can run in parallel with LV-4/LV-5 if it
 only touches the session/overlay layer. LV-8 last.
