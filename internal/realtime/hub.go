@@ -3,6 +3,7 @@ package realtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 
@@ -87,14 +88,26 @@ func (h *Hub) Subscribe(actor authz.Actor) (*Subscription, error) {
 // Dispatch decodes a raw NATS message and publishes it. Unroutable or malformed messages are
 // dropped (logged for the latter): one bad payload must never stop the feed.
 func (h *Hub) Dispatch(subject string, data []byte) {
-	m, err := Decode(h.cfg.Routes, subject, data)
+	h.DispatchStream("", 0, subject, data)
+}
+
+// DispatchStream decodes raw NATS messages for a given stream and sequence, sets envelope metadata, and publishes them.
+func (h *Hub) DispatchStream(stream string, seq uint64, subject string, data []byte) {
+	msgs, err := DecodeAll(h.cfg.Routes, subject, data)
 	if err != nil {
 		if !errors.Is(err, errNoRoute) {
 			h.cfg.Log.Warn("realtime: dropped message", "subject", subject, "error", err)
 		}
 		return
 	}
-	h.Publish(m)
+	for _, m := range msgs {
+		m.Stream = stream
+		m.Seq = seq
+		if stream != "" && seq > 0 {
+			m.Envelope.ID = fmt.Sprintf("%s:%d", stream, seq)
+		}
+		h.Publish(m)
+	}
 }
 
 // Publish offers m to every subscription of its tenant. It never blocks: a subscription whose

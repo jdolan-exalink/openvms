@@ -20,15 +20,15 @@ type consumeCall struct {
 type fakeSource struct {
 	mu      sync.Mutex
 	calls   []consumeCall
-	handle  map[string]func(subject string, data []byte)
+	handle  map[string]func(seq uint64, subject string, data []byte)
 	results map[string][]error // per stream: errors returned by successive Consume calls
 }
 
 func newFakeSource() *fakeSource {
-	return &fakeSource{handle: map[string]func(string, []byte){}, results: map[string][]error{}}
+	return &fakeSource{handle: map[string]func(uint64, string, []byte){}, results: map[string][]error{}}
 }
 
-func (f *fakeSource) Consume(ctx context.Context, stream string, subjects []string, h func(string, []byte)) error {
+func (f *fakeSource) Consume(ctx context.Context, stream string, subjects []string, h func(seq uint64, subject string, data []byte)) error {
 	f.mu.Lock()
 	f.calls = append(f.calls, consumeCall{stream, subjects})
 	f.handle[stream] = h
@@ -51,10 +51,14 @@ func (f *fakeSource) callsSnapshot() []consumeCall {
 }
 
 func (f *fakeSource) deliver(stream, subject string, data []byte) {
+	f.deliverSeq(stream, 1, subject, data)
+}
+
+func (f *fakeSource) deliverSeq(stream string, seq uint64, subject string, data []byte) {
 	f.mu.Lock()
 	h := f.handle[stream]
 	f.mu.Unlock()
-	h(subject, data)
+	h(seq, subject, data)
 }
 
 func waitFor(t *testing.T, cond func() bool) {
@@ -100,11 +104,11 @@ func TestFeedHandsMessagesToTheHub(t *testing.T) {
 	src := newFakeSource()
 	var mu sync.Mutex
 	var got []string
-	routes := []Route{{Stream: "S", Subject: "a.*", Decode: func(subject string, _ []byte) (Message, error) {
+	routes := []Route{{Stream: "S", Subject: "a.*", Decode: func(subject string, _ []byte) ([]Message, error) {
 		mu.Lock()
 		got = append(got, subject)
 		mu.Unlock()
-		return Message{}, errNoTenant // dropped by the hub after decoding; the call is the evidence
+		return nil, errNoTenant // dropped by the hub after decoding; the call is the evidence
 	}}}
 	feed := &Feed{Source: src, Hub: NewHub(HubConfig{Routes: routes, Log: quietLog()}), Routes: routes, Log: quietLog()}
 	ctx, cancel := context.WithCancel(context.Background())

@@ -164,6 +164,13 @@ func run() error {
 				log.ErrorContext(ctx, "publish server status", "error", err)
 			}
 		},
+		OnCameraChange: func(ctx context.Context, c inventory.CameraStatusChange) {
+			log.InfoContext(ctx, "camera status changed", "camera_id", c.CameraID, "server_id", c.ServerID, "from", c.From, "to", c.To)
+			data, _ := json.Marshal(c)
+			if _, err := js.Publish(ctx, fmt.Sprintf("camera.status.%s", c.TenantID), data); err != nil {
+				log.ErrorContext(ctx, "publish camera status", "error", err)
+			}
+		},
 	}
 	go poller.Run(ctx)
 

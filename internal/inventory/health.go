@@ -24,12 +24,24 @@ type StatusChange struct {
 	At       time.Time `json:"at"`
 }
 
+// CameraStatusChange is emitted when a camera's health status changes.
+type CameraStatusChange struct {
+	CameraID uuid.UUID `json:"camera_id"`
+	ServerID uuid.UUID `json:"server_id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+	SiteID   uuid.UUID `json:"site_id"`
+	From     string    `json:"from"`
+	To       string    `json:"to"`
+	At       time.Time `json:"at"`
+}
+
 // HealthPoller checks every registered Frigate server on an interval (PRD §59-60).
 type HealthPoller struct {
-	Svc         *Service
-	Interval    time.Duration
-	Concurrency int
-	OnChange    func(ctx context.Context, c StatusChange)
+	Svc            *Service
+	Interval       time.Duration
+	Concurrency    int
+	OnChange       func(ctx context.Context, c StatusChange)
+	OnCameraChange func(ctx context.Context, c CameraStatusChange)
 
 	// Adapters is shared with the event syncer; nil creates a private pool.
 	Adapters *Adapters
@@ -93,8 +105,29 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 		p.Adapters.Forget(srv.ID) // reconnect (and re-detect version) next time
 	}
 
+	var camChanges []CameraStatusChange
+	now := time.Now().UTC()
+
 	err = p.Svc.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		if status == "offline" {
+			if srv.Status != "offline" {
+				cams, err := q.ListServerCameras(ctx, srv.ID)
+				if err == nil {
+					for _, cam := range cams {
+						if cam.Status != "unknown" {
+							camChanges = append(camChanges, CameraStatusChange{
+								CameraID: cam.ID,
+								ServerID: srv.ID,
+								TenantID: srv.TenantID,
+								SiteID:   srv.SiteID,
+								From:     cam.Status,
+								To:       "unknown",
+								At:       now,
+							})
+						}
+					}
+				}
+			}
 			if err := q.SetServerCamerasStatus(ctx, db.SetServerCamerasStatusParams{ServerID: srv.ID, Status: "unknown"}); err != nil {
 				return err
 			}
@@ -124,6 +157,17 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 			if err := q.UpdateCameraHealth(ctx, db.UpdateCameraHealthParams{ServerID: srv.ID, RemoteName: cam.RemoteName, Status: camStatus, Fps: fps}); err != nil {
 				return err
 			}
+			if camStatus != cam.Status {
+				camChanges = append(camChanges, CameraStatusChange{
+					CameraID: cam.ID,
+					ServerID: srv.ID,
+					TenantID: srv.TenantID,
+					SiteID:   srv.SiteID,
+					From:     cam.Status,
+					To:       camStatus,
+					At:       now,
+				})
+			}
 		}
 		if r := stats.Recordings; r != nil && r.TotalMB > 0 && r.UsedMB/r.TotalMB > storageDegradedRatio {
 			degraded = true
@@ -141,6 +185,11 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 		return
 	}
 	if status != srv.Status && p.OnChange != nil {
-		p.OnChange(ctx, StatusChange{ServerID: srv.ID, TenantID: srv.TenantID, SiteID: srv.SiteID, From: srv.Status, To: status, Error: errMsg, At: time.Now().UTC()})
+		p.OnChange(ctx, StatusChange{ServerID: srv.ID, TenantID: srv.TenantID, SiteID: srv.SiteID, From: srv.Status, To: status, Error: errMsg, At: now})
+	}
+	if p.OnCameraChange != nil {
+		for _, c := range camChanges {
+			p.OnCameraChange(ctx, c)
+		}
 	}
 }

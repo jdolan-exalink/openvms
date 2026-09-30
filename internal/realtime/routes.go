@@ -17,12 +17,23 @@ const (
 	TypeServerStatus        = "server.status"
 	TypeAlarmUpdated        = "alarm.updated"
 	TypeNotificationCreated = "notification.created"
+	TypeCameraStatusChanged = "camera.status_changed"
+	TypeObjectDetected      = "object.detected"
+	TypeServerStatusChanged = "server.status_changed"
+	TypeAlarmCreated        = "alarm.created"
+	TypeAlarmAcknowledged   = "alarm.acknowledged"
 )
 
 // Envelope is what a client receives.
 type Envelope struct {
+	V        int             `json:"v,omitempty"`
+	ID       string          `json:"id,omitempty"`
 	Type     string          `json:"type"`
+	TS       *time.Time      `json:"ts,omitempty"`
 	TenantID uuid.UUID       `json:"tenant_id"`
+	SiteID   *uuid.UUID      `json:"site_id,omitempty"`
+	CameraID *uuid.UUID      `json:"camera_id,omitempty"`
+	ServerID *uuid.UUID      `json:"server_id,omitempty"`
 	Data     json.RawMessage `json:"data"`
 }
 
@@ -35,6 +46,8 @@ type Scope struct {
 
 // Message is an Envelope plus the Scope it is authorized against (never sent to clients).
 type Message struct {
+	Stream   string
+	Seq      uint64
 	Envelope Envelope
 	Scope    Scope
 }
@@ -45,8 +58,8 @@ type Route struct {
 	Stream string
 	// Subject is a NATS subject pattern ("*" one token, ">" the rest).
 	Subject string
-	// Decode turns a raw payload into a Message. It must set the tenant and the scope.
-	Decode func(subject string, data []byte) (Message, error)
+	// Decode turns a raw payload into Messages. It must set the tenant and the scope.
+	Decode func(subject string, data []byte) ([]Message, error)
 }
 
 var (
@@ -61,17 +74,40 @@ func DefaultRoutes() []Route {
 		{Stream: "PLATFORM", Subject: "server.*", Decode: decodeServerStatus},
 		{Stream: "PLATFORM", Subject: "alarm.*.*", Decode: decodeAlarmUpdated},
 		{Stream: "PLATFORM", Subject: "notification.created.*", Decode: decodeNotificationCreated},
+		{Stream: "PLATFORM", Subject: "camera.status.*", Decode: decodeCameraStatus},
 	}
 }
 
-// Decode finds the route for subject and decodes data with it.
+// Decode finds the route for subject and returns the first decoded message.
 func Decode(routes []Route, subject string, data []byte) (Message, error) {
+	msgs, err := DecodeAll(routes, subject, data)
+	if err != nil {
+		return Message{}, err
+	}
+	if len(msgs) == 0 {
+		return Message{}, errNoRoute
+	}
+	return msgs[0], nil
+}
+
+// DecodeAll finds all routes matching subject and decodes all messages.
+func DecodeAll(routes []Route, subject string, data []byte) ([]Message, error) {
+	var out []Message
+	matched := false
 	for _, r := range routes {
 		if SubjectMatch(r.Subject, subject) {
-			return r.Decode(subject, data)
+			matched = true
+			msgs, err := r.Decode(subject, data)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, msgs...)
 		}
 	}
-	return Message{}, errNoRoute
+	if !matched {
+		return nil, errNoRoute
+	}
+	return out, nil
 }
 
 // SubjectMatch implements NATS subject matching for the wildcards used by Routes.
@@ -100,25 +136,50 @@ type newEventPayload struct {
 	Start    time.Time `json:"start_time"`
 }
 
-func decodeEventCreated(_ string, raw []byte) (Message, error) {
+func uuidPtr(u uuid.UUID) *uuid.UUID {
+	if u == uuid.Nil {
+		return nil
+	}
+	return &u
+}
+
+func timePtr(t time.Time) *time.Time {
+	if t.IsZero() {
+		return nil
+	}
+	return &t
+}
+
+func decodeEventCreated(_ string, raw []byte) ([]Message, error) {
 	var p newEventPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return Message{}, err
+		return nil, err
 	}
 	if p.TenantID == uuid.Nil {
-		return Message{}, errNoTenant
+		return nil, errNoTenant
 	}
 	if p.CameraID == uuid.Nil {
-		return Message{}, errors.New("realtime: event has no camera")
+		return nil, errors.New("realtime: event has no camera")
 	}
 	// Re-marshalling the typed struct is the allow-list: nothing else from the payload leaves.
 	data, err := json.Marshal(p)
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
-	return Message{
-		Envelope: Envelope{Type: TypeEventCreated, TenantID: p.TenantID, Data: data},
-		Scope:    Scope{Kind: authz.ScopeCamera, ID: p.CameraID, Permission: authz.EventsView},
+	return []Message{
+		{
+			Envelope: Envelope{
+				V:        2,
+				Type:     TypeEventCreated,
+				TS:       timePtr(p.Start),
+				TenantID: p.TenantID,
+				SiteID:   uuidPtr(p.SiteID),
+				CameraID: uuidPtr(p.CameraID),
+				ServerID: uuidPtr(p.ServerID),
+				Data:     data,
+			},
+			Scope: Scope{Kind: authz.ScopeCamera, ID: p.CameraID, Permission: authz.EventsView},
+		},
 	}, nil
 }
 
@@ -132,25 +193,35 @@ type statusPayload struct {
 	At       time.Time `json:"at"`
 }
 
-func decodeServerStatus(_ string, raw []byte) (Message, error) {
+func decodeServerStatus(_ string, raw []byte) ([]Message, error) {
 	var p statusPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return Message{}, err
+		return nil, err
 	}
 	if p.TenantID == uuid.Nil {
-		return Message{}, errNoTenant
+		return nil, errNoTenant
 	}
 	if p.ServerID == uuid.Nil {
-		return Message{}, errors.New("realtime: status has no server")
+		return nil, errors.New("realtime: status has no server")
 	}
 	// The publisher's free-text error (may name internal hosts) is not part of statusPayload.
 	data, err := json.Marshal(p)
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
-	return Message{
-		Envelope: Envelope{Type: TypeServerStatus, TenantID: p.TenantID, Data: data},
-		Scope:    Scope{Kind: authz.ScopeServer, ID: p.ServerID, Permission: authz.ServersView},
+	return []Message{
+		{
+			Envelope: Envelope{
+				V:        2,
+				Type:     TypeServerStatus,
+				TS:       timePtr(p.At),
+				TenantID: p.TenantID,
+				SiteID:   uuidPtr(p.SiteID),
+				ServerID: uuidPtr(p.ServerID),
+				Data:     data,
+			},
+			Scope: Scope{Kind: authz.ScopeServer, ID: p.ServerID, Permission: authz.ServersView},
+		},
 	}, nil
 }
 
@@ -165,24 +236,34 @@ type alarmPayload struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-func decodeAlarmUpdated(_ string, raw []byte) (Message, error) {
+func decodeAlarmUpdated(_ string, raw []byte) ([]Message, error) {
 	var p alarmPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return Message{}, err
+		return nil, err
 	}
 	if p.TenantID == uuid.Nil {
-		return Message{}, errNoTenant
+		return nil, errNoTenant
 	}
 	if p.CameraID == uuid.Nil {
-		return Message{}, errors.New("realtime: alarm has no camera")
+		return nil, errors.New("realtime: alarm has no camera")
 	}
 	data, err := json.Marshal(p)
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
-	return Message{
-		Envelope: Envelope{Type: TypeAlarmUpdated, TenantID: p.TenantID, Data: data},
-		Scope:    Scope{Kind: authz.ScopeCamera, ID: p.CameraID, Permission: authz.AlarmsView},
+	return []Message{
+		{
+			Envelope: Envelope{
+				V:        2,
+				Type:     TypeAlarmUpdated,
+				TS:       timePtr(p.UpdatedAt),
+				TenantID: p.TenantID,
+				SiteID:   uuidPtr(p.SiteID),
+				CameraID: uuidPtr(p.CameraID),
+				Data:     data,
+			},
+			Scope: Scope{Kind: authz.ScopeCamera, ID: p.CameraID, Permission: authz.AlarmsView},
+		},
 	}, nil
 }
 
@@ -199,20 +280,74 @@ type notificationPayload struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
-func decodeNotificationCreated(_ string, raw []byte) (Message, error) {
+func decodeNotificationCreated(_ string, raw []byte) ([]Message, error) {
 	var p notificationPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
-		return Message{}, err
+		return nil, err
 	}
 	if p.TenantID == uuid.Nil {
-		return Message{}, errNoTenant
+		return nil, errNoTenant
 	}
 	data, err := json.Marshal(p)
 	if err != nil {
-		return Message{}, err
+		return nil, err
 	}
-	return Message{
-		Envelope: Envelope{Type: TypeNotificationCreated, TenantID: p.TenantID, Data: data},
-		Scope:    Scope{Kind: authz.ScopeTenant, ID: p.TenantID},
+	return []Message{
+		{
+			Envelope: Envelope{
+				V:        2,
+				Type:     TypeNotificationCreated,
+				TS:       timePtr(p.CreatedAt),
+				TenantID: p.TenantID,
+				Data:     data,
+			},
+			Scope: Scope{Kind: authz.ScopeTenant, ID: p.TenantID},
+		},
+	}, nil
+}
+
+// cameraStatusPayload is the shape inventory.HealthPoller publishes on camera.status.<tenant>.
+type cameraStatusPayload struct {
+	CameraID uuid.UUID `json:"camera_id"`
+	ServerID uuid.UUID `json:"server_id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+	SiteID   uuid.UUID `json:"site_id"`
+	From     string    `json:"from"`
+	To       string    `json:"to"`
+	At       time.Time `json:"at"`
+}
+
+func decodeCameraStatus(_ string, raw []byte) ([]Message, error) {
+	var p cameraStatusPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, err
+	}
+	if p.TenantID == uuid.Nil {
+		return nil, errNoTenant
+	}
+	if p.CameraID == uuid.Nil {
+		return nil, errors.New("realtime: camera status has no camera")
+	}
+	data, err := json.Marshal(map[string]string{
+		"from": p.From,
+		"to":   p.To,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return []Message{
+		{
+			Envelope: Envelope{
+				V:        2,
+				Type:     TypeCameraStatusChanged,
+				TS:       timePtr(p.At),
+				TenantID: p.TenantID,
+				SiteID:   uuidPtr(p.SiteID),
+				CameraID: uuidPtr(p.CameraID),
+				ServerID: uuidPtr(p.ServerID),
+				Data:     data,
+			},
+			Scope: Scope{Kind: authz.ScopeCamera, ID: p.CameraID, Permission: authz.CamerasView},
+		},
 	}, nil
 }

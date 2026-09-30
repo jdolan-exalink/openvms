@@ -158,3 +158,52 @@ func TestDecodeNotificationCreated(t *testing.T) {
 		t.Fatalf("data = %v", data)
 	}
 }
+
+func TestDecodeCameraStatus(t *testing.T) {
+	tenant, cam, srv, site := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	at := time.Date(2026, 9, 30, 14, 5, 11, 0, time.UTC)
+	payload, _ := json.Marshal(map[string]any{
+		"camera_id": cam,
+		"server_id": srv,
+		"tenant_id": tenant,
+		"site_id":   site,
+		"from":      "online",
+		"to":        "offline",
+		"at":        at,
+	})
+	m, err := realtime.Decode(realtime.DefaultRoutes(), "camera.status."+tenant.String(), payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Envelope.V != 2 {
+		t.Fatalf("v = %d, want 2", m.Envelope.V)
+	}
+	if m.Envelope.Type != realtime.TypeCameraStatusChanged {
+		t.Fatalf("type = %q, want %q", m.Envelope.Type, realtime.TypeCameraStatusChanged)
+	}
+	if m.Envelope.TenantID != tenant {
+		t.Fatalf("tenant = %s, want %s", m.Envelope.TenantID, tenant)
+	}
+	if m.Envelope.SiteID == nil || *m.Envelope.SiteID != site {
+		t.Fatalf("site_id = %v, want %s", m.Envelope.SiteID, site)
+	}
+	if m.Envelope.CameraID == nil || *m.Envelope.CameraID != cam {
+		t.Fatalf("camera_id = %v, want %s", m.Envelope.CameraID, cam)
+	}
+	if m.Envelope.ServerID == nil || *m.Envelope.ServerID != srv {
+		t.Fatalf("server_id = %v, want %s", m.Envelope.ServerID, srv)
+	}
+	if m.Envelope.TS == nil || !m.Envelope.TS.Equal(at) {
+		t.Fatalf("ts = %v, want %v", m.Envelope.TS, at)
+	}
+	if m.Scope.Kind != authz.ScopeCamera || m.Scope.ID != cam || m.Scope.Permission != authz.CamerasView {
+		t.Fatalf("scope = %+v", m.Scope)
+	}
+	var data map[string]string
+	if err := json.Unmarshal(m.Envelope.Data, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["from"] != "online" || data["to"] != "offline" {
+		t.Fatalf("data = %v", data)
+	}
+}

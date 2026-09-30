@@ -14,7 +14,7 @@ import (
 // Source consumes new messages of a stream, filtered to subjects, until ctx ends or the
 // consumer fails. It is the seam between Feed and JetStream.
 type Source interface {
-	Consume(ctx context.Context, stream string, subjects []string, handle func(subject string, data []byte)) error
+	Consume(ctx context.Context, stream string, subjects []string, handle func(seq uint64, subject string, data []byte)) error
 }
 
 // Feed pumps JetStream messages into the Hub: one consumer per distinct stream of Routes,
@@ -73,7 +73,9 @@ func (f *Feed) Run(ctx context.Context) {
 			delay := initial
 			for ctx.Err() == nil {
 				began := time.Now()
-				err := f.Source.Consume(ctx, stream, subjects, f.Hub.Dispatch)
+				err := f.Source.Consume(ctx, stream, subjects, func(seq uint64, subject string, data []byte) {
+					f.Hub.DispatchStream(stream, seq, subject, data)
+				})
 				if ctx.Err() != nil {
 					return
 				}
@@ -115,7 +117,7 @@ type JetStreamSource struct {
 	JS jetstream.JetStream
 }
 
-func (s JetStreamSource) Consume(ctx context.Context, stream string, subjects []string, handle func(string, []byte)) error {
+func (s JetStreamSource) Consume(ctx context.Context, stream string, subjects []string, handle func(uint64, string, []byte)) error {
 	cons, err := s.JS.OrderedConsumer(ctx, stream, jetstream.OrderedConsumerConfig{
 		FilterSubjects: subjects,
 		DeliverPolicy:  jetstream.DeliverNewPolicy,
@@ -125,7 +127,13 @@ func (s JetStreamSource) Consume(ctx context.Context, stream string, subjects []
 	}
 	failed := make(chan error, 1)
 	cc, err := cons.Consume(
-		func(m jetstream.Msg) { handle(m.Subject(), m.Data()) },
+		func(m jetstream.Msg) {
+			var seq uint64
+			if meta, err := m.Metadata(); err == nil && meta != nil {
+				seq = meta.Sequence.Stream
+			}
+			handle(seq, m.Subject(), m.Data())
+		},
 		jetstream.ConsumeErrHandler(func(_ jetstream.ConsumeContext, err error) {
 			// Ordered consumers recreate themselves on gaps; these terminal errors are reported
 			// at once. Any other way the consume can stop is caught by awaitConsume via Closed().
