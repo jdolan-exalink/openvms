@@ -21,6 +21,7 @@ const FrigateCameraConfig = lazyRouteComponent(() => import("./routes/FrigateCam
 const Groups = lazyRouteComponent(() => import("./routes/Groups"), "Groups");
 const Live = lazyRouteComponent(() => import("./routes/Live"), "Live");
 const Login = lazyRouteComponent(() => import("./routes/Login"), "Login");
+const Maps = lazyRouteComponent(() => import("./routes/Maps"), "Maps");
 const Notifications = lazyRouteComponent(() => import("./routes/Notifications"), "Notifications");
 const Permissions = lazyRouteComponent(() => import("./routes/Permissions"), "Permissions");
 const Plates = lazyRouteComponent(() => import("./routes/Plates"), "Plates");
@@ -92,6 +93,30 @@ const liveRoute = createRoute({
   }),
 });
 
+type MapsSearch = {
+  site?: string;
+  camera?: string;
+  mode?: "live" | "investigate" | "analytics" | "edit";
+  alarm?: string;
+  floor?: string;
+};
+
+const mapsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/maps",
+  component: Maps,
+  validateSearch: (s: Record<string, unknown>): MapsSearch => ({
+    site: typeof s.site === "string" && s.site ? s.site : undefined,
+    camera: typeof s.camera === "string" && s.camera ? s.camera : undefined,
+    mode:
+      s.mode === "live" || s.mode === "investigate" || s.mode === "analytics" || s.mode === "edit"
+        ? s.mode
+        : undefined,
+    alarm: typeof s.alarm === "string" && s.alarm ? s.alarm : undefined,
+    floor: typeof s.floor === "string" && s.floor ? s.floor : undefined,
+  }),
+});
+
 type AlarmsSearch = {
   status?: "open" | "acknowledged" | "resolved";
   camera_id?: string;
@@ -152,6 +177,7 @@ export const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     indexRoute,
     liveRoute,
+    mapsRoute,
     alarmsRoute,
     eventsRoute,
     child("/plates", Plates),

@@ -1,0 +1,315 @@
+import * as maplibregl from "maplibre-gl";
+import type { StyleSpecification } from "maplibre-gl";
+import * as pmtiles from "pmtiles";
+import type { MapProviderConfig } from "@/lib/maps/types";
+
+let protocolRegistered = false;
+
+export function registerPMTilesProtocol() {
+  if (protocolRegistered) return;
+  try {
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol("pmtiles", protocol.tile);
+    protocolRegistered = true;
+  } catch (err) {
+    console.warn("Failed to register PMTiles protocol", err);
+  }
+}
+
+export interface ThemeColors {
+  isDark: boolean;
+  background: string;
+  water: string;
+  roadsMinor: string;
+  roadsMajor: string;
+  buildings: string;
+  labels: string;
+  labelsHalo: string;
+}
+
+export function getThemeColors(): ThemeColors {
+  const isDark = typeof document !== "undefined" ? !document.documentElement.classList.contains("light") : true;
+
+  if (typeof window === "undefined") {
+    return isDark ? getDarkFallbackColors() : getLightFallbackColors();
+  }
+
+  const computed = getComputedStyle(document.documentElement);
+  const getVar = (name: string, fallback: string) => computed.getPropertyValue(name).trim() || fallback;
+
+  if (isDark) {
+    const bgApp = getVar("--bg-app", "#0e1523");
+    const bgNav = getVar("--bg-nav", "#101827");
+    const bgPanel = getVar("--bg-panel", "#151f30");
+    const bgPanelHover = getVar("--bg-panel-hover", "#222e42");
+    const borderDefault = getVar("--border-default", "#29364a");
+    const textMuted = getVar("--text-muted", "#7e8a9a");
+
+    return {
+      isDark: true,
+      background: bgApp,
+      water: bgNav, // darkened nav tone
+      roadsMinor: bgPanelHover,
+      roadsMajor: borderDefault,
+      buildings: bgPanel,
+      labels: textMuted,
+      labelsHalo: bgApp,
+    };
+  } else {
+    const bgApp = getVar("--bg-app", "#f4f6f5");
+    const bgPanel = getVar("--bg-panel", "#ffffff");
+    const bgPanelElevated = getVar("--bg-panel-elevated", "#eef2f0");
+    const borderDefault = getVar("--border-default", "#d6dfdc");
+    const textSecondary = getVar("--text-secondary", "#586864");
+
+    return {
+      isDark: false,
+      background: bgApp,
+      water: "#d8e6e2", // tinted accent / water tone
+      roadsMinor: borderDefault,
+      roadsMajor: bgPanelElevated,
+      buildings: bgPanelElevated,
+      labels: textSecondary,
+      labelsHalo: bgPanel,
+    };
+  }
+}
+
+function getDarkFallbackColors(): ThemeColors {
+  return {
+    isDark: true,
+    background: "#0e1523",
+    water: "#0a101a",
+    roadsMinor: "#222e42",
+    roadsMajor: "#29364a",
+    buildings: "#151f30",
+    labels: "#7e8a9a",
+    labelsHalo: "#0e1523",
+  };
+}
+
+function getLightFallbackColors(): ThemeColors {
+  return {
+    isDark: false,
+    background: "#f4f6f5",
+    water: "#d8e6e2",
+    roadsMinor: "#d6dfdc",
+    roadsMajor: "#eef2f0",
+    buildings: "#eef2f0",
+    labels: "#586864",
+    labelsHalo: "#ffffff",
+  };
+}
+
+export function buildMapStyle(provider: MapProviderConfig, theme: ThemeColors = getThemeColors()): StyleSpecification {
+  registerPMTilesProtocol();
+
+  if (provider.kind === "vector-style") {
+    const url = theme.isDark ? provider.styleUrl?.dark : provider.styleUrl?.light;
+    if (url) {
+      // In MapLibre, setStyle accepts a URL or StyleSpecification. For uniform handling, we provide a placeholder style that points to the URL or sources
+      // When a full style URL is configured, callers can pass the URL directly to map.setStyle(url)
+    }
+  }
+
+  if (provider.kind === "raster") {
+    const tiles = provider.tiles && provider.tiles.length > 0 ? provider.tiles : ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"];
+
+    const rasterPaint: Record<string, unknown> = theme.isDark
+      ? {
+          "raster-brightness-max": 0.35,
+          "raster-saturation": -0.6,
+          "raster-contrast": -0.1,
+          "raster-opacity": 0.95,
+        }
+      : {
+          "raster-opacity": 1.0,
+        };
+
+    return {
+      version: 8,
+      name: `OpenVMS Raster (${theme.isDark ? "Dark" : "Light"})`,
+      sources: {
+        "raster-tiles": {
+          type: "raster",
+          tiles,
+          tileSize: 256,
+          attribution: provider.attribution || "© OpenStreetMap contributors",
+          maxzoom: provider.maxZoom || 19,
+        },
+      },
+      layers: [
+        {
+          id: "background",
+          type: "background",
+          paint: {
+            "background-color": theme.background,
+          },
+        },
+        {
+          id: "raster-layer",
+          type: "raster",
+          source: "raster-tiles",
+          paint: rasterPaint,
+        },
+      ],
+    } as StyleSpecification;
+  }
+
+  // Default: PMTiles / Protomaps vector source
+  const pmtilesUrl = provider.tiles?.[0] || "/tiles/base.pmtiles";
+  const sourceUrl = pmtilesUrl.startsWith("pmtiles://") ? pmtilesUrl : `pmtiles://${pmtilesUrl}`;
+
+  return {
+    version: 8,
+    name: `OpenVMS PMTiles (${theme.isDark ? "Dark" : "Light"})`,
+    sources: {
+      protomaps: {
+        type: "vector",
+        url: sourceUrl,
+        attribution: provider.attribution || "© OpenStreetMap contributors",
+      },
+    },
+    layers: [
+      {
+        id: "background",
+        type: "background",
+        paint: {
+          "background-color": theme.background,
+        },
+      },
+      {
+        id: "water",
+        type: "fill",
+        source: "protomaps",
+        "source-layer": "water",
+        paint: {
+          "fill-color": theme.water,
+        },
+      },
+      {
+        id: "landuse",
+        type: "fill",
+        source: "protomaps",
+        "source-layer": "landuse",
+        paint: {
+          "fill-color": theme.background,
+          "fill-opacity": 0.5,
+        },
+      },
+      {
+        id: "roads-minor",
+        type: "line",
+        source: "protomaps",
+        "source-layer": "roads",
+        filter: ["!in", "highway", "motorway", "trunk", "primary"],
+        paint: {
+          "line-color": theme.roadsMinor,
+          "line-width": 1,
+        },
+      },
+      {
+        id: "roads-major",
+        type: "line",
+        source: "protomaps",
+        "source-layer": "roads",
+        filter: ["in", "highway", "motorway", "trunk", "primary"],
+        paint: {
+          "line-color": theme.roadsMajor,
+          "line-width": 2,
+        },
+      },
+      {
+        id: "buildings",
+        type: "fill",
+        source: "protomaps",
+        "source-layer": "buildings",
+        paint: {
+          "fill-color": theme.buildings,
+          "fill-opacity": theme.isDark ? 0.8 : 0.9,
+        },
+      },
+      {
+        id: "labels",
+        type: "symbol",
+        source: "protomaps",
+        "source-layer": "places",
+        layout: {
+          "text-field": ["get", "name"],
+          "text-size": 11,
+          "text-max-width": 8,
+        },
+        paint: {
+          "text-color": theme.labels,
+          "text-halo-color": theme.labelsHalo,
+          "text-halo-width": 1.5,
+        },
+      },
+    ],
+  } as StyleSpecification;
+}
+
+export class MapStyleController {
+  private map: maplibregl.Map | null = null;
+  private provider: MapProviderConfig;
+  private observer: MutationObserver | null = null;
+  private currentDark: boolean;
+  private onReapplyCustomLayers?: () => void;
+
+  constructor(provider: MapProviderConfig, onReapplyCustomLayers?: () => void) {
+    this.provider = provider;
+    this.onReapplyCustomLayers = onReapplyCustomLayers;
+    this.currentDark = typeof document !== "undefined" ? !document.documentElement.classList.contains("light") : true;
+  }
+
+  public setProvider(provider: MapProviderConfig) {
+    this.provider = provider;
+    this.applyCurrentStyle();
+  }
+
+  public attach(map: maplibregl.Map) {
+    this.map = map;
+
+    // Listen to style reload to re-apply any custom layers (cameras, FOV, zones)
+    this.map.on("style.load", () => {
+      this.onReapplyCustomLayers?.();
+    });
+
+    if (typeof window !== "undefined" && typeof MutationObserver !== "undefined") {
+      this.observer = new MutationObserver(() => {
+        const isDark = !document.documentElement.classList.contains("light");
+        if (isDark !== this.currentDark) {
+          this.currentDark = isDark;
+          this.applyCurrentStyle();
+        }
+      });
+
+      this.observer.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class"],
+      });
+    }
+  }
+
+  public applyCurrentStyle() {
+    if (!this.map) return;
+    const theme = getThemeColors();
+    if (this.provider.kind === "vector-style") {
+      const url = theme.isDark ? this.provider.styleUrl?.dark : this.provider.styleUrl?.light;
+      if (url) {
+        this.map.setStyle(url, { diff: true });
+        return;
+      }
+    }
+    const style = buildMapStyle(this.provider, theme);
+    this.map.setStyle(style, { diff: true });
+  }
+
+  public destroy() {
+    if (this.observer) {
+      this.observer.disconnect();
+      this.observer = null;
+    }
+    this.map = null;
+  }
+}

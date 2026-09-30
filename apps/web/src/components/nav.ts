@@ -1,9 +1,10 @@
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import {
   faBell, faBolt, faBriefcase, faBuilding, faCamera, faCar, faClipboardList, faClockRotateLeft, faDownload, faGaugeHigh,
-  faKey, faLayerGroup, faPalette, faPaperPlane, faServer, faShieldHalved, faSliders, faUserGear, faUserGroup, faUsers, faVideo,
+  faKey, faLayerGroup, faMapLocationDot, faPalette, faPaperPlane, faServer, faShieldHalved, faSliders, faUserGear, faUserGroup, faUsers, faVideo,
 } from "@fortawesome/free-solid-svg-icons";
 import { ShieldCheck } from "lucide-react";
+import type { FeatureFlags } from "@/lib/features";
 
 export type NavItem = {
   label: string;
@@ -13,6 +14,8 @@ export type NavItem = {
   milestone?: string;
   /** Shown only to users holding this permission somewhere; the API enforces it regardless. */
   permission?: string;
+  /** Rollout feature flag gating visibility. */
+  feature?: keyof FeatureFlags;
 };
 
 export type NavGroup = { title?: string; items: NavItem[] };
@@ -23,6 +26,7 @@ export const navGroups: NavGroup[] = [
   {
     title: "Investigación",
     items: [
+      { label: "Mapas", icon: faMapLocationDot, to: "/maps", permission: "maps.view", feature: "maps" },
       { label: "Alarmas", icon: faBell, to: "/alarms", permission: "alarms.view" },
       { label: "Eventos", icon: faShieldHalved, to: "/events", permission: "events.view" },
       { label: "Patentes", icon: faCar, to: "/plates", permission: "lpr.view" },

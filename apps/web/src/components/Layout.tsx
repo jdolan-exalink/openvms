@@ -12,6 +12,7 @@ import { parseRecSearch } from "@/lib/liveRec";
 import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { useRealtimeFeed } from "@/lib/realtime";
+import { useFeatures, type FeatureFlags } from "@/lib/features";
 import { AppShell, TopBarActionsSlot } from "./AppShell";
 import { brandIcon as Brand, navGroups, settingsNavGroups, type NavGroup } from "./nav";
 import { NotificationBell } from "./NotificationBell";
@@ -19,6 +20,7 @@ import { Omnibox } from "./Omnibox";
 
 export function Layout() {
   const me = useQuery(meQuery);
+  const features = useFeatures();
   useRealtimeFeed(); // one app-wide push feed; Layout only renders for authenticated routes
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const search = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>;
@@ -66,7 +68,7 @@ export function Layout() {
               </Link>
               <nav className="flex w-full flex-1 flex-col items-center gap-4 overflow-y-auto pb-3" aria-label="Navegación principal">
                 {navGroups.map((group, i) => (
-                  <NavGroupLinks key={group.title ?? i} group={group} me={me.data} pathname={pathname} />
+                  <NavGroupLinks key={group.title ?? i} group={group} me={me.data} pathname={pathname} features={features} />
                 ))}
               </nav>
               <div className="flex w-full flex-col items-center gap-1 border-t border-line pt-3">
@@ -166,7 +168,7 @@ export function Layout() {
                     {group.title && (
                       <p className="px-2 pb-1 font-mono text-[10px] uppercase tracking-wider text-muted">{group.title}</p>
                     )}
-                    {group.items.filter((item) => !item.permission || can(me.data, item.permission)).map((item) => {
+                    {group.items.filter((item) => (!item.permission || can(me.data, item.permission)) && (!item.feature || features[item.feature])).map((item) => {
                       const active = item.to != null && (pathname === item.to || (item.to !== "/live" && item.to !== "/settings" && pathname.startsWith(`${item.to}/`)));
                       return item.to ? (
                         <Link
@@ -230,10 +232,10 @@ export function Layout() {
   );
 }
 
-function NavGroupLinks({ group, me, pathname }: { group: NavGroup; me: Schemas["Me"] | undefined; pathname: string }) {
+function NavGroupLinks({ group, me, pathname, features }: { group: NavGroup; me: Schemas["Me"] | undefined; pathname: string; features: FeatureFlags }) {
   return (
     <div className="flex flex-col items-center gap-1">
-      {group.items.filter((item) => !item.permission || can(me, item.permission)).map((item) => {
+      {group.items.filter((item) => (!item.permission || can(me, item.permission)) && (!item.feature || features[item.feature])).map((item) => {
         const settingsRouteActive = settingsNavGroups.some((settingsGroup) => settingsGroup.items.some((settingsItem) => settingsItem.to && (pathname === settingsItem.to || pathname.startsWith(`${settingsItem.to}/`))));
         const active = item.to != null && (pathname === item.to || (item.to === "/settings" && settingsRouteActive) || (item.to !== "/settings" && item.to !== "/live" && pathname.startsWith(`${item.to}/`)));
         const classes = cn(

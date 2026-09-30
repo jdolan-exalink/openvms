@@ -26,7 +26,9 @@
     "clsx": "^2.1.1",
     "hls.js": "^1.6.13",
     "lucide-react": "^1.48.0",
+    "maplibre-gl": "^6.11.2",
     "openapi-fetch": "^0.17.0",
+    "pmtiles": "^4.5.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwind-merge": "^3.7.0"
@@ -36,6 +38,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
+    "@types/geojson": "^7946.0.16",
     "@types/node": "^22.20.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
