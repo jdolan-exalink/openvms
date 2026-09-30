@@ -228,17 +228,19 @@ ORDER BY name ASC;
 
 -- name: GetMapZone :one
 SELECT * FROM map_zones
-WHERE id = @id AND tenant_id = @tenant_id AND deleted_at IS NULL;
+WHERE id = @id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')) AND deleted_at IS NULL;
 
 -- name: CreateMapZone :one
 INSERT INTO map_zones (
     tenant_id, site_id, floor_id, name, kind, geometry,
     min_lat, min_lng, max_lat, max_lng, style, metadata,
-    created_by, updated_by
+    revision, created_by, updated_by
 ) VALUES (
     @tenant_id, @site_id, @floor_id, @name, @kind, @geometry,
-    @min_lat, @min_lng, @max_lat, @max_lng, @style, @metadata,
-    @user_id, @user_id
+    @min_lat, @min_lng, @max_lat, @max_lng,
+    coalesce(sqlc.narg('style')::jsonb, '{}'::jsonb),
+    coalesce(sqlc.narg('metadata')::jsonb, '{}'::jsonb),
+    nextval('map_revision'), @user_id, @user_id
 )
 RETURNING *;
 
@@ -247,6 +249,7 @@ UPDATE map_zones
 SET name = coalesce(sqlc.narg('name'), name),
     kind = coalesce(sqlc.narg('kind'), kind),
     geometry = coalesce(sqlc.narg('geometry'), geometry),
+    floor_id = coalesce(sqlc.narg('floor_id'), floor_id),
     min_lat = coalesce(sqlc.narg('min_lat'), min_lat),
     min_lng = coalesce(sqlc.narg('min_lng'), min_lng),
     max_lat = coalesce(sqlc.narg('max_lat'), max_lat),
@@ -256,13 +259,13 @@ SET name = coalesce(sqlc.narg('name'), name),
     revision = nextval('map_revision'),
     updated_by = @user_id,
     updated_at = now()
-WHERE id = @id AND tenant_id = @tenant_id AND deleted_at IS NULL
+WHERE id = @id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')) AND deleted_at IS NULL
 RETURNING *;
 
 -- name: DeleteMapZone :exec
 UPDATE map_zones
 SET deleted_at = now(), revision = nextval('map_revision'), updated_by = @user_id
-WHERE id = @id AND tenant_id = @tenant_id;
+WHERE id = @id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id'));
 
 -- name: ListMapViews :many
 SELECT * FROM map_views

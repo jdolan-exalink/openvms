@@ -231,6 +231,26 @@ type SiteGeo struct {
 	UpdatedAt   time.Time  `json:"updated_at"`
 }
 
+// CreateZoneRequest specifies properties for creating a new zone.
+type CreateZoneRequest struct {
+	FloorID  *uuid.UUID      `json:"floor_id,omitempty"`
+	Name     string          `json:"name"`
+	Kind     string          `json:"kind"`
+	Geometry json.RawMessage `json:"geometry"`
+	Style    json.RawMessage `json:"style,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
+}
+
+// UpdateZoneRequest specifies properties for updating a zone.
+type UpdateZoneRequest struct {
+	FloorID  *uuid.UUID      `json:"floor_id,omitempty"`
+	Name     *string         `json:"name,omitempty"`
+	Kind     *string         `json:"kind,omitempty"`
+	Geometry json.RawMessage `json:"geometry,omitempty"`
+	Style    json.RawMessage `json:"style,omitempty"`
+	Metadata json.RawMessage `json:"metadata,omitempty"`
+}
+
 // ValidationError represents an input validation error.
 type ValidationError struct {
 	Msg string

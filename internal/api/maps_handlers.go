@@ -254,6 +254,146 @@ func (h *Handlers) UpdateSiteGeo(ctx context.Context, req gen.UpdateSiteGeoReque
 	}, nil
 }
 
+// ListMapSiteZones returns all active map zones for a site.
+func (h *Handlers) ListMapSiteZones(ctx context.Context, req gen.ListMapSiteZonesRequestObject) (gen.ListMapSiteZonesResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.ListMapSiteZones404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	zones, err := h.Maps.ListZones(ctx, a, req.SiteId)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]gen.MapZone, 0, len(zones))
+	for _, z := range zones {
+		items = append(items, toMapZone(z))
+	}
+	return gen.ListMapSiteZones200JSONResponse{
+		SiteId: req.SiteId,
+		Zones:  items,
+	}, nil
+}
+
+// CreateMapSiteZone creates a new security zone with geometry validation.
+func (h *Handlers) CreateMapSiteZone(ctx context.Context, req gen.CreateMapSiteZoneRequestObject) (gen.CreateMapSiteZoneResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.CreateMapSiteZone404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	if req.Body == nil {
+		return nil, &maps.ValidationError{Msg: "request body is required"}
+	}
+
+	geomBytes, err := json.Marshal(req.Body.Geometry)
+	if err != nil {
+		return nil, &maps.ValidationError{Msg: "invalid geometry payload"}
+	}
+
+	var styleBytes json.RawMessage
+	if req.Body.Style != nil {
+		if b, err := json.Marshal(req.Body.Style); err == nil {
+			styleBytes = b
+		}
+	}
+	var metaBytes json.RawMessage
+	if req.Body.Metadata != nil {
+		if b, err := json.Marshal(req.Body.Metadata); err == nil {
+			metaBytes = b
+		}
+	}
+
+	z, err := h.Maps.CreateZone(ctx, a, req.SiteId, maps.CreateZoneRequest{
+		FloorID:  req.Body.FloorId,
+		Name:     req.Body.Name,
+		Kind:     string(req.Body.Kind),
+		Geometry: geomBytes,
+		Style:    styleBytes,
+		Metadata: metaBytes,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return gen.CreateMapSiteZone201JSONResponse(toMapZone(*z)), nil
+}
+
+// UpdateMapZone updates properties or geometry of an existing map zone.
+func (h *Handlers) UpdateMapZone(ctx context.Context, req gen.UpdateMapZoneRequestObject) (gen.UpdateMapZoneResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.UpdateMapZone404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	if req.Body == nil {
+		return nil, &maps.ValidationError{Msg: "request body is required"}
+	}
+
+	var geomBytes json.RawMessage
+	if req.Body.Geometry != nil {
+		b, err := json.Marshal(req.Body.Geometry)
+		if err != nil {
+			return nil, &maps.ValidationError{Msg: "invalid geometry payload"}
+		}
+		geomBytes = b
+	}
+
+	var kindStr *string
+	if req.Body.Kind != nil {
+		k := string(*req.Body.Kind)
+		kindStr = &k
+	}
+
+	var styleBytes json.RawMessage
+	if req.Body.Style != nil {
+		if b, err := json.Marshal(req.Body.Style); err == nil {
+			styleBytes = b
+		}
+	}
+	var metaBytes json.RawMessage
+	if req.Body.Metadata != nil {
+		if b, err := json.Marshal(req.Body.Metadata); err == nil {
+			metaBytes = b
+		}
+	}
+
+	z, err := h.Maps.UpdateZone(ctx, a, req.ZoneId, maps.UpdateZoneRequest{
+		FloorID:  req.Body.FloorId,
+		Name:     req.Body.Name,
+		Kind:     kindStr,
+		Geometry: geomBytes,
+		Style:    styleBytes,
+		Metadata: metaBytes,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return gen.UpdateMapZone200JSONResponse(toMapZone(*z)), nil
+}
+
+// DeleteMapZone soft-deletes a map zone.
+func (h *Handlers) DeleteMapZone(ctx context.Context, req gen.DeleteMapZoneRequestObject) (gen.DeleteMapZoneResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.DeleteMapZone404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	if err := h.Maps.DeleteZone(ctx, a, req.ZoneId); err != nil {
+		return nil, err
+	}
+	return gen.DeleteMapZone204Response{}, nil
+}
+
 func toMapPlacementResponse(p *maps.Placement) gen.MapPlacement {
 	var props *map[string]interface{}
 	if len(p.Props) > 0 {
@@ -343,38 +483,7 @@ func toMapSiteDetails(s *maps.SiteDetails) gen.MapSiteDetails {
 
 	zones := make([]gen.MapZone, 0, len(s.Zones))
 	for _, z := range s.Zones {
-		var geom map[string]interface{}
-		if len(z.Geometry) > 0 {
-			_ = json.Unmarshal(z.Geometry, &geom)
-		}
-		var style *map[string]interface{}
-		if len(z.Style) > 0 {
-			var st map[string]interface{}
-			if err := json.Unmarshal(z.Style, &st); err == nil {
-				style = &st
-			}
-		}
-		var meta *map[string]interface{}
-		if len(z.Metadata) > 0 {
-			var m map[string]interface{}
-			if err := json.Unmarshal(z.Metadata, &m); err == nil {
-				meta = &m
-			}
-		}
-		zones = append(zones, gen.MapZone{
-			Id:       z.ID,
-			SiteId:   z.SiteID,
-			FloorId:  z.FloorID,
-			Name:     z.Name,
-			Kind:     gen.MapZoneKind(z.Kind),
-			Geometry: geom,
-			MinLat:   z.MinLat,
-			MinLng:   z.MinLng,
-			MaxLat:   z.MaxLat,
-			MaxLng:   z.MaxLng,
-			Style:    style,
-			Metadata: meta,
-		})
+		zones = append(zones, toMapZone(z))
 	}
 
 	return gen.MapSiteDetails{
@@ -421,5 +530,40 @@ func toMapEntity(e maps.Entity) gen.MapEntity {
 		Cam:    cam,
 		St:     gen.MapEntitySt(e.Status),
 		Alarms: e.Alarms,
+	}
+}
+
+func toMapZone(z maps.Zone) gen.MapZone {
+	var geom map[string]interface{}
+	if len(z.Geometry) > 0 {
+		_ = json.Unmarshal(z.Geometry, &geom)
+	}
+	var style *map[string]interface{}
+	if len(z.Style) > 0 {
+		var st map[string]interface{}
+		if err := json.Unmarshal(z.Style, &st); err == nil {
+			style = &st
+		}
+	}
+	var meta *map[string]interface{}
+	if len(z.Metadata) > 0 {
+		var m map[string]interface{}
+		if err := json.Unmarshal(z.Metadata, &m); err == nil {
+			meta = &m
+		}
+	}
+	return gen.MapZone{
+		Id:       z.ID,
+		SiteId:   z.SiteID,
+		FloorId:  z.FloorID,
+		Name:     z.Name,
+		Kind:     gen.MapZoneKind(z.Kind),
+		Geometry: geom,
+		MinLat:   z.MinLat,
+		MinLng:   z.MinLng,
+		MaxLat:   z.MaxLat,
+		MaxLng:   z.MaxLng,
+		Style:    style,
+		Metadata: meta,
 	}
 }

@@ -2437,6 +2437,98 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/maps/sites/{siteId}/zones:
+    get:
+      tags: [maps]
+      operationId: listMapSiteZones
+      summary: List map zones for site
+      description: Returns all active security/perimeter/warning/custom zones for a site.
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: List of zones
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapZoneList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [maps]
+      operationId: createMapSiteZone
+      summary: Create map zone
+      description: Creates a new security zone with geometry validation.
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMapZoneRequest"
+      responses:
+        "201":
+          description: Created zone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapZone"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/maps/zones/{zoneId}:
+    patch:
+      tags: [maps]
+      operationId: updateMapZone
+      summary: Update map zone
+      description: Updates zone properties or geometry with validation.
+      parameters:
+        - name: zoneId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMapZoneRequest"
+      responses:
+        "200":
+          description: Updated zone
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapZone"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [maps]
+      operationId: deleteMapZone
+      summary: Delete map zone
+      description: Soft-deletes a map zone.
+      parameters:
+        - name: zoneId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Zone deleted
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 components:
   securitySchemes:
     bearerAuth:
@@ -3829,5 +3921,33 @@ components:
         default_zoom: { type: number, format: float, nullable: true }
         region_id: { type: string, format: uuid, nullable: true }
         updated_at: { type: string, format: date-time }
+    MapZoneList:
+      type: object
+      required: [site_id, zones]
+      properties:
+        site_id: { type: string, format: uuid }
+        zones:
+          type: array
+          items: { $ref: "#/components/schemas/MapZone" }
+    CreateMapZoneRequest:
+      type: object
+      required: [name, kind, geometry]
+      properties:
+        floor_id: { type: string, format: uuid, nullable: true }
+        name: { type: string }
+        kind: { type: string, enum: [security, perimeter, warning, custom] }
+        geometry: { type: object }
+        style: { type: object, nullable: true }
+        metadata: { type: object, nullable: true }
+    UpdateMapZoneRequest:
+      type: object
+      properties:
+        floor_id: { type: string, format: uuid, nullable: true }
+        name: { type: string }
+        kind: { type: string, enum: [security, perimeter, warning, custom] }
+        geometry: { type: object }
+        style: { type: object, nullable: true }
+        metadata: { type: object, nullable: true }
+
 
 

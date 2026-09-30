@@ -214,11 +214,13 @@ const createMapZone = `-- name: CreateMapZone :one
 INSERT INTO map_zones (
     tenant_id, site_id, floor_id, name, kind, geometry,
     min_lat, min_lng, max_lat, max_lng, style, metadata,
-    created_by, updated_by
+    revision, created_by, updated_by
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
-    $7, $8, $9, $10, $11, $12,
-    $13, $13
+    $7, $8, $9, $10,
+    coalesce($11::jsonb, '{}'::jsonb),
+    coalesce($12::jsonb, '{}'::jsonb),
+    nextval('map_revision'), $13, $13
 )
 RETURNING id, tenant_id, site_id, floor_id, name, kind, geometry, min_lat, min_lng, max_lat, max_lng, style, metadata, revision, created_by, updated_by, created_at, updated_at, deleted_at
 `
@@ -234,8 +236,8 @@ type CreateMapZoneParams struct {
 	MinLng   *float64
 	MaxLat   *float64
 	MaxLng   *float64
-	Style    json.RawMessage
-	Metadata json.RawMessage
+	Style    []byte
+	Metadata []byte
 	UserID   *uuid.UUID
 }
 
@@ -378,13 +380,13 @@ func (q *Queries) DeleteMapView(ctx context.Context, arg DeleteMapViewParams) er
 const deleteMapZone = `-- name: DeleteMapZone :exec
 UPDATE map_zones
 SET deleted_at = now(), revision = nextval('map_revision'), updated_by = $1
-WHERE id = $2 AND tenant_id = $3
+WHERE id = $2 AND ($3::uuid IS NULL OR tenant_id = $3)
 `
 
 type DeleteMapZoneParams struct {
 	UserID   *uuid.UUID
 	ID       uuid.UUID
-	TenantID uuid.UUID
+	TenantID *uuid.UUID
 }
 
 func (q *Queries) DeleteMapZone(ctx context.Context, arg DeleteMapZoneParams) error {
@@ -704,12 +706,12 @@ func (q *Queries) GetMapView(ctx context.Context, arg GetMapViewParams) (MapView
 
 const getMapZone = `-- name: GetMapZone :one
 SELECT id, tenant_id, site_id, floor_id, name, kind, geometry, min_lat, min_lng, max_lat, max_lng, style, metadata, revision, created_by, updated_by, created_at, updated_at, deleted_at FROM map_zones
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+WHERE id = $1 AND ($2::uuid IS NULL OR tenant_id = $2) AND deleted_at IS NULL
 `
 
 type GetMapZoneParams struct {
 	ID       uuid.UUID
-	TenantID uuid.UUID
+	TenantID *uuid.UUID
 }
 
 func (q *Queries) GetMapZone(ctx context.Context, arg GetMapZoneParams) (MapZone, error) {
@@ -1664,16 +1666,17 @@ UPDATE map_zones
 SET name = coalesce($1, name),
     kind = coalesce($2, kind),
     geometry = coalesce($3, geometry),
-    min_lat = coalesce($4, min_lat),
-    min_lng = coalesce($5, min_lng),
-    max_lat = coalesce($6, max_lat),
-    max_lng = coalesce($7, max_lng),
-    style = coalesce($8, style),
-    metadata = coalesce($9, metadata),
+    floor_id = coalesce($4, floor_id),
+    min_lat = coalesce($5, min_lat),
+    min_lng = coalesce($6, min_lng),
+    max_lat = coalesce($7, max_lat),
+    max_lng = coalesce($8, max_lng),
+    style = coalesce($9, style),
+    metadata = coalesce($10, metadata),
     revision = nextval('map_revision'),
-    updated_by = $10,
+    updated_by = $11,
     updated_at = now()
-WHERE id = $11 AND tenant_id = $12 AND deleted_at IS NULL
+WHERE id = $12 AND ($13::uuid IS NULL OR tenant_id = $13) AND deleted_at IS NULL
 RETURNING id, tenant_id, site_id, floor_id, name, kind, geometry, min_lat, min_lng, max_lat, max_lng, style, metadata, revision, created_by, updated_by, created_at, updated_at, deleted_at
 `
 
@@ -1681,6 +1684,7 @@ type UpdateMapZoneParams struct {
 	Name     *string
 	Kind     *string
 	Geometry []byte
+	FloorID  *uuid.UUID
 	MinLat   *float64
 	MinLng   *float64
 	MaxLat   *float64
@@ -1689,7 +1693,7 @@ type UpdateMapZoneParams struct {
 	Metadata []byte
 	UserID   *uuid.UUID
 	ID       uuid.UUID
-	TenantID uuid.UUID
+	TenantID *uuid.UUID
 }
 
 func (q *Queries) UpdateMapZone(ctx context.Context, arg UpdateMapZoneParams) (MapZone, error) {
@@ -1697,6 +1701,7 @@ func (q *Queries) UpdateMapZone(ctx context.Context, arg UpdateMapZoneParams) (M
 		arg.Name,
 		arg.Kind,
 		arg.Geometry,
+		arg.FloorID,
 		arg.MinLat,
 		arg.MinLng,
 		arg.MaxLat,

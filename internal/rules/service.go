@@ -40,6 +40,11 @@ type Publisher interface {
 	Publish(ctx context.Context, subject string, data []byte) error
 }
 
+// ZoneResolver resolves which map zones apply to an event on a camera.
+type ZoneResolver interface {
+	ZonesForEvent(ctx context.Context, cameraID uuid.UUID, frigateZones []string) ([]uuid.UUID, error)
+}
+
 // DefaultDebounce is how long a rule stays quiet for one camera after it fired on an event.
 const DefaultDebounce = 5 * time.Minute
 
@@ -50,6 +55,8 @@ type Service struct {
 	// Debounce is the per rule and camera quiet period after an event rule fires (default
 	// DefaultDebounce). Offline rules fire once per outage instead.
 	Debounce time.Duration
+	// ZoneResolver optionally maps frigate zones to map zones for an event.
+	ZoneResolver ZoneResolver
 }
 
 func NewService(st *store.Store, pub Publisher, log *slog.Logger) *Service {
@@ -417,6 +424,11 @@ func (s *Service) debounce() time.Duration {
 
 // EvaluateEvent runs every enabled event rule of the tenant against a newly indexed event.
 func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
+	if s.ZoneResolver != nil && len(ev.MapZoneIDs) == 0 {
+		if zids, err := s.ZoneResolver.ZonesForEvent(ctx, ev.CameraID, ev.Zones); err == nil {
+			ev.MapZoneIDs = zids
+		}
+	}
 	actor := authz.Actor{TenantID: &ev.TenantID}
 	return s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		q := db.New(tx)

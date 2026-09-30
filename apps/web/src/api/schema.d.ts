@@ -1777,6 +1777,54 @@ export interface paths {
         patch: operations["updateSiteGeo"];
         trace?: never;
     };
+    "/api/v1/maps/sites/{siteId}/zones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List map zones for site
+         * @description Returns all active security/perimeter/warning/custom zones for a site.
+         */
+        get: operations["listMapSiteZones"];
+        put?: never;
+        /**
+         * Create map zone
+         * @description Creates a new security zone with geometry validation.
+         */
+        post: operations["createMapSiteZone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maps/zones/{zoneId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete map zone
+         * @description Soft-deletes a map zone.
+         */
+        delete: operations["deleteMapZone"];
+        options?: never;
+        head?: never;
+        /**
+         * Update map zone
+         * @description Updates zone properties or geometry with validation.
+         */
+        patch: operations["updateMapZone"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3110,6 +3158,31 @@ export interface components {
             region_id?: string | null;
             /** Format: date-time */
             updated_at?: string;
+        };
+        MapZoneList: {
+            /** Format: uuid */
+            site_id: string;
+            zones: components["schemas"]["MapZone"][];
+        };
+        CreateMapZoneRequest: {
+            /** Format: uuid */
+            floor_id?: string | null;
+            name: string;
+            /** @enum {string} */
+            kind: "security" | "perimeter" | "warning" | "custom";
+            geometry: Record<string, never>;
+            style?: Record<string, never> | null;
+            metadata?: Record<string, never> | null;
+        };
+        UpdateMapZoneRequest: {
+            /** Format: uuid */
+            floor_id?: string | null;
+            name?: string;
+            /** @enum {string} */
+            kind?: "security" | "perimeter" | "warning" | "custom";
+            geometry?: Record<string, never>;
+            style?: Record<string, never> | null;
+            metadata?: Record<string, never> | null;
         };
     };
     responses: {
@@ -6431,6 +6504,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SiteGeo"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listMapSiteZones: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of zones */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapZoneList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createMapSiteZone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateMapZoneRequest"];
+            };
+        };
+        responses: {
+            /** @description Created zone */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapZone"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteMapZone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                zoneId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Zone deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateMapZone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                zoneId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMapZoneRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated zone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapZone"];
                 };
             };
             400: components["responses"]["BadRequest"];

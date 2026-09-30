@@ -21,6 +21,7 @@ type Conditions struct {
 	SiteIDs         []uuid.UUID `json:"site_ids,omitempty"`
 	Labels          []string    `json:"labels,omitempty"`
 	Zones           []string    `json:"zones,omitempty"`
+	MapZoneIDs      []uuid.UUID `json:"map_zone_ids,omitempty"`
 	Severities      []string    `json:"severities,omitempty"`
 	DurationSeconds int         `json:"duration_seconds,omitempty"`
 }
@@ -71,6 +72,7 @@ type EventContext struct {
 	Severity   string
 	Labels     []string
 	Zones      []string
+	MapZoneIDs []uuid.UUID
 	Start      time.Time
 }
 
@@ -115,6 +117,18 @@ func (c Conditions) MatchesEvent(ev EventContext) bool {
 	}
 	if len(c.Zones) > 0 && !matchesAny(c.Zones, ev.Zones) {
 		return false
+	}
+	if len(c.MapZoneIDs) > 0 {
+		matched := false
+		for _, id := range c.MapZoneIDs {
+			if containsID(ev.MapZoneIDs, id) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
 	}
 	return true
 }
