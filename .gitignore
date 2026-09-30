@@ -20,3 +20,6 @@ dist/
 
 # CodeGraph index
 .codegraph/
+
+# Local design reference (not part of the product)
+/avigilon_alta_cloud_vms_mockup.html
