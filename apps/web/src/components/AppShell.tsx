@@ -189,14 +189,14 @@ export function AppShell({ primaryNav, contextSidebar, fitViewport = false, chil
               // Capped by the viewport (40%, 480 px) but never below the minimum; see lib/sidebarWidth.
               style={{ "--sidebar-w": `min(${width}px, max(${SIDEBAR_MIN_WIDTH}px, min(480px, 40vw)))` } as CSSProperties}
               className={cn(
-                "w-full min-w-0 border-b border-line bg-surface px-3 py-4 md:h-dvh md:w-(--sidebar-w) md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r",
+                "w-full min-w-0 border-b border-line bg-surface px-3 py-4 md:flex md:h-dvh md:w-(--sidebar-w) md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r",
                 "md:transition-[width,padding,border-color] md:duration-200 motion-reduce:transition-none",
                 resizing && "md:transition-none",
                 collapsed && "hidden md:block md:w-0 md:overflow-hidden md:border-transparent md:px-0",
               )}
               data-shell-region="context-sidebar"
             >
-              <div ref={setSidebarTarget} className="flex min-h-0 min-w-0 flex-col gap-3 md:min-w-[calc(var(--sidebar-w)-1.5rem)]">
+              <div ref={setSidebarTarget} className="flex min-h-0 min-w-0 flex-col gap-3 md:min-w-[calc(var(--sidebar-w)-1.5rem)] md:flex-1">
                 {contextSidebar}
               </div>
             </aside>

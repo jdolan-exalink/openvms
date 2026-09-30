@@ -124,7 +124,7 @@ export function LiveExplorer({
   const mutationError = folderApi.create.error ?? folderApi.rename.error ?? folderApi.reorder.error ?? error;
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-col gap-2 md:h-[calc(100dvh-2rem)]" data-live-sidebar="true" aria-label="Explorador" role="region">
+    <div className="flex min-h-0 min-w-0 flex-col gap-2 md:flex-1" data-live-sidebar="true" aria-label="Explorador" role="region">
       <div className="flex shrink-0 items-center gap-2">
         <h2 className="min-w-0 truncate px-1 text-sm font-semibold">Explorador</h2>
         <button
