@@ -443,6 +443,137 @@ export interface paths {
         patch: operations["updateCameraFrigateConfig"];
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/frigate-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Get the full effective Frigate configuration of a camera
+         * @description Requires cameras.view on the camera. Credentials (ffmpeg input URLs, ONVIF user and
+         *     password) stay masked unless the caller holds servers.config.secrets, in which case
+         *     secrets_visible is true. editable is false for Frigate older than 0.16 and for callers
+         *     without servers.config.
+         */
+        get: operations["getCameraFrigateConfigFull"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Edit camera configuration sections on Frigate
+         * @description Requires servers.config on the parent server; editing ffmpeg inputs or ONVIF
+         *     user/password also needs servers.config.secrets. Sections Frigate can hot-reload are
+         *     applied live; the rest are saved and flagged, and restart_required tells the caller to
+         *     offer a restart. Redacted values are rejected. Every change stores a revision.
+         *     Answers 409 for Frigate older than 0.16.
+         */
+        patch: operations["patchCameraFrigateConfig"];
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/frigate-config/schema": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Frigate's JSON schema for a camera configuration
+         * @description Requires servers.view. Trimmed to CameraConfig and the definitions it references; cached for a few minutes.
+         */
+        get: operations["getServerFrigateConfigSchema"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/frigate-config/raw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read Frigate's config.yml, secrets included
+         * @description Requires servers.config.secrets.
+         */
+        get: operations["getServerFrigateConfigRaw"];
+        /**
+         * Validate and write Frigate's config.yml
+         * @description Requires servers.config and servers.config.secrets. Frigate validates the file (400
+         *     with its message on failure); a revision is stored. Without restart=true the change
+         *     only takes effect on the next Frigate restart. Answers 409 for Frigate older than 0.16.
+         */
+        put: operations["putServerFrigateConfigRaw"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/frigate-config/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List stored Frigate configuration revisions, newest first
+         * @description Requires servers.view. Patches are redacted and before_yaml/after_yaml are omitted
+         *     unless the caller holds servers.config.secrets and passes include_yaml=true.
+         */
+        get: operations["listServerFrigateConfigRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/frigate-config/revisions/{revisionId}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                revisionId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore the configuration a revision replaced
+         * @description Requires servers.config and servers.config.secrets. Re-applies the revision's
+         *     before_yaml through a save, which Frigate only reads on restart: restart_required is
+         *     true. Records a rollback revision.
+         */
+        post: operations["rollbackServerFrigateConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/camera-folders": {
         parameters: {
             query?: never;
@@ -1812,6 +1943,71 @@ export interface components {
             detect_enabled?: boolean;
             tracked_objects?: string[];
             lpr_enabled?: boolean;
+        };
+        FrigateCameraConfigDoc: {
+            /** Format: uuid */
+            camera_id: string;
+            camera_name: string;
+            /** Format: uuid */
+            server_id: string;
+            frigate_version: string;
+            editable: boolean;
+            secrets_visible: boolean;
+            /** @description The camera section of Frigate's effective config. */
+            config: {
+                [key: string]: unknown;
+            };
+        };
+        FrigateConfigPatch: {
+            /** @description Top-level camera section name to its new value. Objects are merged into the current section, lists are replaced. */
+            sections: {
+                [key: string]: unknown;
+            };
+        };
+        FrigateSectionResult: {
+            section: string;
+            applied_live: boolean;
+            requires_restart: boolean;
+        };
+        FrigatePatchResult: {
+            /** Format: uuid */
+            revision_id: string;
+            sections: components["schemas"]["FrigateSectionResult"][];
+            restart_required: boolean;
+        };
+        FrigateRawConfig: {
+            yaml: string;
+        };
+        FrigateRawSaveResult: {
+            /** Format: uuid */
+            revision_id: string;
+            restart_required: boolean;
+        };
+        FrigateConfigRevision: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            server_id: string;
+            /** Format: uuid */
+            camera_id?: string | null;
+            /** Format: uuid */
+            actor_user_id?: string | null;
+            actor_name: string;
+            /** @enum {string} */
+            kind: "camera_patch" | "raw_save" | "rollback";
+            sections: string[];
+            patch: {
+                [key: string]: unknown;
+            };
+            /** @description Only with servers.config.secrets and include_yaml=true. */
+            before_yaml?: string;
+            /** @description Only with servers.config.secrets and include_yaml=true. */
+            after_yaml?: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        FrigateConfigRevisionList: {
+            items: components["schemas"]["FrigateConfigRevision"][];
         };
         CameraGroupInput: {
             /** Format: uuid */
@@ -3426,6 +3622,212 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getCameraFrigateConfigFull: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Camera configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrigateCameraConfigDoc"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    patchCameraFrigateConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FrigateConfigPatch"];
+            };
+        };
+        responses: {
+            /** @description Per-section outcome */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrigatePatchResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getServerFrigateConfigSchema: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description JSON schema */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getServerFrigateConfigRaw: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description config.yml */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrigateRawConfig"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    putServerFrigateConfigRaw: {
+        parameters: {
+            query?: {
+                restart?: boolean;
+            };
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FrigateRawConfig"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrigateRawSaveResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    listServerFrigateConfigRevisions: {
+        parameters: {
+            query?: {
+                camera_id?: string;
+                /** @description Only revisions created before this instant */
+                before?: string;
+                limit?: number;
+                include_yaml?: boolean;
+            };
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revisions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrigateConfigRevisionList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    rollbackServerFrigateConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                revisionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rolled back */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FrigateRawSaveResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };

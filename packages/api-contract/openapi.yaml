@@ -619,6 +619,166 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/frigate-config:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: getCameraFrigateConfigFull
+      summary: Get the full effective Frigate configuration of a camera
+      description: |
+        Requires cameras.view on the camera. Credentials (ffmpeg input URLs, ONVIF user and
+        password) stay masked unless the caller holds servers.config.secrets, in which case
+        secrets_visible is true. editable is false for Frigate older than 0.16 and for callers
+        without servers.config.
+      responses:
+        "200":
+          description: Camera configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FrigateCameraConfigDoc" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+    patch:
+      tags: [cameras]
+      operationId: patchCameraFrigateConfig
+      summary: Edit camera configuration sections on Frigate
+      description: |
+        Requires servers.config on the parent server; editing ffmpeg inputs or ONVIF
+        user/password also needs servers.config.secrets. Sections Frigate can hot-reload are
+        applied live; the rest are saved and flagged, and restart_required tells the caller to
+        offer a restart. Redacted values are rejected. Every change stores a revision.
+        Answers 409 for Frigate older than 0.16.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FrigateConfigPatch" }
+      responses:
+        "200":
+          description: Per-section outcome
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FrigatePatchResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/frigate-config/schema:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerFrigateConfigSchema
+      summary: Frigate's JSON schema for a camera configuration
+      description: Requires servers.view. Trimmed to CameraConfig and the definitions it references; cached for a few minutes.
+      responses:
+        "200":
+          description: JSON schema
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/frigate-config/raw:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerFrigateConfigRaw
+      summary: Read Frigate's config.yml, secrets included
+      description: Requires servers.config.secrets.
+      responses:
+        "200":
+          description: config.yml
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FrigateRawConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+    put:
+      tags: [servers]
+      operationId: putServerFrigateConfigRaw
+      summary: Validate and write Frigate's config.yml
+      description: |
+        Requires servers.config and servers.config.secrets. Frigate validates the file (400
+        with its message on failure); a revision is stored. Without restart=true the change
+        only takes effect on the next Frigate restart. Answers 409 for Frigate older than 0.16.
+      parameters:
+        - { name: restart, in: query, required: false, schema: { type: boolean, default: false } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FrigateRawConfig" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FrigateRawSaveResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/frigate-config/revisions:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: listServerFrigateConfigRevisions
+      summary: List stored Frigate configuration revisions, newest first
+      description: |
+        Requires servers.view. Patches are redacted and before_yaml/after_yaml are omitted
+        unless the caller holds servers.config.secrets and passes include_yaml=true.
+      parameters:
+        - { name: camera_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: before, in: query, required: false, description: Only revisions created before this instant, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - { name: include_yaml, in: query, required: false, schema: { type: boolean, default: false } }
+      responses:
+        "200":
+          description: Revisions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FrigateConfigRevisionList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/frigate-config/revisions/{revisionId}/rollback:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: rollbackServerFrigateConfig
+      summary: Restore the configuration a revision replaced
+      description: |
+        Requires servers.config and servers.config.secrets. Re-applies the revision's
+        before_yaml through a save, which Frigate only reads on restart: restart_required is
+        true. Records a rollback revision.
+      responses:
+        "200":
+          description: Rolled back
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FrigateRawSaveResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/camera-folders:
     get:
       tags: [cameras]
@@ -2442,6 +2602,70 @@ components:
         detect_enabled: { type: boolean }
         tracked_objects: { type: array, items: { type: string } }
         lpr_enabled: { type: boolean }
+    FrigateCameraConfigDoc:
+      type: object
+      required: [camera_id, camera_name, server_id, frigate_version, editable, secrets_visible, config]
+      properties:
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        server_id: { type: string, format: uuid }
+        frigate_version: { type: string }
+        editable: { type: boolean }
+        secrets_visible: { type: boolean }
+        config: { type: object, additionalProperties: true, description: The camera section of Frigate's effective config. }
+    FrigateConfigPatch:
+      type: object
+      required: [sections]
+      properties:
+        sections:
+          type: object
+          additionalProperties: true
+          description: Top-level camera section name to its new value. Objects are merged into the current section, lists are replaced.
+    FrigateSectionResult:
+      type: object
+      required: [section, applied_live, requires_restart]
+      properties:
+        section: { type: string }
+        applied_live: { type: boolean }
+        requires_restart: { type: boolean }
+    FrigatePatchResult:
+      type: object
+      required: [revision_id, sections, restart_required]
+      properties:
+        revision_id: { type: string, format: uuid }
+        sections: { type: array, items: { $ref: "#/components/schemas/FrigateSectionResult" } }
+        restart_required: { type: boolean }
+    FrigateRawConfig:
+      type: object
+      required: [yaml]
+      properties:
+        yaml: { type: string }
+    FrigateRawSaveResult:
+      type: object
+      required: [revision_id, restart_required]
+      properties:
+        revision_id: { type: string, format: uuid }
+        restart_required: { type: boolean }
+    FrigateConfigRevision:
+      type: object
+      required: [id, server_id, actor_name, kind, sections, patch, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        server_id: { type: string, format: uuid }
+        camera_id: { type: string, format: uuid, nullable: true }
+        actor_user_id: { type: string, format: uuid, nullable: true }
+        actor_name: { type: string }
+        kind: { type: string, enum: [camera_patch, raw_save, rollback] }
+        sections: { type: array, items: { type: string } }
+        patch: { type: object, additionalProperties: true }
+        before_yaml: { type: string, description: Only with servers.config.secrets and include_yaml=true. }
+        after_yaml: { type: string, description: Only with servers.config.secrets and include_yaml=true. }
+        created_at: { type: string, format: date-time }
+    FrigateConfigRevisionList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/FrigateConfigRevision" } }
     CameraGroupInput:
       type: object
       required: [tenant_id, name, camera_ids]

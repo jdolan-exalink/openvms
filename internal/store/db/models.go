@@ -194,6 +194,21 @@ type Export struct {
 	DeletedAt   *time.Time
 }
 
+type FrigateConfigRevision struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	ServerID    uuid.UUID
+	CameraID    *uuid.UUID
+	ActorUserID *uuid.UUID
+	ActorName   string
+	Kind        string
+	Sections    []string
+	BeforeYaml  string
+	AfterYaml   string
+	Patch       json.RawMessage
+	CreatedAt   time.Time
+}
+
 type FrigateServer struct {
 	ID             uuid.UUID
 	TenantID       uuid.UUID

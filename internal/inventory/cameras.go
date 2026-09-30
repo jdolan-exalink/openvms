@@ -512,7 +512,19 @@ func (s *Service) UpdateCameraFrigateConfig(ctx context.Context, actor authz.Act
 		return CameraFrigateConfigView{}, &FrigateError{Err: err}
 	}
 
-	after, err := adapter.UpdateCameraConfig(ctx, cam.RemoteName, update)
+	var after frigate.CameraFrigateConfig
+	if adapter.ConfigEditable() {
+		// Same path as the generic editor: applied live where Frigate allows it, with a
+		// stored revision to roll back to.
+		if patch := frigate.LegacyPatch(update); len(patch) > 0 {
+			if _, err := s.PatchCameraFrigateConfig(ctx, actor, cameraID, patch); err != nil {
+				return CameraFrigateConfigView{}, err
+			}
+		}
+		after, err = adapter.GetCameraConfig(ctx, cam.RemoteName)
+	} else {
+		after, err = adapter.UpdateCameraConfig(ctx, cam.RemoteName, update)
+	}
 	if err != nil {
 		return CameraFrigateConfigView{}, &FrigateError{Err: err}
 	}

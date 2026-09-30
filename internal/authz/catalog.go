@@ -47,6 +47,9 @@ const (
 	ServersManage  Permission = "servers.manage"
 	ServersRestart Permission = "servers.restart"
 	ServersConfig  Permission = "servers.config"
+	// ServersConfigSecrets reads and edits Frigate credentials (stream URLs, ONVIF user and
+	// password), the raw config.yml and the stored revisions that contain them.
+	ServersConfigSecrets Permission = "servers.config.secrets" //nolint:gosec // permission name, not a credential
 
 	UsersView   Permission = "users.view"
 	UsersManage Permission = "users.manage"
@@ -108,6 +111,7 @@ var Catalog = []Definition{
 	{ServersManage, "Registrar y administrar servidores Frigate", ScopeServer},
 	{ServersRestart, "Reiniciar servidores Frigate", ScopeServer},
 	{ServersConfig, "Editar configuración de Frigate", ScopeServer},
+	{ServersConfigSecrets, "Ver y editar credenciales, URLs de streams y el YAML completo de Frigate", ScopeServer},
 	{UsersView, "Ver usuarios", ScopeTenant},
 	{UsersManage, "Administrar usuarios", ScopeTenant},
 	{GroupsView, "Ver grupos de usuarios", ScopeTenant},

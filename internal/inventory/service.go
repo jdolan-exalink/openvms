@@ -83,6 +83,10 @@ const (
 	ActionPermissionChanged   = "PERMISSION_CHANGED"
 	ActionServerConfigUpdated = "SERVER_CONFIG_UPDATED"
 	ActionServerRestarted     = "SERVER_RESTARTED"
+
+	ActionFrigateConfigPatched    = "FRIGATE_CONFIG_PATCHED"
+	ActionFrigateConfigRawSaved   = "FRIGATE_CONFIG_RAW_SAVED"
+	ActionFrigateConfigRolledBack = "FRIGATE_CONFIG_ROLLED_BACK"
 )
 
 func audit(ctx context.Context, q *db.Queries, actor authz.Actor, tenantID *uuid.UUID, action, targetType string, targetID uuid.UUID, details map[string]any) error {

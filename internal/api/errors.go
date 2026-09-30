@@ -62,6 +62,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "site_not_empty", err.Error()
 	case errors.Is(err, clipwatermark.ErrNotReady):
 		return http.StatusConflict, "not_ready", "the clip watermark job is not ready yet"
+	case errors.Is(err, frigate.ErrConfigEditUnsupported):
+		return http.StatusConflict, "config_edit_unsupported", err.Error()
 	case errors.As(err, &fe):
 		msg := "could not reach Frigate"
 		if errors.Is(err, frigate.ErrUnauthorized) {

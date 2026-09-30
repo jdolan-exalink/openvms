@@ -201,6 +201,27 @@ func (e ExportStatus) Valid() bool {
 	}
 }
 
+// Defines values for FrigateConfigRevisionKind.
+const (
+	CameraPatch FrigateConfigRevisionKind = "camera_patch"
+	RawSave     FrigateConfigRevisionKind = "raw_save"
+	Rollback    FrigateConfigRevisionKind = "rollback"
+)
+
+// Valid indicates whether the value is a known member of the FrigateConfigRevisionKind enum.
+func (e FrigateConfigRevisionKind) Valid() bool {
+	switch e {
+	case CameraPatch:
+		return true
+	case RawSave:
+		return true
+	case Rollback:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthStatus.
 const (
 	HealthStatusDegraded HealthStatus = "degraded"
@@ -909,6 +930,77 @@ type Features struct {
 	SeamlessQualitySwitch bool `json:"seamless_quality_switch"`
 	StreamPrewarming      bool `json:"stream_prewarming"`
 	VideoSurfaceLayer     bool `json:"video_surface_layer"`
+}
+
+// FrigateCameraConfigDoc defines model for FrigateCameraConfigDoc.
+type FrigateCameraConfigDoc struct {
+	CameraId   openapi_types.UUID `json:"camera_id"`
+	CameraName string             `json:"camera_name"`
+
+	// Config The camera section of Frigate's effective config.
+	Config         map[string]interface{} `json:"config"`
+	Editable       bool                   `json:"editable"`
+	FrigateVersion string                 `json:"frigate_version"`
+	SecretsVisible bool                   `json:"secrets_visible"`
+	ServerId       openapi_types.UUID     `json:"server_id"`
+}
+
+// FrigateConfigPatch defines model for FrigateConfigPatch.
+type FrigateConfigPatch struct {
+	// Sections Top-level camera section name to its new value. Objects are merged into the current section, lists are replaced.
+	Sections map[string]interface{} `json:"sections"`
+}
+
+// FrigateConfigRevision defines model for FrigateConfigRevision.
+type FrigateConfigRevision struct {
+	ActorName   string              `json:"actor_name"`
+	ActorUserId *openapi_types.UUID `json:"actor_user_id,omitempty"`
+
+	// AfterYaml Only with servers.config.secrets and include_yaml=true.
+	AfterYaml *string `json:"after_yaml,omitempty"`
+
+	// BeforeYaml Only with servers.config.secrets and include_yaml=true.
+	BeforeYaml *string                   `json:"before_yaml,omitempty"`
+	CameraId   *openapi_types.UUID       `json:"camera_id,omitempty"`
+	CreatedAt  time.Time                 `json:"created_at"`
+	Id         openapi_types.UUID        `json:"id"`
+	Kind       FrigateConfigRevisionKind `json:"kind"`
+	Patch      map[string]interface{}    `json:"patch"`
+	Sections   []string                  `json:"sections"`
+	ServerId   openapi_types.UUID        `json:"server_id"`
+}
+
+// FrigateConfigRevisionKind defines model for FrigateConfigRevision.Kind.
+type FrigateConfigRevisionKind string
+
+// FrigateConfigRevisionList defines model for FrigateConfigRevisionList.
+type FrigateConfigRevisionList struct {
+	Items []FrigateConfigRevision `json:"items"`
+}
+
+// FrigatePatchResult defines model for FrigatePatchResult.
+type FrigatePatchResult struct {
+	RestartRequired bool                   `json:"restart_required"`
+	RevisionId      openapi_types.UUID     `json:"revision_id"`
+	Sections        []FrigateSectionResult `json:"sections"`
+}
+
+// FrigateRawConfig defines model for FrigateRawConfig.
+type FrigateRawConfig struct {
+	Yaml string `json:"yaml"`
+}
+
+// FrigateRawSaveResult defines model for FrigateRawSaveResult.
+type FrigateRawSaveResult struct {
+	RestartRequired bool               `json:"restart_required"`
+	RevisionId      openapi_types.UUID `json:"revision_id"`
+}
+
+// FrigateSectionResult defines model for FrigateSectionResult.
+type FrigateSectionResult struct {
+	AppliedLive     bool   `json:"applied_live"`
+	RequiresRestart bool   `json:"requires_restart"`
+	Section         string `json:"section"`
 }
 
 // Grant defines model for Grant.
@@ -1873,6 +1965,21 @@ type ListServersParams struct {
 	SiteId *openapi_types.UUID `form:"site_id,omitempty" json:"site_id,omitempty"`
 }
 
+// PutServerFrigateConfigRawParams defines parameters for PutServerFrigateConfigRaw.
+type PutServerFrigateConfigRawParams struct {
+	Restart *bool `form:"restart,omitempty" json:"restart,omitempty"`
+}
+
+// ListServerFrigateConfigRevisionsParams defines parameters for ListServerFrigateConfigRevisions.
+type ListServerFrigateConfigRevisionsParams struct {
+	CameraId *openapi_types.UUID `form:"camera_id,omitempty" json:"camera_id,omitempty"`
+
+	// Before Only revisions created before this instant
+	Before      *time.Time `form:"before,omitempty" json:"before,omitempty"`
+	Limit       *int       `form:"limit,omitempty" json:"limit,omitempty"`
+	IncludeYaml *bool      `form:"include_yaml,omitempty" json:"include_yaml,omitempty"`
+}
+
 // ListSitesParams defines parameters for ListSites.
 type ListSitesParams struct {
 	TenantId *openapi_types.UUID `form:"tenant_id,omitempty" json:"tenant_id,omitempty"`
@@ -1912,6 +2019,9 @@ type UpdateCameraJSONRequestBody = CameraUpdate
 
 // UpdateCameraFrigateConfigJSONRequestBody defines body for UpdateCameraFrigateConfig for application/json ContentType.
 type UpdateCameraFrigateConfigJSONRequestBody = CameraFrigateConfigUpdate
+
+// PatchCameraFrigateConfigJSONRequestBody defines body for PatchCameraFrigateConfig for application/json ContentType.
+type PatchCameraFrigateConfigJSONRequestBody = FrigateConfigPatch
 
 // ReviewEventsJSONRequestBody defines body for ReviewEvents for application/json ContentType.
 type ReviewEventsJSONRequestBody ReviewEventsJSONBody
@@ -1960,6 +2070,9 @@ type ProbeServerJSONRequestBody = ServerProbe
 
 // UpdateServerJSONRequestBody defines body for UpdateServer for application/json ContentType.
 type UpdateServerJSONRequestBody = ServerUpdate
+
+// PutServerFrigateConfigRawJSONRequestBody defines body for PutServerFrigateConfigRaw for application/json ContentType.
+type PutServerFrigateConfigRawJSONRequestBody = FrigateRawConfig
 
 // CreateSiteJSONRequestBody defines body for CreateSite for application/json ContentType.
 type CreateSiteJSONRequestBody = SiteCreate
@@ -2062,6 +2175,12 @@ type ServerInterface interface {
 	// UpdateCameraFrigateConfig Update a camera's Frigate detection and analytics configuration
 	// (PATCH /api/v1/cameras/{cameraId}/config)
 	UpdateCameraFrigateConfig(w http.ResponseWriter, r *http.Request, cameraId openapi_types.UUID)
+	// GetCameraFrigateConfigFull Get the full effective Frigate configuration of a camera
+	// (GET /api/v1/cameras/{cameraId}/frigate-config)
+	GetCameraFrigateConfigFull(w http.ResponseWriter, r *http.Request, cameraId openapi_types.UUID)
+	// PatchCameraFrigateConfig Edit camera configuration sections on Frigate
+	// (PATCH /api/v1/cameras/{cameraId}/frigate-config)
+	PatchCameraFrigateConfig(w http.ResponseWriter, r *http.Request, cameraId openapi_types.UUID)
 	// ListCameraRecordings Recorded spans of a camera, read from its Frigate (recordings.seek)
 	// (GET /api/v1/cameras/{cameraId}/recordings)
 	ListCameraRecordings(w http.ResponseWriter, r *http.Request, cameraId openapi_types.UUID, params ListCameraRecordingsParams)
@@ -2227,6 +2346,21 @@ type ServerInterface interface {
 	// UpdateServer Rename, move or change the credentials of a server
 	// (PATCH /api/v1/servers/{serverId})
 	UpdateServer(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
+	// GetServerFrigateConfigRaw Read Frigate's config.yml, secrets included
+	// (GET /api/v1/servers/{serverId}/frigate-config/raw)
+	GetServerFrigateConfigRaw(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
+	// PutServerFrigateConfigRaw Validate and write Frigate's config.yml
+	// (PUT /api/v1/servers/{serverId}/frigate-config/raw)
+	PutServerFrigateConfigRaw(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, params PutServerFrigateConfigRawParams)
+	// ListServerFrigateConfigRevisions List stored Frigate configuration revisions, newest first
+	// (GET /api/v1/servers/{serverId}/frigate-config/revisions)
+	ListServerFrigateConfigRevisions(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, params ListServerFrigateConfigRevisionsParams)
+	// RollbackServerFrigateConfig Restore the configuration a revision replaced
+	// (POST /api/v1/servers/{serverId}/frigate-config/revisions/{revisionId}/rollback)
+	RollbackServerFrigateConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, revisionId openapi_types.UUID)
+	// GetServerFrigateConfigSchema Frigate's JSON schema for a camera configuration
+	// (GET /api/v1/servers/{serverId}/frigate-config/schema)
+	GetServerFrigateConfigSchema(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
 	// RestartServer Restart the Frigate server
 	// (POST /api/v1/servers/{serverId}/restart)
 	RestartServer(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
@@ -2458,6 +2592,18 @@ func (_ Unimplemented) GetCameraFrigateConfig(w http.ResponseWriter, r *http.Req
 // UpdateCameraFrigateConfig Update a camera's Frigate detection and analytics configuration
 // (PATCH /api/v1/cameras/{cameraId}/config)
 func (_ Unimplemented) UpdateCameraFrigateConfig(w http.ResponseWriter, r *http.Request, cameraId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCameraFrigateConfigFull Get the full effective Frigate configuration of a camera
+// (GET /api/v1/cameras/{cameraId}/frigate-config)
+func (_ Unimplemented) GetCameraFrigateConfigFull(w http.ResponseWriter, r *http.Request, cameraId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PatchCameraFrigateConfig Edit camera configuration sections on Frigate
+// (PATCH /api/v1/cameras/{cameraId}/frigate-config)
+func (_ Unimplemented) PatchCameraFrigateConfig(w http.ResponseWriter, r *http.Request, cameraId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2788,6 +2934,36 @@ func (_ Unimplemented) GetServer(w http.ResponseWriter, r *http.Request, serverI
 // UpdateServer Rename, move or change the credentials of a server
 // (PATCH /api/v1/servers/{serverId})
 func (_ Unimplemented) UpdateServer(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetServerFrigateConfigRaw Read Frigate's config.yml, secrets included
+// (GET /api/v1/servers/{serverId}/frigate-config/raw)
+func (_ Unimplemented) GetServerFrigateConfigRaw(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PutServerFrigateConfigRaw Validate and write Frigate's config.yml
+// (PUT /api/v1/servers/{serverId}/frigate-config/raw)
+func (_ Unimplemented) PutServerFrigateConfigRaw(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, params PutServerFrigateConfigRawParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListServerFrigateConfigRevisions List stored Frigate configuration revisions, newest first
+// (GET /api/v1/servers/{serverId}/frigate-config/revisions)
+func (_ Unimplemented) ListServerFrigateConfigRevisions(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, params ListServerFrigateConfigRevisionsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RollbackServerFrigateConfig Restore the configuration a revision replaced
+// (POST /api/v1/servers/{serverId}/frigate-config/revisions/{revisionId}/rollback)
+func (_ Unimplemented) RollbackServerFrigateConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, revisionId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetServerFrigateConfigSchema Frigate's JSON schema for a camera configuration
+// (GET /api/v1/servers/{serverId}/frigate-config/schema)
+func (_ Unimplemented) GetServerFrigateConfigSchema(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3691,6 +3867,58 @@ func (siw *ServerInterfaceWrapper) UpdateCameraFrigateConfig(w http.ResponseWrit
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateCameraFrigateConfig(w, r, cameraId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCameraFrigateConfigFull operation middleware
+func (siw *ServerInterfaceWrapper) GetCameraFrigateConfigFull(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "cameraId" -------------
+	var cameraId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "cameraId", chi.URLParam(r, "cameraId"), &cameraId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cameraId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCameraFrigateConfigFull(w, r, cameraId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PatchCameraFrigateConfig operation middleware
+func (siw *ServerInterfaceWrapper) PatchCameraFrigateConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "cameraId" -------------
+	var cameraId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "cameraId", chi.URLParam(r, "cameraId"), &cameraId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cameraId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PatchCameraFrigateConfig(w, r, cameraId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5331,6 +5559,216 @@ func (siw *ServerInterfaceWrapper) UpdateServer(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// GetServerFrigateConfigRaw operation middleware
+func (siw *ServerInterfaceWrapper) GetServerFrigateConfigRaw(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", chi.URLParam(r, "serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetServerFrigateConfigRaw(w, r, serverId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutServerFrigateConfigRaw operation middleware
+func (siw *ServerInterfaceWrapper) PutServerFrigateConfigRaw(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", chi.URLParam(r, "serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params PutServerFrigateConfigRawParams
+
+	// ------------- Optional query parameter "restart" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "restart", r.URL.Query(), &params.Restart, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "restart"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "restart", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutServerFrigateConfigRaw(w, r, serverId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListServerFrigateConfigRevisions operation middleware
+func (siw *ServerInterfaceWrapper) ListServerFrigateConfigRevisions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", chi.URLParam(r, "serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListServerFrigateConfigRevisionsParams
+
+	// ------------- Optional query parameter "camera_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "camera_id", r.URL.Query(), &params.CameraId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "camera_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "camera_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "include_yaml" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "include_yaml", r.URL.Query(), &params.IncludeYaml, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "include_yaml"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_yaml", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListServerFrigateConfigRevisions(w, r, serverId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RollbackServerFrigateConfig operation middleware
+func (siw *ServerInterfaceWrapper) RollbackServerFrigateConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", chi.URLParam(r, "serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "revisionId" -------------
+	var revisionId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "revisionId", chi.URLParam(r, "revisionId"), &revisionId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "revisionId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RollbackServerFrigateConfig(w, r, serverId, revisionId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetServerFrigateConfigSchema operation middleware
+func (siw *ServerInterfaceWrapper) GetServerFrigateConfigSchema(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serverId" -------------
+	var serverId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serverId", chi.URLParam(r, "serverId"), &serverId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serverId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetServerFrigateConfigSchema(w, r, serverId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RestartServer operation middleware
 func (siw *ServerInterfaceWrapper) RestartServer(w http.ResponseWriter, r *http.Request) {
 
@@ -6124,6 +6562,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/api/v1/cameras/{cameraId}/config", wrapper.UpdateCameraFrigateConfig)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/cameras/{cameraId}/frigate-config", wrapper.GetCameraFrigateConfigFull)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/api/v1/cameras/{cameraId}/frigate-config", wrapper.PatchCameraFrigateConfig)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/servers/{serverId}/frigate-config/schema", wrapper.GetServerFrigateConfigSchema)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/servers/{serverId}/frigate-config/raw", wrapper.GetServerFrigateConfigRaw)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/api/v1/servers/{serverId}/frigate-config/raw", wrapper.PutServerFrigateConfigRaw)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api/v1/servers/{serverId}/frigate-config/revisions", wrapper.ListServerFrigateConfigRevisions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api/v1/servers/{serverId}/frigate-config/revisions/{revisionId}/rollback", wrapper.RollbackServerFrigateConfig)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/camera-folders", wrapper.ListCameraFolders)
@@ -8016,6 +8475,191 @@ func (response UpdateCameraFrigateConfig404JSONResponse) VisitUpdateCameraFrigat
 type UpdateCameraFrigateConfig502JSONResponse struct{ FrigateUnreachableJSONResponse }
 
 func (response UpdateCameraFrigateConfig502JSONResponse) VisitUpdateCameraFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCameraFrigateConfigFullRequestObject struct {
+	CameraId openapi_types.UUID `json:"cameraId"`
+}
+
+type GetCameraFrigateConfigFullResponseObject interface {
+	VisitGetCameraFrigateConfigFullResponse(w http.ResponseWriter) error
+}
+
+type GetCameraFrigateConfigFull200JSONResponse FrigateCameraConfigDoc
+
+func (response GetCameraFrigateConfigFull200JSONResponse) VisitGetCameraFrigateConfigFullResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCameraFrigateConfigFull401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetCameraFrigateConfigFull401JSONResponse) VisitGetCameraFrigateConfigFullResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCameraFrigateConfigFull403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetCameraFrigateConfigFull403JSONResponse) VisitGetCameraFrigateConfigFullResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCameraFrigateConfigFull404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetCameraFrigateConfigFull404JSONResponse) VisitGetCameraFrigateConfigFullResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetCameraFrigateConfigFull502JSONResponse struct{ FrigateUnreachableJSONResponse }
+
+func (response GetCameraFrigateConfigFull502JSONResponse) VisitGetCameraFrigateConfigFullResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchCameraFrigateConfigRequestObject struct {
+	CameraId openapi_types.UUID `json:"cameraId"`
+	Body     *PatchCameraFrigateConfigJSONRequestBody
+}
+
+type PatchCameraFrigateConfigResponseObject interface {
+	VisitPatchCameraFrigateConfigResponse(w http.ResponseWriter) error
+}
+
+type PatchCameraFrigateConfig200JSONResponse FrigatePatchResult
+
+func (response PatchCameraFrigateConfig200JSONResponse) VisitPatchCameraFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchCameraFrigateConfig400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PatchCameraFrigateConfig400JSONResponse) VisitPatchCameraFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchCameraFrigateConfig401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response PatchCameraFrigateConfig401JSONResponse) VisitPatchCameraFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchCameraFrigateConfig403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PatchCameraFrigateConfig403JSONResponse) VisitPatchCameraFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchCameraFrigateConfig404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PatchCameraFrigateConfig404JSONResponse) VisitPatchCameraFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchCameraFrigateConfig409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PatchCameraFrigateConfig409JSONResponse) VisitPatchCameraFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PatchCameraFrigateConfig502JSONResponse struct{ FrigateUnreachableJSONResponse }
+
+func (response PatchCameraFrigateConfig502JSONResponse) VisitPatchCameraFrigateConfigResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -11487,6 +12131,442 @@ func (response UpdateServer409JSONResponse) VisitUpdateServerResponse(w http.Res
 	return err
 }
 
+type GetServerFrigateConfigRawRequestObject struct {
+	ServerId openapi_types.UUID `json:"serverId"`
+}
+
+type GetServerFrigateConfigRawResponseObject interface {
+	VisitGetServerFrigateConfigRawResponse(w http.ResponseWriter) error
+}
+
+type GetServerFrigateConfigRaw200JSONResponse FrigateRawConfig
+
+func (response GetServerFrigateConfigRaw200JSONResponse) VisitGetServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerFrigateConfigRaw401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetServerFrigateConfigRaw401JSONResponse) VisitGetServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerFrigateConfigRaw403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetServerFrigateConfigRaw403JSONResponse) VisitGetServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerFrigateConfigRaw404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetServerFrigateConfigRaw404JSONResponse) VisitGetServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerFrigateConfigRaw502JSONResponse struct{ FrigateUnreachableJSONResponse }
+
+func (response GetServerFrigateConfigRaw502JSONResponse) VisitGetServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutServerFrigateConfigRawRequestObject struct {
+	ServerId openapi_types.UUID `json:"serverId"`
+	Params   PutServerFrigateConfigRawParams
+	Body     *PutServerFrigateConfigRawJSONRequestBody
+}
+
+type PutServerFrigateConfigRawResponseObject interface {
+	VisitPutServerFrigateConfigRawResponse(w http.ResponseWriter) error
+}
+
+type PutServerFrigateConfigRaw200JSONResponse FrigateRawSaveResult
+
+func (response PutServerFrigateConfigRaw200JSONResponse) VisitPutServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutServerFrigateConfigRaw400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response PutServerFrigateConfigRaw400JSONResponse) VisitPutServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutServerFrigateConfigRaw401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response PutServerFrigateConfigRaw401JSONResponse) VisitPutServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutServerFrigateConfigRaw403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutServerFrigateConfigRaw403JSONResponse) VisitPutServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutServerFrigateConfigRaw404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutServerFrigateConfigRaw404JSONResponse) VisitPutServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutServerFrigateConfigRaw409JSONResponse struct{ ConflictJSONResponse }
+
+func (response PutServerFrigateConfigRaw409JSONResponse) VisitPutServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutServerFrigateConfigRaw502JSONResponse struct{ FrigateUnreachableJSONResponse }
+
+func (response PutServerFrigateConfigRaw502JSONResponse) VisitPutServerFrigateConfigRawResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServerFrigateConfigRevisionsRequestObject struct {
+	ServerId openapi_types.UUID `json:"serverId"`
+	Params   ListServerFrigateConfigRevisionsParams
+}
+
+type ListServerFrigateConfigRevisionsResponseObject interface {
+	VisitListServerFrigateConfigRevisionsResponse(w http.ResponseWriter) error
+}
+
+type ListServerFrigateConfigRevisions200JSONResponse FrigateConfigRevisionList
+
+func (response ListServerFrigateConfigRevisions200JSONResponse) VisitListServerFrigateConfigRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServerFrigateConfigRevisions401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListServerFrigateConfigRevisions401JSONResponse) VisitListServerFrigateConfigRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServerFrigateConfigRevisions403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListServerFrigateConfigRevisions403JSONResponse) VisitListServerFrigateConfigRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListServerFrigateConfigRevisions404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListServerFrigateConfigRevisions404JSONResponse) VisitListServerFrigateConfigRevisionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackServerFrigateConfigRequestObject struct {
+	ServerId   openapi_types.UUID `json:"serverId"`
+	RevisionId openapi_types.UUID `json:"revisionId"`
+}
+
+type RollbackServerFrigateConfigResponseObject interface {
+	VisitRollbackServerFrigateConfigResponse(w http.ResponseWriter) error
+}
+
+type RollbackServerFrigateConfig200JSONResponse FrigateRawSaveResult
+
+func (response RollbackServerFrigateConfig200JSONResponse) VisitRollbackServerFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackServerFrigateConfig400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response RollbackServerFrigateConfig400JSONResponse) VisitRollbackServerFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackServerFrigateConfig401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response RollbackServerFrigateConfig401JSONResponse) VisitRollbackServerFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackServerFrigateConfig403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RollbackServerFrigateConfig403JSONResponse) VisitRollbackServerFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackServerFrigateConfig404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RollbackServerFrigateConfig404JSONResponse) VisitRollbackServerFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackServerFrigateConfig409JSONResponse struct{ ConflictJSONResponse }
+
+func (response RollbackServerFrigateConfig409JSONResponse) VisitRollbackServerFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RollbackServerFrigateConfig502JSONResponse struct{ FrigateUnreachableJSONResponse }
+
+func (response RollbackServerFrigateConfig502JSONResponse) VisitRollbackServerFrigateConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerFrigateConfigSchemaRequestObject struct {
+	ServerId openapi_types.UUID `json:"serverId"`
+}
+
+type GetServerFrigateConfigSchemaResponseObject interface {
+	VisitGetServerFrigateConfigSchemaResponse(w http.ResponseWriter) error
+}
+
+type GetServerFrigateConfigSchema200JSONResponse map[string]interface{}
+
+func (response GetServerFrigateConfigSchema200JSONResponse) VisitGetServerFrigateConfigSchemaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerFrigateConfigSchema401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetServerFrigateConfigSchema401JSONResponse) VisitGetServerFrigateConfigSchemaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerFrigateConfigSchema403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetServerFrigateConfigSchema403JSONResponse) VisitGetServerFrigateConfigSchemaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerFrigateConfigSchema404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetServerFrigateConfigSchema404JSONResponse) VisitGetServerFrigateConfigSchemaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerFrigateConfigSchema502JSONResponse struct{ FrigateUnreachableJSONResponse }
+
+func (response GetServerFrigateConfigSchema502JSONResponse) VisitGetServerFrigateConfigSchemaResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RestartServerRequestObject struct {
 	ServerId openapi_types.UUID `json:"serverId"`
 }
@@ -13136,6 +14216,12 @@ type StrictServerInterface interface {
 	// UpdateCameraFrigateConfig Update a camera's Frigate detection and analytics configuration
 	// (PATCH /api/v1/cameras/{cameraId}/config)
 	UpdateCameraFrigateConfig(ctx context.Context, request UpdateCameraFrigateConfigRequestObject) (UpdateCameraFrigateConfigResponseObject, error)
+	// GetCameraFrigateConfigFull Get the full effective Frigate configuration of a camera
+	// (GET /api/v1/cameras/{cameraId}/frigate-config)
+	GetCameraFrigateConfigFull(ctx context.Context, request GetCameraFrigateConfigFullRequestObject) (GetCameraFrigateConfigFullResponseObject, error)
+	// PatchCameraFrigateConfig Edit camera configuration sections on Frigate
+	// (PATCH /api/v1/cameras/{cameraId}/frigate-config)
+	PatchCameraFrigateConfig(ctx context.Context, request PatchCameraFrigateConfigRequestObject) (PatchCameraFrigateConfigResponseObject, error)
 	// ListCameraRecordings Recorded spans of a camera, read from its Frigate (recordings.seek)
 	// (GET /api/v1/cameras/{cameraId}/recordings)
 	ListCameraRecordings(ctx context.Context, request ListCameraRecordingsRequestObject) (ListCameraRecordingsResponseObject, error)
@@ -13301,6 +14387,21 @@ type StrictServerInterface interface {
 	// UpdateServer Rename, move or change the credentials of a server
 	// (PATCH /api/v1/servers/{serverId})
 	UpdateServer(ctx context.Context, request UpdateServerRequestObject) (UpdateServerResponseObject, error)
+	// GetServerFrigateConfigRaw Read Frigate's config.yml, secrets included
+	// (GET /api/v1/servers/{serverId}/frigate-config/raw)
+	GetServerFrigateConfigRaw(ctx context.Context, request GetServerFrigateConfigRawRequestObject) (GetServerFrigateConfigRawResponseObject, error)
+	// PutServerFrigateConfigRaw Validate and write Frigate's config.yml
+	// (PUT /api/v1/servers/{serverId}/frigate-config/raw)
+	PutServerFrigateConfigRaw(ctx context.Context, request PutServerFrigateConfigRawRequestObject) (PutServerFrigateConfigRawResponseObject, error)
+	// ListServerFrigateConfigRevisions List stored Frigate configuration revisions, newest first
+	// (GET /api/v1/servers/{serverId}/frigate-config/revisions)
+	ListServerFrigateConfigRevisions(ctx context.Context, request ListServerFrigateConfigRevisionsRequestObject) (ListServerFrigateConfigRevisionsResponseObject, error)
+	// RollbackServerFrigateConfig Restore the configuration a revision replaced
+	// (POST /api/v1/servers/{serverId}/frigate-config/revisions/{revisionId}/rollback)
+	RollbackServerFrigateConfig(ctx context.Context, request RollbackServerFrigateConfigRequestObject) (RollbackServerFrigateConfigResponseObject, error)
+	// GetServerFrigateConfigSchema Frigate's JSON schema for a camera configuration
+	// (GET /api/v1/servers/{serverId}/frigate-config/schema)
+	GetServerFrigateConfigSchema(ctx context.Context, request GetServerFrigateConfigSchemaRequestObject) (GetServerFrigateConfigSchemaResponseObject, error)
 	// RestartServer Restart the Frigate server
 	// (POST /api/v1/servers/{serverId}/restart)
 	RestartServer(ctx context.Context, request RestartServerRequestObject) (RestartServerResponseObject, error)
@@ -14117,6 +15218,65 @@ func (sh *strictHandler) UpdateCameraFrigateConfig(w http.ResponseWriter, r *htt
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(UpdateCameraFrigateConfigResponseObject); ok {
 		if err := validResponse.VisitUpdateCameraFrigateConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetCameraFrigateConfigFull operation middleware
+func (sh *strictHandler) GetCameraFrigateConfigFull(w http.ResponseWriter, r *http.Request, cameraId openapi_types.UUID) {
+	var request GetCameraFrigateConfigFullRequestObject
+
+	request.CameraId = cameraId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetCameraFrigateConfigFull(ctx, request.(GetCameraFrigateConfigFullRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetCameraFrigateConfigFull")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetCameraFrigateConfigFullResponseObject); ok {
+		if err := validResponse.VisitGetCameraFrigateConfigFullResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PatchCameraFrigateConfig operation middleware
+func (sh *strictHandler) PatchCameraFrigateConfig(w http.ResponseWriter, r *http.Request, cameraId openapi_types.UUID) {
+	var request PatchCameraFrigateConfigRequestObject
+
+	request.CameraId = cameraId
+
+	var body PatchCameraFrigateConfigJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PatchCameraFrigateConfig(ctx, request.(PatchCameraFrigateConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PatchCameraFrigateConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PatchCameraFrigateConfigResponseObject); ok {
+		if err := validResponse.VisitPatchCameraFrigateConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -15629,6 +16789,146 @@ func (sh *strictHandler) UpdateServer(w http.ResponseWriter, r *http.Request, se
 	}
 }
 
+// GetServerFrigateConfigRaw operation middleware
+func (sh *strictHandler) GetServerFrigateConfigRaw(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+	var request GetServerFrigateConfigRawRequestObject
+
+	request.ServerId = serverId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetServerFrigateConfigRaw(ctx, request.(GetServerFrigateConfigRawRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetServerFrigateConfigRaw")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetServerFrigateConfigRawResponseObject); ok {
+		if err := validResponse.VisitGetServerFrigateConfigRawResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutServerFrigateConfigRaw operation middleware
+func (sh *strictHandler) PutServerFrigateConfigRaw(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, params PutServerFrigateConfigRawParams) {
+	var request PutServerFrigateConfigRawRequestObject
+
+	request.ServerId = serverId
+	request.Params = params
+
+	var body PutServerFrigateConfigRawJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutServerFrigateConfigRaw(ctx, request.(PutServerFrigateConfigRawRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutServerFrigateConfigRaw")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutServerFrigateConfigRawResponseObject); ok {
+		if err := validResponse.VisitPutServerFrigateConfigRawResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListServerFrigateConfigRevisions operation middleware
+func (sh *strictHandler) ListServerFrigateConfigRevisions(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, params ListServerFrigateConfigRevisionsParams) {
+	var request ListServerFrigateConfigRevisionsRequestObject
+
+	request.ServerId = serverId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListServerFrigateConfigRevisions(ctx, request.(ListServerFrigateConfigRevisionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListServerFrigateConfigRevisions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListServerFrigateConfigRevisionsResponseObject); ok {
+		if err := validResponse.VisitListServerFrigateConfigRevisionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RollbackServerFrigateConfig operation middleware
+func (sh *strictHandler) RollbackServerFrigateConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, revisionId openapi_types.UUID) {
+	var request RollbackServerFrigateConfigRequestObject
+
+	request.ServerId = serverId
+	request.RevisionId = revisionId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RollbackServerFrigateConfig(ctx, request.(RollbackServerFrigateConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RollbackServerFrigateConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RollbackServerFrigateConfigResponseObject); ok {
+		if err := validResponse.VisitRollbackServerFrigateConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetServerFrigateConfigSchema operation middleware
+func (sh *strictHandler) GetServerFrigateConfigSchema(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+	var request GetServerFrigateConfigSchemaRequestObject
+
+	request.ServerId = serverId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetServerFrigateConfigSchema(ctx, request.(GetServerFrigateConfigSchemaRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetServerFrigateConfigSchema")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetServerFrigateConfigSchemaResponseObject); ok {
+		if err := validResponse.VisitGetServerFrigateConfigSchemaResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // RestartServer operation middleware
 func (sh *strictHandler) RestartServer(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
 	var request RestartServerRequestObject
@@ -16348,261 +17648,284 @@ func (sh *strictHandler) GetReadiness(w http.ResponseWriter, r *http.Request) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"dGoIovybL/yW/1AtmVjzoKiX+/Xz1/8/AAD//w==",
+	"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",
+	"2qXllhVM5BX0y60uskNPOFDf29N+8NQqwRZvBkASORkwEUxJ+zRujK5GBntXlDM8SB9Mc6BZCvtPiZww",
+	"Y+njEiCrVVUtakasj6xfGvGlAU/W1HQ0z0d1cTHJBUtYhntOD8bAryBh1NWwNKAslP7nN3rw59HBj5/8",
+	"vwefbh52f3j05T+W2+l2ugV633u9rU7Ry/vzT/wN9VJn8Jba3WPLjkbP0AuL6xj4jYWNXJAWuqhyDWXK",
+	"s96wL5E2lszYZt5xLtGLnwvjILjeKFssHNXO026Rq6Hq/w6LTa3jQ1/fH95crKrwYdcLVNWwsrFeVbWj",
+	"/CqWrgV5k6W7rJdqM8UufXNLFNuEgLMCKlI4v5HO31qhgU3OEKnqdK5nCH2ZK+1omXVfn7uinlW8SA+0",
+	"V8F6BBe3V2A9TSdMMG0UNVLpfb/sGlG0qo/Zrojhd3URc3zw/zjp0uv/98Gn/1wuW4pZmhCxqZP43TX1",
+	"nmCj8s0RdT3zYAe8a61m4RUorM5dFrUKX7m987rnsay3+DYcdauR8nKybHdd54A8X9uVYmsIJ2WCKHFq",
+	"AVaRdQZxzDSwwzX29XZj9SdDGrsnskaCDoXapMDedEYqssetuYO1qBqaUm7atvtrETyrCJoz0K6WXaWs",
+	"KhUpSbjUHoyWY+JFHmZGry1x9CrY0S5L5INvgLqFXtSVDiWxBih4jzKhU+LAbc1o5wH1Des30LWnMl9a",
+	"3tpu9JV7cxEfdwZ1y5nr1vf8pvH5A008VaCV22tVh2JMG8vI33UTrQJCZZCaW21xErWeLquIGXtGJ8Aj",
+	"wQXHxDAOPfLRN90sokoJw57AWPsoUohwpShc33Wopnh2dD6o1g3G/00oEyvQV5PDaQO8XdX5UODTco16",
+	"gSwsIgjamWyt3OAeCk3o8KoA0szJAo91cn3HOOAtrsI85BGRKnW6c6uw1gIBa6qGVZ/nyzTxfCJ0rQLk",
+	"PxdXf5xrwO1G6Pq9xCDwcUyNPs6yX88iMpwa2uSvJOg2jCpQbAINLvDZEt3hza6batH6zsvqkHFn2Xwc",
+	"wzjqFjyliF/Vcpel/zrUlmSaXEt16bIiFwjJmYp51fKU7iWyd/7u7enp82ddcv7u+Ozdyzc/d8n5yfGb",
+	"/q9n/ZO3z553yce3Z//Gn18cv3z1/Nm+FVtv3r7rv3j7/s2zXme1fvmfYo2eNCS5YmZ6bnHQ36cBVaCO",
+	"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",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,
