@@ -28,7 +28,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-B5 — normalized realtime envelope, camera status publisher (track B) (`23fea3e`)
 - [x] M-B6 — client hello/filters, resume buffer, coalescing, batching (track B) (`84c17c4`)
 - [x] M-B7 — alarm lifecycle migration 00023 + Alarms inbox labels (track C) (`a3ca385`)
-- [ ] M-W1 — MapLibre route, canvas, theme styles, tile provider (PMTiles)
+- [x] M-W1 — MapLibre route, canvas, theme styles, tile provider (PMTiles) (`12b6ce0`)
 - [ ] M-W2 — camera layers, clustering w/ badges, status icons, semantic zoom
 - [ ] M-W3 — FOV cones, selection, breadcrumb, deep links
 - [ ] M-W4 — realtime store, pulse/ripple, animation budget
@@ -51,6 +51,7 @@ ask-on-risk; push/PR are PO decisions.
 - 2026-09-30: M-B5 completed (`23fea3e`: realtime v2 envelope with ID/TS/site_id/camera_id/server_id, JetStream sequence plumbing in Source/Feed, camera.status_changed decoder, HealthPoller per-camera diff computation, and NATS publisher).
 - 2026-09-30: M-B6 completed (`84c17c4`: client control frames hello/filter, 5-min ring buffer resume + resync, camera status coalescing 500ms, server-offline 30s suppression, batch frame delivery >50 queued, and unit tests).
 - 2026-09-30: M-B7 completed (`a3ca385`: migration 00023 alarm lifecycle transitions table + 6 status enum, OpenAPI transitions & active filter group, backend service validation & audit logging, web Alarms inbox badges & filter tabs).
+- 2026-09-30: M-W1 completed (`12b6ce0`: maplibre-gl and pmtiles dependencies, lazy /maps route with search params, MapShell with HierarchyBreadcrumb and MapToolbar, MapCanvas wrapper, MapStyleController theme tokens with raster dark fallback and PMTiles protocol, navigation item behind maps feature flag, and full unit test coverage).
 
 
 
