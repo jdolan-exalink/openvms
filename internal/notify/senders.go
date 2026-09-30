@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -50,6 +51,10 @@ type Deps struct {
 	TelegramBaseURL string
 	// DialContext dials SMTP servers; defaults to the guarded dialer.
 	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
+	// SMTPTLSConfig is a test seam: when set, its RootCAs (and only that) replace the system
+	// roots when verifying SMTP servers. ServerName, MinVersion and certificate verification
+	// are always enforced by the sender. Production leaves it nil.
+	SMTPTLSConfig *tls.Config
 }
 
 const (
@@ -130,7 +135,7 @@ func NewSender(t Type, cfg Config, sec Secrets, d Deps) (Sender, error) {
 		if dial == nil {
 			dial = guardedDialer().DialContext
 		}
-		return &emailSender{cfg: cfg, password: sec.SMTPPassword, dial: dial}, nil
+		return &emailSender{cfg: cfg, password: sec.SMTPPassword, dial: dial, roots: rootCAs(d.SMTPTLSConfig)}, nil
 	}
 	return nil, fmt.Errorf("unsupported channel type %q", t)
 }
@@ -284,6 +289,19 @@ type emailSender struct {
 	cfg      Config
 	password string
 	dial     func(ctx context.Context, network, addr string) (net.Conn, error)
+	roots    *x509.CertPool // nil: system roots
+}
+
+func rootCAs(c *tls.Config) *x509.CertPool {
+	if c == nil {
+		return nil
+	}
+	return c.RootCAs
+}
+
+// tlsConfig always verifies the server certificate against its host name.
+func (s *emailSender) tlsConfig() *tls.Config {
+	return &tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12, RootCAs: s.roots}
 }
 
 func oneLine(s string) string { return strings.Join(strings.Fields(s), " ") }
@@ -305,7 +323,7 @@ func (s *emailSender) Send(ctx context.Context, m Message, dest string) error {
 	}
 	_ = conn.SetDeadline(deadline)
 	if s.cfg.TLS == "tls" {
-		conn = tls.Client(conn, &tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12})
+		conn = tls.Client(conn, s.tlsConfig())
 	}
 	c, err := smtp.NewClient(conn, s.cfg.Host)
 	if err != nil {
@@ -317,7 +335,7 @@ func (s *emailSender) Send(ctx context.Context, m Message, dest string) error {
 		if ok, _ := c.Extension("STARTTLS"); !ok {
 			return permanent(errors.New("server does not support STARTTLS"))
 		}
-		if err := c.StartTLS(&tls.Config{ServerName: s.cfg.Host, MinVersion: tls.VersionTLS12}); err != nil {
+		if err := c.StartTLS(s.tlsConfig()); err != nil {
 			return smtpError(err)
 		}
 	}

@@ -3,12 +3,19 @@ package notify
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -209,11 +216,15 @@ func TestTelegramSenderAPIErrorIsPermanentWhenForbidden(t *testing.T) {
 
 // fakeSMTP is a minimal SMTP server that records the envelope and the message.
 type fakeSMTP struct {
-	ln   net.Listener
-	mu   sync.Mutex
-	from string
-	rcpt []string
-	data string
+	ln       net.Listener
+	tlsCfg   *tls.Config // server certificate; nil for a plaintext-only server
+	implicit bool        // wrap the connection in TLS right after accept
+	startTLS bool        // advertise and accept STARTTLS
+	mu       sync.Mutex
+	secure   bool // the message was received over TLS
+	from     string
+	rcpt     []string
+	data     string
 }
 
 func newFakeSMTP(t *testing.T) *fakeSMTP {
@@ -230,6 +241,9 @@ func newFakeSMTP(t *testing.T) *fakeSMTP {
 			if err != nil {
 				return
 			}
+			if f.implicit {
+				c = tls.Server(c, f.tlsCfg)
+			}
 			go f.serve(c)
 		}
 	}()
@@ -239,9 +253,10 @@ func newFakeSMTP(t *testing.T) *fakeSMTP {
 func (f *fakeSMTP) port() int { return f.ln.Addr().(*net.TCPAddr).Port }
 
 func (f *fakeSMTP) serve(c net.Conn) {
-	defer c.Close()
+	defer func() { c.Close() }()
 	r := bufio.NewReader(c)
 	w := func(s string) { _, _ = c.Write([]byte(s + "\r\n")) }
+	_, secure := c.(*tls.Conn)
 	w("220 fake ESMTP")
 	for {
 		line, err := r.ReadString('\n')
@@ -251,8 +266,18 @@ func (f *fakeSMTP) serve(c net.Conn) {
 		line = strings.TrimRight(line, "\r\n")
 		up := strings.ToUpper(line)
 		switch {
+		case strings.HasPrefix(up, "EHLO") && f.startTLS && !secure:
+			w("250-fake")
+			w("250 STARTTLS")
 		case strings.HasPrefix(up, "EHLO"), strings.HasPrefix(up, "HELO"):
 			w("250 fake")
+		case up == "STARTTLS" && f.startTLS && !secure:
+			w("220 ready")
+			tc := tls.Server(c, f.tlsCfg)
+			if tc.Handshake() != nil {
+				return
+			}
+			c, r, secure = tc, bufio.NewReader(tc), true
 		case strings.HasPrefix(up, "MAIL FROM:"):
 			f.mu.Lock()
 			f.from = line[len("MAIL FROM:"):]
@@ -278,6 +303,7 @@ func (f *fakeSMTP) serve(c net.Conn) {
 			}
 			f.mu.Lock()
 			f.data = sb.String()
+			f.secure = secure
 			f.mu.Unlock()
 			w("250 queued")
 		case up == "QUIT":
@@ -333,5 +359,120 @@ func TestEmailSubjectCannotInjectHeaders(t *testing.T) {
 	defer f.mu.Unlock()
 	if strings.Contains(f.data, "\r\nBcc:") {
 		t.Errorf("header injection succeeded:\n%s", f.data)
+	}
+}
+
+// selfSignedCert returns a server certificate valid for 127.0.0.1 and the pool that trusts it.
+func selfSignedCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "fake smtp"},
+		NotBefore: time.Now().Add(-time.Hour), NotAfter: time.Now().Add(time.Hour),
+		KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1")}, BasicConstraintsValid: true, IsCA: true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tpl, tpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	pool.AddCert(leaf)
+	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key}, pool
+}
+
+func newTLSFakeSMTP(t *testing.T, implicit bool) (*fakeSMTP, *x509.CertPool) {
+	t.Helper()
+	cert, pool := selfSignedCert(t)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeSMTP{ln: ln, tlsCfg: &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}, implicit: implicit, startTLS: !implicit}
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			if f.implicit {
+				c = tls.Server(c, f.tlsCfg)
+			}
+			go f.serve(c)
+		}
+	}()
+	return f, pool
+}
+
+func tlsEmailSender(t *testing.T, f *fakeSMTP, mode string, roots *x509.CertPool) Sender {
+	t.Helper()
+	cfg := Config{Host: "127.0.0.1", Port: f.port(), TLS: mode, From: "vms@example.com", Recipients: []string{"ops@example.com"}}
+	d := testDeps("")
+	if roots != nil {
+		d.SMTPTLSConfig = &tls.Config{RootCAs: roots}
+	}
+	s, err := NewSender(TypeEmail, cfg, Secrets{}, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func TestEmailSenderTLSModes(t *testing.T) {
+	for _, tc := range []struct {
+		mode     string
+		implicit bool
+	}{{"starttls", false}, {"tls", true}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			f, pool := newTLSFakeSMTP(t, tc.implicit)
+			s := tlsEmailSender(t, f, tc.mode, pool)
+			if err := s.Send(context.Background(), testMessage(), "ops@example.com"); err != nil {
+				t.Fatalf("send: %v", err)
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if !f.secure || !strings.Contains(f.data, "To: ops@example.com") {
+				t.Errorf("secure=%v data=%q", f.secure, f.data)
+			}
+		})
+	}
+}
+
+// The test seam only swaps root CAs: without them a self-signed server must be refused.
+func TestEmailSenderTLSRejectsUntrustedCertificate(t *testing.T) {
+	for _, tc := range []struct {
+		mode     string
+		implicit bool
+	}{{"starttls", false}, {"tls", true}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			f, _ := newTLSFakeSMTP(t, tc.implicit)
+			s := tlsEmailSender(t, f, tc.mode, nil)
+			err := s.Send(context.Background(), testMessage(), "ops@example.com")
+			if err == nil || !strings.Contains(err.Error(), "certificate") {
+				t.Fatalf("err = %v, want a certificate verification error", err)
+			}
+			f.mu.Lock()
+			defer f.mu.Unlock()
+			if f.data != "" {
+				t.Error("message was delivered despite an untrusted certificate")
+			}
+		})
+	}
+}
+
+func TestEmailSenderStartTLSUnsupportedIsPermanent(t *testing.T) {
+	f := newFakeSMTP(t) // plaintext server, no STARTTLS extension
+	s := tlsEmailSender(t, f, "starttls", nil)
+	err := s.Send(context.Background(), testMessage(), "ops@example.com")
+	if err == nil || !IsPermanent(err) || !strings.Contains(err.Error(), "STARTTLS") {
+		t.Fatalf("err = %v", err)
 	}
 }
