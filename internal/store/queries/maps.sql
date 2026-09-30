@@ -29,7 +29,7 @@ RETURNING id, tenant_id, name, lat, lng, default_zoom, region_id, updated_at;
 -- name: GetSiteGeo :one
 SELECT id, tenant_id, name, lat, lng, default_zoom, region_id
 FROM sites
-WHERE id = @id AND tenant_id = @tenant_id AND deleted_at IS NULL;
+WHERE id = @id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')) AND deleted_at IS NULL;
 
 -- name: ListSitesGeo :many
 SELECT id, tenant_id, name, lat, lng, default_zoom, region_id
@@ -39,7 +39,7 @@ ORDER BY name ASC;
 
 -- name: ListMapBuildingsBySite :many
 SELECT * FROM map_buildings
-WHERE site_id = @site_id AND tenant_id = @tenant_id AND deleted_at IS NULL
+WHERE site_id = @site_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')) AND deleted_at IS NULL
 ORDER BY name ASC;
 
 -- name: GetMapBuilding :one
@@ -215,7 +215,7 @@ ORDER BY c.display_name ASC;
 
 -- name: ListMapZonesBySite :many
 SELECT * FROM map_zones
-WHERE site_id = @site_id AND tenant_id = @tenant_id AND deleted_at IS NULL
+WHERE site_id = @site_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')) AND deleted_at IS NULL
 ORDER BY name ASC;
 
 -- name: GetMapZone :one
@@ -285,3 +285,97 @@ VALUES (@user_id, @tenant_id, @prefs, now())
 ON CONFLICT (user_id)
 DO UPDATE SET prefs = EXCLUDED.prefs, tenant_id = EXCLUDED.tenant_id, updated_at = now()
 RETURNING *;
+
+-- name: ListMapSiteOverviews :many
+SELECT
+    s.id,
+    s.tenant_id,
+    s.name,
+    s.lat,
+    s.lng,
+    s.default_zoom,
+    s.region_id,
+    r.name AS region_name,
+    coalesce(count(DISTINCT c.id) FILTER (WHERE c.deleted_at IS NULL), 0)::int AS camera_count,
+    coalesce(count(DISTINCT c.id) FILTER (WHERE c.deleted_at IS NULL AND c.status = 'online'), 0)::int AS online_cameras,
+    coalesce(count(DISTINCT c.id) FILTER (WHERE c.deleted_at IS NULL AND c.status = 'offline'), 0)::int AS offline_cameras,
+    coalesce(count(DISTINCT c.id) FILTER (WHERE c.deleted_at IS NULL AND c.status = 'degraded'), 0)::int AS degraded_cameras,
+    coalesce(count(DISTINCT a.id) FILTER (WHERE a.status = ANY(ARRAY['open', 'acknowledged', 'assigned', 'investigating'])), 0)::int AS alarm_count
+FROM sites s
+LEFT JOIN map_regions r ON r.id = s.region_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR r.tenant_id = s.tenant_id)
+LEFT JOIN cameras c ON c.site_id = s.id AND (sqlc.narg('tenant_id')::uuid IS NULL OR c.tenant_id = s.tenant_id) AND (sqlc.narg('camera_ids')::uuid[] IS NULL OR c.id = ANY(sqlc.narg('camera_ids')::uuid[]))
+LEFT JOIN alarms a ON a.site_id = s.id AND (sqlc.narg('tenant_id')::uuid IS NULL OR a.tenant_id = s.tenant_id) AND (sqlc.narg('camera_ids')::uuid[] IS NULL OR a.camera_id = ANY(sqlc.narg('camera_ids')::uuid[]))
+WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR s.tenant_id = sqlc.narg('tenant_id'))
+  AND s.deleted_at IS NULL
+  AND s.id = ANY(@site_ids::uuid[])
+GROUP BY s.id, s.tenant_id, s.name, s.lat, s.lng, s.default_zoom, s.region_id, r.name
+ORDER BY s.name ASC;
+
+-- name: ListMapFloorsBySite :many
+SELECT f.*
+FROM map_floors f
+JOIN map_buildings b ON b.id = f.building_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR b.tenant_id = f.tenant_id)
+WHERE b.site_id = @site_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR f.tenant_id = sqlc.narg('tenant_id')) AND f.deleted_at IS NULL AND b.deleted_at IS NULL
+ORDER BY f.building_id ASC, f.ordinal ASC;
+
+-- name: GetMapSiteRevision :one
+SELECT coalesce(max(revision), 0)::bigint AS revision
+FROM map_placements
+WHERE site_id = @site_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id'));
+
+-- name: ListMapPlacementsDetailed :many
+SELECT
+    p.id,
+    p.tenant_id,
+    p.site_id,
+    p.entity_type,
+    p.entity_id,
+    p.floor_id,
+    p.lat,
+    p.lng,
+    p.x,
+    p.y,
+    p.bearing_deg,
+    p.fov_deg,
+    p.range_m,
+    p.props,
+    p.revision,
+    c.display_name AS camera_name,
+    c.server_id AS camera_server_id,
+    c.status AS camera_status,
+    c.lpr AS camera_lpr,
+    fs.name AS server_name,
+    fs.status AS server_status,
+    md.name AS device_name,
+    md.kind AS device_kind,
+    md.status AS device_status,
+    coalesce(
+        CASE WHEN p.entity_type = 'camera' THEN
+            (SELECT count(*)::int
+             FROM alarms a
+             WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR a.tenant_id = p.tenant_id)
+               AND a.site_id = p.site_id
+               AND a.camera_id = p.entity_id
+               AND a.status = ANY(ARRAY['open', 'acknowledged', 'assigned', 'investigating']))
+        ELSE 0 END,
+        0
+    )::int AS alarm_count
+FROM map_placements p
+LEFT JOIN cameras c ON c.id = p.entity_id AND p.entity_type = 'camera' AND (sqlc.narg('tenant_id')::uuid IS NULL OR c.tenant_id = p.tenant_id) AND c.deleted_at IS NULL
+LEFT JOIN frigate_servers fs ON fs.id = p.entity_id AND p.entity_type = 'server' AND (sqlc.narg('tenant_id')::uuid IS NULL OR fs.tenant_id = p.tenant_id) AND fs.deleted_at IS NULL
+LEFT JOIN map_devices md ON md.id = p.entity_id AND p.entity_type = 'device' AND (sqlc.narg('tenant_id')::uuid IS NULL OR md.tenant_id = p.tenant_id) AND md.deleted_at IS NULL
+WHERE p.site_id = @site_id
+  AND (sqlc.narg('tenant_id')::uuid IS NULL OR p.tenant_id = sqlc.narg('tenant_id'))
+  AND (sqlc.narg('floor_id')::uuid IS NULL OR p.floor_id = sqlc.narg('floor_id'))
+  AND (sqlc.narg('is_geo')::boolean IS NULL OR (sqlc.narg('is_geo') = true AND p.floor_id IS NULL) OR (sqlc.narg('is_geo') = false AND p.floor_id IS NOT NULL))
+  AND (
+      sqlc.narg('min_lat')::double precision IS NULL
+      OR (p.lat >= sqlc.narg('min_lat') AND p.lat <= sqlc.narg('max_lat') AND p.lng >= sqlc.narg('min_lng') AND p.lng <= sqlc.narg('max_lng'))
+  )
+  AND (
+      (p.entity_type = 'camera' AND c.id IS NOT NULL)
+      OR (p.entity_type = 'server' AND fs.id IS NOT NULL)
+      OR (p.entity_type = 'device' AND md.id IS NOT NULL)
+  )
+ORDER BY p.revision ASC;
+

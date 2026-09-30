@@ -2227,7 +2227,107 @@ paths:
                 required: [count]
                 properties:
                   count: { type: integer }
+  /api/v1/maps/config:
+    get:
+      tags: [maps]
+      operationId: getMapConfig
+      summary: Map configuration
+      description: Tile provider, style URLs, attribution, offline flag, and limits.
+      responses:
+        "200":
+          description: Map configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapConfig"
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/maps/overview:
+    get:
+      tags: [maps]
+      operationId: getMapOverview
+      summary: Sites map overview
+      description: Geo positions and health/alarm aggregates for sites the caller can view.
+      responses:
+        "200":
+          description: Sites overview list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapSiteOverviewList"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/maps/sites/{siteId}:
+    get:
+      tags: [maps]
+      operationId: getMapSite
+      summary: Site map details
+      description: Bounds, buildings, floors, and zones for the site.
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Site map details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapSiteDetails"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/maps/sites/{siteId}/entities:
+    get:
+      tags: [maps]
+      operationId: getMapSiteEntities
+      summary: Placed entities for site
+      description: Compact placed entities (cameras, servers, devices) with status and alarm counts.
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: floor_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: is_geo
+          in: query
+          schema: { type: boolean }
+        - name: min_lat
+          in: query
+          schema: { type: number, format: double }
+        - name: min_lng
+          in: query
+          schema: { type: number, format: double }
+        - name: max_lat
+          in: query
+          schema: { type: number, format: double }
+        - name: max_lng
+          in: query
+          schema: { type: number, format: double }
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+      responses:
+        "200":
+          description: Compact placed entities
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapEntitiesResponse"
+        "304":
+          description: Entities have not changed since If-None-Match revision
+          headers:
+            ETag:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 components:
   securitySchemes:
     bearerAuth:
@@ -3401,3 +3501,154 @@ components:
       properties:
         mimetype: { type: string }
         data: { type: string, description: Base64 image }
+    MapProviderConfig:
+      type: object
+      required: [id, kind, attribution, max_zoom, offline]
+      properties:
+        id: { type: string, example: "protomaps-local" }
+        kind: { type: string, enum: [vector-style, pmtiles, raster] }
+        style_url_light: { type: string, nullable: true }
+        style_url_dark: { type: string, nullable: true }
+        tiles:
+          type: array
+          items: { type: string }
+          nullable: true
+        attribution: { type: string, example: "© OpenStreetMap contributors" }
+        max_zoom: { type: integer, example: 18 }
+        offline: { type: boolean }
+    MapDefaultCenter:
+      type: object
+      required: [lat, lng]
+      properties:
+        lat: { type: number, format: double }
+        lng: { type: number, format: double }
+    MapConfig:
+      type: object
+      required: [provider, default_center, default_zoom]
+      properties:
+        provider: { $ref: "#/components/schemas/MapProviderConfig" }
+        default_center: { $ref: "#/components/schemas/MapDefaultCenter" }
+        default_zoom: { type: integer, example: 2 }
+    MapSiteOverview:
+      type: object
+      required: [id, name, camera_count, online_cameras, offline_cameras, degraded_cameras, alarm_count]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        lat: { type: number, format: double, nullable: true }
+        lng: { type: number, format: double, nullable: true }
+        default_zoom: { type: number, format: float, nullable: true }
+        region_id: { type: string, format: uuid, nullable: true }
+        region_name: { type: string, nullable: true }
+        camera_count: { type: integer }
+        online_cameras: { type: integer }
+        offline_cameras: { type: integer }
+        degraded_cameras: { type: integer }
+        alarm_count: { type: integer }
+    MapSiteOverviewList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/MapSiteOverview" }
+    MapFloor:
+      type: object
+      required: [id, building_id, name, ordinal]
+      properties:
+        id: { type: string, format: uuid }
+        building_id: { type: string, format: uuid }
+        name: { type: string }
+        ordinal: { type: integer }
+        plan_key: { type: string, nullable: true }
+        plan_content_type: { type: string, nullable: true }
+        plan_width_px: { type: integer, nullable: true }
+        plan_height_px: { type: integer, nullable: true }
+        georef: { type: object, nullable: true }
+    MapBuilding:
+      type: object
+      required: [id, site_id, name, floors]
+      properties:
+        id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        name: { type: string }
+        footprint: { type: object, nullable: true }
+        lat: { type: number, format: double, nullable: true }
+        lng: { type: number, format: double, nullable: true }
+        floors:
+          type: array
+          items: { $ref: "#/components/schemas/MapFloor" }
+    MapZone:
+      type: object
+      required: [id, site_id, name, kind, geometry]
+      properties:
+        id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        floor_id: { type: string, format: uuid, nullable: true }
+        name: { type: string }
+        kind: { type: string, enum: [security, perimeter, warning, custom] }
+        geometry: { type: object }
+        min_lat: { type: number, format: double, nullable: true }
+        min_lng: { type: number, format: double, nullable: true }
+        max_lat: { type: number, format: double, nullable: true }
+        max_lng: { type: number, format: double, nullable: true }
+        style: { type: object, nullable: true }
+        metadata: { type: object, nullable: true }
+    MapSiteDetails:
+      type: object
+      required: [id, name, buildings, zones]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        lat: { type: number, format: double, nullable: true }
+        lng: { type: number, format: double, nullable: true }
+        default_zoom: { type: number, format: float, nullable: true }
+        region_id: { type: string, format: uuid, nullable: true }
+        buildings:
+          type: array
+          items: { $ref: "#/components/schemas/MapBuilding" }
+        zones:
+          type: array
+          items: { $ref: "#/components/schemas/MapZone" }
+    MapPosition:
+      type: object
+      required: [k]
+      properties:
+        k: { type: string, enum: [geo, floor] }
+        lat: { type: number, format: double, nullable: true }
+        lng: { type: number, format: double, nullable: true }
+        floor_id: { type: string, format: uuid, nullable: true }
+        x: { type: number, format: float, nullable: true }
+        y: { type: number, format: float, nullable: true }
+    MapCameraProps:
+      type: object
+      required: [bearing, fov, range, type, ptz, lpr]
+      properties:
+        bearing: { type: number, format: float }
+        fov: { type: number, format: float }
+        range: { type: number, format: float }
+        type: { type: string }
+        ptz: { type: boolean }
+        lpr: { type: boolean }
+    MapEntity:
+      type: object
+      required: [id, t, site, name, pos, st, alarms]
+      properties:
+        id: { type: string, format: uuid }
+        t: { type: string, enum: [camera, server, device] }
+        site: { type: string, format: uuid }
+        srv: { type: string, format: uuid, nullable: true }
+        name: { type: string }
+        pos: { $ref: "#/components/schemas/MapPosition" }
+        cam: { $ref: "#/components/schemas/MapCameraProps", nullable: true }
+        st: { type: string, enum: [online, offline, degraded, unknown] }
+        alarms: { type: integer }
+    MapEntitiesResponse:
+      type: object
+      required: [revision, entities]
+      properties:
+        revision: { type: integer, format: int64 }
+        entities:
+          type: array
+          items: { $ref: "#/components/schemas/MapEntity" }
+

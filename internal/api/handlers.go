@@ -13,6 +13,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/health"
 	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/maps"
 	"github.com/jdolan-exalink/openvms/internal/media"
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
@@ -33,6 +34,7 @@ type Handlers struct {
 	Search        *search.Service
 	Rules         *rules.Service
 	Notify        *notify.Service
+	Maps          *maps.Service
 	Features      config.Features
 	Log           *slog.Logger
 	Checks        []health.Check

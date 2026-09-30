@@ -557,6 +557,24 @@ func (q *Queries) GetMapRegion(ctx context.Context, arg GetMapRegionParams) (Map
 	return i, err
 }
 
+const getMapSiteRevision = `-- name: GetMapSiteRevision :one
+SELECT coalesce(max(revision), 0)::bigint AS revision
+FROM map_placements
+WHERE site_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)
+`
+
+type GetMapSiteRevisionParams struct {
+	SiteID   uuid.UUID
+	TenantID *uuid.UUID
+}
+
+func (q *Queries) GetMapSiteRevision(ctx context.Context, arg GetMapSiteRevisionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getMapSiteRevision, arg.SiteID, arg.TenantID)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}
+
 const getMapUserPrefs = `-- name: GetMapUserPrefs :one
 SELECT user_id, tenant_id, prefs, updated_at FROM map_user_prefs
 WHERE user_id = $1
@@ -642,12 +660,12 @@ func (q *Queries) GetMapZone(ctx context.Context, arg GetMapZoneParams) (MapZone
 const getSiteGeo = `-- name: GetSiteGeo :one
 SELECT id, tenant_id, name, lat, lng, default_zoom, region_id
 FROM sites
-WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+WHERE id = $1 AND ($2::uuid IS NULL OR tenant_id = $2) AND deleted_at IS NULL
 `
 
 type GetSiteGeoParams struct {
 	ID       uuid.UUID
-	TenantID uuid.UUID
+	TenantID *uuid.UUID
 }
 
 type GetSiteGeoRow struct {
@@ -677,13 +695,13 @@ func (q *Queries) GetSiteGeo(ctx context.Context, arg GetSiteGeoParams) (GetSite
 
 const listMapBuildingsBySite = `-- name: ListMapBuildingsBySite :many
 SELECT id, tenant_id, site_id, name, footprint, lat, lng, revision, created_at, updated_at, deleted_at FROM map_buildings
-WHERE site_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+WHERE site_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2) AND deleted_at IS NULL
 ORDER BY name ASC
 `
 
 type ListMapBuildingsBySiteParams struct {
 	SiteID   uuid.UUID
-	TenantID uuid.UUID
+	TenantID *uuid.UUID
 }
 
 func (q *Queries) ListMapBuildingsBySite(ctx context.Context, arg ListMapBuildingsBySiteParams) ([]MapBuilding, error) {
@@ -773,6 +791,54 @@ type ListMapFloorsByBuildingParams struct {
 
 func (q *Queries) ListMapFloorsByBuilding(ctx context.Context, arg ListMapFloorsByBuildingParams) ([]MapFloor, error) {
 	rows, err := q.db.Query(ctx, listMapFloorsByBuilding, arg.BuildingID, arg.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MapFloor{}
+	for rows.Next() {
+		var i MapFloor
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.BuildingID,
+			&i.Name,
+			&i.Ordinal,
+			&i.PlanKey,
+			&i.PlanContentType,
+			&i.PlanWidthPx,
+			&i.PlanHeightPx,
+			&i.Georef,
+			&i.Revision,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMapFloorsBySite = `-- name: ListMapFloorsBySite :many
+SELECT f.id, f.tenant_id, f.building_id, f.name, f.ordinal, f.plan_key, f.plan_content_type, f.plan_width_px, f.plan_height_px, f.georef, f.revision, f.created_at, f.updated_at, f.deleted_at
+FROM map_floors f
+JOIN map_buildings b ON b.id = f.building_id AND ($1::uuid IS NULL OR b.tenant_id = f.tenant_id)
+WHERE b.site_id = $2 AND ($1::uuid IS NULL OR f.tenant_id = $1) AND f.deleted_at IS NULL AND b.deleted_at IS NULL
+ORDER BY f.building_id ASC, f.ordinal ASC
+`
+
+type ListMapFloorsBySiteParams struct {
+	TenantID *uuid.UUID
+	SiteID   uuid.UUID
+}
+
+func (q *Queries) ListMapFloorsBySite(ctx context.Context, arg ListMapFloorsBySiteParams) ([]MapFloor, error) {
+	rows, err := q.db.Query(ctx, listMapFloorsBySite, arg.TenantID, arg.SiteID)
 	if err != nil {
 		return nil, err
 	}
@@ -906,6 +972,157 @@ func (q *Queries) ListMapPlacementsBySite(ctx context.Context, arg ListMapPlacem
 	return items, nil
 }
 
+const listMapPlacementsDetailed = `-- name: ListMapPlacementsDetailed :many
+SELECT
+    p.id,
+    p.tenant_id,
+    p.site_id,
+    p.entity_type,
+    p.entity_id,
+    p.floor_id,
+    p.lat,
+    p.lng,
+    p.x,
+    p.y,
+    p.bearing_deg,
+    p.fov_deg,
+    p.range_m,
+    p.props,
+    p.revision,
+    c.display_name AS camera_name,
+    c.server_id AS camera_server_id,
+    c.status AS camera_status,
+    c.lpr AS camera_lpr,
+    fs.name AS server_name,
+    fs.status AS server_status,
+    md.name AS device_name,
+    md.kind AS device_kind,
+    md.status AS device_status,
+    coalesce(
+        CASE WHEN p.entity_type = 'camera' THEN
+            (SELECT count(*)::int
+             FROM alarms a
+             WHERE ($1::uuid IS NULL OR a.tenant_id = p.tenant_id)
+               AND a.site_id = p.site_id
+               AND a.camera_id = p.entity_id
+               AND a.status = ANY(ARRAY['open', 'acknowledged', 'assigned', 'investigating']))
+        ELSE 0 END,
+        0
+    )::int AS alarm_count
+FROM map_placements p
+LEFT JOIN cameras c ON c.id = p.entity_id AND p.entity_type = 'camera' AND ($1::uuid IS NULL OR c.tenant_id = p.tenant_id) AND c.deleted_at IS NULL
+LEFT JOIN frigate_servers fs ON fs.id = p.entity_id AND p.entity_type = 'server' AND ($1::uuid IS NULL OR fs.tenant_id = p.tenant_id) AND fs.deleted_at IS NULL
+LEFT JOIN map_devices md ON md.id = p.entity_id AND p.entity_type = 'device' AND ($1::uuid IS NULL OR md.tenant_id = p.tenant_id) AND md.deleted_at IS NULL
+WHERE p.site_id = $2
+  AND ($1::uuid IS NULL OR p.tenant_id = $1)
+  AND ($3::uuid IS NULL OR p.floor_id = $3)
+  AND ($4::boolean IS NULL OR ($4 = true AND p.floor_id IS NULL) OR ($4 = false AND p.floor_id IS NOT NULL))
+  AND (
+      $5::double precision IS NULL
+      OR (p.lat >= $5 AND p.lat <= $6 AND p.lng >= $7 AND p.lng <= $8)
+  )
+  AND (
+      (p.entity_type = 'camera' AND c.id IS NOT NULL)
+      OR (p.entity_type = 'server' AND fs.id IS NOT NULL)
+      OR (p.entity_type = 'device' AND md.id IS NOT NULL)
+  )
+ORDER BY p.revision ASC
+`
+
+type ListMapPlacementsDetailedParams struct {
+	TenantID *uuid.UUID
+	SiteID   uuid.UUID
+	FloorID  *uuid.UUID
+	IsGeo    *bool
+	MinLat   *float64
+	MaxLat   *float64
+	MinLng   *float64
+	MaxLng   *float64
+}
+
+type ListMapPlacementsDetailedRow struct {
+	ID             uuid.UUID
+	TenantID       uuid.UUID
+	SiteID         uuid.UUID
+	EntityType     string
+	EntityID       uuid.UUID
+	FloorID        *uuid.UUID
+	Lat            *float64
+	Lng            *float64
+	X              *float32
+	Y              *float32
+	BearingDeg     *float32
+	FovDeg         *float32
+	RangeM         *float32
+	Props          json.RawMessage
+	Revision       int64
+	CameraName     *string
+	CameraServerID *uuid.UUID
+	CameraStatus   *string
+	CameraLpr      *bool
+	ServerName     *string
+	ServerStatus   *string
+	DeviceName     *string
+	DeviceKind     *string
+	DeviceStatus   *string
+	AlarmCount     int32
+}
+
+func (q *Queries) ListMapPlacementsDetailed(ctx context.Context, arg ListMapPlacementsDetailedParams) ([]ListMapPlacementsDetailedRow, error) {
+	rows, err := q.db.Query(ctx, listMapPlacementsDetailed,
+		arg.TenantID,
+		arg.SiteID,
+		arg.FloorID,
+		arg.IsGeo,
+		arg.MinLat,
+		arg.MaxLat,
+		arg.MinLng,
+		arg.MaxLng,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMapPlacementsDetailedRow{}
+	for rows.Next() {
+		var i ListMapPlacementsDetailedRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.SiteID,
+			&i.EntityType,
+			&i.EntityID,
+			&i.FloorID,
+			&i.Lat,
+			&i.Lng,
+			&i.X,
+			&i.Y,
+			&i.BearingDeg,
+			&i.FovDeg,
+			&i.RangeM,
+			&i.Props,
+			&i.Revision,
+			&i.CameraName,
+			&i.CameraServerID,
+			&i.CameraStatus,
+			&i.CameraLpr,
+			&i.ServerName,
+			&i.ServerStatus,
+			&i.DeviceName,
+			&i.DeviceKind,
+			&i.DeviceStatus,
+			&i.AlarmCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMapRegions = `-- name: ListMapRegions :many
 SELECT id, tenant_id, parent_id, name, created_at FROM map_regions
 WHERE tenant_id = $1
@@ -927,6 +1144,88 @@ func (q *Queries) ListMapRegions(ctx context.Context, tenantID uuid.UUID) ([]Map
 			&i.ParentID,
 			&i.Name,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMapSiteOverviews = `-- name: ListMapSiteOverviews :many
+SELECT
+    s.id,
+    s.tenant_id,
+    s.name,
+    s.lat,
+    s.lng,
+    s.default_zoom,
+    s.region_id,
+    r.name AS region_name,
+    coalesce(count(DISTINCT c.id) FILTER (WHERE c.deleted_at IS NULL), 0)::int AS camera_count,
+    coalesce(count(DISTINCT c.id) FILTER (WHERE c.deleted_at IS NULL AND c.status = 'online'), 0)::int AS online_cameras,
+    coalesce(count(DISTINCT c.id) FILTER (WHERE c.deleted_at IS NULL AND c.status = 'offline'), 0)::int AS offline_cameras,
+    coalesce(count(DISTINCT c.id) FILTER (WHERE c.deleted_at IS NULL AND c.status = 'degraded'), 0)::int AS degraded_cameras,
+    coalesce(count(DISTINCT a.id) FILTER (WHERE a.status = ANY(ARRAY['open', 'acknowledged', 'assigned', 'investigating'])), 0)::int AS alarm_count
+FROM sites s
+LEFT JOIN map_regions r ON r.id = s.region_id AND ($1::uuid IS NULL OR r.tenant_id = s.tenant_id)
+LEFT JOIN cameras c ON c.site_id = s.id AND ($1::uuid IS NULL OR c.tenant_id = s.tenant_id) AND ($2::uuid[] IS NULL OR c.id = ANY($2::uuid[]))
+LEFT JOIN alarms a ON a.site_id = s.id AND ($1::uuid IS NULL OR a.tenant_id = s.tenant_id) AND ($2::uuid[] IS NULL OR a.camera_id = ANY($2::uuid[]))
+WHERE ($1::uuid IS NULL OR s.tenant_id = $1)
+  AND s.deleted_at IS NULL
+  AND s.id = ANY($3::uuid[])
+GROUP BY s.id, s.tenant_id, s.name, s.lat, s.lng, s.default_zoom, s.region_id, r.name
+ORDER BY s.name ASC
+`
+
+type ListMapSiteOverviewsParams struct {
+	TenantID  *uuid.UUID
+	CameraIds []uuid.UUID
+	SiteIds   []uuid.UUID
+}
+
+type ListMapSiteOverviewsRow struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	Name            string
+	Lat             *float64
+	Lng             *float64
+	DefaultZoom     *float32
+	RegionID        *uuid.UUID
+	RegionName      *string
+	CameraCount     int32
+	OnlineCameras   int32
+	OfflineCameras  int32
+	DegradedCameras int32
+	AlarmCount      int32
+}
+
+func (q *Queries) ListMapSiteOverviews(ctx context.Context, arg ListMapSiteOverviewsParams) ([]ListMapSiteOverviewsRow, error) {
+	rows, err := q.db.Query(ctx, listMapSiteOverviews, arg.TenantID, arg.CameraIds, arg.SiteIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMapSiteOverviewsRow{}
+	for rows.Next() {
+		var i ListMapSiteOverviewsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.Lat,
+			&i.Lng,
+			&i.DefaultZoom,
+			&i.RegionID,
+			&i.RegionName,
+			&i.CameraCount,
+			&i.OnlineCameras,
+			&i.OfflineCameras,
+			&i.DegradedCameras,
+			&i.AlarmCount,
 		); err != nil {
 			return nil, err
 		}
@@ -981,13 +1280,13 @@ func (q *Queries) ListMapViews(ctx context.Context, arg ListMapViewsParams) ([]M
 
 const listMapZonesBySite = `-- name: ListMapZonesBySite :many
 SELECT id, tenant_id, site_id, floor_id, name, kind, geometry, min_lat, min_lng, max_lat, max_lng, style, metadata, revision, created_by, updated_by, created_at, updated_at, deleted_at FROM map_zones
-WHERE site_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+WHERE site_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2) AND deleted_at IS NULL
 ORDER BY name ASC
 `
 
 type ListMapZonesBySiteParams struct {
 	SiteID   uuid.UUID
-	TenantID uuid.UUID
+	TenantID *uuid.UUID
 }
 
 func (q *Queries) ListMapZonesBySite(ctx context.Context, arg ListMapZonesBySiteParams) ([]MapZone, error) {

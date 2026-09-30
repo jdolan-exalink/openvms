@@ -1617,6 +1617,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/maps/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Map configuration
+         * @description Tile provider, style URLs, attribution, offline flag, and limits.
+         */
+        get: operations["getMapConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maps/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Sites map overview
+         * @description Geo positions and health/alarm aggregates for sites the caller can view.
+         */
+        get: operations["getMapOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maps/sites/{siteId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Site map details
+         * @description Bounds, buildings, floors, and zones for the site.
+         */
+        get: operations["getMapSite"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/maps/sites/{siteId}/entities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Placed entities for site
+         * @description Compact placed entities (cameras, servers, devices) with status and alarm counts.
+         */
+        get: operations["getMapSiteEntities"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2700,6 +2780,163 @@ export interface components {
             mimetype: string;
             /** @description Base64 image */
             data: string;
+        };
+        MapProviderConfig: {
+            /** @example protomaps-local */
+            id: string;
+            /** @enum {string} */
+            kind: "vector-style" | "pmtiles" | "raster";
+            style_url_light?: string | null;
+            style_url_dark?: string | null;
+            tiles?: string[] | null;
+            /** @example © OpenStreetMap contributors */
+            attribution: string;
+            /** @example 18 */
+            max_zoom: number;
+            offline: boolean;
+        };
+        MapDefaultCenter: {
+            /** Format: double */
+            lat: number;
+            /** Format: double */
+            lng: number;
+        };
+        MapConfig: {
+            provider: components["schemas"]["MapProviderConfig"];
+            default_center: components["schemas"]["MapDefaultCenter"];
+            /** @example 2 */
+            default_zoom: number;
+        };
+        MapSiteOverview: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: double */
+            lat?: number | null;
+            /** Format: double */
+            lng?: number | null;
+            /** Format: float */
+            default_zoom?: number | null;
+            /** Format: uuid */
+            region_id?: string | null;
+            region_name?: string | null;
+            camera_count: number;
+            online_cameras: number;
+            offline_cameras: number;
+            degraded_cameras: number;
+            alarm_count: number;
+        };
+        MapSiteOverviewList: {
+            items: components["schemas"]["MapSiteOverview"][];
+        };
+        MapFloor: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            building_id: string;
+            name: string;
+            ordinal: number;
+            plan_key?: string | null;
+            plan_content_type?: string | null;
+            plan_width_px?: number | null;
+            plan_height_px?: number | null;
+            georef?: Record<string, never> | null;
+        };
+        MapBuilding: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            site_id: string;
+            name: string;
+            footprint?: Record<string, never> | null;
+            /** Format: double */
+            lat?: number | null;
+            /** Format: double */
+            lng?: number | null;
+            floors: components["schemas"]["MapFloor"][];
+        };
+        MapZone: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            site_id: string;
+            /** Format: uuid */
+            floor_id?: string | null;
+            name: string;
+            /** @enum {string} */
+            kind: "security" | "perimeter" | "warning" | "custom";
+            geometry: Record<string, never>;
+            /** Format: double */
+            min_lat?: number | null;
+            /** Format: double */
+            min_lng?: number | null;
+            /** Format: double */
+            max_lat?: number | null;
+            /** Format: double */
+            max_lng?: number | null;
+            style?: Record<string, never> | null;
+            metadata?: Record<string, never> | null;
+        };
+        MapSiteDetails: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: double */
+            lat?: number | null;
+            /** Format: double */
+            lng?: number | null;
+            /** Format: float */
+            default_zoom?: number | null;
+            /** Format: uuid */
+            region_id?: string | null;
+            buildings: components["schemas"]["MapBuilding"][];
+            zones: components["schemas"]["MapZone"][];
+        };
+        MapPosition: {
+            /** @enum {string} */
+            k: "geo" | "floor";
+            /** Format: double */
+            lat?: number | null;
+            /** Format: double */
+            lng?: number | null;
+            /** Format: uuid */
+            floor_id?: string | null;
+            /** Format: float */
+            x?: number | null;
+            /** Format: float */
+            y?: number | null;
+        };
+        MapCameraProps: {
+            /** Format: float */
+            bearing: number;
+            /** Format: float */
+            fov: number;
+            /** Format: float */
+            range: number;
+            type: string;
+            ptz: boolean;
+            lpr: boolean;
+        };
+        MapEntity: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            t: "camera" | "server" | "device";
+            /** Format: uuid */
+            site: string;
+            /** Format: uuid */
+            srv?: string | null;
+            name: string;
+            pos: components["schemas"]["MapPosition"];
+            cam?: components["schemas"]["MapCameraProps"];
+            /** @enum {string} */
+            st: "online" | "offline" | "degraded" | "unknown";
+            alarms: number;
+        };
+        MapEntitiesResponse: {
+            /** Format: int64 */
+            revision: number;
+            entities: components["schemas"]["MapEntity"][];
         };
     };
     responses: {
@@ -5799,7 +6036,118 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    getMapConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Map configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapConfig"];
+                };
+            };
             401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getMapOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sites overview list */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapSiteOverviewList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getMapSite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Site map details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapSiteDetails"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getMapSiteEntities: {
+        parameters: {
+            query?: {
+                floor_id?: string;
+                is_geo?: boolean;
+                min_lat?: number;
+                min_lng?: number;
+                max_lat?: number;
+                max_lng?: number;
+            };
+            header?: {
+                "If-None-Match"?: string;
+            };
+            path: {
+                siteId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Compact placed entities */
+            200: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapEntitiesResponse"];
+                };
+            };
+            /** @description Entities have not changed since If-None-Match revision */
+            304: {
+                headers: {
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
 }

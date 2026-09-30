@@ -35,6 +35,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/health"
 	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/maps"
 	"github.com/jdolan-exalink/openvms/internal/media"
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
@@ -134,11 +135,13 @@ func run() error {
 	brandingSvc := &branding.Service{Store: st, Blobs: store, Log: log}
 	clipWatermarkSvc := &clipwatermark.Service{Store: st, Media: mediaSvc, Branding: brandingSvc, Blobs: store, Log: log}
 	alarmsSvc := &alarms.Service{Store: st, Pub: &jetstreamPublisher{js: js}, Log: log}
+	mapsSvc := &maps.Service{Store: st, Config: maps.DefaultConfig(), Log: log}
 	handlers := &api.Handlers{
 		Inv:           inv,
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Alarms:        alarmsSvc,
 		Media:         mediaSvc,
+		Maps:          mapsSvc,
 		Features:      cfg.Features,
 		Branding:      brandingSvc,
 		ClipWatermark: clipWatermarkSvc,
