@@ -61,6 +61,13 @@ export const camerasQuery = (filter: CameraFilter = {}) =>
     refetchInterval: 15_000,
   });
 
+/** Shared explorer folders of the tenant plus the servers the caller may manage them on (LV-13). */
+export const cameraFoldersQuery = queryOptions({
+  queryKey: ["camera-folders"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/camera-folders")),
+  refetchInterval: 30_000,
+});
+
 export const cameraFrigateConfigQuery = (cameraId: string) =>
   queryOptions({
     queryKey: ["cameras", cameraId, "frigate-config"],

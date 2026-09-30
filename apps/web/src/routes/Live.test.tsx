@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { AppShell } from "@/components/AppShell";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
@@ -103,7 +103,7 @@ describe("Live", () => {
     );
     renderPage(LiveWithShell);
 
-    const cameraSearch = await screen.findByLabelText("Buscar cámara");
+    const cameraSearch = await screen.findByLabelText("Buscar en el explorador");
     const contextSidebar = screen.getByRole("complementary", { name: "Context Sidebar" });
     expect(contextSidebar).toContainElement(cameraSearch);
     expect(screen.getByRole("main", { name: "Main Workspace" })).not.toContainElement(cameraSearch);
@@ -113,7 +113,7 @@ describe("Live", () => {
     await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
     const video = tile.querySelector("video");
     const socketCount = FakeSocket.created;
-    fireEvent.click(screen.getByRole("button", { name: "Campus" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Campus/ }));
 
     expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video);
     expect(FakeSocket.created).toBe(socketCount);
@@ -373,7 +373,7 @@ describe("Live", () => {
     renderPage(Live);
 
     await screen.findByLabelText("Nombre de la vista");
-    expect(screen.queryByText("Guardar vista")).not.toBeInTheDocument();
+    expect(screen.queryByText("Guardar vista actual")).not.toBeInTheDocument();
     expect(screen.queryByText("Compartida con mi organización")).not.toBeInTheDocument();
   });
 
@@ -392,7 +392,7 @@ describe("Live", () => {
 
     renderPage(Live);
 
-    expect(await screen.findByText("Guardar vista")).toBeInTheDocument();
+    expect(await screen.findByText("Guardar vista actual")).toBeInTheDocument();
   });
 
   it("shows the API error when saving a view fails despite the gate (server-side denial)", async () => {
@@ -416,7 +416,7 @@ describe("Live", () => {
     renderPage(Live);
 
     fireEvent.change(await screen.findByLabelText("Nombre de la vista"), { target: { value: "Turno noche" } });
-    fireEvent.click(screen.getByText("Guardar vista"));
+    fireEvent.click(screen.getByText("Guardar vista actual"));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No tenés permiso para guardar esta vista.");
   });
@@ -454,10 +454,9 @@ describe("Live", () => {
 
     renderPage(Live);
 
-    const select = await screen.findByLabelText("Vista guardada");
-    await screen.findByRole("option", { name: /Turno noche/ });
-    expect(select.querySelector('optgroup[label="Privadas"]')).toHaveTextContent("Turno noche");
-    expect(select.querySelector('optgroup[label="Compartidas"]')).toHaveTextContent("Perímetro");
+    await screen.findByRole("button", { name: /Turno noche/ });
+    expect(within(screen.getByRole("listitem", { name: "Privadas" })).getByText("Turno noche")).toBeInTheDocument();
+    expect(within(screen.getByRole("listitem", { name: "Compartidas" })).getByText("Perímetro")).toBeInTheDocument();
   });
 
   it("announces the active view, its visibility and read-only state", async () => {
@@ -465,25 +464,87 @@ describe("Live", () => {
 
     renderPage(Live);
 
-    await screen.findByRole("option", { name: /Perímetro/ });
+    const item = await screen.findByRole("button", { name: /Perímetro/ });
     expect(screen.getByRole("status", { name: "Vista activa" })).toHaveTextContent("Vista sin guardar");
-    fireEvent.change(screen.getByLabelText("Vista guardada"), { target: { value: "v2" } });
+    fireEvent.click(item);
     const status = screen.getByRole("status", { name: "Vista activa" });
     expect(status).toHaveTextContent("Perímetro");
     expect(status).toHaveTextContent("Compartida");
     expect(status).toHaveTextContent("Solo lectura");
+    expect(item).toHaveAttribute("aria-current", "true");
   });
 
-  it("shows who owns a shared view in the selector and the status line", async () => {
+  it("shows who owns a shared view in the list and the status line", async () => {
     viewsApi([savedView("v1", "Turno noche", false, true, "Ana"), savedView("v2", "Perímetro", true, false, "Marta Gómez")]);
 
     renderPage(Live);
 
-    expect(await screen.findByRole("option", { name: "Perímetro · Marta Gómez" })).toBeInTheDocument();
+    const shared = await screen.findByRole("button", { name: "Perímetro · Marta Gómez" });
     // Private views are the caller's own: no owner suffix.
-    expect(screen.getByRole("option", { name: "Turno noche" })).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Vista guardada"), { target: { value: "v2" } });
+    expect(screen.getByRole("button", { name: "Turno noche" })).toBeInTheDocument();
+    fireEvent.click(shared);
     expect(screen.getByRole("status", { name: "Vista activa" })).toHaveTextContent("Compartida por Marta Gómez");
+  });
+
+  it("filters saved views with the explorer search", async () => {
+    viewsApi([savedView("v1", "Turno noche", false, true), savedView("v2", "Perímetro", true, false)]);
+
+    renderPage(Live);
+
+    await screen.findByRole("button", { name: /Turno noche/ });
+    fireEvent.change(screen.getByLabelText("Buscar en el explorador"), { target: { value: "perí" } });
+    expect(screen.queryByRole("button", { name: /Turno noche/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Perímetro/ })).toBeInTheDocument();
+  });
+
+  it("collapses the explorer, shows a reopen button and remembers the choice", async () => {
+    viewsApi([]);
+
+    const first = renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: "Ocultar explorador" }));
+    expect(screen.queryByLabelText("Buscar en el explorador")).not.toBeInTheDocument();
+    expect(localStorage.getItem("openvms.live.sidebar.collapsed")).toBe("1");
+    first.unmount();
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: "Mostrar explorador" }));
+    expect(await screen.findByLabelText("Buscar en el explorador")).toBeInTheDocument();
+    expect(localStorage.getItem("openvms.live.sidebar.collapsed")).toBe("0");
+  });
+
+  it("offers folder management only on servers the caller can manage", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte", { folder_id: "f1", sort_order: 0 }), camera("cam-2", "Muelle", { server_id: "srv2", folder_id: null, sort_order: 0 })] }),
+          "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+          "/api/v1/servers": () =>
+            json({
+              items: [
+                { id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" },
+                { id: "srv2", tenant_id: "t1", site_id: "s1", name: "Frigate B", status: "online" },
+              ],
+            }),
+          "/api/v1/camera-folders": () =>
+            json({ items: [{ id: "f1", tenant_id: "t1", server_id: "srv1", name: "Accesos", sort_order: 0, created_at: "", updated_at: "" }], manageable_server_ids: ["srv1"] }),
+          "/api/v1/views": () => json({ items: [] }),
+        }),
+      ),
+    );
+
+    renderPage(Live);
+
+    expect(await screen.findByRole("button", { name: /^Accesos\d*$/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Puerta norte" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Nueva carpeta en Frigate A" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Nueva carpeta en Frigate B" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Renombrar carpeta Accesos" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Buscar en el explorador"), { target: { value: "acce" } });
+    expect(screen.queryByRole("button", { name: "Muelle" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Puerta norte" })).toBeInTheDocument();
   });
 
   it("labels the layout picker as a group", async () => {

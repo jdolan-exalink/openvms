@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { AppShell } from "./AppShell";
+import { AppShell, setContextSidebarCollapsed } from "./AppShell";
 
 describe("AppShell", () => {
   it("provides named primary navigation and main workspace regions", () => {
@@ -30,5 +30,20 @@ describe("AppShell", () => {
     expect(contextSidebar).toHaveTextContent("Camera context");
     expect(container.querySelector('[data-shell="openvms"]')).toHaveClass("flex-col", "md:flex-row");
     expect(contextSidebar).toHaveClass("w-full", "md:w-64", "border-b", "md:border-b-0", "md:border-r");
+  });
+
+  it("collapses the context sidebar to zero width and hides it from assistive tech", () => {
+    render(
+      <AppShell primaryNav={<nav>Existing navigation</nav>} contextSidebar={<div>Camera context</div>}>
+        <h1>Current route</h1>
+      </AppShell>,
+    );
+
+    act(() => setContextSidebarCollapsed(true));
+    const contextSidebar = document.querySelector('[data-shell-region="context-sidebar"]');
+    expect(contextSidebar).toHaveAttribute("aria-hidden", "true");
+    expect(contextSidebar).toHaveClass("md:w-0", "md:overflow-hidden");
+    act(() => setContextSidebarCollapsed(false));
+    expect(screen.getByRole("complementary", { name: "Context Sidebar" })).not.toHaveClass("md:w-0");
   });
 });

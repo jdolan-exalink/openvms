@@ -443,6 +443,73 @@ export interface paths {
         patch: operations["updateCameraFrigateConfig"];
         trace?: never;
     };
+    "/api/v1/camera-folders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Shared camera folders of the tenant, filtered by what the caller can see
+         * @description Folders are shared by everyone in the tenant (one tree). A folder is listed when it holds at least one
+         *     camera the caller can view, or when the caller has cameras.manage on its server. manageable_server_ids
+         *     lists the servers on which the caller may create, rename and delete folders and reorder cameras.
+         */
+        get: operations["listCameraFolders"];
+        put?: never;
+        /**
+         * Create a folder on a server
+         * @description Requires cameras.manage on the server. Names are unique per server, case-insensitively.
+         */
+        post: operations["createCameraFolder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/camera-folders/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply a batch of camera placements and folder positions atomically
+         * @description Every camera may only be placed in a folder of its own server (or at the server root, folder_id null).
+         *     Requires cameras.manage on each camera and on each folder's server. Nothing is applied if any item is rejected.
+         */
+        post: operations["reorderCameraFolders"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/camera-folders/{folderId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folderId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a folder; its cameras return to the server root */
+        delete: operations["deleteCameraFolder"];
+        options?: never;
+        head?: never;
+        /** Rename a folder */
+        patch: operations["renameCameraFolder"];
+        trace?: never;
+    };
     "/api/v1/camera-groups": {
         parameters: {
             query?: never;
@@ -1686,10 +1753,31 @@ export interface components {
             /** Format: date-time */
             missing_since?: string | null;
             group_ids: string[];
+            /**
+             * Format: uuid
+             * @description Shared explorer folder of the camera's server; null at the server root.
+             */
+            folder_id: string | null;
+            /** @description Shared position inside its folder (or the server root). */
+            sort_order: number;
             default_live_quality: components["schemas"]["CameraLiveQuality"];
             description: string;
             location: string;
             tags: string[];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CameraFolder: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            server_id: string;
+            name: string;
+            sort_order: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -3339,6 +3427,158 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    listCameraFolders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Folders */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CameraFolder"][];
+                        manageable_server_ids: string[];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createCameraFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** Format: uuid */
+                    server_id: string;
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraFolder"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    reorderCameraFolders: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    cameras?: {
+                        /** Format: uuid */
+                        camera_id: string;
+                        /** Format: uuid */
+                        folder_id?: string | null;
+                        sort_order: number;
+                    }[];
+                    folders?: {
+                        /** Format: uuid */
+                        folder_id: string;
+                        sort_order: number;
+                    }[];
+                };
+            };
+        };
+        responses: {
+            /** @description Applied */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteCameraFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    renameCameraFolder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                folderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Renamed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraFolder"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listCameraGroups: {

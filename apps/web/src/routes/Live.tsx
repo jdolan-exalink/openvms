@@ -1,10 +1,10 @@
-import { DndContext, type DragEndEvent, KeyboardSensor, PointerSensor, useDraggable, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, DragOverlay, type DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { rectSortingStrategy, rectSwappingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowUpRight, Camera, CircleCheck, CircleHelp, CircleX, ChevronDown, ChevronRight, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
+import { Camera, CircleCheck, CircleHelp, CircleX, History, Maximize2, Minimize2, PanelLeftOpen, Save, Trash2, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
@@ -14,16 +14,19 @@ import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { LiveRecDock } from "@/components/LiveRecDock";
 import { RecTile, type RecTileState } from "@/components/RecTile";
 import { LiveModeToggle } from "@/components/LiveModeToggle";
-import { useContextSidebarPortalTarget, useTopBarActionsPortalTarget } from "@/components/AppShell";
-import { Button, ErrorNote, Select, StatusBadge, TextInput } from "@/components/ui";
+import { setContextSidebarCollapsed, useContextSidebarPortalTarget, useTopBarActionsPortalTarget } from "@/components/AppShell";
+import { LiveExplorer } from "@/components/LiveExplorer";
+import { Button, ErrorNote, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  cameraDragId, duplicateTileIndexes, liveSelectionKey, parseSelection, placeCameraAt, placeCameraUnique, resizeTiles, resolveDragEnd, reorderTiles,
+  duplicateTileIndexes, liveSelectionKey, parseSelection, placeCameraAt, placeCameraUnique, resizeTiles, resolveDragEnd, reorderTiles,
   serializeSelection, swapTiles, tileDragId,
   type Tile,
 } from "@/lib/liveGrid";
 import { assignRecPlayers, parseRecSearch, pickMaster, REC_ENTRY_OFFSET_S, recSearch } from "@/lib/liveRec";
+import { loadSidebarCollapsed, saveSidebarCollapsed } from "@/lib/explorer";
 import { can } from "@/lib/perm";
+import { useCameraFolders } from "@/lib/useCameraFolders";
 import { useRecData } from "@/lib/useRecData";
 import { useRecPlayback } from "@/lib/useRecPlayback";
 import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
@@ -63,6 +66,20 @@ export function Live() {
   // Set once the saved grid selection (or the default) has been applied, so the persistence
   // effect below never fires before restoration and overwrites a saved selection with defaults.
   const [restored, setRestored] = useState(false);
+  const folderApi = useCameraFolders(cameras.data);
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState(loadSidebarCollapsed);
+  const [treeNotice, setTreeNotice] = useState<string | null>(null);
+  const [activeDrag, setActiveDrag] = useState<string | null>(null);
+  const setSidebarCollapsed = (next: boolean) => {
+    setSidebarCollapsedState(next);
+    saveSidebarCollapsed(next);
+  };
+  // The shell owns the sidebar's width; the route only says whether it is collapsed. Reset on
+  // leaving Live so other screens keep their context sidebar.
+  useEffect(() => {
+    setContextSidebarCollapsed(sidebarCollapsed);
+    return () => setContextSidebarCollapsed(false);
+  }, [sidebarCollapsed]);
   const sidebarMount = useContextSidebarPortalTarget();
   const topBar = useTopBarActionsPortalTarget();
   const { persistentPlayers, videoSurfaceLayer } = useFeatures();
@@ -149,8 +166,16 @@ export function Live() {
   );
 
   const handleDragEnd = (event: DragEndEvent) => {
+    setActiveDrag(null);
     const resolution = resolveDragEnd(event.active.id, event.over?.id ?? null);
-    if (!resolution) return;
+    if (!resolution) {
+      // Not a grid drop: it may be a move inside the shared explorer tree.
+      if (folderApi.drop(event.active.id, event.over?.id ?? null) === "rejected") {
+        setTreeNotice("No se puede mover entre servidores.");
+        setTimeout(() => setTreeNotice(null), 4000);
+      }
+      return;
+    }
     if (resolution.type === "place") place(resolution.cameraId, resolution.index);
     else reorder(resolution.from, resolution.to);
   };
@@ -257,30 +282,46 @@ export function Live() {
       clearInterval(interval);
     };
   }, [rec, win, playing, getPosition, subscribePosition, navigate]);
+  const dragLabel = activeDrag?.startsWith("camera:")
+    ? camById.get(activeDrag.slice("camera:".length))?.display_name
+    : activeDrag?.startsWith("tfolder:")
+      ? folderApi.folders.find((f) => f.id === activeDrag.slice("tfolder:".length))?.name
+      : undefined;
   const modeToggle = <LiveModeToggle rec={rec} onChange={setMode} />;
   const topBarActions = canRec && topBar.available && topBar.target ? createPortal(modeToggle, topBar.target) : null;
-  const sidebarContent = (
-    <div className="flex min-h-0 flex-col gap-3" data-live-sidebar="true">
-      <section aria-label="Vistas guardadas" className="flex flex-col gap-2 rounded-xl border border-line bg-bg p-2.5">
-        <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">Vista</h2>
-        <Select aria-label="Vista guardada" value={viewId} onChange={(e) => (e.target.value ? loadView(e.target.value) : setViewId(""))}>
-          <option value="">Vista sin guardar</option>
-          {[
-            { label: "Privadas", items: privateViews },
-            { label: "Compartidas", items: sharedViews },
-          ].map(
+  const renderViews = (query: string) => {
+    const match = (v: Schemas["View"]) => !query || v.name.toLowerCase().includes(query);
+    const groups = [
+      { label: "Privadas", items: privateViews.filter(match) },
+      { label: "Compartidas", items: sharedViews.filter(match) },
+    ];
+    const viewButton = "flex w-full min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-left text-sm hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent";
+    return (
+      <div className="flex flex-col gap-2">
+        <ul aria-label="Vistas" className="flex flex-col">
+          <li>
+            <button type="button" aria-current={viewId === "" ? "true" : undefined} onClick={() => setViewId("")} className={cn(viewButton, viewId === "" && "bg-raised font-medium")}>
+              Vista sin guardar
+            </button>
+          </li>
+          {groups.map(
             (group) =>
               group.items.length > 0 && (
-                <optgroup key={group.label} label={group.label}>
-                  {group.items.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.shared && v.owner_name ? `${v.name} · ${v.owner_name}` : v.name}
-                    </option>
-                  ))}
-                </optgroup>
+                <li key={group.label} aria-label={group.label}>
+                  <p className="px-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{group.label}</p>
+                  <ul className="flex flex-col">
+                    {group.items.map((v) => (
+                      <li key={v.id}>
+                        <button type="button" aria-current={viewId === v.id ? "true" : undefined} onClick={() => loadView(v.id)} className={cn(viewButton, viewId === v.id && "bg-raised font-medium")}>
+                          <span className="truncate">{v.shared && v.owner_name ? `${v.name} · ${v.owner_name}` : v.name}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </li>
               ),
           )}
-        </Select>
+        </ul>
         <p role="status" aria-label="Vista activa" className="px-1 text-xs text-muted">
           {current
             ? `${current.name} · ${current.shared ? (current.owner_name ? `Compartida por ${current.owner_name}` : "Compartida") : "Privada"}${current.editable ? "" : " · Solo lectura: guardar crea una copia propia"}`
@@ -298,7 +339,7 @@ export function Live() {
               manage does not, so the button stays available for that case regardless. */}
           {(current?.editable || can(me.data, "views.create_private") || can(me.data, "views.create_shared")) && (
             <Button onClick={() => save.mutate(false)} disabled={!saveName.trim() || save.isPending}>
-              <Save className="size-4" aria-hidden /> {current?.editable ? "Guardar" : "Guardar vista"}
+              <Save className="size-4" aria-hidden /> {current?.editable ? "Guardar" : "Guardar vista actual"}
             </Button>
           )}
           {current?.editable && (
@@ -313,33 +354,48 @@ export function Live() {
           )}
         </div>
         <ErrorNote error={save.error ?? remove.error} />
-      </section>
-      <div className="flex min-h-0 flex-col gap-2 rounded-xl border border-line bg-bg p-2.5">
-        <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted">Cámaras</h2>
-        <CameraTree
-          cameras={cameras.data ?? []}
-          sites={sites.data ?? []}
-          servers={servers.data ?? []}
-          onPick={place}
-          onPlayback={setPlaybackCameraId}
-          canViewRecordings={can(me.data, "recordings.view")}
-        />
-        <ErrorNote error={cameras.error} />
       </div>
-    </div>
+    );
+  };
+  const sidebarContent = (
+    <LiveExplorer
+      cameras={cameras.data ?? []}
+      sites={sites.data ?? []}
+      servers={servers.data ?? []}
+      folderApi={folderApi}
+      onPick={place}
+      onPlayback={setPlaybackCameraId}
+      canViewRecordings={can(me.data, "recordings.view")}
+      onCollapse={() => setSidebarCollapsed(true)}
+      renderViews={renderViews}
+      viewCount={views.data?.length ?? 0}
+      notice={treeNotice}
+      error={cameras.error}
+    />
   );
   const sidebar = sidebarMount.available
     ? sidebarMount.target ? createPortal(sidebarContent, sidebarMount.target) : null
-    : <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-64">{sidebarContent}</aside>;
+    : sidebarCollapsed ? null : <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-64">{sidebarContent}</aside>;
 
   return (
     <div className="flex flex-col gap-2 md:h-full md:min-h-0">
       <h1 className="sr-only">En vivo</h1>
       {topBarActions}
-      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+      <DndContext sensors={sensors} onDragStart={(e) => setActiveDrag(String(e.active.id))} onDragCancel={() => setActiveDrag(null)} onDragEnd={handleDragEnd}>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
           <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
             <div role="group" aria-label="Layout de la grilla" className="flex shrink-0 flex-wrap items-center gap-1">
+              {sidebarCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => setSidebarCollapsed(false)}
+                  aria-label="Mostrar explorador"
+                  title="Mostrar explorador"
+                  className="mr-1 rounded border border-line bg-surface p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+                >
+                  <PanelLeftOpen className="size-4" aria-hidden />
+                </button>
+              )}
               {layouts.map(({ columns: layoutColumns, rows: layoutRows }) => (
                 <button
                   key={`${layoutColumns}x${layoutRows}`}
@@ -427,6 +483,9 @@ export function Live() {
           </section>
         </div>
         {sidebar}
+        <DragOverlay dropAnimation={null}>
+          {dragLabel ? <div className="pointer-events-none rounded border border-accent bg-surface px-2 py-1 text-xs shadow-lg">{dragLabel}</div> : null}
+        </DragOverlay>
       </DndContext>
       {playbackCameraId && camById.has(playbackCameraId) && (
         <LivePlaybackPanel
@@ -556,118 +615,6 @@ function GridTile({
         </>
       ) : (
         <div className="flex size-full items-center justify-center text-xs text-muted">{tile && !camera ? "Cámara sin acceso" : "Vacío"}</div>
-      )}
-    </div>
-  );
-}
-
-function CameraTree({
-  cameras,
-  sites,
-  servers,
-  onPick,
-  onPlayback,
-  canViewRecordings,
-}: {
-  cameras: Schemas["Camera"][];
-  sites: Schemas["Site"][];
-  servers: Schemas["Server"][];
-  onPick: (id: string) => void;
-  onPlayback: (id: string) => void;
-  canViewRecordings: boolean;
-}) {
-  const [q, setQ] = useState("");
-  const [closed, setClosed] = useState<Record<string, boolean>>({});
-  const filtered = cameras.filter((c) => c.enabled && (!q || c.display_name.toLowerCase().includes(q.toLowerCase())));
-  const bySite = new Map<string, Map<string, Schemas["Camera"][]>>();
-  for (const c of filtered) {
-    const s = bySite.get(c.site_id) ?? new Map<string, Schemas["Camera"][]>();
-    s.set(c.server_id, [...(s.get(c.server_id) ?? []), c]);
-    bySite.set(c.site_id, s);
-  }
-  const siteName = new Map(sites.map((s) => [s.id, s.name]));
-  const server = new Map(servers.map((s) => [s.id, s]));
-  const toggle = (k: string) => setClosed((c) => ({ ...c, [k]: !c[k] }));
-
-  return (
-    <div className="flex flex-col gap-2">
-      <TextInput aria-label="Buscar cámara" placeholder="Buscar cámara" value={q} onChange={(e) => setQ(e.target.value)} />
-      <nav aria-label="Cámaras" className="flex max-h-[60vh] flex-col md:max-h-none overflow-y-auto text-sm">
-        {[...bySite.entries()].map(([siteId, srvs]) => (
-          <div key={siteId}>
-            <button type="button" onClick={() => toggle(siteId)} className="flex w-full items-center gap-1 py-1 font-medium">
-              {closed[siteId] ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-              {siteName.get(siteId) ?? "Sitio"}
-            </button>
-            {!closed[siteId] &&
-              [...srvs.entries()].map(([srvId, cams]) => (
-                <div key={srvId} className="ml-3">
-                  <button type="button" onClick={() => toggle(srvId)} className="flex w-full items-center gap-1 py-0.5 text-muted">
-                    {closed[srvId] ? <ChevronRight className="size-3.5" /> : <ChevronDown className="size-3.5" />}
-                    <span className="truncate">{server.get(srvId)?.name ?? "Servidor"}</span>
-                    {server.get(srvId) && <span className="ml-auto"><StatusBadge status={server.get(srvId)!.status} /></span>}
-                  </button>
-                  {!closed[srvId] &&
-                    cams.map((c) => (
-                      <DraggableCamera key={c.id} camera={c} onPick={onPick} onPlayback={onPlayback} canViewRecordings={canViewRecordings} />
-                    ))}
-                </div>
-              ))}
-          </div>
-        ))}
-        {filtered.length === 0 && <p className="py-2 text-xs text-muted">No hay cámaras visibles.</p>}
-      </nav>
-    </div>
-  );
-}
-
-/** DraggableCamera keeps the existing click-to-place behavior and adds drag-to-place. */
-function DraggableCamera({
-  camera,
-  onPick,
-  onPlayback,
-  canViewRecordings,
-}: {
-  camera: Schemas["Camera"];
-  onPick: (id: string) => void;
-  onPlayback: (id: string) => void;
-  canViewRecordings: boolean;
-}) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: cameraDragId(camera.id) });
-  return (
-    <div className="ml-4 flex min-w-0 items-center gap-1">
-      <button
-        ref={setNodeRef}
-        type="button"
-        onClick={() => onPick(camera.id)}
-        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded px-1.5 py-0.5 text-left hover:bg-raised", isDragging && "opacity-50")}
-        {...attributes}
-        {...listeners}
-      >
-        <span className={cn("size-1.5 shrink-0 rounded-full", camera.status === "online" ? "bg-ok" : camera.status === "offline" ? "bg-bad" : "bg-muted")} />
-        <span className="truncate">{camera.display_name}</span>
-      </button>
-      {canViewRecordings && (
-        <>
-          <button
-            type="button"
-            title="Ver grabaciones en vivo"
-            aria-label={`Ver grabaciones de ${camera.display_name}`}
-            onClick={() => onPlayback(camera.id)}
-            className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <History className="size-3.5" aria-hidden />
-          </button>
-          <Link
-            to="/playback"
-            search={{ camera: camera.id }}
-            title="Abrir página de grabaciones"
-            aria-label={`Grabaciones de ${camera.display_name}`}
-            className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <ArrowUpRight className="size-3.5" aria-hidden />
-          </Link>
-        </>
       )}
     </div>
   );

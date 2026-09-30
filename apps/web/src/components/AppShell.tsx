@@ -22,6 +22,21 @@ export function useContextSidebarPortalTarget() {
   return { target, available };
 }
 
+// Context sidebar collapse (Live explorer): the route owns the state, the shell only renders it.
+let sidebarCollapsed = false;
+const sidebarCollapsedListeners = new Set<() => void>();
+const getSidebarCollapsed = () => sidebarCollapsed;
+const subscribeSidebarCollapsed = (listener: () => void) => {
+  sidebarCollapsedListeners.add(listener);
+  return () => sidebarCollapsedListeners.delete(listener);
+};
+/** Collapse the shell's context sidebar to zero width (a route must reset it on unmount). */
+export function setContextSidebarCollapsed(collapsed: boolean) {
+  if (sidebarCollapsed === collapsed) return;
+  sidebarCollapsed = collapsed;
+  sidebarCollapsedListeners.forEach((listener) => listener());
+}
+
 // Top bar actions slot: routes portal route-specific controls next to the breadcrumb.
 const TopBarTargetContext = createContext(false);
 let topBarTarget: HTMLElement | null = null;
@@ -58,6 +73,7 @@ interface AppShellProps {
 }
 
 export function AppShell({ primaryNav, contextSidebar, fitViewport = false, children }: AppShellProps) {
+  const collapsed = useSyncExternalStore(subscribeSidebarCollapsed, getSidebarCollapsed, () => false);
   return (
     <SidebarTargetContext.Provider value={contextSidebar != null}>
       <TopBarTargetContext.Provider value>
@@ -72,8 +88,19 @@ export function AppShell({ primaryNav, contextSidebar, fitViewport = false, chil
           {primaryNav}
         </aside>
         {contextSidebar != null && (
-          <aside aria-label="Context Sidebar" className="w-full shrink-0 border-b border-line bg-surface px-3 py-4 md:h-dvh md:w-64 md:overflow-y-auto md:border-b-0 md:border-r" data-shell-region="context-sidebar">
-            <div ref={setSidebarTarget} className="flex min-h-0 flex-col gap-3">
+          <aside
+            aria-label="Context Sidebar"
+            aria-hidden={collapsed || undefined}
+            inert={collapsed}
+            data-collapsed={collapsed}
+            className={cn(
+              "w-full shrink-0 border-b border-line bg-surface px-3 py-4 md:h-dvh md:w-64 md:overflow-y-auto md:border-b-0 md:border-r",
+              "md:transition-[width,padding,border-color] md:duration-200 motion-reduce:transition-none",
+              collapsed && "hidden md:block md:w-0 md:overflow-hidden md:border-transparent md:px-0",
+            )}
+            data-shell-region="context-sidebar"
+          >
+            <div ref={setSidebarTarget} className="flex min-h-0 flex-col gap-3 md:min-w-56">
               {contextSidebar}
             </div>
           </aside>
