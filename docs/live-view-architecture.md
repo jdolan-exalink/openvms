@@ -155,6 +155,17 @@ SurfaceLayer follows the grid growing through its ResizeObserver plus settle per
   optimistically and rolls back on error.
 - **Not browser-verified:** drop indicators, drag overlay, collapse transition, keyboard DnD in the tree.
 
+## LV-14: Font Awesome icons and resizable sidebar
+
+Navigation (`components/nav.ts`: rail, mobile drawer, settings sub-nav) and the Explorador use
+Font Awesome Free solid icons (individual imports; core CSS imported once in `main.tsx`,
+`config.autoAddCss = false`); other in-page icons stay on lucide. FA CSS is unlayered, so size
+icons with font-size classes (`text-sm`) and `fixedWidth`, not `size-*`. The shell sidebar
+(`AppShell`) is resizable through a keyboard-accessible `role="separator"` handle (drag with
+rAF throttling, arrows +-16 px, Home/End, double click resets). Width is 256 px (default and
+minimum) to `min(480 px, 40vw)`, persisted in `openvms.live.sidebar.width`; collapse keeps it.
+The aside clips horizontal overflow and the tree truncates names with `title`.
+
 ## Known limitations
 
 Not yet browser-verified: overlay geometry/z-order during drag, IntersectionObserver
