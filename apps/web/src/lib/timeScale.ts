@@ -114,3 +114,71 @@ export function clusterMarkers(times: number[], view: View, width: number, minPx
   }
   return out;
 }
+
+/** The timeline never shows more than this far past "now": nothing exists there yet. */
+export const FUTURE_LIMIT_S = 3600;
+/** Default REC window: this long, ending a little after now (today only). */
+const DEFAULT_SPAN_S = 3 * 3600;
+const DEFAULT_LOOKAHEAD_S = 15 * 60;
+
+/** rangeBounds is the navigable range of a day: its start up to min(day end, now + 1 h). */
+export function rangeBounds(day: number, now: number): View {
+  return { start: day, end: Math.max(day + MIN_SPAN_S, Math.min(day + DAY_S, now + FUTURE_LIMIT_S)) };
+}
+
+/** defaultView is the window shown on entering a day: a few hours ending near now, or the whole past day. */
+export function defaultView(bounds: View, now: number): View {
+  if (now < bounds.start || now > bounds.end) return bounds;
+  const end = Math.min(bounds.end, now + DEFAULT_LOOKAHEAD_S);
+  return clampView({ start: end - DEFAULT_SPAN_S, end }, bounds);
+}
+
+export type MarkerItem = { time: number; end?: number };
+export type ItemCluster = { time: number; endTime: number; from: number; to: number; count: number };
+
+/**
+ * clusterItems buckets time-sorted items into clusters no narrower than minPx (like
+ * clusterMarkers) but keeps the member index range [from, to) and the latest end so a
+ * cluster can be drawn as a segment and inspected on hover. Items outside the view are dropped.
+ */
+export function clusterItems(items: MarkerItem[], view: View, width: number, minPx = 6): ItemCluster[] {
+  const out: ItemCluster[] = [];
+  let bucket = NaN;
+  items.forEach((item, i) => {
+    const end = Math.max(item.end ?? item.time, item.time);
+    if (end < view.start || item.time > view.end) return;
+    const b = Math.floor(timeToX(item.time, view, width) / minPx);
+    const last = out[out.length - 1];
+    if (last && b === bucket) {
+      last.count += 1;
+      last.to = i + 1;
+      last.endTime = Math.max(last.endTime, end);
+    } else {
+      out.push({ time: item.time, endTime: end, from: i, to: i + 1, count: 1 });
+      bucket = b;
+    }
+  });
+  return out;
+}
+
+/** clusterExtent is the horizontal pixel extent [x0, x1] a cluster is drawn with. */
+export function clusterExtent(c: ItemCluster, view: View, width: number, minPx: number): [number, number] {
+  const x0 = timeToX(c.time, view, width);
+  return [x0, Math.max(timeToX(c.endTime, view, width), x0 + minPx)];
+}
+
+/** findClusterAt hit-tests a pointer x (px) against the drawn clusters, with a small slop. */
+export function findClusterAt(clusters: ItemCluster[], view: View, width: number, px: number, minPx: number, slop = 2): ItemCluster | undefined {
+  let best: ItemCluster | undefined;
+  let bestD = Infinity;
+  for (const c of clusters) {
+    const [x0, x1] = clusterExtent(c, view, width, minPx);
+    if (px < x0 - slop || px > x1 + slop) continue;
+    const d = Math.abs(px - (x0 + x1) / 2);
+    if (d < bestD) {
+      best = c;
+      bestD = d;
+    }
+  }
+  return best;
+}

@@ -51,7 +51,19 @@ export function useRecData(cameraIds: string[], day: number, enabled: boolean) {
   const eventList = useMemo(
     () =>
       (events.data?.pages.flatMap((p) => p.items) ?? [])
-        .map((e) => ({ time: Date.parse(e.start_time) / 1000, severity: e.severity as string }))
+        .map((e) => {
+          const time = Date.parse(e.start_time) / 1000;
+          const end = e.end_time ? Date.parse(e.end_time) / 1000 : undefined;
+          return {
+            id: e.id,
+            time,
+            end: end !== undefined && end > time ? end : undefined,
+            severity: e.severity as string,
+            cameraId: e.camera_id,
+            label: e.labels[0] ?? "",
+            detail: e.plates?.[0] || e.sub_labels?.[0] || undefined,
+          };
+        })
         .sort((a, b) => a.time - b.time),
     [events.data],
   );

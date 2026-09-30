@@ -31,11 +31,15 @@ export function LiveRecDock({
   cameras,
   events,
   now,
+  selectedId,
+  onSelectCamera,
 }: {
   transport: RecTransport;
   cameras: TimelineCamera[];
   events: TimelineEvent[];
   now: number;
+  selectedId?: string;
+  onSelectCamera?: (cameraId: string) => void;
 }) {
   const { seek, play, pause, playing, speed, setSpeed, day, getPosition, subscribePosition } = transport;
   const position = useSyncExternalStore(subscribePosition, getPosition);
@@ -75,7 +79,7 @@ export function LiveRecDock({
   });
 
   return (
-    <section aria-label="Controles de grabación" className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-2">
+    <section aria-label="Controles de grabación" className="flex flex-col gap-2 max-h-[40vh] rounded-xl border border-line bg-surface p-2">
       <div className="flex flex-wrap items-center gap-1.5">
         <Button variant="primary" aria-label={playing ? "Pausar" : "Reproducir"} title={playing ? "Pausar (Espacio)" : "Reproducir (Espacio)"} onClick={() => (playing ? pause() : play())}>
           {playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
@@ -122,7 +126,7 @@ export function LiveRecDock({
           </div>
         </details>
       </div>
-      <DayTimeline day={day} cameras={cameras} events={events} position={position} now={now} onSeek={(t) => seek(Math.min(t, liveEdge))} />
+      <DayTimeline day={day} cameras={cameras} events={events} position={position} now={now} onSeek={(t) => seek(Math.min(t, liveEdge))} selectedId={selectedId} onSelectCamera={onSelectCamera} />
     </section>
   );
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clampView, clusterMarkers, DAY_S, MIN_SPAN_S, mergeSpans, panView, tickStep, timeToX, xToTime, zoomView } from "./timeScale";
+import { clampView, clusterItems, clusterMarkers, defaultView, findClusterAt, FUTURE_LIMIT_S, rangeBounds, DAY_S, MIN_SPAN_S, mergeSpans, panView, tickStep, timeToX, xToTime, zoomView } from "./timeScale";
 
 const bounds = { start: 1000, end: 1000 + DAY_S };
 
@@ -49,5 +49,28 @@ describe("timeScale", () => {
     expect(clusters.length).toBeLessThan(20);
     expect(clusters.reduce((n, c) => n + c.count, 0)).toBe(500);
     expect(clusterMarkers([-5, 2000], view, 1000)).toEqual([]);
+  });
+});
+
+describe("future limit and detection hit-testing", () => {
+  const day = 1_700_000_000;
+  it("never reaches past now + 1 h on today, and keeps the whole past day", () => {
+    const now = day + 10 * 3600;
+    expect(rangeBounds(day, now).end).toBe(now + FUTURE_LIMIT_S);
+    expect(rangeBounds(day, day + 2 * DAY_S).end).toBe(day + DAY_S);
+    const view = defaultView(rangeBounds(day, now), now);
+    expect(view.end).toBeLessThanOrEqual(now + FUTURE_LIMIT_S);
+    expect(view.end).toBeGreaterThan(now);
+    expect(panView(view, 10 * 3600, rangeBounds(day, now)).end).toBe(now + FUTURE_LIMIT_S);
+  });
+
+  it("clusters items keeping index ranges and finds the cluster under the pointer", () => {
+    const view = { start: 0, end: 1000 };
+    const items = [{ time: 100, end: 160 }, { time: 101 }, { time: 500 }];
+    const clusters = clusterItems(items, view, 1000, 7);
+    expect(clusters.map((c) => [c.from, c.to, c.count])).toEqual([[0, 2, 2], [2, 3, 1]]);
+    expect(findClusterAt(clusters, view, 1000, 130, 4)?.count).toBe(2);
+    expect(findClusterAt(clusters, view, 1000, 502, 4)?.from).toBe(2);
+    expect(findClusterAt(clusters, view, 1000, 300, 4)).toBeUndefined();
   });
 });

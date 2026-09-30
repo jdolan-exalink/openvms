@@ -625,10 +625,10 @@ describe("Live with persistent players (P0 acceptance)", () => {
     it("switches to REC from the toggle and back to LIVE, clearing the URL state", async () => {
       setup(withRecordings);
       const { router } = renderPage(Live);
-      fireEvent.click(await screen.findByRole("button", { name: "Grabación" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Grabaciones" }));
       expect(await screen.findByRole("region", { name: "Controles de grabación" })).toBeInTheDocument();
       await waitFor(() => expect(router.state.location.search).toMatchObject({ mode: "rec" }));
-      expect(screen.getByRole("button", { name: "Grabación" })).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("button", { name: "Grabaciones" })).toHaveAttribute("aria-pressed", "true");
 
       fireEvent.click(screen.getByRole("button", { name: "En vivo" }));
       await waitFor(() => expect(screen.queryByRole("region", { name: "Controles de grabación" })).toBeNull());

@@ -3,12 +3,12 @@ import { cn } from "@/lib/cn";
 
 /**
  * LiveModeToggle is the LIVE/REC segmented control shown in the top bar of the Live screen.
- * EN VIVO carries a green accent with a pulsing dot when active; GRABACIÓN carries a red one.
+ * EN VIVO carries a green accent with a pulsing dot when active; GRABACIONES carries a red one.
  */
 export function LiveModeToggle({ rec, onChange }: { rec: boolean; onChange: (mode: "live" | "rec") => void }) {
   const options = [
     { mode: "live", label: "En vivo", Icon: Play, hint: "Ver las cámaras en vivo", active: "bg-ok/15 text-ok ring-ok/40", dot: "bg-ok" },
-    { mode: "rec", label: "Grabación", Icon: Circle, hint: "Reproducir grabaciones sincronizadas", active: "bg-bad/15 text-bad ring-bad/40", dot: "bg-bad" },
+    { mode: "rec", label: "Grabaciones", Icon: Circle, hint: "Reproducir grabaciones sincronizadas", active: "bg-bad/15 text-bad ring-bad/40", dot: "bg-bad" },
   ] as const;
   return (
     <div role="group" aria-label="Modo de reproducción" className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">

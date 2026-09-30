@@ -24,7 +24,7 @@ export function Layout() {
   const isLive = pathname === "/live";
   const liveRec = isLive && parseRecSearch(search).rec && can(me.data, "recordings.view");
   const pageContext = getPageContext(pathname);
-  const pageTitle = isLive && liveRec ? "Grabación" : pageContext.title;
+  const pageTitle = isLive && liveRec ? "Grabaciones" : pageContext.title;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [omniboxOpen, setOmniboxOpen] = useState(false);
   const logout = useLogout();

@@ -217,7 +217,7 @@ export function Live() {
   const masterId = pickMaster(syncIds, tiles[selected]?.camera_id, hasCoverage);
   useSyncedPlayback(rec ? masterId : "", syncIds, (id) => transport.players.current.get(id)?.video);
   const timelineCameras = useMemo(
-    () => gridCameraIds.filter((id) => !denied.has(id)).map((id) => ({ id, name: camById.get(id)?.display_name ?? id, spans: recData.spans[id] ?? [] })),
+    () => gridCameraIds.filter((id) => !denied.has(id)).map((id) => ({ id, name: camById.get(id)?.display_name ?? id, spans: recData.spans[id] ?? [], live: camById.get(id)?.status === "online" })),
     [gridCameraIds, denied, camById, recData.spans],
   );
 
@@ -413,7 +413,17 @@ export function Live() {
                 })}
               </div>
             </SortableContext>
-            {rec && <LiveRecDock transport={transport} cameras={timelineCameras} events={recData.events} now={now} />}
+            {rec && <LiveRecDock
+                transport={transport}
+                cameras={timelineCameras}
+                events={recData.events}
+                now={now}
+                selectedId={tiles[selected]?.camera_id}
+                onSelectCamera={(id) => {
+                  const idx = tiles.findIndex((t) => t?.camera_id === id);
+                  if (idx >= 0) setSelected(idx);
+                }}
+              />}
           </section>
         </div>
         {sidebar}
