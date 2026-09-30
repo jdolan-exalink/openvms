@@ -1,14 +1,15 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { camerasQuery, eventsQuery, meQuery, recordingsQuery } from "@/api/queries";
-import { HlsPlayer } from "@/components/HlsPlayer";
+import { HlsPlayer, type HlsPlayerHandle } from "@/components/HlsPlayer";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
 import { Button, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
 import { fmtDateTime, toLocalInput } from "@/lib/format";
 import { vodWindowForInstant } from "@/lib/recordings";
+import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
 import { can } from "@/lib/perm";
 
 const DAY = 24 * 3600;
@@ -123,6 +124,10 @@ export function Playback() {
       updateSelection(selectedCameraIds, id);
     }
   };
+
+  // Drift correction: the primary player is the master clock for the other cameras.
+  const players = useRef(new Map<string, HlsPlayerHandle | null>());
+  useSyncedPlayback(primaryCameraId, selectedCameraIds, (id) => players.current.get(id)?.video);
 
   const jump = (t: number) => {
     setInstant(t);
@@ -310,6 +315,10 @@ export function Playback() {
                   </div>
 
                   <HlsPlayer
+                    ref={(h) => {
+                      if (h) players.current.set(camId, h);
+                      else players.current.delete(camId);
+                    }}
                     key={`${camId}-${winStart}`}
                     cameraId={camId}
                     start={winStart}
