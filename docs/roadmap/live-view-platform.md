@@ -67,6 +67,7 @@ and `apps/api/main.go` if any (both branches add config knobs/wiring). Then
 | LV-9 | LIVE/REC toggle: synchronized recorded grid, zoomable day timeline, calendar, URL state | ✅ done (not browser-verified) | `a3a3b89`, `faea095` |
 | LV-10 | Top-bar LIVE/REC toggle, mode-colored grid ring, sidebar fixed, grid fits viewport (no page scroll) | ✅ done (not browser-verified) | `cd03ecc` |
 | LV-11 | Per-camera timeline rows with detection tooltips, 1 h future limit, live growth, "Grabaciones" rename | ✅ done (not browser-verified) | `30dac57` |
+| LV-12 | Detection snapshot shown as poster while the recording loads; last-frame hold on other tiles | ✅ done (not browser-verified) | `fce96d5` |
 
 Dependencies: LV-2 → LV-3 → LV-4 → LV-5. LV-6 can run in parallel with LV-4/LV-5 if it
 only touches the session/overlay layer. LV-8 last.
