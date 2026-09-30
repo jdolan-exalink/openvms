@@ -1316,6 +1316,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/alarms/{alarmId}/investigate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Mark an alarm as investigating
+         * @description Requires alarms.manage on the alarm's camera.
+         */
+        post: operations["investigateAlarm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/{alarmId}/close": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Close an alarm
+         * @description Requires alarms.manage on the alarm's camera.
+         */
+        post: operations["closeAlarm"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/{alarmId}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a comment to an alarm
+         * @description Requires alarms.manage on the alarm's camera.
+         */
+        post: operations["addAlarmComment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/{alarmId}/transitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List lifecycle transitions and comments for an alarm
+         * @description Requires alarms.view on the alarm's camera.
+         */
+        get: operations["listAlarmTransitions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/alarms/{alarmId}/assignees": {
         parameters: {
             query?: never;
@@ -2602,7 +2690,7 @@ export interface components {
             updated_at: string;
         };
         /** @enum {string} */
-        AlarmStatus: "open" | "acknowledged" | "resolved";
+        AlarmStatus: "open" | "acknowledged" | "assigned" | "investigating" | "resolved" | "closed";
         Alarm: {
             /** Format: uuid */
             id: string;
@@ -2639,10 +2727,31 @@ export interface components {
             resolved_by_name?: string | null;
             /** Format: date-time */
             resolved_at?: string | null;
+            /** Format: uuid */
+            closed_by?: string | null;
+            closed_by_name?: string | null;
+            /** Format: date-time */
+            closed_at?: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        AlarmTransition: {
+            /** Format: int64 */
+            id: number;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            alarm_id: string;
+            from_status?: string | null;
+            to_status?: string | null;
+            /** Format: uuid */
+            actor_id?: string | null;
+            actor_name?: string | null;
+            comment: string;
+            /** Format: date-time */
+            at: string;
         };
         AlarmAssignInput: {
             /** Format: uuid */
@@ -5614,6 +5723,8 @@ export interface operations {
         parameters: {
             query?: {
                 status?: components["schemas"]["AlarmStatus"];
+                /** @description Filter by status group (active = open, acknowledged, assigned, investigating) */
+                status_group?: "active";
                 site_id?: string;
                 camera_id?: string;
                 assigned_to?: string;
@@ -5767,6 +5878,127 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Alarm"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    investigateAlarm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    comment?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Alarm in investigating state */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alarm"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    closeAlarm: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    comment?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Closed alarm */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Alarm"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    addAlarmComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    comment: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Comment added as transition */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlarmTransition"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listAlarmTransitions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Transitions history */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlarmTransition"][];
                 };
             };
             401: components["responses"]["Unauthorized"];

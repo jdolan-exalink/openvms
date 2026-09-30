@@ -13,15 +13,29 @@ type AlarmStatus = Schemas["AlarmStatus"];
 const statusBadgeStyles: Record<AlarmStatus, { label: string; bg: string; text: string }> = {
   open: { label: "Abierta", bg: "bg-bad/10 border-bad/30", text: "text-bad" },
   acknowledged: { label: "Reconocida", bg: "bg-warn/10 border-warn/30", text: "text-warn" },
+  assigned: { label: "Asignada", bg: "bg-primary/10 border-primary/30", text: "text-primary" },
+  investigating: { label: "En investigación", bg: "bg-warn/10 border-warn/30", text: "text-warn" },
   resolved: { label: "Resuelta", bg: "bg-ok/10 border-ok/30", text: "text-ok" },
+  closed: { label: "Cerrada", bg: "bg-muted border-border", text: "text-muted-foreground" },
 };
 
 export function Alarms() {
   const qc = useQueryClient();
-  const [filter, setFilter] = useState<AlarmFilter>({ status: "open" });
+  const [filter, setFilter] = useState<AlarmFilter>({ status_group: "active" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [assignAlarm, setAssignAlarm] = useState<Alarm | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
+
+  const filterTabs: { key: string; label: string; filter: AlarmFilter }[] = [
+    { key: "active", label: "Activas", filter: { status_group: "active" } },
+    { key: "open", label: "Abiertas", filter: { status: "open" } },
+    { key: "acknowledged", label: "Reconocidas", filter: { status: "acknowledged" } },
+    { key: "assigned", label: "Asignadas", filter: { status: "assigned" } },
+    { key: "investigating", label: "En investigación", filter: { status: "investigating" } },
+    { key: "resolved", label: "Resueltas", filter: { status: "resolved" } },
+    { key: "closed", label: "Cerradas", filter: { status: "closed" } },
+    { key: "all", label: "Todas", filter: {} },
+  ];
 
   const alarms = useQuery(alarmsQuery(filter));
   const cameras = useQuery(camerasQuery());
@@ -119,22 +133,30 @@ export function Alarms() {
       <div className="flex flex-wrap items-center justify-between gap-4 rounded border border-line bg-surface p-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-muted">Estado:</span>
-          {(["open", "acknowledged", "resolved", undefined] as const).map((st) => {
-            const isSelected = filter.status === st;
-            const label = st === "open" ? "Abiertas" : st === "acknowledged" ? "Reconocidas" : st === "resolved" ? "Resueltas" : "Todas";
+          {filterTabs.map((tab) => {
+            const isSelected =
+              tab.key === "active"
+                ? filter.status_group === "active"
+                : tab.key === "all"
+                  ? !filter.status && !filter.status_group
+                  : filter.status === tab.filter.status && !filter.status_group;
             return (
               <button
-                key={label}
+                key={tab.key}
                 type="button"
                 onClick={() => {
-                  setFilter((prev) => ({ ...prev, status: st }));
+                  setFilter((prev) => ({
+                    ...prev,
+                    status: tab.filter.status,
+                    status_group: tab.filter.status_group,
+                  }));
                   setSelectedIds(new Set());
                 }}
                 className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
                   isSelected ? "bg-accent text-bg" : "bg-bg text-fg hover:bg-raised"
                 }`}
               >
-                {label}
+                {tab.label}
               </button>
             );
           })}

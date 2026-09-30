@@ -27,11 +27,24 @@ type Alarm struct {
 	ResolvedAt     *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	ClosedBy       *uuid.UUID
+	ClosedAt       *time.Time
 }
 
 type AlarmSetting struct {
 	Singleton bool
 	EnabledAt time.Time
+}
+
+type AlarmTransition struct {
+	ID         int64
+	TenantID   uuid.UUID
+	AlarmID    uuid.UUID
+	FromStatus *string
+	ToStatus   *string
+	ActorID    *uuid.UUID
+	Comment    string
+	At         time.Time
 }
 
 type ApiToken struct {

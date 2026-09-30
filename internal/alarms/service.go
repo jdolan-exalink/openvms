@@ -29,10 +29,50 @@ type ValidationError struct {
 func (e *ValidationError) Error() string { return e.Msg }
 
 const (
-	ActionAlarmAcknowledged = "ALARM_ACKNOWLEDGED"
-	ActionAlarmAssigned     = "ALARM_ASSIGNED"
-	ActionAlarmResolved     = "ALARM_RESOLVED"
+	ActionAlarmAcknowledged  = "ALARM_ACKNOWLEDGED"
+	ActionAlarmAssigned      = "ALARM_ASSIGNED"
+	ActionAlarmInvestigating = "ALARM_INVESTIGATING"
+	ActionAlarmResolved      = "ALARM_RESOLVED"
+	ActionAlarmClosed        = "ALARM_CLOSED"
+	ActionAlarmComment       = "ALARM_COMMENT"
 )
+
+// CanTransition validates whether transitioning from one alarm status to another is permitted.
+func CanTransition(from, to string) bool {
+	if from == to {
+		return true
+	}
+	switch from {
+	case "open":
+		switch to {
+		case "acknowledged", "assigned", "investigating", "resolved", "closed":
+			return true
+		}
+	case "acknowledged":
+		switch to {
+		case "assigned", "investigating", "resolved", "closed":
+			return true
+		}
+	case "assigned":
+		switch to {
+		case "acknowledged", "investigating", "resolved", "closed":
+			return true
+		}
+	case "investigating":
+		switch to {
+		case "acknowledged", "assigned", "resolved", "closed":
+			return true
+		}
+	case "resolved":
+		switch to {
+		case "closed", "investigating":
+			return true
+		}
+	case "closed":
+		return false
+	}
+	return false
+}
 
 type Publisher interface {
 	Publish(ctx context.Context, subject string, data []byte) error
@@ -67,8 +107,23 @@ type Alarm struct {
 	ResolvedBy         *uuid.UUID `json:"resolved_by,omitempty"`
 	ResolvedByName     *string    `json:"resolved_by_name,omitempty"`
 	ResolvedAt         *time.Time `json:"resolved_at,omitempty"`
+	ClosedBy           *uuid.UUID `json:"closed_by,omitempty"`
+	ClosedByName       *string    `json:"closed_by_name,omitempty"`
+	ClosedAt           *time.Time `json:"closed_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
+}
+
+type Transition struct {
+	ID         int64      `json:"id"`
+	TenantID   uuid.UUID  `json:"tenant_id"`
+	AlarmID    uuid.UUID  `json:"alarm_id"`
+	FromStatus *string    `json:"from_status,omitempty"`
+	ToStatus   *string    `json:"to_status,omitempty"`
+	ActorID    *uuid.UUID `json:"actor_id,omitempty"`
+	ActorName  *string    `json:"actor_name,omitempty"`
+	Comment    string     `json:"comment"`
+	At         time.Time  `json:"at"`
 }
 
 type Assignee struct {
@@ -78,11 +133,12 @@ type Assignee struct {
 }
 
 type Filter struct {
-	Status     *string
-	SiteID     *uuid.UUID
-	CameraID   *uuid.UUID
-	AssignedTo *uuid.UUID
-	Limit      int
+	Status      *string
+	StatusGroup *string
+	SiteID      *uuid.UUID
+	CameraID    *uuid.UUID
+	AssignedTo  *uuid.UUID
+	Limit       int
 }
 
 type BulkResult struct {
@@ -126,12 +182,13 @@ func (s *Service) List(ctx context.Context, actor authz.Actor, f Filter) ([]Alar
 		}
 
 		rows, err := q.ListAlarms(ctx, db.ListAlarmsParams{
-			CameraIds:  cameraIDs,
-			Status:     f.Status,
-			SiteID:     f.SiteID,
-			CameraID:   f.CameraID,
-			AssignedTo: f.AssignedTo,
-			LimitCount: int32(limit), //nolint:gosec // bounded to 1000
+			CameraIds:   cameraIDs,
+			Status:      f.Status,
+			StatusGroup: f.StatusGroup,
+			SiteID:      f.SiteID,
+			CameraID:    f.CameraID,
+			AssignedTo:  f.AssignedTo,
+			LimitCount:  int32(limit), //nolint:gosec // bounded to 1000
 		})
 		if err != nil {
 			return store.Classify(err)
@@ -168,9 +225,13 @@ func (s *Service) Get(ctx context.Context, actor authz.Actor, id uuid.UUID) (Ala
 	return res, err
 }
 
-func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UUID) (Alarm, error) {
+func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
 	var res Alarm
 	var published bool
+	cText := ""
+	if len(comment) > 0 {
+		cText = comment[0]
+	}
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		row, err := q.GetAlarm(ctx, id)
 		if err != nil {
@@ -185,7 +246,9 @@ func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UU
 			return err
 		}
 
-		if row.Status == "resolved" {
+		fromStatus := row.Status
+		toStatus := "acknowledged"
+		if !CanTransition(fromStatus, toStatus) {
 			return ErrInvalidTransition
 		}
 		if row.Status == "acknowledged" {
@@ -201,8 +264,20 @@ func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UU
 			return store.Classify(err)
 		}
 
+		if _, err := q.CreateAlarmTransition(ctx, db.CreateAlarmTransitionParams{
+			TenantID:   row.TenantID,
+			AlarmID:    id,
+			FromStatus: &fromStatus,
+			ToStatus:   &toStatus,
+			ActorID:    &actor.UserID,
+			Comment:    cText,
+		}); err != nil {
+			return store.Classify(err)
+		}
+
 		if err := audit(ctx, q, actor, &row.TenantID, ActionAlarmAcknowledged, id, map[string]any{
 			"previous_status": row.Status,
+			"comment":         cText,
 		}); err != nil {
 			return err
 		}
@@ -238,7 +313,7 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 			return err
 		}
 
-		if row.Status == "resolved" {
+		if row.Status == "resolved" || row.Status == "closed" {
 			return ErrInvalidTransition
 		}
 
@@ -260,6 +335,7 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 			return &ValidationError{Msg: "assigned user does not hold alarms.manage on this camera"}
 		}
 
+		oldStatus := row.Status
 		if _, err := q.AssignAlarm(ctx, db.AssignAlarmParams{
 			ID:         id,
 			AssignedTo: &assigneeID,
@@ -267,16 +343,36 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 			return store.Classify(err)
 		}
 
-		if err := audit(ctx, q, actor, &row.TenantID, ActionAlarmAssigned, id, map[string]any{
-			"assigned_to": assigneeID,
-		}); err != nil {
-			return err
-		}
-
 		updatedRow, err := q.GetAlarm(ctx, id)
 		if err != nil {
 			return store.Classify(err)
 		}
+
+		newStatus := updatedRow.Status
+		var fromStatusPtr, toStatusPtr *string
+		if oldStatus != newStatus {
+			fromStatusPtr = &oldStatus
+			toStatusPtr = &newStatus
+		}
+		if _, err := q.CreateAlarmTransition(ctx, db.CreateAlarmTransitionParams{
+			TenantID:   row.TenantID,
+			AlarmID:    id,
+			FromStatus: fromStatusPtr,
+			ToStatus:   toStatusPtr,
+			ActorID:    &actor.UserID,
+			Comment:    "",
+		}); err != nil {
+			return store.Classify(err)
+		}
+
+		if err := audit(ctx, q, actor, &row.TenantID, ActionAlarmAssigned, id, map[string]any{
+			"assigned_to":     assigneeID,
+			"previous_status": oldStatus,
+			"status":          newStatus,
+		}); err != nil {
+			return err
+		}
+
 		res = mapGetAlarmRow(updatedRow)
 		published = true
 		return nil
@@ -287,9 +383,13 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 	return res, err
 }
 
-func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID) (Alarm, error) {
+func (s *Service) Investigate(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
 	var res Alarm
 	var published bool
+	cText := ""
+	if len(comment) > 0 {
+		cText = comment[0]
+	}
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		row, err := q.GetAlarm(ctx, id)
 		if err != nil {
@@ -304,6 +404,82 @@ func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID) 
 			return err
 		}
 
+		fromStatus := row.Status
+		toStatus := "investigating"
+		if !CanTransition(fromStatus, toStatus) {
+			return ErrInvalidTransition
+		}
+		if row.Status == "investigating" {
+			res = mapGetAlarmRow(row)
+			return nil
+		}
+
+		if _, err := q.UpdateAlarmStatus(ctx, db.UpdateAlarmStatusParams{
+			ID:      id,
+			Status:  "investigating",
+			ActorID: &actor.UserID,
+		}); err != nil {
+			return store.Classify(err)
+		}
+
+		if _, err := q.CreateAlarmTransition(ctx, db.CreateAlarmTransitionParams{
+			TenantID:   row.TenantID,
+			AlarmID:    id,
+			FromStatus: &fromStatus,
+			ToStatus:   &toStatus,
+			ActorID:    &actor.UserID,
+			Comment:    cText,
+		}); err != nil {
+			return store.Classify(err)
+		}
+
+		if err := audit(ctx, q, actor, &row.TenantID, ActionAlarmInvestigating, id, map[string]any{
+			"previous_status": row.Status,
+			"comment":         cText,
+		}); err != nil {
+			return err
+		}
+
+		updatedRow, err := q.GetAlarm(ctx, id)
+		if err != nil {
+			return store.Classify(err)
+		}
+		res = mapGetAlarmRow(updatedRow)
+		published = true
+		return nil
+	})
+	if err == nil && published {
+		s.publish(ctx, "investigating", res)
+	}
+	return res, err
+}
+
+func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
+	var res Alarm
+	var published bool
+	cText := ""
+	if len(comment) > 0 {
+		cText = comment[0]
+	}
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		row, err := q.GetAlarm(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+
+		chk, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+			return err
+		}
+
+		fromStatus := row.Status
+		toStatus := "resolved"
+		if !CanTransition(fromStatus, toStatus) {
+			return ErrInvalidTransition
+		}
 		if row.Status == "resolved" {
 			res = mapGetAlarmRow(row)
 			return nil
@@ -317,8 +493,20 @@ func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID) 
 			return store.Classify(err)
 		}
 
+		if _, err := q.CreateAlarmTransition(ctx, db.CreateAlarmTransitionParams{
+			TenantID:   row.TenantID,
+			AlarmID:    id,
+			FromStatus: &fromStatus,
+			ToStatus:   &toStatus,
+			ActorID:    &actor.UserID,
+			Comment:    cText,
+		}); err != nil {
+			return store.Classify(err)
+		}
+
 		if err := audit(ctx, q, actor, &row.TenantID, ActionAlarmResolved, id, map[string]any{
 			"previous_status": row.Status,
+			"comment":         cText,
 		}); err != nil {
 			return err
 		}
@@ -335,6 +523,175 @@ func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID) 
 		s.publish(ctx, "resolved", res)
 	}
 	return res, err
+}
+
+func (s *Service) Close(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
+	var res Alarm
+	var published bool
+	cText := ""
+	if len(comment) > 0 {
+		cText = comment[0]
+	}
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		row, err := q.GetAlarm(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+
+		chk, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+			return err
+		}
+
+		fromStatus := row.Status
+		toStatus := "closed"
+		if !CanTransition(fromStatus, toStatus) {
+			return ErrInvalidTransition
+		}
+		if row.Status == "closed" {
+			res = mapGetAlarmRow(row)
+			return nil
+		}
+
+		if _, err := q.UpdateAlarmStatus(ctx, db.UpdateAlarmStatusParams{
+			ID:      id,
+			Status:  "closed",
+			ActorID: &actor.UserID,
+		}); err != nil {
+			return store.Classify(err)
+		}
+
+		if _, err := q.CreateAlarmTransition(ctx, db.CreateAlarmTransitionParams{
+			TenantID:   row.TenantID,
+			AlarmID:    id,
+			FromStatus: &fromStatus,
+			ToStatus:   &toStatus,
+			ActorID:    &actor.UserID,
+			Comment:    cText,
+		}); err != nil {
+			return store.Classify(err)
+		}
+
+		if err := audit(ctx, q, actor, &row.TenantID, ActionAlarmClosed, id, map[string]any{
+			"previous_status": row.Status,
+			"comment":         cText,
+		}); err != nil {
+			return err
+		}
+
+		updatedRow, err := q.GetAlarm(ctx, id)
+		if err != nil {
+			return store.Classify(err)
+		}
+		res = mapGetAlarmRow(updatedRow)
+		published = true
+		return nil
+	})
+	if err == nil && published {
+		s.publish(ctx, "closed", res)
+	}
+	return res, err
+}
+
+func (s *Service) AddComment(ctx context.Context, actor authz.Actor, id uuid.UUID, comment string) (Transition, error) {
+	if comment == "" {
+		return Transition{}, &ValidationError{Msg: "comment cannot be empty"}
+	}
+	var res Transition
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		row, err := q.GetAlarm(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+
+		chk, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+			return err
+		}
+
+		tr, err := q.CreateAlarmTransition(ctx, db.CreateAlarmTransitionParams{
+			TenantID:   row.TenantID,
+			AlarmID:    id,
+			FromStatus: nil,
+			ToStatus:   nil,
+			ActorID:    &actor.UserID,
+			Comment:    comment,
+		})
+		if err != nil {
+			return store.Classify(err)
+		}
+
+		if err := audit(ctx, q, actor, &row.TenantID, ActionAlarmComment, id, map[string]any{
+			"comment": comment,
+		}); err != nil {
+			return err
+		}
+
+		actorName := actor.Username
+		res = Transition{
+			ID:         tr.ID,
+			TenantID:   tr.TenantID,
+			AlarmID:    tr.AlarmID,
+			FromStatus: tr.FromStatus,
+			ToStatus:   tr.ToStatus,
+			ActorID:    tr.ActorID,
+			ActorName:  &actorName,
+			Comment:    tr.Comment,
+			At:         tr.At,
+		}
+		return nil
+	})
+	return res, err
+}
+
+func (s *Service) ListTransitions(ctx context.Context, actor authz.Actor, id uuid.UUID) ([]Transition, error) {
+	var items []Transition
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		row, err := q.GetAlarm(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+
+		chk, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		if err := chk.Require(authz.AlarmsView, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+			return err
+		}
+
+		rows, err := q.ListAlarmTransitions(ctx, id)
+		if err != nil {
+			return store.Classify(err)
+		}
+
+		items = make([]Transition, len(rows))
+		for i, r := range rows {
+			var actName *string
+			if r.ActorName != "" {
+				actName = &r.ActorName
+			}
+			items[i] = Transition{
+				ID:         r.ID,
+				TenantID:   r.TenantID,
+				AlarmID:    r.AlarmID,
+				FromStatus: r.FromStatus,
+				ToStatus:   r.ToStatus,
+				ActorID:    r.ActorID,
+				ActorName:  actName,
+				Comment:    r.Comment,
+				At:         r.At,
+			}
+		}
+		return nil
+	})
+	return items, err
 }
 
 func (s *Service) Bulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, action string) (BulkResult, error) {
@@ -361,7 +718,9 @@ func (s *Service) Bulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, 
 			}
 
 			if action == "acknowledge" {
-				if row.Status == "resolved" {
+				fromStatus := row.Status
+				toStatus := "acknowledged"
+				if !CanTransition(fromStatus, toStatus) {
 					return ErrInvalidTransition
 				}
 				if row.Status == "acknowledged" {
@@ -371,6 +730,16 @@ func (s *Service) Bulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, 
 					ID:      id,
 					Status:  "acknowledged",
 					ActorID: &actor.UserID,
+				}); err != nil {
+					return store.Classify(err)
+				}
+				if _, err := q.CreateAlarmTransition(ctx, db.CreateAlarmTransitionParams{
+					TenantID:   row.TenantID,
+					AlarmID:    id,
+					FromStatus: &fromStatus,
+					ToStatus:   &toStatus,
+					ActorID:    &actor.UserID,
+					Comment:    "",
 				}); err != nil {
 					return store.Classify(err)
 				}
@@ -384,6 +753,11 @@ func (s *Service) Bulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, 
 				updatedRow, _ := q.GetAlarm(ctx, id)
 				toPublish = append(toPublish, mapGetAlarmRow(updatedRow))
 			} else if action == "resolve" {
+				fromStatus := row.Status
+				toStatus := "resolved"
+				if !CanTransition(fromStatus, toStatus) {
+					return ErrInvalidTransition
+				}
 				if row.Status == "resolved" {
 					continue
 				}
@@ -391,6 +765,16 @@ func (s *Service) Bulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, 
 					ID:      id,
 					Status:  "resolved",
 					ActorID: &actor.UserID,
+				}); err != nil {
+					return store.Classify(err)
+				}
+				if _, err := q.CreateAlarmTransition(ctx, db.CreateAlarmTransitionParams{
+					TenantID:   row.TenantID,
+					AlarmID:    id,
+					FromStatus: &fromStatus,
+					ToStatus:   &toStatus,
+					ActorID:    &actor.UserID,
+					Comment:    "",
 				}); err != nil {
 					return store.Classify(err)
 				}
@@ -521,6 +905,10 @@ func mapGetAlarmRow(r db.GetAlarmRow) Alarm {
 	if r.ResolvedByName != "" {
 		resByName = &r.ResolvedByName
 	}
+	var closedByName *string
+	if r.ClosedByName != "" {
+		closedByName = &r.ClosedByName
+	}
 	return Alarm{
 		ID:                 r.ID,
 		TenantID:           r.TenantID,
@@ -544,6 +932,9 @@ func mapGetAlarmRow(r db.GetAlarmRow) Alarm {
 		ResolvedBy:         r.ResolvedBy,
 		ResolvedByName:     resByName,
 		ResolvedAt:         r.ResolvedAt,
+		ClosedBy:           r.ClosedBy,
+		ClosedByName:       closedByName,
+		ClosedAt:           r.ClosedAt,
 		CreatedAt:          r.CreatedAt,
 		UpdatedAt:          r.UpdatedAt,
 	}
@@ -562,6 +953,10 @@ func mapListAlarmRow(r db.ListAlarmsRow) Alarm {
 	if r.ResolvedByName != "" {
 		resByName = &r.ResolvedByName
 	}
+	var closedByName *string
+	if r.ClosedByName != "" {
+		closedByName = &r.ClosedByName
+	}
 	return Alarm{
 		ID:                 r.ID,
 		TenantID:           r.TenantID,
@@ -585,6 +980,9 @@ func mapListAlarmRow(r db.ListAlarmsRow) Alarm {
 		ResolvedBy:         r.ResolvedBy,
 		ResolvedByName:     resByName,
 		ResolvedAt:         r.ResolvedAt,
+		ClosedBy:           r.ClosedBy,
+		ClosedByName:       closedByName,
+		ClosedAt:           r.ClosedAt,
 		CreatedAt:          r.CreatedAt,
 		UpdatedAt:          r.UpdatedAt,
 	}

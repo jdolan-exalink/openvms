@@ -384,3 +384,192 @@ func TestAlarmsBulk(t *testing.T) {
 		t.Fatalf("bulk invalid action code = %d, want 400", code)
 	}
 }
+
+func TestAlarmLifecycleFull(t *testing.T) {
+	te := setupAlarmsTest(t)
+	cam := te.Cameras["frigate-h01/acceso_norte"]
+	alarmID, _ := seedAlarm(t, te, cam, "lifecycle-1")
+	operadorToken := te.Demo.Tokens["operador"]
+	adminToken := te.AdminToken
+
+	// 1. Initial status is open
+	code, body := te.request("GET", fmt.Sprintf("/api/v1/alarms/%s", alarmID), operadorToken, nil)
+	if code != 200 {
+		t.Fatalf("get alarm code = %d, want 200", code)
+	}
+	var a gen.Alarm
+	_ = json.Unmarshal(body, &a)
+	if a.Status != "open" {
+		t.Fatalf("initial status = %s, want open", a.Status)
+	}
+
+	// 2. Acknowledge -> status = acknowledged
+	code, body = te.request("POST", fmt.Sprintf("/api/v1/alarms/%s/acknowledge", alarmID), operadorToken, nil)
+	if code != 200 {
+		t.Fatalf("acknowledge code = %d, want 200: %s", code, body)
+	}
+	_ = json.Unmarshal(body, &a)
+	if a.Status != "acknowledged" || a.AcknowledgedBy == nil {
+		t.Fatalf("acknowledged status = %s, want acknowledged", a.Status)
+	}
+	operadorID := *a.AcknowledgedBy
+
+	// 3. Assign to user -> status = assigned
+	code, body = te.request("POST", fmt.Sprintf("/api/v1/alarms/%s/assign", alarmID), adminToken, gen.AlarmAssignInput{
+		UserId: operadorID,
+	})
+	if code != 200 {
+		t.Fatalf("assign code = %d, want 200: %s", code, body)
+	}
+	_ = json.Unmarshal(body, &a)
+	if a.Status != "assigned" {
+		t.Fatalf("assigned status = %s, want assigned", a.Status)
+	}
+
+	// 4. Investigate -> status = investigating
+	comment := "checking camera feed"
+	code, body = te.request("POST", fmt.Sprintf("/api/v1/alarms/%s/investigate", alarmID), operadorToken, map[string]string{
+		"comment": comment,
+	})
+	if code != 200 {
+		t.Fatalf("investigate code = %d, want 200: %s", code, body)
+	}
+	_ = json.Unmarshal(body, &a)
+	if a.Status != "investigating" {
+		t.Fatalf("investigating status = %s, want investigating", a.Status)
+	}
+
+	// 5. Resolve -> status = resolved
+	code, body = te.request("POST", fmt.Sprintf("/api/v1/alarms/%s/resolve", alarmID), operadorToken, nil)
+	if code != 200 {
+		t.Fatalf("resolve code = %d, want 200: %s", code, body)
+	}
+	_ = json.Unmarshal(body, &a)
+	if a.Status != "resolved" {
+		t.Fatalf("resolved status = %s, want resolved", a.Status)
+	}
+
+	// 6. Close -> status = closed
+	closeComment := "incident concluded"
+	code, body = te.request("POST", fmt.Sprintf("/api/v1/alarms/%s/close", alarmID), operadorToken, map[string]string{
+		"comment": closeComment,
+	})
+	if code != 200 {
+		t.Fatalf("close code = %d, want 200: %s", code, body)
+	}
+	_ = json.Unmarshal(body, &a)
+	if a.Status != "closed" {
+		t.Fatalf("closed status = %s, want closed", a.Status)
+	}
+	if a.ClosedBy == nil || *a.ClosedBy != operadorID {
+		t.Fatalf("closed_by = %+v, want operador", a.ClosedBy)
+	}
+	if a.ClosedAt == nil {
+		t.Fatalf("closed_at is nil")
+	}
+
+	// 7. Verify all transitions recorded
+	code, body = te.request("GET", fmt.Sprintf("/api/v1/alarms/%s/transitions", alarmID), operadorToken, nil)
+	if code != 200 {
+		t.Fatalf("transitions code = %d, want 200: %s", code, body)
+	}
+	var transitions []gen.AlarmTransition
+	_ = json.Unmarshal(body, &transitions)
+	if len(transitions) != 5 {
+		t.Fatalf("expected 5 transitions, got %d", len(transitions))
+	}
+	// Verify transition sequence
+	expectedPairs := [][2]string{
+		{"open", "acknowledged"},
+		{"acknowledged", "assigned"},
+		{"assigned", "investigating"},
+		{"investigating", "resolved"},
+		{"resolved", "closed"},
+	}
+	for i, pair := range expectedPairs {
+		if transitions[i].FromStatus == nil || *transitions[i].FromStatus != pair[0] {
+			t.Fatalf("transition %d from_status = %+v, want %s", i, transitions[i].FromStatus, pair[0])
+		}
+		if transitions[i].ToStatus == nil || *transitions[i].ToStatus != pair[1] {
+			t.Fatalf("transition %d to_status = %+v, want %s", i, transitions[i].ToStatus, pair[1])
+		}
+	}
+}
+
+func TestAlarmComments(t *testing.T) {
+	te := setupAlarmsTest(t)
+	cam := te.Cameras["frigate-h01/acceso_norte"]
+	alarmID, _ := seedAlarm(t, te, cam, "comments-1")
+	operadorToken := te.Demo.Tokens["operador"]
+
+	// Add a comment
+	code, body := te.request("POST", fmt.Sprintf("/api/v1/alarms/%s/comments", alarmID), operadorToken, map[string]string{
+		"comment": "Security guard dispatched to gate",
+	})
+	if code != 201 {
+		t.Fatalf("add comment code = %d, want 201: %s", code, body)
+	}
+	var tr gen.AlarmTransition
+	_ = json.Unmarshal(body, &tr)
+	if tr.Comment != "Security guard dispatched to gate" {
+		t.Fatalf("comment = %q", tr.Comment)
+	}
+	if tr.FromStatus != nil || tr.ToStatus != nil {
+		t.Fatalf("comment transition must have nil statuses, got from=%+v to=%+v", tr.FromStatus, tr.ToStatus)
+	}
+
+	// Transitions list should contain this comment
+	code, body = te.request("GET", fmt.Sprintf("/api/v1/alarms/%s/transitions", alarmID), operadorToken, nil)
+	if code != 200 {
+		t.Fatalf("transitions code = %d, want 200", code)
+	}
+	var list []gen.AlarmTransition
+	_ = json.Unmarshal(body, &list)
+	if len(list) != 1 || list[0].Comment != "Security guard dispatched to gate" {
+		t.Fatalf("unexpected transitions list: %+v", list)
+	}
+}
+
+func TestAlarmStatusGroupFilter(t *testing.T) {
+	te := setupAlarmsTest(t)
+	cam := te.Cameras["frigate-h01/acceso_norte"]
+	alarmOpen, _ := seedAlarm(t, te, cam, "filter-open")
+	alarmAck, _ := seedAlarm(t, te, cam, "filter-ack")
+	alarmRes, _ := seedAlarm(t, te, cam, "filter-res")
+	alarmClosed, _ := seedAlarm(t, te, cam, "filter-closed")
+
+	operadorToken := te.Demo.Tokens["operador"]
+
+	// Set statuses
+	te.request("POST", fmt.Sprintf("/api/v1/alarms/%s/acknowledge", alarmAck), operadorToken, nil)
+	te.request("POST", fmt.Sprintf("/api/v1/alarms/%s/resolve", alarmRes), operadorToken, nil)
+	te.request("POST", fmt.Sprintf("/api/v1/alarms/%s/close", alarmClosed), operadorToken, nil)
+
+	// Filter with status_group=active
+	code, body := te.request("GET", "/api/v1/alarms?status_group=active", operadorToken, nil)
+	if code != 200 {
+		t.Fatalf("list alarms status_group=active code = %d, want 200", code)
+	}
+	var res struct {
+		Items []gen.Alarm `json:"items"`
+	}
+	_ = json.Unmarshal(body, &res)
+
+	foundIDs := make(map[uuid.UUID]bool)
+	for _, it := range res.Items {
+		foundIDs[it.Id] = true
+	}
+
+	if !foundIDs[alarmOpen] {
+		t.Fatalf("expected alarmOpen in active group")
+	}
+	if !foundIDs[alarmAck] {
+		t.Fatalf("expected alarmAck in active group")
+	}
+	if foundIDs[alarmRes] {
+		t.Fatalf("resolved alarm should NOT be in active group")
+	}
+	if foundIDs[alarmClosed] {
+		t.Fatalf("closed alarm should NOT be in active group")
+	}
+}

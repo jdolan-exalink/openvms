@@ -1,5 +1,5 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { api, unwrap } from "./client";
+import { api, unwrap, type Schemas } from "./client";
 
 export const readinessQuery = queryOptions({
   queryKey: ["health", "ready"],
@@ -226,7 +226,8 @@ export const auditQuery = (filter: AuditFilter) =>
   });
 
 export type AlarmFilter = {
-  status?: "open" | "acknowledged" | "resolved";
+  status?: Schemas["AlarmStatus"];
+  status_group?: "active";
   site_id?: string;
   camera_id?: string;
   assigned_to?: string;

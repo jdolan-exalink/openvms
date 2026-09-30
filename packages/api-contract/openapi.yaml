@@ -1712,6 +1712,7 @@ paths:
         Alarms for alert-severity events the caller can view via alarms.view, newest first.
       parameters:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/AlarmStatus" } }
+        - { name: status_group, in: query, schema: { type: string, enum: [active] }, description: "Filter by status group (active = open, acknowledged, assigned, investigating)" }
         - { name: site_id, in: query, schema: { type: string, format: uuid } }
         - { name: camera_id, in: query, schema: { type: string, format: uuid } }
         - { name: assigned_to, in: query, schema: { type: string, format: uuid } }
@@ -1823,6 +1824,104 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Alarm" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/alarms/{alarmId}/investigate:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [alarms]
+      operationId: investigateAlarm
+      summary: Mark an alarm as investigating
+      description: Requires alarms.manage on the alarm's camera.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment: { type: string }
+      responses:
+        "200":
+          description: Alarm in investigating state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Alarm" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/alarms/{alarmId}/close:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [alarms]
+      operationId: closeAlarm
+      summary: Close an alarm
+      description: Requires alarms.manage on the alarm's camera.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment: { type: string }
+      responses:
+        "200":
+          description: Closed alarm
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Alarm" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/alarms/{alarmId}/comments:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [alarms]
+      operationId: addAlarmComment
+      summary: Add a comment to an alarm
+      description: Requires alarms.manage on the alarm's camera.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [comment]
+              properties:
+                comment: { type: string }
+      responses:
+        "201":
+          description: Comment added as transition
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AlarmTransition" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/alarms/{alarmId}/transitions:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [alarms]
+      operationId: listAlarmTransitions
+      summary: List lifecycle transitions and comments for an alarm
+      description: Requires alarms.view on the alarm's camera.
+      responses:
+        "200":
+          description: Transitions history
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AlarmTransition" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -3349,7 +3448,7 @@ components:
         updated_at: { type: string, format: date-time }
     AlarmStatus:
       type: string
-      enum: [open, acknowledged, resolved]
+      enum: [open, acknowledged, assigned, investigating, resolved, closed]
     Alarm:
       type: object
       required: [id, tenant_id, site_id, site_name, camera_id, camera_name, event_id, event_severity, event_start_time, event_labels, event_sub_labels, source, status, created_at, updated_at]
@@ -3376,8 +3475,24 @@ components:
         resolved_by: { type: string, format: uuid, nullable: true }
         resolved_by_name: { type: string, nullable: true }
         resolved_at: { type: string, format: date-time, nullable: true }
+        closed_by: { type: string, format: uuid, nullable: true }
+        closed_by_name: { type: string, nullable: true }
+        closed_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AlarmTransition:
+      type: object
+      required: [id, tenant_id, alarm_id, comment, at]
+      properties:
+        id: { type: integer, format: int64 }
+        tenant_id: { type: string, format: uuid }
+        alarm_id: { type: string, format: uuid }
+        from_status: { type: string, nullable: true }
+        to_status: { type: string, nullable: true }
+        actor_id: { type: string, format: uuid, nullable: true }
+        actor_name: { type: string, nullable: true }
+        comment: { type: string }
+        at: { type: string, format: date-time }
     AlarmAssignInput:
       type: object
       required: [user_id]

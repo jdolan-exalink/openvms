@@ -15,9 +15,10 @@ import (
 const assignAlarm = `-- name: AssignAlarm :one
 UPDATE alarms
 SET assigned_to = $1,
+    status = CASE WHEN status IN ('open', 'acknowledged') THEN 'assigned' ELSE status END,
     updated_at = now()
 WHERE id = $2
-RETURNING id, tenant_id, site_id, camera_id, event_id, source, status, assigned_to, acknowledged_by, acknowledged_at, resolved_by, resolved_at, created_at, updated_at
+RETURNING id, tenant_id, site_id, camera_id, event_id, source, status, assigned_to, acknowledged_by, acknowledged_at, resolved_by, resolved_at, created_at, updated_at, closed_by, closed_at
 `
 
 type AssignAlarmParams struct {
@@ -43,6 +44,46 @@ func (q *Queries) AssignAlarm(ctx context.Context, arg AssignAlarmParams) (Alarm
 		&i.ResolvedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ClosedBy,
+		&i.ClosedAt,
+	)
+	return i, err
+}
+
+const createAlarmTransition = `-- name: CreateAlarmTransition :one
+INSERT INTO alarm_transitions (tenant_id, alarm_id, from_status, to_status, actor_id, comment, at)
+VALUES ($1, $2, $3, $4, $5, $6, now())
+RETURNING id, tenant_id, alarm_id, from_status, to_status, actor_id, comment, at
+`
+
+type CreateAlarmTransitionParams struct {
+	TenantID   uuid.UUID
+	AlarmID    uuid.UUID
+	FromStatus *string
+	ToStatus   *string
+	ActorID    *uuid.UUID
+	Comment    string
+}
+
+func (q *Queries) CreateAlarmTransition(ctx context.Context, arg CreateAlarmTransitionParams) (AlarmTransition, error) {
+	row := q.db.QueryRow(ctx, createAlarmTransition,
+		arg.TenantID,
+		arg.AlarmID,
+		arg.FromStatus,
+		arg.ToStatus,
+		arg.ActorID,
+		arg.Comment,
+	)
+	var i AlarmTransition
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AlarmID,
+		&i.FromStatus,
+		&i.ToStatus,
+		&i.ActorID,
+		&i.Comment,
+		&i.At,
 	)
 	return i, err
 }
@@ -50,6 +91,7 @@ func (q *Queries) AssignAlarm(ctx context.Context, arg AssignAlarmParams) (Alarm
 const getAlarm = `-- name: GetAlarm :one
 SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status,
        a.assigned_to, a.acknowledged_by, a.acknowledged_at, a.resolved_by, a.resolved_at,
+       a.closed_by, a.closed_at,
        a.created_at, a.updated_at,
        s.name AS site_name,
        c.display_name AS camera_name,
@@ -60,7 +102,8 @@ SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status
        e.sub_labels AS event_sub_labels,
        COALESCE(u_assignee.display_name, '')::text AS assigned_to_name,
        COALESCE(u_ack.display_name, '')::text AS acknowledged_by_name,
-       COALESCE(u_res.display_name, '')::text AS resolved_by_name
+       COALESCE(u_res.display_name, '')::text AS resolved_by_name,
+       COALESCE(u_closed.display_name, '')::text AS closed_by_name
 FROM alarms a
 JOIN sites s ON s.id = a.site_id
 JOIN cameras c ON c.id = a.camera_id
@@ -68,6 +111,7 @@ JOIN events e ON e.id = a.event_id
 LEFT JOIN users u_assignee ON u_assignee.id = a.assigned_to
 LEFT JOIN users u_ack ON u_ack.id = a.acknowledged_by
 LEFT JOIN users u_res ON u_res.id = a.resolved_by
+LEFT JOIN users u_closed ON u_closed.id = a.closed_by
 WHERE a.id = $1
 `
 
@@ -84,6 +128,8 @@ type GetAlarmRow struct {
 	AcknowledgedAt     *time.Time
 	ResolvedBy         *uuid.UUID
 	ResolvedAt         *time.Time
+	ClosedBy           *uuid.UUID
+	ClosedAt           *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	SiteName           string
@@ -96,6 +142,7 @@ type GetAlarmRow struct {
 	AssignedToName     string
 	AcknowledgedByName string
 	ResolvedByName     string
+	ClosedByName       string
 }
 
 func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, error) {
@@ -114,6 +161,8 @@ func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, erro
 		&i.AcknowledgedAt,
 		&i.ResolvedBy,
 		&i.ResolvedAt,
+		&i.ClosedBy,
+		&i.ClosedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SiteName,
@@ -126,13 +175,66 @@ func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, erro
 		&i.AssignedToName,
 		&i.AcknowledgedByName,
 		&i.ResolvedByName,
+		&i.ClosedByName,
 	)
 	return i, err
+}
+
+const listAlarmTransitions = `-- name: ListAlarmTransitions :many
+SELECT t.id, t.tenant_id, t.alarm_id, t.from_status, t.to_status, t.actor_id, t.comment, t.at,
+       COALESCE(u.display_name, u.username, '')::text AS actor_name
+FROM alarm_transitions t
+LEFT JOIN users u ON u.id = t.actor_id
+WHERE t.alarm_id = $1
+ORDER BY t.at ASC, t.id ASC
+`
+
+type ListAlarmTransitionsRow struct {
+	ID         int64
+	TenantID   uuid.UUID
+	AlarmID    uuid.UUID
+	FromStatus *string
+	ToStatus   *string
+	ActorID    *uuid.UUID
+	Comment    string
+	At         time.Time
+	ActorName  string
+}
+
+func (q *Queries) ListAlarmTransitions(ctx context.Context, alarmID uuid.UUID) ([]ListAlarmTransitionsRow, error) {
+	rows, err := q.db.Query(ctx, listAlarmTransitions, alarmID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlarmTransitionsRow{}
+	for rows.Next() {
+		var i ListAlarmTransitionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AlarmID,
+			&i.FromStatus,
+			&i.ToStatus,
+			&i.ActorID,
+			&i.Comment,
+			&i.At,
+			&i.ActorName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAlarms = `-- name: ListAlarms :many
 SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status,
        a.assigned_to, a.acknowledged_by, a.acknowledged_at, a.resolved_by, a.resolved_at,
+       a.closed_by, a.closed_at,
        a.created_at, a.updated_at,
        s.name AS site_name,
        c.display_name AS camera_name,
@@ -143,7 +245,8 @@ SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status
        e.sub_labels AS event_sub_labels,
        COALESCE(u_assignee.display_name, '')::text AS assigned_to_name,
        COALESCE(u_ack.display_name, '')::text AS acknowledged_by_name,
-       COALESCE(u_res.display_name, '')::text AS resolved_by_name
+       COALESCE(u_res.display_name, '')::text AS resolved_by_name,
+       COALESCE(u_closed.display_name, '')::text AS closed_by_name
 FROM alarms a
 JOIN sites s ON s.id = a.site_id
 JOIN cameras c ON c.id = a.camera_id
@@ -151,22 +254,27 @@ JOIN events e ON e.id = a.event_id
 LEFT JOIN users u_assignee ON u_assignee.id = a.assigned_to
 LEFT JOIN users u_ack ON u_ack.id = a.acknowledged_by
 LEFT JOIN users u_res ON u_res.id = a.resolved_by
+LEFT JOIN users u_closed ON u_closed.id = a.closed_by
 WHERE a.camera_id = ANY($1::uuid[])
   AND ($2::text IS NULL OR a.status = $2)
-  AND ($3::uuid IS NULL OR a.site_id = $3)
-  AND ($4::uuid IS NULL OR a.camera_id = $4)
-  AND ($5::uuid IS NULL OR a.assigned_to = $5)
+  AND ($3::text IS NULL OR (
+      $3::text = 'active' AND a.status IN ('open', 'acknowledged', 'assigned', 'investigating')
+  ))
+  AND ($4::uuid IS NULL OR a.site_id = $4)
+  AND ($5::uuid IS NULL OR a.camera_id = $5)
+  AND ($6::uuid IS NULL OR a.assigned_to = $6)
 ORDER BY a.created_at DESC
-LIMIT $6
+LIMIT $7
 `
 
 type ListAlarmsParams struct {
-	CameraIds  []uuid.UUID
-	Status     *string
-	SiteID     *uuid.UUID
-	CameraID   *uuid.UUID
-	AssignedTo *uuid.UUID
-	LimitCount int32
+	CameraIds   []uuid.UUID
+	Status      *string
+	StatusGroup *string
+	SiteID      *uuid.UUID
+	CameraID    *uuid.UUID
+	AssignedTo  *uuid.UUID
+	LimitCount  int32
 }
 
 type ListAlarmsRow struct {
@@ -182,6 +290,8 @@ type ListAlarmsRow struct {
 	AcknowledgedAt     *time.Time
 	ResolvedBy         *uuid.UUID
 	ResolvedAt         *time.Time
+	ClosedBy           *uuid.UUID
+	ClosedAt           *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	SiteName           string
@@ -194,12 +304,14 @@ type ListAlarmsRow struct {
 	AssignedToName     string
 	AcknowledgedByName string
 	ResolvedByName     string
+	ClosedByName       string
 }
 
 func (q *Queries) ListAlarms(ctx context.Context, arg ListAlarmsParams) ([]ListAlarmsRow, error) {
 	rows, err := q.db.Query(ctx, listAlarms,
 		arg.CameraIds,
 		arg.Status,
+		arg.StatusGroup,
 		arg.SiteID,
 		arg.CameraID,
 		arg.AssignedTo,
@@ -225,6 +337,8 @@ func (q *Queries) ListAlarms(ctx context.Context, arg ListAlarmsParams) ([]ListA
 			&i.AcknowledgedAt,
 			&i.ResolvedBy,
 			&i.ResolvedAt,
+			&i.ClosedBy,
+			&i.ClosedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SiteName,
@@ -237,6 +351,7 @@ func (q *Queries) ListAlarms(ctx context.Context, arg ListAlarmsParams) ([]ListA
 			&i.AssignedToName,
 			&i.AcknowledgedByName,
 			&i.ResolvedByName,
+			&i.ClosedByName,
 		); err != nil {
 			return nil, err
 		}
@@ -255,9 +370,11 @@ SET status = $1,
     acknowledged_at = CASE WHEN $1 = 'acknowledged' THEN now() ELSE acknowledged_at END,
     resolved_by = CASE WHEN $1 = 'resolved' THEN $2 ELSE resolved_by END,
     resolved_at = CASE WHEN $1 = 'resolved' THEN now() ELSE resolved_at END,
+    closed_by = CASE WHEN $1 = 'closed' THEN $2 ELSE closed_by END,
+    closed_at = CASE WHEN $1 = 'closed' THEN now() ELSE closed_at END,
     updated_at = now()
 WHERE id = $3
-RETURNING id, tenant_id, site_id, camera_id, event_id, source, status, assigned_to, acknowledged_by, acknowledged_at, resolved_by, resolved_at, created_at, updated_at
+RETURNING id, tenant_id, site_id, camera_id, event_id, source, status, assigned_to, acknowledged_by, acknowledged_at, resolved_by, resolved_at, created_at, updated_at, closed_by, closed_at
 `
 
 type UpdateAlarmStatusParams struct {
@@ -284,6 +401,8 @@ func (q *Queries) UpdateAlarmStatus(ctx context.Context, arg UpdateAlarmStatusPa
 		&i.ResolvedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ClosedBy,
+		&i.ClosedAt,
 	)
 	return i, err
 }
