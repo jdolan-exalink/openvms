@@ -44,7 +44,7 @@ Edit every per-camera parameter Frigate supports from OpenVMS and apply it to Fr
 - Conventional Commits, no AI attribution. ~400 authored lines per task (advisory).
 
 ## Tasks
-- [x] FC-1 — (done, commits 40e5f64 adapter+mock, 49b7af6 service/migration/permission/endpoints, 781c94c integration tests) Backend foundation: adapter methods (Schema, RawConfig, RawPaths, ApplyCameraPatch with
+- [x] FC-1 — (done, commits 40e5f64 adapter+mock, 49b7af6 service/migration/permission/endpoints, 781c94c integration tests) Backend foundation: adapter methods (Schema, RawConfig, RawPaths, ApplyCameraPatch with Review: medium risk, declined by PO (candidate-scoped).
   requires_restart/update_topic, SaveRaw), version gate ≥0.16, fix live-apply bug, revisions table +
   rollback, new secrets permission, endpoints, mock extensions, integration tests.
 - [ ] FC-2 — Web: schema-driven per-camera editor (section tabs, generated fields with descriptions/
