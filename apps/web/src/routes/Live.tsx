@@ -14,7 +14,7 @@ import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { LiveRecDock } from "@/components/LiveRecDock";
 import { RecTile, type RecTileState } from "@/components/RecTile";
 import { useContextSidebarPortalTarget } from "@/components/AppShell";
-import { Button, ErrorNote, PageHeader, Select, StatusBadge, TextInput } from "@/components/ui";
+import { Button, ErrorNote, Select, StatusBadge, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
   cameraDragId, duplicateTileIndexes, liveSelectionKey, parseSelection, placeCameraAt, placeCameraUnique, resizeTiles, resolveDragEnd, reorderTiles,
@@ -329,11 +329,8 @@ export function Live() {
     : <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-64">{sidebarContent}</aside>;
 
   return (
-    <div className="flex flex-col gap-4">
-      <PageHeader
-        title="En vivo"
-        description="Cámaras de cualquier servidor Frigate en una misma grilla. Arrastrá una cámara a un cuadro, o arrastrá cuadros entre sí para reordenarlos. Doble clic en un cuadro para ampliarlo."
-      />
+    <div className="flex flex-col gap-2">
+      <h1 className="sr-only">En vivo</h1>
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
         <div className="flex min-w-0 flex-col gap-2">
           <section className="flex min-w-0 flex-1 flex-col gap-2">
