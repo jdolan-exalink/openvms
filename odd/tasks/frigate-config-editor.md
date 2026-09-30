@@ -44,7 +44,7 @@ Edit every per-camera parameter Frigate supports from OpenVMS and apply it to Fr
 - Conventional Commits, no AI attribution. ~400 authored lines per task (advisory).
 
 ## Tasks
-- [ ] FC-1 — Backend foundation: adapter methods (Schema, RawConfig, RawPaths, ApplyCameraPatch with
+- [x] FC-1 — (done, commits 40e5f64 adapter+mock, 49b7af6 service/migration/permission/endpoints, 781c94c integration tests) Backend foundation: adapter methods (Schema, RawConfig, RawPaths, ApplyCameraPatch with
   requires_restart/update_topic, SaveRaw), version gate ≥0.16, fix live-apply bug, revisions table +
   rollback, new secrets permission, endpoints, mock extensions, integration tests.
 - [ ] FC-2 — Web: schema-driven per-camera editor (section tabs, generated fields with descriptions/
@@ -59,4 +59,30 @@ Edit every per-camera parameter Frigate supports from OpenVMS and apply it to Fr
 Strategy ask-on-risk; push/PR are PO decisions.
 
 ## Progress
-(none yet)
+### FC-1 (2026-09-30) — Route: delegated (writer trigger: 2+ non-trivial files)
+- Endpoints: `GET|PATCH /api/v1/cameras/{id}/frigate-config`, `GET /api/v1/servers/{id}/frigate-config/schema`,
+  `GET|PUT /api/v1/servers/{id}/frigate-config/raw` (`?restart=`), `GET /api/v1/servers/{id}/frigate-config/revisions`
+  (`camera_id`, `before`, `limit`, `include_yaml`), `POST .../revisions/{rev}/rollback`. Old `/cameras/{id}/config`
+  kept; on editable servers it now runs through the same patch path (live + revision) and still writes SERVER_CONFIG_UPDATED.
+- Permission `servers.config.secrets` (server scope, granted to platform admin via bootstrap catalog loop). Needed for
+  ffmpeg `inputs` and ONVIF `user`/`password` edits, raw GET/PUT and rollback; revisions hide YAML and mask credentials in
+  patches without it. Migration `00021_frigate_config_revisions.sql` (RLS tenant_isolation).
+- Audit: FRIGATE_CONFIG_PATCHED / RAW_SAVED / ROLLED_BACK with revision_id and sections.
+- Frigate API facts VERIFIED from source (raw.githubusercontent, v0.16.0 and v0.17.0):
+  - 0.16.0: `AppConfigSetBody` has only `requires_restart`; config/set takes dotted query params; requires_restart=0 only
+    swaps the in-memory config, nothing is published, no update_topic. So on 0.16 every change is flagged restart-required
+    (query-param fallback; lists of objects such as ffmpeg.inputs are rejected with "needs 0.17").
+  - 0.17.0: body `{requires_restart, update_topic, config_data}`; query params take precedence over body; update_topic
+    `config/cameras/<cam>/<field>` where field must be in CameraConfigUpdateEnum (add, audio, audio_transcription, birdseye,
+    detect, enabled, motion, notifications, objects, object_genai, record, remove, review, review_genai, semantic_search,
+    snapshots, zones). Live sections used: that set minus add/remove/genai. NOT live (correcting the earlier assumption):
+    ffmpeg, onvif, lpr, face_recognition, live, ui, timestamp_style, mqtt, genai — these are saved and flagged restart.
+  - `POST /config/save?save_option=saveonly|restart` takes text/plain, `GET /config/raw_paths` is admin-only unmasked paths.
+- ASSUMED (not verified against a real Frigate): redaction sentinel shapes (`://*:*@`, bare asterisks for ONVIF
+  user/password), raw `GET /config/raw` body is plain YAML (JSON-string form tolerated), schema.json has `$defs.CameraConfig`
+  (falls back to the full schema otherwise), 400 body `{"message": ...}` from save/set.
+- Non-atomic: multiple sections are sent one request each; if a later one fails the earlier ones stay applied and recorded,
+  the error is returned. Revision capture fails closed when `/config/raw` cannot be read before writing.
+- Checks: go build, go vet, go test ./..., go test -tags integration ./internal/frigate/ ./internal/inventory/ ./internal/api/,
+  golangci-lint (0 issues), make generate, web `tsc --noEmit` — all passing.
+- Next: FC-2 (web schema-driven editor).
