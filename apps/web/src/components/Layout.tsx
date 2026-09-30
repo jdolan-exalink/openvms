@@ -90,7 +90,8 @@ export function Layout() {
                 >
                   <Menu className="size-5" aria-hidden />
                 </button>
-                <div className="min-w-0">
+                {/* On /live the mode toggle replaces the breadcrumb to save space; the title stays for screen readers. */}
+                <div className={cn("min-w-0", isLive && "sr-only")}>
                   <p className="truncate text-lg font-semibold tracking-tight text-ink">
                     <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted">{pageContext.section}</span>
                     <span className="ml-2">{`/ ${pageTitle}`}</span>

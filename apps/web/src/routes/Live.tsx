@@ -362,7 +362,7 @@ export function Live() {
               <div role="group" aria-label="Grilla de video" data-mode={rec ? "rec" : "live"}
                 className={cn(
                   "grid gap-1 rounded-md ring-2 md:min-h-0 md:flex-1 md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
-                  rec ? "ring-warn/50" : "ring-bad/40",
+                  rec ? "ring-bad/50" : "ring-ok/40",
                 )}
                 style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, "--grid-rows": focus !== null ? 1 : rows } as CSSProperties}
               >
