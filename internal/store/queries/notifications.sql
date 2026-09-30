@@ -1,5 +1,5 @@
 -- name: ListNotifications :many
-SELECT id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at
+SELECT id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at, server_id, camera_id
 FROM notifications
 WHERE tenant_id = @tenant_id
   AND (user_id IS NULL OR user_id = @user_id)
@@ -15,9 +15,9 @@ WHERE tenant_id = @tenant_id
   AND read_at IS NULL;
 
 -- name: CreateNotification :one
-INSERT INTO notifications (tenant_id, user_id, rule_id, title, body, link, severity)
-VALUES (@tenant_id, @user_id, @rule_id, @title, @body, @link, @severity)
-RETURNING id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at;
+INSERT INTO notifications (tenant_id, user_id, rule_id, title, body, link, severity, server_id, camera_id)
+VALUES (@tenant_id, @user_id, @rule_id, @title, @body, @link, @severity, @server_id, @camera_id)
+RETURNING id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at, server_id, camera_id;
 
 -- name: MarkNotificationRead :one
 UPDATE notifications
@@ -25,7 +25,7 @@ SET read_at = now()
 WHERE id = @id
   AND tenant_id = @tenant_id
   AND (user_id IS NULL OR user_id = @user_id)
-RETURNING id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at;
+RETURNING id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at, server_id, camera_id;
 
 -- name: MarkAllNotificationsRead :execrows
 UPDATE notifications

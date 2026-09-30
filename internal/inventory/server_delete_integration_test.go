@@ -221,3 +221,107 @@ func TestDeleteServerSurvivesObjectStoreFailure(t *testing.T) {
 		t.Errorf("server rows = %d", n)
 	}
 }
+
+// Rules keep their remaining ids; a rule whose only camera/server filter disappears is
+// disabled instead of silently widening to "all". Notifications tied to the server go away.
+func TestDeleteServerCleansRulesAndNotifications(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	doomedCam := env.Cameras["frigate-h01/acceso_norte"]
+	keptCam := env.Cameras["frigate-c01/muelle"]
+	doomed, kept := doomedCam.ServerID, keptCam.ServerID
+	tenant := doomedCam.TenantID
+
+	rule := func(name, conditions string) uuid.UUID {
+		id := uuid.New()
+		err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO rules (id, tenant_id, name, trigger_type, conditions, enabled) VALUES ($1, $2, $3, 'event', $4::jsonb, true)`,
+				id, tenant, name, conditions)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	q := func(ids ...uuid.UUID) string {
+		s := "["
+		for i, id := range ids {
+			if i > 0 {
+				s += ","
+			}
+			s += `"` + id.String() + `"`
+		}
+		return s + "]"
+	}
+	partial := rule("partial", `{"camera_ids": `+q(doomedCam.ID, keptCam.ID)+`, "labels": ["person"]}`)
+	onlyCam := rule("only-camera", `{"camera_ids": `+q(doomedCam.ID)+`}`)
+	partialSrv := rule("partial-server", `{"server_ids": `+q(doomed, kept)+`}`)
+	onlySrv := rule("only-server", `{"server_ids": `+q(doomed)+`}`)
+	untouched := rule("all-cameras", `{"labels": ["car"]}`)
+
+	notif := func(server, camera *uuid.UUID) uuid.UUID {
+		id := uuid.New()
+		err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO notifications (id, tenant_id, title, body, server_id, camera_id) VALUES ($1, $2, 't', 'b', $3, $4)`,
+				id, tenant, server, camera)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	byServer, byCamera := notif(&doomed, nil), notif(nil, &doomedCam.ID)
+	otherCamera, unlinked := notif(nil, &keptCam.ID), notif(nil, nil)
+
+	if err := env.Svc.DeleteServer(ctx, env.Admin, doomed); err != nil {
+		t.Fatal(err)
+	}
+
+	type state struct {
+		enabled bool
+		cams    string
+		srvs    string
+	}
+	get := func(id uuid.UUID) state {
+		var s state
+		err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT enabled, coalesce(conditions->'camera_ids', 'null'::jsonb)::text, coalesce(conditions->'server_ids', 'null'::jsonb)::text FROM rules WHERE id = $1`, id).Scan(&s.enabled, &s.cams, &s.srvs)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	if s := get(partial); !s.enabled || s.cams != `["`+keptCam.ID.String()+`"]` {
+		t.Errorf("partial rule = %+v, want enabled with only the kept camera", s)
+	}
+	if s := get(onlyCam); s.enabled || s.cams != "[]" {
+		t.Errorf("only-camera rule = %+v, want disabled with an empty filter", s)
+	}
+	if s := get(partialSrv); !s.enabled || s.srvs != `["`+kept.String()+`"]` {
+		t.Errorf("partial-server rule = %+v, want enabled with only the kept server", s)
+	}
+	if s := get(onlySrv); s.enabled || s.srvs != "[]" {
+		t.Errorf("only-server rule = %+v, want disabled", s)
+	}
+	if s := get(untouched); !s.enabled || s.cams != "null" || s.srvs != "null" {
+		t.Errorf("unfiltered rule = %+v, want untouched", s)
+	}
+
+	for id, want := range map[uuid.UUID]int{byServer: 0, byCamera: 0, otherCamera: 1, unlinked: 1} {
+		if n := count(t, env, `SELECT count(*) FROM notifications WHERE id = $1`, id); n != want {
+			t.Errorf("notification %s rows = %d, want %d", id, n, want)
+		}
+	}
+
+	var notifications, updated, disabled int
+	err := env.Pool.QueryRow(ctx, `SELECT (details->>'notifications')::int, (details->>'rules_updated')::int, (details->>'rules_disabled')::int FROM audit_log WHERE action = 'SERVER_REMOVED' AND target_id = $1`, doomed).Scan(&notifications, &updated, &disabled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notifications != 2 || updated != 4 || disabled != 2 {
+		t.Errorf("audit notifications=%d rules_updated=%d rules_disabled=%d, want 2, 4, 2", notifications, updated, disabled)
+	}
+}

@@ -237,6 +237,47 @@ WHERE jsonb_typeof(v.layout->'cells') = 'array'
       SELECT 1 FROM jsonb_array_elements(v.layout->'cells') AS c(cell)
       WHERE cell->>'camera_id' IN (SELECT cam.id::text FROM cameras cam WHERE cam.server_id = @server_id));
 
+-- In-app notifications carry the server/camera they were raised for (migration 00019).
+-- name: PurgeServerNotifications :execrows
+DELETE FROM notifications n
+WHERE n.server_id = @server_id
+   OR n.camera_id IN (SELECT c.id FROM cameras c WHERE c.server_id = @server_id);
+
+-- Removes the server and its cameras from every rule of the tenant. A rule that had a camera
+-- (or server) filter and is left with none is disabled: an empty filter means "all", so
+-- leaving it enabled would silently widen the rule.
+-- name: StripServerFromRules :many
+WITH gone AS (
+  SELECT coalesce(array_agg(id::text), '{}') AS camera_ids FROM cameras WHERE cameras.server_id = @server_id
+), calc AS (
+  SELECT r.id, r.enabled AS was_enabled,
+    CASE WHEN jsonb_typeof(r.conditions->'camera_ids') = 'array' THEN
+      coalesce((SELECT jsonb_agg(v.val ORDER BY v.ord) FROM jsonb_array_elements(r.conditions->'camera_ids') WITH ORDINALITY AS v(val, ord)
+                WHERE NOT ((v.val #>> '{}') = ANY(gone.camera_ids))), '[]'::jsonb) END AS cams,
+    CASE WHEN jsonb_typeof(r.conditions->'server_ids') = 'array' THEN
+      coalesce((SELECT jsonb_agg(v.val ORDER BY v.ord) FROM jsonb_array_elements(r.conditions->'server_ids') WITH ORDINALITY AS v(val, ord)
+                WHERE (v.val #>> '{}') <> sqlc.arg(server_id)::uuid::text), '[]'::jsonb) END AS srvs,
+    CASE WHEN jsonb_typeof(r.conditions->'camera_ids') = 'array' THEN jsonb_array_length(r.conditions->'camera_ids') ELSE 0 END AS had_cams,
+    CASE WHEN jsonb_typeof(r.conditions->'server_ids') = 'array' THEN jsonb_array_length(r.conditions->'server_ids') ELSE 0 END AS had_srvs
+  FROM rules r, gone
+  WHERE r.tenant_id = @tenant_id
+), changed AS (
+  SELECT c.*,
+    (c.had_cams > 0 AND jsonb_array_length(c.cams) = 0) OR (c.had_srvs > 0 AND jsonb_array_length(c.srvs) = 0) AS widens
+  FROM calc c
+  JOIN rules r ON r.id = c.id
+  WHERE c.cams IS DISTINCT FROM r.conditions->'camera_ids' OR c.srvs IS DISTINCT FROM r.conditions->'server_ids'
+)
+UPDATE rules
+SET conditions = rules.conditions
+      || CASE WHEN c.cams IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('camera_ids', c.cams) END
+      || CASE WHEN c.srvs IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('server_ids', c.srvs) END,
+    enabled = rules.enabled AND NOT c.widens,
+    updated_at = now()
+FROM changed c
+WHERE rules.id = c.id
+RETURNING rules.id, rules.name, (c.was_enabled AND c.widens)::boolean AS disabled;
+
 -- Camera outages and group memberships cascade with the cameras.
 -- name: PurgeServerCameras :execrows
 DELETE FROM cameras WHERE server_id = @server_id;

@@ -370,6 +370,13 @@ func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.U
 		if blobKeys, err = q.ListServerBlobKeys(ctx, id); err != nil {
 			return err
 		}
+		// Rules referencing the server or its cameras lose those ids. This reads the cameras, so
+		// it must run before they are purged. A rule left with an empty camera/server filter is
+		// disabled, never widened to "all".
+		ruleRefs, err := s.stripRuleRefs(ctx, q, srv.TenantID, id)
+		if err != nil {
+			return err
+		}
 		// Children first: the foreign keys to frigate_servers, cameras, events and lpr_reads
 		// do not cascade, so an explicit order keeps every other delete path unchanged.
 		counts := map[string]int64{}
@@ -385,6 +392,7 @@ func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.U
 			{"object_snapshots", func() (int64, error) { return q.PurgeServerObjectSnapshots(ctx, id) }},
 			{"sync_state", func() (int64, error) { return q.PurgeServerSyncState(ctx, id) }},
 			{"rule_firings", func() (int64, error) { return q.PurgeServerRuleFirings(ctx, id) }},
+			{"notifications", func() (int64, error) { return q.PurgeServerNotifications(ctx, &id) }},
 			{"grants", func() (int64, error) { return q.PurgeServerGrants(ctx, id) }},
 			{"view_cells_cleared", func() (int64, error) { return q.ClearServerViewCells(ctx, id) }},
 			{"cameras", func() (int64, error) { return q.PurgeServerCameras(ctx, id) }},
@@ -397,7 +405,10 @@ func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.U
 			}
 			counts[st.name] = n
 		}
-		details := map[string]any{"name": srv.Name}
+		details := map[string]any{"name": srv.Name, "rules_updated": ruleRefs.updated, "rules_disabled": len(ruleRefs.disabled)}
+		if len(ruleRefs.disabled) > 0 {
+			details["rules_disabled_ids"] = ruleRefs.disabled
+		}
 		for k, v := range counts {
 			details[k] = v
 		}
@@ -408,6 +419,27 @@ func (s *Service) DeleteServer(ctx context.Context, actor authz.Actor, id uuid.U
 	}
 	s.deleteBlobs(ctx, id, blobKeys)
 	return nil
+}
+
+type ruleRefResult struct {
+	updated  int
+	disabled []uuid.UUID
+}
+
+// stripRuleRefs removes the server and its cameras from the conditions of every rule of the
+// tenant (see the StripServerFromRules query for the disable-instead-of-widen rule).
+func (s *Service) stripRuleRefs(ctx context.Context, q *db.Queries, tenantID, serverID uuid.UUID) (ruleRefResult, error) {
+	rows, err := q.StripServerFromRules(ctx, db.StripServerFromRulesParams{TenantID: tenantID, ServerID: serverID})
+	if err != nil {
+		return ruleRefResult{}, fmt.Errorf("delete server rule references: %w", err)
+	}
+	res := ruleRefResult{updated: len(rows)}
+	for _, r := range rows {
+		if r.Disabled {
+			res.disabled = append(res.disabled, r.ID)
+		}
+	}
+	return res, nil
 }
 
 // deleteBlobs removes stored objects after the database commit. Failures are logged only:

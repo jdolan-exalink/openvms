@@ -33,9 +33,9 @@ func (q *Queries) CountUnreadNotifications(ctx context.Context, arg CountUnreadN
 }
 
 const createNotification = `-- name: CreateNotification :one
-INSERT INTO notifications (tenant_id, user_id, rule_id, title, body, link, severity)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at
+INSERT INTO notifications (tenant_id, user_id, rule_id, title, body, link, severity, server_id, camera_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at, server_id, camera_id
 `
 
 type CreateNotificationParams struct {
@@ -46,6 +46,8 @@ type CreateNotificationParams struct {
 	Body     string
 	Link     *string
 	Severity string
+	ServerID *uuid.UUID
+	CameraID *uuid.UUID
 }
 
 func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error) {
@@ -57,6 +59,8 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 		arg.Body,
 		arg.Link,
 		arg.Severity,
+		arg.ServerID,
+		arg.CameraID,
 	)
 	var i Notification
 	err := row.Scan(
@@ -70,12 +74,14 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 		&i.Severity,
 		&i.ReadAt,
 		&i.CreatedAt,
+		&i.ServerID,
+		&i.CameraID,
 	)
 	return i, err
 }
 
 const listNotifications = `-- name: ListNotifications :many
-SELECT id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at
+SELECT id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at, server_id, camera_id
 FROM notifications
 WHERE tenant_id = $1
   AND (user_id IS NULL OR user_id = $2)
@@ -116,6 +122,8 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 			&i.Severity,
 			&i.ReadAt,
 			&i.CreatedAt,
+			&i.ServerID,
+			&i.CameraID,
 		); err != nil {
 			return nil, err
 		}
@@ -154,7 +162,7 @@ SET read_at = now()
 WHERE id = $1
   AND tenant_id = $2
   AND (user_id IS NULL OR user_id = $3)
-RETURNING id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at
+RETURNING id, tenant_id, user_id, rule_id, title, body, link, severity, read_at, created_at, server_id, camera_id
 `
 
 type MarkNotificationReadParams struct {
@@ -177,6 +185,8 @@ func (q *Queries) MarkNotificationRead(ctx context.Context, arg MarkNotification
 		&i.Severity,
 		&i.ReadAt,
 		&i.CreatedAt,
+		&i.ServerID,
+		&i.CameraID,
 	)
 	return i, err
 }

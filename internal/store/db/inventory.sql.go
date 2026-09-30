@@ -1030,6 +1030,21 @@ func (q *Queries) PurgeServerLprReads(ctx context.Context, serverID uuid.UUID) (
 	return result.RowsAffected(), nil
 }
 
+const purgeServerNotifications = `-- name: PurgeServerNotifications :execrows
+DELETE FROM notifications n
+WHERE n.server_id = $1
+   OR n.camera_id IN (SELECT c.id FROM cameras c WHERE c.server_id = $1)
+`
+
+// In-app notifications carry the server/camera they were raised for (migration 00019).
+func (q *Queries) PurgeServerNotifications(ctx context.Context, serverID *uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeServerNotifications, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const purgeServerObjectSnapshots = `-- name: PurgeServerObjectSnapshots :execrows
 DELETE FROM object_snapshots WHERE server_id = $1
 `
@@ -1107,6 +1122,73 @@ type SoftDeleteSiteParams struct {
 func (q *Queries) SoftDeleteSite(ctx context.Context, arg SoftDeleteSiteParams) error {
 	_, err := q.db.Exec(ctx, softDeleteSite, arg.DeletedBy, arg.ID)
 	return err
+}
+
+const stripServerFromRules = `-- name: StripServerFromRules :many
+WITH gone AS (
+  SELECT coalesce(array_agg(id::text), '{}') AS camera_ids FROM cameras WHERE cameras.server_id = $1
+), calc AS (
+  SELECT r.id, r.enabled AS was_enabled,
+    CASE WHEN jsonb_typeof(r.conditions->'camera_ids') = 'array' THEN
+      coalesce((SELECT jsonb_agg(v.val ORDER BY v.ord) FROM jsonb_array_elements(r.conditions->'camera_ids') WITH ORDINALITY AS v(val, ord)
+                WHERE NOT ((v.val #>> '{}') = ANY(gone.camera_ids))), '[]'::jsonb) END AS cams,
+    CASE WHEN jsonb_typeof(r.conditions->'server_ids') = 'array' THEN
+      coalesce((SELECT jsonb_agg(v.val ORDER BY v.ord) FROM jsonb_array_elements(r.conditions->'server_ids') WITH ORDINALITY AS v(val, ord)
+                WHERE (v.val #>> '{}') <> $1::uuid::text), '[]'::jsonb) END AS srvs,
+    CASE WHEN jsonb_typeof(r.conditions->'camera_ids') = 'array' THEN jsonb_array_length(r.conditions->'camera_ids') ELSE 0 END AS had_cams,
+    CASE WHEN jsonb_typeof(r.conditions->'server_ids') = 'array' THEN jsonb_array_length(r.conditions->'server_ids') ELSE 0 END AS had_srvs
+  FROM rules r, gone
+  WHERE r.tenant_id = $2
+), changed AS (
+  SELECT c.id, c.was_enabled, c.cams, c.srvs, c.had_cams, c.had_srvs,
+    (c.had_cams > 0 AND jsonb_array_length(c.cams) = 0) OR (c.had_srvs > 0 AND jsonb_array_length(c.srvs) = 0) AS widens
+  FROM calc c
+  JOIN rules r ON r.id = c.id
+  WHERE c.cams IS DISTINCT FROM r.conditions->'camera_ids' OR c.srvs IS DISTINCT FROM r.conditions->'server_ids'
+)
+UPDATE rules
+SET conditions = rules.conditions
+      || CASE WHEN c.cams IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('camera_ids', c.cams) END
+      || CASE WHEN c.srvs IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('server_ids', c.srvs) END,
+    enabled = rules.enabled AND NOT c.widens,
+    updated_at = now()
+FROM changed c
+WHERE rules.id = c.id
+RETURNING rules.id, rules.name, (c.was_enabled AND c.widens)::boolean AS disabled
+`
+
+type StripServerFromRulesParams struct {
+	ServerID uuid.UUID
+	TenantID uuid.UUID
+}
+
+type StripServerFromRulesRow struct {
+	ID       uuid.UUID
+	Name     string
+	Disabled bool
+}
+
+// Removes the server and its cameras from every rule of the tenant. A rule that had a camera
+// (or server) filter and is left with none is disabled: an empty filter means "all", so
+// leaving it enabled would silently widen the rule.
+func (q *Queries) StripServerFromRules(ctx context.Context, arg StripServerFromRulesParams) ([]StripServerFromRulesRow, error) {
+	rows, err := q.db.Query(ctx, stripServerFromRules, arg.ServerID, arg.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []StripServerFromRulesRow{}
+	for rows.Next() {
+		var i StripServerFromRulesRow
+		if err := rows.Scan(&i.ID, &i.Name, &i.Disabled); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const updateCamera = `-- name: UpdateCamera :exec

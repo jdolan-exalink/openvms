@@ -234,6 +234,8 @@ type Notification struct {
 	Severity  string
 	ReadAt    *time.Time
 	CreatedAt time.Time
+	ServerID  *uuid.UUID
+	CameraID  *uuid.UUID
 }
 
 type NotificationChannel struct {

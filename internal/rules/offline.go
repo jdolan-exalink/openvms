@@ -85,12 +85,12 @@ DELETE FROM camera_outages WHERE camera_id NOT IN (SELECT id FROM cameras WHERE 
 		}
 		var err error
 		if cameras, err = readOutages(ctx, tx, `
-SELECT c.tenant_id, c.site_id, c.id, c.display_name, o.since, extract(epoch FROM now() - o.since)
+SELECT c.tenant_id, c.site_id, c.id, c.server_id, c.display_name, o.since, extract(epoch FROM now() - o.since)
 FROM camera_outages o JOIN cameras c ON c.id = o.camera_id`); err != nil {
 			return err
 		}
 		servers, err = readOutages(ctx, tx, `
-SELECT tenant_id, site_id, id, name, coalesce(last_seen_at, created_at), extract(epoch FROM now() - coalesce(last_seen_at, created_at))
+SELECT tenant_id, site_id, id, id, name, coalesce(last_seen_at, created_at), extract(epoch FROM now() - coalesce(last_seen_at, created_at))
 FROM frigate_servers WHERE status = 'offline' AND deleted_at IS NULL`)
 		return err
 	})
@@ -107,7 +107,7 @@ func readOutages(ctx context.Context, tx pgx.Tx, query string) ([]Outage, error)
 	for rows.Next() {
 		var o Outage
 		var secs float64
-		if err := rows.Scan(&o.TenantID, &o.SiteID, &o.ResourceID, &o.Name, &o.Since, &secs); err != nil {
+		if err := rows.Scan(&o.TenantID, &o.SiteID, &o.ResourceID, &o.ServerID, &o.Name, &o.Since, &secs); err != nil {
 			return nil, err
 		}
 		o.Duration = time.Duration(secs * float64(time.Second))

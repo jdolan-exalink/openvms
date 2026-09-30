@@ -489,7 +489,7 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 			if alarmID != nil {
 				link = "/alarms"
 			}
-			s.deliver(ctx, tx, q, rule, ev.TenantID, rule.Name, body, link, severity)
+			s.deliver(ctx, tx, q, rule, ev.TenantID, resourceRef{Server: ev.ServerID, Camera: ev.CameraID}, rule.Name, body, link, severity)
 		}
 		return nil
 	})
@@ -502,9 +502,11 @@ type Outage struct {
 	TenantID   uuid.UUID
 	ResourceID uuid.UUID
 	SiteID     uuid.UUID
-	Name       string
-	Since      time.Time
-	Duration   time.Duration
+	// ServerID is the server of a camera outage; for a server outage it equals ResourceID.
+	ServerID uuid.UUID
+	Name     string
+	Since    time.Time
+	Duration time.Duration
 }
 
 // EvaluateOffline runs the tenant's offline rules for a camera or server outage. Callers may
@@ -554,20 +556,33 @@ func (s *Service) EvaluateOffline(ctx context.Context, triggerType TriggerType, 
 				severity = "critical"
 			}
 			kind, link := "Cámara", "/cameras"
+			ref := resourceRef{Server: o.ServerID, Camera: resourceID}
 			if triggerType == TriggerServerOffline {
 				kind, link = "Servidor", "/servers"
+				ref = resourceRef{Server: resourceID}
 			}
 			body := fmt.Sprintf("%s '%s' está desconectado.", kind, resourceName)
-			s.deliver(ctx, tx, q, rule, tenantID, rule.Name, body, link, severity)
+			s.deliver(ctx, tx, q, rule, tenantID, ref, rule.Name, body, link, severity)
 		}
 		return nil
 	})
 }
 
+// resourceRef is the server and camera a notification was raised for; zero means none. It is
+// stored on the in-app notification so it can be removed when the server is deleted.
+type resourceRef struct{ Server, Camera uuid.UUID }
+
+func idPtr(id uuid.UUID) *uuid.UUID {
+	if id == uuid.Nil {
+		return nil
+	}
+	return &id
+}
+
 // deliver runs the notification actions of a fired rule: the in-app notification (published on
 // the bus) and the external channel deliveries. The deliveries are enqueued in the caller's
 // transaction, atomically with the firing claim; sending happens later in the worker.
-func (s *Service) deliver(ctx context.Context, tx pgx.Tx, q *db.Queries, rule Rule, tenantID uuid.UUID, title, body, link, severity string) {
+func (s *Service) deliver(ctx context.Context, tx pgx.Tx, q *db.Queries, rule Rule, tenantID uuid.UUID, ref resourceRef, title, body, link, severity string) {
 	var notifID *uuid.UUID
 	if rule.Actions.NotifyInApp {
 		notifRow, err := q.CreateNotification(ctx, db.CreateNotificationParams{
@@ -578,6 +593,8 @@ func (s *Service) deliver(ctx context.Context, tx pgx.Tx, q *db.Queries, rule Ru
 			Body:     body,
 			Link:     &link,
 			Severity: severity,
+			ServerID: idPtr(ref.Server),
+			CameraID: idPtr(ref.Camera),
 		})
 		if err != nil {
 			s.Log.WarnContext(ctx, "failed to create notification", "error", err, "rule_id", rule.ID)
