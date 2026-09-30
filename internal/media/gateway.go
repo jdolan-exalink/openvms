@@ -600,6 +600,12 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// Unauthenticated callers get the plain JSON 401 before any upgrade. Failures that are
+	// only knowable later (forbidden, camera_offline, ...) are reported as error frames.
+	a, ok := g.actorOr401(w, r)
+	if !ok {
+		return
+	}
 	cfg := g.Live
 	up := websocket.Upgrader{ReadBufferSize: 4 << 10, WriteBufferSize: 64 << 10, CheckOrigin: g.checkOrigin}
 	raw, err := up.Upgrade(w, r, nil)
@@ -612,11 +618,6 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 	// reject reports a pre-stream failure to the browser and closes.
 	reject := func(code, msg string) {
 		g.sendLiveError(client, code, msg)
-	}
-	a, ok := g.Actor(r.Context())
-	if !ok {
-		reject(CodeUnauthorized, "authentication required")
-		return
 	}
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
