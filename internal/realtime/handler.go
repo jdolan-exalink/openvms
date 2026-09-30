@@ -2,9 +2,11 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -144,16 +146,65 @@ func (h *Handler) serve(ctx context.Context, conn *websocket.Conn, sub *Subscrip
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	// Reader: clients send nothing meaningful; reading is what processes pongs and detects a
-	// closed peer. Anything larger than a control frame is a protocol violation.
-	conn.SetReadLimit(512)
+	// Reader: accepts control frames (hello, filter) up to 4 KiB, rate-limited to at most 1/s.
+	conn.SetReadLimit(4096)
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(pongWait)) })
+
+	var writeMu sync.Mutex
+	writeJSON := func(v any) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		return conn.WriteJSON(v)
+	}
+	writePing := func() error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		return conn.WriteMessage(websocket.PingMessage, nil)
+	}
+
+	var lastControl time.Time
+	var controlMu sync.Mutex
 	go func() {
 		defer cancel()
 		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
+			_, payload, err := conn.ReadMessage()
+			if err != nil {
 				return
+			}
+			var frame ClientFrame
+			if err := json.Unmarshal(payload, &frame); err != nil {
+				continue
+			}
+			controlMu.Lock()
+			now := time.Now()
+			if !lastControl.IsZero() && now.Sub(lastControl) < time.Second {
+				controlMu.Unlock()
+				continue
+			}
+			lastControl = now
+			controlMu.Unlock()
+
+			switch frame.Op {
+			case OpHello:
+				if len(frame.Topics) > 0 {
+					sub.SetTopics(frame.Topics)
+				}
+				if len(frame.SiteIDs) > 0 {
+					sub.SetSiteIDs(frame.SiteIDs)
+				}
+				if len(frame.LastEventID) > 0 {
+					h.handleResume(ctx, sub, frame.LastEventID, writeJSON)
+				}
+			case OpFilter:
+				if len(frame.SiteIDs) > 0 {
+					sub.SetSiteIDs(frame.SiteIDs)
+				}
+				if len(frame.Topics) > 0 {
+					sub.SetTopics(frame.Topics)
+				}
 			}
 		}
 	}()
@@ -173,7 +224,11 @@ func (h *Handler) serve(ctx context.Context, conn *websocket.Conn, sub *Subscrip
 		env Envelope
 		err error
 	}
-	msgs := make(chan result)
+	bufSize := h.Hub.cfg.Buffer
+	if bufSize <= 0 {
+		bufSize = 64
+	}
+	msgs := make(chan result, bufSize)
 	go func() {
 		for {
 			env, err := sub.Recv(ctx)
@@ -198,8 +253,7 @@ func (h *Handler) serve(ctx context.Context, conn *websocket.Conn, sub *Subscrip
 			h.closeWith(conn, err, writeTimeout)
 			return
 		case <-ping.C:
-			_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
-			if err := conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if err := writePing(); err != nil {
 				return
 			}
 		case res := <-msgs:
@@ -207,10 +261,74 @@ func (h *Handler) serve(ctx context.Context, conn *websocket.Conn, sub *Subscrip
 				h.closeWith(conn, res.err, writeTimeout)
 				return
 			}
-			_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
-			if err := conn.WriteJSON(res.env); err != nil {
-				return
+			batch := []Envelope{res.env}
+			for len(batch) < 100 {
+				select {
+				case next := <-msgs:
+					if next.err != nil {
+						h.closeWith(conn, next.err, writeTimeout)
+						return
+					}
+					batch = append(batch, next.env)
+				default:
+					goto drained
+				}
 			}
+		drained:
+			if len(batch) > 50 {
+				if err := writeJSON(BatchFrame{Op: OpBatch, Frames: batch}); err != nil {
+					return
+				}
+			} else {
+				for _, env := range batch {
+					if err := writeJSON(env); err != nil {
+						return
+					}
+				}
+			}
+		}
+	}
+}
+
+func (h *Handler) handleResume(ctx context.Context, sub *Subscription, lastEventID map[string]uint64, writeJSON func(any) error) {
+	ring := h.Hub.Ring()
+	if ring == nil {
+		return
+	}
+	var resyncStreams []string
+	var replayMsgs []Message
+
+	for stream, lastSeq := range lastEventID {
+		msgs, ok := ring.Replay(stream, lastSeq)
+		if !ok {
+			resyncStreams = append(resyncStreams, stream)
+		} else {
+			replayMsgs = append(replayMsgs, msgs...)
+		}
+	}
+
+	if len(resyncStreams) > 0 {
+		if err := writeJSON(ResyncFrame{Op: OpResync, Streams: resyncStreams}); err != nil {
+			return
+		}
+	}
+
+	for _, m := range replayMsgs {
+		if sub.actor.TenantID != nil && *sub.actor.TenantID != m.Envelope.TenantID {
+			continue
+		}
+		if !sub.matchesSite(m.Envelope.SiteID) {
+			continue
+		}
+		if !sub.matchesTopic(m.Envelope.Type) {
+			continue
+		}
+		ok, err := h.Hub.cfg.Authorizer.Allow(ctx, sub.actor, m.Scope)
+		if err != nil || !ok {
+			continue
+		}
+		if err := writeJSON(m.Envelope); err != nil {
+			return
 		}
 	}
 }

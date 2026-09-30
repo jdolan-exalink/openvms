@@ -317,3 +317,217 @@ func TestHandlerClosesAfterConsecutiveCheckErrors(t *testing.T) {
 		t.Fatalf("close = %d %q, want 1013 \"session check unavailable\"", ce.Code, ce.Text)
 	}
 }
+
+func TestHandlerHelloAndFilter(t *testing.T) {
+	siteA := uuid.New()
+	siteB := uuid.New()
+	camA := uuid.New()
+	f := newWS(t, nil, realtime.HubConfig{})
+	c, err := f.dial(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	waitConnections(t, f.hub, 1)
+
+	// Send hello with topics: ["camera"] and site_ids: [siteA]
+	hello := realtime.ClientFrame{
+		Op:      realtime.OpHello,
+		Topics:  []string{"camera"},
+		SiteIDs: []uuid.UUID{siteA},
+	}
+	if err := c.WriteJSON(hello); err != nil {
+		t.Fatal(err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Publish non-camera event for siteA -> should be ignored because topic is camera
+	f.hub.Publish(realtime.Message{
+		Envelope: realtime.Envelope{
+			Type:     realtime.TypeEventCreated,
+			TenantID: f.tenant,
+			SiteID:   &siteA,
+			Data:     []byte(`{}`),
+		},
+		Scope: realtime.Scope{Kind: authz.ScopeTenant, ID: f.tenant, Permission: authz.EventsView},
+	})
+
+	// Publish camera event for siteB -> should be ignored because site is siteB
+	f.hub.Publish(realtime.Message{
+		Envelope: realtime.Envelope{
+			Type:     realtime.TypeCameraStatusChanged,
+			TenantID: f.tenant,
+			SiteID:   &siteB,
+			CameraID: &camA,
+			Data:     []byte(`{"to":"online"}`),
+		},
+		Scope: realtime.Scope{Kind: authz.ScopeCamera, ID: camA, Permission: authz.CamerasView},
+	})
+
+	// Publish camera event for siteA -> should be delivered!
+	f.hub.Publish(realtime.Message{
+		Envelope: realtime.Envelope{
+			Type:     realtime.TypeCameraStatusChanged,
+			TenantID: f.tenant,
+			SiteID:   &siteA,
+			CameraID: &camA,
+			Data:     []byte(`{"to":"online"}`),
+		},
+		Scope: realtime.Scope{Kind: authz.ScopeCamera, ID: camA, Permission: authz.CamerasView},
+	})
+
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var env realtime.Envelope
+	if err := c.ReadJSON(&env); err != nil {
+		t.Fatalf("failed to read delivered envelope: %v", err)
+	}
+	if env.Type != realtime.TypeCameraStatusChanged || env.SiteID == nil || *env.SiteID != siteA {
+		t.Fatalf("unexpected envelope: %+v", env)
+	}
+}
+
+func TestHandlerResumeReplay(t *testing.T) {
+	ring := realtime.NewRingBuffer()
+	camA := uuid.New()
+	tenant := uuid.New()
+	// Put messages in ring
+	ring.Add(realtime.Message{
+		Stream: "events",
+		Seq:    1,
+		Envelope: realtime.Envelope{
+			ID:       "events:1",
+			Type:     realtime.TypeEventCreated,
+			TenantID: tenant,
+			Data:     []byte(`{"seq":1}`),
+		},
+		Scope: realtime.Scope{Kind: authz.ScopeCamera, ID: camA, Permission: authz.EventsView},
+	})
+	ring.Add(realtime.Message{
+		Stream: "events",
+		Seq:    2,
+		Envelope: realtime.Envelope{
+			ID:       "events:2",
+			Type:     realtime.TypeEventCreated,
+			TenantID: tenant,
+			Data:     []byte(`{"seq":2}`),
+		},
+		Scope: realtime.Scope{Kind: authz.ScopeCamera, ID: camA, Permission: authz.EventsView},
+	})
+
+	actor := tenantActor(tenant)
+	cfg := realtime.HubConfig{Authorizer: allowAll(), Log: discard(), Ring: ring}
+	hub := realtime.NewHub(cfg)
+	h := &realtime.Handler{
+		Hub: hub, Log: discard(),
+		Actor: func(context.Context) (authz.Actor, bool) { return actor, true },
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	defer hub.Close()
+
+	c, resp, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+"/ws", nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	waitConnections(t, hub, 1)
+
+	// Send hello with last_event_id: {"events": 1}
+	hello := realtime.ClientFrame{
+		Op:          realtime.OpHello,
+		LastEventID: map[string]uint64{"events": 1},
+	}
+	if err := c.WriteJSON(hello); err != nil {
+		t.Fatal(err)
+	}
+
+	// Should replay event 2
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var env realtime.Envelope
+	if err := c.ReadJSON(&env); err != nil {
+		t.Fatalf("failed to read replayed envelope: %v", err)
+	}
+	if env.ID != "events:2" {
+		t.Fatalf("replayed ID = %s, want events:2", env.ID)
+	}
+}
+
+func TestHandlerResyncOnRingGap(t *testing.T) {
+	ring := realtime.NewRingBuffer()
+	// Add message at seq 10
+	ring.Add(realtime.Message{
+		Stream: "events",
+		Seq:    10,
+		Envelope: realtime.Envelope{
+			ID:       "events:10",
+			Type:     realtime.TypeEventCreated,
+			TenantID: uuid.New(),
+		},
+	})
+
+	f := newWS(t, nil, realtime.HubConfig{Ring: ring})
+	c, err := f.dial(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	waitConnections(t, f.hub, 1)
+
+	// Ask to resume from seq 1, which fell out
+	hello := realtime.ClientFrame{
+		Op:          realtime.OpHello,
+		LastEventID: map[string]uint64{"events": 1},
+	}
+	if err := c.WriteJSON(hello); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var resync realtime.ResyncFrame
+	if err := c.ReadJSON(&resync); err != nil {
+		t.Fatalf("failed to read resync frame: %v", err)
+	}
+	if resync.Op != realtime.OpResync || len(resync.Streams) == 0 || resync.Streams[0] != "events" {
+		t.Fatalf("unexpected resync frame: %+v", resync)
+	}
+}
+
+func TestHandlerBatchFrameDelivery(t *testing.T) {
+	f := newWS(t, nil, realtime.HubConfig{Buffer: 200})
+	c, err := f.dial(t, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	waitConnections(t, f.hub, 1)
+
+	// Publish 60 messages in rapid succession
+	for i := 1; i <= 60; i++ {
+		f.hub.Publish(realtime.Message{
+			Envelope: realtime.Envelope{
+				ID:       "events:" + string(rune('0'+i)),
+				Type:     realtime.TypeEventCreated,
+				TenantID: f.tenant,
+			},
+			Scope: realtime.Scope{Kind: authz.ScopeTenant, ID: f.tenant, Permission: authz.EventsView},
+		})
+	}
+
+	_ = c.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msgBytes, err := c.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read batch message: %v", err)
+	}
+	t.Logf("received message: %s", string(msgBytes))
+	var batch realtime.BatchFrame
+	if err := json.Unmarshal(msgBytes, &batch); err != nil {
+		t.Fatalf("failed to parse batch frame: %v (raw: %s)", err, string(msgBytes))
+	}
+	if batch.Op != realtime.OpBatch || len(batch.Frames) <= 50 {
+		t.Fatalf("expected batch frame with >50 frames, got op=%s, frames=%d", batch.Op, len(batch.Frames))
+	}
+}

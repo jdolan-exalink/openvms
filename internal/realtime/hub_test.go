@@ -212,3 +212,189 @@ func TestHubDispatchDecodesAndPublishes(t *testing.T) {
 	}
 	expectNothing(t, sub)
 }
+
+func TestHubSiteFiltering(t *testing.T) {
+	tenant := uuid.New()
+	siteA, siteB := uuid.New(), uuid.New()
+	h := realtime.NewHub(realtime.HubConfig{Authorizer: allowAll(), Log: discard()})
+	defer h.Close()
+
+	sub, err := h.Subscribe(tenantActor(tenant))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+
+	// Filter to siteA only
+	sub.SetSiteIDs([]uuid.UUID{siteA})
+
+	// Message for siteB should be filtered out
+	h.Publish(realtime.Message{
+		Envelope: realtime.Envelope{Type: realtime.TypeEventCreated, TenantID: tenant, SiteID: &siteB, Data: []byte(`{}`)},
+		Scope:    realtime.Scope{Kind: authz.ScopeTenant, ID: tenant, Permission: authz.EventsView},
+	})
+	expectNothing(t, sub)
+
+	// Message for siteA should be delivered
+	h.Publish(realtime.Message{
+		Envelope: realtime.Envelope{Type: realtime.TypeEventCreated, TenantID: tenant, SiteID: &siteA, Data: []byte(`{}`)},
+		Scope:    realtime.Scope{Kind: authz.ScopeTenant, ID: tenant, Permission: authz.EventsView},
+	})
+	env, err := recv(t, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.SiteID == nil || *env.SiteID != siteA {
+		t.Fatalf("expected siteA, got %+v", env.SiteID)
+	}
+
+	// Message without siteID (global/tenant-level) should still be delivered
+	h.Publish(realtime.Message{
+		Envelope: realtime.Envelope{Type: realtime.TypeEventCreated, TenantID: tenant, SiteID: nil, Data: []byte(`{}`)},
+		Scope:    realtime.Scope{Kind: authz.ScopeTenant, ID: tenant, Permission: authz.EventsView},
+	})
+	if _, err := recv(t, sub); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHubTopicFiltering(t *testing.T) {
+	tenant := uuid.New()
+	h := realtime.NewHub(realtime.HubConfig{Authorizer: allowAll(), Log: discard()})
+	defer h.Close()
+
+	sub, err := h.Subscribe(tenantActor(tenant))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+
+	// Filter to camera topic only
+	sub.SetTopics([]string{"camera"})
+
+	// Event message should be filtered out
+	h.Publish(realtime.Message{
+		Envelope: realtime.Envelope{Type: realtime.TypeEventCreated, TenantID: tenant, Data: []byte(`{}`)},
+		Scope:    realtime.Scope{Kind: authz.ScopeTenant, ID: tenant, Permission: authz.EventsView},
+	})
+	expectNothing(t, sub)
+
+	// Camera status message should be delivered
+	camID := uuid.New()
+	h.Publish(realtime.Message{
+		Envelope: realtime.Envelope{Type: realtime.TypeCameraStatusChanged, TenantID: tenant, CameraID: &camID, Data: []byte(`{}`)},
+		Scope:    realtime.Scope{Kind: authz.ScopeCamera, ID: camID, Permission: authz.CamerasView},
+	})
+	env, err := recv(t, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Type != realtime.TypeCameraStatusChanged {
+		t.Fatalf("expected camera.status_changed, got %s", env.Type)
+	}
+}
+
+func TestHubCameraStatusCoalescing(t *testing.T) {
+	tenant := uuid.New()
+	camID := uuid.New()
+	h := realtime.NewHub(realtime.HubConfig{Authorizer: allowAll(), Log: discard()})
+	defer h.Close()
+
+	sub, err := h.Subscribe(tenantActor(tenant))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+
+	makeMsg := func(status string) realtime.Message {
+		return realtime.Message{
+			Envelope: realtime.Envelope{
+				Type:     realtime.TypeCameraStatusChanged,
+				TenantID: tenant,
+				CameraID: &camID,
+				Data:     []byte(`{"to":"` + status + `"}`),
+			},
+			Scope: realtime.Scope{Kind: authz.ScopeCamera, ID: camID, Permission: authz.CamerasView},
+		}
+	}
+
+	// First message delivered immediately
+	h.Publish(makeMsg("streaming"))
+	env1, err := recv(t, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(env1.Data) != `{"to":"streaming"}` {
+		t.Fatalf("first msg = %s, want streaming", string(env1.Data))
+	}
+
+	// Two rapid messages within 500ms
+	h.Publish(makeMsg("reconnecting"))
+	time.Sleep(10 * time.Millisecond)
+	h.Publish(makeMsg("offline"))
+
+	// The coalesced message delivered after the 500ms window expires should be "offline"
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	env2, err := sub.Recv(ctx)
+	if err != nil {
+		t.Fatalf("expected coalesced message, got err: %v", err)
+	}
+	if string(env2.Data) != `{"to":"offline"}` {
+		t.Fatalf("expected offline, got %s", string(env2.Data))
+	}
+
+	// Nothing else should be delivered
+	expectNothing(t, sub)
+}
+
+func TestHubServerOfflineSuppression(t *testing.T) {
+	tenant := uuid.New()
+	serverID := uuid.New()
+	camID := uuid.New()
+	h := realtime.NewHub(realtime.HubConfig{Authorizer: allowAll(), Log: discard()})
+	defer h.Close()
+
+	sub, err := h.Subscribe(tenantActor(tenant))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+
+	// Server goes offline
+	serverData, _ := json.Marshal(map[string]any{
+		"id":   serverID,
+		"from": "online",
+		"to":   "offline",
+	})
+	h.Publish(realtime.Message{
+		Envelope: realtime.Envelope{
+			Type:     realtime.TypeServerStatus,
+			TenantID: tenant,
+			ServerID: &serverID,
+			Data:     serverData,
+		},
+		Scope: realtime.Scope{Kind: authz.ScopeServer, ID: serverID, Permission: authz.ServersView},
+	})
+
+	serverEnv, err := recv(t, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if serverEnv.Type != realtime.TypeServerStatus {
+		t.Fatalf("expected server.status, got %s", serverEnv.Type)
+	}
+
+	// Camera status for that server published during the 30s window must be suppressed
+	h.Publish(realtime.Message{
+		Envelope: realtime.Envelope{
+			Type:     realtime.TypeCameraStatusChanged,
+			TenantID: tenant,
+			ServerID: &serverID,
+			CameraID: &camID,
+			Data:     []byte(`{"to":"unknown"}`),
+		},
+		Scope: realtime.Scope{Kind: authz.ScopeCamera, ID: camID, Permission: authz.CamerasView},
+	})
+	expectNothing(t, sub)
+}

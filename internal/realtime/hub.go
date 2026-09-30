@@ -2,10 +2,13 @@ package realtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -37,16 +40,19 @@ type HubConfig struct {
 	Buffer int
 	// MaxPerUser caps concurrent connections of one user. Zero means 5.
 	MaxPerUser int
+	// Ring stores recent messages for resume. Default is a 5-minute RingBuffer.
+	Ring *RingBuffer
 }
 
 // Hub fans decoded messages out to subscriptions of this API instance.
 type Hub struct {
 	cfg HubConfig
 
-	mu      sync.Mutex
-	closed  bool
-	subs    map[*Subscription]struct{}
-	perUser map[uuid.UUID]int
+	mu                 sync.Mutex
+	closed             bool
+	subs               map[*Subscription]struct{}
+	perUser            map[uuid.UUID]int
+	serverOfflineUntil map[uuid.UUID]time.Time
 }
 
 func NewHub(cfg HubConfig) *Hub {
@@ -59,7 +65,20 @@ func NewHub(cfg HubConfig) *Hub {
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
 	}
-	return &Hub{cfg: cfg, subs: map[*Subscription]struct{}{}, perUser: map[uuid.UUID]int{}}
+	if cfg.Ring == nil {
+		cfg.Ring = NewRingBuffer()
+	}
+	return &Hub{
+		cfg:                cfg,
+		subs:               map[*Subscription]struct{}{},
+		perUser:            map[uuid.UUID]int{},
+		serverOfflineUntil: map[uuid.UUID]time.Time{},
+	}
+}
+
+// Ring returns the resume ring buffer.
+func (h *Hub) Ring() *RingBuffer {
+	return h.cfg.Ring
 }
 
 // Connections reports the number of live subscriptions.
@@ -79,7 +98,15 @@ func (h *Hub) Subscribe(actor authz.Actor) (*Subscription, error) {
 	if h.perUser[actor.UserID] >= h.cfg.MaxPerUser {
 		return nil, ErrTooManyConnections
 	}
-	s := &Subscription{hub: h, actor: actor, in: make(chan Message, h.cfg.Buffer), done: make(chan struct{})}
+	s := &Subscription{
+		hub:              h,
+		actor:            actor,
+		in:               make(chan Message, h.cfg.Buffer),
+		done:             make(chan struct{}),
+		lastCamTimes:     make(map[uuid.UUID]time.Time),
+		pendingCamMsg:    make(map[uuid.UUID]Message),
+		pendingCamTimers: make(map[uuid.UUID]*time.Timer),
+	}
 	h.subs[s] = struct{}{}
 	h.perUser[actor.UserID]++
 	return s, nil
@@ -106,6 +133,9 @@ func (h *Hub) DispatchStream(stream string, seq uint64, subject string, data []b
 		if stream != "" && seq > 0 {
 			m.Envelope.ID = fmt.Sprintf("%s:%d", stream, seq)
 		}
+		if h.cfg.Ring != nil {
+			h.cfg.Ring.Add(m)
+		}
 		h.Publish(m)
 	}
 }
@@ -113,6 +143,28 @@ func (h *Hub) DispatchStream(stream string, seq uint64, subject string, data []b
 // Publish offers m to every subscription of its tenant. It never blocks: a subscription whose
 // buffer is full is closed with ErrSlowConsumer.
 func (h *Hub) Publish(m Message) {
+	now := time.Now()
+	// Server offline suppression: when server status is offline, suppress per-camera status for 30s
+	if m.Envelope.Type == TypeServerStatus || m.Envelope.Type == TypeServerStatusChanged {
+		var p statusPayload
+		if err := json.Unmarshal(m.Envelope.Data, &p); err == nil && p.To == "offline" && m.Envelope.ServerID != nil {
+			h.mu.Lock()
+			if h.serverOfflineUntil == nil {
+				h.serverOfflineUntil = make(map[uuid.UUID]time.Time)
+			}
+			h.serverOfflineUntil[*m.Envelope.ServerID] = now.Add(30 * time.Second)
+			h.mu.Unlock()
+		}
+	} else if m.Envelope.Type == TypeCameraStatusChanged && m.Envelope.ServerID != nil {
+		h.mu.Lock()
+		until, ok := h.serverOfflineUntil[*m.Envelope.ServerID]
+		h.mu.Unlock()
+		if ok && now.Before(until) {
+			// Suppressed while server is offline
+			return
+		}
+	}
+
 	h.mu.Lock()
 	var slow []*Subscription
 	for s := range h.subs {
@@ -121,9 +173,13 @@ func (h *Hub) Publish(m Message) {
 		if s.actor.TenantID != nil && *s.actor.TenantID != m.Envelope.TenantID {
 			continue
 		}
-		select {
-		case s.in <- m:
-		default:
+		if !s.matchesSite(m.Envelope.SiteID) {
+			continue
+		}
+		if !s.matchesTopic(m.Envelope.Type) {
+			continue
+		}
+		if !s.deliver(m) {
 			slow = append(slow, s)
 		}
 	}
@@ -169,6 +225,131 @@ type Subscription struct {
 	once sync.Once
 	done chan struct{}
 	err  error
+
+	mu               sync.Mutex
+	topics           map[string]struct{}
+	siteIDs          map[uuid.UUID]struct{}
+	lastCamTimes     map[uuid.UUID]time.Time
+	pendingCamMsg    map[uuid.UUID]Message
+	pendingCamTimers map[uuid.UUID]*time.Timer
+}
+
+func (s *Subscription) matchesSite(siteID *uuid.UUID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.siteIDs) == 0 {
+		return true
+	}
+	if siteID == nil {
+		return true
+	}
+	_, ok := s.siteIDs[*siteID]
+	return ok
+}
+
+func (s *Subscription) matchesTopic(msgType string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.topics) == 0 {
+		switch msgType {
+		case TypeEventCreated, TypeServerStatus, TypeAlarmUpdated, TypeNotificationCreated, TypeCameraStatusChanged:
+			return true
+		default:
+			return false
+		}
+	}
+	for topic := range s.topics {
+		switch topic {
+		case "camera":
+			if msgType == TypeCameraStatusChanged || msgType == "camera.status" {
+				return true
+			}
+		case "server":
+			if msgType == TypeServerStatus || msgType == TypeServerStatusChanged {
+				return true
+			}
+		case "alarm":
+			if strings.HasPrefix(msgType, "alarm.") {
+				return true
+			}
+		case "object":
+			if msgType == TypeEventCreated || msgType == TypeObjectDetected {
+				return true
+			}
+		case "notification":
+			if msgType == TypeNotificationCreated {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// SetTopics opts the subscription into specific topics.
+func (s *Subscription) SetTopics(topics []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.topics = make(map[string]struct{}, len(topics))
+	for _, t := range topics {
+		s.topics[t] = struct{}{}
+	}
+}
+
+// SetSiteIDs narrows the subscription to specific site IDs.
+func (s *Subscription) SetSiteIDs(siteIDs []uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.siteIDs = make(map[uuid.UUID]struct{}, len(siteIDs))
+	for _, id := range siteIDs {
+		s.siteIDs[id] = struct{}{}
+	}
+}
+
+func (s *Subscription) enqueue(m Message) bool {
+	select {
+	case <-s.done:
+		return false
+	case s.in <- m:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Subscription) deliver(m Message) bool {
+	if m.Envelope.Type == TypeCameraStatusChanged && m.Envelope.CameraID != nil {
+		camID := *m.Envelope.CameraID
+		s.mu.Lock()
+		if s.lastCamTimes == nil {
+			s.lastCamTimes = make(map[uuid.UUID]time.Time)
+			s.pendingCamMsg = make(map[uuid.UUID]Message)
+			s.pendingCamTimers = make(map[uuid.UUID]*time.Timer)
+		}
+		last, ok := s.lastCamTimes[camID]
+		now := time.Now()
+		if ok && now.Sub(last) < 500*time.Millisecond {
+			s.pendingCamMsg[camID] = m
+			if _, hasTimer := s.pendingCamTimers[camID]; !hasTimer {
+				rem := 500*time.Millisecond - now.Sub(last)
+				s.pendingCamTimers[camID] = time.AfterFunc(rem, func() {
+					s.mu.Lock()
+					msg, hasMsg := s.pendingCamMsg[camID]
+					delete(s.pendingCamMsg, camID)
+					delete(s.pendingCamTimers, camID)
+					s.lastCamTimes[camID] = time.Now()
+					s.mu.Unlock()
+					if hasMsg {
+						s.enqueue(msg)
+					}
+				})
+			}
+			s.mu.Unlock()
+			return true
+		}
+		s.lastCamTimes[camID] = now
+		s.mu.Unlock()
+	}
+	return s.enqueue(m)
 }
 
 // Close releases the subscription. It is safe to call more than once.
@@ -178,6 +359,12 @@ func (s *Subscription) closeWith(err error) {
 	s.once.Do(func() {
 		s.err = err
 		close(s.done)
+		s.mu.Lock()
+		for _, tm := range s.pendingCamTimers {
+			tm.Stop()
+		}
+		s.pendingCamTimers = nil
+		s.mu.Unlock()
 		s.hub.remove(s)
 	})
 }
