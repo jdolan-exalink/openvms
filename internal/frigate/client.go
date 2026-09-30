@@ -188,6 +188,18 @@ func (c *client) url(path string, query url.Values) string {
 	return u.String()
 }
 
+// StatusError is a non-2xx answer from Frigate (other than 404, which is ErrNotFound).
+type StatusError struct {
+	Method string
+	Path   string
+	Status int
+	Body   string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("frigate %s %s: status %d: %s", e.Method, e.Path, e.Status, snippet([]byte(e.Body)))
+}
+
 // send performs a request with an optional JSON body and returns the response body.
 func (c *client) send(ctx context.Context, method, path string, query url.Values, payload any) ([]byte, error) {
 	var raw []byte
@@ -197,6 +209,11 @@ func (c *client) send(ctx context.Context, method, path string, query url.Values
 			return nil, err
 		}
 	}
+	return c.sendRaw(ctx, method, path, query, "application/json", raw)
+}
+
+// sendRaw performs a request with an optional raw body of the given content type.
+func (c *client) sendRaw(ctx context.Context, method, path string, query url.Values, contentType string, raw []byte) ([]byte, error) {
 	resp, err := c.do(ctx, c.http, func() (*http.Request, error) {
 		var body io.Reader
 		if raw != nil {
@@ -204,7 +221,7 @@ func (c *client) send(ctx context.Context, method, path string, query url.Values
 		}
 		req, err := http.NewRequestWithContext(ctx, method, c.url(path, query), body)
 		if err == nil && raw != nil {
-			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Content-Type", contentType)
 		}
 		return req, err
 	})
@@ -220,7 +237,7 @@ func (c *client) send(ctx context.Context, method, path string, query url.Values
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, fmt.Errorf("frigate %s %s: %w", method, path, ErrNotFound)
 	case resp.StatusCode >= 300:
-		return nil, fmt.Errorf("frigate %s %s: status %d: %s", method, path, resp.StatusCode, snippet(body))
+		return nil, &StatusError{Method: method, Path: path, Status: resp.StatusCode, Body: string(body)}
 	}
 	return body, nil
 }

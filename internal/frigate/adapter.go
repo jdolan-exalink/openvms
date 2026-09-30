@@ -3,6 +3,7 @@ package frigate
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -35,6 +36,23 @@ type Adapter interface {
 	Restart(ctx context.Context) error
 	// Media opens raw media resources for the media gateway.
 	Media() Media
+
+	// ConfigEditable reports whether this server's config may be edited (Frigate >= 0.16).
+	ConfigEditable() bool
+	// ConfigSchema returns Frigate's JSON schema of its configuration (cached).
+	ConfigSchema(ctx context.Context) (json.RawMessage, error)
+	// RawConfig returns config.yml with secrets (Frigate admin only).
+	RawConfig(ctx context.Context) (string, error)
+	// RawPaths returns the unmasked ffmpeg input paths (Frigate admin only).
+	RawPaths(ctx context.Context) (map[string]any, error)
+	// CameraConfig returns the full effective camera section as generic JSON; secrets stay
+	// masked unless secrets is true.
+	CameraConfig(ctx context.Context, camera string, secrets bool) (map[string]any, error)
+	// ApplyCameraPatch merges a patch (top-level section -> value) into one camera, live
+	// where Frigate allows it.
+	ApplyCameraPatch(ctx context.Context, camera string, patch map[string]any) ([]SectionResult, error)
+	// SaveRawConfig validates and writes a full config.yml, optionally restarting Frigate.
+	SaveRawConfig(ctx context.Context, yaml string, restart bool) error
 }
 
 // CameraFrigateConfig holds detection, object tracking and LPR settings for a camera.

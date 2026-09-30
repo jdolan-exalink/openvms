@@ -33,6 +33,7 @@ require (
 	go.opentelemetry.io/otel/sdk v1.46.0
 	golang.org/x/crypto v0.57.0
 	golang.org/x/image v0.46.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -160,5 +161,4 @@ require (
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

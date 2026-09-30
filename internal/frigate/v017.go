@@ -314,6 +314,17 @@ func (a *v017) UpdateCameraConfig(ctx context.Context, camera string, update Cam
 		return CameraFrigateConfig{}, err
 	}
 
+	if a.ConfigEditable() {
+		// Apply through the generic patch path so detect/objects reach running processes
+		// (requires_restart=0 + update_topic) instead of only being saved to config.yml.
+		if patch := legacyPatch(update); len(patch) > 0 {
+			if _, err := a.ApplyCameraPatch(ctx, camera, patch); err != nil {
+				return CameraFrigateConfig{}, err
+			}
+		}
+		return a.GetCameraConfig(ctx, camera)
+	}
+
 	params := url.Values{}
 	if update.DetectEnabled != nil {
 		params.Set(fmt.Sprintf("cameras.%s.detect.enabled", camera), strconv.FormatBool(*update.DetectEnabled))
@@ -337,4 +348,25 @@ func (a *v017) UpdateCameraConfig(ctx context.Context, camera string, update Cam
 func (a *v017) Restart(ctx context.Context) error {
 	_, err := a.c.send(ctx, http.MethodPost, "/api/restart", nil, nil)
 	return err
+}
+
+// LegacyPatch converts the three-field S2-7 update into a camera patch.
+func LegacyPatch(update CameraFrigateConfigUpdate) map[string]any { return legacyPatch(update) }
+
+func legacyPatch(update CameraFrigateConfigUpdate) map[string]any {
+	patch := map[string]any{}
+	if update.DetectEnabled != nil {
+		patch["detect"] = map[string]any{"enabled": *update.DetectEnabled}
+	}
+	if update.LPREnabled != nil {
+		patch["lpr"] = map[string]any{"enabled": *update.LPREnabled}
+	}
+	if update.TrackedObjects != nil {
+		track := make([]any, len(update.TrackedObjects))
+		for i, o := range update.TrackedObjects {
+			track[i] = o
+		}
+		patch["objects"] = map[string]any{"track": track}
+	}
+	return patch
 }

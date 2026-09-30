@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -36,6 +37,12 @@ type Server struct {
 	Go2RTCStreams []string
 
 	token string
+
+	// cfg is the editable configuration behind /api/config, built from Cameras on first use.
+	cfgMu    sync.Mutex
+	cfg      map[string]any
+	setCalls []SetCall
+	saves    []SaveCall
 }
 
 const tokenCookie = "frigate_token"
@@ -50,6 +57,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.login)
 	mux.HandleFunc("GET /api/version", s.auth(s.version))
 	mux.HandleFunc("GET /api/config", s.auth(s.config))
+	mux.HandleFunc("GET /api/config/raw", s.auth(s.configRaw))
+	mux.HandleFunc("GET /api/config/raw_paths", s.auth(s.configRawPaths))
+	mux.HandleFunc("GET /api/config/schema.json", s.auth(s.configSchema))
+	mux.HandleFunc("POST /api/config/save", s.auth(s.configSave))
 	mux.HandleFunc("GET /api/go2rtc/streams", s.auth(s.go2rtcStreams))
 	mux.HandleFunc("GET /api/stats", s.auth(s.stats))
 	mux.HandleFunc("GET /api/review", s.auth(s.listReviews))
@@ -114,73 +125,8 @@ func (s *Server) version(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte(s.Version))
 }
 
-func (s *Server) config(w http.ResponseWriter, _ *http.Request) {
-	cams := map[string]any{}
-	for _, c := range s.Cameras {
-		zones := map[string]any{}
-		for _, z := range c.Zones {
-			zones[z] = map[string]any{"coordinates": "0,0,1,0,1,1,0,1"}
-		}
-		detectEnabled := true
-		if c.Detect != nil {
-			detectEnabled = *c.Detect
-		}
-		tracked := c.TrackedObjects
-		if tracked == nil {
-			tracked = []string{"person"}
-		}
-		cams[c.Name] = map[string]any{
-			"name":    c.Name,
-			"enabled": true,
-			"detect":  map[string]any{"enabled": detectEnabled, "width": 1280, "height": 720, "fps": 5},
-			"record":  map[string]any{"enabled": true},
-			"live":    map[string]any{"streams": map[string]string{"main": c.Name, "sub": c.Name + "_sub"}},
-			"lpr":     map[string]any{"enabled": c.LPR},
-			"objects": map[string]any{"track": tracked},
-			"zones":   zones,
-		}
-	}
-	writeJSON(w, map[string]any{
-		"cameras": cams,
-		"mqtt":    map[string]any{"enabled": true, "topic_prefix": s.TopicPrefix},
-		"version": s.Version,
-	})
-}
-
 func (s *Server) restart(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, map[string]any{"success": true, "message": "Frigate restarting"})
-}
-
-func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	for i := range s.Cameras {
-		c := &s.Cameras[i]
-		detectKey := "cameras." + c.Name + ".detect.enabled"
-		if v := q.Get(detectKey); v != "" {
-			b, _ := strconv.ParseBool(v)
-			c.Detect = &b
-		}
-		lprKey := "cameras." + c.Name + ".lpr.enabled"
-		if v := q.Get(lprKey); v != "" {
-			b, _ := strconv.ParseBool(v)
-			c.LPR = b
-		}
-		trackKey := "cameras." + c.Name + ".objects.track"
-		if v := q.Get(trackKey); v != "" {
-			var items []string
-			if strings.HasPrefix(v, "[") {
-				_ = json.Unmarshal([]byte(v), &items)
-			} else {
-				for _, p := range strings.Split(v, ",") {
-					if p = strings.TrimSpace(p); p != "" {
-						items = append(items, p)
-					}
-				}
-			}
-			c.TrackedObjects = items
-		}
-	}
-	writeJSON(w, map[string]any{"success": true})
 }
 
 // go2rtcStreams serves GET /api/go2rtc/streams, keyed by stream name like real go2rtc
