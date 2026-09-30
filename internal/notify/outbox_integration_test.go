@@ -199,3 +199,36 @@ func TestEnqueueSkipsDisabledChannelsAndIsolatesTenantData(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPruneKeepsPendingAndYoungRows(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	ch := f.addWebhook("http://127.0.0.1:1/unused", true)
+	f.worker.PruneBatch = 2 // force several batches
+	old := time.Now().Add(-60 * 24 * time.Hour)
+	err := f.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		for _, r := range []struct {
+			status string
+			at     time.Time
+		}{{"sent", old}, {"failed", old}, {"sent", old}, {"pending", old}, {"sent", time.Now()}} {
+			if _, err := tx.Exec(ctx, `INSERT INTO notification_deliveries (tenant_id, channel_id, channel_name, channel_type, payload, status, created_at)
+				VALUES ($1, $2, 'c', 'webhook', '{}', $3, $4)`, f.env.Demo.TenantID, ch, r.status, r.at); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d, _ := f.worker.Prune(ctx); d != 3 {
+		t.Fatalf("pruned %d deliveries, want 3 (old sent/failed only)", d)
+	}
+	var left int
+	err = f.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM notification_deliveries WHERE channel_id = $1`, ch).Scan(&left)
+	})
+	if err != nil || left != 2 {
+		t.Fatalf("left %d rows (err %v), want 2 (old pending + recent sent)", left, err)
+	}
+}

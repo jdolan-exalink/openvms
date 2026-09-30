@@ -33,3 +33,14 @@ SET read_at = now()
 WHERE tenant_id = @tenant_id
   AND (user_id IS NULL OR user_id = @user_id)
   AND read_at IS NULL;
+
+-- name: PruneReadNotifications :execrows
+-- Deletes in-app notifications that were read before the cutoff, at most max_rows per call.
+-- Unread notifications are never touched.
+DELETE FROM notifications
+WHERE id IN (
+  SELECT n.id FROM notifications n
+  WHERE n.read_at IS NOT NULL AND n.read_at < @cutoff::timestamptz
+  ORDER BY n.read_at
+  LIMIT @max_rows
+  FOR UPDATE SKIP LOCKED);

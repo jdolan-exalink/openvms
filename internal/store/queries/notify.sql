@@ -84,3 +84,14 @@ WHERE id = @id;
 UPDATE notification_deliveries
 SET status = 'failed', last_error = @last_error
 WHERE id = @id;
+
+-- name: PruneNotificationDeliveries :execrows
+-- Deletes terminal (sent/failed) deliveries created before the cutoff, at most max_rows per call.
+-- Pending rows are never touched, whatever their age.
+DELETE FROM notification_deliveries
+WHERE id IN (
+  SELECT d.id FROM notification_deliveries d
+  WHERE d.status IN ('sent', 'failed') AND d.created_at < @cutoff::timestamptz
+  ORDER BY d.created_at
+  LIMIT @max_rows
+  FOR UPDATE SKIP LOCKED);

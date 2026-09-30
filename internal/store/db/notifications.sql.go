@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -178,4 +179,29 @@ func (q *Queries) MarkNotificationRead(ctx context.Context, arg MarkNotification
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const pruneReadNotifications = `-- name: PruneReadNotifications :execrows
+DELETE FROM notifications
+WHERE id IN (
+  SELECT n.id FROM notifications n
+  WHERE n.read_at IS NOT NULL AND n.read_at < $1::timestamptz
+  ORDER BY n.read_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED)
+`
+
+type PruneReadNotificationsParams struct {
+	Cutoff  time.Time
+	MaxRows int32
+}
+
+// Deletes in-app notifications that were read before the cutoff, at most max_rows per call.
+// Unread notifications are never touched.
+func (q *Queries) PruneReadNotifications(ctx context.Context, arg PruneReadNotificationsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneReadNotifications, arg.Cutoff, arg.MaxRows)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

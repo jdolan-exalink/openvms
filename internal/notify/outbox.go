@@ -118,6 +118,15 @@ type Worker struct {
 	BackoffMax  time.Duration
 	// Lease is how long a claimed row stays invisible to other workers (default 2m).
 	Lease time.Duration
+
+	// DeliveryRetention is how long terminal (sent/failed) deliveries are kept (default 30d).
+	// NotificationRetention is how long read in-app notifications are kept (default 90d).
+	// A negative value disables that pruning. PruneInterval is the pass period (default 1h)
+	// and PruneBatch bounds the rows deleted per statement (default 1000).
+	DeliveryRetention     time.Duration
+	NotificationRetention time.Duration
+	PruneInterval         time.Duration
+	PruneBatch            int
 }
 
 const (
@@ -127,8 +136,13 @@ const (
 	defaultBackoffBase = 30 * time.Second
 	defaultBackoffMax  = 30 * time.Minute
 	defaultLease       = 2 * time.Minute
-	sendConcurrency    = 4
-	maxStoredError     = 500
+
+	defaultDeliveryRetention     = 30 * 24 * time.Hour
+	defaultNotificationRetention = 90 * 24 * time.Hour
+	defaultPruneInterval         = time.Hour
+	defaultPruneBatch            = 1000
+	sendConcurrency              = 4
+	maxStoredError               = 500
 )
 
 func orDefault[T ~int | ~int64](v, def T) T {
@@ -164,6 +178,7 @@ func (w *Worker) backoff(attempts int) time.Duration {
 
 // Run polls until ctx is cancelled.
 func (w *Worker) Run(ctx context.Context) {
+	go w.runPruner(ctx)
 	t := time.NewTicker(orDefault(w.Interval, defaultInterval))
 	defer t.Stop()
 	for {
@@ -278,4 +293,70 @@ func (w *Worker) send(ctx context.Context, row db.NotificationDelivery) error {
 		ID: row.ID.String(), Title: p.Title, Body: p.Body, Link: p.Link, Severity: p.Severity,
 		RuleID: p.RuleID, OccurredAt: p.OccurredAt,
 	}, row.Destination)
+}
+
+// retention resolves a configured retention: zero means the default, negative disables.
+func retention(v, def time.Duration) (time.Duration, bool) {
+	switch {
+	case v < 0:
+		return 0, false
+	case v == 0:
+		return def, true
+	}
+	return v, true
+}
+
+func (w *Worker) runPruner(ctx context.Context) {
+	t := time.NewTicker(orDefault(w.PruneInterval, defaultPruneInterval))
+	defer t.Stop()
+	for {
+		w.Prune(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// Prune deletes terminal deliveries and read notifications past their retention, in bounded
+// batches, and logs the counts. Pending (including leased, in-flight) deliveries and unread
+// notifications are never deleted. It returns the deleted delivery and notification counts.
+func (w *Worker) Prune(ctx context.Context) (deliveries, notifications int64) {
+	batch := int32(orDefault(w.PruneBatch, defaultPruneBatch)) //nolint:gosec // small bounded value
+	now := time.Now()
+	if d, ok := retention(w.DeliveryRetention, defaultDeliveryRetention); ok {
+		deliveries = w.pruneLoop(ctx, "notification deliveries", func(q *db.Queries) (int64, error) {
+			return q.PruneNotificationDeliveries(ctx, db.PruneNotificationDeliveriesParams{Cutoff: now.Add(-d), MaxRows: batch})
+		}, batch)
+	}
+	if d, ok := retention(w.NotificationRetention, defaultNotificationRetention); ok {
+		notifications = w.pruneLoop(ctx, "read notifications", func(q *db.Queries) (int64, error) {
+			return q.PruneReadNotifications(ctx, db.PruneReadNotificationsParams{Cutoff: now.Add(-d), MaxRows: batch})
+		}, batch)
+	}
+	if deliveries > 0 || notifications > 0 {
+		w.log().InfoContext(ctx, "notification retention pruned", "deliveries", deliveries, "notifications", notifications)
+	}
+	return deliveries, notifications
+}
+
+// pruneLoop repeats a bounded delete until a batch comes back short (or ctx ends).
+func (w *Worker) pruneLoop(ctx context.Context, what string, del func(*db.Queries) (int64, error), batch int32) (total int64) {
+	for ctx.Err() == nil {
+		var n int64
+		err := w.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) (err error) {
+			n, err = del(q)
+			return err
+		})
+		if err != nil {
+			w.log().ErrorContext(ctx, "prune "+what, "error", err)
+			return total
+		}
+		total += n
+		if n < int64(batch) {
+			return total
+		}
+	}
+	return total
 }

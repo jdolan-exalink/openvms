@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -367,6 +368,31 @@ WHERE id = $1
 func (q *Queries) MarkNotificationDeliverySent(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, markNotificationDeliverySent, id)
 	return err
+}
+
+const pruneNotificationDeliveries = `-- name: PruneNotificationDeliveries :execrows
+DELETE FROM notification_deliveries
+WHERE id IN (
+  SELECT d.id FROM notification_deliveries d
+  WHERE d.status IN ('sent', 'failed') AND d.created_at < $1::timestamptz
+  ORDER BY d.created_at
+  LIMIT $2
+  FOR UPDATE SKIP LOCKED)
+`
+
+type PruneNotificationDeliveriesParams struct {
+	Cutoff  time.Time
+	MaxRows int32
+}
+
+// Deletes terminal (sent/failed) deliveries created before the cutoff, at most max_rows per call.
+// Pending rows are never touched, whatever their age.
+func (q *Queries) PruneNotificationDeliveries(ctx context.Context, arg PruneNotificationDeliveriesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneNotificationDeliveries, arg.Cutoff, arg.MaxRows)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const stripChannelFromRules = `-- name: StripChannelFromRules :exec

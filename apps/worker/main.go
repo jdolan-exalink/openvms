@@ -134,7 +134,9 @@ func run() error {
 	// Delivers the outbox rows that rule firings enqueue for external channels.
 	deliveries := &notify.Worker{
 		Store: st, Sealer: sealer, Log: log,
-		Deps: notify.Deps{WahaBaseURL: cfg.Waha.BaseURL, WahaAPIKey: cfg.Waha.APIKey},
+		Deps:                  notify.Deps{WahaBaseURL: cfg.Waha.BaseURL, WahaAPIKey: cfg.Waha.APIKey},
+		DeliveryRetention:     cfg.NotifyDeliveryRetention,
+		NotificationRetention: cfg.NotifyReadRetention,
 	}
 	go deliveries.Run(ctx)
 

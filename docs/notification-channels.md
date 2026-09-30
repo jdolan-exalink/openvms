@@ -69,6 +69,20 @@ redirect cannot reach them). The same guard applies to SMTP. **Private LAN and l
 stay allowed**: on-premise receivers are the normal case for a VMS, so this is not a full SSRF
 sandbox. Restrict who holds `notifications.manage` accordingly.
 
+## Retention
+
+The worker prunes history periodically (hourly, in bounded batches of 1000 rows) and logs the
+counts as `notification retention pruned`.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `NOTIFY_DELIVERY_RETENTION` | `720h` (30 days) | Deletes `notification_deliveries` in a terminal state (`sent`, `failed`) created earlier than this. `pending` rows (including in-flight, leased ones) are never deleted. |
+| `NOTIFY_READ_RETENTION` | `2160h` (90 days) | Deletes in-app `notifications` that were **read** earlier than this. Unread notifications are kept. |
+
+Values are Go durations (`720h`; there is no `d` unit). A negative value (e.g. `-1h`) disables that
+pruning. Deliveries keep `notification_id` as `SET NULL`, so pruning notifications leaves the
+delivery history intact.
+
 ## WhatsApp (WAHA)
 
 WhatsApp goes through the internal **WAHA** service (`devlikeapro/waha`, the `waha` compose
