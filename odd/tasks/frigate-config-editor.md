@@ -59,6 +59,7 @@ Edit every per-camera parameter Frigate supports from OpenVMS and apply it to Fr
 Strategy ask-on-risk; push/PR are PO decisions.
 
 ## Progress
+- 2026-09-30: FC-2..FC-4 review medium risk, declined by PO. Deployed after backup (pre-frigate-config-*): migration 00021 applied, health ok. Platform admin had no servers.config.secrets (platform grants are only created by vmsctl bootstrap) -> granted manually via SQL at platform scope. Note: existing installations need the same (re-run bootstrap or grant in Permisos). Pending: validation against real Frigate 0.16/0.17 (schema render, null map-key deletion, live patch, restart flow, rollback); FC-5.
 ### FC-1 (2026-09-30) — Route: delegated (writer trigger: 2+ non-trivial files)
 - Endpoints: `GET|PATCH /api/v1/cameras/{id}/frigate-config`, `GET /api/v1/servers/{id}/frigate-config/schema`,
   `GET|PUT /api/v1/servers/{id}/frigate-config/raw` (`?restart=`), `GET /api/v1/servers/{id}/frigate-config/revisions`
