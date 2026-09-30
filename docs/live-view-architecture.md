@@ -130,6 +130,31 @@ below the grid.
   "now", so playback at the live edge re-opens a window about every minute; REC "snapshot"
   for capped tiles is the latest one, not the one at the shared time.
 
+## LV-13: Explorador sidebar and shared camera folders
+
+The Live sidebar is one **Explorador** (`components/LiveExplorer.tsx`): search, an accordion
+**Cámaras** (Site > Server > Folder > Camera, counts, status dots) and **Vistas guardadas**
+(list, load, save current view). It is portaled into the shell sidebar (LV-10) and collapses to
+zero width (`setContextSidebarCollapsed`, `md:w-0` with a 200 ms width transition, none with
+reduced motion); a reopen button sits at the left of the grid toolbar. Collapse state is
+`openvms.live.sidebar.collapsed`, tree expansion `openvms.live.explorer.v1` (localStorage).
+SurfaceLayer follows the grid growing through its ResizeObserver plus settle period.
+
+- **Data.** Folders and camera order are shared per tenant (`camera_folders`, `cameras.folder_id`,
+  `cameras.sort_order`, migration 00020). Folders belong to one server, one level. Everyone sees
+  the same tree filtered by camera visibility; a folder shows when it holds a visible camera or
+  the caller can manage its server (`manageable_server_ids`).
+- **Permissions.** Only `cameras.manage` (on the server for folders, on each camera for moves)
+  may create, rename, delete and reorder. Audit: FOLDER_CREATED/RENAMED/DELETED, CAMERAS_REORDERED.
+- **Same-server rule.** A camera only moves to a folder of its own server or that server's root.
+  The tree disables and dims other servers while dragging; the API rejects the batch with 400
+  (atomic: nothing is applied).
+- **Drag and drop.** One DndContext: grid uses `camera:<id>` (draggable) and `tile:<n>`; the tree
+  adds droppables `tcam:`, `tfolder:`, `troot:` and folder handles `tfolder:` (draggable).
+  `lib/explorer.ts` turns (active, over) into a reorder batch; `useCameraFolders` applies it
+  optimistically and rolls back on error.
+- **Not browser-verified:** drop indicators, drag overlay, collapse transition, keyboard DnD in the tree.
+
 ## Known limitations
 
 Not yet browser-verified: overlay geometry/z-order during drag, IntersectionObserver
