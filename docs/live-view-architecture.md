@@ -97,6 +97,39 @@ falls back to all-off on error.
   or fix the grant, then "Reintentar".
 - Roll back: unset the flags (`OPENVMS_FEATURES=`) — the grid returns to the pre-P0 path.
 
+## LV-9: LIVE / REC toggle
+
+A segmented **En vivo / Grabación** toggle in the Live toolbar (hidden without any
+`recordings.view` grant). REC keeps the grid (cameras, positions, layout) and covers each tile
+with recorded HLS playback synchronized to one clock; a docked day timeline and transport sit
+below the grid.
+
+- **Live is suspended, not closed.** With `persistentPlayers`, each tile's session gets the
+  suspend reason `rec` (socket closed, last frame kept) and reconnects when switching back.
+  Without the flag the live player is unmounted while in REC (it remounts on return).
+- **Shared clock.** `useRecPlayback` opens one hour-long VOD window (`vodWindowForInstant`) for
+  every tile; seeks inside it only move `currentTime`, outside it a new window is opened.
+  The master tile (selected tile if it has recordings, else the first that has) is the clock;
+  `useSyncedPlayback` (S2-8 drift correction) follows it for all N tiles.
+- **Cap.** At most `REC_MAX_PLAYERS` (16, `lib/liveRec.ts`) recorded players; extra tiles show
+  the camera snapshot and "Reproducción limitada a 16 cámaras". Tiles without permission
+  (recordings API 403) show "Sin permiso de grabaciones"; cameras with no recording that day
+  show "Sin grabaciones este día".
+- **Timeline** (`DayTimeline`, canvas): union coverage, per-camera rows up to 8 cameras, event
+  markers clustered by 7 px bucket (`clusterMarkers`), playhead. Wheel zooms around the cursor
+  (24 h to 2 min), ctrl+wheel/pinch too, drag pans, click seeks all cameras and plays,
+  shift+drag or dragging the playhead scrubs. Math lives in `lib/timeScale.ts`.
+- **Controls:** play/pause, 0.5x-8x, +/-10 s and +/-1 min, previous/next event, "Ahora",
+  calendar (`DayCalendar`), keyboard: Space, Left/Right (10 s), Shift+Left/Right (1 min).
+- **URL:** `?mode=rec&t=<ISO>`; kept in step with the clock (every 15 s while playing, shortly
+  after seeks); switching to LIVE clears both. Entering defaults to now - 30 s, or to the
+  latest recording if the cameras stopped earlier.
+- **Known limitations:** not browser-verified; the calendar does not mark days with
+  recordings (no cheap API); all tiles assume the same VOD offset, so a camera whose
+  recording starts mid-window is corrected only by the drift loop; the window is clamped to
+  "now", so playback at the live edge re-opens a window about every minute; REC "snapshot"
+  for capped tiles is the latest one, not the one at the shared time.
+
 ## Known limitations
 
 Not yet browser-verified: overlay geometry/z-order during drag, IntersectionObserver
@@ -110,5 +143,6 @@ is open. No WebSocket end-to-end test with a fake Frigate; audit dedupe is per A
 - Env vars: `OPENVMS_FEATURES`, `LIVE_AUDIT_WINDOW`, `LIVE_REVALIDATE_INTERVAL`,
   `LIVE_PING_INTERVAL`, `LIVE_PONG_WAIT`.
 - Migrations: none. Dependencies: none added.
+- LV-9: `a3a3b89`, `faea095` (no API/config changes).
 - Commits: LV-1 `a0f4a62`, LV-2 `b3d0624`, LV-3 `4e84007`, LV-7 `813f791` (merge `3a80d80`),
   LV-6 `7d91c84`, LV-4 `1f632e0`, LV-5 `656b5d9`.

@@ -64,6 +64,7 @@ and `apps/api/main.go` if any (both branches add config knobs/wiring). Then
 | LV-6 | Snapshot poster + last frame; states Connecting/Reconnecting/Offline/Unauthorized/Codec/Error + Retry; jittered backoff grouped per server; **stop retrying on `unauthorized`, `forbidden`, `codec_unsupported`** | ✅ done | `7d91c84` |
 | LV-7 | Gateway hardening | ✅ done, merged | `813f791`, merge `3a80d80` |
 | LV-8 | Rollout (flags on in local compose), `docs/live-view-architecture.md`, deploy | ✅ done | see feature doc |
+| LV-9 | LIVE/REC toggle: synchronized recorded grid, zoomable day timeline, calendar, URL state | ✅ done (not browser-verified) | `a3a3b89`, `faea095` |
 
 Dependencies: LV-2 → LV-3 → LV-4 → LV-5. LV-6 can run in parallel with LV-4/LV-5 if it
 only touches the session/overlay layer. LV-8 last.
