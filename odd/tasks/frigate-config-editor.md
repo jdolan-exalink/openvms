@@ -51,7 +51,7 @@ Edit every per-camera parameter Frigate supports from OpenVMS and apply it to Fr
   enums/defaults), diff preview, live/restart banner, replaces CameraSettingsDrawer.
 - [x] FC-3 — (done, commit 4042e3e) Curated panels for the most used sections (ffmpeg inputs/roles/hwaccel, detect, record/
   snapshots retention, objects+filters, motion, review) + revision history with rollback UI.
-- [ ] FC-4 — Visual zone & mask editor over the camera snapshot (relative coords; 0.18 dict format).
+- [x] FC-4 — (done, components 2cd5228 merged in 3c1f807, wiring 5618b12) Visual zone & mask editor over the camera snapshot (relative coords; 0.18 dict format).
 - [ ] FC-5 — Advanced YAML editor (validation via Frigate, diff, revision), ONVIF/autotracking/LPR/face/
   GenAI panels, bulk apply to several cameras.
 
@@ -102,4 +102,10 @@ Strategy ask-on-risk; push/PR are PO decisions.
 - Unverified: behaviour against a real Frigate 0.16/0.17 schema.json (curated fields render only when schema/config knows the
   path); map-key removal is sent as null (merge cannot delete) and is not verified against Frigate; model-supported labels are
   not exposed by the API so the label grid uses known + configured labels plus a free "Otra etiqueta" input.
-- Next: FC-4 (zones editor, plug into `onEditZones`), FC-5.
+- FC-4 (2cd5228, merge 3c1f807, wiring 5618b12): `ZoneEditorModal` opens from the Zones panel "Editar zonas" (`onEditZones`); it edits the
+  DRAFT (zones, motion.mask, objects.mask, objects.filters.<label>.mask) so the normal diff/Aplicar flow sends the patch; removed
+  zones go out as null via buildPatch map deletion; cleared masks keep the server's empty shape. Button disabled when read-only.
+  Diff truncates long values (coordinates) behind an expandable detail. Checks (apps/web): tsc, vitest (329), eslint, build pass.
+- Known gaps: no undo/zoom in the editor; zone distances and zone filters preserved but not editable; zone `enabled` flag not
+  exposed; legacy mask names not persisted; mask clearing/map-null deletion unverified against real Frigate.
+- Next: FC-5.
