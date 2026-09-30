@@ -7,10 +7,11 @@ import { api, type Schemas } from "@/api/client";
 import { meQuery } from "@/api/queries";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
+import { parseRecSearch } from "@/lib/liveRec";
 import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { useRealtimeFeed } from "@/lib/realtime";
-import { AppShell } from "./AppShell";
+import { AppShell, TopBarActionsSlot } from "./AppShell";
 import { brandIcon as Brand, navGroups, settingsNavGroups, type NavGroup } from "./nav";
 import { NotificationBell } from "./NotificationBell";
 import { Omnibox } from "./Omnibox";
@@ -19,7 +20,11 @@ export function Layout() {
   const me = useQuery(meQuery);
   useRealtimeFeed(); // one app-wide push feed; Layout only renders for authenticated routes
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const search = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>;
+  const isLive = pathname === "/live";
+  const liveRec = isLive && parseRecSearch(search).rec && can(me.data, "recordings.view");
   const pageContext = getPageContext(pathname);
+  const pageTitle = isLive && liveRec ? "Grabación" : pageContext.title;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [omniboxOpen, setOmniboxOpen] = useState(false);
   const logout = useLogout();
@@ -69,10 +74,11 @@ export function Layout() {
               </div>
             </div>
           }
-          contextSidebar={pathname === "/live" ? <div id="live-context-sidebar" className="flex min-h-0 flex-col gap-3" /> : undefined}
+          fitViewport={isLive}
+          contextSidebar={isLive ? <div id="live-context-sidebar" className="flex min-h-0 flex-col gap-3" /> : undefined}
         >
-          <div className="min-w-0">
-            <header className="mb-6 flex min-h-14 items-center justify-between border-b border-line pb-4" aria-label="Encabezado de página">
+          <div className={cn("min-w-0", isLive && "md:flex md:min-h-0 md:flex-1 md:flex-col")}>
+            <header className={cn("flex min-h-14 items-center justify-between gap-3 border-b border-line", isLive ? "mb-2 pb-2 md:min-h-11 md:shrink-0" : "mb-6 pb-4")} aria-label="Encabezado de página">
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
@@ -87,9 +93,10 @@ export function Layout() {
                 <div className="min-w-0">
                   <p className="truncate text-lg font-semibold tracking-tight text-ink">
                     <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted">{pageContext.section}</span>
-                    <span className="ml-2">{`/ ${pageContext.title}`}</span>
+                    <span className="ml-2">{`/ ${pageTitle}`}</span>
                   </p>
                 </div>
+                {isLive && <TopBarActionsSlot className="flex shrink-0 items-center" />}
               </div>
               <div className="flex items-center gap-3">
                 <NotificationBell />
@@ -107,7 +114,13 @@ export function Layout() {
                 </button>
               </div>
             </header>
-            <Outlet />
+            {isLive ? (
+              <div className="md:min-h-0 md:flex-1">
+                <Outlet />
+              </div>
+            ) : (
+              <Outlet />
+            )}
           </div>
         </AppShell>
   

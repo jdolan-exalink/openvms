@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { ArrowUpRight, Camera, CircleCheck, CircleHelp, CircleX, ChevronDown, ChevronRight, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
@@ -13,7 +13,8 @@ import { useFeatures } from "@/lib/features";
 import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { LiveRecDock } from "@/components/LiveRecDock";
 import { RecTile, type RecTileState } from "@/components/RecTile";
-import { useContextSidebarPortalTarget } from "@/components/AppShell";
+import { LiveModeToggle } from "@/components/LiveModeToggle";
+import { useContextSidebarPortalTarget, useTopBarActionsPortalTarget } from "@/components/AppShell";
 import { Button, ErrorNote, Select, StatusBadge, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
@@ -63,6 +64,7 @@ export function Live() {
   // effect below never fires before restoration and overwrites a saved selection with defaults.
   const [restored, setRestored] = useState(false);
   const sidebarMount = useContextSidebarPortalTarget();
+  const topBar = useTopBarActionsPortalTarget();
   const { persistentPlayers, videoSurfaceLayer } = useFeatures();
   const layouts = persistentPlayers ? [...GRID_LAYOUTS, ...LARGE_GRID_LAYOUTS] : GRID_LAYOUTS;
 
@@ -255,6 +257,8 @@ export function Live() {
       clearInterval(interval);
     };
   }, [rec, win, playing, getPosition, subscribePosition, navigate]);
+  const modeToggle = <LiveModeToggle rec={rec} onChange={setMode} />;
+  const topBarActions = canRec && topBar.available && topBar.target ? createPortal(modeToggle, topBar.target) : null;
   const sidebarContent = (
     <div className="flex min-h-0 flex-col gap-3" data-live-sidebar="true">
       <section aria-label="Vistas guardadas" className="flex flex-col gap-2 rounded-xl border border-line bg-bg p-2.5">
@@ -329,12 +333,13 @@ export function Live() {
     : <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-64">{sidebarContent}</aside>;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2 md:h-full md:min-h-0">
       <h1 className="sr-only">En vivo</h1>
+      {topBarActions}
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        <div className="flex min-w-0 flex-col gap-2">
-          <section className="flex min-w-0 flex-1 flex-col gap-2">
-            <div role="group" aria-label="Layout de la grilla" className="flex items-center gap-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+            <div role="group" aria-label="Layout de la grilla" className="flex shrink-0 flex-wrap items-center gap-1">
               {layouts.map(({ columns: layoutColumns, rows: layoutRows }) => (
                 <button
                   key={`${layoutColumns}x${layoutRows}`}
@@ -350,25 +355,17 @@ export function Live() {
                   {layoutColumns}×{layoutRows}
                 </button>
               ))}
-              <span className="ml-2 text-xs text-muted">Elegí un cuadro y después una cámara del árbol, o arrastrala.</span>
-              {canRec && (
-                <div role="group" aria-label="Modo de reproducción" className="ml-auto flex overflow-hidden rounded border border-line text-xs">
-                  {(["live", "rec"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      aria-pressed={(m === "rec") === rec}
-                      onClick={() => (m === "rec") !== rec && setMode(m)}
-                      className={cn("px-2.5 py-1 font-medium", (m === "rec") === rec ? "bg-accent text-bg" : "bg-surface hover:bg-raised")}
-                    >
-                      {m === "live" ? "En vivo" : "Grabación"}
-                    </button>
-                  ))}
-                </div>
-              )}
+              <span className="ml-2 hidden truncate text-xs text-muted 2xl:inline">Elegí un cuadro y después una cámara del árbol, o arrastrala.</span>
+              {canRec && !topBar.available && <div className="ml-auto">{modeToggle}</div>}
             </div>
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
-              <div role="group" aria-label="Grilla de video" className="grid gap-1" style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))` }}>
+              <div role="group" aria-label="Grilla de video" data-mode={rec ? "rec" : "live"}
+                className={cn(
+                  "grid gap-1 rounded-md ring-2 md:min-h-0 md:flex-1 md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
+                  rec ? "ring-warn/50" : "ring-bad/40",
+                )}
+                style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, "--grid-rows": focus !== null ? 1 : rows } as CSSProperties}
+              >
                 {shown.map((i) => {
                   const t = tiles[i] ?? null;
                   const cam = t ? camById.get(t.camera_id) : undefined;
@@ -485,7 +482,7 @@ function GridTile({
       onClick={onSelect}
       onDoubleClick={onToggleFocus}
       className={cn(
-        "group relative aspect-video overflow-hidden rounded border bg-black outline-none focus-visible:ring-2 focus-visible:ring-accent",
+        "group relative aspect-video overflow-hidden md:aspect-auto md:min-h-0 rounded border bg-black outline-none focus-visible:ring-2 focus-visible:ring-accent",
         isSelected ? "border-accent" : "border-line",
         isDragging && "opacity-50",
         isHidden && "hidden",
@@ -585,7 +582,7 @@ function CameraTree({
   return (
     <div className="flex flex-col gap-2">
       <TextInput aria-label="Buscar cámara" placeholder="Buscar cámara" value={q} onChange={(e) => setQ(e.target.value)} />
-      <nav aria-label="Cámaras" className="flex max-h-[60vh] flex-col overflow-y-auto text-sm">
+      <nav aria-label="Cámaras" className="flex max-h-[60vh] flex-col md:max-h-none overflow-y-auto text-sm">
         {[...bySite.entries()].map(([siteId, srvs]) => (
           <div key={siteId}>
             <button type="button" onClick={() => toggle(siteId)} className="flex w-full items-center gap-1 py-1 font-medium">
