@@ -47,9 +47,9 @@ Edit every per-camera parameter Frigate supports from OpenVMS and apply it to Fr
 - [x] FC-1 — (done, commits 40e5f64 adapter+mock, 49b7af6 service/migration/permission/endpoints, 781c94c integration tests) Backend foundation: adapter methods (Schema, RawConfig, RawPaths, ApplyCameraPatch with Review: medium risk, declined by PO (candidate-scoped).
   requires_restart/update_topic, SaveRaw), version gate ≥0.16, fix live-apply bug, revisions table +
   rollback, new secrets permission, endpoints, mock extensions, integration tests.
-- [ ] FC-2 — Web: schema-driven per-camera editor (section tabs, generated fields with descriptions/
+- [x] FC-2 — (done, commit 6a52f9e) Web: schema-driven per-camera editor (section tabs, generated fields with descriptions/
   enums/defaults), diff preview, live/restart banner, replaces CameraSettingsDrawer.
-- [ ] FC-3 — Curated panels for the most used sections (ffmpeg inputs/roles/hwaccel, detect, record/
+- [x] FC-3 — (done, commit 4042e3e) Curated panels for the most used sections (ffmpeg inputs/roles/hwaccel, detect, record/
   snapshots retention, objects+filters, motion, review) + revision history with rollback UI.
 - [ ] FC-4 — Visual zone & mask editor over the camera snapshot (relative coords; 0.18 dict format).
 - [ ] FC-5 — Advanced YAML editor (validation via Frigate, diff, revision), ONVIF/autotracking/LPR/face/
@@ -86,3 +86,20 @@ Strategy ask-on-risk; push/PR are PO decisions.
 - Checks: go build, go vet, go test ./..., go test -tags integration ./internal/frigate/ ./internal/inventory/ ./internal/api/,
   golangci-lint (0 issues), make generate, web `tsc --noEmit` — all passing.
 - Next: FC-2 (web schema-driven editor).
+
+### FC-2 + FC-3 (2026-09-30) — Route: delegated (writer trigger: 2+ non-trivial files)
+- FC-2 (6a52f9e): route `/cameras/$cameraId/frigate` (`routes/FrigateCameraConfig.tsx`), in-house schema form
+  (`components/frigate/SchemaForm.tsx`, pure helpers `lib/frigateSchema.ts`), section nav with live/restart badges (live set =
+  verified 0.17 list, 0.16 = all restart), diff review modal, PATCH with minimal per-key patch, per-section result list,
+  restart banner (sessionStorage per server) + ConfirmDialog restart. Entry points: Cameras list (icon link + drawer link,
+  gated servers.config), Live Explorer camera context menu "Configurar" (servers.config). Drawer keeps VMS fields and a
+  read-only Frigate summary.
+- FC-3 (4042e3e): curated panels (ffmpeg, detect, record, snapshots, objects with emoji label picker + per-label filters,
+  motion, review, zones placeholder button "Editar zonas" via `onEditZones` prop) above "Opciones avanzadas" (generic form);
+  revisions history tab (list, patch, YAML line diff with secrets, restore with ConfirmDialog -> rollback -> restart banner).
+  Reusable `lib/labelEmoji.ts` + `components/frigate/LabelPicker.tsx`.
+- Checks (apps/web): tsc --noEmit, vitest run (319 passed), eslint, build — all passing. No Go touched.
+- Unverified: behaviour against a real Frigate 0.16/0.17 schema.json (curated fields render only when schema/config knows the
+  path); map-key removal is sent as null (merge cannot delete) and is not verified against Frigate; model-supported labels are
+  not exposed by the API so the label grid uses known + configured labels plus a free "Otra etiqueta" input.
+- Next: FC-4 (zones editor, plug into `onEditZones`), FC-5.
