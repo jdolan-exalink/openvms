@@ -4,7 +4,9 @@ import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Camera, CircleCheck, CircleHelp, CircleX, History, Maximize2, Minimize2, PanelLeftOpen, Save, Trash2, X } from "lucide-react";
+import { faAnglesRight } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { Camera, CircleCheck, CircleHelp, CircleX, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
@@ -393,7 +395,7 @@ export function Live() {
                   title="Mostrar explorador"
                   className="mr-1 rounded border border-line bg-surface p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
                 >
-                  <PanelLeftOpen className="size-4" aria-hidden />
+                  <FontAwesomeIcon icon={faAnglesRight} fixedWidth className="text-sm" aria-hidden />
                 </button>
               )}
               {layouts.map(({ columns: layoutColumns, rows: layoutRows }) => (

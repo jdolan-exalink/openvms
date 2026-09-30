@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { LogOut, Menu, Moon, Search, Sun, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { clearToken } from "@/api/auth";
@@ -178,7 +179,7 @@ export function Layout() {
                           )}
                           activeProps={{ "aria-current": "page" }}
                         >
-                          <item.icon className="size-4 shrink-0" aria-hidden />
+                          <FontAwesomeIcon icon={item.icon} fixedWidth className="shrink-0 text-sm" aria-hidden />
                           <span>{item.label}</span>
                         </Link>
                       ) : (
@@ -187,7 +188,7 @@ export function Layout() {
                           className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted/50"
                           title={`Llega en ${item.milestone}`}
                         >
-                          <item.icon className="size-4 shrink-0" aria-hidden />
+                          <FontAwesomeIcon icon={item.icon} fixedWidth className="shrink-0 text-sm" aria-hidden />
                           <span>{item.label}</span>
                           <span className="ml-auto font-mono text-[10px]">{item.milestone}</span>
                         </span>
@@ -242,11 +243,11 @@ function NavGroupLinks({ group, me, pathname }: { group: NavGroup; me: Schemas["
         );
         return item.to ? (
           <Link key={item.label} to={item.to} aria-label={item.label} aria-current={active ? "page" : undefined} title={item.label} className={classes} activeProps={{ "aria-current": "page" }}>
-            <item.icon className="size-[18px]" aria-hidden />
+            <FontAwesomeIcon icon={item.icon} fixedWidth className="text-[17px]" aria-hidden />
           </Link>
         ) : (
           <span key={item.label} aria-label={`${item.label}, próximamente`} title={`${item.label} · Llega en ${item.milestone}`} className={classes}>
-            <item.icon className="size-[18px]" aria-hidden />
+            <FontAwesomeIcon icon={item.icon} fixedWidth className="text-[17px]" aria-hidden />
           </span>
         );
       })}

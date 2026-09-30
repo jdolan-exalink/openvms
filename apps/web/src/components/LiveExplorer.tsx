@@ -1,6 +1,11 @@
 import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRight, ChevronDown, ChevronRight, Folder as FolderIcon, FolderPlus, GripVertical, History, PanelLeftClose, Pencil, Search, Trash2 } from "lucide-react";
+import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
+import {
+  faAnglesLeft, faArrowUpRightFromSquare, faBookmark, faBuilding, faChevronDown, faChevronRight, faClockRotateLeft, faFolder, faFolderOpen,
+  faFolderPlus, faFolderTree, faGripVertical, faMagnifyingGlass, faPen, faServer, faTrash, faVideo,
+} from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type ReactNode, useCallback, useMemo, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -25,17 +30,25 @@ function useDropState(serverId: string, canManage: boolean, accepts: ("camera" |
 
 const dot = (status: string) => (status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-muted");
 
+/** Every explorer icon is a fixed-width Font Awesome glyph so tree rows align at any depth. */
+function Icon({ icon, className }: { icon: IconDefinition; className?: string }) {
+  return <FontAwesomeIcon icon={icon} fixedWidth className={cn("shrink-0 text-xs", className)} aria-hidden />;
+}
+
+/** Muted node-type glyph (site, server, folder, camera) shown before the name. */
+const nodeIcon = "text-muted/80";
+
 function Chevron({ open }: { open: boolean }) {
-  return open ? <ChevronDown className="size-3.5 shrink-0" aria-hidden /> : <ChevronRight className="size-3.5 shrink-0" aria-hidden />;
+  return <Icon icon={open ? faChevronDown : faChevronRight} className="text-[10px]" />;
 }
 
 function Count({ n }: { n: number }) {
   return <span className="ml-auto shrink-0 rounded-full bg-raised px-1.5 text-[11px] tabular-nums text-muted">{n}</span>;
 }
 
-function Section({ title, open, onToggle, count, children }: { title: string; open: boolean; onToggle: () => void; count?: number; children: ReactNode }) {
+function Section({ title, icon, open, onToggle, count, children }: { title: string; icon: IconDefinition; open: boolean; onToggle: () => void; count?: number; children: ReactNode }) {
   return (
-    <section className="rounded-xl border border-line bg-bg" aria-label={title}>
+    <section className="min-w-0 rounded-xl border border-line bg-bg" aria-label={title}>
       <h2>
         <button
           type="button"
@@ -44,11 +57,12 @@ function Section({ title, open, onToggle, count, children }: { title: string; op
           className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted focus-visible:outline-2 focus-visible:outline-accent"
         >
           <Chevron open={open} />
-          {title}
+          <Icon icon={icon} />
+          <span className="truncate">{title}</span>
           {count !== undefined && <Count n={count} />}
         </button>
       </h2>
-      {open && <div className="flex flex-col gap-2 px-2 pb-2">{children}</div>}
+      {open && <div className="flex min-w-0 flex-col gap-2 px-2 pb-2">{children}</div>}
     </section>
   );
 }
@@ -110,9 +124,9 @@ export function LiveExplorer({
   const mutationError = folderApi.create.error ?? folderApi.rename.error ?? folderApi.reorder.error ?? error;
 
   return (
-    <div className="flex min-h-0 flex-col gap-2 md:h-[calc(100dvh-2rem)]" data-live-sidebar="true" aria-label="Explorador" role="region">
+    <div className="flex min-h-0 min-w-0 flex-col gap-2 md:h-[calc(100dvh-2rem)]" data-live-sidebar="true" aria-label="Explorador" role="region">
       <div className="flex shrink-0 items-center gap-2">
-        <h2 className="px-1 text-sm font-semibold">Explorador</h2>
+        <h2 className="min-w-0 truncate px-1 text-sm font-semibold">Explorador</h2>
         <button
           type="button"
           onClick={onCollapse}
@@ -120,21 +134,22 @@ export function LiveExplorer({
           title="Ocultar explorador"
           className="ml-auto rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
         >
-          <PanelLeftClose className="size-4" aria-hidden />
+          <Icon icon={faAnglesLeft} className="text-sm" />
         </button>
       </div>
       <div className="relative shrink-0">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" aria-hidden />
+        <Icon icon={faMagnifyingGlass} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
         <TextInput aria-label="Buscar en el explorador" placeholder="Buscar cámaras, carpetas o vistas" className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-        <Section title="Cámaras" open={prefs.sections.cameras} onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, cameras: !p.sections.cameras } }))} count={total}>
-          <nav aria-label="Cámaras" className="flex flex-col text-sm">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden">
+        <Section title="Cámaras" icon={faFolderTree} open={prefs.sections.cameras} onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, cameras: !p.sections.cameras } }))} count={total}>
+          <nav aria-label="Cámaras" className="flex min-w-0 flex-col text-sm">
             {tree.map((site) => (
-              <div key={site.id}>
-                <button type="button" onClick={() => toggle(`site:${site.id}`)} aria-expanded={isOpen(`site:${site.id}`)} className="flex w-full items-center gap-1 py-1 text-left font-medium">
+              <div key={site.id} className="min-w-0">
+                <button type="button" onClick={() => toggle(`site:${site.id}`)} aria-expanded={isOpen(`site:${site.id}`)} title={site.name} className="flex w-full min-w-0 items-center gap-1 py-1 text-left font-medium">
                   <Chevron open={isOpen(`site:${site.id}`)} />
-                  <span className="truncate">{site.name}</span>
+                  <Icon icon={faBuilding} className={nodeIcon} />
+                  <span className="min-w-0 truncate">{site.name}</span>
                   <Count n={site.count} />
                 </button>
                 {isOpen(`site:${site.id}`) &&
@@ -167,7 +182,7 @@ export function LiveExplorer({
             </p>
           )}
         </Section>
-        <Section title="Vistas guardadas" open={prefs.sections.views} onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, views: !p.sections.views } }))} count={viewCount}>
+        <Section title="Vistas guardadas" icon={faBookmark} open={prefs.sections.views} onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, views: !p.sections.views } }))} count={viewCount}>
           {renderViews(query)}
         </Section>
         <ErrorNote error={mutationError} />
@@ -222,12 +237,13 @@ function ServerBranch({
   const drop = useDropState(server.id, server.canManage, ["camera"]);
   const { setNodeRef, isOver } = useDroppable({ id: treeRootDropId(server.id), disabled: drop.disabled });
   return (
-    <div className={cn("ml-3", drop.foreign && "opacity-40")} title={drop.foreign ? "No se puede mover entre servidores" : undefined}>
-      <div ref={setNodeRef} className={cn("flex items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-accent")}>
-        <button type="button" onClick={() => toggle(key)} aria-expanded={isOpen(key)} className="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left text-muted">
+    <div className={cn("ml-3 min-w-0", drop.foreign && "opacity-40")} title={drop.foreign ? "No se puede mover entre servidores" : undefined}>
+      <div ref={setNodeRef} className={cn("flex min-w-0 items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-accent")}>
+        <button type="button" onClick={() => toggle(key)} aria-expanded={isOpen(key)} title={server.name} className="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left text-muted">
           <Chevron open={isOpen(key)} />
+          <Icon icon={faServer} className={nodeIcon} />
           <span className={cn("size-1.5 shrink-0 rounded-full", dot(server.status))} aria-hidden />
-          <span className="truncate">{server.name}</span>
+          <span className="min-w-0 truncate">{server.name}</span>
           <Count n={server.count} />
         </button>
         {server.canManage && (
@@ -238,7 +254,7 @@ function ServerBranch({
             title="Nueva carpeta"
             className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
           >
-            <FolderPlus className="size-3.5" aria-hidden />
+            <Icon icon={faFolderPlus} />
           </button>
         )}
       </div>
@@ -305,8 +321,8 @@ function FolderBranch({
     data: { kind: "folder", serverId: server.id } satisfies DragData,
   });
   return (
-    <div className={cn("ml-3", drop.foreign && "opacity-40", isDragging && "opacity-50")}>
-      <div ref={setDropRef} className={cn("group flex items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-accent")}>
+    <div className={cn("ml-3 min-w-0", drop.foreign && "opacity-40", isDragging && "opacity-50")}>
+      <div ref={setDropRef} className={cn("group flex min-w-0 items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-accent")}>
         {server.canManage && (
           <button
             ref={setDragRef}
@@ -317,7 +333,7 @@ function FolderBranch({
             {...attributes}
             {...listeners}
           >
-            <GripVertical className="size-3.5" aria-hidden />
+            <Icon icon={faGripVertical} />
           </button>
         )}
         {renaming ? (
@@ -329,20 +345,21 @@ function FolderBranch({
               onClick={() => toggle(key)}
               onDoubleClick={server.canManage ? () => onRenaming(folder.id) : undefined}
               aria-expanded={isOpen(key)}
+              title={folder.name}
               className="flex min-w-0 flex-1 items-center gap-1 py-0.5 text-left"
             >
               <Chevron open={isOpen(key)} />
-              <FolderIcon className="size-3.5 shrink-0 text-muted" aria-hidden />
-              <span className="truncate">{folder.name}</span>
+              <Icon icon={isOpen(key) ? faFolderOpen : faFolder} className={nodeIcon} />
+              <span className="min-w-0 truncate">{folder.name}</span>
               <Count n={node.cameras.length} />
             </button>
             {server.canManage && (
               <span className="flex shrink-0 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
                 <button type="button" aria-label={`Renombrar carpeta ${folder.name}`} title="Renombrar" onClick={() => onRenaming(folder.id)} className="rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
-                  <Pencil className="size-3.5" aria-hidden />
+                  <Icon icon={faPen} />
                 </button>
                 <button type="button" aria-label={`Eliminar carpeta ${folder.name}`} title="Eliminar" onClick={() => onDelete(folder)} className="rounded p-1 text-muted hover:bg-raised hover:text-bad focus-visible:outline-2 focus-visible:outline-accent">
-                  <Trash2 className="size-3.5" aria-hidden />
+                  <Icon icon={faTrash} />
                 </button>
               </span>
             )}
@@ -388,12 +405,14 @@ function CameraRow({
         ref={setDragRef}
         type="button"
         onClick={() => onPick(camera.id)}
-        className={cn("flex min-w-0 flex-1 items-center gap-2 rounded px-1.5 py-0.5 text-left hover:bg-raised", isDragging && "opacity-50")}
+        title={camera.display_name}
+        className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left hover:bg-raised", isDragging && "opacity-50")}
         {...attributes}
         {...listeners}
       >
+        <Icon icon={faVideo} className={nodeIcon} />
         <span className={cn("size-1.5 shrink-0 rounded-full", dot(camera.status))} aria-hidden />
-        <span className="truncate">{camera.display_name}</span>
+        <span className="min-w-0 truncate">{camera.display_name}</span>
       </button>
       {canViewRecordings && (
         <>
@@ -404,7 +423,7 @@ function CameraRow({
             onClick={() => onPlayback(camera.id)}
             className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
           >
-            <History className="size-3.5" aria-hidden />
+            <Icon icon={faClockRotateLeft} />
           </button>
           <Link
             to="/playback"
@@ -413,7 +432,7 @@ function CameraRow({
             aria-label={`Grabaciones de ${camera.display_name}`}
             className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
           >
-            <ArrowUpRight className="size-3.5" aria-hidden />
+            <Icon icon={faArrowUpRightFromSquare} />
           </Link>
         </>
       )}
