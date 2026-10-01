@@ -23,3 +23,8 @@ dist/
 
 # Local design reference (not part of the product)
 /avigilon_alta_cloud_vms_mockup.html
+
+# Local basemap archives (fetch your own PMTiles extract; not committed).
+deploy/tiles/
+# Local compose overrides (e.g. mounting deploy/tiles into the web container).
+docker-compose.override.yml
