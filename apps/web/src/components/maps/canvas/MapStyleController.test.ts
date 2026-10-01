@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { buildMapStyle, type ThemeColors } from "./MapStyleController";
+import { describe, expect, it, vi } from "vitest";
+import { buildMapStyle, MapStyleController, type ThemeColors } from "./MapStyleController";
+import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapProviderConfig } from "@/lib/maps/types";
 
 describe("MapStyleController buildMapStyle", () => {
@@ -107,5 +108,71 @@ describe("MapStyleController buildMapStyle", () => {
     const paint = rasterLayer?.paint as any;
     expect(paint?.["raster-brightness-max"]).toBeUndefined();
     expect(paint?.["raster-opacity"]).toBe(1.0);
+  });
+});
+
+describe("MapStyleController provider swaps", () => {
+  const provider: MapProviderConfig = {
+    id: "protomaps-local",
+    kind: "pmtiles",
+    tiles: ["/tiles/world.pmtiles"],
+    attribution: "© OpenStreetMap contributors",
+    maxZoom: 18,
+    offline: true,
+  };
+
+  function fakeMap(styleLoaded: () => boolean) {
+    const styleLoadCbs: Array<() => void> = [];
+    const map = {
+      isStyleLoaded: styleLoaded,
+      setStyle: vi.fn(),
+      // Both on() and once() listeners fire on style.load, like the real Map; once()
+      // listeners remove themselves.
+      once: (event: string, cb: () => void) => {
+        if (event !== "style.load") return;
+        const wrapped = () => {
+          const at = styleLoadCbs.indexOf(wrapped);
+          if (at >= 0) styleLoadCbs.splice(at, 1);
+          cb();
+        };
+        styleLoadCbs.push(wrapped);
+      },
+      on: (event: string, cb: () => void) => {
+        if (event === "style.load") styleLoadCbs.push(cb);
+      },
+    } as unknown as MapLibreMap & { setStyle: ReturnType<typeof vi.fn> };
+    return {
+      map,
+      setStyle: map.setStyle,
+      fireStyleLoad: () => styleLoadCbs.splice(0).forEach(cb => cb()),
+    };
+  }
+
+  it("defers a provider swap until the current style finished loading", () => {
+    const onReapply = vi.fn();
+    const controller = new MapStyleController(provider, onReapply);
+    let loaded = false;
+    const { map, setStyle, fireStyleLoad } = fakeMap(() => loaded);
+    controller.attach(map);
+
+    // The config query resolves while the initial style is still streaming in: setStyle
+    // cannot diff yet, and a from-scratch rebuild mid-load is exactly the console warning.
+    controller.setProvider(provider);
+    expect(setStyle).not.toHaveBeenCalled();
+
+    loaded = true;
+    fireStyleLoad();
+    expect(setStyle).toHaveBeenCalledTimes(1);
+    // The custom layers (cameras, zones) ride back on the style that just loaded.
+    expect(onReapply).toHaveBeenCalled();
+  });
+
+  it("applies immediately once the style is loaded, without waiting", () => {
+    const controller = new MapStyleController(provider);
+    const { map, setStyle } = fakeMap(() => true);
+    controller.attach(map);
+
+    controller.setProvider(provider);
+    expect(setStyle).toHaveBeenCalledTimes(1);
   });
 });

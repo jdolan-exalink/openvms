@@ -255,6 +255,7 @@ export class MapStyleController {
   private observer: MutationObserver | null = null;
   private currentDark: boolean;
   private onReapplyCustomLayers?: () => void;
+  private styleLoadPending = false;
 
   constructor(provider: MapProviderConfig, onReapplyCustomLayers?: () => void) {
     this.provider = provider;
@@ -293,6 +294,19 @@ export class MapStyleController {
 
   public applyCurrentStyle() {
     if (!this.map) return;
+    if (!this.map.isStyleLoaded()) {
+      // setStyle cannot diff against a style that is still streaming in: MapLibre rebuilds
+      // it from scratch mid-load ("Unable to perform style diff") and the custom layers
+      // flicker until they re-apply. One deferred apply is enough — it reads the provider
+      // and theme fresh when the style actually loaded.
+      if (this.styleLoadPending) return;
+      this.styleLoadPending = true;
+      this.map.once("style.load", () => {
+        this.styleLoadPending = false;
+        this.applyCurrentStyle();
+      });
+      return;
+    }
     const theme = getThemeColors();
     if (this.provider.kind === "vector-style") {
       const url = theme.isDark ? this.provider.styleUrl?.dark : this.provider.styleUrl?.light;
