@@ -440,8 +440,7 @@ it("keeps the lists untouched while the import is still a dry run", async () => 
         json({ dry_run: true, rows: 1, upserted: 0, errors: [] }),
     },
     [{ permission: "maps.edit_device", effect: "allow", scope_type: "platform" }],
-  );
-  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+  );  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
   fireEvent.click(screen.getByRole("button", { name: "Importar CSV" }));
   fireEvent.change(await screen.findByRole("textbox"), {
@@ -457,6 +456,58 @@ it("keeps the lists untouched while the import is still a dry run", async () => 
 it("shows no import entry point without maps.edit_device", async () => {
   await setupEditor();
   expect(screen.queryByRole("button", { name: "Importar CSV" })).not.toBeInTheDocument();
+});
+
+// --- Monitoring center (M-W11) ---------------------------------------------
+const twoSiteOverview = () => json({ items: [
+  { id: "s", name: "Site", lat: 0, lng: 0, camera_count: 5, online_cameras: 5, offline_cameras: 0, degraded_cameras: 0, alarm_count: 0 },
+  { id: "s2", name: "Site 2", lat: -34.1, lng: -58.9, camera_count: 2, online_cameras: 2, offline_cameras: 0, degraded_cameras: 0, alarm_count: 0 },
+] });
+
+it("re-centers an open map when the selected site changes", async () => {
+  const { router } = await setup(false, {}, {
+    routes: { "/api/v1/maps/overview": twoSiteOverview },
+  });
+  act(() => canvasHarness.props?.onMapReady?.({ easeTo: canvasHarness.easeTo, once: () => {} } as never));
+  canvasHarness.easeTo.mockClear();
+
+  await act(async () => {
+    await router.navigate({ to: "/maps", search: { site: "s2" } });
+  });
+
+  await waitFor(() =>
+    expect(canvasHarness.easeTo).toHaveBeenCalledWith(expect.objectContaining({ center: [-58.9, -34.1] })));
+});
+
+it("pins the monitoring center from the current view in edit mode", async () => {
+  const { fetchSpy, queryClient } = await setupEditor({
+    "PATCH /api/v1/sites/s/geo": () => json({ id: "s", name: "Site", lat: -34.6, lng: -58.4, default_zoom: 14 }),
+  });
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+  // The operator framed the monitoring view: the fake map reports that viewport.
+  act(() => canvasHarness.props?.onMapReady?.({
+    easeTo: vi.fn(),
+    once: () => {},
+    getCenter: () => ({ lng: -58.4, lat: -34.6 }),
+    getZoom: () => 14,
+  } as never));
+
+  fireEvent.click(screen.getByRole("button", { name: "Fijar centro de monitoreo aquí" }));
+
+  const geoPatch = () =>
+    fetchSpy.mock.calls.map(([input]) => input as Request)
+      .find(r => r.method === "PATCH" && new URL(r.url).pathname === "/api/v1/sites/s/geo");
+  await waitFor(() => expect(geoPatch()).toBeTruthy());
+  expect(JSON.parse(await geoPatch()!.text())).toMatchObject({ lat: -34.6, lng: -58.4, default_zoom: 14 });
+  await waitFor(() => {
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["maps", "overview"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["sites"] });
+  });
+});
+
+it("offers no monitoring-center pin outside edit mode", async () => {
+  await setup();
+  expect(screen.queryByRole("button", { name: "Fijar centro de monitoreo aquí" })).not.toBeInTheDocument();
 });
 
 // --- Zone editor (M-W9) ------------------------------------------------------------

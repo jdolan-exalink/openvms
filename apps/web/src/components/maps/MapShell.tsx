@@ -52,6 +52,7 @@ import { ZonesPanel } from "./editor/ZonesPanel";
 import { HoverIntentManager, type HoverIntentState } from "@/lib/maps/hoverIntent";
 import { installPerfMetrics, perfMetricsEnabled, type PerfMetrics } from "@/lib/maps/perfMetrics";
 import { subscribeFrames } from "@/lib/realtime";
+import { saveSiteMonitoringCenter } from "@/lib/maps/sites";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
 import { ErrorNote } from "../ui";
 import { Loader2 } from "lucide-react";
@@ -102,6 +103,14 @@ function MapShellContent({
   const hoverLiveEnabled = hoverLiveOverride ?? storedPrefs?.hover_live ?? liveOnHover;
   const [mode, setMode] = useState<MapMode>(initialMode);
   const [selectedSiteId, setSelectedSiteId] = useState<string | undefined>(initialSiteId);
+  // The URL is the source of truth for the selection: browser back/forward and pasted
+  // deep links select sites exactly like the breadcrumb does. Adjusting during render
+  // (not in an effect) keeps this a same-commit update, as react.dev recommends.
+  const [renderedSiteId, setRenderedSiteId] = useState(initialSiteId);
+  if (renderedSiteId !== initialSiteId) {
+    setRenderedSiteId(initialSiteId);
+    setSelectedSiteId(initialSiteId);
+  }
   const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(initialCameraId);
   const [pinnedCameraIds, setPinnedCameraIds] = useState<string[]>(initialCameraId ? [initialCameraId] : []);
   const [contextMenu, setContextMenu] = useState<{ cameraId: string; x: number; y: number } | null>(null);
@@ -451,6 +460,49 @@ function MapShellContent({
   }, [contextMenu, cameras]);
 
 
+  // --- Monitoring center (M-W11) -------------------------------------------------------
+  // Default view: the selected site's monitoring center, else the platform default. All
+  // hooks in this block live above the config early-returns (hook order is fixed).
+  const defaultCenter = configQuery.data?.defaultCenter ?? { lat: 0, lng: 0 };
+  const center: [number, number] = currentSite?.center
+    ? [currentSite.center.lng, currentSite.center.lat]
+    : [defaultCenter.lng, defaultCenter.lat];
+  const zoom = currentSite?.defaultZoom ?? configQuery.data?.defaultZoom ?? 12;
+
+  // Entering a site — or its monitoring center changing — re-centers an already-open map:
+  // center/zoom drive only the initial view, so their changes are followed after init.
+  const followViewRef = useRef<{ center?: [number, number]; zoom?: number } | undefined>(undefined);
+  useEffect(() => {
+    const map = mapRef.current;
+    const prev = followViewRef.current;
+    followViewRef.current = { center, zoom };
+    if (!map || !prev) return;
+    if (prev.center?.[0] === center[0] && prev.center?.[1] === center[1] && prev.zoom === zoom) return;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    map.easeTo({ center, zoom, duration: reduced ? 0 : 500 });
+  }, [center, zoom]);
+
+  const [centerSaving, setCenterSaving] = useState(false);
+  const [centerError, setCenterError] = useState<string>();
+  const handleSetMonitoringCenter = async () => {
+    const map = mapRef.current;
+    if (!map || !currentSite || centerSaving) return;
+    setCenterSaving(true);
+    setCenterError(undefined);
+    try {
+      const view = map.getCenter();
+      await saveSiteMonitoringCenter(currentSite.id, view.lat, view.lng, Math.round(map.getZoom()));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["maps", "overview"] }),
+        queryClient.invalidateQueries({ queryKey: ["sites"] }),
+      ]);
+    } catch (cause) {
+      setCenterError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setCenterSaving(false);
+    }
+  };
+
   if (configQuery.isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-bg" data-testid="map-loading">
@@ -472,18 +524,13 @@ function MapShellContent({
     );
   }
 
-  const { provider, defaultCenter, defaultZoom } = configQuery.data;
-
-  const center: [number, number] = currentSite?.center
-    ? [currentSite.center.lng, currentSite.center.lat]
-    : [defaultCenter.lng, defaultCenter.lat];
-
-  const zoom = currentSite?.defaultZoom ?? defaultZoom ?? 12;
+  const { provider } = configQuery.data;
 
   const handleModeChange = (nextMode: MapMode) => {
     setMode(nextMode);
     onModeChange?.(nextMode);
   };
+
 
   const handleSelectSite = (siteId: string | undefined) => {
     focusPolicy.interact();
@@ -684,6 +731,20 @@ function MapShellContent({
                     Guardar ({pending.length})
                   </button>
                 </div>
+              </div>
+            )}
+            {can(me.data, "maps.edit") && (
+              <div className="rounded border border-line bg-surface p-2 shadow-sm">
+                {centerError && <p role="alert" className="mb-1 text-xs text-bad">{centerError}</p>}
+                <button
+                  type="button"
+                  disabled={centerSaving}
+                  onClick={() => void handleSetMonitoringCenter()}
+                  className="w-full rounded border border-line px-2 py-1 text-xs text-ink hover:bg-raised disabled:opacity-50"
+                  title="Guarda la vista actual como centro del sitio: al entrar al mapa se abre aquí"
+                >
+                  Fijar centro de monitoreo aquí
+                </button>
               </div>
             )}
           </aside>
