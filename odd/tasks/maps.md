@@ -37,7 +37,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-W7 — layers & filters panels, user prefs (`cd56639`)
 - [x] M-W8 — placement editor + Sin ubicar tray (`9174a44`)
 - [x] M-W9 — zone editor (`b88abac`)
-- [ ] M-W10 — 5k-camera performance harness
+- [x] M-W10 — 5k-camera performance harness
 - [x] M-B8 — CSV import of camera positions (`38c5eaf`)
 
 ## Delivery
@@ -59,6 +59,7 @@ ask-on-risk; push/PR are PO decisions.
 - 2026-10-01: M-W8 completed (`9174a44`: MapEntity exposes the placement revision for If-Match, pure placement draft with undo/redo and 409 rebase, unplaced tray with click-to-place/drag/bulk-at-centre, properties form with 15° rotation and clamped FOV/range, and editor wiring in MapShell).
 - 2026-10-01: M-W9 completed (`b88abac`: pure ZoneDraft with point-by-point drawing, close/reopen/undo and backend-mirrored geometry validation, ZonesPanel gated on maps.create_zone, zones fill/outline/label layers under a new zones layer group, MapCanvas zone rendering, and MapShell create/update/delete wiring with visible server refusals).
 - 2026-10-01: M-B8 completed (`38c5eaf`: POST /api/v1/maps/placements/import with pure parsePlacementCSV, per-line errors, dry-run validation, atomic apply preserving existing props, maps.placement.import audit on apply, and web importPlacements + CsvImportForm + gated Importar CSV entry).
+- 2026-10-01: M-W10 completed (window.__openvmsMapMetrics overlay gated on dev/?perf, deterministic synthetic 5k fixture generator, and the @openvms/test Playwright package: 5k render smoke against a production build with in-page API stubs, plus the perf CI job).
 
 ## Resumed scope (2026-10-01)
 Explicit user confirmation today enables **STRICT TDD ON**, superseding historical OFF above.
@@ -408,3 +409,49 @@ change). Strict TDD ON; source explicit user confirmation 2026-10-01.
 - Rollback baseline: M-W9 docs `a0e38b9`; M-B8 commit `38c5eaf`. No staging beyond that
   commit, no review, remote operation or deployment performed by this writer.
 - Next: M-W10 (performance harness), then push.
+
+## M-W10 — 5k-camera performance harness
+Route: delegated single writer; trigger: new test package + overlay wiring. Strict TDD ON;
+source explicit user confirmation 2026-10-01. PO decision for this unit: **render-only
+smoke** (no WS event flood), package named `@openvms/test`.
+- [x] `lib/maps/perfFixture.ts`: deterministic (mulberry32, fixed seed) wire-format camera
+  generator; count/seed/bbox/status-mix are the contract; import-free so the Playwright
+  package loads it directly across package boundaries.
+- [x] `lib/maps/perfMetrics.ts`: the design's overlay as `window.__openvmsMapMetrics` —
+  FPS from a 30-frame rAF-delta window, entities visible, events/s (1 s window), WS lag
+  (latest `now − frame.ts`), time to first render, and the long-task budget (≤ 50 ms)
+  which starts only when the render loop first goes idle. Collection runs in dev builds
+  or with `?perf` in the URL; MapShell installs it and feeds entities/first-paint/frames.
+- [x] `packages/test` (`@openvms/test`): Playwright config (chromium + `--enable-unsafe-swiftshader`,
+  `vite preview` of the production build), `tests/maps-perf.spec.ts` stubbing every
+  `/api/v1` call in-page and serving the 5k fixture through the real fetch path; asserts
+  entities = 5000, FPS ≥ 50 (`MAPS_PERF_MIN_FPS` to lower on weak runners), max long task
+  ≤ 50 ms, first render < 5 s, and zero uncaught page errors, with WebGL2 as precondition.
+- [x] CI: `perf` job (browser cache, `playwright install --with-deps chromium`, smoke run,
+  report artifact on failure); workspace gains `packages/test`; root gains `test:perf`.
+
+### M-W10 evidence (2026-10-01)
+- RED: perfFixture/perfMetrics suites failed to resolve their modules (14 units unwritten);
+  the MapShell overlay test failed with the sampler absent before any wiring existed.
+- GREEN: perfFixture 5 + perfMetrics 9 unit tests; MapShell +2 (overlay installed with
+  `?perf=1`, absent when DEV is stubbed false and no param). Focused Maps suite PASS,
+  185 tests / 31 files; full web PASS, 522 tests / 83 files; web typecheck, lint and build
+  PASS; `@openvms/test` typecheck PASS; `git diff --check` PASS; `go build ./...` and
+  `go vet ./...` PASS (no Go changes); `make generate` idempotent (identical diff hash).
+- Smoke run evidence (chromium headless-shell 153, SwiftShader GL): 5 consecutive green
+  runs; snapshots ~FPS 60, time to first render 260–320 ms at 5k, max long task 0.
+- The three failures the smoke caught, all real and fixed with tests: (1) a buffered
+  PerformanceObserver replays cold-start entries after the mark — the budget now keys on
+  the task's own `startTime`, not the delivery time; (2) "first render" marked at
+  data-in-state fired before the first paint — the mark waits two rAFs; (3) the init tail
+  (first cluster `setData`) still hit 55–63 ms after paint on software GL — the budget now
+  starts at MapLibre's first `idle` (`markRenderSettled`), which is the design's steady
+  state. A mocked-canvas test also exposed `map.once` being called unguarded on fakes.
+- Design deviations, deliberate: the smoke is render-only — the 50 events/s + 500-alarm
+  flood and "WS stays connected" checks need a live hub (or a WS stub) and were deferred
+  by PO decision; the overlay ships in dev builds or behind `?perf` rather than dev-only,
+  so the smoke can profile a production build; CI keeps the design's 50 ms / 50 FPS bars
+  (weaker hardware lowers them explicitly via `MAPS_PERF_MIN_FPS`, never silently).
+- Rollback baseline: M-B8 docs `b171e12`; M-W10 commits listed above. No staging beyond
+  that, no deployment performed by this writer.
+- Next: push `feat/maps` to `origin` (PO decision recorded 2026-10-01).
