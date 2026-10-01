@@ -47,6 +47,7 @@ import { LayersPanel } from "./panel/LayersPanel";
 import { FiltersPanel } from "./panel/FiltersPanel";
 import { UnplacedTray, DRAG_MIME } from "./editor/UnplacedTray";
 import { PlacementPropsForm } from "./editor/PlacementPropsForm";
+import { CsvImportForm } from "./editor/CsvImportForm";
 import { ZonesPanel } from "./editor/ZonesPanel";
 import { HoverIntentManager, type HoverIntentState } from "@/lib/maps/hoverIntent";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
@@ -273,6 +274,19 @@ function MapShellContent({
       (next, entityId) => rebasePlacement(next, entityId, fresh.entities.find((e) => e.id === entityId)?.revision),
       prev,
     ));
+  };
+
+  // --- CSV import (M-B8) ---------------------------------------------------------------
+  // The import endpoint demands maps.edit_device, so the entry point is offered only to
+  // that permission; only an apply refreshes the lists (a dry run writes nothing).
+  const canImport = can(me.data, "maps.edit_device");
+  const [importOpen, setImportOpen] = useState(false);
+  const handleImportApplied = async () => {
+    if (!currentSite) return;
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["maps", "sites", currentSite.id, "entities"] }),
+      queryClient.invalidateQueries({ queryKey: ["maps", "unplaced", currentSite.id] }),
+    ]);
   };
 
   // --- Zone editor (M-W9) --------------------------------------------------------------
@@ -566,7 +580,15 @@ function MapShellContent({
               armedId={armedCameraId}
               onArm={setArmedCameraId}
               onPlaceAll={siteCenter ? handlePlaceAll : undefined}
+              onImport={canImport ? () => setImportOpen(true) : undefined}
             />
+            {importOpen && currentSite && (
+              <CsvImportForm
+                siteId={currentSite.id}
+                onClose={() => setImportOpen(false)}
+                onApplied={() => void handleImportApplied()}
+              />
+            )}
             {activeDraftId && draft.entries[activeDraftId] && (
               <PlacementPropsForm
                 name={cameras.find((camera) => camera.id === activeDraftId)?.name

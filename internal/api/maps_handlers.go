@@ -222,6 +222,40 @@ func (h *Handlers) DeleteMapPlacement(ctx context.Context, req gen.DeleteMapPlac
 	return gen.DeleteMapPlacement204Response{}, nil
 }
 
+// ImportMapPlacements validates and applies a CSV of camera positions for a site.
+func (h *Handlers) ImportMapPlacements(ctx context.Context, req gen.ImportMapPlacementsRequestObject) (gen.ImportMapPlacementsResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.ImportMapPlacements404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	if req.Body == nil {
+		return nil, &maps.ValidationError{Msg: "request body is required"}
+	}
+	report, err := h.Maps.ImportPlacements(ctx, a, req.Body.SiteId, req.Body.Csv, req.Body.DryRun)
+	if err != nil {
+		return nil, err
+	}
+	rowErrors := make([]struct {
+		Line    int    `json:"line"`
+		Message string `json:"message"`
+	}, 0, len(report.Errors))
+	for _, e := range report.Errors {
+		rowErrors = append(rowErrors, struct {
+			Line    int    `json:"line"`
+			Message string `json:"message"`
+		}{Line: e.Line, Message: e.Message})
+	}
+	return gen.ImportMapPlacements200JSONResponse{
+		DryRun:   report.DryRun,
+		Rows:     report.Rows,
+		Upserted: report.Upserted,
+		Errors:   rowErrors,
+	}, nil
+}
+
 // UpdateSiteGeo updates site geographic coordinates, zoom, and region.
 func (h *Handlers) UpdateSiteGeo(ctx context.Context, req gen.UpdateSiteGeoRequestObject) (gen.UpdateSiteGeoResponseObject, error) {
 	a, err := actor(ctx)

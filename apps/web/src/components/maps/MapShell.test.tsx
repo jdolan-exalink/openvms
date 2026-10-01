@@ -293,9 +293,9 @@ const unplacedRoute = () => json({ site_id: "s", cameras: [
   { id: "cu2", name: "Otra cam", site_id: "s", status: "offline" },
 ] });
 
-async function setupEditor(routes: Record<string, () => Response> = {}) {
+async function setupEditor(routes: Record<string, () => Response> = {}, extraGrants: unknown[] = []) {
   const view = await setup(false, {}, {
-    grants: editGrants,
+    grants: [...editGrants, ...extraGrants],
     routes: {
       "/api/v1/maps/unplaced": unplacedRoute,
       "/api/v1/maps/placements/camera/cu1": () => json({ id: "p-cu1", revision: 1 }),
@@ -382,6 +382,66 @@ it("bulk-places every unplaced camera at the site centre in one undo step", asyn
     placementPuts(fetchSpy).map(async (request) => JSON.parse(await request.text()) as Record<string, unknown>),
   );
   expect(bodies.every((body) => body.lat === 0 && body.lng === 0)).toBe(true);
+});
+
+// --- CSV import (M-B8) ------------------------------------------------------
+const importRequests = (fetchSpy: { mock: { calls: unknown[][] } }) =>
+  fetchSpy.mock.calls
+    .map(([input]) => input as Request)
+    .filter((request) => request && typeof request === "object" && request.method === "POST"
+      && new URL(request.url).pathname === "/api/v1/maps/placements/import");
+
+it("imports placements from CSV and refreshes the unplaced tray and the site", async () => {
+  const { fetchSpy, queryClient } = await setupEditor(
+    {
+      "POST /api/v1/maps/placements/import": () =>
+        json({ dry_run: false, rows: 1, upserted: 1, errors: [] }),
+    },
+    [{ permission: "maps.edit_device", effect: "allow", scope_type: "platform" }],
+  );
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+  fireEvent.click(screen.getByRole("button", { name: "Importar CSV" }));
+  fireEvent.change(await screen.findByRole("textbox"), {
+    target: { value: "camera,lat,lng\nNueva cam,-34.6,-58.4" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Importar$/ }));
+
+  await waitFor(() => expect(importRequests(fetchSpy)).toHaveLength(1));
+  const body = JSON.parse(await importRequests(fetchSpy)[0]!.text()) as Record<string, unknown>;
+  expect(body).toMatchObject({ site_id: "s", dry_run: false });
+  await waitFor(() => {
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["maps", "unplaced", "s"] });
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["maps", "sites", "s", "entities"] });
+  });
+  // The applied import closes the form and keeps the tray usable.
+  await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument());
+});
+
+it("keeps the lists untouched while the import is still a dry run", async () => {
+  const { fetchSpy, queryClient } = await setupEditor(
+    {
+      "POST /api/v1/maps/placements/import": () =>
+        json({ dry_run: true, rows: 1, upserted: 0, errors: [] }),
+    },
+    [{ permission: "maps.edit_device", effect: "allow", scope_type: "platform" }],
+  );
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+  fireEvent.click(screen.getByRole("button", { name: "Importar CSV" }));
+  fireEvent.change(await screen.findByRole("textbox"), {
+    target: { value: "camera,lat,lng\nNueva cam,-34.6,-58.4" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Validar" }));
+
+  await screen.findByText(/1 filas/);
+  expect(importRequests(fetchSpy)).toHaveLength(1);
+  expect(invalidate).not.toHaveBeenCalled();
+});
+
+it("shows no import entry point without maps.edit_device", async () => {
+  await setupEditor();
+  expect(screen.queryByRole("button", { name: "Importar CSV" })).not.toBeInTheDocument();
 });
 
 // --- Zone editor (M-W9) ------------------------------------------------------------

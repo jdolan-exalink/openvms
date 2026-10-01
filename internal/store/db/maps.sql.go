@@ -1413,6 +1413,46 @@ func (q *Queries) ListMapZonesBySite(ctx context.Context, arg ListMapZonesBySite
 	return items, nil
 }
 
+const listSiteCamerasForImport = `-- name: ListSiteCamerasForImport :many
+SELECT c.id, c.display_name, c.remote_name
+FROM cameras c
+WHERE c.site_id = $1
+  AND ($2::uuid IS NULL OR c.tenant_id = $2)
+  AND c.deleted_at IS NULL
+ORDER BY c.id
+`
+
+type ListSiteCamerasForImportParams struct {
+	SiteID   uuid.UUID
+	TenantID *uuid.UUID
+}
+
+type ListSiteCamerasForImportRow struct {
+	ID          uuid.UUID
+	DisplayName string
+	RemoteName  string
+}
+
+func (q *Queries) ListSiteCamerasForImport(ctx context.Context, arg ListSiteCamerasForImportParams) ([]ListSiteCamerasForImportRow, error) {
+	rows, err := q.db.Query(ctx, listSiteCamerasForImport, arg.SiteID, arg.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSiteCamerasForImportRow{}
+	for rows.Next() {
+		var i ListSiteCamerasForImportRow
+		if err := rows.Scan(&i.ID, &i.DisplayName, &i.RemoteName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSitesGeo = `-- name: ListSitesGeo :many
 SELECT id, tenant_id, name, lat, lng, default_zoom, region_id
 FROM sites

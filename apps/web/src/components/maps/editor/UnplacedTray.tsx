@@ -12,6 +12,8 @@ export interface UnplacedTrayProps {
   onArm: (cameraId: string) => void;
   /** Offered only when the site has coordinates to place the cameras at. */
   onPlaceAll?: () => void;
+  /** Offered only to holders of maps.edit_device (the backend's import permission). */
+  onImport?: () => void;
   onClose?: () => void;
 }
 
@@ -21,7 +23,7 @@ export interface UnplacedTrayProps {
  * answers PO decision 3 ("ubicar todas en el centro del sitio") for sites that already
  * know where they are.
  */
-export function UnplacedTray({ cameras, armedId, onArm, onPlaceAll, onClose }: UnplacedTrayProps) {
+export function UnplacedTray({ cameras, armedId, onArm, onPlaceAll, onImport, onClose }: UnplacedTrayProps) {
   return (
     <section aria-label="Sin ubicar" className="rounded border border-line bg-surface p-3 shadow-sm">
       <header className="mb-2 flex items-center justify-between">
@@ -73,6 +75,15 @@ export function UnplacedTray({ cameras, armedId, onArm, onPlaceAll, onClose }: U
             </button>
           )}
         </>
+      )}
+      {onImport && (
+        <button
+          type="button"
+          onClick={onImport}
+          className="mt-2 w-full rounded border border-line px-2 py-1 text-xs text-ink hover:bg-raised"
+        >
+          Importar CSV
+        </button>
       )}
     </section>
   );

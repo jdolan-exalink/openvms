@@ -2547,6 +2547,33 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/maps/placements/import:
+    post:
+      tags: [maps]
+      operationId: importMapPlacements
+      summary: Import camera placements from CSV
+      description: >
+        Parses a camera,lat,lng CSV (optional bearing,fov,range columns) and upserts geo
+        placements for the site. A row resolves its camera by UUID, display name, or remote
+        name. dry_run validates and reports without writing; an apply with any invalid row
+        writes nothing, keeping the import atomic.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportMapPlacementsRequest"
+      responses:
+        "200":
+          description: Import report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapImportReport"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/sites/{siteId}/geo:
     patch:
       tags: [maps]
@@ -4061,6 +4088,37 @@ components:
         revision: { type: integer, format: int64 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ImportMapPlacementsRequest:
+      type: object
+      required: [site_id, csv, dry_run]
+      properties:
+        site_id: { type: string, format: uuid }
+        csv:
+          type: string
+          description: CSV text with a header row; camera,lat,lng required, bearing,fov,range optional.
+        dry_run: { type: boolean }
+    MapImportReport:
+      type: object
+      required: [dry_run, rows, upserted, errors]
+      properties:
+        dry_run: { type: boolean }
+        rows:
+          type: integer
+          description: Data rows seen, valid or not (header excluded).
+        upserted:
+          type: integer
+          description: Placements written; 0 for dry runs and for applies rejected by row errors.
+        errors:
+          type: array
+          description: At most one entry per invalid row.
+          items:
+            type: object
+            required: [line, message]
+            properties:
+              line:
+                type: integer
+                description: Physical CSV line number; the header is line 1.
+              message: { type: string }
     MapLayerPreference:
       type: object
       description: Visibility of every map layer group. Absent keys fall back to the client defaults.

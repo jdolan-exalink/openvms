@@ -1871,6 +1871,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/maps/placements/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import camera placements from CSV
+         * @description Parses a camera,lat,lng CSV (optional bearing,fov,range columns) and upserts geo placements for the site. A row resolves its camera by UUID, display name, or remote name. dry_run validates and reports without writing; an apply with any invalid row writes nothing, keeping the import atomic.
+         */
+        post: operations["importMapPlacements"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sites/{siteId}/geo": {
         parameters: {
             query?: never;
@@ -3273,6 +3293,26 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        ImportMapPlacementsRequest: {
+            /** Format: uuid */
+            site_id: string;
+            /** @description CSV text with a header row; camera,lat,lng required, bearing,fov,range optional. */
+            csv: string;
+            dry_run: boolean;
+        };
+        MapImportReport: {
+            dry_run: boolean;
+            /** @description Data rows seen, valid or not (header excluded). */
+            rows: number;
+            /** @description Placements written; 0 for dry runs and for applies rejected by row errors. */
+            upserted: number;
+            /** @description At most one entry per invalid row. */
+            errors: {
+                /** @description Physical CSV line number; the header is line 1. */
+                line: number;
+                message: string;
+            }[];
         };
         /** @description Visibility of every map layer group. Absent keys fall back to the client defaults. */
         MapLayerPreference: {
@@ -6842,6 +6882,34 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    importMapPlacements: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportMapPlacementsRequest"];
+            };
+        };
+        responses: {
+            /** @description Import report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapImportReport"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     updateSiteGeo: {

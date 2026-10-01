@@ -221,6 +221,14 @@ WHERE c.site_id = @site_id
   )
 ORDER BY c.display_name ASC;
 
+-- name: ListSiteCamerasForImport :many
+SELECT c.id, c.display_name, c.remote_name
+FROM cameras c
+WHERE c.site_id = @site_id
+  AND (sqlc.narg('tenant_id')::uuid IS NULL OR c.tenant_id = sqlc.narg('tenant_id'))
+  AND c.deleted_at IS NULL
+ORDER BY c.id;
+
 -- name: ListMapZonesBySite :many
 SELECT * FROM map_zones
 WHERE site_id = @site_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')) AND deleted_at IS NULL
