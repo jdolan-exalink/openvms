@@ -36,7 +36,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-W6 — alarm panel, site health, auto-focus (verified; commit pending parent)
 - [x] M-W7 — layers & filters panels, user prefs (`cd56639`)
 - [x] M-W8 — placement editor + Sin ubicar tray (`9174a44`)
-- [ ] M-W9 — zone editor
+- [x] M-W9 — zone editor (`b88abac`)
 - [ ] M-W10 — 5k-camera performance harness
 - [ ] M-B8 — CSV import of camera positions
 
@@ -57,6 +57,7 @@ ask-on-risk; push/PR are PO decisions.
 - 2026-10-01: M-W4 completed (`a494a46`: realtime store with 5-min ring buffer, dedup Set, throttled camera status flush 1/s, animation budget with concurrent ripple/pulse caps, reduced-motion fallback, and fx layers).
 - 2026-10-01: M-W7 completed (`cd56639`: /api/v1/me/map-prefs contract and handlers with enum/size validation and per-user isolation, client-owned layer/filter defaults, LayersPanel/FiltersPanel, canvas layer visibility, and render-time preference restoration).
 - 2026-10-01: M-W8 completed (`9174a44`: MapEntity exposes the placement revision for If-Match, pure placement draft with undo/redo and 409 rebase, unplaced tray with click-to-place/drag/bulk-at-centre, properties form with 15° rotation and clamped FOV/range, and editor wiring in MapShell).
+- 2026-10-01: M-W9 completed (`b88abac`: pure ZoneDraft with point-by-point drawing, close/reopen/undo and backend-mirrored geometry validation, ZonesPanel gated on maps.create_zone, zones fill/outline/label layers under a new zones layer group, MapCanvas zone rendering, and MapShell create/update/delete wiring with visible server refusals).
 
 ## Resumed scope (2026-10-01)
 Explicit user confirmation today enables **STRICT TDD ON**, superseding historical OFF above.
@@ -314,3 +315,45 @@ Strict TDD ON; source explicit user confirmation 2026-10-01. Chain: feature-bran
 - Rollback baseline: HEAD `dee37d7`; M-W8 commit `9174a44`. No staging beyond that commit, no
   review, remote operation or deployment performed by this writer.
 - Next: M-W9 (zone editor), then M-W10 (performance harness) and M-B8 (CSV import).
+
+## M-W9 — zone editor
+Route: delegated single writer; trigger: multifile new logic (contract and backend already
+landed in M-B4). Strict TDD ON; source explicit user confirmation 2026-10-01.
+- [x] Pure draft (`lib/maps/zoneDraft.ts`): vertices grow on map clicks until the polygon is
+  closed; close refuses fewer than 3 points, undo keeps the draft editable and reopens a
+  closed ring, and validation mirrors `internal/maps/geometry.go` with the same messages
+  (name required, >= 3 points, closed before save, no self-intersection).
+- [x] `zoneDraftToPolygon` closes the GeoJSON ring (first vertex repeated last) and
+  `zoneToDraft` round-trips a stored zone without its closing vertex.
+- [x] ZonesPanel: lists the site zones with kind labels, every write gated on
+  `maps.create_zone`, Guardar disabled until the draft validates, and the server's refusal
+  rendered as an alert next to the draft that stays on screen.
+- [x] zonesLayer source/fill/outline/label with a new `zones` group in `LAYER_GROUPS` and
+  `builtLayerIds()` parity; MapCanvas adds the source under the site layers and re-syncs the
+  feature collection when the query changes.
+- [x] MapShell wires `siteZonesQuery` for the selected site (the map draws polygons in every
+  mode), drafts points from `onMapClick`, and saves via POST/PATCH with `DELETE` for removal;
+  zone state is cleared only on success.
+- [x] `ZoneKind` corrected to the contract enum (`security|perimeter|warning|custom`);
+  `stubApi` accepts additive `"METHOD /path"` keys so two verbs on one resource stub
+  different outcomes.
+
+### M-W9 evidence (2026-10-01)
+- RED: zoneDraft.test.ts (4), zonesLayer.test.ts (3), ZonesPanel.test.tsx (5) failed on
+  missing modules and MapShell's 3 new zone tests failed on the absent panel before any
+  implementation existed; the ZonesPanel drawing test also exposed a missing
+  `onReopenPolygon` destructure in the test itself, and zoneDraft's first GREEN attempt
+  lacked the undo floor (3→2 allowed, 2→2 no-op) the test demands.
+- GREEN: focused Maps suite PASS, 159 tests / 28 files (+15). Final sequential checks: full
+  web PASS, 496 tests / 80 files; typecheck PASS; lint PASS; build PASS (existing
+  large-chunk warning); `git diff --check` PASS; `go build ./...` and `go vet ./...` PASS
+  (no Go changes in this unit); `make generate` idempotent (no generated deltas).
+- Design deviations, deliberate: zone writes carry no If-Match — the contract's
+  update/delete take none (M-B4), so conflicts cannot occur and no rebase flow exists for
+  zones, unlike placements. The zones list is fetched for the selected site in every mode so
+  the polygons are visible outside the editor; the panel itself only renders in edit mode.
+  Zone geometry validation runs client-side first with the backend's exact messages, so the
+  400 path only surfaces server-side refusals (auth, feature flag, cross-request changes).
+- Rollback baseline: HEAD `55cc513`; M-W9 commit `b88abac`. No staging beyond that commit, no
+  review, remote operation or deployment performed by this writer.
+- Next: M-W10 (performance harness), then M-B8 (CSV import).
