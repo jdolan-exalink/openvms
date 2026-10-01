@@ -486,6 +486,7 @@ smoke** (no WS event flood), package named `@openvms/test`.
   and at startup the API geolocates the server's public IP (freeipapi, best-effort 4 s,
   `OPENVMS_MAPS_CENTER="lat,lng"` override) to center the default view on the server's
   region (`internal/maps/geoip.go` + wiring in `apps/api/main.go`).
-- Caddy CSP gained `https://*.tile.openstreetmap.org` in img-src/connect-src. Go unit
-  (TestDefaultConfig rewritten, geoip tests new) and the GetMapConfig integration test
-  pin the new contract.
+- Caddy CSP gained `https://tile.openstreetmap.org` and `https://*.tile.openstreetmap.org`
+  in img-src/connect-src — a CSP wildcard does not match the bare host, which is exactly
+  where the tiles come from (first attempt shipped only the wildcard and the browser kept
+  blocking every tile).
