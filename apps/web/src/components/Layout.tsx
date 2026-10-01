@@ -103,7 +103,8 @@ export function Layout() {
                 {isLive && <TopBarActionsSlot className="flex shrink-0 items-center" />}
               </div>
               <div className="flex items-center gap-3">
-                <NotificationBell />
+                {/* Notifications are tenant-scoped; the tenant-less platform admin would only collect 403s. */}
+                {me.data?.tenant_id != null && <NotificationBell />}
                 <button
                   type="button"
                   onClick={() => setOmniboxOpen(true)}

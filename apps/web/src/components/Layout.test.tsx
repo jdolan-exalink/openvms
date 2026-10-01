@@ -8,6 +8,26 @@ import { routeTree } from "@/router";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("primary navigation and context header", () => {
+  it("hides the tenant notification bell for the tenant-less platform admin", async () => {
+    const fetchMock = vi.fn(stubApi({
+      "/api/v1/me": () => json({
+        id: "u1", username: "admin", display_name: "Admin", tenant_id: null,
+        mfa_enabled: false, must_change_password: false, auth_method: "session",
+        grants: [{ permission: "events.view", effect: "allow", scope_type: "platform" }],
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/events"] }), context: { queryClient: client } });
+    render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+
+    await screen.findByRole("navigation", { name: "Navegación principal" });
+    // Notifications are tenant-scoped: the platform admin has no tenant, so polling the
+    // endpoint would only ever produce a 403 in the console.
+    expect(screen.queryByRole("button", { name: "Notificaciones" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([req]) => String((req as Request).url).includes("/notifications"))).toBe(false);
+  });
+
   it("uses a compact icon-first rail with an active route and context-aware heading", async () => {
     vi.stubGlobal("fetch", vi.fn(stubApi({
       "/api/v1/me": () => json({
