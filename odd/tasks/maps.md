@@ -533,8 +533,8 @@ placement draft/form/MapShell/canvas. Strict TDD ON (user-confirmed): RED → GR
 Runner: `pnpm --filter @openvms/web test`; required closure checks are focused Maps tests,
 full web tests, `typecheck`, `lint`, `build`, and `git diff --check`, all sequential.
 Delivery: `ask-on-risk`; chain strategy `feature-branch-chain` (user-selected). M-W12 is
-committed locally as `f911c20`; M-W13 is implemented and verified, with its work-unit commit
-pending. No remote delivery or deployment has occurred.
+committed locally as `f911c20` and M-W13 as `2dbd499`. The Maps frontend is deployed to the
+existing local `openvms` Compose stack. No remote delivery has occurred.
 
 - [x] M-W12 — Add camera type (`bullet`/`fixed`, `dome`, `ptz`) to placement draft/form,
   MapShell and save props; render a per-camera glyph while preserving server alarm/offline/
@@ -547,8 +547,8 @@ pending. No remote delivery or deployment has occurred.
   without one undo snapshot per pointer movement. Acceptance: pointer interaction stages the
   final location, preserves revision, produces a single undoable move, and does not move
   cameras in view mode. Rollback: W13 source/tests only.
-- Unit boundary: W12 and W13 remain separate rollback/work-unit boundaries. W12 is committed;
-  W13 source/tests and tracker updates are the pending local work unit.
+- Unit boundary: W12 and W13 remain separate rollback/work-unit boundaries, committed as
+  `f911c20` and `2dbd499` respectively.
 
 ### M-W12 evidence
 - RED: supplied focused five-file suite had 8 failures (63 pass) across the absent type UI,
@@ -585,4 +585,11 @@ pending. No remote delivery or deployment has occurred.
 - W13 candidate assessment: medium risk, `review_due=false` / `under_budget`; user declined
   this candidate, so no review receipt or approval exists. Ordinary delivery is unmanaged by
   that candidate choice.
-- W13 remains uncommitted for parent delivery. No remote operation or deployment has occurred.
+- W13 commit: `2dbd499` (`feat(maps): add edit-mode placed-camera drag`). Its committed
+  accumulated-range candidate was high risk due to process/shell evidence in
+  `.github/workflows/ci.yml`; the user declined review for that candidate. No review receipt
+  or approval exists.
+- Local deployment: rebuilt and recreated only the `web` service in Compose project `openvms`;
+  API liveness, readiness, and system-info endpoints returned HTTP 200, and `/maps` returned
+  HTTP 200. Full `nurby` deployment was not used because its ports conflict with the already
+  running `openvms` stack. No remote operation occurred.
