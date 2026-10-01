@@ -44,6 +44,26 @@ describe("savePlacements", () => {
     expect(placementPut(fetchSpy)[0]!.headers.get("If-Match")).toBeNull();
   });
 
+  it("carries the camera type as props, preserving the ptz/lpr flags", async () => {
+    const fetchSpy = vi.fn(async () => json({ id: "p1", revision: 2 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await savePlacements([entry({ cameraType: "dome", ptz: true, lpr: false })]);
+
+    const body = JSON.parse(await placementPut(fetchSpy)[0]!.text()) as { props: Record<string, unknown> };
+    expect(body.props).toEqual({ camera_type: "dome", ptz: true, lpr: false });
+  });
+
+  it("defaults the camera type to a fixed bullet when the draft does not say", async () => {
+    const fetchSpy = vi.fn(async () => json({ id: "p1", revision: 1 }));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    await savePlacements([entry()]);
+
+    const body = JSON.parse(await placementPut(fetchSpy)[0]!.text()) as { props: Record<string, unknown> };
+    expect(body.props).toEqual({ camera_type: "fixed" });
+  });
+
   it("reports a stale write as a conflict instead of a failure", async () => {
     const fetchSpy = vi.fn(async () => json({ code: "conflict", message: "stale" }, 409));
     vi.stubGlobal("fetch", fetchSpy);

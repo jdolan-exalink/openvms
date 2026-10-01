@@ -14,6 +14,17 @@ const draft = (over: Partial<DraftPlacement> = {}): DraftPlacement => ({
 });
 
 describe("PlacementPropsForm", () => {
+  it("changes the camera icon type between bullet, dome and ptz", () => {
+    const onChange = vi.fn();
+    render(<PlacementPropsForm name="Recepción" draft={draft({ cameraType: "fixed" })} onChange={onChange} />);
+
+    expect(screen.getByRole("button", { name: "Bullet" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Domo" }));
+    expect(onChange).toHaveBeenCalledWith({ cameraType: "dome" });
+    fireEvent.click(screen.getByRole("button", { name: "PTZ" }));
+    expect(onChange).toHaveBeenCalledWith({ cameraType: "ptz" });
+  });
+
   it("shows what is about to be saved, not the stored placement", () => {
     render(<PlacementPropsForm name="Recepción" draft={draft({ lat: -31.42, lng: -64.18, bearingDeg: 45, fovDeg: 90, rangeM: 120 })} onChange={() => {}} />);
     expect(screen.getByRole("region", { name: "Propiedades de la cámara" })).toBeInTheDocument();

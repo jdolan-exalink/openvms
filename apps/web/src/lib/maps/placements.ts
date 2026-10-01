@@ -32,6 +32,11 @@ export async function savePlacements(entries: readonly PendingPlacement[]): Prom
             bearing_deg: entry.bearingDeg,
             fov_deg: entry.fovDeg,
             range_m: entry.rangeM,
+            props: ({
+              camera_type: entry.cameraType ?? "fixed",
+              ...(entry.ptz !== undefined ? { ptz: entry.ptz } : {}),
+              ...(entry.lpr !== undefined ? { lpr: entry.lpr } : {}),
+            } as never),
           },
         }),
       );

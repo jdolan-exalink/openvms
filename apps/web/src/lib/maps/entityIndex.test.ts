@@ -9,6 +9,17 @@ import {
 import type { CameraEntity } from "./types";
 
 describe("entityIndex", () => {
+  it("picks the glyph by camera type while online, and the status glyph otherwise", () => {
+    const index = new EntityIndex([
+      { ...baseCamera, camera: { ...baseCamera.camera, cameraType: "dome" } },
+      { ...baseCamera, id: "cam-2", camera: { ...baseCamera.camera, cameraType: "ptz" } },
+      { ...baseCamera, id: "cam-3", camera: { ...baseCamera.camera, cameraType: "fixed" } },
+      { ...baseCamera, id: "cam-4", activeAlarms: 2 }, // alarm wins over type
+    ]);
+    const icons = index.toFeatureCollection().features.map((f) => f.properties.icon);
+    expect(icons).toEqual(["cam-dome", "cam-ptz", "cam-normal", "cam-alarm"]);
+  });
+
   it("renders server-only metadata outages as unreachable", () => {
     const index = new EntityIndex([{ ...baseCamera, metadata: { serverOffline: true } }]);
     expect(index.toFeatureCollection().features[0]!.properties.display_state).toBe("UNREACHABLE");

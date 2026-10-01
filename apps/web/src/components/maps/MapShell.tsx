@@ -206,6 +206,9 @@ function MapShellContent({
       bearingDeg: camera.camera.bearingDeg ?? 0,
       fovDeg: camera.camera.fovDeg,
       rangeM: camera.camera.rangeM,
+      cameraType: camera.camera.cameraType,
+      ptz: camera.camera.ptz,
+      lpr: camera.camera.lpr,
     }, knownRevision(cameraId)));
   };
 

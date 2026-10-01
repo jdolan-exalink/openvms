@@ -27,6 +27,15 @@ export function PlacementPropsForm({ name, draft, onChange }: PlacementPropsForm
         {draft.lat.toFixed(5)}, {draft.lng.toFixed(5)}
       </p>
 
+      <fieldset className="mb-2 flex gap-1" aria-label="Tipo de cámara">
+        <legend className="text-xs text-muted">Tipo</legend>
+        {([ ["fixed", "Bullet"], ["dome", "Domo"], ["ptz", "PTZ"] ] as const).map(([value, label]) => (
+          <button key={value} type="button" aria-pressed={(draft.cameraType ?? "fixed") === value}
+            onClick={() => onChange({ cameraType: value })}
+            className="rounded border border-line px-2 py-1 text-xs">{label}</button>
+        ))}
+      </fieldset>
+
       <div className="mb-2 flex items-center gap-1">
         <label htmlFor="placement-bearing" className="text-xs text-muted">Rumbo</label>
         <input

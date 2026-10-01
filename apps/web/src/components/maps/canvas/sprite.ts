@@ -9,6 +9,14 @@ export interface SdfIconDefinition {
 
 // 24x24 monochrome glyphs that MapLibre will color with icon-color
 export const ICONS: SdfIconDefinition[] = [
+  { id: "cam-dome", width: 24, height: 24, draw: (ctx) => {
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(12, 12, 8, Math.PI, 0); ctx.lineTo(20, 17);
+    ctx.lineTo(4, 17); ctx.closePath(); ctx.fill(); ctx.fillRect(9, 17, 6, 3);
+  } },
+  { id: "cam-ptz", width: 24, height: 24, draw: (ctx) => {
+    ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(12, 10, 7, 0, Math.PI * 2); ctx.fill();
+    ctx.fillRect(10, 16, 4, 4); ctx.fillRect(7, 20, 10, 2);
+  } },
   {
     id: "cam-normal",
     width: 24,

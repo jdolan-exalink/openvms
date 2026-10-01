@@ -17,6 +17,9 @@ export interface DraftPlacement {
   bearingDeg: number;
   fovDeg: number;
   rangeM: number;
+  cameraType?: "fixed" | "dome" | "ptz" | "fisheye" | "lpr";
+  ptz?: boolean;
+  lpr?: boolean;
 }
 
 /** A pending change paired with the revision its save has to match. */

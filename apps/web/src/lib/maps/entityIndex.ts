@@ -64,7 +64,10 @@ export function cameraToFeature(entity: CameraEntity, serverOffline = false): Fe
 
   const displayState = computeDisplayState(entity.status, entity.activeAlarms, serverOffline || !!entity.metadata.serverOffline);
   const color = STATE_COLORS[displayState];
-  const icon = STATE_ICONS[displayState];
+  const icon = displayState === "ONLINE"
+    ? entity.camera.cameraType === "dome" ? "cam-dome"
+      : entity.camera.cameraType === "ptz" ? "cam-ptz" : "cam-normal"
+    : STATE_ICONS[displayState];
 
   return {
     type: "Feature",
