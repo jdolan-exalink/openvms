@@ -383,3 +383,124 @@ it("bulk-places every unplaced camera at the site centre in one undo step", asyn
   );
   expect(bodies.every((body) => body.lat === 0 && body.lng === 0)).toBe(true);
 });
+
+// --- Zone editor (M-W9) ------------------------------------------------------------
+const zoneGrants = [
+  ...editGrants,
+  { permission: "maps.create_zone", effect: "allow", scope_type: "platform" },
+];
+
+const zoneRequests = (fetchSpy: { mock: { calls: unknown[][] } }, method: string) =>
+  fetchSpy.mock.calls
+    .map(([input]) => input as Request)
+    .filter((request) => request && typeof request === "object" && request.method === method
+      && new URL(request.url).pathname.includes("/zones"));
+
+const zoneFixture = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  id: "z1",
+  site_id: "s",
+  name: "Zona Vieja",
+  kind: "custom",
+  geometry: {
+    type: "Polygon",
+    coordinates: [[[-58.4, -34.6], [-58.39, -34.6], [-58.395, -34.61], [-58.4, -34.6]]],
+  },
+  ...over,
+});
+
+it("draws a zone point by point and writes the closed ring the backend expects", async () => {
+  const zones: Record<string, unknown>[] = [];
+  const { fetchSpy } = await setup(false, {}, {
+    grants: zoneGrants,
+    routes: {
+      "/api/v1/maps/sites/s/zones": () => json({ site_id: "s", zones }),
+      "POST /api/v1/maps/sites/s/zones": () => {
+        zones.push(zoneFixture({ id: "z9", name: "Zona Norte", kind: "security" }));
+        return json(zones[zones.length - 1], 201);
+      },
+    },
+  });
+
+  fireEvent.click(screen.getByRole("tab", { name: "Editor" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Nueva zona" }));
+
+  act(() => canvasHarness.props?.onMapClick?.({ lng: -58.4, lat: -34.6 }));
+  act(() => canvasHarness.props?.onMapClick?.({ lng: -58.39, lat: -34.6 }));
+  act(() => canvasHarness.props?.onMapClick?.({ lng: -58.395, lat: -34.61 }));
+  expect(screen.getByText("Puntos: 3")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Cerrar polígono" }));
+  fireEvent.change(screen.getByLabelText("Nombre de la zona"), { target: { value: "Zona Norte" } });
+  fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+
+  await waitFor(() => expect(zoneRequests(fetchSpy, "POST")).toHaveLength(1));
+  const body = JSON.parse(await zoneRequests(fetchSpy, "POST")[0]!.text()) as {
+    name: string;
+    kind: string;
+    geometry: { coordinates: number[][][] };
+  };
+  expect(body).toMatchObject({ name: "Zona Norte", kind: "security" });
+  const ring = body.geometry.coordinates[0]!;
+  expect(ring).toHaveLength(4);
+  expect(ring[0]).toEqual(ring[ring.length - 1]);
+
+  // The refetch after the write carries the saved zone back onto the panel.
+  expect(await screen.findByText("Zona Norte")).toBeInTheDocument();
+});
+
+it("updates an existing zone and deletes it afterwards", async () => {
+  const zones: Record<string, unknown>[] = [zoneFixture()];
+  const { fetchSpy } = await setup(false, {}, {
+    grants: zoneGrants,
+    routes: {
+      "/api/v1/maps/sites/s/zones": () => json({ site_id: "s", zones }),
+      "PATCH /api/v1/maps/zones/z1": () => {
+        zones[0] = { ...zones[0], name: "Zona Nueva" };
+        return json(zones[0]);
+      },
+      "DELETE /api/v1/maps/zones/z1": () => {
+        zones.splice(0);
+        return new Response(null, { status: 204 });
+      },
+    },
+  });
+
+  fireEvent.click(screen.getByRole("tab", { name: "Editor" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+
+  const name = await screen.findByLabelText("Nombre de la zona");
+  expect(name).toHaveValue("Zona Vieja");
+  fireEvent.change(name, { target: { value: "Zona Nueva" } });
+  fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+
+  await waitFor(() => expect(zoneRequests(fetchSpy, "PATCH")).toHaveLength(1));
+  const patch = JSON.parse(await zoneRequests(fetchSpy, "PATCH")[0]!.text()) as Record<string, unknown>;
+  expect(patch).toMatchObject({ name: "Zona Nueva", kind: "custom" });
+  await screen.findByText("Zona Nueva");
+
+  fireEvent.click(screen.getByRole("button", { name: "Eliminar" }));
+  await waitFor(() => expect(zoneRequests(fetchSpy, "DELETE")).toHaveLength(1));
+  await waitFor(() => expect(screen.queryByText("Zona Nueva")).not.toBeInTheDocument());
+});
+
+it("surfaces the server's refusal without losing the zone draft", async () => {
+  const zones: Record<string, unknown>[] = [zoneFixture()];
+  const { fetchSpy } = await setup(false, {}, {
+    grants: zoneGrants,
+    routes: {
+      "/api/v1/maps/sites/s/zones": () => json({ site_id: "s", zones }),
+      "PATCH /api/v1/maps/zones/z1": () =>
+        json({ code: "bad_request", message: "El polígono se cruza consigo mismo." }, 400),
+    },
+  });
+
+  fireEvent.click(screen.getByRole("tab", { name: "Editor" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+  fireEvent.change(await screen.findByLabelText("Nombre de la zona"), { target: { value: "Zona Nueva" } });
+  fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("El polígono se cruza consigo mismo.");
+  // The operator's draft stays on screen so nothing has to be drawn twice.
+  expect(screen.getByLabelText("Nombre de la zona")).toHaveValue("Zona Nueva");
+  expect(zoneRequests(fetchSpy, "PATCH")).toHaveLength(1);
+});

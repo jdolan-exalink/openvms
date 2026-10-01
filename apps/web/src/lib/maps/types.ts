@@ -124,7 +124,8 @@ export interface Building {
   floors: Floor[];
 }
 
-export type ZoneKind = "area" | "restricted" | "perimeter" | "parking" | "entrance" | "custom";
+/** ZoneKind mirrors the contract's map-zone enum (openapi.yaml: MapZone.kind). */
+export type ZoneKind = "security" | "perimeter" | "warning" | "custom";
 
 export interface Zone {
   id: string;

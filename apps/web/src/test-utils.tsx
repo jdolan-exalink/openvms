@@ -28,10 +28,15 @@ export function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-/** stubApi answers fetches by pathname; unknown paths get 404. */
+/**
+ * stubApi answers fetches by pathname; a "METHOD /pathname" key wins over the plain
+ * pathname so two verbs on the same resource can stub different outcomes.
+ * Unknown paths get 404.
+ */
 export function stubApi(routes: Record<string, () => Response>) {
   return async (input: Request) => {
-    const handler = routes[new URL(input.url).pathname];
+    const { pathname } = new URL(input.url);
+    const handler = routes[`${input.method} ${pathname}`] ?? routes[pathname];
     return handler ? handler() : json({ code: "not_found", message: "not found" }, 404);
   };
 }

@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { alarmsQuery, serversQuery, meQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
-import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery, unplacedCamerasQuery } from "@/lib/maps/api";
+import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery, siteZonesQuery, unplacedCamerasQuery } from "@/lib/maps/api";
 import { applyFilters, mapUserPrefsQuery, mergeLayers, saveMapUserPrefs } from "@/lib/maps/prefs";
 import {
   DEFAULT_PLACEMENT,
@@ -20,6 +20,17 @@ import {
   type DraftState,
 } from "@/lib/maps/placementDraft";
 import { savePlacements } from "@/lib/maps/placements";
+import {
+  addZonePoint,
+  closeZonePolygon,
+  emptyZoneDraft,
+  reopenZonePolygon,
+  undoZonePoint,
+  validateZoneDraft,
+  zoneToDraft,
+  type ZoneDraft,
+} from "@/lib/maps/zoneDraft";
+import { deleteZone, saveZone } from "@/lib/maps/zones";
 import { EMPTY_FILTERS, type CameraEntity, type LayerPreference, type MapFilters, type MapMode } from "@/lib/maps/types";
 import { MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { IncidentFocus } from "@/lib/maps/incidentPolicy";
@@ -36,6 +47,7 @@ import { LayersPanel } from "./panel/LayersPanel";
 import { FiltersPanel } from "./panel/FiltersPanel";
 import { UnplacedTray, DRAG_MIME } from "./editor/UnplacedTray";
 import { PlacementPropsForm } from "./editor/PlacementPropsForm";
+import { ZonesPanel } from "./editor/ZonesPanel";
 import { HoverIntentManager, type HoverIntentState } from "@/lib/maps/hoverIntent";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
 import { ErrorNote } from "../ui";
@@ -187,6 +199,11 @@ function MapShellContent({
 
   const handleMapClick = (point: { lng: number; lat: number }) => {
     if (!editActive) return;
+    if (zoneDraft) {
+      // Drawing wins: every click grows the polygon until the operator closes it.
+      setZoneDraft(addZonePoint(zoneDraft, point));
+      return;
+    }
     if (armedCameraId) placeCameraAt(armedCameraId, point);
     else if (selectedCameraId) placeCameraAt(selectedCameraId, point);
   };
@@ -256,6 +273,63 @@ function MapShellContent({
       (next, entityId) => rebasePlacement(next, entityId, fresh.entities.find((e) => e.id === entityId)?.revision),
       prev,
     ));
+  };
+
+  // --- Zone editor (M-W9) --------------------------------------------------------------
+  // The zone list is read as soon as a site is selected (the map draws the polygons), while
+  // the panel and its draft only exist in edit mode; nothing is written until Guardar.
+  const zonesQuery = useQuery({ ...siteZonesQuery(currentSite?.id ?? ""), enabled: !!currentSite });
+  const canCreateZone = can(me.data, "maps.create_zone");
+  const [zoneDraft, setZoneDraft] = useState<ZoneDraft>();
+  const [zoneError, setZoneError] = useState<string>();
+  const [zoneSaving, setZoneSaving] = useState(false);
+
+  const handleZoneStart = () => {
+    setZoneError(undefined);
+    setZoneDraft(emptyZoneDraft());
+  };
+
+  const handleZoneSelect = (zoneId: string) => {
+    const zone = (zonesQuery.data ?? []).find((item) => item.id === zoneId);
+    if (!zone) return;
+    setZoneError(undefined);
+    setZoneDraft(zoneToDraft(zone));
+  };
+
+  const handleZoneDraftPatch = (patch: Partial<ZoneDraft>) => {
+    setZoneDraft((prev) => (prev ? { ...prev, ...patch } : prev));
+  };
+
+  const handleZoneSave = async () => {
+    if (!zoneDraft || !currentSite || zoneSaving) return;
+    // The panel already blocks an invalid draft with the same messages; this is the backstop.
+    if (validateZoneDraft(zoneDraft).length > 0) return;
+    setZoneSaving(true);
+    try {
+      await saveZone(currentSite.id, zoneDraft);
+      setZoneDraft(undefined);
+      setZoneError(undefined);
+      await queryClient.invalidateQueries({ queryKey: ["maps", "sites", currentSite.id, "zones"] });
+    } catch (error) {
+      setZoneError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setZoneSaving(false);
+    }
+  };
+
+  const handleZoneDelete = async (zoneId: string) => {
+    if (!currentSite || zoneSaving) return;
+    setZoneSaving(true);
+    try {
+      await deleteZone(zoneId);
+      setZoneDraft((prev) => (prev?.zoneId === zoneId ? undefined : prev));
+      setZoneError(undefined);
+      await queryClient.invalidateQueries({ queryKey: ["maps", "sites", currentSite.id, "zones"] });
+    } catch (error) {
+      setZoneError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setZoneSaving(false);
+    }
   };
 
   const baseCameras: CameraEntity[] = useMemo(() => {
@@ -451,6 +525,7 @@ function MapShellContent({
           zoom={zoom}
           cameras={visibleCameras}
           sites={sites}
+          zones={zonesQuery.data ?? []}
           coverage={coverage}
           layerVisibility={layerVisibility}
           selectedCameraId={selectedCameraId}
@@ -536,6 +611,30 @@ function MapShellContent({
                 </div>
               </div>
             )}
+          </aside>
+        )}
+        {/* Zone editor: pick or draw a zone, then save the geometry the backend validates */}
+        {editActive && (
+          <aside className="absolute bottom-3 right-3 z-30 max-h-[70%] w-80 overflow-auto">
+            <ZonesPanel
+              zones={zonesQuery.data ?? []}
+              draft={zoneDraft}
+              canEdit={canCreateZone}
+              error={zoneError}
+              saving={zoneSaving}
+              onStartCreate={handleZoneStart}
+              onSelectZone={handleZoneSelect}
+              onDraftChange={handleZoneDraftPatch}
+              onClosePolygon={() => setZoneDraft((prev) => (prev ? closeZonePolygon(prev) : prev))}
+              onReopenPolygon={() => setZoneDraft((prev) => (prev ? reopenZonePolygon(prev) : prev))}
+              onUndoPoint={() => setZoneDraft((prev) => (prev ? undoZonePoint(prev) : prev))}
+              onSave={() => void handleZoneSave()}
+              onDelete={(zoneId) => void handleZoneDelete(zoneId)}
+              onCancel={() => {
+                setZoneDraft(undefined);
+                setZoneError(undefined);
+              }}
+            />
           </aside>
         )}
         {/* Hover preview floating card */}

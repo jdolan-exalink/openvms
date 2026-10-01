@@ -3,13 +3,14 @@ import * as maplibregl from "maplibre-gl";
 import type { LngLatBounds } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Point } from "geojson";
-import type { CameraEntity, MapProviderConfig, Site } from "@/lib/maps/types";
+import type { CameraEntity, MapProviderConfig, Site, Zone } from "@/lib/maps/types";
 import { type BoundingBox } from "@/lib/maps/geo";
 import { EntityIndex } from "@/lib/maps/entityIndex";
 import { buildMapStyle, getThemeColors, MapStyleController } from "./MapStyleController";
 import { buildCameraLayers, buildCamerasSource, CAMERAS_SOURCE_ID } from "./layers/cameraLayers";
 import { buildFovLayers, buildFovSource, camerasToFovCollection, FOV_SOURCE_ID } from "./layers/fovLayer";
 import { buildSiteLayers, buildSitesSource, SITES_SOURCE_ID, sitesToFeatureCollection } from "./layers/sitesLayer";
+import { buildZonesLayers, buildZonesSource, zonesToFeatureCollection, ZONES_SOURCE_ID } from "./layers/zonesLayer";
 import { buildFxLayers, buildFxSource, FX_SOURCE_ID } from "./layers/fxLayers";
 import { applyLayerVisibility, type LayerGroup } from "./layers/visibility";
 import { AnimationBudget, isPrefersReducedMotion } from "@/lib/maps/animationBudget";
@@ -24,6 +25,7 @@ export interface MapCanvasProps {
   bearing?: number;
   cameras?: CameraEntity[];
   sites?: Site[];
+  zones?: Zone[];
   coverage?: boolean;
   /** Per-group visibility driven by the user's saved layer preferences. */
   layerVisibility?: Partial<Record<LayerGroup, boolean>>;
@@ -52,6 +54,7 @@ export function MapCanvas({
   bearing = 0,
   cameras = [],
   sites = [],
+  zones = [],
   coverage = true,
   layerVisibility,
   selectedCameraId,
@@ -86,6 +89,7 @@ export function MapCanvas({
   const onSelectSiteRef = useRef(onSelectSite);
   const camerasRef = useRef(cameras);
   const sitesRef = useRef(sites);
+  const zonesRef = useRef(zones);
   const coverageRef = useRef(coverage);
   const layerVisibilityRef = useRef(layerVisibility);
 
@@ -107,6 +111,7 @@ export function MapCanvas({
     onMapClickRef.current = onMapClick;
     camerasRef.current = cameras;
     sitesRef.current = sites;
+    zonesRef.current = zones;
     coverageRef.current = coverage;
     layerVisibilityRef.current = layerVisibility;
 
@@ -117,6 +122,14 @@ export function MapCanvas({
       if (!map.getSource(SITES_SOURCE_ID)) {
         map.addSource(SITES_SOURCE_ID, buildSitesSource(sitesRef.current));
         for (const layer of buildSiteLayers()) {
+          if (!map.getLayer(layer.id)) map.addLayer(layer);
+        }
+      }
+
+      // 1b. Zones Source & Layers (site polygons, underneath every device layer)
+      if (!map.getSource(ZONES_SOURCE_ID)) {
+        map.addSource(ZONES_SOURCE_ID, buildZonesSource(zonesRef.current));
+        for (const layer of buildZonesLayers()) {
           if (!map.getLayer(layer.id)) map.addLayer(layer);
         }
       }
@@ -478,6 +491,16 @@ export function MapCanvas({
       source.setData(sitesToFeatureCollection(sites));
     }
   }, [sites]);
+
+  // Update zones GeoJSON data
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const source = map.getSource(ZONES_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    if (source) {
+      source.setData(zonesToFeatureCollection(zones));
+    }
+  }, [zones]);
 
   // Toggle layer-group visibility from the saved preferences
   useEffect(() => {

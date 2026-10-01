@@ -3,15 +3,19 @@ import { buildCameraLayers } from "./cameraLayers";
 import { buildFovLayers } from "./fovLayer";
 import { buildFxLayers } from "./fxLayers";
 import { buildSiteLayers } from "./sitesLayer";
+import { buildZonesLayers } from "./zonesLayer";
 
 /**
  * Every layer the Maps feature owns, grouped by the preference that controls it. Keeping the
  * ids in one place lets the layer builders and the visibility groups stay in sync — a new
  * layer that nobody groups would otherwise stay on screen no matter what the user toggles.
+ * Zones are always on: they carry no preference key of their own but still belong to a
+ * group so ownedLayerIds() covers them.
  */
 export const LAYER_GROUPS = {
   cameras: ["cam-cluster", "cam-cluster-count", "cam-cluster-badge-alarms", "cam-point-halo", "cam-point-circle", "cam-point-icon", "cam-label"],
   sites: ["site-health-ring", "site-point", "site-label"],
+  zones: ["zone-fill", "zone-outline", "zone-label"],
   coverage: ["fov-fill", "fov-outline"],
   alarmFx: ["fx-alarm-pulse"],
   detectionFx: ["fx-ripple"],
@@ -30,6 +34,7 @@ export function builtLayerIds(): string[] {
     ...buildCameraLayers().map((l) => l.id),
     ...buildFovLayers().map((l) => l.id),
     ...buildSiteLayers().map((l) => l.id),
+    ...buildZonesLayers().map((l) => l.id),
     ...buildFxLayers().map((l) => l.id),
   ];
 }
