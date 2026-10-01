@@ -501,3 +501,28 @@ smoke** (no WS event flood), package named `@openvms/test`.
   fallback hosts stay. `TestDefaultConfig` and `GetMapConfig` pin the new contract; the
   geoip precedence test was made hermetic (it had started passing against the real
   network and would never exercise the fallback).
+
+## New units (2026-10-01, PO request): edit-mode monitoring center + camera editor
+- [ ] M-W11 — Persistent monitoring center: in edit mode (maps.edit) pin the site's
+  monitoring center from the current view (PATCH /sites/{id}/geo: lat/lng/default_zoom);
+  an open map re-centers when the selected site (or its center) changes.
+- [ ] M-W12 — Camera icons: bullet/dome/ptz selectable in the placement properties form,
+  persisted through placement `props`, rendered per type in the canvas sprite.
+- [ ] M-W13 — Drag & drop of placed cameras in edit mode: pointer drag stages a move
+  draft (keeping the If-Match revision) that the existing save flow writes.
+
+### M-W11 evidence (2026-10-01)
+- [x] M-W11 completed (`875f909`): `Fijar centro de monitoreo aquí` in the edit aside
+  (gated on maps.edit, the SiteGeo PATCH permission) saves the framed view
+  (position + rounded zoom) through the new `lib/maps/sites.ts`; overview+sites refetch;
+  MapShell now follows center/zoom prop changes after map init (easeTo, 0 ms under
+  reduced motion) and re-syncs the site selection from the URL, so back/forward and pasted
+  deep links land on the right site with its monitoring center.
+- RED: the three new MapShell tests failed before wiring (no button, no easeTo on site
+  change). Two build findings fixed on the way: the new hooks were first placed below the
+  config early-returns ("rendered more hooks than during the previous render") and moved
+  above them; the URL-selection sync first used setState-in-effect and was rewritten to
+  the adjust-during-render pattern to satisfy the react-hooks lint rule.
+- Checks: MapShell 30/30, full web 528/528 (83 files), typecheck/lint PASS, perf smoke
+  PASS. The centering behavior inside the real MapCanvas GL component remains
+  headless-unverifiable; the canvas harness exercises the MapShell contract instead.
