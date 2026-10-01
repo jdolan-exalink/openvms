@@ -43,6 +43,8 @@ describe("primary navigation and context header", () => {
     await screen.findByRole("navigation", { name: "Navegación principal" });
     const rail = screen.getByRole("complementary", { name: "Primary Nav Rail" });
     expect(rail).toHaveClass("w-16");
+    expect(rail).not.toHaveClass("hidden");
+    expect(rail.firstElementChild).not.toHaveClass("hidden");
     const eventsLink = screen.getByRole("link", { name: "Eventos" });
     expect(eventsLink).toHaveAttribute("aria-current", "page");
     expect(eventsLink).toHaveClass("bg-accent/15");

@@ -175,8 +175,8 @@ export function AppShell({ primaryNav, contextSidebar, fitViewport = false, chil
       >
         Saltar al contenido
       </a>
-      <div className={cn("flex min-h-dvh flex-col bg-bg md:flex-row", fitViewport && "md:h-dvh md:min-h-0 md:overflow-hidden")} data-shell="openvms">
-        <aside aria-label="Primary Nav Rail" className="hidden w-16 shrink-0 md:flex" data-shell-region="primary-nav">
+      <div className={cn("flex min-h-dvh flex-col bg-bg pl-16 md:flex-row md:pl-0", fitViewport && "md:h-dvh md:min-h-0 md:overflow-hidden")} data-shell="openvms">
+        <aside aria-label="Primary Nav Rail" className="fixed inset-y-0 left-0 z-40 flex w-16 shrink-0 overflow-y-auto md:static md:z-auto" data-shell-region="primary-nav">
           {primaryNav}
         </aside>
         {contextSidebar != null && (

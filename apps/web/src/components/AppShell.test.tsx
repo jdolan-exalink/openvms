@@ -12,7 +12,8 @@ describe("AppShell", () => {
       </AppShell>,
     );
 
-    expect(screen.getByLabelText("Primary Nav Rail")).toHaveClass("hidden", "md:flex");
+    expect(screen.getByLabelText("Primary Nav Rail")).toHaveClass("flex");
+    expect(screen.getByLabelText("Primary Nav Rail")).not.toHaveClass("hidden");
     expect(screen.getByRole("complementary", { name: "Primary Nav Rail" })).toHaveTextContent("Existing navigation");
     const main = screen.getByRole("main", { name: "Main Workspace" });
     expect(main).toContainElement(screen.getByRole("heading", { name: "Current route" }));

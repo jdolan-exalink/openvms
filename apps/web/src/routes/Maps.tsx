@@ -77,7 +77,7 @@ export function Maps() {
   };
 
   return (
-    <div className="relative h-[calc(100vh-3.5rem)] w-full overflow-hidden">
+    <div className="relative h-[calc(100dvh-10rem)] min-h-0 w-full overflow-hidden md:h-full md:flex-1">
       <MapShell
         initialSiteId={search.site}
         initialCameraId={search.camera}

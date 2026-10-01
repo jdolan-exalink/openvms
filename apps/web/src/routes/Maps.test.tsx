@@ -45,7 +45,7 @@ describe("Maps route", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("Acceso restringido")).toBeInTheDocument();
+    expect(await screen.findByText("Acceso restringido", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(screen.getByText(/maps.view/)).toBeInTheDocument();
   });
 

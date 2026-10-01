@@ -25,6 +25,8 @@ export function Layout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const search = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>;
   const isLive = pathname === "/live";
+  const isMaps = pathname === "/maps";
+  const fitWorkspace = isLive || isMaps;
   const liveRec = isLive && parseRecSearch(search).rec && can(me.data, "recordings.view");
   const pageContext = getPageContext(pathname);
   const pageTitle = isLive && liveRec ? "Grabaciones" : pageContext.title;
@@ -62,7 +64,7 @@ export function Layout() {
       <VideoSurfaceLayer>
         <AppShell
           primaryNav={
-            <div className="hidden w-16 shrink-0 flex-col items-center border-r border-line bg-surface py-3 md:flex">
+            <div className="flex min-h-full w-16 shrink-0 flex-col items-center border-r border-line bg-surface py-3">
               <Link to="/live" aria-label="OpenVMS: En vivo" title="OpenVMS" className="mb-5 flex size-10 items-center justify-center rounded-xl text-accent hover:bg-raised">
                 <Brand className="size-5" aria-hidden />
               </Link>
@@ -77,10 +79,10 @@ export function Layout() {
               </div>
             </div>
           }
-          fitViewport={isLive}
+          fitViewport={fitWorkspace}
           contextSidebar={isLive ? <div id="live-context-sidebar" className="flex min-h-0 flex-col gap-3" /> : undefined}
         >
-          <div className={cn("min-w-0", isLive && "md:flex md:min-h-0 md:flex-1 md:flex-col")}>
+          <div className={cn("min-w-0", fitWorkspace && "md:flex md:min-h-0 md:flex-1 md:flex-col")}>
             <header className={cn("flex min-h-14 items-center justify-between gap-3 border-b border-line", isLive ? "mb-2 pb-2 md:min-h-11 md:shrink-0" : "mb-6 pb-4")} aria-label="Encabezado de página">
               <div className="flex min-w-0 items-center gap-3">
                 <button
@@ -119,8 +121,8 @@ export function Layout() {
                 </button>
               </div>
             </header>
-            {isLive ? (
-              <div className="md:min-h-0 md:flex-1">
+            {fitWorkspace ? (
+              <div className="md:flex md:min-h-0 md:flex-1 md:flex-col">
                 <Outlet />
               </div>
             ) : (
