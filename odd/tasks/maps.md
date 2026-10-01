@@ -107,7 +107,7 @@ Acceptance proof: real provider/component integration plus Live route/storage re
 Sequential runner: `pnpm --filter @openvms/web test src/lib/maps src/components/maps src/routes/Maps.test.tsx src/routes/Live.test.tsx src/lib/live`;
 then full web test, typecheck, lint, build, and `git diff --check`.
 Scope: M-W5 only; preserve W5a. No staging, commits, review, remote/PR/merge or deployment.
-Status: outcome verified; commit pending; parent handles delivery.
+Status: outcome verified and committed as `eb592e6`; native review pending.
 
 
 #### M-W5 verification and delivery handoff
@@ -138,4 +138,9 @@ Status: outcome verified; commit pending; parent handles delivery.
 - Parent-reported deployment blocker: actual local PMTiles asset is missing;
   ranged `/tiles/world.pmtiles` returns SPA HTML. Deployment stays pending until assets are
   provisioned and ALL remaining units are ready. This worker did not probe or change deployment.
-- Next: parent risk/review and work-unit commit; W5 commit pending.
+- Work-unit commit: `eb592e6` (`feat(maps): complete camera previews and authorized live handoff`).
+- Parent spot check: Maps shell, preview and Live suites PASS (39 tests, 3 files).
+- Running resumed authored count: 1372 lines including task documentation (no generated code).
+- This coherent local commit exceeds the advisory per-task size; future PR slices remain subject
+  to the selected feature-branch-chain policy. No PR is created or authorized here.
+- Next: native risk/review before continuing M-W6; local deployment remains pending.
