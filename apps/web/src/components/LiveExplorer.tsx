@@ -2,9 +2,10 @@ import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import {
-  faAnglesDown, faAnglesLeft, faAnglesUp, faArrowUpRightFromSquare, faGear, faMap, faTableCells, faBookmark, faBuilding, faChevronDown, faChevronRight, faClockRotateLeft, faFolder, faFolderOpen,
-  faFolderPlus, faFolderTree, faGripVertical, faMagnifyingGlass, faPen, faServer, faTrash, faVideo,
+  faAnglesDown, faAnglesLeft, faAnglesUp, faArrowUpRightFromSquare, faGear, faMap, faTableCells, faBookmark, faChevronDown, faChevronRight, faClockRotateLeft, faFolder, faFolderOpen,
+  faFolderPlus, faFolderTree, faGripVertical, faMagnifyingGlass, faPen, faTrash,
 } from "@fortawesome/free-solid-svg-icons";
+import { siteIcon as faBuilding, serverIcon as faServer, cameraIcon as faVideo } from "@/lib/inventoryIcons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { createContext, type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import type { Schemas } from "@/api/client";

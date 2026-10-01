@@ -62,7 +62,6 @@ export function buildSiteLayers(): LayerSpecification[] {
     id: "site-health-ring",
     type: "circle",
     source: SITES_SOURCE_ID,
-    maxzoom: 12,
     paint: {
       "circle-radius": 18,
       "circle-color": "transparent",
@@ -83,10 +82,9 @@ export function buildSiteLayers(): LayerSpecification[] {
     id: "site-point",
     type: "circle",
     source: SITES_SOURCE_ID,
-    maxzoom: 12,
     paint: {
       "circle-radius": 14,
-      "circle-color": "#1683f8",
+      "circle-color": ["case", [">", ["get", "online"], 0], "#21b45b", [">", ["get", "offline"], 0], "#7e8a9a", "#1683f8"],
       "circle-stroke-width": 2,
       "circle-stroke-color": "#ffffff",
     },
@@ -97,7 +95,6 @@ export function buildSiteLayers(): LayerSpecification[] {
     id: "site-label",
     type: "symbol",
     source: SITES_SOURCE_ID,
-    maxzoom: 13,
     layout: {
       "text-field": ["get", "name"],
       "text-offset": [0, 2],
@@ -112,5 +109,16 @@ export function buildSiteLayers(): LayerSpecification[] {
     },
   };
 
-  return [siteHealthRing, sitePoint, siteLabel];
+  const siteIcon: SymbolLayerSpecification = {
+    id: "site-icon", type: "symbol", source: SITES_SOURCE_ID,
+    layout: { "icon-image": "site-building", "icon-size": 0.7, "icon-allow-overlap": true },
+    paint: { "icon-color": "#ffffff" },
+  };
+  const offlineBadge: SymbolLayerSpecification = {
+    id: "site-offline-badge", type: "symbol", source: SITES_SOURCE_ID,
+    filter: ["all", ["==", ["get", "online"], 0], [">", ["get", "offline"], 0]],
+    layout: { "icon-image": "status-offline", "icon-size": 0.45, "icon-offset": [22, -22], "icon-allow-overlap": true },
+    paint: { "icon-color": "#ef3f46", "icon-halo-color": "#ffffff", "icon-halo-width": 1.5 },
+  };
+  return [siteHealthRing, sitePoint, siteLabel, siteIcon, offlineBadge];
 }

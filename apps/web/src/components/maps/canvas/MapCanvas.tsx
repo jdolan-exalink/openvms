@@ -24,6 +24,7 @@ import { applyLayerVisibility, type LayerGroup } from "./layers/visibility";
 import { AnimationBudget, isPrefersReducedMotion } from "@/lib/maps/animationBudget";
 import { defaultMapRealtimeStore, MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { registerSdfSprites } from "./sprite";
+import { bindCameraPointerDrag } from "@/lib/maps/editorInteractions";
 
 export interface MapCanvasProps {
   provider: MapProviderConfig;
@@ -279,33 +280,25 @@ export function MapCanvas({
 
     // Unclustered camera click
     map.on("click", "cam-point-circle", (e) => {
+      if (cameraDrag.consumeClick()) return;
       const feat = e.features?.[0];
       if (feat?.properties?.id) {
         onSelectCameraRef.current?.(feat.properties.id);
       }
     });
 
-    // Drag is enabled only when the editor supplies these callbacks. MapLibre's
-    // layer-specific mousedown keeps empty-space placement and ordinary view pans intact.
-    let draggingCameraId: string | undefined;
-    map.on("mousedown", "cam-point-circle", (event) => {
-      const id = event.features?.[0]?.properties?.id;
-      if (!id || !onCameraDragStartRef.current || !onCameraDragMoveRef.current) return;
-      draggingCameraId = String(id);
-      map.dragPan.disable();
-      map.getCanvas().style.cursor = "grabbing";
-      onCameraDragStartRef.current(draggingCameraId);
-    });
-    map.on("mousemove", (event) => {
-      if (draggingCameraId) onCameraDragMoveRef.current?.(draggingCameraId, event.lngLat);
-    });
-    map.on("mouseup", (event) => {
-      if (!draggingCameraId) return;
-      const id = draggingCameraId;
-      draggingCameraId = undefined;
-      map.dragPan.enable();
-      map.getCanvas().style.cursor = "";
-      onCameraDragEndRef.current?.(id, event.lngLat);
+    const cameraDrag = bindCameraPointerDrag(map.getCanvas(), {
+      enabled: () => !!onCameraDragStartRef.current && !!onCameraDragMoveRef.current,
+      pick: point => {
+        if (!map.getLayer("cam-point-circle")) return;
+        const id = map.queryRenderedFeatures(point, { layers: ["cam-point-circle"] })[0]?.properties?.id;
+        return id ? String(id) : undefined;
+      },
+      pan: map.dragPan,
+      unproject: point => map.unproject(point),
+      start: id => onCameraDragStartRef.current?.(id),
+      move: (id, point) => onCameraDragMoveRef.current?.(id, point),
+      end: (id, point) => onCameraDragEndRef.current?.(id, point),
     });
 
     // Site overview click
@@ -395,6 +388,7 @@ export function MapCanvas({
 
     return () => {
       if (fovDebounceTimerRef.current) clearTimeout(fovDebounceTimerRef.current);
+      cameraDrag.dispose();
       resizeObserver.disconnect();
       controller.destroy();
       map.remove();

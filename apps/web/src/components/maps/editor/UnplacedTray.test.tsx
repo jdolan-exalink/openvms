@@ -40,7 +40,7 @@ describe("UnplacedTray", () => {
   it("offers the bulk placement at the site centre", () => {
     const onPlaceAll = vi.fn();
     render(<UnplacedTray cameras={cameras} onArm={() => {}} onPlaceAll={onPlaceAll} />);
-    fireEvent.click(screen.getByRole("button", { name: "Ubicar todas en el centro del sitio" }));
+    fireEvent.click(screen.getByRole("button", { name: "Distribuir provisionalmente" }));
     expect(onPlaceAll).toHaveBeenCalledTimes(1);
   });
 
@@ -59,6 +59,18 @@ describe("UnplacedTray", () => {
   it("says so when nothing is left to place", () => {
     render(<UnplacedTray cameras={[]} onArm={() => {}} onPlaceAll={() => {}} />);
     expect(screen.getByText(/Todas las cámaras del sitio están ubicadas/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Ubicar todas en el centro del sitio" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Distribuir provisionalmente" })).not.toBeInTheDocument();
   });
+});
+
+it("offers icon-and-name drag cards directly without selecting a camera first", () => {
+  const onArm = vi.fn(), setData = vi.fn();
+  render(<UnplacedTray cameras={cameras} onArm={onArm} />);
+  const card = screen.getByRole("button", { name: "Recepción" });
+  expect(card).toHaveAttribute("draggable", "true");
+  expect(card.querySelector("svg")).toBeInTheDocument();
+  fireEvent.dragStart(card, { dataTransfer: { setData } });
+  expect(onArm).not.toHaveBeenCalled();
+  expect(setData).toHaveBeenCalledWith(DRAG_MIME, "cu1");
+  expect(screen.getByText(/Suelta.*mapa/)).toBeInTheDocument();
 });

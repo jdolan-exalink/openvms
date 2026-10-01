@@ -58,9 +58,9 @@ describe("sitesLayer", () => {
     expect((src.data as any).features).toHaveLength(2);
   });
 
-  it("builds site layers with semantic zoom limits", () => {
+  it("keeps building identity markers across zoom levels", () => {
     const layers = buildSiteLayers();
-    expect(layers.length).toBe(3);
+    expect(layers.length).toBe(5);
 
     const ids = layers.map((l) => l.id);
     expect(ids).toContain("site-health-ring");
@@ -70,7 +70,7 @@ describe("sitesLayer", () => {
     for (const l of layers) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       expect((l as any).source).toBe(SITES_SOURCE_ID);
-      expect(l.maxzoom).toBeDefined();
+      expect(l.maxzoom).toBeUndefined();
     }
   });
 });

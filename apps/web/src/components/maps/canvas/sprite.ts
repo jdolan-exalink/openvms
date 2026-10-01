@@ -1,3 +1,5 @@
+import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
+import { cameraIcon, siteIcon, serverIcon, offlineIcon } from "@/lib/inventoryIcons";
 import type { Map as MapLibreMap } from "maplibre-gl";
 
 export interface SdfIconDefinition {
@@ -5,6 +7,18 @@ export interface SdfIconDefinition {
   width: number;
   height: number;
   draw: (ctx: CanvasRenderingContext2D) => void;
+}
+
+function inventoryGlyph(id: string, icon: IconDefinition): SdfIconDefinition {
+  return { id, width: 24, height: 24, draw: ctx => {
+    const [width, height, , , paths] = icon.icon;
+    ctx.save();
+    ctx.translate((24 - width * 20 / Math.max(width, height)) / 2, (24 - height * 20 / Math.max(width, height)) / 2);
+    ctx.scale(20 / Math.max(width, height), 20 / Math.max(width, height));
+    ctx.fillStyle = "#ffffff";
+    for (const path of typeof paths === "string" ? [paths] : paths) ctx.fill(new Path2D(path));
+    ctx.restore();
+  } };
 }
 
 // 24x24 monochrome glyphs that MapLibre will color with icon-color
@@ -17,28 +31,10 @@ export const ICONS: SdfIconDefinition[] = [
     ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(12, 10, 7, 0, Math.PI * 2); ctx.fill();
     ctx.fillRect(10, 16, 4, 4); ctx.fillRect(7, 20, 10, 2);
   } },
-  {
-    id: "cam-normal",
-    width: 24,
-    height: 24,
-    draw: (ctx) => {
-      ctx.fillStyle = "#ffffff";
-      // Camera body
-      ctx.beginPath();
-      ctx.roundRect(4, 7, 11, 10, 2);
-      ctx.fill();
-      // Camera lens cone
-      ctx.beginPath();
-      ctx.moveTo(15, 9);
-      ctx.lineTo(20, 6);
-      ctx.lineTo(20, 18);
-      ctx.lineTo(15, 15);
-      ctx.closePath();
-      ctx.fill();
-      // Stand / base
-      ctx.fillRect(8, 17, 3, 3);
-    },
-  },
+  inventoryGlyph("cam-normal", cameraIcon),
+  inventoryGlyph("site-building", siteIcon),
+  inventoryGlyph("server", serverIcon),
+  inventoryGlyph("status-offline", offlineIcon),
   {
     id: "cam-alarm",
     width: 24,

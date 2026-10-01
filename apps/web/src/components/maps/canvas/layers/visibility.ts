@@ -13,8 +13,8 @@ import { buildZonesLayers } from "./zonesLayer";
  * group so ownedLayerIds() covers them.
  */
 export const LAYER_GROUPS = {
-  cameras: ["cam-cluster", "cam-cluster-count", "cam-cluster-badge-alarms", "cam-point-halo", "cam-point-circle", "cam-point-icon", "cam-label"],
-  sites: ["site-health-ring", "site-point", "site-label"],
+  cameras: ["cam-cluster", "cam-cluster-count", "cam-cluster-icon", "cam-cluster-badge-alarms", "cam-point-halo", "cam-point-circle", "cam-point-icon", "cam-offline-badge", "cam-label"],
+  sites: ["site-health-ring", "site-point", "site-label", "site-icon", "site-offline-badge"],
   zones: ["zone-fill", "zone-outline", "zone-label"],
   coverage: ["fov-fill", "fov-outline"],
   alarmFx: ["fx-alarm-pulse"],

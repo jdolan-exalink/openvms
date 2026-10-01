@@ -42,7 +42,7 @@ export function buildCameraLayers(): LayerSpecification[] {
         "#7e8a9a", // next: offline / unreachable
         [">", ["get", "warnings"], 0],
         "#f59e0b", // next: warnings / degraded
-        "#1683f8", // all ok
+        "#21b45b", // all online
       ],
       "circle-radius": [
         "step",
@@ -70,6 +70,7 @@ export function buildCameraLayers(): LayerSpecification[] {
     layout: {
       "text-field": "{point_count_abbreviated}",
       "text-size": 12,
+      "text-offset": [0, 0.65],
       "text-allow-overlap": true,
     },
     paint: {
@@ -151,7 +152,7 @@ export function buildCameraLayers(): LayerSpecification[] {
     source: CAMERAS_SOURCE_ID,
     filter: ["!", ["has", "point_count"]],
     layout: {
-      "icon-image": ["get", "icon"],
+      "icon-image": "cam-normal",
       "icon-size": 0.65,
       "icon-allow-overlap": true,
     },
@@ -181,12 +182,27 @@ export function buildCameraLayers(): LayerSpecification[] {
     },
   };
 
+  const clusterIcon: SymbolLayerSpecification = {
+    id: "cam-cluster-icon", type: "symbol", source: CAMERAS_SOURCE_ID,
+    filter: ["has", "point_count"],
+    layout: { "icon-image": "cam-normal", "icon-size": 0.6, "icon-offset": [0, -9], "icon-allow-overlap": true },
+    paint: { "icon-color": "#ffffff" },
+  };
+  const offlineBadge: SymbolLayerSpecification = {
+    id: "cam-offline-badge", type: "symbol", source: CAMERAS_SOURCE_ID,
+    filter: ["all", ["!", ["has", "point_count"]], ["in", ["get", "st"], ["literal", ["offline", "unreachable", "no_signal"]]]],
+    layout: { "icon-image": "status-offline", "icon-size": 0.45, "icon-offset": [20, -20], "icon-allow-overlap": true },
+    paint: { "icon-color": "#ef3f46", "icon-halo-color": "#ffffff", "icon-halo-width": 1.5 },
+  };
+
   return [
     cameraHaloLayer,
     cameraCircleLayer,
     cameraIconLayer,
+    offlineBadge,
     clusterCircleLayer,
     clusterCountLayer,
+    clusterIcon,
     clusterAlarmsBadge,
     cameraLabelLayer,
   ];

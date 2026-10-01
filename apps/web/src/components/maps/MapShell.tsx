@@ -20,6 +20,7 @@ import {
   type DraftPlacement,
   type DraftState,
 } from "@/lib/maps/placementDraft";
+import { canvasDropPoint, spreadCameraPositions } from "@/lib/maps/editorInteractions";
 import { savePlacements } from "@/lib/maps/placements";
 import {
   addZonePoint,
@@ -200,6 +201,7 @@ function MapShellContent({
   const cameraDragIdRef = useRef<string | undefined>(undefined);
   const cameraDragMovedRef = useRef(false);
   const [saving, setSaving] = useState(false);
+  const [dropReady, setDropReady] = useState(false);
   const [saveError, setSaveError] = useState<string>();
   const pending = pendingPlacements(draft);
   const siteCenter = currentSite?.center?.kind === "geo" ? currentSite.center : undefined;
@@ -294,6 +296,7 @@ function MapShellContent({
   };
 
   const handleMapDrop = (event: DragEvent) => {
+    setDropReady(false);
     if (!editActive) return;
     const cameraId = event.dataTransfer.getData(DRAG_MIME);
     if (!cameraId) return;
@@ -301,19 +304,21 @@ function MapShellContent({
     const map = mapRef.current;
     if (!map) return;
     const rect = map.getContainer().getBoundingClientRect();
-    const point = map.unproject([event.clientX - rect.left, event.clientY - rect.top]);
+    const pixel = canvasDropPoint(map.getCanvas(), rect, event.target, event.clientX, event.clientY);
+    if (!pixel) return;
+    const point = map.unproject(pixel);
     placeCameraAt(cameraId, { lng: point.lng, lat: point.lat });
   };
 
   const handlePlaceAll = () => {
     if (!currentSite || !siteCenter || !unplacedCameras?.length) return;
     setArmedCameraId(undefined);
-    setDraft(stageMany(draft, unplacedCameras.map((camera) => ({
+    setDraft(stageMany(draft, spreadCameraPositions(unplacedCameras.filter(camera => !draft.entries[camera.id]).map(camera => camera.id), siteCenter).map((camera) => ({
       entityId: camera.id,
       entityType: "camera" as const,
       siteId: currentSite.id,
-      lat: siteCenter.lat,
-      lng: siteCenter.lng,
+      lat: camera.lat,
+      lng: camera.lng,
       ...DEFAULT_PLACEMENT,
     }))));
   };
@@ -701,8 +706,19 @@ function MapShellContent({
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg"
       onPointerDownCapture={() => focusPolicy.interact()} onWheelCapture={() => focusPolicy.interact()}
       onKeyDownCapture={() => focusPolicy.interact()}
-      onDragOver={(event) => { if (editActive) event.preventDefault(); }}
+      onDragOver={(event) => {
+        if (!editActive || !Array.from(event.dataTransfer.types ?? []).includes(DRAG_MIME)) return;
+        const map = mapRef.current;
+        const valid = !!map && !!canvasDropPoint(map.getCanvas(), map.getContainer().getBoundingClientRect(), event.target, event.clientX, event.clientY);
+        setDropReady(valid);
+        if (valid) { event.preventDefault(); event.dataTransfer.dropEffect = "copy"; }
+      }}
+      onDragLeave={() => setDropReady(false)}
+      onDragEnd={() => setDropReady(false)}
       onDrop={handleMapDrop}>
+      {dropReady && <div role="status" className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/10">
+        <span className="rounded-lg bg-surface px-4 py-2 text-sm font-medium text-accent shadow-lg">Suelta la cámara para colocarla</span>
+      </div>}
       {/* Floating Top Controls Bar */}
       <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex flex-wrap items-center justify-between gap-2 px-4">
         <div className="pointer-events-auto">
@@ -819,7 +835,10 @@ function MapShellContent({
         {editActive && (
           <aside className="absolute bottom-3 left-1/2 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-start gap-2">
             {unplacedCameras ? <UnplacedTray
-              cameras={unplacedCameras ?? []}
+              siteName={currentSite?.name}
+              cameras={unplacedCameras.map(camera => ({ ...camera,
+                serverName: servers.data?.find(server => server.id === inventoryQuery.data?.find(item => item.id === camera.id)?.server_id)?.name,
+              }))}
               armedId={armedCameraId}
               onArm={setArmedCameraId}
               onPlaceAll={siteCenter ? handlePlaceAll : undefined}

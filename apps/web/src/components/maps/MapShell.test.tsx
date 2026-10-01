@@ -389,16 +389,17 @@ it("moves a placed camera as a draft that keeps its If-Match revision", async ()
   expect(body).toMatchObject({ lat: 0.25, lng: 0.5, fov_deg: 60, range_m: 100, bearing_deg: 0 });
 });
 
-it("bulk-places every unplaced camera at the site centre in one undo step", async () => {
+it("spreads only unplaced cameras near the site center in one undo step", async () => {
   const { fetchSpy } = await setupEditor();
-  fireEvent.click(screen.getByRole("button", { name: "Ubicar todas en el centro del sitio" }));
+  fireEvent.click(screen.getByRole("button", { name: "Distribuir provisionalmente" }));
   fireEvent.click(await screen.findByRole("button", { name: "Guardar (2)" }));
 
   await waitFor(() => expect(placementPuts(fetchSpy)).toHaveLength(2));
   const bodies = await Promise.all(
     placementPuts(fetchSpy).map(async (request) => JSON.parse(await request.text()) as Record<string, unknown>),
   );
-  expect(bodies.every((body) => body.lat === 0 && body.lng === 0)).toBe(true);
+  expect(new Set(bodies.map(body => `${body.lat},${body.lng}`)).size).toBe(2);
+  expect(bodies.every(body => Math.abs(Number(body.lat)) < 0.001 && Math.abs(Number(body.lng)) < 0.001)).toBe(true);
 });
 
 // --- CSV import (M-B8) ------------------------------------------------------
@@ -704,4 +705,28 @@ describe("Operational Maps completion", () => {
     await act(async () => { router.history.back(); });
     await waitFor(() => expect(screen.getByRole("tab", { name: "En vivo" })).toHaveAttribute("aria-selected", "true"));
   });
+});
+
+it("places a directly dragged camera without selection and ignores drops onto the tray", async () => {
+  const { fetchSpy } = await setupEditor();
+  const container = screen.getByTestId("canvas");
+  const canvas = document.createElement("canvas"); container.appendChild(canvas);
+  container.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100 } as DOMRect);
+  act(() => canvasHarness.props?.onMapReady?.({
+    getCanvas: () => canvas, getContainer: () => container,
+    unproject: ([lng, lat]: number[]) => ({ lng, lat }), easeTo: vi.fn(), once: vi.fn(),
+  } as never));
+  const transfer = { getData: () => "cu1", types: ["application/x-openvms-map-camera"] };
+  const drop = (target: HTMLElement) => {
+    const event = new Event("drop", { bubbles: true, cancelable: true });
+    Object.assign(event, { dataTransfer: transfer, clientX: 20, clientY: 30 });
+    fireEvent(target, event);
+  };
+  drop(screen.getByRole("button", { name: "Nueva cam" }));
+  expect(screen.queryByRole("button", { name: "Guardar (1)" })).not.toBeInTheDocument();
+  drop(canvas);
+  fireEvent.click(await screen.findByRole("button", { name: "Guardar (1)" }));
+  await waitFor(() => expect(placementPuts(fetchSpy)).toHaveLength(1));
+  expect(JSON.parse(await placementPuts(fetchSpy)[0]!.text())).toMatchObject({ lat: 30, lng: 20 });
+  expect(placementPuts(fetchSpy)[0]!.headers.get("If-Match")).toBeNull();
 });

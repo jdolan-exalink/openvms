@@ -52,3 +52,13 @@ describe("cameraLayers", () => {
     expect(labelLayer?.minzoom).toBe(16);
   });
 });
+
+it("keeps camera identity visible in clusters and uses a separate offline X badge", () => {
+  const layers = buildCameraLayers();
+  const cluster = layers.find(l => l.id === "cam-cluster-icon");
+  expect(cluster?.type).toBe("symbol");
+  expect(cluster?.type === "symbol" && cluster.layout?.["icon-image"]).toBe("cam-normal");
+  const camera = layers.find(l => l.id === "cam-point-icon");
+  expect(camera?.type === "symbol" && camera.layout?.["icon-image"]).toBe("cam-normal");
+  expect(layers.find(l => l.id === "cam-offline-badge")?.type).toBe("symbol");
+});
