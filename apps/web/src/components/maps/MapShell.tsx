@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { mapsConfigQuery, mapsOverviewQuery } from "@/lib/maps/api";
-import type { MapMode } from "@/lib/maps/types";
+import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery } from "@/lib/maps/api";
+import type { CameraEntity, MapMode } from "@/lib/maps/types";
 import { MapCanvas } from "./canvas/MapCanvas";
 import { MapToolbar } from "./MapToolbar";
 import { HierarchyBreadcrumb } from "./HierarchyBreadcrumb";
@@ -17,11 +17,14 @@ export interface MapShellProps {
 
 export function MapShell({
   initialSiteId,
+  initialCameraId,
   initialMode = "live",
   canEdit = false,
 }: MapShellProps) {
   const [mode, setMode] = useState<MapMode>(initialMode);
   const [selectedSiteId, setSelectedSiteId] = useState<string | undefined>(initialSiteId);
+  const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(initialCameraId);
+  const [hoveredCameraId, setHoveredCameraId] = useState<string | null>(null);
   const [layersOpen, setLayersOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -30,6 +33,13 @@ export function MapShell({
 
   const sites = overviewQuery.data ?? [];
   const currentSite = sites.find((s) => s.id === selectedSiteId) ?? (sites.length === 1 ? sites[0] : undefined);
+
+  const entitiesQuery = useQuery(siteEntitiesQuery(currentSite?.id ?? ""));
+
+  const cameras: CameraEntity[] = useMemo(() => {
+    if (!entitiesQuery.data) return [];
+    return entitiesQuery.data.entities.filter((e): e is CameraEntity => e.type === "camera");
+  }, [entitiesQuery.data]);
 
   if (configQuery.isLoading) {
     return (
@@ -68,8 +78,14 @@ export function MapShell({
           <HierarchyBreadcrumb
             sites={sites}
             currentSite={currentSite}
-            onSelectSite={(id) => setSelectedSiteId(id)}
-            onClearSite={() => setSelectedSiteId(undefined)}
+            onSelectSite={(id) => {
+              setSelectedSiteId(id);
+              setSelectedCameraId(undefined);
+            }}
+            onClearSite={() => {
+              setSelectedSiteId(undefined);
+              setSelectedCameraId(undefined);
+            }}
           />
         </div>
 
@@ -92,6 +108,16 @@ export function MapShell({
           provider={provider}
           center={center}
           zoom={zoom}
+          cameras={cameras}
+          sites={sites}
+          selectedCameraId={selectedCameraId}
+          hoveredCameraId={hoveredCameraId ?? undefined}
+          onSelectCamera={(id) => setSelectedCameraId(id)}
+          onHoverCamera={(id) => setHoveredCameraId(id)}
+          onSelectSite={(id) => {
+            setSelectedSiteId(id);
+            setSelectedCameraId(undefined);
+          }}
         />
       </div>
     </div>

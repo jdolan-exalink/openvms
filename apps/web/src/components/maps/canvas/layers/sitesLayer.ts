@@ -1,0 +1,116 @@
+import type {
+  CircleLayerSpecification,
+  GeoJSONSourceSpecification,
+  LayerSpecification,
+  SymbolLayerSpecification,
+} from "maplibre-gl";
+import type { Feature, FeatureCollection, Point } from "geojson";
+import type { Site } from "@/lib/maps/types";
+
+export const SITES_SOURCE_ID = "sites";
+
+export interface SiteFeatureProperties {
+  id: string;
+  name: string;
+  camera_count: number;
+  online: number;
+  offline: number;
+  alarms: number;
+  severity: "OK" | "WARNING" | "CRITICAL";
+}
+
+export function sitesToFeatureCollection(sites: Site[]): FeatureCollection<Point, SiteFeatureProperties> {
+  const features: Feature<Point, SiteFeatureProperties>[] = [];
+
+  for (const s of sites) {
+    if (!s.center) continue;
+    features.push({
+      type: "Feature",
+      id: s.id,
+      geometry: {
+        type: "Point",
+        coordinates: [s.center.lng, s.center.lat],
+      },
+      properties: {
+        id: s.id,
+        name: s.name,
+        camera_count: s.cameraCount ?? 0,
+        online: s.health?.online ?? 0,
+        offline: s.health?.offline ?? 0,
+        alarms: s.health?.activeAlarms ?? 0,
+        severity: s.health?.severity ?? "OK",
+      },
+    });
+  }
+
+  return {
+    type: "FeatureCollection",
+    features,
+  };
+}
+
+export function buildSitesSource(sites: Site[] = []): GeoJSONSourceSpecification {
+  return {
+    type: "geojson",
+    data: sitesToFeatureCollection(sites),
+  };
+}
+
+export function buildSiteLayers(): LayerSpecification[] {
+  // 1. Health ring around site
+  const siteHealthRing: CircleLayerSpecification = {
+    id: "site-health-ring",
+    type: "circle",
+    source: SITES_SOURCE_ID,
+    maxzoom: 12,
+    paint: {
+      "circle-radius": 18,
+      "circle-color": "transparent",
+      "circle-stroke-width": 3,
+      "circle-stroke-color": [
+        "case",
+        ["==", ["get", "severity"], "CRITICAL"],
+        "#ef3f46",
+        ["==", ["get", "severity"], "WARNING"],
+        "#f59e0b",
+        "#21b45b",
+      ],
+    },
+  };
+
+  // 2. Central site circle
+  const sitePoint: CircleLayerSpecification = {
+    id: "site-point",
+    type: "circle",
+    source: SITES_SOURCE_ID,
+    maxzoom: 12,
+    paint: {
+      "circle-radius": 14,
+      "circle-color": "#1683f8",
+      "circle-stroke-width": 2,
+      "circle-stroke-color": "#ffffff",
+    },
+  };
+
+  // 3. Site label
+  const siteLabel: SymbolLayerSpecification = {
+    id: "site-label",
+    type: "symbol",
+    source: SITES_SOURCE_ID,
+    maxzoom: 13,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-offset": [0, 2],
+      "text-anchor": "top",
+      "text-size": 12,
+      "text-max-width": 10,
+    },
+    paint: {
+      "text-color": "#ffffff",
+      "text-halo-color": "#0e1523",
+      "text-halo-width": 2,
+    },
+  };
+
+  return [siteHealthRing, sitePoint, siteLabel];
+}
