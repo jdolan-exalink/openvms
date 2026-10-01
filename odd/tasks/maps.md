@@ -798,3 +798,11 @@ object event stream, no production MQTT consumption, and missing lifecycle updat
 This is a separate feature-scope discovery, not a new Maps task, acceptance criterion, or an
 implemented Event Rail. No Event Rail code, ingestion, lifecycle, or replay was changed here.
 Any implementation requires separately authorized scope and verification.
+
+### Parent delivery evidence (2026-10-01)
+
+- Local work-unit commit: `0889ec1` (`feat(maps): complete operational navigation and mode workflows`).
+- Authored range from baseline `de66c1c`: 655 additions + 52 deletions = 707 lines, including recovery/verification documentation; no generated files. One cohesive operational change with regression tests and supporting docs, not a PR. Existing feature-branch-chain delivery applies to any later PR slices; no push, PR, or merge performed.
+- Independent parent-requested focused spot check: 45 tests / 4 files PASS (MapShell, HierarchyBreadcrumb, MapOperationsPanel, Maps route).
+- Native committed-range assessment: medium; `review_due=true`, `slice_budget_reached`. Candidate consent/review outcome pending; automated checks are not a review receipt.
+- Installed-account acceptance and deployment remain pending explicit operational authorization. Event Rail remains explored only, not implemented.
