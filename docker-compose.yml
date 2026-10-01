@@ -21,6 +21,8 @@ x-go-env: &go-env
   # Feature flags (comma-separated, docs/live-view-architecture.md). The code defaults every
   # flag to off; the local stack enables the Live View P0 flags for testing.
   OPENVMS_FEATURES: ${OPENVMS_FEATURES:-persistentPlayers,videoSurfaceLayer}
+  SESSION_TTL: ${SESSION_TTL:-12h}
+  SESSION_IDLE: ${SESSION_IDLE:-2h}
 
 services:
   postgres:
