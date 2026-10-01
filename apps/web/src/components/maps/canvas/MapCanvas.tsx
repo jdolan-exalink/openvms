@@ -4,9 +4,11 @@ import type { LngLatBounds } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Point } from "geojson";
 import type { CameraEntity, MapProviderConfig, Site } from "@/lib/maps/types";
+import { type BoundingBox } from "@/lib/maps/geo";
 import { EntityIndex } from "@/lib/maps/entityIndex";
 import { buildMapStyle, getThemeColors, MapStyleController } from "./MapStyleController";
 import { buildCameraLayers, buildCamerasSource, CAMERAS_SOURCE_ID } from "./layers/cameraLayers";
+import { buildFovLayers, buildFovSource, camerasToFovCollection, FOV_SOURCE_ID } from "./layers/fovLayer";
 import { buildSiteLayers, buildSitesSource, SITES_SOURCE_ID, sitesToFeatureCollection } from "./layers/sitesLayer";
 import { registerSdfSprites } from "./sprite";
 
@@ -18,6 +20,7 @@ export interface MapCanvasProps {
   bearing?: number;
   cameras?: CameraEntity[];
   sites?: Site[];
+  coverage?: boolean;
   selectedCameraId?: string;
   hoveredCameraId?: string;
   onSelectCamera?: (cameraId: string) => void;
@@ -37,6 +40,7 @@ export function MapCanvas({
   bearing = 0,
   cameras = [],
   sites = [],
+  coverage = true,
   selectedCameraId,
   hoveredCameraId,
   onSelectCamera,
@@ -52,6 +56,7 @@ export function MapCanvas({
   const controllerRef = useRef<MapStyleController | null>(null);
   const prevSelectedIdRef = useRef<string | undefined>(undefined);
   const prevHoveredIdRef = useRef<string | undefined>(undefined);
+  const fovDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const onMoveEndRef = useRef(onMoveEnd);
   const onSelectCameraRef = useRef(onSelectCamera);
@@ -59,6 +64,7 @@ export function MapCanvas({
   const onSelectSiteRef = useRef(onSelectSite);
   const camerasRef = useRef(cameras);
   const sitesRef = useRef(sites);
+  const coverageRef = useRef(coverage);
 
   const setupCustomLayersRef = useRef<(map: maplibregl.Map) => void>(() => {});
 
@@ -69,10 +75,12 @@ export function MapCanvas({
     onSelectSiteRef.current = onSelectSite;
     camerasRef.current = cameras;
     sitesRef.current = sites;
+    coverageRef.current = coverage;
+
     setupCustomLayersRef.current = (map: maplibregl.Map) => {
       registerSdfSprites(map);
 
-      // 1. Sites Source & Layers (Overview / country level)
+      // 1. Sites Source & Layers (Country / Overview level)
       if (!map.getSource(SITES_SOURCE_ID)) {
         map.addSource(SITES_SOURCE_ID, buildSitesSource(sitesRef.current));
         for (const layer of buildSiteLayers()) {
@@ -80,7 +88,15 @@ export function MapCanvas({
         }
       }
 
-      // 2. Cameras Source & Layers (Clustered & Unclustered)
+      // 2. FOV Cones Source & Layers (Street level, rendered underneath cameras)
+      if (!map.getSource(FOV_SOURCE_ID)) {
+        map.addSource(FOV_SOURCE_ID, buildFovSource());
+        for (const layer of buildFovLayers(coverageRef.current)) {
+          if (!map.getLayer(layer.id)) map.addLayer(layer);
+        }
+      }
+
+      // 3. Cameras Source & Layers (Clustered & Unclustered)
       if (!map.getSource(CAMERAS_SOURCE_ID)) {
         const sourceSpec = buildCamerasSource();
         const entityIndex = new EntityIndex(camerasRef.current);
@@ -140,8 +156,26 @@ export function MapCanvas({
     controllerRef.current = controller;
     mapRef.current = map;
 
+    const updateFov = () => {
+      const fovSource = map.getSource(FOV_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+      if (!fovSource) return;
+      if (map.getZoom() < 13 || !coverageRef.current) {
+        fovSource.setData({ type: "FeatureCollection", features: [] });
+        return;
+      }
+      const b = map.getBounds();
+      const bbox: BoundingBox = {
+        west: b.getWest(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        north: b.getNorth(),
+      };
+      fovSource.setData(camerasToFovCollection(camerasRef.current, bbox));
+    };
+
     map.on("load", () => {
       setupCustomLayersRef.current(map);
+      updateFov();
       initOnMapReady?.(map);
     });
 
@@ -205,6 +239,14 @@ export function MapCanvas({
     });
 
     map.on("moveend", () => {
+      // Debounce FOV cone calculation by 150ms per architecture §11
+      if (fovDebounceTimerRef.current) {
+        clearTimeout(fovDebounceTimerRef.current);
+      }
+      fovDebounceTimerRef.current = setTimeout(() => {
+        updateFov();
+      }, 150);
+
       if (onMoveEndRef.current) {
         const c = map.getCenter();
         onMoveEndRef.current({
@@ -221,6 +263,7 @@ export function MapCanvas({
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      if (fovDebounceTimerRef.current) clearTimeout(fovDebounceTimerRef.current);
       resizeObserver.disconnect();
       controller.destroy();
       map.remove();
@@ -238,7 +281,18 @@ export function MapCanvas({
       const entityIndex = new EntityIndex(cameras);
       source.setData(entityIndex.toFeatureCollection());
     }
-  }, [cameras]);
+    const fovSource = map.getSource(FOV_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    if (fovSource && map.getZoom() >= 13 && coverage) {
+      const b = map.getBounds();
+      const bbox: BoundingBox = {
+        west: b.getWest(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        north: b.getNorth(),
+      };
+      fovSource.setData(camerasToFovCollection(cameras, bbox));
+    }
+  }, [cameras, coverage]);
 
   // Update sites GeoJSON data
   useEffect(() => {
@@ -250,34 +304,61 @@ export function MapCanvas({
     }
   }, [sites]);
 
-  // Update selection feature-state
+  // Toggle coverage visibility
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
+    const visibility = coverage ? "visible" : "none";
+    if (map.getLayer("fov-fill")) {
+      map.setLayoutProperty("fov-fill", "visibility", visibility);
+    }
+    if (map.getLayer("fov-outline")) {
+      map.setLayoutProperty("fov-outline", "visibility", visibility);
+    }
+  }, [coverage]);
+
+  // Update selection feature-state on cameras & fov
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+
     if (prevSelectedIdRef.current && prevSelectedIdRef.current !== selectedCameraId) {
       try {
         map.setFeatureState({ source: CAMERAS_SOURCE_ID, id: prevSelectedIdRef.current }, { selected: false });
+        map.setFeatureState({ source: FOV_SOURCE_ID, id: prevSelectedIdRef.current }, { selected: false });
       } catch {
-        // Ignored if feature disappeared
+        // Ignored
       }
     }
     if (selectedCameraId) {
       try {
         map.setFeatureState({ source: CAMERAS_SOURCE_ID, id: selectedCameraId }, { selected: true });
+        map.setFeatureState({ source: FOV_SOURCE_ID, id: selectedCameraId }, { selected: true });
+
+        // Fly to camera position smoothly
+        const cam = cameras.find((c) => c.id === selectedCameraId);
+        if (cam && cam.position.kind === "geo") {
+          map.easeTo({
+            center: [cam.position.lng, cam.position.lat],
+            zoom: Math.max(map.getZoom(), 16),
+          });
+        }
       } catch {
         // Ignored
       }
     }
     prevSelectedIdRef.current = selectedCameraId;
-  }, [selectedCameraId]);
+  }, [selectedCameraId, cameras]);
 
-  // Update hover feature-state
+  // Update hover feature-state on cameras & fov
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
+
     if (prevHoveredIdRef.current && prevHoveredIdRef.current !== hoveredCameraId) {
       try {
         map.setFeatureState({ source: CAMERAS_SOURCE_ID, id: prevHoveredIdRef.current }, { hover: false });
+        map.setFeatureState({ source: FOV_SOURCE_ID, id: prevHoveredIdRef.current }, { hover: false });
       } catch {
         // Ignored
       }
@@ -285,6 +366,7 @@ export function MapCanvas({
     if (hoveredCameraId) {
       try {
         map.setFeatureState({ source: CAMERAS_SOURCE_ID, id: hoveredCameraId }, { hover: true });
+        map.setFeatureState({ source: FOV_SOURCE_ID, id: hoveredCameraId }, { hover: true });
       } catch {
         // Ignored
       }

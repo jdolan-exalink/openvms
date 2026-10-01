@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { meQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
 import { MapShell } from "@/components/maps/MapShell";
@@ -15,7 +15,8 @@ export type MapsSearch = {
 };
 
 export function Maps() {
-  const search = useSearch({ from: "/app/maps" as never }) as MapsSearch;
+  const search = useSearch({ strict: false }) as MapsSearch;
+  const navigate = useNavigate();
   const me = useQuery(meQuery);
 
   const canView = can(me.data, "maps.view");
@@ -38,6 +39,43 @@ export function Maps() {
     );
   }
 
+  const handleSelectSite = (siteId: string | undefined) => {
+    void navigate({
+      to: "/maps",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      search: (prev: any) => ({
+        ...prev,
+        site: siteId,
+        camera: undefined,
+      }),
+      replace: true,
+    });
+  };
+
+  const handleSelectCamera = (cameraId: string | undefined) => {
+    void navigate({
+      to: "/maps",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      search: (prev: any) => ({
+        ...prev,
+        camera: cameraId,
+      }),
+      replace: true,
+    });
+  };
+
+  const handleModeChange = (mode: MapMode) => {
+    void navigate({
+      to: "/maps",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      search: (prev: any) => ({
+        ...prev,
+        mode,
+      }),
+      replace: true,
+    });
+  };
+
   return (
     <div className="relative h-[calc(100vh-3.5rem)] w-full overflow-hidden">
       <MapShell
@@ -45,6 +83,9 @@ export function Maps() {
         initialCameraId={search.camera}
         initialMode={search.mode || "live"}
         canEdit={canEdit}
+        onSelectSite={handleSelectSite}
+        onSelectCamera={handleSelectCamera}
+        onModeChange={handleModeChange}
       />
     </div>
   );

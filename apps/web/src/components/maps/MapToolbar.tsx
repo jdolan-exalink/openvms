@@ -1,4 +1,4 @@
-import { Video, Search, BarChart3, Edit3, SlidersHorizontal, Layers } from "lucide-react";
+import { Video, Search, BarChart3, Edit3, SlidersHorizontal, Layers, Radar } from "lucide-react";
 import type { MapMode } from "@/lib/maps/types";
 import { cn } from "@/lib/cn";
 
@@ -6,6 +6,8 @@ export interface MapToolbarProps {
   mode: MapMode;
   onModeChange: (mode: MapMode) => void;
   canEdit?: boolean;
+  coverage?: boolean;
+  onToggleCoverage?: () => void;
   onToggleLayers?: () => void;
   onToggleFilters?: () => void;
   layersActive?: boolean;
@@ -23,6 +25,8 @@ export function MapToolbar({
   mode,
   onModeChange,
   canEdit = false,
+  coverage = true,
+  onToggleCoverage,
   onToggleLayers,
   onToggleFilters,
   layersActive = false,
@@ -58,6 +62,21 @@ export function MapToolbar({
       <div className="h-4 w-px bg-line" aria-hidden />
 
       <div className="flex items-center gap-1">
+        {onToggleCoverage && (
+          <button
+            type="button"
+            onClick={onToggleCoverage}
+            aria-pressed={coverage}
+            title={coverage ? "Ocultar conos FOV (Cobertura)" : "Mostrar conos FOV (Cobertura)"}
+            className={cn(
+              "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
+              coverage && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",
+            )}
+          >
+            <Radar className="size-3.5" aria-hidden />
+          </button>
+        )}
+
         {onToggleLayers && (
           <button
             type="button"

@@ -13,6 +13,9 @@ export interface MapShellProps {
   initialCameraId?: string;
   initialMode?: MapMode;
   canEdit?: boolean;
+  onSelectSite?: (siteId: string | undefined) => void;
+  onSelectCamera?: (cameraId: string | undefined) => void;
+  onModeChange?: (mode: MapMode) => void;
 }
 
 export function MapShell({
@@ -20,11 +23,15 @@ export function MapShell({
   initialCameraId,
   initialMode = "live",
   canEdit = false,
+  onSelectSite,
+  onSelectCamera,
+  onModeChange,
 }: MapShellProps) {
   const [mode, setMode] = useState<MapMode>(initialMode);
   const [selectedSiteId, setSelectedSiteId] = useState<string | undefined>(initialSiteId);
   const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(initialCameraId);
   const [hoveredCameraId, setHoveredCameraId] = useState<string | null>(null);
+  const [coverage, setCoverage] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
@@ -70,6 +77,23 @@ export function MapShell({
 
   const zoom = currentSite?.defaultZoom ?? defaultZoom ?? 12;
 
+  const handleModeChange = (nextMode: MapMode) => {
+    setMode(nextMode);
+    onModeChange?.(nextMode);
+  };
+
+  const handleSelectSite = (siteId: string | undefined) => {
+    setSelectedSiteId(siteId);
+    setSelectedCameraId(undefined);
+    onSelectSite?.(siteId);
+    onSelectCamera?.(undefined);
+  };
+
+  const handleSelectCamera = (cameraId: string) => {
+    setSelectedCameraId(cameraId);
+    onSelectCamera?.(cameraId);
+  };
+
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg">
       {/* Floating Top Controls Bar */}
@@ -78,22 +102,18 @@ export function MapShell({
           <HierarchyBreadcrumb
             sites={sites}
             currentSite={currentSite}
-            onSelectSite={(id) => {
-              setSelectedSiteId(id);
-              setSelectedCameraId(undefined);
-            }}
-            onClearSite={() => {
-              setSelectedSiteId(undefined);
-              setSelectedCameraId(undefined);
-            }}
+            onSelectSite={(id) => handleSelectSite(id)}
+            onClearSite={() => handleSelectSite(undefined)}
           />
         </div>
 
         <div className="pointer-events-auto">
           <MapToolbar
             mode={mode}
-            onModeChange={setMode}
+            onModeChange={handleModeChange}
             canEdit={canEdit}
+            coverage={coverage}
+            onToggleCoverage={() => setCoverage(!coverage)}
             onToggleLayers={() => setLayersOpen(!layersOpen)}
             onToggleFilters={() => setFiltersOpen(!filtersOpen)}
             layersActive={layersOpen}
@@ -110,14 +130,12 @@ export function MapShell({
           zoom={zoom}
           cameras={cameras}
           sites={sites}
+          coverage={coverage}
           selectedCameraId={selectedCameraId}
           hoveredCameraId={hoveredCameraId ?? undefined}
-          onSelectCamera={(id) => setSelectedCameraId(id)}
+          onSelectCamera={handleSelectCamera}
           onHoverCamera={(id) => setHoveredCameraId(id)}
-          onSelectSite={(id) => {
-            setSelectedSiteId(id);
-            setSelectedCameraId(undefined);
-          }}
+          onSelectSite={(id) => handleSelectSite(id)}
         />
       </div>
     </div>
