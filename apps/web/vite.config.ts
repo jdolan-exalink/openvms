@@ -30,6 +30,11 @@ export default defineConfig({
       },
     },
   },
+  worker: {
+    // MapLibre's worker config URL drives `new Worker(url, { type: "module" })`, so the
+    // bundled worker must stay ESM.
+    format: "es",
+  },
   test: {
     environment: "jsdom",
     globals: true,

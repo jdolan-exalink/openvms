@@ -1,6 +1,14 @@
 import { useEffect, useRef } from "react";
 import * as maplibregl from "maplibre-gl";
 import type { LngLatBounds } from "maplibre-gl";
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url";
+
+// MapLibre v6 ships its worker as a sibling file it locates relative to its own bundle
+// URL — after bundling that points at /assets/maplibre-gl-worker.mjs, which no bundler
+// emits. Worse, a raw copy of the file still imports ./maplibre-gl-shared.mjs, which
+// Rollup inlines elsewhere. ?worker&url makes Vite bundle a self-contained worker and
+// hand us its URL; worker.format "es" (vite.config) keeps it a module worker.
+maplibregl.config.WORKER_URL = maplibreWorkerUrl;
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Point } from "geojson";
 import type { CameraEntity, MapProviderConfig, Site, Zone } from "@/lib/maps/types";
