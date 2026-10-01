@@ -31,7 +31,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-W1 — MapLibre route, canvas, theme styles, tile provider (PMTiles) (`12b6ce0`)
 - [x] M-W2 — camera layers, clustering w/ badges, status icons, semantic zoom (`3cf166c`)
 - [x] M-W3 — FOV cones, selection, breadcrumb, deep links (`71f3ed0`)
-- [ ] M-W4 — realtime store, pulse/ripple, animation budget
+- [x] M-W4 — realtime store, pulse/ripple, animation budget (`a494a46`)
 - [ ] M-W5 — camera panel, hover preview, context menu, nearby cameras
 - [ ] M-W6 — alarm panel, site health, auto-focus
 - [ ] M-W7 — layers & filters panels, user prefs
@@ -54,6 +54,7 @@ ask-on-risk; push/PR are PO decisions.
 - 2026-09-30: M-W1 completed (`12b6ce0`: maplibre-gl and pmtiles dependencies, lazy /maps route with search params, MapShell with HierarchyBreadcrumb and MapToolbar, MapCanvas wrapper, MapStyleController theme tokens with raster dark fallback and PMTiles protocol, navigation item behind maps feature flag, and full unit test coverage).
 - 2026-09-30: M-W2 completed (`3cf166c`: camera layers, clustering with worst-child circle color and count/alarm badges, SDF status glyphs sprite generator, semantic zoom with country-level site health rings, EntityIndex with display-state priority engine, and full test suite).
 - 2026-10-01: M-W3 completed (`71f3ed0`: FOV cones geometry with haversine destination point, FOV fill/outline layers, selection sync, 150ms viewport culling debouncing, deep-linking URL search params synchronization).
+- 2026-10-01: M-W4 completed (`a494a46`: realtime store with 5-min ring buffer, dedup Set, throttled camera status flush 1/s, animation budget with concurrent ripple/pulse caps, reduced-motion fallback, and fx layers).
 
 
 
