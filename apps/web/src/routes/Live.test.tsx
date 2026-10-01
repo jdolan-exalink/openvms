@@ -84,6 +84,39 @@ const emptyCatalogs = {
 };
 
 describe("Live", () => {
+  it("consumes an authorized camera handoff while preserving the saved selection", async () => {
+    stubBrowserAPIs();
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-1", quality: "main" }, null, null, null,
+    ]));
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "North"), camera("cam-2", "East")] }),
+      ...emptyCatalogs,
+    })));
+    const { router } = renderPage(Live, "/?camera=cam-2");
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]));
+      expect(saved?.tiles.slice(0, 2)).toEqual([
+        { camera_id: "cam-1", quality: "main" }, { camera_id: "cam-2", quality: "sub" },
+      ]);
+    });
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty("camera"));
+  });
+
+  it("ignores an unauthorized camera handoff", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "North")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live, "/?camera=hidden");
+    await screen.findByRole("button", { name: /North/ });
+    await waitFor(() => expect(localStorage.getItem(liveSelectionKey("t1", "u1"))).not.toBeNull());
+    expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["hidden"]))?.tiles.every(t => t === null)).toBe(true);
+  });
+
   it("places the camera tree in the shell context sidebar without remounting live media", async () => {
     stubBrowserAPIs();
     vi.stubGlobal(

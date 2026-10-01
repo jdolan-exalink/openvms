@@ -32,7 +32,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-W2 — camera layers, clustering w/ badges, status icons, semantic zoom (`3cf166c`)
 - [x] M-W3 — FOV cones, selection, breadcrumb, deep links (`71f3ed0`)
 - [x] M-W4 — realtime store, pulse/ripple, animation budget (`a494a46`)
-- [ ] M-W5 — camera panel, hover preview, context menu, nearby cameras
+- [x] M-W5 — camera panel, hover preview, context menu, nearby cameras
 - [ ] M-W6 — alarm panel, site health, auto-focus
 - [ ] M-W7 — layers & filters panels, user prefs
 - [ ] M-W8 — placement editor + Sin ubicar tray
@@ -56,5 +56,86 @@ ask-on-risk; push/PR are PO decisions.
 - 2026-10-01: M-W3 completed (`71f3ed0`: FOV cones geometry with haversine destination point, FOV fill/outline layers, selection sync, 150ms viewport culling debouncing, deep-linking URL search params synchronization).
 - 2026-10-01: M-W4 completed (`a494a46`: realtime store with 5-min ring buffer, dedup Set, throttled camera status flush 1/s, animation budget with concurrent ripple/pulse caps, reduced-motion fallback, and fx layers).
 
+## Resumed scope (2026-10-01)
+Explicit user confirmation today enables **STRICT TDD ON**, superseding historical OFF above.
+Source: current user authorization; observe RED → GREEN → REFACTOR with sequential checks.
+Runners: `pnpm --filter @openvms/web test`, `typecheck`, `lint`, `build`.
+Reconciled observation 120 as historical planning; this file preserves completed B1–W4 evidence.
+Resumed review boundary: `3a4cd96`. Delivery: `ask-on-risk`; chain_strategy: `feature-branch-chain` selected by user; ask-on-risk resolved.
+At resumption, seven units remained: M-W5, M-W6, M-W7, M-W8, M-W9, M-W10, M-B8.
+Forecast: 3000–4200 authored lines, advisory only; no code-golf.
+
+### M-W5a — runtime and storage regression repairs
+- [x] Loading-to-ready MapShell keeps hook order; hover manager lifecycle avoids render-time refs.
+- [x] Nullable tenant identity cannot write a Live selection.
+- [x] CameraPanel narrows geographic positions before accessing coordinates.
+- [x] Live grid preserves existing stored cameras, dimensions, duplicate quality and full capacity;
+      storage failures return false. Live restoration remains the authorization filter.
+Route: delegated; trigger: multifile regression repairs. Scope excludes player/live handoff and W6–B8.
+Required sequential checks: focused Maps suite including Maps.test.tsx, full web tests,
+typecheck, lint, build, and `git diff --check`.
+Status at W5a handoff: regression repairs verified; W5a commit pending (parent delivery); M-W5 was incomplete.
+Mirror: synchronized to observation 120; full file and locator read back.
 
 
+
+#### W5a verification
+- RED: `pnpm --filter @openvms/web test src/lib/maps/liveGridHelper.test.ts src/routes/Maps.test.tsx`:
+  5 failed / 4 passed (2 files failed); observed loading-to-ready hook-order error and storage regressions.
+- GREEN: same command: 9 passed (2 files). Intermediate repair run: 2 failed / 7 passed,
+  exposing duplicate quality preservation in placeCameraUnique; corrected locally in helper.
+- Refactor: geographic flatMap narrowing and lifecycle ownership via state; no formatter configured.
+- Final sequential checks: focused Maps suite 61 passed (13 files); full web suite 394 passed
+  (65 files); typecheck PASS; lint PASS; build PASS (existing large-chunk warning); diff check PASS.
+- Runtime harness: real Maps route loading-to-ready test with only WebGL canvas mocked.
+- Authorization: helper preserves storage IDs, not grants; Live's parseSelection still filters against
+  current authorized cameras on restoration.
+- Rollback: remove only W5a hook/lifecycle/tenant guard, nearby-coordinate narrowing,
+  grid preservation changes and regression tests; preserve preceding W5 scaffolding.
+- W5 follow-ups identified at W5a (now completed below): nullable/empty-ID player acquisition, prewarm wiring, shared surface ownership,
+  camera deep-link consumption in Live, and broader integration acceptance.
+- Next: parent reviews this bounded slice and creates its work-unit commit; commit pending.
+
+### M-W5 — remaining integration
+Route: delegated single writer; trigger: shared player ownership and multifile Live handoff.
+Strict TDD ON (explicit user confirmation 2026-10-01); failing tests before source implementation.
+- [x] Hover stages 0/150/400/700ms, live-on-hover optional and default false, balanced prewarm release.
+- [x] No empty-ID acquisition; one hover preview and at most four pins reuse shared manager/surface.
+- [x] Context menu, double-click and Open Live handoff validate and consume authorized camera.
+- [x] Nearby geographic cameras work; no nonfunctional PTZ controls.
+Acceptance proof: real provider/component integration plus Live route/storage restoration.
+Sequential runner: `pnpm --filter @openvms/web test src/lib/maps src/components/maps src/routes/Maps.test.tsx src/routes/Live.test.tsx src/lib/live`;
+then full web test, typecheck, lint, build, and `git diff --check`.
+Scope: M-W5 only; preserve W5a. No staging, commits, review, remote/PR/merge or deployment.
+Status: outcome verified; commit pending; parent handles delivery.
+
+
+#### M-W5 verification and delivery handoff
+- RED: `pnpm --filter @openvms/web test src/components/maps/panel/CameraPreview.test.tsx src/lib/live/surfaceLayer.test.ts src/routes/Live.test.tsx`:
+  7 failed / 29 passed (3 failed files). GREEN: same command, 36 passed (3 files).
+- Live-hover opt-in RED: `pnpm --filter @openvms/web test src/components/maps/MapShell.test.tsx`:
+  1 failed / 5 passed. Integration GREEN with preview/surface/Live suites: 42 passed (4 files).
+- Final normalized sequential checks: focused command above PASS, 153 tests (22 files);
+  full `pnpm --filter @openvms/web test` PASS, 408 tests (67 files);
+  typecheck PASS; lint PASS; build PASS (large-chunk warning); `git diff --check` PASS.
+- Initial lint caught synchronous set-state-in-effect in Live handoff; refactored to the existing
+  render-time restoration pattern, then reran every required check sequentially.
+- Runtime proof: real Maps and Live router/query/provider integration; only WebGL canvas
+  and media transport boundaries mocked. Context menu, double-click and panel Open Live all
+  retain prior authorized grid selections. Unit tests also cover unauthorized handoff rejection.
+- Ownership: 400ms prewarm acquires without attaching; 700ms opt-in uses exclusive shared
+  SurfaceSlot; empty ID never acquires. Four-pin cap suppresses duplicate hover surfaces.
+- PTZ directional scaffold removed rather than shipping nonfunctional actionable buttons.
+- Size: combined uncommitted W5/W5a scaffold source/tests versus HEAD: 1273 additions + 16 deletions = 1289 authored lines; task documentation separate.
+- Clean possible slice boundaries: W5a regression repairs; shared preview ownership and Maps
+  component integration; authorized Live handoff and router/storage integration. Preserve tests
+  and docs with each behavior; no cosmetic shrinking. Parent selects delivery slices.
+- Rollback: remove this continuation's optional acquisition guard, preserveOwner surface API,
+  preview/panel shared-slot integration, hover opt-in, Live camera search/consumption and tests;
+  retain W5a repairs and original scaffold. No source edits outside M-W5.
+- No staging, commits, review, PR/merge, remote operation or deployment performed.
+- Remaining implementation: M-W6, M-W7, M-W8, M-W9, M-W10 and M-B8.
+- Parent-reported deployment blocker: actual local PMTiles asset is missing;
+  ranged `/tiles/world.pmtiles` returns SPA HTML. Deployment stays pending until assets are
+  provisioned and ALL remaining units are ready. This worker did not probe or change deployment.
+- Next: parent risk/review and work-unit commit; W5 commit pending.

@@ -40,13 +40,13 @@ export function useSurfaceLayer(): VideoSurfaceLayerController | null {
  * the layer, which overlays the session's persistent `<video>` on it; unmounting only hides
  * the video, never moves or stops it. Give it the size (usually `absolute inset-0`).
  */
-export function SurfaceSlot({ session, className }: { session: PlayerSession | null; className?: string }) {
+export function SurfaceSlot({ session, className, preserveOwner = false }: { session: PlayerSession | null; className?: string; preserveOwner?: boolean }) {
   const layer = useSurfaceLayer();
   const ref = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!layer || !session || !el) return;
-    return layer.register(session, el);
-  }, [layer, session]);
+    return layer.register(session, el, preserveOwner);
+  }, [layer, session, preserveOwner]);
   return <div ref={ref} data-surface-slot={session?.cameraId} className={className} />;
 }

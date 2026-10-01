@@ -1,10 +1,18 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
+import { meQuery } from "@/api/queries";
+import { can } from "@/lib/perm";
 import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery } from "@/lib/maps/api";
 import type { CameraEntity, MapMode } from "@/lib/maps/types";
 import { MapCanvas } from "./canvas/MapCanvas";
 import { MapToolbar } from "./MapToolbar";
 import { HierarchyBreadcrumb } from "./HierarchyBreadcrumb";
+import { CameraPreview } from "./panel/CameraPreview";
+import { CameraPanel } from "./panel/CameraPanel";
+import { CameraContextMenu } from "./panel/CameraContextMenu";
+import { HoverIntentManager, type HoverIntentState } from "@/lib/maps/hoverIntent";
+import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
 import { ErrorNote } from "../ui";
 import { Loader2 } from "lucide-react";
 
@@ -15,6 +23,7 @@ export interface MapShellProps {
   canEdit?: boolean;
   onSelectSite?: (siteId: string | undefined) => void;
   onSelectCamera?: (cameraId: string | undefined) => void;
+  liveOnHover?: boolean;
   onModeChange?: (mode: MapMode) => void;
 }
 
@@ -23,17 +32,39 @@ export function MapShell({
   initialCameraId,
   initialMode = "live",
   canEdit = false,
+  liveOnHover = false,
   onSelectSite,
   onSelectCamera,
   onModeChange,
 }: MapShellProps) {
+  const navigate = useNavigate();
+  const me = useQuery(meQuery);
+  const [hoverLiveEnabled, setHoverLiveEnabled] = useState(liveOnHover);
   const [mode, setMode] = useState<MapMode>(initialMode);
   const [selectedSiteId, setSelectedSiteId] = useState<string | undefined>(initialSiteId);
   const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(initialCameraId);
-  const [hoveredCameraId, setHoveredCameraId] = useState<string | null>(null);
+  const [pinnedCameraIds, setPinnedCameraIds] = useState<string[]>(initialCameraId ? [initialCameraId] : []);
+  const [contextMenu, setContextMenu] = useState<{ cameraId: string; x: number; y: number } | null>(null);
+  const [hoverState, setHoverState] = useState<HoverIntentState>({
+    cameraId: null,
+    stage: "none",
+    x: 0,
+    y: 0,
+  });
   const [coverage, setCoverage] = useState(true);
   const [layersOpen, setLayersOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const [hoverManager] = useState(() => new HoverIntentManager({ liveOnHover: hoverLiveEnabled }));
+  useEffect(() => {
+    const unsubscribe = hoverManager.subscribe(setHoverState);
+    return () => {
+      unsubscribe();
+      hoverManager.destroy();
+    };
+  }, [hoverManager]);
+
+  useEffect(() => hoverManager.setLiveOnHover(hoverLiveEnabled), [hoverManager, hoverLiveEnabled]);
 
   const configQuery = useQuery(mapsConfigQuery);
   const overviewQuery = useQuery(mapsOverviewQuery);
@@ -47,6 +78,24 @@ export function MapShell({
     if (!entitiesQuery.data) return [];
     return entitiesQuery.data.entities.filter((e): e is CameraEntity => e.type === "camera");
   }, [entitiesQuery.data]);
+
+  const pinnedCameras = useMemo(() => {
+    return pinnedCameraIds
+      .map((id) => cameras.find((c) => c.id === id))
+      .filter((c): c is CameraEntity => c !== undefined);
+  }, [pinnedCameraIds, cameras]);
+
+  const hoveredCamera = useMemo(() => {
+    if (!hoverState.cameraId || hoverState.stage === "none") return null;
+    if (pinnedCameraIds.includes(hoverState.cameraId)) return null;
+    return cameras.find((c) => c.id === hoverState.cameraId) ?? null;
+  }, [hoverState, pinnedCameraIds, cameras]);
+
+  const contextMenuCamera = useMemo(() => {
+    if (!contextMenu) return null;
+    return cameras.find((c) => c.id === contextMenu.cameraId) ?? null;
+  }, [contextMenu, cameras]);
+
 
   if (configQuery.isLoading) {
     return (
@@ -89,8 +138,41 @@ export function MapShell({
     onSelectCamera?.(undefined);
   };
 
+  const handlePinCamera = (cameraId: string) => {
+    setPinnedCameraIds((prev) => {
+      if (prev.includes(cameraId)) return prev;
+      if (prev.length >= 4) {
+        return [...prev.slice(1), cameraId]; // FIFO drop oldest
+      }
+      return [...prev, cameraId];
+    });
+  };
+
+  const handleUnpinCamera = (cameraId: string) => {
+    setPinnedCameraIds((prev) => prev.filter((id) => id !== cameraId));
+  };
+
+  const handleOpenLive = (cameraId: string) => {
+    void navigate({ to: "/live", search: { camera: cameraId } });
+  };
+
+  const handleAddToLive = (cameraId: string) => {
+    if (me.data?.tenant_id) {
+      addCameraToLiveGrid(me.data.tenant_id, me.data.id, cameraId);
+    }
+  };
+
+  const handleHoverCamera = (id: string | null, point?: { x: number; y: number }) => {
+    if (id && point) {
+      hoverManager.enter(id, point.x, point.y);
+    } else {
+      hoverManager.leave();
+    }
+  };
+
   const handleSelectCamera = (cameraId: string) => {
     setSelectedCameraId(cameraId);
+    handlePinCamera(cameraId);
     onSelectCamera?.(cameraId);
   };
 
@@ -107,7 +189,14 @@ export function MapShell({
           />
         </div>
 
-        <div className="pointer-events-auto">
+        <div className="pointer-events-auto flex items-center gap-2">
+          {can(me.data, "live.view") && (
+            <label className="flex items-center gap-2 rounded border border-border bg-card px-2 py-1 text-xs">
+              <input type="checkbox" checked={hoverLiveEnabled}
+                onChange={(event) => setHoverLiveEnabled(event.target.checked)} />
+              Live on hover
+            </label>
+          )}
           <MapToolbar
             mode={mode}
             onModeChange={handleModeChange}
@@ -132,11 +221,51 @@ export function MapShell({
           sites={sites}
           coverage={coverage}
           selectedCameraId={selectedCameraId}
-          hoveredCameraId={hoveredCameraId ?? undefined}
+          hoveredCameraId={hoverState.cameraId ?? undefined}
           onSelectCamera={handleSelectCamera}
-          onHoverCamera={(id) => setHoveredCameraId(id)}
+          onHoverCamera={handleHoverCamera}
+          onDoubleClickCamera={handleOpenLive}
+          onContextMenuCamera={(id, point) => setContextMenu({ cameraId: id, ...point })}
           onSelectSite={(id) => handleSelectSite(id)}
         />
+
+        {/* Hover preview floating card */}
+        {hoveredCamera && (
+          <CameraPreview
+            camera={hoveredCamera}
+            siteName={currentSite?.name}
+            stage={hoverState.stage}
+            position={{ x: hoverState.x, y: hoverState.y }}
+            liveOnHover={hoverLiveEnabled}
+            canPreview={can(me.data, "live.view")}
+            onPin={handlePinCamera}
+            onOpenLive={handleOpenLive}
+          />
+        )}
+
+        {/* Pinned Camera Panel (max 4 pinned previews) */}
+        <CameraPanel
+          pinnedCameras={pinnedCameras}
+          allCameras={cameras}
+          sites={sites}
+          onUnpin={handleUnpinCamera}
+          onSelectCamera={handleSelectCamera}
+          onOpenLive={handleOpenLive}
+          onAddToLive={handleAddToLive}
+          canPreview={can(me.data, "live.view")}
+        />
+
+        {/* Right-click Context Menu */}
+        {contextMenu && contextMenuCamera && (
+          <CameraContextMenu
+            camera={contextMenuCamera}
+            position={{ x: contextMenu.x, y: contextMenu.y }}
+            onClose={() => setContextMenu(null)}
+            onOpenLive={handleOpenLive}
+            onAddToLive={handleAddToLive}
+            onPin={handlePinCamera}
+          />
+        )}
       </div>
     </div>
   );

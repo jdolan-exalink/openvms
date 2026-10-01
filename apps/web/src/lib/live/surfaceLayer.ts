@@ -84,8 +84,11 @@ export class VideoSurfaceLayerController {
     this.frame = 0;
   }
 
+  /** preserveOwner refuses competing preview slots instead of stealing an existing surface. */
   /** register shows `session`'s video over `slot`; the returned function releases the slot. */
-  register(session: PlayerSession, slot: HTMLElement): () => void {
+  register(session: PlayerSession, slot: HTMLElement, preserveOwner = false): () => void {
+    const existing = this.entries.get(session);
+    if (preserveOwner && existing?.slot && existing.slot !== slot) return () => {};
     const entry = this.entry(session);
     if (entry.slot && entry.slot !== slot) this.observer?.unobserve(entry.slot);
     entry.slot = slot;

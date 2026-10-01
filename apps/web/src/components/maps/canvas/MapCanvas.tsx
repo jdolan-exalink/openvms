@@ -29,7 +29,9 @@ export interface MapCanvasProps {
   realtimeStore?: MapRealtimeStore;
   animationBudget?: AnimationBudget;
   onSelectCamera?: (cameraId: string) => void;
-  onHoverCamera?: (cameraId: string | null) => void;
+  onHoverCamera?: (cameraId: string | null, point?: { x: number; y: number }) => void;
+  onDoubleClickCamera?: (cameraId: string) => void;
+  onContextMenuCamera?: (cameraId: string, point: { x: number; y: number }) => void;
   onSelectSite?: (siteId: string) => void;
   onMapReady?: (map: maplibregl.Map) => void;
   onMoveEnd?: (view: { center: [number, number]; zoom: number; bounds: LngLatBounds }) => void;
@@ -52,6 +54,8 @@ export function MapCanvas({
   animationBudget,
   onSelectCamera,
   onHoverCamera,
+  onDoubleClickCamera,
+  onContextMenuCamera,
   onSelectSite,
   onMapReady,
   onMoveEnd,
@@ -69,6 +73,8 @@ export function MapCanvas({
   const onMoveEndRef = useRef(onMoveEnd);
   const onSelectCameraRef = useRef(onSelectCamera);
   const onHoverCameraRef = useRef(onHoverCamera);
+  const onDoubleClickCameraRef = useRef(onDoubleClickCamera);
+  const onContextMenuCameraRef = useRef(onContextMenuCamera);
   const onSelectSiteRef = useRef(onSelectSite);
   const camerasRef = useRef(cameras);
   const sitesRef = useRef(sites);
@@ -86,6 +92,8 @@ export function MapCanvas({
     onMoveEndRef.current = onMoveEnd;
     onSelectCameraRef.current = onSelectCamera;
     onHoverCameraRef.current = onHoverCamera;
+    onDoubleClickCameraRef.current = onDoubleClickCamera;
+    onContextMenuCameraRef.current = onContextMenuCamera;
     onSelectSiteRef.current = onSelectSite;
     camerasRef.current = cameras;
     sitesRef.current = sites;
@@ -248,11 +256,27 @@ export function MapCanvas({
     map.on("mouseenter", "cam-point-circle", (e) => {
       map.getCanvas().style.cursor = "pointer";
       const id = e.features?.[0]?.properties?.id;
-      if (id) onHoverCameraRef.current?.(id);
+      if (id) onHoverCameraRef.current?.(id, { x: e.point.x, y: e.point.y });
+    });
+    map.on("mousemove", "cam-point-circle", (e) => {
+      const id = e.features?.[0]?.properties?.id;
+      if (id) onHoverCameraRef.current?.(id, { x: e.point.x, y: e.point.y });
     });
     map.on("mouseleave", "cam-point-circle", () => {
       map.getCanvas().style.cursor = "";
       onHoverCameraRef.current?.(null);
+    });
+
+    map.on("dblclick", "cam-point-circle", (e) => {
+      e.preventDefault();
+      const id = e.features?.[0]?.properties?.id;
+      if (id) onDoubleClickCameraRef.current?.(id);
+    });
+
+    map.on("contextmenu", "cam-point-circle", (e) => {
+      e.preventDefault();
+      const id = e.features?.[0]?.properties?.id;
+      if (id) onContextMenuCameraRef.current?.(id, { x: e.point.x, y: e.point.y });
     });
 
     map.on("mouseenter", "site-point", () => {

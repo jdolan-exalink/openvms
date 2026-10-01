@@ -35,6 +35,20 @@ function slotAt(rect: { left: number; top: number; width: number; height: number
 }
 
 describe("VideoSurfaceLayerController", () => {
+  it("refuses an exclusive Maps slot while another owner is registered", () => {
+    const layer = new VideoSurfaceLayerController();
+    const { session } = fakeSession();
+    const original = slotAt({ left: 10, top: 20, width: 100, height: 100 });
+    const release = layer.register(session, original);
+    const other = slotAt({ left: 300, top: 20, width: 100, height: 100 });
+    const releaseOther = layer.register(session, other, true);
+    releaseOther();
+    const host = document.createElement("div");
+    layer.setHost(host);
+    expect(host.firstElementChild?.getAttribute("style")).toContain("translate3d(10px");
+    release();
+  });
+
   it("positions the persistent video over its slot and never re-parents it", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

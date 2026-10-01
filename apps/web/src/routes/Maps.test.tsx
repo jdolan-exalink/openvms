@@ -49,7 +49,7 @@ describe("Maps route", () => {
     expect(screen.getByText(/maps.view/)).toBeInTheDocument();
   });
 
-  it("renders map shell and canvas when user holds maps.view", async () => {
+  it("transitions from loading to ready without changing MapShell hook order", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(

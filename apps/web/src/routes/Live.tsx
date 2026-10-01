@@ -71,6 +71,7 @@ export function Live() {
   // Set once the saved grid selection (or the default) has been applied, so the persistence
   // effect below never fires before restoration and overwrites a saved selection with defaults.
   const [restored, setRestored] = useState(false);
+  const [consumedCamera, setConsumedCamera] = useState<string | undefined>();
   const folderApi = useCameraFolders(cameras.data);
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(loadSidebarCollapsed);
   const [treeNotice, setTreeNotice] = useState<string | null>(null);
@@ -144,6 +145,39 @@ export function Live() {
       // Storage unavailable (private mode, quota): the grid still works for this session.
     }
   }, [restored, me.data, columns, rows, tiles]);
+
+  // A Maps handoff is consumed only after REST has supplied the authorized camera list.
+  const requestedCamera = typeof search.camera === "string" ? search.camera : undefined;
+  // Like storage restoration above, adjust derived local state during render, not in an effect.
+  if (!requestedCamera && consumedCamera) setConsumedCamera(undefined);
+  if (restored && me.data && cameras.data && requestedCamera && consumedCamera !== requestedCamera) {
+    setConsumedCamera(requestedCamera);
+    const allowed = cameras.data.find((camera) => camera.id === requestedCamera);
+    if (allowed && can(me.data, "live.view")) {
+      const existing = tiles.findIndex((tile) => tile?.camera_id === requestedCamera);
+      if (existing >= 0) setSelected(existing);
+      else {
+        const empty = tiles.findIndex((tile) => tile === null);
+        const target = empty >= 0 ? empty : tiles.length;
+        const next = [...tiles];
+        if (target === next.length) {
+          next.push(...Array(columns).fill(null));
+          setRows(rows + 1);
+        }
+        next[target] = { camera_id: requestedCamera, quality: "sub" };
+        setTiles(next);
+        setSelected(target);
+      }
+    }
+  }
+  useEffect(() => {
+    if (!requestedCamera || consumedCamera !== requestedCamera) return;
+    void navigate({
+      to: ".",
+      search: ((previous: Record<string, unknown>) => ({ ...previous, camera: undefined })) as never,
+      replace: true,
+    });
+  }, [requestedCamera, consumedCamera, navigate]);
 
   const setGrid = (nextColumns: number, nextRows: number) => {
     setColumns(nextColumns);

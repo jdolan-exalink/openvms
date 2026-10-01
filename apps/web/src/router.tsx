@@ -80,7 +80,7 @@ const playbackRoute = createRoute({
   },
 });
 
-type LiveSearch = { mode?: "rec"; t?: string | number };
+type LiveSearch = { camera?: string; mode?: "rec"; t?: string | number };
 
 // `?mode=rec&t=<ISO>` opens Live in synchronized recorded playback at that instant (LV-9).
 const liveRoute = createRoute({
@@ -88,6 +88,7 @@ const liveRoute = createRoute({
   path: "/live",
   component: Live,
   validateSearch: (s: Record<string, unknown>): LiveSearch => ({
+    camera: typeof s.camera === "string" && s.camera.length > 0 ? s.camera : undefined,
     mode: s.mode === "rec" ? "rec" : undefined,
     t: typeof s.t === "string" || typeof s.t === "number" ? s.t : undefined,
   }),

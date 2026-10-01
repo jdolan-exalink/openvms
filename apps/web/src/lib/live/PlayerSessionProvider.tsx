@@ -32,7 +32,8 @@ export function PlayerSessionProvider({
 
 /**
  * usePlayerSession acquires the persistent session for a camera+quality and releases it on
- * change or unmount (the session then stays WARM until its TTL). Outside a provider it falls
+ * change or unmount (the session then stays WARM until its TTL). An empty camera ID disables
+ * acquisition, allowing snapshot and prewarm stages to share this hook. Outside a provider it falls
  * back to a private manager, so the session simply lives as long as the component.
  */
 export function usePlayerSession(cameraId: string, quality: SessionQuality, serverId?: string): PlayerSession | null {
@@ -46,7 +47,7 @@ export function usePlayerSession(cameraId: string, quality: SessionQuality, serv
     serverRef.current = serverId;
   });
   useEffect(() => {
-    if (!manager) return;
+    if (!manager || !cameraId) return;
     // Acquiring an external resource and publishing it to state is the subscribe pattern the rule allows for.
     setSession(manager.acquire(cameraId, quality, serverRef.current));
     return () => {
@@ -54,5 +55,5 @@ export function usePlayerSession(cameraId: string, quality: SessionQuality, serv
       if (manager === fallback) manager.clear();
     };
   }, [manager, fallback, cameraId, quality]);
-  return session;
+  return cameraId && session?.cameraId === cameraId ? session : null;
 }
