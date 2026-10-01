@@ -35,7 +35,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-W5 — camera panel, hover preview, context menu, nearby cameras
 - [x] M-W6 — alarm panel, site health, auto-focus (verified; commit pending parent)
 - [x] M-W7 — layers & filters panels, user prefs (`cd56639`)
-- [ ] M-W8 — placement editor + Sin ubicar tray
+- [x] M-W8 — placement editor + Sin ubicar tray (`9174a44`)
 - [ ] M-W9 — zone editor
 - [ ] M-W10 — 5k-camera performance harness
 - [ ] M-B8 — CSV import of camera positions
@@ -56,6 +56,7 @@ ask-on-risk; push/PR are PO decisions.
 - 2026-10-01: M-W3 completed (`71f3ed0`: FOV cones geometry with haversine destination point, FOV fill/outline layers, selection sync, 150ms viewport culling debouncing, deep-linking URL search params synchronization).
 - 2026-10-01: M-W4 completed (`a494a46`: realtime store with 5-min ring buffer, dedup Set, throttled camera status flush 1/s, animation budget with concurrent ripple/pulse caps, reduced-motion fallback, and fx layers).
 - 2026-10-01: M-W7 completed (`cd56639`: /api/v1/me/map-prefs contract and handlers with enum/size validation and per-user isolation, client-owned layer/filter defaults, LayersPanel/FiltersPanel, canvas layer visibility, and render-time preference restoration).
+- 2026-10-01: M-W8 completed (`9174a44`: MapEntity exposes the placement revision for If-Match, pure placement draft with undo/redo and 409 rebase, unplaced tray with click-to-place/drag/bulk-at-centre, properties form with 15° rotation and clamped FOV/range, and editor wiring in MapShell).
 
 ## Resumed scope (2026-10-01)
 Explicit user confirmation today enables **STRICT TDD ON**, superseding historical OFF above.
@@ -274,3 +275,42 @@ Strict TDD ON; source explicit user confirmation 2026-10-01. Chain: feature-bran
 - Rollback baseline: HEAD `c433168`; M-W7 commit `cd56639`. No staging beyond that commit, no
   review, remote operation or deployment performed by this writer.
 - Next: dispatch M-W8 (placement editor + Sin ubicar tray), then M-W9, M-W10, M-B8.
+
+## M-W8 — placement editor and unplaced tray
+Route: delegated single writer; trigger: multifile new logic plus a contract addition.
+Strict TDD ON; source explicit user confirmation 2026-10-01. Chain: feature-branch-chain.
+- [x] `MapEntity.rev` (placement revision) so the editor can send `If-Match`; entities read
+  is the single source of the token, each save's ETag refreshes it.
+- [x] Pure draft (`lib/maps/placementDraft.ts`): stage/undo/redo snapshots, one pending entry
+  per camera, per-camera revision memory, conflict marking and explicit rebase.
+- [x] UnplacedTray: click-to-arm then click the map, HTML5 drag onto the map, and
+  "ubicar todas en el centro del sitio" (PO decision 3) as one undo step.
+- [x] Save sends one PUT per change with `If-Match: "<revision>"` only when a revision is
+  known; a camera without a placement is created without the header. 409 keeps the server
+  message visible and parks the camera behind a "Rebase" action that re-reads entities.
+- [x] Properties form rotates in 15° steps (wrapping the compass) and clamps FOV to 1..360
+  and range to >= 0, the ranges `UpsertPlacement` validates.
+
+### M-W8 evidence (2026-10-01)
+- RED/GREEN backend: `go test -tags integration -run TestMapEntitiesExposePlacementRevision
+  ./internal/api/` failed ("expected placement revision (rev) on placed entity") until the
+  contract/model/handler change; then PASS. `go test -tags integration -run 'TestMapEntities|TestMaps'
+  ./internal/api/` PASS (read/RBAC, write lifecycle, floor validation, geo+audit, zones,
+  prefs, new revision test). `go build ./...` and `go vet ./...` PASS.
+- RED/GREEN web: four new suites failed to resolve their modules first; then PASS:
+  placementDraft 8, placements 4, UnplacedTray 6, PlacementPropsForm 4; MapShell integration
+  gained 5 editor tests (stage/save without If-Match, undo before write, 409+rebase retry with
+  `If-Match: "1"`, move keeps the camera's revision, bulk place at centre).
+- Final sequential checks: focused Maps suite PASS, 144 tests / 25 files; full web PASS,
+  481 tests / 77 files; typecheck PASS; lint PASS; build PASS (existing large-chunk warning);
+  `git diff --check` PASS; `make generate` idempotent (schema.d.ts/api.gen.go committed with
+  the contract change).
+- Design deviations, deliberate: rotation/FOV live in the React properties form instead of
+  on-map drag handles — the design assigns React only the form, and drag handles cannot be
+  verified in this headless environment; floor placements, snapping, buildings/labels and
+  zone drawing remain for M-W9/Phase 2. Also corrected maps panel utility classes
+  (`border-border`/`bg-card`/`danger` → `border-line`/`surface`/`bad`): the theme defines no
+  card/border/danger tokens, so those classes generated no CSS.
+- Rollback baseline: HEAD `dee37d7`; M-W8 commit `9174a44`. No staging beyond that commit, no
+  review, remote operation or deployment performed by this writer.
+- Next: M-W9 (zone editor), then M-W10 (performance harness) and M-B8 (CSV import).
