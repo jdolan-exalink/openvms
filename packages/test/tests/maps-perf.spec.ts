@@ -85,6 +85,16 @@ async function stubBackend(page: Page) {
 test("maps renders 5k synthetic cameras above the performance floor", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", error => pageErrors.push(String(error)));
+  // Console errors are how a half-loaded map announces itself (missing worker, bad
+  // source); the perf numbers alone would stay green either way.
+  const consoleErrors: string[] = [];
+  page.on("console", message => {
+    if (message.type() !== "error") return;
+    // The realtime /ws feed belongs to the real stack; this render-only smoke has no
+    // backend, so its reconnect noise says nothing about the map.
+    if (message.text().startsWith("WebSocket connection to")) return;
+    consoleErrors.push(message.text());
+  });
   await stubBackend(page);
 
   await page.goto(`/maps?site=${PERF_SITE_ID}&perf=1`);
@@ -104,4 +114,5 @@ test("maps renders 5k synthetic cameras above the performance floor", async ({ p
   expect(snapshot.maxLongTaskMs).toBeLessThanOrEqual(MAX_LONG_TASK_MS);
   expect(snapshot.timeToFirstRenderMs).toBeLessThan(MAX_FIRST_RENDER_MS);
   expect(pageErrors).toEqual([]);
+  expect(consoleErrors).toEqual([]);
 });
