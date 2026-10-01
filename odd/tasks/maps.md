@@ -107,7 +107,7 @@ Acceptance proof: real provider/component integration plus Live route/storage re
 Sequential runner: `pnpm --filter @openvms/web test src/lib/maps src/components/maps src/routes/Maps.test.tsx src/routes/Live.test.tsx src/lib/live`;
 then full web test, typecheck, lint, build, and `git diff --check`.
 Scope: M-W5 only; preserve W5a. No staging, commits, review, remote/PR/merge or deployment.
-Status: outcome verified and committed as `eb592e6`; native review pending.
+Status: outcome verified and committed as `eb592e6`; native review approved; exact acknowledgement burned authority (parent-confirmed).
 
 
 #### M-W5 verification and delivery handoff
@@ -143,4 +143,37 @@ Status: outcome verified and committed as `eb592e6`; native review pending.
 - Running resumed authored count: 1372 lines including task documentation (no generated code).
 - This coherent local commit exceeds the advisory per-task size; future PR slices remain subject
   to the selected feature-branch-chain policy. No PR is created or authorized here.
-- Next: native risk/review before continuing M-W6; local deployment remains pending.
+- Native outcome: approved and exactly acknowledged; authority burned. Reviewed boundary: `17644d8`.
+- No re-review of the consumed W5 target. Later fixes are separate work units.
+
+## Later W5 reliability follow-ups (R3)
+Parent-confirmed W5 review: approved; exact acknowledgement burned authority.
+Current boundary: `17644d8`. Completed W5 acceptance/receipt remains unchanged.
+Route: delegated single bounded writer; no native correction or re-review of consumed target.
+Strict TDD ON; sequential checks; `feature-branch-chain` selected.
+- [x] R3-hover-actions — retain controls across marker-to-preview pointer transition; cancel
+  stale leave on preview/new-camera entry; delayed leave and cleanup release sessions.
+- [x] R3-snapshot-recovery — failed camera A must not hide camera B's successful snapshot.
+Runner: `pnpm --filter @openvms/web test src/lib/maps src/components/maps src/routes/Maps.test.tsx`;
+then full web test, typecheck, lint, build, and `git diff --check`.
+Status: both bug outcomes verified; separate bug commits pending parent delivery.
+Scope excludes W6, staging, commits, review, remote operations and deployment.
+
+### R3 verification (later bugs only)
+- RED: `pnpm --filter @openvms/web test src/components/maps/MapShell.test.tsx src/components/maps/panel/CameraPreview.test.tsx`:
+  3 failed / 11 passed (2 files failed). GREEN: identical command, 14 passed (2 files).
+- Final sequential foreground checks after source normalization:
+  focused Maps command PASS (75 tests, 15 files); full web test PASS (411 tests, 67 files);
+  typecheck PASS; lint PASS; build PASS (large-chunk warning); `git diff --check` PASS.
+- R3-hover-actions root cause: immediate marker leave unmounted the card before controls
+  could be reached. A cancellable 150ms grace period bridges marker and preview; preview
+  pointer/focus entry and new camera entry cancel stale leave. Cleanup remains immediate.
+- R3-snapshot-recovery root cause: React reused the image DOM node with camera A's error
+  display:none style. URL-keyed images isolate camera changes; onLoad clears visibility errors.
+- Acquisition/release unchanged: tests observe delayed release, target replacement and unmount.
+  Existing shared-manager/surface and accessibility control behavior remains covered.
+- Independent rollback/commit boundaries: hover task includes manager delay, shell wiring,
+  preview boundary callbacks and MapShell regression tests; snapshot task includes only the
+  image key/onLoad hunk and failed-A to successful-B component regression.
+- No native correction, re-review, staging, commits, remote operations or deployment performed.
+  W5 approved/acknowledged authority remains burned; parent commits these later fixes before W6.

@@ -90,10 +90,12 @@ export function CameraPreview({
       {stage !== "tooltip" && canPreview ? (
         <div className="relative aspect-video w-full overflow-hidden rounded bg-black/40">
           <img
+            key={snapshotUrl}
             src={snapshotUrl}
             alt={camera.name}
             className="size-full object-cover"
             loading="eager"
+            onLoad={(event) => event.currentTarget.style.removeProperty("display")}
             onError={(e) => {
               (e.currentTarget as HTMLImageElement).style.display = "none";
             }}

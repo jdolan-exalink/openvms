@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CameraPreview } from "./CameraPreview";
 import { CameraPanel } from "./CameraPanel";
@@ -22,6 +22,19 @@ const preview = (stage: "tooltip" | "snapshot" | "prewarm" | "live", liveOnHover
   <CameraPreview camera={camera} stage={stage} position={{ x: 10, y: 20 }} liveOnHover={liveOnHover} />;
 
 describe("Maps shared preview ownership", () => {
+
+  it("shows camera B after camera A snapshot fails", () => {
+    const view = render(preview("snapshot"), { wrapper });
+    fireEvent.error(screen.getByAltText("North"));
+    expect(screen.getByAltText("North")).not.toBeVisible();
+    view.rerender(<CameraPreview camera={{ ...camera, id: "c2", name: "East" }}
+      stage="snapshot" position={{ x: 10, y: 20 }} />);
+    const image = screen.getByAltText("East");
+    fireEvent.load(image);
+    expect(image).toBeVisible();
+    expect(image).toHaveAttribute("src", "/media/v1/cameras/c2/snapshot.jpg?h=240");
+  });
+
   it("does not acquire an empty ID during tooltip or snapshot", () => {
     const acquire = vi.spyOn(PlayerSessionManager.prototype, "acquire");
     vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
