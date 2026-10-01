@@ -50,6 +50,8 @@ import { PlacementPropsForm } from "./editor/PlacementPropsForm";
 import { CsvImportForm } from "./editor/CsvImportForm";
 import { ZonesPanel } from "./editor/ZonesPanel";
 import { HoverIntentManager, type HoverIntentState } from "@/lib/maps/hoverIntent";
+import { installPerfMetrics, perfMetricsEnabled, type PerfMetrics } from "@/lib/maps/perfMetrics";
+import { subscribeFrames } from "@/lib/realtime";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
 import { ErrorNote } from "../ui";
 import { Loader2 } from "lucide-react";
@@ -362,6 +364,49 @@ function MapShellContent({
     return realtimeStore.patchCameras(baseCameras).cameras;
   }, [baseCameras, realtimeStore, snapshot.revision]);
 
+  // --- Performance overlay (M-W10) --------------------------------------------------
+  // Installed only in dev builds or with `?perf` in the URL: production users never pay
+  // for the rAF loop, and the Playwright perf smoke passes the param to profile a
+  // production build through window.__openvmsMapMetrics.
+  const metricsRef = useRef<PerfMetrics | undefined>(undefined);
+  useEffect(() => {
+    if (!perfMetricsEnabled(window.location.search, import.meta.env.DEV)) return;
+    const installed = installPerfMetrics(window);
+    metricsRef.current = installed.metrics;
+    return () => {
+      metricsRef.current = undefined;
+      installed.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    const metrics = metricsRef.current;
+    if (!metrics) return;
+    metrics.setEntitiesVisible(cameras.length);
+    if (cameras.length === 0) return;
+    // "First render" is the first paint after the data is on screen: the mark waits two
+    // frames so the initial GeoJSON/cluster build is cold-start work, not a budget hit.
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => metrics.markFirstRender());
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [cameras.length]);
+
+  useEffect(() => {
+    const metrics = metricsRef.current;
+    if (!metrics) return;
+    return subscribeFrames((frame) => {
+      metrics.recordEventsApplied(1);
+      const ts = (frame as { ts?: number | string }).ts;
+      if (typeof ts === "number") metrics.recordWsLag(Date.now() - ts);
+      else if (typeof ts === "string") metrics.recordWsLag(Date.now() - new Date(ts).getTime());
+    });
+  }, []);
+
   // Panels read `cameras` (everything authorized); the canvas only draws what survives the
   // active filters, so a filtered-out camera is still pinnable from an existing deep link.
   const visibleCameras = useMemo(() => applyFilters(cameras, filters), [cameras, filters]);
@@ -533,7 +578,15 @@ function MapShellContent({
       <div className="relative h-full w-full flex-1">
         <MapCanvas
           realtimeStore={realtimeStore}
-          onMapReady={map => { mapRef.current = map; }}
+          onMapReady={map => {
+            mapRef.current = map;
+            // The long-task budget starts when MapLibre first reports a full render:
+            // tasks before idle are init work, tasks after idle are the steady state
+            // the design budgets at 50 ms.
+            if (metricsRef.current) {
+              map.once("idle", () => metricsRef.current?.markRenderSettled());
+            }
+          }}
           provider={provider}
           center={center}
           zoom={zoom}

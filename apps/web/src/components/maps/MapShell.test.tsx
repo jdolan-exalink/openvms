@@ -24,11 +24,11 @@ vi.mock("./canvas/MapCanvas", () => ({
   </div>; },
 }));
 
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); canvasHarness.easeTo.mockReset(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); localStorage.clear(); canvasHarness.easeTo.mockReset(); });
 async function setup(alarmsEnabled = false, prefs: unknown = {}, extra: {
   grants?: unknown[];
   routes?: Record<string, () => Response>;
-} = {}) {
+} = {}, entry = "/maps?site=s") {
   vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
   const cameras = Array.from({ length: 5 }, (_, n) => ({
     id: `c${n}`, tenant_id: "t", site_id: "s", server_id: "srv", remote_name: `c${n}`,
@@ -63,12 +63,27 @@ async function setup(alarmsEnabled = false, prefs: unknown = {}, extra: {
   vi.stubGlobal("fetch", fetchSpy);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({ routeTree, context: { queryClient },
-    history: createMemoryHistory({ initialEntries: ["/maps?site=s"] }) });
+    history: createMemoryHistory({ initialEntries: [entry] }) });
   const view = render(<QueryClientProvider client={queryClient}><RouterProvider router={router} /></QueryClientProvider>);
   await screen.findByRole("button", { name: "Marker c0" });
   return { ...view, router, queryClient, fetchSpy };
 }
 describe("Maps camera interaction integration", () => {
+  it("installs the perf overlay only with the ?perf param", async () => {
+    await setup(false, {}, {}, "/maps?site=s&perf=1");
+    const metrics = window.__openvmsMapMetrics;
+    expect(metrics).toBeDefined();
+    await waitFor(() => expect(metrics!.entitiesVisible).toBe(5));
+    await waitFor(() => expect(metrics!.timeToFirstRenderMs).not.toBeNull());
+  });
+
+  it("keeps the perf sampler off in normal renders", async () => {
+    vi.stubEnv("DEV", false);
+    delete window.__openvmsMapMetrics;
+    await setup();
+    expect(window.__openvmsMapMetrics).toBeUndefined();
+  });
+
   it("prewarms at 400ms, defaults live hover off, and releases on leave", async () => {
     const acquire = vi.spyOn(PlayerSessionManager.prototype, "acquire");
     const release = vi.spyOn(PlayerSessionManager.prototype, "release");
@@ -178,7 +193,7 @@ it("integrates authorized alarms and grouped site health with focus off by defau
 it("focuses only explicit current-site incidents, without selecting a camera, and respects manual navigation and reduced motion", async () => {
   await setup(true);
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
-  act(() => canvasHarness.props?.onMapReady?.({ easeTo: canvasHarness.easeTo } as never));
+  act(() => canvasHarness.props?.onMapReady?.({ easeTo: canvasHarness.easeTo, once: () => {} } as never));
   const emit = (id: string, site = "s") => act(() => canvasHarness.props?.realtimeStore?.handleFrame({
     id, type: "alarm.updated", site_id: site, camera_id: "c0", data: { id, status: "open" },
   }));
