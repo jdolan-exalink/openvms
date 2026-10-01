@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useRealtimeFeed } from "./realtime";
+import { useRealtimeFeed, subscribeFrames } from "./realtime";
 
 class FakeSocket {
   static instances: FakeSocket[] = [];
@@ -11,8 +11,12 @@ class FakeSocket {
   onclose: ((e: { code: number; reason: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   closed = false;
+  sent: string[] = [];
   constructor(public url: string) {
     FakeSocket.instances.push(this);
+  }
+  send(data: string) {
+    this.sent.push(data);
   }
   close() {
     this.closed = true;
@@ -170,5 +174,91 @@ describe("notification frames", () => {
     sock(0).open();
     sock(0).message({ type: "notification.created", data: {} });
     expect(keys()).toContain(JSON.stringify(["notifications"]));
+  });
+});
+
+describe("realtime protocol v2 & listener API", () => {
+  it("sends hello frame on socket open", () => {
+    setup();
+    const ws = sock(0);
+    act(() => ws.open());
+    expect(ws.sent).toHaveLength(1);
+    const hello = JSON.parse(ws.sent[0]!) as { op: string; v: number; topics: string[] };
+    expect(hello.op).toBe("hello");
+    expect(hello.v).toBe(2);
+    expect(hello.topics).toEqual(expect.arrayContaining(["events", "cameras", "alarms"]));
+  });
+
+  it("dispatches raw frames to subscribeFrames listeners", () => {
+    setup();
+    const ws = sock(0);
+    act(() => ws.open());
+
+    const received: unknown[] = [];
+    const unsub = subscribeFrames((frame) => {
+      received.push(frame);
+    });
+
+    const testFrame = {
+      v: 2,
+      type: "camera.status_changed",
+      camera_id: "c1",
+      data: { from: "online", to: "offline" },
+    };
+    act(() => ws.message(testFrame));
+
+    expect(received).toHaveLength(1);
+    expect(received[0]).toEqual(testFrame);
+
+    unsub();
+    act(() => ws.message({ type: "other" }));
+    expect(received).toHaveLength(1);
+  });
+
+  it("handles batch frames and dispatches each sub-frame", () => {
+    const { keys } = setup();
+    const ws = sock(0);
+    act(() => ws.open());
+
+    const received: unknown[] = [];
+    const unsub = subscribeFrames((frame) => {
+      received.push(frame);
+    });
+
+    const batch = {
+      op: "batch",
+      frames: [
+        { type: "event.created", data: {} },
+        { type: "camera.status_changed", camera_id: "c2", data: {} },
+      ],
+    };
+
+    act(() => ws.message(batch));
+
+    expect(received).toHaveLength(2);
+    expect(keys()).toContain(JSON.stringify(["events"]));
+    expect(keys()).toContain(JSON.stringify(["cameras"]));
+
+    unsub();
+  });
+
+  it("handles resync frames and triggers catch-up invalidations", () => {
+    const { keys, invalidate } = setup();
+    const ws = sock(0);
+    act(() => ws.open());
+    invalidate.mockClear();
+
+    const received: unknown[] = [];
+    const unsub = subscribeFrames((frame) => {
+      received.push(frame);
+    });
+
+    act(() => ws.message({ op: "resync", streams: ["events", "cameras"] }));
+
+    expect(received).toHaveLength(1);
+    expect(keys()).toContain(JSON.stringify(["events"]));
+    expect(keys()).toContain(JSON.stringify(["cameras"]));
+
+    unsub();
   });
 });

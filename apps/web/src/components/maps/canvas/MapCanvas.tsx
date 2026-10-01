@@ -10,6 +10,9 @@ import { buildMapStyle, getThemeColors, MapStyleController } from "./MapStyleCon
 import { buildCameraLayers, buildCamerasSource, CAMERAS_SOURCE_ID } from "./layers/cameraLayers";
 import { buildFovLayers, buildFovSource, camerasToFovCollection, FOV_SOURCE_ID } from "./layers/fovLayer";
 import { buildSiteLayers, buildSitesSource, SITES_SOURCE_ID, sitesToFeatureCollection } from "./layers/sitesLayer";
+import { buildFxLayers, buildFxSource, FX_SOURCE_ID } from "./layers/fxLayers";
+import { AnimationBudget, isPrefersReducedMotion } from "@/lib/maps/animationBudget";
+import { defaultMapRealtimeStore, MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { registerSdfSprites } from "./sprite";
 
 export interface MapCanvasProps {
@@ -23,6 +26,8 @@ export interface MapCanvasProps {
   coverage?: boolean;
   selectedCameraId?: string;
   hoveredCameraId?: string;
+  realtimeStore?: MapRealtimeStore;
+  animationBudget?: AnimationBudget;
   onSelectCamera?: (cameraId: string) => void;
   onHoverCamera?: (cameraId: string | null) => void;
   onSelectSite?: (siteId: string) => void;
@@ -43,6 +48,8 @@ export function MapCanvas({
   coverage = true,
   selectedCameraId,
   hoveredCameraId,
+  realtimeStore,
+  animationBudget,
   onSelectCamera,
   onHoverCamera,
   onSelectSite,
@@ -57,6 +64,7 @@ export function MapCanvas({
   const prevSelectedIdRef = useRef<string | undefined>(undefined);
   const prevHoveredIdRef = useRef<string | undefined>(undefined);
   const fovDebounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const budgetRef = useRef<AnimationBudget>(animationBudget ?? new AnimationBudget());
 
   const onMoveEndRef = useRef(onMoveEnd);
   const onSelectCameraRef = useRef(onSelectCamera);
@@ -67,6 +75,12 @@ export function MapCanvas({
   const coverageRef = useRef(coverage);
 
   const setupCustomLayersRef = useRef<(map: maplibregl.Map) => void>(() => {});
+
+  useEffect(() => {
+    if (animationBudget) {
+      budgetRef.current = animationBudget;
+    }
+  }, [animationBudget]);
 
   useEffect(() => {
     onMoveEndRef.current = onMoveEnd;
@@ -99,10 +113,20 @@ export function MapCanvas({
       // 3. Cameras Source & Layers (Clustered & Unclustered)
       if (!map.getSource(CAMERAS_SOURCE_ID)) {
         const sourceSpec = buildCamerasSource();
-        const entityIndex = new EntityIndex(camerasRef.current);
+        const store = realtimeStore ?? defaultMapRealtimeStore;
+        const { cameras: patched } = store.patchCameras(camerasRef.current);
+        const entityIndex = new EntityIndex(patched);
         sourceSpec.data = entityIndex.toFeatureCollection();
         map.addSource(CAMERAS_SOURCE_ID, sourceSpec);
         for (const layer of buildCameraLayers()) {
+          if (!map.getLayer(layer.id)) map.addLayer(layer);
+        }
+      }
+
+      // 4. FX Source & Layers (Ripples & Alarm Pulses, rendered on top of cameras)
+      if (!map.getSource(FX_SOURCE_ID)) {
+        map.addSource(FX_SOURCE_ID, buildFxSource());
+        for (const layer of buildFxLayers()) {
           if (!map.getLayer(layer.id)) map.addLayer(layer);
         }
       }
@@ -272,13 +296,113 @@ export function MapCanvas({
     };
   }, []);
 
+  // FX animation loop driven by rAF
+  useEffect(() => {
+    let animFrameId: number;
+
+    const frameLoop = () => {
+      const map = mapRef.current;
+      const budget = budgetRef.current;
+
+      if (!document.hidden && map && map.isStyleLoaded()) {
+        const fxSource = map.getSource(FX_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+        if (fxSource && budget.hasActiveFx()) {
+          const fc = budget.tick(Date.now(), isPrefersReducedMotion());
+          fxSource.setData(fc);
+        }
+      }
+      animFrameId = requestAnimationFrame(frameLoop);
+    };
+
+    animFrameId = requestAnimationFrame(frameLoop);
+
+    return () => {
+      cancelAnimationFrame(animFrameId);
+    };
+  }, []);
+
+  // Listen to realtime events to trigger ripples and pulses
+  useEffect(() => {
+    const store = realtimeStore ?? defaultMapRealtimeStore;
+    const budget = budgetRef.current;
+
+    const unsubscribe = store.subscribe(() => {
+      const recent = store.getRecentEvents(1);
+      const latest = recent[0];
+      if (!latest || !latest.cameraId) return;
+
+      const cam = camerasRef.current.find((c) => c.id === latest.cameraId);
+      if (!cam || cam.position.kind !== "geo") return;
+
+      const { lng, lat } = cam.position;
+
+      if (latest.type === "event.created") {
+        const data = latest.data as { labels?: string[] } | undefined;
+        const isLpr = data?.labels?.some((l) => l.includes("plate") || l.includes("license"));
+        budget.addRipple({
+          id: latest.id,
+          lng,
+          lat,
+          type: isLpr ? "lpr" : "detection",
+        });
+      } else if (latest.type === "alarm.created") {
+        budget.addRipple({
+          id: latest.id,
+          lng,
+          lat,
+          type: "alarm",
+        });
+        budget.setAlarmPulse({
+          cameraId: cam.id,
+          lng,
+          lat,
+          acknowledged: false,
+        });
+      } else if (latest.type === "alarm.acknowledged") {
+        budget.setAlarmPulse({
+          cameraId: cam.id,
+          lng,
+          lat,
+          acknowledged: true,
+        });
+      } else if (latest.type === "alarm.updated") {
+        const data = latest.data as { status?: string } | undefined;
+        if (data?.status === "resolved" || data?.status === "closed") {
+          budget.removeAlarmPulse(cam.id);
+        }
+      }
+    });
+
+    return unsubscribe;
+  }, [realtimeStore]);
+
+  // Re-sync cameras when realtime store flushes camera status/alarm changes
+  useEffect(() => {
+    const map = mapRef.current;
+    const store = realtimeStore ?? defaultMapRealtimeStore;
+
+    const updateCameras = () => {
+      if (!map || !map.isStyleLoaded()) return;
+      const source = map.getSource(CAMERAS_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+      if (!source) return;
+
+      const { cameras: patched } = store.patchCameras(camerasRef.current);
+      const index = new EntityIndex(patched);
+      source.setData(index.toFeatureCollection());
+    };
+
+    return store.onCameraChange(updateCameras);
+  }, [realtimeStore]);
+
   // Update cameras GeoJSON data
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
     const source = map.getSource(CAMERAS_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    const store = realtimeStore ?? defaultMapRealtimeStore;
+    const { cameras: patched } = store.patchCameras(cameras);
     if (source) {
-      const entityIndex = new EntityIndex(cameras);
+      const entityIndex = new EntityIndex(patched);
       source.setData(entityIndex.toFeatureCollection());
     }
     const fovSource = map.getSource(FOV_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
@@ -290,9 +414,9 @@ export function MapCanvas({
         east: b.getEast(),
         north: b.getNorth(),
       };
-      fovSource.setData(camerasToFovCollection(cameras, bbox));
+      fovSource.setData(camerasToFovCollection(patched, bbox));
     }
-  }, [cameras, coverage]);
+  }, [cameras, coverage, realtimeStore]);
 
   // Update sites GeoJSON data
   useEffect(() => {

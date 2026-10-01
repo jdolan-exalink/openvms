@@ -14,10 +14,38 @@ import { useEffect, useRef, useState } from "react";
 const invalidationsByType: Record<string, readonly (readonly string[])[]> = {
   "event.created": [["events"], ["plates"]],
   "server.status": [["servers"], ["health"], ["cameras"]],
+  "server.status_changed": [["servers"], ["health"], ["cameras"]],
   "alarm.updated": [["alarms"]],
+  "alarm.created": [["alarms"]],
+  "alarm.acknowledged": [["alarms"]],
   "notification.created": [["notifications"]],
+  "camera.status_changed": [["cameras"], ["health"]],
 };
 const catchUpKeys = [...new Set(Object.values(invalidationsByType).flat().map((k) => JSON.stringify(k)))].map((k) => JSON.parse(k) as string[]);
+
+export type FrameListener = (frame: unknown) => void;
+const frameListeners = new Set<FrameListener>();
+
+/**
+ * Subscribe to raw incoming realtime frames (individual envelopes, batch envelopes, or control frames).
+ * Returns an unsubscribe cleanup function.
+ */
+export function subscribeFrames(listener: FrameListener): () => void {
+  frameListeners.add(listener);
+  return () => {
+    frameListeners.delete(listener);
+  };
+}
+
+function notifyFrameListeners(frame: unknown) {
+  for (const listener of frameListeners) {
+    try {
+      listener(frame);
+    } catch {
+      // Listener error should not affect others
+    }
+  }
+}
 
 const BASE_DELAY_MS = 1_000;
 const MAX_DELAY_MS = 30_000;
@@ -64,15 +92,49 @@ export function useRealtimeFeed({ enabled = true, random = Math.random }: Realti
       ws.onopen = () => {
         if (stopped) return;
         setConnected(true);
+
+        // Send hello control frame to server per protocol (M-B6)
+        try {
+          const hello = JSON.stringify({
+            op: "hello",
+            v: 2,
+            topics: ["events", "servers", "alarms", "notifications", "cameras"],
+          });
+          ws.send(hello);
+        } catch {
+          // Ignore send failures if socket closed prematurely
+        }
+
         // No replay: catch up once per (re)connect.
         invalidate(qc, catchUpKeys);
         stableTimer = setTimeout(() => (attempt = 0), STABLE_AFTER_MS);
       };
       ws.onmessage = (e) => {
         try {
-          const frame = JSON.parse(String(e.data)) as { type?: unknown };
-          const keys = typeof frame.type === "string" ? invalidationsByType[frame.type] : undefined;
-          if (keys) invalidate(qc, keys);
+          const raw = JSON.parse(String(e.data)) as {
+            op?: string;
+            frames?: unknown[];
+            type?: unknown;
+            streams?: string[];
+          };
+          if (!raw || typeof raw !== "object") return;
+
+          if (raw.op === "batch" && Array.isArray(raw.frames)) {
+            for (const subFrame of raw.frames) {
+              notifyFrameListeners(subFrame);
+              if (subFrame && typeof subFrame === "object" && "type" in subFrame) {
+                const keys = typeof subFrame.type === "string" ? invalidationsByType[subFrame.type] : undefined;
+                if (keys) invalidate(qc, keys);
+              }
+            }
+          } else if (raw.op === "resync") {
+            notifyFrameListeners(raw);
+            invalidate(qc, catchUpKeys);
+          } else {
+            notifyFrameListeners(raw);
+            const keys = typeof raw.type === "string" ? invalidationsByType[raw.type] : undefined;
+            if (keys) invalidate(qc, keys);
+          }
         } catch {
           // malformed frame: ignore
         }
