@@ -24,6 +24,7 @@ export class HoverIntentManager {
   private listeners = new Set<(state: HoverIntentState) => void>();
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
   private prewarmTimer: ReturnType<typeof setTimeout> | null = null;
+  private leaveTimer: ReturnType<typeof setTimeout> | null = null;
   private liveTimer: ReturnType<typeof setTimeout> | null = null;
 
   private onPrewarm?: (cameraId: string) => void;
@@ -77,6 +78,7 @@ export class HoverIntentManager {
   }
 
   enter(cameraId: string, x = 0, y = 0): void {
+    this.cancelLeave();
     if (this.currentState.cameraId === cameraId && this.currentState.stage !== "none") {
       this.currentState = { ...this.currentState, x, y };
       this.notify();
@@ -126,7 +128,18 @@ export class HoverIntentManager {
     this.notify();
   }
 
-  leave(): void {
+  /** Keep actions reachable while the pointer crosses the gap to the preview. */
+  cancelLeave(): void {
+    if (this.leaveTimer !== null) clearTimeout(this.leaveTimer);
+    this.leaveTimer = null;
+  }
+
+  leave(delayMs = 0): void {
+    this.cancelLeave();
+    if (delayMs > 0) {
+      this.leaveTimer = setTimeout(() => this.leave(), delayMs);
+      return;
+    }
     if (this.currentState.cameraId) {
       this.onRelease?.(this.currentState.cameraId);
     }

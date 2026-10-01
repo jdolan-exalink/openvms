@@ -166,7 +166,7 @@ export function MapShell({
     if (id && point) {
       hoverManager.enter(id, point.x, point.y);
     } else {
-      hoverManager.leave();
+      hoverManager.leave(150);
     }
   };
 
@@ -233,6 +233,8 @@ export function MapShell({
         {hoveredCamera && (
           <CameraPreview
             camera={hoveredCamera}
+            onHoverEnter={() => hoverManager.cancelLeave()}
+            onHoverLeave={() => hoverManager.leave(150)}
             siteName={currentSite?.name}
             stage={hoverState.stage}
             position={{ x: hoverState.x, y: hoverState.y }}

@@ -14,6 +14,8 @@ export interface CameraPreviewProps {
   onOpenLive?: (cameraId: string) => void;
   liveOnHover?: boolean;
   canPreview?: boolean;
+  onHoverEnter?: () => void;
+  onHoverLeave?: () => void;
 }
 
 export function CameraPreview({
@@ -25,6 +27,8 @@ export function CameraPreview({
   onOpenLive,
   liveOnHover = false,
   canPreview = true,
+  onHoverEnter,
+  onHoverLeave,
 }: CameraPreviewProps) {
   const shouldRenderVideo = stage === "live" && liveOnHover && canPreview;
   const shouldPrewarm = canPreview && (stage === "prewarm" || stage === "live");
@@ -44,6 +48,13 @@ export function CameraPreview({
 
   return (
     <div
+      data-testid="camera-hover-preview"
+      onMouseEnter={onHoverEnter}
+      onMouseLeave={onHoverLeave}
+      onFocus={onHoverEnter}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onHoverLeave?.();
+      }}
       style={{ left: `${left}px`, top: `${top}px` }}
       className="pointer-events-auto absolute w-72 rounded-lg border border-border bg-card p-3 shadow-xl "
     >

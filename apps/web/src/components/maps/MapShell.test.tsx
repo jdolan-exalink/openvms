@@ -72,9 +72,44 @@ describe("Maps camera interaction integration", () => {
     act(() => vi.advanceTimersByTime(300));
     expect(document.querySelector("[data-surface-slot='c0']")).toBeNull();
     fireEvent.mouseLeave(screen.getByRole("button", { name: "Marker c0" }));
+    act(() => vi.advanceTimersByTime(150));
     expect(release).toHaveBeenCalledWith("c0", "sub");
   });
 
+
+
+  it("keeps Pin interactive while crossing from a marker into its preview", async () => {
+    await setup();
+    vi.useFakeTimers();
+    const marker = screen.getByRole("button", { name: "Marker c0" });
+    fireEvent.mouseEnter(marker);
+    act(() => vi.advanceTimersByTime(400));
+    const pin = screen.getByRole("button", { name: "Pin preview" });
+    fireEvent.mouseLeave(marker);
+    fireEvent.mouseEnter(pin.closest("[data-testid='camera-hover-preview']") ?? pin);
+    act(() => vi.advanceTimersByTime(200));
+    expect(pin).toBeInTheDocument();
+    fireEvent.click(pin);
+    expect(screen.getByRole("button", { name: "Close preview" })).toBeInTheDocument();
+  });
+
+  it("cancels stale leave when another camera enters and releases on cleanup", async () => {
+    const release = vi.spyOn(PlayerSessionManager.prototype, "release");
+    const view = await setup();
+    vi.useFakeTimers();
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Marker c0" }));
+    act(() => vi.advanceTimersByTime(400));
+    fireEvent.mouseLeave(screen.getByRole("button", { name: "Marker c0" }));
+    expect(screen.getByRole("button", { name: "Pin preview" })).toBeInTheDocument();
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Marker c1" }));
+    act(() => vi.advanceTimersByTime(400));
+    expect(screen.getByAltText("Camera 1")).toBeInTheDocument();
+    expect(release).toHaveBeenCalledWith("c0", "sub");
+    fireEvent.mouseLeave(screen.getByRole("button", { name: "Marker c1" }));
+    view.unmount();
+    expect(release).toHaveBeenCalledWith("c1", "sub");
+    act(() => vi.advanceTimersByTime(200));
+  });
 
   it("opts into live hover at 700ms without acquiring a second session", async () => {
     const acquire = vi.spyOn(PlayerSessionManager.prototype, "acquire");
