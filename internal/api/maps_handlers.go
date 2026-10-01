@@ -530,6 +530,7 @@ func toMapEntity(e maps.Entity) gen.MapEntity {
 		Cam:    cam,
 		St:     gen.MapEntitySt(e.Status),
 		Alarms: e.Alarms,
+		Rev:    e.Revision,
 	}
 }
 

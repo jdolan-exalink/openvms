@@ -39,6 +39,7 @@ export function mapWireEntity(entity: Schemas["MapEntity"]): MapEntity | CameraE
     position: mapWirePosition(entity.pos),
     status: entity.st,
     metadata: {},
+    revision: entity.rev,
   };
 
   if (entity.t === "camera" && entity.cam) {

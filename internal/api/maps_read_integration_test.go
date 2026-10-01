@@ -489,3 +489,60 @@ func TestMapsReadEndpointsAndRBAC(t *testing.T) {
 		}
 	})
 }
+
+// TestMapEntitiesExposePlacementRevision proves the editor can read the per-placement
+// revision it later sends back as If-Match (M-W8).
+func TestMapEntitiesExposePlacementRevision(t *testing.T) {
+	te := setupMapsTest(t, true)
+	ctx := context.Background()
+	tenantID := te.Demo.TenantID
+	cam := te.Cameras["frigate-h01/acceso_norte"]
+	siteID := cam.SiteID
+
+	err := te.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO map_placements (
+				tenant_id, site_id, entity_type, entity_id, floor_id,
+				lat, lng, bearing_deg, fov_deg, range_m, props, revision
+			) VALUES (
+				$1, $2, 'camera', $3, NULL,
+				-34.6037, -58.3816, 90, 70, 30, '{}'::jsonb, 7
+			)
+		`, tenantID, siteID, cam.ID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("failed to seed placement: %v", err)
+	}
+
+	status, _, body := te.request(http.MethodGet, fmt.Sprintf("/api/v1/maps/sites/%s/entities", siteID), te.AdminToken, nil, nil)
+	if status != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", status, body)
+	}
+
+	var resp struct {
+		Entities []struct {
+			ID  uuid.UUID `json:"id"`
+			Rev *int64    `json:"rev"`
+		} `json:"entities"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range resp.Entities {
+		if e.ID != cam.ID {
+			continue
+		}
+		found = true
+		if e.Rev == nil {
+			t.Fatal("expected placement revision (rev) on placed entity")
+		}
+		if *e.Rev != 7 {
+			t.Fatalf("expected rev 7, got %d", *e.Rev)
+		}
+	}
+	if !found {
+		t.Fatalf("placed camera %s missing from entities", cam.ID)
+	}
+}

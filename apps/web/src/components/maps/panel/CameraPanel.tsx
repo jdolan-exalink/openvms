@@ -76,9 +76,9 @@ function SingleCameraCard({
   };
 
   return (
-    <div className="flex flex-col rounded-lg border border-border bg-card shadow-md overflow-hidden text-sm">
+    <div className="flex flex-col rounded-lg border border-line bg-surface shadow-md overflow-hidden text-sm">
       {/* Header */}
-      <div className="relative z-[3] flex items-center justify-between border-b border-border bg-muted/30 px-3 py-2">
+      <div className="relative z-[3] flex items-center justify-between border-b border-line bg-muted/30 px-3 py-2">
         <div className="min-w-0 pr-2">
           <div className="flex items-center gap-1.5">
             <span
@@ -96,7 +96,7 @@ function SingleCameraCard({
           <button
             type="button"
             onClick={() => onOpenLive(camera.id)}
-            className="rounded p-1 text-muted hover:bg-hover hover:text-ink transition-colors"
+            className="rounded p-1 text-muted hover:bg-raised hover:text-ink transition-colors"
             title="Open in Live View"
             aria-label="Open in Live View"
           >
@@ -105,7 +105,7 @@ function SingleCameraCard({
           <button
             type="button"
             onClick={() => onUnpin(camera.id)}
-            className="rounded p-1 text-muted hover:bg-hover hover:text-ink transition-colors"
+            className="rounded p-1 text-muted hover:bg-raised hover:text-ink transition-colors"
             title="Close preview"
             aria-label="Close preview"
           >
@@ -129,7 +129,7 @@ function SingleCameraCard({
       </div>
 
       {/* Toolbar & Actions */}
-      <div className="relative z-[3] flex flex-wrap items-center justify-between gap-1 p-2 border-b border-border/50 text-xs">
+      <div className="relative z-[3] flex flex-wrap items-center justify-between gap-1 p-2 border-b border-line/50 text-xs">
         <div className="flex items-center gap-1.5 text-muted">
           <span>{camera.camera.cameraType.toUpperCase()}</span>
           {camera.camera.fovDeg && (
@@ -145,7 +145,7 @@ function SingleCameraCard({
             <button
               type="button"
               onClick={() => onAddToLive(camera.id)}
-              className="flex items-center gap-1 rounded border border-border px-2 py-0.5 text-ink hover:bg-hover transition-colors"
+              className="flex items-center gap-1 rounded border border-line px-2 py-0.5 text-ink hover:bg-raised transition-colors"
               title="Add to current Live View grid"
             >
               <Plus className="size-3" />
@@ -179,7 +179,7 @@ function SingleCameraCard({
                   key={nearby.id}
                   type="button"
                   onClick={() => onSelectCamera(nearby.id)}
-                  className="flex w-full items-center justify-between rounded px-2 py-1 text-xs hover:bg-hover text-left transition-colors"
+                  className="flex w-full items-center justify-between rounded px-2 py-1 text-xs hover:bg-raised text-left transition-colors"
                 >
                   <span className="truncate pr-2 text-ink">{nearby.name}</span>
                   <span className="font-mono text-[10px] text-muted shrink-0">

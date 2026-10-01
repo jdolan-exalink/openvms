@@ -1,10 +1,25 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { alarmsQuery, serversQuery, meQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
-import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery } from "@/lib/maps/api";
+import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery, unplacedCamerasQuery } from "@/lib/maps/api";
 import { applyFilters, mapUserPrefsQuery, mergeLayers, saveMapUserPrefs } from "@/lib/maps/prefs";
+import {
+  DEFAULT_PLACEMENT,
+  canUndo,
+  commitPlacement,
+  emptyDraft,
+  markConflict,
+  pendingPlacements,
+  rebasePlacement,
+  stageMany,
+  stagePlacement,
+  undoDraft,
+  type DraftPlacement,
+  type DraftState,
+} from "@/lib/maps/placementDraft";
+import { savePlacements } from "@/lib/maps/placements";
 import { EMPTY_FILTERS, type CameraEntity, type LayerPreference, type MapFilters, type MapMode } from "@/lib/maps/types";
 import { MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { IncidentFocus } from "@/lib/maps/incidentPolicy";
@@ -19,6 +34,8 @@ import { CameraPanel } from "./panel/CameraPanel";
 import { CameraContextMenu } from "./panel/CameraContextMenu";
 import { LayersPanel } from "./panel/LayersPanel";
 import { FiltersPanel } from "./panel/FiltersPanel";
+import { UnplacedTray, DRAG_MIME } from "./editor/UnplacedTray";
+import { PlacementPropsForm } from "./editor/PlacementPropsForm";
 import { HoverIntentManager, type HoverIntentState } from "@/lib/maps/hoverIntent";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
 import { ErrorNote } from "../ui";
@@ -120,6 +137,126 @@ function MapShellContent({
   const currentSite = sites.find((s) => s.id === selectedSiteId) ?? (sites.length === 1 ? sites[0] : undefined);
 
   const entitiesQuery = useQuery(siteEntitiesQuery(currentSite?.id ?? ""));
+
+  // --- Placement editor (M-W8) -------------------------------------------------------
+  // Everything the operator changes stays in the draft; nothing is written until Save,
+  // and each save carries the revision it was based on as If-Match.
+  const queryClient = useQueryClient();
+  const editActive = mode === "edit" && canEdit && !!currentSite;
+  const unplacedQuery = useQuery({ ...unplacedCamerasQuery(currentSite?.id ?? ""), enabled: editActive });
+  const [draft, setDraft] = useState<DraftState>(emptyDraft);
+  const [armedCameraId, setArmedCameraId] = useState<string>();
+  const [activeDraftId, setActiveDraftId] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string>();
+  const pending = pendingPlacements(draft);
+  const siteCenter = currentSite?.center?.kind === "geo" ? currentSite.center : undefined;
+  const knownRevision = (entityId: string): number | undefined =>
+    draft.revisions[entityId] ?? entitiesQuery.data?.entities.find((e) => e.id === entityId)?.revision;
+
+  const placeCameraAt = (cameraId: string, point: { lng: number; lat: number }) => {
+    if (!currentSite) return;
+    const unplaced = (unplacedQuery.data ?? []).find((camera) => camera.id === cameraId);
+    if (unplaced) {
+      setActiveDraftId(cameraId);
+      setArmedCameraId(undefined);
+      setDraft(stagePlacement(draft, {
+        entityId: cameraId,
+        entityType: "camera",
+        siteId: currentSite.id,
+        lat: point.lat,
+        lng: point.lng,
+        ...DEFAULT_PLACEMENT,
+      }));
+      return;
+    }
+    const camera = cameras.find((item) => item.id === cameraId);
+    if (!camera || camera.position.kind !== "geo") return;
+    setActiveDraftId(cameraId);
+    setDraft(stagePlacement(draft, {
+      entityId: cameraId,
+      entityType: "camera",
+      siteId: currentSite.id,
+      lat: point.lat,
+      lng: point.lng,
+      bearingDeg: camera.camera.bearingDeg ?? 0,
+      fovDeg: camera.camera.fovDeg,
+      rangeM: camera.camera.rangeM,
+    }, knownRevision(cameraId)));
+  };
+
+  const handleMapClick = (point: { lng: number; lat: number }) => {
+    if (!editActive) return;
+    if (armedCameraId) placeCameraAt(armedCameraId, point);
+    else if (selectedCameraId) placeCameraAt(selectedCameraId, point);
+  };
+
+  const handleMapDrop = (event: DragEvent) => {
+    if (!editActive) return;
+    const cameraId = event.dataTransfer.getData(DRAG_MIME);
+    if (!cameraId) return;
+    event.preventDefault();
+    const map = mapRef.current;
+    if (!map) return;
+    const rect = map.getContainer().getBoundingClientRect();
+    const point = map.unproject([event.clientX - rect.left, event.clientY - rect.top]);
+    placeCameraAt(cameraId, { lng: point.lng, lat: point.lat });
+  };
+
+  const handlePlaceAll = () => {
+    if (!currentSite || !siteCenter || !unplacedQuery.data?.length) return;
+    setArmedCameraId(undefined);
+    setDraft(stageMany(draft, unplacedQuery.data.map((camera) => ({
+      entityId: camera.id,
+      entityType: "camera" as const,
+      siteId: currentSite.id,
+      lat: siteCenter.lat,
+      lng: siteCenter.lng,
+      ...DEFAULT_PLACEMENT,
+    }))));
+  };
+
+  const handleDraftChange = (patch: Partial<DraftPlacement>) => {
+    if (!activeDraftId) return;
+    const current = draft.entries[activeDraftId];
+    if (!current) return;
+    setDraft(stagePlacement(draft, { ...current, ...patch }));
+  };
+
+  const handleSave = async () => {
+    if (saving || pending.length === 0) return;
+    setSaving(true);
+    try {
+      const outcome = await savePlacements(pending);
+      setDraft((prev) => {
+        let next = prev;
+        for (const saved of outcome.saved) next = commitPlacement(next, saved.entityId, saved.revision);
+        for (const conflict of outcome.conflicts) next = markConflict(next, conflict.entityId);
+        return next;
+      });
+      const notices = [...outcome.conflicts, ...outcome.failed].map((item) => item.message);
+      setSaveError(notices.length ? notices.join(" · ") : undefined);
+      if (outcome.saved.length && currentSite) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["maps", "sites", currentSite.id, "entities"] }),
+          queryClient.invalidateQueries({ queryKey: ["maps", "unplaced", currentSite.id] }),
+        ]);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // A 409 means someone else moved the placement: re-read the site entities and rebase the
+  // draft on the revision the server is actually at, keeping the operator's values.
+  const handleRebase = async () => {
+    if (!currentSite) return;
+    const fresh = await queryClient.fetchQuery({ ...siteEntitiesQuery(currentSite.id), staleTime: 0 });
+    setDraft((prev) => prev.conflicts.reduce<DraftState>(
+      (next, entityId) => rebasePlacement(next, entityId, fresh.entities.find((e) => e.id === entityId)?.revision),
+      prev,
+    ));
+  };
 
   const baseCameras: CameraEntity[] = useMemo(() => {
     if (!entitiesQuery.data) return [];
@@ -265,7 +402,9 @@ function MapShellContent({
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg"
       onPointerDownCapture={() => focusPolicy.interact()} onWheelCapture={() => focusPolicy.interact()}
-      onKeyDownCapture={() => focusPolicy.interact()}>
+      onKeyDownCapture={() => focusPolicy.interact()}
+      onDragOver={(event) => { if (editActive) event.preventDefault(); }}
+      onDrop={handleMapDrop}>
       {/* Floating Top Controls Bar */}
       <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex items-center justify-between px-4">
         <div className="pointer-events-auto">
@@ -279,7 +418,7 @@ function MapShellContent({
 
         <div className="pointer-events-auto flex items-center gap-2">
           {can(me.data, "live.view") && (
-            <label className="flex items-center gap-2 rounded border border-border bg-card px-2 py-1 text-xs">
+            <label className="flex items-center gap-2 rounded border border-line bg-surface px-2 py-1 text-xs">
               <input type="checkbox" checked={hoverLiveEnabled}
                 onChange={(event) => setHoverLiveOverride(event.target.checked)} />
               Live on hover
@@ -321,6 +460,7 @@ function MapShellContent({
           onDoubleClickCamera={handleOpenLive}
           onContextMenuCamera={(id, point) => setContextMenu({ cameraId: id, ...point })}
           onSelectSite={(id) => handleSelectSite(id)}
+          onMapClick={handleMapClick}
         />
 
         <aside className="absolute left-3 top-16 z-10 max-h-[70%] w-72 overflow-auto space-y-2">
@@ -341,6 +481,62 @@ function MapShellContent({
               <FiltersPanel filters={filters} onChange={(next) => setFiltersOverride(next)} onClose={() => setFiltersOpen(false)} />
             )}
           </div>
+        )}
+
+        {/* Placement editor: unplaced tray, the unsaved change's properties, save & undo */}
+        {editActive && (
+          <aside className="absolute bottom-3 left-1/2 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-start gap-2">
+            <UnplacedTray
+              cameras={unplacedQuery.data ?? []}
+              armedId={armedCameraId}
+              onArm={setArmedCameraId}
+              onPlaceAll={siteCenter ? handlePlaceAll : undefined}
+            />
+            {activeDraftId && draft.entries[activeDraftId] && (
+              <PlacementPropsForm
+                name={cameras.find((camera) => camera.id === activeDraftId)?.name
+                  ?? (unplacedQuery.data ?? []).find((camera) => camera.id === activeDraftId)?.name
+                  ?? "Cámara"}
+                draft={draft.entries[activeDraftId]}
+                onChange={handleDraftChange}
+              />
+            )}
+            {pending.length > 0 && (
+              <div className="w-56 rounded border border-line bg-surface p-3 shadow-sm">
+                <p className="mb-2 text-xs text-muted">{pending.length} cambio(s) sin guardar</p>
+                {saveError && (
+                  <p role="alert" className="mb-2 text-xs text-bad">{saveError}</p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  {draft.conflicts.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => void handleRebase()}
+                      className="rounded border border-bad px-2 py-1 text-xs font-medium text-bad"
+                    >
+                      Rebase
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setDraft(undoDraft(draft))}
+                    disabled={!canUndo(draft)}
+                    className="rounded border border-line px-2 py-1 text-xs text-ink disabled:opacity-50"
+                  >
+                    Deshacer
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleSave()}
+                    disabled={saving}
+                    className="rounded bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                  >
+                    Guardar ({pending.length})
+                  </button>
+                </div>
+              </div>
+            )}
+          </aside>
         )}
         {/* Hover preview floating card */}
         {hoveredCamera && (

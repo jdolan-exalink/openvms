@@ -32,7 +32,7 @@ const PENDING_GROUPS = "IA por etiqueta, LPR, caras, infraestructura, heatmap y 
 
 export function LayersPanel({ layers, onChange, onClose }: LayersPanelProps) {
   return (
-    <section aria-label="Layers" className="w-64 rounded border border-border bg-card p-3 shadow-sm">
+    <section aria-label="Layers" className="w-64 rounded border border-line bg-surface p-3 shadow-sm">
       <header className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold">Capas</h2>
         {onClose && (
@@ -66,7 +66,7 @@ export function LayersPanel({ layers, onChange, onClose }: LayersPanelProps) {
         </fieldset>
       ))}
 
-      <p className="mt-3 border-t border-border pt-2 text-xs text-muted">{PENDING_GROUPS}</p>
+      <p className="mt-3 border-t border-line pt-2 text-xs text-muted">{PENDING_GROUPS}</p>
     </section>
   );
 }

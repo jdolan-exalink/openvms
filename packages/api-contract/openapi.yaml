@@ -3987,7 +3987,7 @@ components:
         lpr: { type: boolean }
     MapEntity:
       type: object
-      required: [id, t, site, name, pos, st, alarms]
+      required: [id, t, site, name, pos, st, alarms, rev]
       properties:
         id: { type: string, format: uuid }
         t: { type: string, enum: [camera, server, device] }
@@ -3998,6 +3998,10 @@ components:
         cam: { $ref: "#/components/schemas/MapCameraProps", nullable: true }
         st: { type: string, enum: [online, offline, degraded, unknown] }
         alarms: { type: integer }
+        rev:
+          type: integer
+          format: int64
+          description: Placement revision; the editor sends it back as If-Match on save.
     MapEntitiesResponse:
       type: object
       required: [revision, entities]

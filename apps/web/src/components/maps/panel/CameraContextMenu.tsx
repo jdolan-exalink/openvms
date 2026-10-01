@@ -51,9 +51,9 @@ export function CameraContextMenu({
     <div
       ref={menuRef}
       style={{ left: `${position.x}px`, top: `${position.y}px` }}
-      className="pointer-events-auto absolute z-40 min-w-48 rounded-lg border border-border bg-card p-1 shadow-2xl text-xs animate-in fade-in zoom-in-95 duration-100"
+      className="pointer-events-auto absolute z-40 min-w-48 rounded-lg border border-line bg-surface p-1 shadow-2xl text-xs animate-in fade-in zoom-in-95 duration-100"
     >
-      <div className="px-2.5 py-1.5 border-b border-border text-muted font-medium truncate">
+      <div className="px-2.5 py-1.5 border-b border-line text-muted font-medium truncate">
         {camera.name}
       </div>
 
@@ -64,7 +64,7 @@ export function CameraContextMenu({
             onOpenLive(camera.id);
             onClose();
           }}
-          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-ink hover:bg-hover transition-colors"
+          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-ink hover:bg-raised transition-colors"
         >
           <ExternalLink className="size-3.5 text-muted" />
           <span>Open in Live View</span>
@@ -77,7 +77,7 @@ export function CameraContextMenu({
               onAddToLive(camera.id);
               onClose();
             }}
-            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-ink hover:bg-hover transition-colors"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-ink hover:bg-raised transition-colors"
           >
             <Plus className="size-3.5 text-muted" />
             <span>Add to Live View Grid</span>
@@ -90,7 +90,7 @@ export function CameraContextMenu({
             onPin(camera.id);
             onClose();
           }}
-          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-ink hover:bg-hover transition-colors"
+          className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-ink hover:bg-raised transition-colors"
         >
           <Pin className="size-3.5 text-muted" />
           <span>Pin Preview</span>
@@ -100,7 +100,7 @@ export function CameraContextMenu({
           <button
             type="button"
             onClick={handleCopyCoords}
-            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-ink hover:bg-hover transition-colors"
+            className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-ink hover:bg-raised transition-colors"
           >
             <Copy className="size-3.5 text-muted" />
             <span>Copy Coordinates</span>

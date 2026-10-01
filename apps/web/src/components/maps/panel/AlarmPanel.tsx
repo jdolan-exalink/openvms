@@ -11,7 +11,7 @@ const labels: Record<Action, string> = {
 export function AlarmPanel({ alarms, canManage }: { alarms: Schemas["Alarm"][]; canManage: boolean }) {
   const [selected, setSelected] = useState<string>();
   const alarm = alarms.find(item => item.id === selected);
-  return <section aria-label="Alarms" className="rounded border border-border bg-card p-3">
+  return <section aria-label="Alarms" className="rounded border border-line bg-surface p-3">
     <h2>Alarms</h2>
     {!alarms.length && <p>No alarms in this site</p>}
     <ul>{alarms.map(item => <li key={item.id}><button onClick={() => setSelected(item.id)}>

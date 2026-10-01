@@ -36,6 +36,8 @@ export interface MapCanvasProps {
   onDoubleClickCamera?: (cameraId: string) => void;
   onContextMenuCamera?: (cameraId: string, point: { x: number; y: number }) => void;
   onSelectSite?: (siteId: string) => void;
+  /** Clicks that did not land on any feature — the editor places/moves on these. */
+  onMapClick?: (point: { lng: number; lat: number }) => void;
   onMapReady?: (map: maplibregl.Map) => void;
   onMoveEnd?: (view: { center: [number, number]; zoom: number; bounds: LngLatBounds }) => void;
   onReapplyCustomLayers?: () => void;
@@ -61,6 +63,7 @@ export function MapCanvas({
   onDoubleClickCamera,
   onContextMenuCamera,
   onSelectSite,
+  onMapClick,
   onMapReady,
   onMoveEnd,
   onReapplyCustomLayers,
@@ -76,6 +79,7 @@ export function MapCanvas({
 
   const onMoveEndRef = useRef(onMoveEnd);
   const onSelectCameraRef = useRef(onSelectCamera);
+  const onMapClickRef = useRef(onMapClick);
   const onHoverCameraRef = useRef(onHoverCamera);
   const onDoubleClickCameraRef = useRef(onDoubleClickCamera);
   const onContextMenuCameraRef = useRef(onContextMenuCamera);
@@ -100,6 +104,7 @@ export function MapCanvas({
     onDoubleClickCameraRef.current = onDoubleClickCamera;
     onContextMenuCameraRef.current = onContextMenuCamera;
     onSelectSiteRef.current = onSelectSite;
+    onMapClickRef.current = onMapClick;
     camerasRef.current = cameras;
     sitesRef.current = sites;
     coverageRef.current = coverage;
@@ -253,6 +258,18 @@ export function MapCanvas({
       if (feat?.properties?.id) {
         onSelectSiteRef.current?.(feat.properties.id);
       }
+    });
+
+    // Empty-space click: only the editor stages placements on these, so the feature
+    // handlers above keep owning everything the operator clicked on purpose.
+    map.on("click", (e) => {
+      if (!onMapClickRef.current) return;
+      const featureLayers = ["cam-cluster", "cam-point-circle", "site-point"].filter((id) => map.getLayer(id));
+      const hits = featureLayers.length
+        ? map.queryRenderedFeatures(e.point, { layers: featureLayers })
+        : [];
+      if (hits.length > 0) return;
+      onMapClickRef.current({ lng: e.lngLat.lng, lat: e.lngLat.lat });
     });
 
     // Cursor hover effects

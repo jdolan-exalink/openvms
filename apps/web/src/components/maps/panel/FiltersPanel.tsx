@@ -34,7 +34,7 @@ function toggle<T extends string>(values: T[] | undefined, value: T): T[] | unde
 /** FiltersPanel edits the dimensions the entity payload can actually answer. */
 export function FiltersPanel({ filters, onChange, onClose }: FiltersPanelProps) {
   return (
-    <section aria-label="Filters" className="w-64 rounded border border-border bg-card p-3 shadow-sm">
+    <section aria-label="Filters" className="w-64 rounded border border-line bg-surface p-3 shadow-sm">
       <header className="mb-2 flex items-center justify-between">
         <h2 className="text-sm font-semibold">Filtros</h2>
         <div className="flex items-center gap-1">
@@ -92,7 +92,7 @@ export function FiltersPanel({ filters, onChange, onClose }: FiltersPanelProps) 
         </div>
       </fieldset>
 
-      <p className="border-t border-border pt-2 text-xs text-muted">
+      <p className="border-t border-line pt-2 text-xs text-muted">
         Sin un filtro activo se muestran todas las cámaras autorizadas.
       </p>
     </section>

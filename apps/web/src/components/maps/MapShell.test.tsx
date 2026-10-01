@@ -25,7 +25,10 @@ vi.mock("./canvas/MapCanvas", () => ({
 }));
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); canvasHarness.easeTo.mockReset(); });
-async function setup(alarmsEnabled = false, prefs: unknown = {}) {
+async function setup(alarmsEnabled = false, prefs: unknown = {}, extra: {
+  grants?: unknown[];
+  routes?: Record<string, () => Response>;
+} = {}) {
   vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
   const cameras = Array.from({ length: 5 }, (_, n) => ({
     id: `c${n}`, tenant_id: "t", site_id: "s", server_id: "srv", remote_name: `c${n}`,
@@ -38,6 +41,7 @@ async function setup(alarmsEnabled = false, prefs: unknown = {}) {
       { permission: "maps.view", effect: "allow", scope_type: "platform" },
       { permission: "live.view", effect: "allow", scope_type: "platform" },
       ...(alarmsEnabled ? [{ permission: "alarms.view", effect: "allow", scope_type: "platform" }] : []),
+      ...(extra.grants ?? []),
     ] }),
     "/api/v1/me/map-prefs": () => json(prefs),
     "/api/v1/maps/config": () => json({ provider: { id: "local", kind: "pmtiles", tiles: ["/tiles/base.pmtiles"],
@@ -46,7 +50,7 @@ async function setup(alarmsEnabled = false, prefs: unknown = {}) {
       camera_count: 5, online_cameras: 5, offline_cameras: 0, degraded_cameras: 0, alarm_count: 0 }] }),
     "/api/v1/maps/sites/s/entities": () => json({ revision: "1", entities: cameras.map((camera, n) => ({
       id: camera.id, t: "camera", site: "s", srv: "srv", name: camera.display_name,
-      pos: { kind: "geo", lat: 0, lng: n * 0.001 }, st: "online", alarms: n === 0 ? 3 : 0,
+      pos: { kind: "geo", lat: 0, lng: n * 0.001 }, st: "online", alarms: n === 0 ? 3 : 0, rev: 1,
       cam: { bearing: 0, fov: 60, range: 100, type: "fixed", ptz: false, lpr: false },
     })) }),
     "/api/v1/alarms": () => json({ items: [{ id: "a", site_id: "s", camera_id: "c0", camera_name: "Entrance", status: "open" }] }),
@@ -54,6 +58,7 @@ async function setup(alarmsEnabled = false, prefs: unknown = {}) {
     "/api/v1/sites": () => json({ items: [] }),
     "/api/v1/servers": () => json({ items: [] }),
     "/api/v1/views": () => json({ items: [] }),
+    ...(extra.routes ?? {}),
   }));
   vi.stubGlobal("fetch", fetchSpy);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -273,4 +278,108 @@ it("hydrates saved preferences, applies them to the canvas and persists later ch
   expect(body.layers).toMatchObject({ coverage: true, cameras: false, sites: false });
   expect(body.focus_mode).toBe("current-site");
   expect(body.hover_live).toBe(true);
+});
+
+const editGrants = [{ permission: "maps.edit", effect: "allow", scope_type: "platform" }];
+
+const placementPuts = (fetchSpy: { mock: { calls: unknown[][] } }) =>
+  fetchSpy.mock.calls
+    .map(([input]) => input as Request)
+    .filter((request) => request && typeof request === "object" && request.method === "PUT"
+      && new URL(request.url).pathname.startsWith("/api/v1/maps/placements/"));
+
+const unplacedRoute = () => json({ site_id: "s", cameras: [
+  { id: "cu1", name: "Nueva cam", site_id: "s", status: "online" },
+  { id: "cu2", name: "Otra cam", site_id: "s", status: "offline" },
+] });
+
+async function setupEditor(routes: Record<string, () => Response> = {}) {
+  const view = await setup(false, {}, {
+    grants: editGrants,
+    routes: {
+      "/api/v1/maps/unplaced": unplacedRoute,
+      "/api/v1/maps/placements/camera/cu1": () => json({ id: "p-cu1", revision: 1 }),
+      "/api/v1/maps/placements/camera/cu2": () => json({ id: "p-cu2", revision: 1 }),
+      "/api/v1/maps/placements/camera/c1": () => json({ id: "p1", revision: 2 }),
+      ...routes,
+    },
+  });
+  fireEvent.click(screen.getByRole("tab", { name: "Editor" }));
+  await screen.findByRole("region", { name: "Sin ubicar" });
+  return view;
+}
+
+it("drops an armed camera on the map and saves the new placement without If-Match", async () => {
+  const { fetchSpy } = await setupEditor();
+  fireEvent.click(screen.getByRole("button", { name: "Nueva cam" }));
+  act(() => canvasHarness.props?.onMapClick?.({ lng: -58.4, lat: -34.6 }));
+
+  const save = await screen.findByRole("button", { name: "Guardar (1)" });
+  fireEvent.click(save);
+  await waitFor(() => expect(placementPuts(fetchSpy)).toHaveLength(1));
+
+  const [request] = placementPuts(fetchSpy);
+  expect(request!.headers.get("If-Match")).toBeNull();
+  const body = JSON.parse(await request!.text()) as Record<string, unknown>;
+  expect(body).toMatchObject({ site_id: "s", lat: -34.6, lng: -58.4, fov_deg: 70, range_m: 30 });
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Guardar (1)" })).not.toBeInTheDocument());
+});
+
+it("discards a staged placement through undo before anything is written", async () => {
+  const { fetchSpy } = await setupEditor();
+  fireEvent.click(screen.getByRole("button", { name: "Nueva cam" }));
+  act(() => canvasHarness.props?.onMapClick?.({ lng: -58.4, lat: -34.6 }));
+  await screen.findByRole("button", { name: "Guardar (1)" });
+
+  fireEvent.click(screen.getByRole("button", { name: "Deshacer" }));
+  expect(screen.queryByRole("button", { name: "Guardar (1)" })).not.toBeInTheDocument();
+  expect(placementPuts(fetchSpy)).toHaveLength(0);
+});
+
+it("holds a stale save as a conflict and rebases it on the server revision", async () => {
+  let calls = 0;
+  const { fetchSpy } = await setupEditor({
+    "/api/v1/maps/placements/camera/c1": () =>
+      (++calls === 1 ? json({ code: "conflict", message: "revisión desactualizada" }, 409)
+        : json({ id: "p1", revision: 2 })),
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Marker c1" }));
+  act(() => canvasHarness.props?.onMapClick?.({ lng: 0.5, lat: 0.25 }));
+
+  fireEvent.click(await screen.findByRole("button", { name: "Guardar (1)" }));
+  expect(await screen.findByText(/revisión desactualizada/)).toBeInTheDocument();
+  expect(placementPuts(fetchSpy)[0]!.headers.get("If-Match")).toBe(`"1"`);
+
+  // Rebase re-reads the site entities and adopts the revision the server is at.
+  fireEvent.click(screen.getByRole("button", { name: "Rebase" }));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Rebase" })).not.toBeInTheDocument());
+
+  fireEvent.click(screen.getByRole("button", { name: "Guardar (1)" }));
+  await waitFor(() => expect(placementPuts(fetchSpy)).toHaveLength(2));
+  expect(placementPuts(fetchSpy)[1]!.headers.get("If-Match")).toBe(`"1"`);
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Guardar (1)" })).not.toBeInTheDocument());
+});
+
+it("moves a placed camera as a draft that keeps its If-Match revision", async () => {
+  const { fetchSpy } = await setupEditor();
+  fireEvent.click(screen.getByRole("button", { name: "Marker c1" }));
+  act(() => canvasHarness.props?.onMapClick?.({ lng: 0.5, lat: 0.25 }));
+
+  fireEvent.click(await screen.findByRole("button", { name: "Guardar (1)" }));
+  await waitFor(() => expect(placementPuts(fetchSpy)).toHaveLength(1));
+  expect(placementPuts(fetchSpy)[0]!.headers.get("If-Match")).toBe(`"1"`);
+  const body = JSON.parse(await placementPuts(fetchSpy)[0]!.text()) as Record<string, unknown>;
+  expect(body).toMatchObject({ lat: 0.25, lng: 0.5, fov_deg: 60, range_m: 100, bearing_deg: 0 });
+});
+
+it("bulk-places every unplaced camera at the site centre in one undo step", async () => {
+  const { fetchSpy } = await setupEditor();
+  fireEvent.click(screen.getByRole("button", { name: "Ubicar todas en el centro del sitio" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Guardar (2)" }));
+
+  await waitFor(() => expect(placementPuts(fetchSpy)).toHaveLength(2));
+  const bodies = await Promise.all(
+    placementPuts(fetchSpy).map(async (request) => JSON.parse(await request.text()) as Record<string, unknown>),
+  );
+  expect(bodies.every((body) => body.lat === 0 && body.lng === 0)).toBe(true);
 });

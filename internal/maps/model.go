@@ -161,6 +161,8 @@ type Entity struct {
 	Camera   *CameraProps `json:"cam,omitempty"`
 	Status   string       `json:"st"`
 	Alarms   int          `json:"alarms"`
+	// Revision is the placement revision the editor echoes back as If-Match.
+	Revision int64 `json:"rev"`
 }
 
 // EntitiesResult wraps the collection of placed entities and the current revision.

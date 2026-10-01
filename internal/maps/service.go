@@ -384,6 +384,7 @@ func (s *Service) GetSiteEntities(ctx context.Context, actor authz.Actor, siteID
 				Camera:   cam,
 				Status:   status,
 				Alarms:   int(r.AlarmCount),
+				Revision: r.Revision,
 			})
 		}
 		return nil

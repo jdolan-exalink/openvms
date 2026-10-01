@@ -56,6 +56,8 @@ export interface MapEntity {
   position: MapPosition;
   status: "unknown" | "online" | "degraded" | "offline";
   metadata: Record<string, unknown>;
+  /** Placement revision read from the site entities endpoint (the editor's If-Match token). */
+  revision?: number;
 }
 
 export interface CameraMapProps {

@@ -3195,6 +3195,11 @@ export interface components {
             /** @enum {string} */
             st: "online" | "offline" | "degraded" | "unknown";
             alarms: number;
+            /**
+             * Format: int64
+             * @description Placement revision; the editor sends it back as If-Match on save.
+             */
+            rev: number;
         };
         MapEntitiesResponse: {
             /** Format: int64 */

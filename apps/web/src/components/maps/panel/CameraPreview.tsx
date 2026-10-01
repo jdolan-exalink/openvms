@@ -56,7 +56,7 @@ export function CameraPreview({
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onHoverLeave?.();
       }}
       style={{ left: `${left}px`, top: `${top}px` }}
-      className="pointer-events-auto absolute w-72 rounded-lg border border-border bg-card p-3 shadow-xl "
+      className="pointer-events-auto absolute w-72 rounded-lg border border-line bg-surface p-3 shadow-xl "
     >
       <div className="relative z-[3] flex items-start justify-between gap-2 mb-2">
         <div className="min-w-0">
@@ -77,7 +77,7 @@ export function CameraPreview({
             <button
               type="button"
               onClick={() => onPin(camera.id)}
-              className="rounded p-1 text-muted hover:bg-hover hover:text-ink transition-colors"
+              className="rounded p-1 text-muted hover:bg-raised hover:text-ink transition-colors"
               title="Pin preview panel"
               aria-label="Pin preview"
             >
@@ -88,7 +88,7 @@ export function CameraPreview({
             <button
               type="button"
               onClick={() => onOpenLive(camera.id)}
-              className="rounded p-1 text-muted hover:bg-hover hover:text-ink transition-colors"
+              className="rounded p-1 text-muted hover:bg-raised hover:text-ink transition-colors"
               title="Open in Live View"
               aria-label="Open in Live View"
             >
