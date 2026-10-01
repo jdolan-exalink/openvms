@@ -48,6 +48,8 @@ async function setup(alarmsEnabled = false, prefs: unknown = {}, extra: {
       attribution: "local", max_zoom: 18, offline: true }, default_center: { lat: 0, lng: 0 }, default_zoom: 14 }),
     "/api/v1/maps/overview": () => json({ items: [{ id: "s", name: "Site", lat: 0, lng: 0,
       camera_count: 5, online_cameras: 5, offline_cameras: 0, degraded_cameras: 0, alarm_count: 0 }] }),
+    "/api/v1/maps/sites/s/zones": () => json({ zones: [] }),
+    "/api/v1/maps/unplaced": () => json({ cameras: [] }),
     "/api/v1/maps/sites/s/entities": () => json({ revision: "1", entities: cameras.map((camera, n) => ({
       id: camera.id, t: "camera", site: "s", srv: "srv", name: camera.display_name,
       pos: { kind: "geo", lat: 0, lng: n * 0.001 }, st: "online", alarms: n === 0 ? 3 : 0, rev: 1,
@@ -65,7 +67,7 @@ async function setup(alarmsEnabled = false, prefs: unknown = {}, extra: {
   const router = createRouter({ routeTree, context: { queryClient },
     history: createMemoryHistory({ initialEntries: [entry] }) });
   const view = render(<QueryClientProvider client={queryClient}><RouterProvider router={router} /></QueryClientProvider>);
-  await screen.findByRole("button", { name: "Marker c0" });
+  await screen.findByRole("button", { name: "Marker c0" }, { timeout: 5000 });
   return { ...view, router, queryClient, fetchSpy };
 }
 describe("Maps camera interaction integration", () => {
@@ -193,7 +195,7 @@ it("integrates authorized alarms and grouped site health with focus off by defau
 it("focuses only explicit current-site incidents, without selecting a camera, and respects manual navigation and reduced motion", async () => {
   await setup(true);
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
-  act(() => canvasHarness.props?.onMapReady?.({ easeTo: canvasHarness.easeTo, once: () => {} } as never));
+  act(() => canvasHarness.props?.onMapReady?.({ easeTo: canvasHarness.easeTo, getZoom: () => 14, once: () => {} } as never));
   const emit = (id: string, site = "s") => act(() => canvasHarness.props?.realtimeStore?.handleFrame({
     id, type: "alarm.updated", site_id: site, camera_id: "c0", data: { id, status: "open" },
   }));
@@ -502,7 +504,7 @@ it("re-centers an open map when the selected site changes", async () => {
   const { router } = await setup(false, {}, {
     routes: { "/api/v1/maps/overview": twoSiteOverview },
   });
-  act(() => canvasHarness.props?.onMapReady?.({ easeTo: canvasHarness.easeTo, once: () => {} } as never));
+  act(() => canvasHarness.props?.onMapReady?.({ easeTo: canvasHarness.easeTo, getZoom: () => 14, once: () => {} } as never));
   canvasHarness.easeTo.mockClear();
 
   await act(async () => {
@@ -659,8 +661,47 @@ it("surfaces the server's refusal without losing the zone draft", async () => {
   fireEvent.change(await screen.findByLabelText("Nombre de la zona"), { target: { value: "Zona Nueva" } });
   fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
 
-  expect(await screen.findByRole("alert")).toHaveTextContent("El polígono se cruza consigo mismo.");
+  expect(await screen.findByText("El polígono se cruza consigo mismo.")).toBeInTheDocument();
   // The operator's draft stays on screen so nothing has to be drawn twice.
   expect(screen.getByLabelText("Nombre de la zona")).toHaveValue("Zona Nueva");
   expect(zoneRequests(fetchSpy, "PATCH")).toHaveLength(1);
+});
+
+describe("Operational Maps completion", () => {
+  it("synchronizes mode with URL navigation and does not preview in investigation", async () => {
+    const { router } = await setup(false, {}, { grants: [
+      { permission: "events.view", effect: "allow", scope_type: "platform" },
+      { permission: "recordings.view", effect: "allow", scope_type: "platform" },
+    ] });
+    await act(async () => { await router.navigate({ to: "/maps", search: { site: "s", mode: "investigate" } }); });
+    expect(screen.getByRole("tab", { name: "Investigar" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Marker c0" }));
+    expect(screen.getByRole("button", { name: "Open camera events" })).toBeEnabled();
+    expect(screen.queryByLabelText("Close preview")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open camera events" }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/events"));
+    expect(router.state.location.search).toMatchObject({ camera: "c0", site: "s" });
+  });
+
+  it("offers coordinate-less sites from global multi-site navigation", async () => {
+    const { router } = await setup(false, {}, { routes: {
+      "/api/v1/maps/overview": () => json({ items: [
+        { id: "s", name: "Site", camera_count: 5, online_cameras: 5, offline_cameras: 0, degraded_cameras: 0, alarm_count: 0 },
+        { id: "other", name: "Other unlocated site", camera_count: 0, online_cameras: 0, offline_cameras: 0, degraded_cameras: 0, alarm_count: 0 },
+      ] }),
+    } });
+    await act(async () => { await router.navigate({ to: "/maps", search: { mode: "live" } }); });
+    expect(screen.queryByRole("button", { name: "Marker c0" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("combobox", { name: "Seleccionar sitio" }), { target: { value: "s" } });
+    await screen.findByRole("button", { name: "Marker c0" });
+    expect(router.state.location.search).toMatchObject({ site: "s" });
+  });
+
+  it("updates mode when browser history goes back", async () => {
+    const { router } = await setup();
+    fireEvent.click(screen.getByRole("tab", { name: "Analítica" }));
+    await screen.findByText("Current site summary");
+    await act(async () => { router.history.back(); });
+    await waitFor(() => expect(screen.getByRole("tab", { name: "En vivo" })).toHaveAttribute("aria-selected", "true"));
+  });
 });

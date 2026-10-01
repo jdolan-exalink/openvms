@@ -58,7 +58,7 @@ func TestMapsCoreMigrationAndQueries(t *testing.T) {
 	zoom := float32(14.5)
 	siteGeo, err := q.UpdateSiteGeo(ctx, db.UpdateSiteGeoParams{
 		ID:          siteID,
-		TenantID:    tenantID,
+		TenantID:    &tenantID,
 		Lat:         &lat,
 		Lng:         &lng,
 		DefaultZoom: &zoom,

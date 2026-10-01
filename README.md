@@ -9,6 +9,14 @@ Plataforma central multi-tenant y multi-site que federa múltiples servidores [F
 
 **MVP (M0 a M6).** Sobre la base de M0 y el inventario con permisos de M1: índice central de eventos y lecturas de patentes de todos los Frigate con backfill tras caídas (M2), búsqueda global de eventos y patentes (M3), login con usuario y contraseña, sesiones, MFA TOTP, usuarios, grupos, permisos y auditoría desde la web (M4), en vivo multi-servidor con vistas guardadas a través del media gateway (M5) y línea de tiempo, reproducción y exportaciones desde el Frigate de origen (M6). Cada Frigate se registra con login (puerto 8971) o sin login (puerto 5000). Guía de instalación: [`Readme.txt`](Readme.txt).
 
+Maps incorpora edición de posiciones, tipos/FOV, zonas, centro de monitoreo y navegación por
+sitio. El cierre operativo agrega estados de inventario/ubicación, recuperación de errores y
+flujos diferenciados de Live, investigación y resumen actual. **Implementado no equivale a
+validado en producción:** los checks locales de web, Go (race/integración) y rendimiento
+sintético pasaron; la aceptación con la cuenta instalada y el despliegue completo siguen pendientes. Guía: [`docs/maps/OPERATIONS.md`](docs/maps/OPERATIONS.md). Estado y evidencia
+histórica: [`odd/tasks/maps.md`](odd/tasks/maps.md). El editor avanzado de Frigate y las
+capacidades fuera del MVP mantienen sus propios pendientes; no se declaran cerrados aquí.
+
 ## Arranque rápido
 
 Requisitos: Docker con Compose v2. Para desarrollo local también Go 1.26 y Node 22 con pnpm (`corepack enable`).

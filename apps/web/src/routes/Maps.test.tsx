@@ -116,7 +116,7 @@ describe("Maps route", () => {
     );
 
     expect(await screen.findByTestId("mock-map-canvas")).toBeInTheDocument();
-    expect(screen.getByText("Sede Central")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Seleccionar sitio" })).toHaveValue("11111111-1111-1111-1111-111111111111");
     expect(screen.getByRole("tab", { name: /editor/i })).toBeInTheDocument();
   });
 });

@@ -33,27 +33,24 @@ export function HierarchyBreadcrumb({
         <span>Todos los sitios</span>
       </button>
 
-      {currentSite && (
+      {sites.length > 0 && onSelectSite ? (
         <>
           <ChevronRight className="size-3.5 text-muted/60 shrink-0" aria-hidden />
-          {sites.length > 1 && onSelectSite ? (
-            <select
-              value={currentSite.id}
-              onChange={(e) => onSelectSite(e.target.value)}
-              className="bg-transparent font-medium text-ink focus-visible:outline-2 focus-visible:outline-accent cursor-pointer"
-              aria-label="Seleccionar sitio"
-            >
-              {sites.map((s) => (
-                <option key={s.id} value={s.id} className="bg-surface text-ink">
-                  {s.name}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <span className="font-medium text-ink">{currentSite.name}</span>
-          )}
+          <select
+            value={currentSite?.id ?? ""}
+            onChange={(event) => event.target.value ? onSelectSite(event.target.value) : onClearSite?.()}
+            className="max-w-48 bg-transparent font-medium text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            aria-label="Seleccionar sitio"
+          >
+            <option value="" className="bg-surface text-ink">Seleccionar sitio</option>
+            {sites.map((site) => (
+              <option key={site.id} value={site.id} className="bg-surface text-ink">
+                {site.name}{site.center ? "" : " · Sin centro geográfico"}
+              </option>
+            ))}
+          </select>
         </>
-      )}
+      ) : currentSite ? <span className="font-medium text-ink">{currentSite.name}</span> : null}
 
       {buildingName && (
         <>

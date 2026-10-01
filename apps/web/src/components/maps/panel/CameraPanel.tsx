@@ -93,7 +93,7 @@ function SingleCameraCard({
         </div>
 
         <div className="flex items-center gap-1 shrink-0">
-          <button
+          {canPreview && <button
             type="button"
             onClick={() => onOpenLive(camera.id)}
             className="rounded p-1 text-muted hover:bg-raised hover:text-ink transition-colors"
@@ -101,7 +101,7 @@ function SingleCameraCard({
             aria-label="Open in Live View"
           >
             <ExternalLink className="size-4" />
-          </button>
+          </button>}
           <button
             type="button"
             onClick={() => onUnpin(camera.id)}

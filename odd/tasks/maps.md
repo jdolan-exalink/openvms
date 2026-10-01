@@ -593,3 +593,208 @@ existing local `openvms` Compose stack. No remote delivery has occurred.
   API liveness, readiness, and system-info endpoints returned HTTP 200, and `/maps` returned
   HTTP 200. Full `nurby` deployment was not used because its ports conflict with the already
   running `openvms` stack. No remote operation occurred.
+
+## Operational completion follow-up (2026-10-01)
+
+Objective: make Maps discoverable and operational when opening `/maps?mode=live`,
+`investigate`, `analytics`, or `edit`, and reconcile current operational documentation.
+The reported deployment shows only the world basemap and changing mode buttons; this
+report is not proof of its deployed version, permissions, inventory, or placements.
+Working baseline: `de66c1c`. Preserve all prior completion and verification evidence above.
+
+### Current authorization and verification policy
+
+- Authorized: local Maps implementation, supporting regression coverage, and documentation.
+- Effective TDD for this follow-up: **OFF / tests deferred**, from the user's explicit
+  instruction `no hagas los test hasta que terminemos todo`. Historical STRICT TDD and
+  RED/GREEN evidence above remain historical and are not rewritten by this override.
+- Do not execute tests, typecheck, lint, build, or deployment during implementation.
+  Run the final checks only after all authorized implementation/documentation is complete.
+- Do not mark the units complete or create work-unit commits before observing final check
+  proof. Record failures and unavailable/manual checks honestly, without claiming closure.
+- Excluded until separate target/session approval: remote probes, remote deployment,
+  credential/session discovery, and live-account permission/grant changes. The reported
+  `http://10.1.1.24:8000/maps` URL identifies the symptom, not remote execution authority.
+- No push, pull request creation, or merge is authorized. Reuse delivery strategy
+  `ask-on-risk` and the existing user-selected `feature-branch-chain` chain strategy.
+- Initial authored-change forecast: approximately 350–650 additions plus deletions across
+  navigation/data-state behavior, operational mode content, regression coverage, and docs.
+  This is an estimate, not a gate or justification for code-golf. Measure actual work-unit
+  diffs after implementation; preserve cohesive rollback boundaries and plan focused slices
+  if delivery exceeds the existing approximately 400-line PR budget.
+
+### Findings and scope
+
+Local code confirms that site entities load only for a selected site (or the sole site),
+while the global breadcrumb hides its selector until a site is already selected. Sites
+without coordinates have no clickable map marker. Camera inventory and map placements
+are separate: overview counts inventory, but entities returns placements. Unplaced cameras
+are fetched only in active editing. Non-edit modes currently share the same operational
+content, and overview/entities/unplaced/zones failures are not explained in the shell.
+These facts explain a local navigation dead end; deployed state remains unverified.
+
+| ID | Work unit and acceptance | Route and trigger evidence |
+| --- | --- | --- |
+| M-W14 | Discoverability, navigation, and data/error states: expose site selection from global view, including coordinate-less sites; synchronize URL mode/selection; explain loading, failed requests with recovery, empty inventory, unplaced cameras, and filtered/hidden markers; guide authorized users into the existing editor without inventing positions or granting access. | Delegated direct: mapping required 4+ files; implementation spans 2+ non-trivial route/shell/breadcrumb/state files. |
+| M-W15 | Useful live/investigate/analytics behavior using existing APIs only: live camera availability/preview actions; camera-scoped Events/Playback investigation entry points with permission checks; factual inventory/placement/health analytics. Preserve existing placement, zones, FOV, filters, layers, and monitoring-center behavior. | Delegated direct: existing API/permission/route mapping and 2+ non-trivial shell/panel/API integration files. |
+| M-W16 | Operational docs and stale README/status cleanup: explain commissioning, inventory versus placement, site selection, permissions, each mode, failure recovery, and the pending final acceptance/deployment checklist. Preserve historic evidence and distinguish implemented from operationally verified. | Delegated direct: analytical documentation preparation across feature document and existing operational docs/README. |
+| M-W17 | Final validation and deployment: execute applicable functional/static/build checks after M-W14–16 implementation is finished; perform authorized runtime acceptance; obtain explicit destination/operation/credential-or-session approval before remote work; deploy complete authorized solution only after final proof. | Delegated verification: execution checks require a fresh verifier; deployment remains blocked on operational authorization, not granted by local implementation. |
+
+- [x] M-W14 — Local discoverability/navigation/error states implemented and automated checks observed.
+- [x] M-W15 — Local distinct mode workflows implemented and automated checks observed.
+- [x] M-W16 — Operational docs and stale status reconciled and structurally reviewed.
+- [ ] M-W17 — Final checks, runtime acceptance, and explicitly authorized deployment observed.
+
+### Final acceptance scenarios
+
+1. **Live:** select any authorized site from a global multi-site view, including unlocated
+   sites; see placed cameras; understand unplaced inventory; previews respect `live.view`.
+2. **Investigate:** a distinct camera-selection workflow opens existing Events/Playback
+   with the intended camera context and appropriate permissions; no fabricated history.
+3. **Analytics:** display actual authorized site/inventory/placement/availability summaries;
+   do not imply unsupported historical analytics or heatmaps.
+4. **Edit:** an authorized user selects an unlocated site, places and saves cameras, reloads,
+   moves placed markers, edits supported type/FOV, manages allowed zones, and persists the
+   monitoring center. Unauthorized users receive clear guidance rather than dead controls.
+5. **Monitoring:** revisiting a site restores its center/zoom; availability/alarms reflect
+   authorized cameras; hidden layers or filters have explanatory recovery states.
+6. **All modes:** expose request failures; deep links and browser navigation synchronize
+   state; toolbars/panels remain reachable without depending on geographical markers.
+
+Indoor floor-plan workflows, historical geospatial analytics, fabricated coordinates,
+new provider infrastructure, and automatic live-admin grant repair are not implied by this
+follow-up. Any newly discovered product requirement is returned to the parent for scope.
+
+### Deferred final runners and proof
+
+Run sequentially after implementation is complete, recording exact outcomes:
+
+```bash
+pnpm --filter @openvms/web test
+pnpm --filter @openvms/web typecheck
+pnpm --filter @openvms/web lint
+pnpm --filter @openvms/web build
+pnpm test:perf
+go test -race ./...
+go test -race -tags integration ./...
+git diff --check
+```
+
+Integration/performance/runtime checks depend on their existing infrastructure and must
+be reported pending/unavailable if it cannot safely be used. A generated bundle or HTTP
+200 alone does not prove camera placement, editor interaction, permissions, or media.
+At initial planning no follow-up checks had run. Final local web, ordinary/integration Go race,
+and performance results are recorded below. Work-unit commits/native review receipt and installed-
+account runtime acceptance/deployment remain pending; local checks do not certify production.
+
+### Recovery and next step
+
+The local `odd/tasks/maps.md` contains the complete historical record. Parent readback of
+Engram observation 120 found an old truncation warning inside the saved content itself;
+that incomplete historical mirror was repaired from the local document as multipart historical
+observations `odd/maps/tasks/history-1` and `odd/maps/tasks/history-2`, with the current scope
+under `odd/maps/tasks`. Tool content limits prevent claiming one full-file observation.
+Preserve history; do not reconstruct missing evidence from previews or summaries. The
+parent owns persisting/readback of updated current scope and retained historical parts.
+
+Next: parent records local work-unit commits and reconciles delivery policy. M-W14–16 local
+implementation/docs and automated verification are complete; M-W17 remains pending real-account
+runtime acceptance and explicit deployment destination/operation/session authorization.
+
+
+### M-W14–16 initial implementation handoff (historical: checks were deferred)
+
+- M-W14 source authored: global selector includes coordinate-less sites; invalid deep links,
+  identity/config/data failures and retries are visible; inventory and placements are separated;
+  filtered/hidden marker recovery resets only view preferences. Site/mode browser history and
+  externally changed URL camera selection synchronize; site changes clear stale unsaved drafts.
+- M-W15 source authored: camera search/selection and Live entry, no preview acquisition merely
+  for investigation/analytics modes, Events/Playback camera-context actions under existing
+  permission checks, and explicitly current-state overview/placement summaries. Editor/zone/
+  drag/FOV/type/center paths remain in place. No fabricated coordinates/history or grant changes.
+- M-W16 docs authored: `docs/maps/OPERATIONS.md` and README operational status; historical
+  evidence retained and mirror multipart limitations corrected. Final closure checkboxes above
+  remain unchecked until parent final verification and runtime acceptance are observed.
+- Regression coverage authored: global coordinate-less breadcrumb, operational empty/error/
+  retry/filter recovery/permission/analytics states, route mode navigation/browser back, and
+  camera-scoped Events handoff. These tests have NOT been executed.
+- Execution proof: no tests, typecheck, lint, build, performance, Go checks, deployment, commit,
+  staging, native review, remote probes or remote delivery executed by this writer.
+- API contracts reused: maps overview/entities/zones/config/prefs, existing cameras inventory
+  (`cameras.view`), unplaced (`maps.edit`), Live `camera`, Events `camera` + `site`, Playback
+  `camera`. A `maps.edit_device` editor can derive unplaced inventory from successful camera
+  inventory + placements instead of broadening the unplaced endpoint authorization.
+- Rollback boundaries: M-W14 navigation/state panel and shell integration + regression tests;
+  M-W15 mode content/actions and preview gating in shell/panel + mode integration tests;
+  M-W16 operational guide/README and this handoff only. M-W14 and M-W15 share the operational
+  panel; retain navigation/error scaffolding if reverting only mode behavior.
+- Future work-unit delivery: navigation/error recovery with tests; mode workflows/permission
+  gates with tests; operational documentation alongside those slices. Existing feature-branch-
+  chain policy applies, but no commit/PR or approved review outcome is claimed now.
+- Next: parent runs final verification only now that implementation/docs are authored, repairs
+  any actual failures, and obtains explicit operational authorization before deployment.
+
+### Writer final web verification (2026-10-01)
+
+User-requested test deferral was honored until all M-W14–16 source and documentation were
+authored. Parent then authorized sequential foreground verification; no mutating normalizer
+is configured in the web package or root. No native review freeze, commit or deployment occurred.
+
+- Initial `pnpm --filter @openvms/web test`: 543 passed / 4 failed, 85 files. Candidate changes
+  exposed two stale broad assertions: duplicate site text after adding an operational panel,
+  and selecting the first alert rather than the intended zone refusal. Tests now assert the
+  selected site control and exact refusal text; successful default zone/unplaced API fixtures
+  avoid unrelated missing-route errors. Lazy route setup explicitly allows 5 seconds.
+- Focused `pnpm --filter @openvms/web test src/components/maps/MapShell.test.tsx src/routes/Maps.test.tsx src/components/SettingsLayout.test.tsx`:
+  PASS, 39 tests / 3 files. Initial unrelated SettingsLayout grant timeout did not reproduce.
+- First full rerun: 546 passed / 1 failed (85 files); the unrelated Live unauthorized-camera
+  test timed out waiting for North. `pnpm --filter @openvms/web test src/routes/Live.test.tsx`:
+  PASS, 28 tests. No unrelated Live or Settings source/test was changed.
+- Final exact `pnpm --filter @openvms/web test`, after concurrent Go work exited: **PASS,
+  547 tests / 85 files**, 38.72 seconds. Earlier concurrent runs took 135.99–160.69 seconds;
+  transient timeout failures are recorded, not erased or presented as deterministic bugs.
+- `pnpm --filter @openvms/web typecheck`: PASS (exit 0).
+- `pnpm --filter @openvms/web lint`: PASS (exit 0), existing center dependency warning remains.
+- `pnpm --filter @openvms/web build`: PASS (exit 0), existing >500 kB chunk warning remains.
+- `git diff --check`: PASS (exit 0), repeated after the integration fixture correction below.
+
+Independent Go integration verification found a pre-existing compile error in
+`internal/store/maps_core_test.go:61`: its `UpdateSiteGeoParams.TenantID` fixture supplied
+`uuid.UUID`, but the generated query accepts nullable `*uuid.UUID`. Parent authorized the
+minimal fixture-only fix to `&tenantID`; HEAD confirms the stale fixture predates this Maps
+follow-up. Production schema/query/authorization were not changed. The Go verifier owns
+rerunning the corrected integration tests. Keep this one-line correction with validation/docs,
+not the Maps behavior rollback; rollback replaces `&tenantID` with the prior fixture value.
+
+At this writer handoff the independent Go/performance results were still pending. The final
+independent results below close local automated verification only; real-account runtime
+interaction/media and explicitly authorized complete deployment remain M-W17.
+
+
+### Independent final verification and local closure (2026-10-01)
+
+Parent-confirmed independent results (fresh verifier, after all implementation/docs):
+
+| Exact command | Observed outcome |
+| --- | --- |
+| `go test -race ./...` | PASS, ordinary Go packages. |
+| `go test -race -tags integration ./...` | Initial FAIL: pre-existing `maps_core_test.go:61` UUID pointer fixture compile error; final full rerun PASS after the one-line fixture correction described above. |
+| `pnpm test:perf` | PASS, 1/1 synthetic 5,000-camera WebGL2 performance smoke; observed harness acceptance of at least 50 FPS, at most 50 ms steady-state long tasks, and first render under 5 seconds. |
+
+The perf reporter supplied PASS rather than numeric snapshots. These performance numbers are
+asserted harness thresholds, not independently reported measurements or a claim about installed-
+user hardware, production camera traffic, media transport, or a live MQTT feed.
+Initial failures remain recorded above; no silent waiver, fabricated approval, or production
+schema change occurred. Web final results are 547/547 tests, typecheck/lint/build PASS with
+existing warnings, and diff check PASS. Parent structural readback and this doc reconciliation
+close M-W14–16 as **locally implemented and verified**, not operationally deployed/100% live.
+M-W17 stays unchecked. No native review receipt, commit, remote authorization or deployment is
+claimed by this document; parent owns subsequent work-unit delivery.
+
+### Separate discovery: Event Rail (not implemented)
+
+Parallel read-only investigation reported review-item granularity rather than an individual-
+object event stream, no production MQTT consumption, and missing lifecycle update/replay paths.
+This is a separate feature-scope discovery, not a new Maps task, acceptance criterion, or an
+implemented Event Rail. No Event Rail code, ingestion, lifecycle, or replay was changed here.
+Any implementation requires separately authorized scope and verification.

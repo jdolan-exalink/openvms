@@ -48,7 +48,7 @@ export function Maps() {
         site: siteId,
         camera: undefined,
       }),
-      replace: true,
+
     });
   };
 
@@ -60,7 +60,7 @@ export function Maps() {
         ...prev,
         camera: cameraId,
       }),
-      replace: true,
+
     });
   };
 
@@ -72,7 +72,7 @@ export function Maps() {
         ...prev,
         mode,
       }),
-      replace: true,
+
     });
   };
 
