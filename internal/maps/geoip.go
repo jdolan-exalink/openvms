@@ -15,8 +15,8 @@ import (
 
 // Public, key-less IP geolocation. One best-effort call at startup: it only decides where
 // the default map view lands, so any failure keeps the Latin America default and nothing
-// ever blocks on it.
-const serverGeoIPURL = "https://freeipapi.com/api/json"
+// ever blocks on it. Var (not const) so tests can point it at a stub.
+var serverGeoIPURL = "https://freeipapi.com/api/json"
 
 // OPENVMS_MAPS_CENTER="lat,lng" pins the default view for air-gapped deployments where
 // the geolocation lookup cannot work.

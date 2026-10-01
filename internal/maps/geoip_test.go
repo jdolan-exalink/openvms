@@ -86,8 +86,11 @@ func TestDetectServerCenterPrecedence(t *testing.T) {
 		t.Fatalf("env override ignored: %+v", c)
 	}
 
-	// 2. Without a reachable geolocation service, the Latin America default stands.
+	// 2. With the geolocation service unreachable, the Latin America default stands.
 	t.Setenv("OPENVMS_MAPS_CENTER", "")
+	originalURL := serverGeoIPURL
+	serverGeoIPURL = "http://127.0.0.1:1" // nothing listens there
+	defer func() { serverGeoIPURL = originalURL }()
 	def := DefaultConfig().DefaultCenter
 	if c := DetectServerCenter(context.Background(), log); c.Lat != def.Lat || c.Lng != def.Lng {
 		t.Fatalf("expected the default center on failure, got %+v", c)

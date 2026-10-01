@@ -33,19 +33,22 @@ type Config struct {
 	DefaultZoom   int            `json:"default_zoom"`
 }
 
-// DefaultConfig returns the map configuration for a fresh deployment: public OSM raster
-// tiles (the design keeps self-hosted offline PMTiles as the production goal, but PO
-// decision 2026-10-01 sets public OSM as the shipped default) with a Latin America
-// landing view.
+// DefaultConfig returns the map configuration for a fresh deployment: hosted vector
+// tiles from OpenFreeMap (free, key-less, full light/dark styles), with a Latin America
+// landing view. Self-hosted offline PMTiles remains the production goal and comes back by
+// changing this config — the provider abstraction and the vector-style client path stay.
 func DefaultConfig() Config {
+	light := "https://tiles.openfreemap.org/styles/liberty"
+	dark := "https://tiles.openfreemap.org/styles/dark"
 	return Config{
 		Provider: ProviderConfig{
-			ID:          "osm-public",
-			Kind:        "raster",
-			Tiles:       []string{"https://tile.openstreetmap.org/{z}/{x}/{y}.png"},
-			Attribution: "© OpenStreetMap contributors",
-			MaxZoom:     19,
-			Offline:     false,
+			ID:            "openfreemap",
+			Kind:          "vector-style",
+			StyleURLLight: &light,
+			StyleURLDark:  &dark,
+			Attribution:   "© OpenStreetMap contributors © OpenFreeMap",
+			MaxZoom:       19,
+			Offline:       false,
 		},
 		DefaultCenter: DefaultCenter{
 			Lat: -14.2,

@@ -490,3 +490,14 @@ smoke** (no WS event flood), package named `@openvms/test`.
   in img-src/connect-src — a CSP wildcard does not match the bare host, which is exactly
   where the tiles come from (first attempt shipped only the wildcard and the browser kept
   blocking every tile).
+
+### Basemap migration to OpenFreeMap (2026-10-01, PO decision)
+- Raster OSM was superseded the same day by **OpenFreeMap hosted vector tiles**: provider
+  `openfreemap`, kind `vector-style`, `style_url_light = .../styles/liberty`,
+  `style_url_dark = .../styles/dark` — the web `vector-style` provider path (M-W1) needed
+  zero changes: the style URL is the initial style (light/dark by theme) and theme swaps
+  diff on top. Full vector detail, one host for style/tiles/sprites/glyphs, no API key.
+- Caddy CSP gained `https://tiles.openfreemap.org` in img-src/connect-src; OSM raster
+  fallback hosts stay. `TestDefaultConfig` and `GetMapConfig` pin the new contract; the
+  geoip precedence test was made hermetic (it had started passing against the real
+  network and would never exercise the fallback).

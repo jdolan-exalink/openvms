@@ -249,8 +249,11 @@ func TestMapsReadEndpointsAndRBAC(t *testing.T) {
 		if err := json.Unmarshal(body, &cfg); err != nil {
 			t.Fatalf("failed to unmarshal config: %v", err)
 		}
-		if cfg.Provider.Id != "osm-public" || cfg.Provider.Kind != gen.Raster || cfg.Provider.Offline {
+		if cfg.Provider.Id != "openfreemap" || cfg.Provider.Kind != gen.VectorStyle || cfg.Provider.Offline {
 			t.Fatalf("unexpected provider config: %+v", cfg.Provider)
+		}
+		if cfg.Provider.StyleUrlLight == nil || *cfg.Provider.StyleUrlLight == "" {
+			t.Fatal("expected a light vector style URL")
 		}
 	})
 
