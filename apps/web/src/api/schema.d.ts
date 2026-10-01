@@ -78,6 +78,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/map-prefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Your map preferences
+         * @description Layer toggles, filters and focus policy stored for the calling user. The response echoes
+         *     exactly what was saved; a user who never saved anything gets an empty object, and the
+         *     client merges its own defaults.
+         */
+        get: operations["getMapUserPrefs"];
+        /**
+         * Save your map preferences
+         * @description Replaces the whole preference blob of the calling user. Preferences are per user, never shared.
+         */
+        put: operations["putMapUserPrefs"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/features": {
         parameters: {
             query?: never;
@@ -3243,6 +3269,56 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @description Visibility of every map layer group. Absent keys fall back to the client defaults. */
+        MapLayerPreference: {
+            sites?: boolean;
+            cameras?: boolean;
+            coverage?: boolean;
+            ptz_direction?: boolean;
+            ai_person?: boolean;
+            ai_vehicle?: boolean;
+            lpr?: boolean;
+            faces?: boolean;
+            events_alarm?: boolean;
+            events_motion?: boolean;
+            events_audio?: boolean;
+            infra_servers?: boolean;
+            infra_network?: boolean;
+            infra_access?: boolean;
+            infra_sensors?: boolean;
+            heatmap?: boolean;
+            traffic?: boolean;
+        };
+        /** @description Combinable filters applied to the entities drawn on the map. */
+        MapFilters: {
+            site_ids?: string[];
+            camera_ids?: string[];
+            server_ids?: string[];
+            tags?: string[];
+            objects?: string[];
+            priority?: ("alert" | "detection")[];
+            /** @description Restricts the drawn cameras to these hardware types. */
+            camera_types?: ("fixed" | "dome" | "ptz" | "fisheye" | "lpr")[];
+            event_types?: string[];
+            status?: ("ONLINE" | "DEGRADED" | "OFFLINE" | "NO_SIGNAL" | "RECORDING_ERROR" | "UNREACHABLE" | "ALARM")[];
+            time_range?: {
+                /** Format: date-time */
+                start: string;
+                /** Format: date-time */
+                end: string;
+            } | null;
+        };
+        /** @description Per-user map preferences. Every key is optional and the stored blob replaces the previous one on save. */
+        MapUserPrefs: {
+            layers?: components["schemas"]["MapLayerPreference"];
+            filters?: components["schemas"]["MapFilters"];
+            /**
+             * @description Incident auto-focus policy. Defaults to none, which never moves the map.
+             * @enum {string}
+             */
+            focus_mode?: "none" | "current-site";
+            hover_live?: boolean;
+        };
         UpdateSiteGeoRequest: {
             /** Format: double */
             lat?: number | null;
@@ -3454,6 +3530,55 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getMapUserPrefs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stored map preferences */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapUserPrefs"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    putMapUserPrefs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MapUserPrefs"];
+            };
+        };
+        responses: {
+            /** @description Stored map preferences */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapUserPrefs"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
         };
     };
     getFeatures: {

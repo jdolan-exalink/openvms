@@ -88,6 +88,45 @@ paths:
               schema:
                 $ref: "#/components/schemas/Me"
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/me/map-prefs:
+    get:
+      tags: [maps]
+      operationId: getMapUserPrefs
+      summary: Your map preferences
+      description: |
+        Layer toggles, filters and focus policy stored for the calling user. The response echoes
+        exactly what was saved; a user who never saved anything gets an empty object, and the
+        client merges its own defaults.
+      responses:
+        "200":
+          description: Stored map preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapUserPrefs"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [maps]
+      operationId: putMapUserPrefs
+      summary: Save your map preferences
+      description: Replaces the whole preference blob of the calling user. Preferences are per user, never shared.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MapUserPrefs"
+      responses:
+        "200":
+          description: Stored map preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapUserPrefs"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/features:
     get:
       tags: [system]
@@ -4018,6 +4057,77 @@ components:
         revision: { type: integer, format: int64 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    MapLayerPreference:
+      type: object
+      description: Visibility of every map layer group. Absent keys fall back to the client defaults.
+      properties:
+        sites: { type: boolean }
+        cameras: { type: boolean }
+        coverage: { type: boolean }
+        ptz_direction: { type: boolean }
+        ai_person: { type: boolean }
+        ai_vehicle: { type: boolean }
+        lpr: { type: boolean }
+        faces: { type: boolean }
+        events_alarm: { type: boolean }
+        events_motion: { type: boolean }
+        events_audio: { type: boolean }
+        infra_servers: { type: boolean }
+        infra_network: { type: boolean }
+        infra_access: { type: boolean }
+        infra_sensors: { type: boolean }
+        heatmap: { type: boolean }
+        traffic: { type: boolean }
+    MapFilters:
+      type: object
+      description: Combinable filters applied to the entities drawn on the map.
+      properties:
+        site_ids:
+          type: array
+          items: { type: string, format: uuid }
+        camera_ids:
+          type: array
+          items: { type: string, format: uuid }
+        server_ids:
+          type: array
+          items: { type: string, format: uuid }
+        tags:
+          type: array
+          items: { type: string }
+        objects:
+          type: array
+          items: { type: string }
+        priority:
+          type: array
+          items: { type: string, enum: [alert, detection] }
+        camera_types:
+          type: array
+          description: Restricts the drawn cameras to these hardware types.
+          items: { type: string, enum: [fixed, dome, ptz, fisheye, lpr] }
+        event_types:
+          type: array
+          items: { type: string }
+        status:
+          type: array
+          items: { type: string, enum: [ONLINE, DEGRADED, OFFLINE, NO_SIGNAL, RECORDING_ERROR, UNREACHABLE, ALARM] }
+        time_range:
+          type: object
+          nullable: true
+          required: [start, end]
+          properties:
+            start: { type: string, format: date-time }
+            end: { type: string, format: date-time }
+    MapUserPrefs:
+      type: object
+      description: Per-user map preferences. Every key is optional and the stored blob replaces the previous one on save.
+      properties:
+        layers: { $ref: "#/components/schemas/MapLayerPreference" }
+        filters: { $ref: "#/components/schemas/MapFilters" }
+        focus_mode:
+          type: string
+          enum: [none, current-site]
+          description: Incident auto-focus policy. Defaults to none, which never moves the map.
+        hover_live: { type: boolean }
     UpdateSiteGeoRequest:
       type: object
       properties:

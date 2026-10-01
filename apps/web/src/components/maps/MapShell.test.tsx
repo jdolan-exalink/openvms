@@ -25,7 +25,7 @@ vi.mock("./canvas/MapCanvas", () => ({
 }));
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); canvasHarness.easeTo.mockReset(); });
-async function setup(alarmsEnabled = false) {
+async function setup(alarmsEnabled = false, prefs: unknown = {}) {
   vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
   const cameras = Array.from({ length: 5 }, (_, n) => ({
     id: `c${n}`, tenant_id: "t", site_id: "s", server_id: "srv", remote_name: `c${n}`,
@@ -33,12 +33,13 @@ async function setup(alarmsEnabled = false) {
     fps: 5, group_ids: [], default_live_quality: "sub", description: "", location: "", tags: [],
     created_at: "", updated_at: "",
   }));
-  vi.stubGlobal("fetch", vi.fn(stubApi({
+  const fetchSpy = vi.fn(stubApi({
     "/api/v1/me": () => json({ id: "u", username: "admin", tenant_id: "t", grants: [
       { permission: "maps.view", effect: "allow", scope_type: "platform" },
       { permission: "live.view", effect: "allow", scope_type: "platform" },
       ...(alarmsEnabled ? [{ permission: "alarms.view", effect: "allow", scope_type: "platform" }] : []),
     ] }),
+    "/api/v1/me/map-prefs": () => json(prefs),
     "/api/v1/maps/config": () => json({ provider: { id: "local", kind: "pmtiles", tiles: ["/tiles/base.pmtiles"],
       attribution: "local", max_zoom: 18, offline: true }, default_center: { lat: 0, lng: 0 }, default_zoom: 14 }),
     "/api/v1/maps/overview": () => json({ items: [{ id: "s", name: "Site", lat: 0, lng: 0,
@@ -53,13 +54,14 @@ async function setup(alarmsEnabled = false) {
     "/api/v1/sites": () => json({ items: [] }),
     "/api/v1/servers": () => json({ items: [] }),
     "/api/v1/views": () => json({ items: [] }),
-  })));
+  }));
+  vi.stubGlobal("fetch", fetchSpy);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({ routeTree, context: { queryClient },
     history: createMemoryHistory({ initialEntries: ["/maps?site=s"] }) });
   const view = render(<QueryClientProvider client={queryClient}><RouterProvider router={router} /></QueryClientProvider>);
   await screen.findByRole("button", { name: "Marker c0" });
-  return { ...view, router, queryClient };
+  return { ...view, router, queryClient, fetchSpy };
 }
 describe("Maps camera interaction integration", () => {
   it("prewarms at 400ms, defaults live hover off, and releases on leave", async () => {
@@ -225,4 +227,50 @@ it("navigates from grouped health to an authorized camera and site", async () =>
   fireEvent.click(screen.getByRole("button", { name: "View site" }));
   await waitFor(() => expect(router.state.location.search).toMatchObject({ site: "s" }));
   expect(router.state.location.search.camera).toBeUndefined();
+});
+
+const putPrefsRequests = (fetchSpy: { mock: { calls: unknown[][] } }) =>
+  fetchSpy.mock.calls
+    .map(([input]) => input as Request)
+    .filter((request) => request && typeof request === "object" && request.method === "PUT"
+      && new URL(request.url).pathname === "/api/v1/me/map-prefs");
+
+it("hydrates saved preferences, applies them to the canvas and persists later changes", async () => {
+  const { fetchSpy } = await setup(false, {
+    layers: { coverage: false, cameras: false, sites: false, events_alarm: false },
+    filters: {},
+    focus_mode: "current-site",
+    hover_live: true,
+  });
+
+  await waitFor(() => expect(canvasHarness.props?.layerVisibility).toEqual({
+    cameras: false,
+    sites: false,
+    coverage: false,
+    alarmFx: false,
+    detectionFx: true,
+  }));
+  expect(screen.getByLabelText("Incident focus")).toHaveValue("current-site");
+  expect(screen.getByRole("checkbox", { name: "Live on hover" })).toBeChecked();
+  // Hydration must not write back: it would clobber a newer blob saved by another tab.
+  expect(putPrefsRequests(fetchSpy)).toHaveLength(0);
+
+  fireEvent.click(screen.getByTitle("Filtros"));
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Offline" }));
+  await waitFor(() => expect(canvasHarness.props?.cameras).toHaveLength(0));
+  expect(screen.queryByRole("button", { name: "Marker c0" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByTitle("Capas del mapa"));
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Conos FOV" }));
+  // One PUT per change: first the filter, then the layer toggle.
+  await waitFor(() => expect(putPrefsRequests(fetchSpy).length).toBeGreaterThanOrEqual(2));
+  const puts = putPrefsRequests(fetchSpy);
+  const body = JSON.parse(await puts[puts.length - 1]!.text()) as {
+    layers: Record<string, boolean>;
+    focus_mode: string;
+    hover_live: boolean;
+  };
+  expect(body.layers).toMatchObject({ coverage: true, cameras: false, sites: false });
+  expect(body.focus_mode).toBe("current-site");
+  expect(body.hover_live).toBe(true);
 });

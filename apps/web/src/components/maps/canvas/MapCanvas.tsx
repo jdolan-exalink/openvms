@@ -11,6 +11,7 @@ import { buildCameraLayers, buildCamerasSource, CAMERAS_SOURCE_ID } from "./laye
 import { buildFovLayers, buildFovSource, camerasToFovCollection, FOV_SOURCE_ID } from "./layers/fovLayer";
 import { buildSiteLayers, buildSitesSource, SITES_SOURCE_ID, sitesToFeatureCollection } from "./layers/sitesLayer";
 import { buildFxLayers, buildFxSource, FX_SOURCE_ID } from "./layers/fxLayers";
+import { applyLayerVisibility, type LayerGroup } from "./layers/visibility";
 import { AnimationBudget, isPrefersReducedMotion } from "@/lib/maps/animationBudget";
 import { defaultMapRealtimeStore, MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { registerSdfSprites } from "./sprite";
@@ -24,6 +25,8 @@ export interface MapCanvasProps {
   cameras?: CameraEntity[];
   sites?: Site[];
   coverage?: boolean;
+  /** Per-group visibility driven by the user's saved layer preferences. */
+  layerVisibility?: Partial<Record<LayerGroup, boolean>>;
   selectedCameraId?: string;
   hoveredCameraId?: string;
   realtimeStore?: MapRealtimeStore;
@@ -48,6 +51,7 @@ export function MapCanvas({
   cameras = [],
   sites = [],
   coverage = true,
+  layerVisibility,
   selectedCameraId,
   hoveredCameraId,
   realtimeStore,
@@ -79,6 +83,7 @@ export function MapCanvas({
   const camerasRef = useRef(cameras);
   const sitesRef = useRef(sites);
   const coverageRef = useRef(coverage);
+  const layerVisibilityRef = useRef(layerVisibility);
 
   const setupCustomLayersRef = useRef<(map: maplibregl.Map) => void>(() => {});
 
@@ -98,6 +103,7 @@ export function MapCanvas({
     camerasRef.current = cameras;
     sitesRef.current = sites;
     coverageRef.current = coverage;
+    layerVisibilityRef.current = layerVisibility;
 
     setupCustomLayersRef.current = (map: maplibregl.Map) => {
       registerSdfSprites(map);
@@ -138,6 +144,10 @@ export function MapCanvas({
           if (!map.getLayer(layer.id)) map.addLayer(layer);
         }
       }
+
+      // The style can be rebuilt at any moment (theme swap, provider change), so the user's
+      // layer preferences have to be re-applied every time these layers come back.
+      applyLayerVisibility(map, layerVisibilityRef.current ?? {});
 
       onReapplyCustomLayers?.();
     };
@@ -452,18 +462,12 @@ export function MapCanvas({
     }
   }, [sites]);
 
-  // Toggle coverage visibility
+  // Toggle layer-group visibility from the saved preferences
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !map.isStyleLoaded()) return;
-    const visibility = coverage ? "visible" : "none";
-    if (map.getLayer("fov-fill")) {
-      map.setLayoutProperty("fov-fill", "visibility", visibility);
-    }
-    if (map.getLayer("fov-outline")) {
-      map.setLayoutProperty("fov-outline", "visibility", visibility);
-    }
-  }, [coverage]);
+    applyLayerVisibility(map, layerVisibility ?? {});
+  }, [layerVisibility]);
 
   // Update selection feature-state on cameras & fov
   useEffect(() => {

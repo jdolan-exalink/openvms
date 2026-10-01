@@ -4,7 +4,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { alarmsQuery, serversQuery, meQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
 import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery } from "@/lib/maps/api";
-import type { CameraEntity, MapMode } from "@/lib/maps/types";
+import { applyFilters, mapUserPrefsQuery, mergeLayers, saveMapUserPrefs } from "@/lib/maps/prefs";
+import { EMPTY_FILTERS, type CameraEntity, type LayerPreference, type MapFilters, type MapMode } from "@/lib/maps/types";
 import { MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { IncidentFocus } from "@/lib/maps/incidentPolicy";
 import { AlarmPanel } from "./panel/AlarmPanel";
@@ -16,6 +17,8 @@ import { HierarchyBreadcrumb } from "./HierarchyBreadcrumb";
 import { CameraPreview } from "./panel/CameraPreview";
 import { CameraPanel } from "./panel/CameraPanel";
 import { CameraContextMenu } from "./panel/CameraContextMenu";
+import { LayersPanel } from "./panel/LayersPanel";
+import { FiltersPanel } from "./panel/FiltersPanel";
 import { HoverIntentManager, type HoverIntentState } from "@/lib/maps/hoverIntent";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
 import { ErrorNote } from "../ui";
@@ -50,13 +53,21 @@ function MapShellContent({
 }: MapShellProps) {
   const navigate = useNavigate();
   const me = useQuery(meQuery);
+  const prefsQuery = useQuery(mapUserPrefsQuery);
+  const storedPrefs = prefsQuery.data;
+  const prefsSettled = prefsQuery.isSuccess || prefsQuery.isError;
   const [realtimeStore] = useState(() => new MapRealtimeStore(false, me.data?.tenant_id ?? undefined));
   const snapshot = useSyncExternalStore(realtimeStore.subscribe, realtimeStore.getSnapshot);
   const [focusPolicy] = useState(() => new IncidentFocus());
-  const [focusMode, setFocusMode] = useState<"none" | "current-site">("none");
+  // Preferences are restored at render time from the query result: the overrides only record
+  // what the user changed during this visit, so a background refetch can never move a map the
+  // operator is already working with, and no effect ever has to seed state.
+  const [focusModeOverride, setFocusModeOverride] = useState<"none" | "current-site">();
+  const focusMode = focusModeOverride ?? storedPrefs?.focus_mode ?? "none";
   const mapRef = useRef<MapLibreMap | null>(null);
   useEffect(() => { realtimeStore.connect(); return () => realtimeStore.destroy(); }, [realtimeStore]);
-  const [hoverLiveEnabled, setHoverLiveEnabled] = useState(liveOnHover);
+  const [hoverLiveOverride, setHoverLiveOverride] = useState<boolean>();
+  const hoverLiveEnabled = hoverLiveOverride ?? storedPrefs?.hover_live ?? liveOnHover;
   const [mode, setMode] = useState<MapMode>(initialMode);
   const [selectedSiteId, setSelectedSiteId] = useState<string | undefined>(initialSiteId);
   const [selectedCameraId, setSelectedCameraId] = useState<string | undefined>(initialCameraId);
@@ -68,10 +79,13 @@ function MapShellContent({
     x: 0,
     y: 0,
   });
-  const [coverage, setCoverage] = useState(true);
+  const [layersOverride, setLayersOverride] = useState<LayerPreference>();
+  const layers = useMemo(() => layersOverride ?? mergeLayers(storedPrefs?.layers), [layersOverride, storedPrefs]);
+  const [filtersOverride, setFiltersOverride] = useState<MapFilters>();
+  const filters = filtersOverride ?? storedPrefs?.filters ?? EMPTY_FILTERS;
   const [layersOpen, setLayersOpen] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
-
+  const coverage = layers.coverage;
   const [hoverManager] = useState(() => new HoverIntentManager({ liveOnHover: hoverLiveEnabled }));
   useEffect(() => {
     const unsubscribe = hoverManager.subscribe(setHoverState);
@@ -85,6 +99,22 @@ function MapShellContent({
 
   const configQuery = useQuery(mapsConfigQuery);
   const overviewQuery = useQuery(mapsOverviewQuery);
+
+  // The focus policy is an external object that the alarm subscription reads, so it is kept
+  // in sync from render state instead of being mutated by the control that changes it.
+  useEffect(() => { focusPolicy.setMode(focusMode); }, [focusPolicy, focusMode]);
+
+  // The first run after the query settles carries the blob that was just restored; writing
+  // it straight back would race any other tab of the same user that saved in the meantime.
+  const skipNextSaveRef = useRef(true);
+  useEffect(() => {
+    if (!prefsSettled) return;
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      return;
+    }
+    void saveMapUserPrefs({ layers, filters, focus_mode: focusMode, hover_live: hoverLiveEnabled });
+  }, [prefsSettled, layers, filters, focusMode, hoverLiveEnabled]);
 
   const sites = overviewQuery.data ?? [];
   const currentSite = sites.find((s) => s.id === selectedSiteId) ?? (sites.length === 1 ? sites[0] : undefined);
@@ -106,6 +136,17 @@ function MapShellContent({
     void snapshot.revision;
     return realtimeStore.patchCameras(baseCameras).cameras;
   }, [baseCameras, realtimeStore, snapshot.revision]);
+
+  // Panels read `cameras` (everything authorized); the canvas only draws what survives the
+  // active filters, so a filtered-out camera is still pinnable from an existing deep link.
+  const visibleCameras = useMemo(() => applyFilters(cameras, filters), [cameras, filters]);
+  const layerVisibility = useMemo(() => ({
+    cameras: layers.cameras,
+    sites: layers.sites,
+    coverage: layers.coverage,
+    alarmFx: layers.events_alarm,
+    detectionFx: layers.events_motion,
+  }), [layers]);
   useEffect(() => {
     let lastEvent = realtimeStore.getRecentEvents(1)[0]?.id;
     return realtimeStore.subscribe(() => {
@@ -240,21 +281,19 @@ function MapShellContent({
           {can(me.data, "live.view") && (
             <label className="flex items-center gap-2 rounded border border-border bg-card px-2 py-1 text-xs">
               <input type="checkbox" checked={hoverLiveEnabled}
-                onChange={(event) => setHoverLiveEnabled(event.target.checked)} />
+                onChange={(event) => setHoverLiveOverride(event.target.checked)} />
               Live on hover
             </label>
           )}
           <label>Incident focus<select aria-label="Incident focus" value={focusMode} onChange={event => {
-            const next = event.target.value === "current-site" ? "current-site" : "none";
-            focusPolicy.setMode(next);
-            setFocusMode(next);
+            setFocusModeOverride(event.target.value === "current-site" ? "current-site" : "none");
           }}><option value="none">None</option><option value="current-site">Current site</option></select></label>
           <MapToolbar
             mode={mode}
             onModeChange={handleModeChange}
             canEdit={canEdit}
             coverage={coverage}
-            onToggleCoverage={() => setCoverage(!coverage)}
+            onToggleCoverage={() => setLayersOverride({ ...layers, coverage: !layers.coverage })}
             onToggleLayers={() => setLayersOpen(!layersOpen)}
             onToggleFilters={() => setFiltersOpen(!filtersOpen)}
             layersActive={layersOpen}
@@ -271,9 +310,10 @@ function MapShellContent({
           provider={provider}
           center={center}
           zoom={zoom}
-          cameras={cameras}
+          cameras={visibleCameras}
           sites={sites}
           coverage={coverage}
+          layerVisibility={layerVisibility}
           selectedCameraId={selectedCameraId}
           hoveredCameraId={hoverState.cameraId ?? undefined}
           onSelectCamera={handleSelectCamera}
@@ -290,6 +330,18 @@ function MapShellContent({
           </>}
           <SiteHealthPanel cameras={cameras} siteId={currentSite?.id} onSite={handleSelectSite} onCamera={handleSelectCamera} />
         </aside>
+
+        {/* Layer and filter preference panels */}
+        {(layersOpen || filtersOpen) && (
+          <div className="absolute right-3 top-16 z-20 flex flex-col items-end gap-2">
+            {layersOpen && (
+              <LayersPanel layers={layers} onChange={(next) => setLayersOverride(next)} onClose={() => setLayersOpen(false)} />
+            )}
+            {filtersOpen && (
+              <FiltersPanel filters={filters} onChange={(next) => setFiltersOverride(next)} onClose={() => setFiltersOpen(false)} />
+            )}
+          </div>
+        )}
         {/* Hover preview floating card */}
         {hoveredCamera && (
           <CameraPreview

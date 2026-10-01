@@ -1,4 +1,5 @@
 import type { Polygon } from "geojson";
+import type { Schemas } from "@/api/client";
 
 export type EntityType =
   | "camera"
@@ -139,55 +140,38 @@ export interface Zone {
   ruleIds: string[];
 }
 
-export interface LayerPreference {
-  cameras: boolean;
-  coverage: boolean;
-  ptzDirection: boolean;
-  aiPerson: boolean;
-  aiVehicle: boolean;
-  lpr: boolean;
-  faces: boolean;
-  eventsAlarm: boolean;
-  eventsMotion: boolean;
-  eventsAudio: boolean;
-  infraServers: boolean;
-  infraNetwork: boolean;
-  infraAccess: boolean;
-  infraSensors: boolean;
-  heatmap: boolean;
-  traffic: boolean;
-}
+/**
+ * Layer toggles, expressed with the contract's own keys so preferences travel to
+ * `/me/map-prefs` without a conversion layer to keep in sync. Every key has a default, so
+ * `LayerPreference` is the complete set the UI renders from.
+ */
+export type LayerPreference = Required<Schemas["MapLayerPreference"]>;
 
 export const DEFAULT_LAYER_PREFERENCE: LayerPreference = {
+  sites: true,
   cameras: true,
   coverage: true,
-  ptzDirection: false,
-  aiPerson: true,
-  aiVehicle: true,
+  ptz_direction: false,
+  ai_person: true,
+  ai_vehicle: true,
   lpr: true,
   faces: false,
-  eventsAlarm: true,
-  eventsMotion: false,
-  eventsAudio: false,
-  infraServers: true,
-  infraNetwork: false,
-  infraAccess: false,
-  infraSensors: false,
+  events_alarm: true,
+  events_motion: true,
+  events_audio: false,
+  infra_servers: true,
+  infra_network: false,
+  infra_access: false,
+  infra_sensors: false,
   heatmap: false,
   traffic: false,
 };
 
-export interface MapFilters {
-  siteIds?: string[];
-  cameraIds?: string[];
-  serverIds?: string[];
-  tags?: string[];
-  objects?: string[];
-  priority?: ("alert" | "detection")[];
-  eventTypes?: string[];
-  status?: CameraDisplayState[];
-  timeRange?: { start: string; end: string };
-}
+/** Combinable map filters. Absent dimensions do not restrict anything. */
+export type MapFilters = Schemas["MapFilters"];
+
+/** Client-owned default: an operator who never filtered anything draws every camera. */
+export const EMPTY_FILTERS: MapFilters = {};
 
 export interface SavedMapView {
   id: string;

@@ -567,3 +567,47 @@ func toMapZone(z maps.Zone) gen.MapZone {
 		Metadata: meta,
 	}
 }
+
+// GetMapUserPrefs returns the calling user's stored map preferences.
+func (h *Handlers) GetMapUserPrefs(ctx context.Context, _ gen.GetMapUserPrefsRequestObject) (gen.GetMapUserPrefsResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.GetMapUserPrefs404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	raw, err := h.Maps.GetUserPrefs(ctx, a)
+	if err != nil {
+		return nil, err
+	}
+	prefs := gen.MapUserPrefs{}
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &prefs); err != nil {
+			return nil, &maps.ValidationError{Msg: "stored map preferences are not readable"}
+		}
+	}
+	return gen.GetMapUserPrefs200JSONResponse(prefs), nil
+}
+
+// PutMapUserPrefs replaces the calling user's map preferences.
+func (h *Handlers) PutMapUserPrefs(ctx context.Context, req gen.PutMapUserPrefsRequestObject) (gen.PutMapUserPrefsResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.PutMapUserPrefs404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+	if req.Body == nil {
+		return nil, &maps.ValidationError{Msg: "request body is required"}
+	}
+	raw, err := json.Marshal(req.Body)
+	if err != nil {
+		return nil, &maps.ValidationError{Msg: "invalid map preferences"}
+	}
+	if err := h.Maps.SaveUserPrefs(ctx, a, raw); err != nil {
+		return nil, err
+	}
+	return gen.PutMapUserPrefs200JSONResponse(*req.Body), nil
+}
