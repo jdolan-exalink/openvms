@@ -9,6 +9,7 @@
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
+    "test:perf": "pnpm --filter @openvms/test test:perf",
     "generate": "pnpm -r generate"
   }
 }
