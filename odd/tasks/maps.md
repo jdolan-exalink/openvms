@@ -806,3 +806,193 @@ Any implementation requires separately authorized scope and verification.
 - Independent parent-requested focused spot check: 45 tests / 4 files PASS (MapShell, HierarchyBreadcrumb, MapOperationsPanel, Maps route).
 - Native committed-range assessment: medium; `review_due=true`, `slice_budget_reached`. Candidate consent/review outcome pending; automated checks are not a review receipt.
 - Installed-account acceptance and deployment remain pending explicit operational authorization. Event Rail remains explored only, not implemented.
+
+## Navigation and drag/drop follow-up (2026-10-01)
+
+Authorized scope: restore persistent compact icon navigation; fit Maps inside the shared
+workspace; harden camera drag/drop and distribute bulk drafts instead of overlapping markers.
+User confirmed provisional distribution of ONLY the 16 unplaced cameras on server `helvecia`
+(`55793e53-e7a0-4b3f-9640-b2250cbdc1e9`) around the existing Casa site center
+(-31.105609931702922, -60.09134003511838). Do not reassign cameras/servers/sites or change
+other placements. Provisional layout is not actual camera geolocation. Preserve configuration.
+
+- [x] M-W18 — Persistent icon rail on all viewports and workspace-fit Maps layout.
+- [x] M-W19 — Canvas-contained drag/drop, usable mouse/touch movement and release recovery,
+      visible feedback, aesthetic icon-and-name direct-drag camera cards (no selection prerequisite),
+      and deterministic spaced provisional bulk drafts; preserve save/undo/revisions.
+- [ ] M-W20 — Audited provisional placement of the authorized 16 cameras and configuration-preserving
+      local deployment with real interaction acceptance and exact rollback evidence.
+
+Route: delegated direct for M-W18/M-W19 (multiple non-trivial files and preparation for writing).
+M-W20 is parent-gated local operational execution, no remote Frigate access. No data mutation or
+ deployment before parent inspection of implementation proof. Forecast: 300–650 authored lines;
+existing `ask-on-risk` / `feature-branch-chain` delivery strategy applies, no PR/push/merge authorized.
+STRICT TDD ON: current AGENTS/session instruction, runner `pnpm --filter @openvms/web test`;
+previous deferred/OFF entries are historical. Observe focused RED, GREEN, REFACTOR.
+Focused checks: Layout, AppShell, Maps route, MapShell, UnplacedTray and new interaction helpers;
+full web test/typecheck/lint/build and `git diff --check`, sequential foreground.
+Acceptance: icons reachable desktop/narrow viewport; tray placement and marker mouse/touch movement;
+release outside/cancel restores pan; unrelated drops ignored; spaced drafts preserve existing cameras;
+save/reload retains revisions/properties. Real browser proof remains explicit, not inferred from callbacks.
+Rollback: independent source work-unit commits; operational inserts tracked by exact IDs/revisions and
+removed only while unchanged, never overwriting the user's later manual adjustments.
+Mirror: current follow-up scope under `odd/maps/tasks`; full historical evidence retained locally and
+in existing `odd/maps/tasks/history-1` / `history-2` multipart observations. Next: RED regressions.
+
+- [x] M-W21 — Keep site/camera identity symbols visible through zoom and clustering; reuse
+      the existing Live sidebar Font Awesome building/server/video glyphs in actual map/list
+      representations; online green and explicit offline X badges, without fabricated server locations.
+Route: delegated direct (canvas/layers/sprites/tray plus tests). User additionally requested
+5-second per-camera event popups for all available event types; capability inspection is delegated
+separately and implementation remains dependent on verified normalized event fields/links.
+No event ingestion or fabricated snapshots/plates are implied by this UI unit.
+M-W21 acceptance: site glyph remains above zoom 12; clusters retain a camera glyph/count;
+individual marker identity remains video while offline X is a separate badge; tray site/server
+context uses the same existing sidebar icons. Exact focused layer/sprite/tray tests plus full web checks.
+
+- [x] M-W22 — Automatic 5-second anchored popups for newly indexed, permission-filtered
+      camera events: all indexed event categories, real labels/plates/photo only when available,
+      latest event replaces per camera; independent cameras; bounded dedup/recency; tenant/site
+      cleanup and stale-response guards. Fresh writer follows M-W18/19/21 handoff.
+Source contract: existing `event.created` frames carry camera ID and detail ID in `data.id`;
+GET `/api/v1/events/{id}` is authoritative. Reviews/alerts/detections are indexed, not every raw
+object lifecycle; existing upstream HTTP ingestion latency is not eliminated by this UI.
+Do not invent plates/snapshots or implement new ingestion infrastructure in this unit.
+
+### M-W18/19/21 local implementation evidence
+
+- M-W18 navigation RED: focused Layout/AppShell/Maps command returned 2 failures / 12 passes
+  (both rail containers hidden). GREEN: 14/14. Shared shell now keeps a fixed narrow-screen
+  rail and desktop in-flow rail; Maps uses the workspace-fit shell instead of overflowing
+  with a viewport-height child. Browser disappearance cause beyond responsive hiding is not claimed.
+- M-W19 helper RED: new editorInteractions suite failed unresolved module before implementation;
+  helper GREEN 5/5. Icon-card/bulk editor RED: 3 failures / 41 passes; GREEN 49/49 with helpers.
+  Direct-drop integration regression uses real DOM canvas targeting without prior camera selection;
+  overlays/out-of-bounds drops are ignored. Marker pointer capture handles mouse/touch/pen,
+  movement threshold and cancel/outside release cleanup; last valid coordinate remains a draft.
+  Spaced 45-meter provisional grids are deterministic and skip already-staged bulk entries.
+- M-W21 layers RED: 2 failures / 4 passes; GREEN with tray 15/15. Site point/ring maxzoom12
+  and label maxzoom13 were explicit disappearance rules; site symbols now remain through zoom.
+  Clusters keep video identity plus count, individual cameras keep video identity plus offline-X
+  badge. Canonical Font Awesome glyphs match Live sidebar; server identity is list context only,
+  not a fabricated geographic server marker. All new layers registered in visibility groups.
+- Intermediate integration fixture failed `map.once` missing; fake map fixture repaired, no source
+  behavior waived. One focused restricted-route async startup timed out at 1 second; wait now
+  explicitly permits 5 seconds as the existing lazy-ready route setup does.
+- Final full `pnpm --filter @openvms/web test`: PASS 555 tests / 86 files (71.28 seconds).
+- Final focused nine-file Layout/AppShell/Maps/MapShell/UnplacedTray/editorInteractions/
+  cameraLayers/sitesLayer/visibility command: PASS 74/74 after type-only assertion narrowing.
+- `pnpm --filter @openvms/web typecheck`: initial FAIL only new layer-test union narrowing;
+  final PASS after discriminating symbol layers. Production source not changed by this correction.
+- `pnpm --filter @openvms/web lint`: PASS; existing center-effect dependency warning retained.
+- `pnpm --filter @openvms/web build`: PASS; existing >500 kB chunk warning retained.
+- Runtime synthetic production-render harness `pnpm test:perf`: FAIL, maxLongTaskMs 54 > 50;
+  no real-account/media/deployment acceptance claimed. Data, services/config and existing sessions unchanged.
+- M-W20 remains pending parent release. `vmsctl` has no maps operation; HTTP placement API needs
+  an explicitly authorized authenticated session/token. Native `maps.Service.UpsertPlacement`
+  and `DeletePlacement` provide RBAC and audit without token issuance if invoked through an
+  explicitly authorized local administrative service runner with an existing admin identity.
+  Nil If-Match does not guarantee create-only: operational code must lock/check the 16 unplaced
+  targets and preserve race safety. Rollback records placement IDs/revisions and refuses changed rows.
+- Mock-data scope was clarified: remove example records/services only; preserve real servers,
+  cameras and events. Operational maintenance evidence follows; no test fixtures deleted.
+
+### M-W20 operational maintenance evidence (parent-confirmed)
+
+- Native audited maintenance inserted 15 new provisional placements, revisions 3–17, around
+  current Casa center (-31.107187045294246, -60.09585033385747); prior CEF28 placement preserved.
+  All 16 Helvecia cameras are now placed; Frigate-Casa's 10 unplaced cameras remain unchanged.
+- Exactly three empty demo sites (Helvecia, Cayasta, SantaRosa) were soft-deleted, and two mock
+  profile services stopped. Snapshot preserved two real servers, 26 cameras and 34,172 events.
+- Audit request `maps-maintenance-b5a290b0-f009-4fe2-8ec3-6bae920a2625` contains 15 placement
+  upserts and three SITE_REMOVED records. No inventory reassignment or real event deletion.
+- Existing API image restarted after the bounded maintenance pause; health/ready and web
+  returned 200. Initial incorrect healthz probe returned 404, then corrected probe confirmed 200.
+- Rollback evidence is mode-0600 `/tmp/openvms-maps-maintenance-evidence.jsonl`; helper removed.
+  Rollback must refuse modified placement revisions, preserving later user adjustments.
+- New frontend deployment and real browser/media acceptance remain pending parent release.
+  External basemap style returned 403; circle-11/wood-pattern provider sprite warnings are not
+  custom camera icon references and are not claimed fixed by these UI changes.
+
+### M-W22 event notice implementation and correction evidence
+
+Route: delegated direct (MapShell integration, new component and tests); strict TDD ON, exact
+runner `pnpm --filter @openvms/web test`. No backend ingestion, Frigate probes, token issuance,
+remote deployment or RDD lifecycle. Existing navigation/editor/icon uncommitted bytes preserved.
+
+- New component tests RED: missing component import before source. Initial GREEN: 8 event
+  tests plus 36 MapShell tests passed. Initial full web suite: 563/563, 87 files, 91.84 seconds.
+- Independent review found receipt-time expiry shortened visible notices after REST latency;
+  correction tests RED: two failures (retry display lifetime, status-rerender preservation).
+  Display expiry now starts at first validated detail; separate five-second request deadline,
+  one 500 ms retry, abort/replacement/context guards remain bounded. Eligibility signatures
+  preserve events across status/name/coordinate updates without retaining hidden cameras.
+- Backend frame timestamps are event starts, not publication timestamps. A 30-second-old-start
+  regression was observed RED before the two-minute bounded start-recency policy was applied.
+  Events indexed after two minutes may not appear; this limitation is documented, not hidden.
+- REST uses the generated `/api/v1/events/{eventId}` contract and `data.id`, never transport ID.
+  Real labels/plates/severity only; permitted available snapshots otherwise actual thumbnails;
+  explicit image-unavailable state. Different cameras have independent replacement/expiry.
+- Final source checks are pending below; initial MapShell fixture failures from missing mock
+  map.on were repaired by permission-gating the entire new map-move listener, not weakening
+  production checks. Initial typecheck failed generated path placeholder/test narrowing and
+  was corrected; initial typecheck overlapped the historical focused test before final sequential
+  verification. No such historical result is represented as final proof.
+- Performance remains unresolved: writer 54 ms, independent isolated baseline 57 ms and
+  candidate 74 ms all exceed unchanged 50 ms budget. No retry/threshold waiver or proven
+  causal regression/absolution. M-W18/19/21 local functional work is verified; feature-level performance remains partial and M-W20 deployment pending.
+- Rollback boundary: remove CameraEventPopups component/tests and only its MapShell import,
+  ready-map state/callback and JSX integration; preserve unrelated navigation/drag/icon changes.
+
+#### M-W22 final sequential local checks
+
+- Focused `pnpm --filter @openvms/web test src/components/maps/events/CameraEventPopups.test.tsx src/components/maps/MapShell.test.tsx`: PASS 46/46 (10 event + 36 MapShell tests).
+  There is no standalone MapCanvas.test.tsx in this repository; existing MapShell integration
+  and canvas/layer tests in the full suite supply existing canvas coverage, not a fabricated runner.
+- Final `pnpm --filter @openvms/web test`: PASS 565/565, 87 files, 75.32 seconds; expected
+  jsdom HTMLMediaElement.load notices remain. Previous 563 pass was pre-correction evidence.
+- Final `pnpm --filter @openvms/web typecheck`: PASS, exit 0.
+- Final `pnpm --filter @openvms/web lint`: PASS, exit 0; existing center-effect warning retained.
+- Final `pnpm --filter @openvms/web build`: PASS, exit 0; existing >500 kB chunk warning retained.
+- M-W22 event behavior is locally implemented and verified, but no real-account/browser/media
+  acceptance, source commit or new deployment is claimed. Feature-level status remains partial
+  because synthetic performance failed without waiver and deployment remains parent-gated.
+- Parent owns final tracker mirror/readback, independent check and delivery decisions. No source
+  edits after final focused/full/check batch; only proof/document reconciliation followed.
+
+### Functional work-unit commit closure (2026-10-01)
+
+The checked M-W18/M-W19/M-W21/M-W22 items denote observed **local functional completion**,
+not a performance waiver, real-account acceptance, deployment, native receipt or remote delivery.
+M-W20 data maintenance is observed above, but its frontend deployment/acceptance remains open;
+M-W17 real-account/media acceptance remains open. External basemap sprite errors remain unresolved.
+
+| Work unit | Commit | Authored additions + deletions |
+| --- | --- | --- |
+| Persistent navigation and workspace fit, including regression tests | `d446ed724bfe5b579ee748f92485f6589ed104d7` | 15 + 10 = 25 |
+| Direct camera dragging, spaced drafts and canonical zoom-stable identity icons with tests | `c8423b58ca53a950b932ad5eb8dc4f0ba48bc9cd` | 332 + 78 = 410 |
+| Permission-filtered camera event notices, tests and operational docs | `e8a5549f7db9f786ba5d1ac5e55a6350e9eca579` | 228 + 1 = 229 |
+
+Three source commits total 664 authored changed lines, generated outputs excluded. The editor
+unit exceeds the advisory 400-line heuristic by 10 because its pointer interactions, tray behavior,
+shared canonical glyphs and their tests form one coherent rollback/review unit; no code-golf or
+artificial test split. Existing feature-branch-chain policy applies to later PR planning. No PR,
+push or merge was requested/performed, and source normalization has no configured mutating formatter.
+
+- Independent event verifier: exact event + MapShell focused command PASS 46/46, 12.10 seconds;
+  structural timing/context/media readback PASS with no additional findings.
+- Final sequential source checks: full web 565/565, typecheck/lint/build PASS as above; final
+  `git diff --check` PASS. Existing center and chunk warnings remain.
+- Synthetic performance: FAILED at unchanged 50 ms threshold (writer 54, baseline 57,
+  candidate 74 ms); unresolved, not waived, and no attribution/absolution fabricated.
+- All commits are local Conventional Commits on feat/maps, without AI/co-author attribution.
+- Runtime proof remains synthetic only, with failed performance recorded; real editor/media
+  browser acceptance is pending. No additional runtime harness or Frigate probe was executed.
+- Rollback boundaries: navigation six files; editor listed fifteen files and editor-only MapShell
+  hunks; events four files and only event MapShell integration. Source commits retain tests/docs.
+- Native assessment/consent and candidate review remain parent-owned and pending; these commits
+  create no receipt or delivery authority. Generated packages/test/test-results artifacts remain
+  untouched/uncommitted. Evidence-only tracker commit follows these immutable source units.
+- Recovery mirror: full current navigation/drag follow-up under
+  `odd/maps/tasks/navigation-drag-followup`, linked to this file and existing main observation 120
+  plus retained history topics; parent can reconcile its normal main mirror without losing history.
