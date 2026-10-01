@@ -34,7 +34,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-W4 — realtime store, pulse/ripple, animation budget (`a494a46`)
 - [x] M-W5 — camera panel, hover preview, context menu, nearby cameras
 - [x] M-W6 — alarm panel, site health, auto-focus (verified; commit pending parent)
-- [ ] M-W7 — layers & filters panels, user prefs
+- [x] M-W7 — layers & filters panels, user prefs (`cd56639`)
 - [ ] M-W8 — placement editor + Sin ubicar tray
 - [ ] M-W9 — zone editor
 - [ ] M-W10 — 5k-camera performance harness
@@ -55,6 +55,7 @@ ask-on-risk; push/PR are PO decisions.
 - 2026-09-30: M-W2 completed (`3cf166c`: camera layers, clustering with worst-child circle color and count/alarm badges, SDF status glyphs sprite generator, semantic zoom with country-level site health rings, EntityIndex with display-state priority engine, and full test suite).
 - 2026-10-01: M-W3 completed (`71f3ed0`: FOV cones geometry with haversine destination point, FOV fill/outline layers, selection sync, 150ms viewport culling debouncing, deep-linking URL search params synchronization).
 - 2026-10-01: M-W4 completed (`a494a46`: realtime store with 5-min ring buffer, dedup Set, throttled camera status flush 1/s, animation budget with concurrent ripple/pulse caps, reduced-motion fallback, and fx layers).
+- 2026-10-01: M-W7 completed (`cd56639`: /api/v1/me/map-prefs contract and handlers with enum/size validation and per-user isolation, client-owned layer/filter defaults, LayersPanel/FiltersPanel, canvas layer visibility, and render-time preference restoration).
 
 ## Resumed scope (2026-10-01)
 Explicit user confirmation today enables **STRICT TDD ON**, superseding historical OFF above.
@@ -248,3 +249,28 @@ Status: verified; commit pending parent delivery. Native assessment/review remai
 - Next: parent commits/assesses accumulated slice against `17644d8`, then dispatches M-W7.
   Remaining implementation: M-W7, M-W8, M-W9, M-W10, M-B8. Local deployment remains blocked
   by the missing PMTiles asset (ranged /tiles/world.pmtiles returns SPA HTML) and remaining units.
+
+## M-W7 — layer/filter panels and user preferences
+Route: delegated single writer; trigger: multifile new logic and contract change.
+Strict TDD ON; source explicit user confirmation 2026-10-01. Chain: feature-branch-chain.
+- [x] GET/PUT /api/v1/me/map-prefs contract, schemas MapUserPrefs/MapLayerPreference/MapFilters,
+  backend validation (enums, 16 KiB cap) and per-user isolation behind the maps flag.
+- [x] LayersPanel offers only toggles with a real layer (sites, coverage, cameras, events_alarm,
+  events_motion); remaining groups are labelled Fase 2. FiltersPanel covers status and
+  camera_types; the priority=alert checkbox was dropped as redundant with ALARM state.
+- [x] Preferences restore at render time from the query result (no setState-in-effect); overrides
+  record only this visit's changes, so a background refetch cannot move an operator's map, and
+  the first run after the query settles skips its own save.
+
+### M-W7 evidence (2026-10-01)
+- RED/GREEN: backend integration `go test -tags integration -run TestMapUserPrefs ./internal/api/`
+  PASS (3 tests: flag off returns 004, whole-blob replacement, admin/operador isolation, invalid
+  payloads). Web `prefs.test.ts` + `LayersPanel.test.tsx` + `FiltersPanel.test.tsx` +
+  `visibility.test.ts`: 25 tests PASS; MapShell hydration test 14 passed.
+- Final sequential checks: focused Maps suite PASS, 117 tests / 21 files; full web PASS, 454 tests
+  / 73 files; typecheck PASS; lint PASS; build PASS (existing large-chunk warning);
+  `go build ./...` and `go vet ./...` PASS; `git diff --check` PASS; `make generate` idempotent
+  (generated schema.d.ts/api.gen.go committed in the same change).
+- Rollback baseline: HEAD `c433168`; M-W7 commit `cd56639`. No staging beyond that commit, no
+  review, remote operation or deployment performed by this writer.
+- Next: dispatch M-W8 (placement editor + Sin ubicar tray), then M-W9, M-W10, M-B8.
