@@ -38,7 +38,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-W8 — placement editor + Sin ubicar tray (`9174a44`)
 - [x] M-W9 — zone editor (`b88abac`)
 - [ ] M-W10 — 5k-camera performance harness
-- [ ] M-B8 — CSV import of camera positions
+- [x] M-B8 — CSV import of camera positions (`38c5eaf`)
 
 ## Delivery
 ask-on-risk; push/PR are PO decisions.
@@ -58,6 +58,7 @@ ask-on-risk; push/PR are PO decisions.
 - 2026-10-01: M-W7 completed (`cd56639`: /api/v1/me/map-prefs contract and handlers with enum/size validation and per-user isolation, client-owned layer/filter defaults, LayersPanel/FiltersPanel, canvas layer visibility, and render-time preference restoration).
 - 2026-10-01: M-W8 completed (`9174a44`: MapEntity exposes the placement revision for If-Match, pure placement draft with undo/redo and 409 rebase, unplaced tray with click-to-place/drag/bulk-at-centre, properties form with 15° rotation and clamped FOV/range, and editor wiring in MapShell).
 - 2026-10-01: M-W9 completed (`b88abac`: pure ZoneDraft with point-by-point drawing, close/reopen/undo and backend-mirrored geometry validation, ZonesPanel gated on maps.create_zone, zones fill/outline/label layers under a new zones layer group, MapCanvas zone rendering, and MapShell create/update/delete wiring with visible server refusals).
+- 2026-10-01: M-B8 completed (`38c5eaf`: POST /api/v1/maps/placements/import with pure parsePlacementCSV, per-line errors, dry-run validation, atomic apply preserving existing props, maps.placement.import audit on apply, and web importPlacements + CsvImportForm + gated Importar CSV entry).
 
 ## Resumed scope (2026-10-01)
 Explicit user confirmation today enables **STRICT TDD ON**, superseding historical OFF above.
@@ -357,3 +358,53 @@ landed in M-B4). Strict TDD ON; source explicit user confirmation 2026-10-01.
 - Rollback baseline: HEAD `55cc513`; M-W9 commit `b88abac`. No staging beyond that commit, no
   review, remote operation or deployment performed by this writer.
 - Next: M-W10 (performance harness), then M-B8 (CSV import).
+
+## M-B8 — CSV import of camera positions
+Route: delegated single writer; trigger: multifile new logic (contract, backend and web all
+change). Strict TDD ON; source explicit user confirmation 2026-10-01.
+- [x] Contract `POST /api/v1/maps/placements/import`: `{site_id, csv, dry_run}` answered by
+  `MapImportReport {dry_run, rows, upserted, errors[{line,message}]}`; generated into
+  `schema.d.ts` and `internal/api/gen/api.gen.go`.
+- [x] Pure parser (`internal/maps/import.go`): resolves each row's camera by UUID, display
+  name (case-insensitive/trim) or remote name; ambiguous or unknown names, duplicate rows and
+  out-of-range values each yield at most one error per physical line (`csv.Reader.FieldPos`),
+  checked in the order camera → resolution → duplicate → lat → lng → bearing → fov → range,
+  with the same ranges as `UpsertPlacement`. BOM stripped via escape (`"\ufeff"`), a BOM
+  literal in Go source breaks compilation.
+- [x] Service `ImportPlacements`: Tx, `maps.edit_device` required even for dry runs, cameras
+  marked used only after a row validates fully, existing placement props preserved, apply
+  skipped entirely when any row is invalid (atomic), audit `maps.placement.import` recorded
+  only when applying.
+- [x] Handler `ImportMapPlacements` mirrors `UpdateSiteGeo`: 404 with the flag off, nil body
+  → `maps.ValidationError`, report errors mapped to the contract struct; static chi route
+  wins over `{entityType}/{entityId}`.
+- [x] Web `lib/maps/import.ts` (`api.POST` + `unwrap`), `CsvImportForm` with Validar (dry
+  run) / Importar / Cancelar, per-line report, and an `Importar CSV` entry in the Sin ubicar
+  tray offered only to `maps.edit_device`; only a clean apply refreshes
+  `["maps","unplaced",id]` and `["maps","sites",id,"entities"]` and closes the form.
+
+### M-B8 evidence (2026-10-01)
+- RED backend: unit test failed to compile on the missing `siteCamera`/`parsePlacementCSV`,
+  integration test on the missing `ImportMapPlacements` method — both before any
+  implementation existed. One fixture bug found while red: a backtick string kept `\n`
+  literal, so the parser correctly saw one line; rewritten as an interpreted string.
+- GREEN backend: `go test ./internal/maps/` PASS, `go test -tags integration -run
+  'TestMapPlacementsImport' ./internal/api/` PASS (both tests).
+- RED web: `CsvImportForm.test.tsx` failed on the missing module, `UnplacedTray.test.tsx` and
+  the 3 new MapShell import tests failed on the absent `Importar CSV` button; the permission
+  gate test confirmed no entry point exists without `maps.edit_device`.
+- GREEN web: editor suites 13 tests PASS, MapShell import tests 3 PASS; focused Maps suite
+  PASS, 169 tests / 29 files.
+- Final sequential checks: full web PASS, 506 tests / 81 files; typecheck PASS; lint PASS;
+  build PASS (existing large-chunk warning); `git diff --check` PASS (including the new
+  files); `go build ./...` and `go vet ./...` PASS; `go test -tags integration -run
+  'TestMaps' ./internal/api/` PASS (23.9s) plus `./internal/maps/` and `./internal/api/`
+  unit PASS; `make generate` idempotent (identical `git diff` hash across two runs).
+- Design deviations, deliberate: the web gates the import button on `maps.edit_device`
+  rather than inheriting the editor's `maps.edit || maps.edit_device`, because the endpoint
+  requires the former and a `maps.edit`-only operator would always get a 403; camera
+  resolution matches the single-placement upsert ranges, not looser CSV-friendly ones, so a
+  file that validates in the dry run also applies.
+- Rollback baseline: M-W9 docs `a0e38b9`; M-B8 commit `38c5eaf`. No staging beyond that
+  commit, no review, remote operation or deployment performed by this writer.
+- Next: M-W10 (performance harness), then push.
