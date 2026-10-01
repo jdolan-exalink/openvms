@@ -64,32 +64,59 @@ func PlatformAdmin(ctx context.Context, st *store.Store, username string) (authz
 		if u.TenantID != nil {
 			return fmt.Errorf("user %q belongs to a tenant; pick another name", username)
 		}
-		existing, err := q.ListGrantsForUser(ctx, u.ID)
-		if err != nil {
+		if _, err := reconcileCatalogGrants(ctx, q, u.ID); err != nil {
 			return err
-		}
-		have := map[string]bool{}
-		for _, g := range existing {
-			if g.ScopeType == string(authz.ScopePlatform) && g.Effect == string(authz.Allow) {
-				have[g.Permission] = true
-			}
-		}
-		for _, d := range authz.Catalog {
-			if have[string(d.Permission)] {
-				continue
-			}
-			if _, err := q.CreateGrant(ctx, db.CreateGrantParams{
-				SubjectType: "user", SubjectID: u.ID, Permission: string(d.Permission),
-				Effect: string(authz.Allow), ScopeType: string(authz.ScopePlatform), CreatedBy: &u.ID,
-			}); err != nil {
-				return fmt.Errorf("grant %s: %w", d.Permission, err)
-			}
 		}
 		token, err = IssueToken(ctx, q, u.ID, "bootstrap", 0)
 		actor = authz.Actor{UserID: u.ID, Username: u.Username}
 		return err
 	})
 	return actor, token, err
+}
+
+// SyncPlatformAdmin adds missing platform-scope catalog ALLOW grants to an
+// existing platform user. It does not create users or API tokens.
+func SyncPlatformAdmin(ctx context.Context, st *store.Store, username string) (int, error) {
+	added := 0
+	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		u, err := q.GetUserByUsername(ctx, username)
+		if err != nil {
+			return fmt.Errorf("user %q: %w", username, store.Classify(err))
+		}
+		if u.TenantID != nil {
+			return fmt.Errorf("user %q belongs to a tenant; platform permission sync requires a platform user", username)
+		}
+		added, err = reconcileCatalogGrants(ctx, q, u.ID)
+		return err
+	})
+	return added, err
+}
+
+func reconcileCatalogGrants(ctx context.Context, q *db.Queries, userID uuid.UUID) (int, error) {
+	existing, err := q.ListGrantsForUser(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	have := map[string]bool{}
+	for _, g := range existing {
+		if g.ScopeType == string(authz.ScopePlatform) && g.Effect == string(authz.Allow) {
+			have[g.Permission] = true
+		}
+	}
+	added := 0
+	for _, d := range authz.Catalog {
+		if have[string(d.Permission)] {
+			continue
+		}
+		if _, err := q.CreateGrant(ctx, db.CreateGrantParams{
+			SubjectType: "user", SubjectID: userID, Permission: string(d.Permission),
+			Effect: string(authz.Allow), ScopeType: string(authz.ScopePlatform), CreatedBy: &userID,
+		}); err != nil {
+			return 0, fmt.Errorf("grant %s: %w", d.Permission, err)
+		}
+		added++
+	}
+	return added, nil
 }
 
 // TenantUser creates a user in tenantID and issues a token for it.

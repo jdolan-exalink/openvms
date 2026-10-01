@@ -2,6 +2,7 @@
 //
 //	vmsctl migrate                 apply database migrations
 //	vmsctl bootstrap [-user admin] create the platform administrator and print its token
+//	vmsctl sync-admin-permissions -user NAME add missing catalog grants without creating a token
 //	vmsctl token -user NAME        issue another token for an existing user
 //	vmsctl passwd -user NAME       set the login password of a user (read from stdin or -password)
 //	vmsctl seed-demo               create the "demo" tenant against the compose Frigate mocks
@@ -37,6 +38,7 @@ const usage = `usage: vmsctl <command> [flags]
 commands:
   migrate      apply database migrations
   bootstrap    create the platform administrator and print its API token
+  sync-admin-permissions  add missing catalog permissions to an existing platform user
   token        issue a new API token for an existing user
   passwd       set the login password of a user (stdin, or -password)
   seed-demo    create the demo tenant (sites, compose Frigate mocks, Operator-A, supervisor)
@@ -90,6 +92,24 @@ func run(ctx context.Context, cmd string, args []string, out io.Writer) error {
 			}
 		}
 		fmt.Fprintf(out, "platform admin %q ready\ntoken: %s\n", *user, token)
+		return nil
+	case "sync-admin-permissions":
+		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+		user := fs.String("user", "", "existing platform username")
+		_ = fs.Parse(args)
+		if *user == "" {
+			return errors.New("-user is required")
+		}
+		st, closeFn, err := open(ctx, dbURL, log)
+		if err != nil {
+			return err
+		}
+		defer closeFn()
+		added, err := bootstrap.SyncPlatformAdmin(ctx, st, *user)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "platform permissions synchronized for %q (%d grants added; no token created)\n", *user, added)
 		return nil
 	case "token":
 		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
