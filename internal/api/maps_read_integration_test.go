@@ -249,7 +249,7 @@ func TestMapsReadEndpointsAndRBAC(t *testing.T) {
 		if err := json.Unmarshal(body, &cfg); err != nil {
 			t.Fatalf("failed to unmarshal config: %v", err)
 		}
-		if cfg.Provider.Id != "protomaps-local" || cfg.Provider.Kind != gen.Pmtiles || !cfg.Provider.Offline {
+		if cfg.Provider.Id != "osm-public" || cfg.Provider.Kind != gen.Raster || cfg.Provider.Offline {
 			t.Fatalf("unexpected provider config: %+v", cfg.Provider)
 		}
 	})

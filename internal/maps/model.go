@@ -33,22 +33,25 @@ type Config struct {
 	DefaultZoom   int            `json:"default_zoom"`
 }
 
-// DefaultConfig returns the default self-hosted offline PMTiles map configuration.
+// DefaultConfig returns the map configuration for a fresh deployment: public OSM raster
+// tiles (the design keeps self-hosted offline PMTiles as the production goal, but PO
+// decision 2026-10-01 sets public OSM as the shipped default) with a Latin America
+// landing view.
 func DefaultConfig() Config {
 	return Config{
 		Provider: ProviderConfig{
-			ID:          "protomaps-local",
-			Kind:        "pmtiles",
-			Tiles:       []string{"/tiles/world.pmtiles"},
+			ID:          "osm-public",
+			Kind:        "raster",
+			Tiles:       []string{"https://tile.openstreetmap.org/{z}/{x}/{y}.png"},
 			Attribution: "© OpenStreetMap contributors",
-			MaxZoom:     18,
-			Offline:     true,
+			MaxZoom:     19,
+			Offline:     false,
 		},
 		DefaultCenter: DefaultCenter{
-			Lat: 0,
-			Lng: 0,
+			Lat: -14.2,
+			Lng: -51.9,
 		},
-		DefaultZoom: 2,
+		DefaultZoom: 3,
 	}
 }
 

@@ -473,3 +473,19 @@ smoke** (no WS event flood), package named `@openvms/test`.
   `ListNotifications` requires a tenant and the platform user has none
   (internal/rules/service.go); and Live media WebSockets cannot open against frigate-mock
   (no real streams).
+  [Update 2026-10-01: the bell part shipped in `6a863ba` — the Layout no longer renders
+  NotificationBell without a tenant.]
+
+### Basemap decision change (2026-10-01, PO override)
+- The sample PMTiles extract could not carry a real basemap (single-city extract), and the
+  user decided: **public OSM raster is the shipped default** (`osm-public`, offline false),
+  overriding design decision 1 for now — self-hosted offline PMTiles remains the
+  production goal and returns via config when an archive is available (mount
+  `deploy/tiles/` locally).
+- Default view lands on **Latin America** (-14.2, -51.9, zoom 3) instead of null island,
+  and at startup the API geolocates the server's public IP (freeipapi, best-effort 4 s,
+  `OPENVMS_MAPS_CENTER="lat,lng"` override) to center the default view on the server's
+  region (`internal/maps/geoip.go` + wiring in `apps/api/main.go`).
+- Caddy CSP gained `https://*.tile.openstreetmap.org` in img-src/connect-src. Go unit
+  (TestDefaultConfig rewritten, geoip tests new) and the GetMapConfig integration test
+  pin the new contract.
