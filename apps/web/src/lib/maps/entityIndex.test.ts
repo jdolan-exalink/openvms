@@ -9,6 +9,10 @@ import {
 import type { CameraEntity } from "./types";
 
 describe("entityIndex", () => {
+  it("renders server-only metadata outages as unreachable", () => {
+    const index = new EntityIndex([{ ...baseCamera, metadata: { serverOffline: true } }]);
+    expect(index.toFeatureCollection().features[0]!.properties.display_state).toBe("UNREACHABLE");
+  });
   const baseCamera: CameraEntity = {
     id: "cam-1",
     type: "camera",

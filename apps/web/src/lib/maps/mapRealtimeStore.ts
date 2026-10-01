@@ -40,6 +40,7 @@ const MIN_FLUSH_INTERVAL_MS = 1_000; // at most 1/s throttled camera updates per
 export class MapRealtimeStore {
   private statusOverrides = new Map<string, { status: MapEntity["status"]; at: number }>();
   private serverOffline = new Set<string>();
+  private alarmStates = new Map<string, boolean>();
   private cameraAlarms = new Map<string, number>();
   private ringBuffer: RealtimeEvent[] = [];
   private seenIds = new Map<string, number>(); // id -> timestamp
@@ -54,11 +55,46 @@ export class MapRealtimeStore {
   private lastCameraFlushTime = Date.now();
   private cameraFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(autoSubscribe = true) {
+  constructor(autoSubscribe = true, private tenantId?: string) {
     this.currentSnapshot = this.buildSnapshot();
-    if (autoSubscribe) {
-      this.unsubscribeFrames = subscribeFrames((frame) => this.handleFrame(frame));
+    if (autoSubscribe) this.connect();
+  }
+
+  connect(): void {
+    if (!this.unsubscribeFrames) this.unsubscribeFrames = subscribeFrames((frame) => this.handleFrame(frame));
+  }
+
+  seedCameras(cameras: CameraEntity[]): void {
+    for (const camera of cameras) {
+      this.cameraAlarms.set(camera.id, camera.activeAlarms);
+      this.statusOverrides.delete(camera.id);
     }
+    this.notify();
+    this.scheduleCameraFlush();
+  }
+
+  seedAlarms(alarms: { id: string; status: string }[]): void {
+    for (const alarm of alarms) this.alarmStates.set(alarm.id, !["resolved", "closed"].includes(alarm.status));
+  }
+
+  seedServers(servers: { id: string; status: string }[]): void {
+    for (const server of servers) {
+      if (server.status === "offline") this.serverOffline.add(server.id);
+      else this.serverOffline.delete(server.id);
+    }
+    this.notify();
+    this.scheduleCameraFlush();
+  }
+
+  private reset(): void {
+    this.statusOverrides.clear();
+    this.serverOffline.clear();
+    this.cameraAlarms.clear();
+    this.alarmStates.clear();
+    this.ringBuffer = [];
+    this.seenIds.clear();
+    this.notify();
+    this.scheduleCameraFlush();
   }
 
   destroy(): void {
@@ -70,6 +106,7 @@ export class MapRealtimeStore {
       clearTimeout(this.cameraFlushTimer);
       this.cameraFlushTimer = null;
     }
+    this.pendingCameraFlush = false;
     this.listeners.clear();
     this.cameraChangeCallbacks.clear();
   }
@@ -163,6 +200,8 @@ export class MapRealtimeStore {
   handleFrame(raw: unknown): void {
     if (!raw || typeof raw !== "object") return;
     const frame = raw as RealtimeFrame;
+    if (this.tenantId && frame.tenant_id && frame.tenant_id !== this.tenantId) return;
+    if (frame.op === "resync") { this.reset(); return; }
 
     // Handle batch frames
     if (frame.op === "batch" && Array.isArray(frame.frames)) {
@@ -210,24 +249,23 @@ export class MapRealtimeStore {
         }
         cameraAffected = true;
       }
-    } else if (type === "alarm.created") {
-      const camId = frame.camera_id || (frame.data as Record<string, unknown>)?.camera_id;
-      if (typeof camId === "string") {
-        const current = this.cameraAlarms.get(camId) ?? 0;
-        this.cameraAlarms.set(camId, current + 1);
-        cameraAffected = true;
-      }
-    } else if (type === "alarm.updated" || type === "alarm.acknowledged") {
-      const camId = frame.camera_id || (frame.data as Record<string, unknown>)?.camera_id;
-      const data = frame.data as { status?: string } | undefined;
-      if (typeof camId === "string" && data?.status) {
-        const s = data.status.toLowerCase();
-        if (s === "resolved" || s === "closed") {
-          const current = this.cameraAlarms.get(camId) ?? 0;
-          if (current > 0) {
-            this.cameraAlarms.set(camId, current - 1);
-            cameraAffected = true;
-          }
+    } else if (type?.startsWith("alarm.")) {
+      const data = frame.data as { id?: string; camera_id?: string; status?: string } | undefined;
+      const camId = frame.camera_id ?? data?.camera_id;
+      if (camId) {
+        const active = !["resolved", "closed"].includes(data?.status ?? "open");
+        const previous = data?.id ? this.alarmStates.get(data.id) : undefined;
+        // Unknown updated alarms are reconciled through REST, not guessed as newly created.
+        const delta = previous === undefined
+          ? (type === "alarm.created" ? 1 : active ? 0 : -1)
+          : Number(active) - Number(previous);
+        if (data?.id) {
+          this.alarmStates.set(data.id, active);
+          if (this.alarmStates.size > 20_000) this.alarmStates.delete(this.alarmStates.keys().next().value!);
+        }
+        if (delta) {
+          this.cameraAlarms.set(camId, Math.max(0, (this.cameraAlarms.get(camId) ?? 0) + delta));
+          cameraAffected = true;
         }
       }
     }
@@ -298,7 +336,7 @@ export class MapRealtimeStore {
       const currentAlarms = cam.activeAlarms ?? 0;
       const targetAlarms = liveAlarms !== undefined ? liveAlarms : currentAlarms;
 
-      if (targetStatus !== cam.status || targetAlarms !== currentAlarms) {
+      if (targetStatus !== cam.status || targetAlarms !== currentAlarms || isServerDown !== !!cam.metadata.serverOffline) {
         changed = true;
         return {
           ...cam,
@@ -319,4 +357,4 @@ export class MapRealtimeStore {
 }
 
 // Global default singleton for maps
-export const defaultMapRealtimeStore = new MapRealtimeStore();
+export const defaultMapRealtimeStore = new MapRealtimeStore(false);

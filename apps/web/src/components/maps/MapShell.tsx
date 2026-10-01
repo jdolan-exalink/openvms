@@ -1,10 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { meQuery } from "@/api/queries";
+import { alarmsQuery, serversQuery, meQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
 import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery } from "@/lib/maps/api";
 import type { CameraEntity, MapMode } from "@/lib/maps/types";
+import { MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
+import { IncidentFocus } from "@/lib/maps/incidentPolicy";
+import { AlarmPanel } from "./panel/AlarmPanel";
+import { SiteHealthPanel } from "./panel/SiteHealthPanel";
+import type { Map as MapLibreMap } from "maplibre-gl";
 import { MapCanvas } from "./canvas/MapCanvas";
 import { MapToolbar } from "./MapToolbar";
 import { HierarchyBreadcrumb } from "./HierarchyBreadcrumb";
@@ -27,7 +32,13 @@ export interface MapShellProps {
   onModeChange?: (mode: MapMode) => void;
 }
 
-export function MapShell({
+export function MapShell(props: MapShellProps) {
+  const me = useQuery(meQuery);
+  if (!me.data) return <div data-testid="map-loading">Loading map identity...</div>;
+  return <MapShellContent key={`${me.data.tenant_id}:${me.data.id}`} {...props} />;
+}
+
+function MapShellContent({
   initialSiteId,
   initialCameraId,
   initialMode = "live",
@@ -39,6 +50,12 @@ export function MapShell({
 }: MapShellProps) {
   const navigate = useNavigate();
   const me = useQuery(meQuery);
+  const [realtimeStore] = useState(() => new MapRealtimeStore(false, me.data?.tenant_id ?? undefined));
+  const snapshot = useSyncExternalStore(realtimeStore.subscribe, realtimeStore.getSnapshot);
+  const [focusPolicy] = useState(() => new IncidentFocus());
+  const [focusMode, setFocusMode] = useState<"none" | "current-site">("none");
+  const mapRef = useRef<MapLibreMap | null>(null);
+  useEffect(() => { realtimeStore.connect(); return () => realtimeStore.destroy(); }, [realtimeStore]);
   const [hoverLiveEnabled, setHoverLiveEnabled] = useState(liveOnHover);
   const [mode, setMode] = useState<MapMode>(initialMode);
   const [selectedSiteId, setSelectedSiteId] = useState<string | undefined>(initialSiteId);
@@ -74,10 +91,36 @@ export function MapShell({
 
   const entitiesQuery = useQuery(siteEntitiesQuery(currentSite?.id ?? ""));
 
-  const cameras: CameraEntity[] = useMemo(() => {
+  const baseCameras: CameraEntity[] = useMemo(() => {
     if (!entitiesQuery.data) return [];
     return entitiesQuery.data.entities.filter((e): e is CameraEntity => e.type === "camera");
   }, [entitiesQuery.data]);
+
+  const alarms = useQuery({ ...alarmsQuery({ site_id: currentSite?.id, limit: 100 }),
+    enabled: !!currentSite && can(me.data, "alarms.view") });
+  const servers = useQuery({ ...serversQuery, enabled: can(me.data, "servers.view") });
+  useEffect(() => { realtimeStore.seedCameras(baseCameras); }, [baseCameras, entitiesQuery.dataUpdatedAt, realtimeStore]);
+  useEffect(() => { if (alarms.data) realtimeStore.seedAlarms(alarms.data); }, [alarms.data, alarms.dataUpdatedAt, realtimeStore]);
+  useEffect(() => { if (servers.data) realtimeStore.seedServers(servers.data); }, [servers.data, servers.dataUpdatedAt, realtimeStore]);
+  const cameras = useMemo(() => {
+    void snapshot.revision;
+    return realtimeStore.patchCameras(baseCameras).cameras;
+  }, [baseCameras, realtimeStore, snapshot.revision]);
+  useEffect(() => {
+    let lastEvent = realtimeStore.getRecentEvents(1)[0]?.id;
+    return realtimeStore.subscribe(() => {
+      const event = realtimeStore.getRecentEvents(1)[0];
+      if (!event || event.id === lastEvent) return;
+      lastEvent = event.id;
+      if (!event.type.startsWith("alarm.") || !mapRef.current || (event.siteId && event.siteId !== currentSite?.id)) return;
+      const data = event.data as { status?: string; camera_id?: string } | undefined;
+      if (["resolved", "closed"].includes(data?.status ?? "")) return;
+      const camera = baseCameras.find(item => item.id === (event.cameraId ?? data?.camera_id));
+      if (!camera || !focusPolicy.accept(camera, currentSite?.id) || camera.position.kind !== "geo") return;
+      const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+      mapRef.current.easeTo({ center: [camera.position.lng, camera.position.lat], duration: reduced ? 0 : 500 });
+    });
+  }, [baseCameras, currentSite?.id, focusPolicy, realtimeStore]);
 
   const pinnedCameras = useMemo(() => {
     return pinnedCameraIds
@@ -132,6 +175,7 @@ export function MapShell({
   };
 
   const handleSelectSite = (siteId: string | undefined) => {
+    focusPolicy.interact();
     setSelectedSiteId(siteId);
     setSelectedCameraId(undefined);
     onSelectSite?.(siteId);
@@ -171,13 +215,16 @@ export function MapShell({
   };
 
   const handleSelectCamera = (cameraId: string) => {
+    focusPolicy.interact();
     setSelectedCameraId(cameraId);
     handlePinCamera(cameraId);
     onSelectCamera?.(cameraId);
   };
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg"
+      onPointerDownCapture={() => focusPolicy.interact()} onWheelCapture={() => focusPolicy.interact()}
+      onKeyDownCapture={() => focusPolicy.interact()}>
       {/* Floating Top Controls Bar */}
       <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex items-center justify-between px-4">
         <div className="pointer-events-auto">
@@ -197,6 +244,11 @@ export function MapShell({
               Live on hover
             </label>
           )}
+          <label>Incident focus<select aria-label="Incident focus" value={focusMode} onChange={event => {
+            const next = event.target.value === "current-site" ? "current-site" : "none";
+            focusPolicy.setMode(next);
+            setFocusMode(next);
+          }}><option value="none">None</option><option value="current-site">Current site</option></select></label>
           <MapToolbar
             mode={mode}
             onModeChange={handleModeChange}
@@ -214,6 +266,8 @@ export function MapShell({
       {/* Map Canvas */}
       <div className="relative h-full w-full flex-1">
         <MapCanvas
+          realtimeStore={realtimeStore}
+          onMapReady={map => { mapRef.current = map; }}
           provider={provider}
           center={center}
           zoom={zoom}
@@ -229,6 +283,13 @@ export function MapShell({
           onSelectSite={(id) => handleSelectSite(id)}
         />
 
+        <aside className="absolute left-3 top-16 z-10 max-h-[70%] w-72 overflow-auto space-y-2">
+          {can(me.data, "alarms.view") && <>
+            {alarms.isError && <ErrorNote error={alarms.error} />}
+            <AlarmPanel alarms={alarms.data ?? []} canManage={can(me.data, "alarms.manage")} />
+          </>}
+          <SiteHealthPanel cameras={cameras} siteId={currentSite?.id} onSite={handleSelectSite} onCamera={handleSelectCamera} />
+        </aside>
         {/* Hover preview floating card */}
         {hoveredCamera && (
           <CameraPreview

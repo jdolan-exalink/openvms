@@ -11,6 +11,41 @@ describe("MapRealtimeStore", () => {
     vi.useRealTimers();
   });
 
+
+  it("can flush after cleanup and reconnect", () => {
+    const store = new MapRealtimeStore(false);
+    store.seedCameras([]);
+    store.destroy();
+    const flush = vi.fn();
+    store.onCameraChange(flush);
+    store.handleFrame({ type: "camera.status_changed", camera_id: "c", data: { to: "offline" } });
+    vi.advanceTimersByTime(1000);
+    expect(flush).toHaveBeenCalledOnce();
+    store.destroy();
+  });
+  it("seeds REST alarm counts and handles repeated terminal updates idempotently", () => {
+    const store = new MapRealtimeStore(false);
+    store.seedCameras([{ id: "c", activeAlarms: 3 } as CameraEntity]);
+    store.handleFrame({ type: "alarm.updated", camera_id: "c", data: { id: "a", status: "resolved" } });
+    store.handleFrame({ type: "alarm.updated", camera_id: "c", data: { id: "a", status: "closed" } });
+    expect(store.getCameraAlarms("c")).toBe(2);
+    store.destroy();
+  });
+  it("patches a server-only outage and resets state on resync", () => {
+    const store = new MapRealtimeStore(false);
+    const cam = { id: "c", serverId: "srv", status: "online", activeAlarms: 0, metadata: {} } as CameraEntity;
+    store.handleFrame({ type: "server.status", server_id: "srv", data: { status: "offline" } });
+    expect(store.patchCameras([cam]).cameras[0]!.metadata.serverOffline).toBe(true);
+    store.handleFrame({ op: "resync" });
+    expect(store.isServerOffline("srv")).toBe(false);
+    store.destroy();
+  });
+  it("rejects frames for another tenant", () => {
+    const store = new MapRealtimeStore(false, "tenant-a");
+    store.handleFrame({ tenant_id: "tenant-b", type: "camera.status_changed", camera_id: "c", data: { to: "offline" } });
+    expect(store.getStatus("c")).toBeUndefined();
+    store.destroy();
+  });
   it("deduplicates frames with the same ID within 5-minute window", () => {
     const store = new MapRealtimeStore(false);
     let notifyCount = 0;

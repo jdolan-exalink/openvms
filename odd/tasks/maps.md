@@ -33,7 +33,7 @@ normalized APIs/event bus; RBAC server-side filtering; Conventional Commits, no 
 - [x] M-W3 — FOV cones, selection, breadcrumb, deep links (`71f3ed0`)
 - [x] M-W4 — realtime store, pulse/ripple, animation budget (`a494a46`)
 - [x] M-W5 — camera panel, hover preview, context menu, nearby cameras
-- [ ] M-W6 — alarm panel, site health, auto-focus
+- [x] M-W6 — alarm panel, site health, auto-focus (verified; commit pending parent)
 - [ ] M-W7 — layers & filters panels, user prefs
 - [ ] M-W8 — placement editor + Sin ubicar tray
 - [ ] M-W9 — zone editor
@@ -156,7 +156,9 @@ Strict TDD ON; sequential checks; `feature-branch-chain` selected.
 - [x] R3-snapshot-recovery — failed camera A must not hide camera B's successful snapshot.
 Runner: `pnpm --filter @openvms/web test src/lib/maps src/components/maps src/routes/Maps.test.tsx`;
 then full web test, typecheck, lint, build, and `git diff --check`.
-Status: both bug outcomes verified; separate bug commits pending parent delivery.
+Status: both bug outcomes verified and committed: snapshot `10443f1`, hover `dac2054`.
+Native assessment (parent): medium, 119 authored lines, review_due=false / under_budget.
+Current accumulated-slice review boundary remains `17644d8`.
 Scope excludes W6, staging, commits, review, remote operations and deployment.
 
 ### R3 verification (later bugs only)
@@ -177,3 +179,72 @@ Scope excludes W6, staging, commits, review, remote operations and deployment.
   image key/onLoad hunk and failed-A to successful-B component regression.
 - No native correction, re-review, staging, commits, remote operations or deployment performed.
   W5 approved/acknowledged authority remains burned; parent commits these later fixes before W6.
+
+## M-W6 — alarm operations, health and incident focus
+Route: delegated single writer; trigger: multifile new logic and realtime reconciliation.
+Strict TDD ON; source explicit user confirmation 2026-10-01. Chain: feature-branch-chain.
+Reviewed boundary: `17644d8`; W5 approved authority stays burned.
+- [x] Permission-aware alarm acknowledge/assign/investigate/resolve/close, comments and history
+  reuse normalized authorized alarm APIs; errors remain visible.
+- [x] Realtime counts seeded from REST; terminal updates idempotent; server-only outage patches;
+  reconnect/resync refetch maps; route-owned identity-scoped state prevents cross-user leakage.
+- [x] Site health groups server root causes and provides site/camera navigation.
+- [x] Incident focus defaults NONE; explicit opt-in respects site, manual navigation (15s),
+  movement throttle (10s) and reduced motion; integrate real MapShell query data.
+Focused runner: `pnpm --filter @openvms/web test src/lib/maps src/components/maps src/routes/Maps.test.tsx src/routes/Alarms.test.tsx src/lib/realtime.test.ts`;
+then full web test, typecheck, lint, build and `git diff --check`, sequentially.
+Scope excludes W7 preferences/backend editor/import/performance work. Existing contracts first;
+missing contracts are reported rather than invented. No staging/commits/review/remote/deploy.
+Status: verified; commit pending parent delivery. Native assessment/review remains parent-owned.
+
+
+### M-W6 evidence and handoff (2026-10-01)
+- AlarmPanel uses existing acknowledge/assign/investigate/resolve/close/comments/transitions/
+  assignees endpoints. Read-only actors see history, not management buttons; the API remains
+  authoritative per camera. Eligible transitions and pending actions disable controls;
+  authorization/network errors are visible. Site list is bounded to the latest 100 alarms.
+- MapShell owns a tenant-scoped realtime store keyed by existing Me user+tenant identity;
+  authenticated Layout/Login already clear query caches at session changes. Default fallback
+  singleton no longer subscribes globally. REST camera counts and known alarm states seed it;
+  repeated resolved->closed updates decrement once. Server-only patches reach health and
+  GeoJSON UNREACHABLE styling. Reconnect/resync clears overrides and invalidates Maps queries.
+- Server outages group authorized affected cameras once, with working site/camera navigation.
+  Focus defaults NONE; explicit current-site opt-in never selects/opens a stream. Site guard,
+  10-second movement throttle, 15-second manual interaction suppression and reduced-motion
+  duration zero are covered. Focus stays session-local; persisted preferences belong to M-W7.
+- RED (observed commands; failed/passed counts):
+  - `pnpm --filter @openvms/web test src/lib/maps/mapRealtimeStore.test.ts src/lib/maps/incidentPolicy.test.ts src/lib/realtime.test.ts`:
+    4 failed / 21 passed, plus incidentPolicy missing-module suite failure. GREEN: 28 passed.
+  - `pnpm --filter @openvms/web test src/components/maps/panel/AlarmPanel.test.tsx`:
+    missing-module suite first, then skeleton 3 failed / 0 passed. GREEN: 3 passed.
+  - `pnpm --filter @openvms/web test src/components/maps/MapShell.test.tsx`:
+    initial integration 1 failed / 8 passed; GREEN 9 passed. Added focus-site regression
+    RED 1 failed / 9 passed; final expanded integration GREEN 13 passed.
+  - `pnpm --filter @openvms/web test src/lib/maps/entityIndex.test.ts src/lib/maps/mapRealtimeStore.test.ts`:
+    2 failed / 19 passed (metadata UNREACHABLE and cleanup/reconnect flush). Combined GREEN
+    with MapShell: 31 passed. Refactor added policy setter and reseeding on dataUpdatedAt.
+- Final sequential foreground checks, after all source normalization:
+  - `pnpm --filter @openvms/web test src/lib/maps src/components/maps src/routes/Maps.test.tsx src/routes/Alarms.test.tsx src/lib/realtime.test.ts`: PASS, 112 tests / 19 files.
+  - `pnpm --filter @openvms/web test`: PASS, 428 tests / 69 files.
+  - `pnpm --filter @openvms/web typecheck`: PASS.
+  - `pnpm --filter @openvms/web lint`: PASS.
+  - `pnpm --filter @openvms/web build`: PASS; existing large-chunk warning remains.
+  - `git diff --check`: PASS (also repeated after this documentation update).
+  The requested realtime.test.ts selector includes actual realtime.test.tsx. No backend changes
+  or Go checks needed; no missing alarm API contract discovered. Earlier iteration typecheck
+  found test-array nullability and lint found direct policy mutation; corrected before final run.
+- Root causes: scaffold panels had no operational API wiring; realtime counts lacked REST
+  baseline and alarm identity; server-only metadata changes were skipped and feature conversion
+  ignored outage metadata; singleton lifetime exceeded actor lifetime; cleanup left flush pending.
+  Backend normalizes all alarm lifecycle subjects to alarm.updated, so unknown active updates
+  reconcile REST rather than assume creation. Structurally shared refetches require observing
+  dataUpdatedAt as well as object identity to reseed after resync.
+- Natural authored source+test size: 506 additions+deletions (generated files excluded), plus
+  tracker evidence. Possible coherent review slices: realtime/render repairs 147; operational
+  panels 140; incident policy 63; MapShell integration/tests 156. No artificial shrinking/splits.
+- Rollback baseline: HEAD `dac2054`; W6 is an unstaged patch. Revert only W6 changed/new paths
+  if needed; preserve W5 scaffolding, followups and approved/burned authority at `17644d8`.
+  No staging, commit, native review, remote operation or deployment performed by this writer.
+- Next: parent commits/assesses accumulated slice against `17644d8`, then dispatches M-W7.
+  Remaining implementation: M-W7, M-W8, M-W9, M-W10, M-B8. Local deployment remains blocked
+  by the missing PMTiles asset (ranged /tiles/world.pmtiles returns SPA HTML) and remaining units.

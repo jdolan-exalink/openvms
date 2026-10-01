@@ -58,6 +58,15 @@ afterEach(() => {
 });
 
 describe("useRealtimeFeed", () => {
+
+  it("invalidates maps on reconnect and resync", () => {
+    const { keys, invalidate } = setup();
+    act(() => sock(0).open());
+    expect(keys()).toContain(JSON.stringify(["maps"]));
+    invalidate.mockClear();
+    act(() => sock(0).message({ op: "resync" }));
+    expect(keys()).toContain(JSON.stringify(["maps"]));
+  });
   it("connects to same-origin /ws and reports the connection state", () => {
     const { result } = setup();
     expect(FakeSocket.instances).toHaveLength(1);

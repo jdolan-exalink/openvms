@@ -9,8 +9,11 @@ import { PlayerSessionManager } from "@/lib/live/PlayerSessionManager";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import type { MapCanvasProps } from "./canvas/MapCanvas";
 
+const canvasHarness = vi.hoisted(() => ({ props: null as MapCanvasProps | null, easeTo: vi.fn() }));
+
 vi.mock("./canvas/MapCanvas", () => ({
-  MapCanvas: (props: MapCanvasProps) => <div data-testid="canvas">
+  MapCanvas: (props: MapCanvasProps) => { canvasHarness.props = props; return <div data-testid="canvas">
+    <button onClick={() => props.realtimeStore?.handleFrame({ type: "server.status", server_id: "srv", data: { status: "offline" } })}>Server outage</button>
     {props.cameras?.map(camera => <button key={camera.id}
       onClick={() => props.onSelectCamera?.(camera.id)}
       onMouseEnter={() => props.onHoverCamera?.(camera.id, { x: 10, y: 20 })}
@@ -18,11 +21,11 @@ vi.mock("./canvas/MapCanvas", () => ({
       onDoubleClick={() => props.onDoubleClickCamera?.(camera.id)}
       onContextMenu={() => props.onContextMenuCamera?.(camera.id, { x: 10, y: 20 })}
     >Marker {camera.id}</button>)}
-  </div>,
+  </div>; },
 }));
 
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); });
-async function setup() {
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); canvasHarness.easeTo.mockReset(); });
+async function setup(alarmsEnabled = false) {
   vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
   const cameras = Array.from({ length: 5 }, (_, n) => ({
     id: `c${n}`, tenant_id: "t", site_id: "s", server_id: "srv", remote_name: `c${n}`,
@@ -34,6 +37,7 @@ async function setup() {
     "/api/v1/me": () => json({ id: "u", username: "admin", tenant_id: "t", grants: [
       { permission: "maps.view", effect: "allow", scope_type: "platform" },
       { permission: "live.view", effect: "allow", scope_type: "platform" },
+      ...(alarmsEnabled ? [{ permission: "alarms.view", effect: "allow", scope_type: "platform" }] : []),
     ] }),
     "/api/v1/maps/config": () => json({ provider: { id: "local", kind: "pmtiles", tiles: ["/tiles/base.pmtiles"],
       attribution: "local", max_zoom: 18, offline: true }, default_center: { lat: 0, lng: 0 }, default_zoom: 14 }),
@@ -41,9 +45,10 @@ async function setup() {
       camera_count: 5, online_cameras: 5, offline_cameras: 0, degraded_cameras: 0, alarm_count: 0 }] }),
     "/api/v1/maps/sites/s/entities": () => json({ revision: "1", entities: cameras.map((camera, n) => ({
       id: camera.id, t: "camera", site: "s", srv: "srv", name: camera.display_name,
-      pos: { kind: "geo", lat: 0, lng: n * 0.001 }, st: "online", alarms: 0,
+      pos: { kind: "geo", lat: 0, lng: n * 0.001 }, st: "online", alarms: n === 0 ? 3 : 0,
       cam: { bearing: 0, fov: 60, range: 100, type: "fixed", ptz: false, lpr: false },
     })) }),
+    "/api/v1/alarms": () => json({ items: [{ id: "a", site_id: "s", camera_id: "c0", camera_name: "Entrance", status: "open" }] }),
     "/api/v1/cameras": () => json({ items: cameras }),
     "/api/v1/sites": () => json({ items: [] }),
     "/api/v1/servers": () => json({ items: [] }),
@@ -54,7 +59,7 @@ async function setup() {
     history: createMemoryHistory({ initialEntries: ["/maps?site=s"] }) });
   const view = render(<QueryClientProvider client={queryClient}><RouterProvider router={router} /></QueryClientProvider>);
   await screen.findByRole("button", { name: "Marker c0" });
-  return { ...view, router };
+  return { ...view, router, queryClient };
 }
 describe("Maps camera interaction integration", () => {
   it("prewarms at 400ms, defaults live hover off, and releases on leave", async () => {
@@ -152,4 +157,72 @@ describe("Maps camera interaction integration", () => {
       ]);
     });
   });
+});
+
+it("integrates authorized alarms and grouped site health with focus off by default", async () => {
+  await setup(true);
+  expect(await screen.findByRole("region", { name: "Alarms" })).toHaveTextContent("Entrance");
+  expect(screen.getByLabelText("Incident focus")).toHaveValue("none");
+  fireEvent.click(screen.getByRole("button", { name: "Server outage" }));
+  expect(await screen.findByText("Server srv offline")).toBeInTheDocument();
+  expect(screen.getByRole("region", { name: "Site health" })).toHaveTextContent("5 cameras affected");
+});
+
+it("focuses only explicit current-site incidents, without selecting a camera, and respects manual navigation and reduced motion", async () => {
+  await setup(true);
+  vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
+  act(() => canvasHarness.props?.onMapReady?.({ easeTo: canvasHarness.easeTo } as never));
+  const emit = (id: string, site = "s") => act(() => canvasHarness.props?.realtimeStore?.handleFrame({
+    id, type: "alarm.updated", site_id: site, camera_id: "c0", data: { id, status: "open" },
+  }));
+  emit("default");
+  expect(canvasHarness.easeTo).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText("Incident focus"), { target: { value: "current-site" } });
+  emit("unrelated", "other");
+  expect(canvasHarness.easeTo).not.toHaveBeenCalled();
+  emit("focus");
+  expect(canvasHarness.easeTo).toHaveBeenCalledWith({ center: [0, 0], duration: 0 });
+  expect(screen.queryByRole("button", { name: "Close preview" })).not.toBeInTheDocument();
+  canvasHarness.easeTo.mockClear();
+  const now = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(now + 11_000);
+  fireEvent.pointerDown(screen.getByTestId("canvas"));
+  emit("manual");
+  expect(canvasHarness.easeTo).not.toHaveBeenCalled();
+  clock.mockReturnValue(now + 26_000);
+  emit("after-manual");
+  expect(canvasHarness.easeTo).toHaveBeenCalledTimes(1);
+});
+
+it("replaces realtime state at the existing user and tenant identity boundary", async () => {
+  const { queryClient } = await setup(true);
+  fireEvent.click(screen.getByRole("button", { name: "Server outage" }));
+  expect(await screen.findByText("Server srv offline")).toBeInTheDocument();
+  const previous = canvasHarness.props?.realtimeStore;
+  act(() => queryClient.setQueryData(["me"], { id: "other-user", tenant_id: "other-tenant", grants: [
+    { permission: "maps.view", effect: "allow", scope_type: "platform" },
+    { permission: "alarms.view", effect: "allow", scope_type: "platform" },
+  ] }));
+  await waitFor(() => expect(canvasHarness.props?.realtimeStore).not.toBe(previous));
+  expect(screen.queryByText("Server srv offline")).not.toBeInTheDocument();
+  expect(canvasHarness.props?.realtimeStore?.isServerOffline("srv")).toBe(false);
+});
+
+it("seeds camera counts from real Maps queries and keeps terminal lifecycle updates idempotent", async () => {
+  await setup(true);
+  await waitFor(() => expect(canvasHarness.props?.realtimeStore?.getCameraAlarms("c0")).toBe(3));
+  act(() => {
+    canvasHarness.props?.realtimeStore?.handleFrame({ type: "alarm.updated", camera_id: "c0", data: { id: "a", status: "resolved" } });
+    canvasHarness.props?.realtimeStore?.handleFrame({ type: "alarm.updated", camera_id: "c0", data: { id: "a", status: "closed" } });
+  });
+  expect(canvasHarness.props?.cameras?.find(camera => camera.id === "c0")?.activeAlarms).toBe(2);
+});
+it("navigates from grouped health to an authorized camera and site", async () => {
+  const { router } = await setup(true);
+  fireEvent.click(screen.getByRole("button", { name: "Server outage" }));
+  fireEvent.click(await screen.findByRole("button", { name: "View Camera 0" }));
+  await waitFor(() => expect(router.state.location.search).toMatchObject({ camera: "c0" }));
+  fireEvent.click(screen.getByRole("button", { name: "View site" }));
+  await waitFor(() => expect(router.state.location.search).toMatchObject({ site: "s" }));
+  expect(router.state.location.search.camera).toBeUndefined();
 });

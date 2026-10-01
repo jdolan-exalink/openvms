@@ -62,7 +62,7 @@ export function computeDisplayState(
 export function cameraToFeature(entity: CameraEntity, serverOffline = false): Feature<Point, CameraFeatureProperties> | null {
   if (entity.position.kind !== "geo") return null;
 
-  const displayState = computeDisplayState(entity.status, entity.activeAlarms, serverOffline);
+  const displayState = computeDisplayState(entity.status, entity.activeAlarms, serverOffline || !!entity.metadata.serverOffline);
   const color = STATE_COLORS[displayState];
   const icon = STATE_ICONS[displayState];
 

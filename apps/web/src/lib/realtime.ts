@@ -13,13 +13,13 @@ import { useEffect, useRef, useState } from "react";
 /** Query-key prefixes to refresh per frame type. Unknown types are ignored. */
 const invalidationsByType: Record<string, readonly (readonly string[])[]> = {
   "event.created": [["events"], ["plates"]],
-  "server.status": [["servers"], ["health"], ["cameras"]],
-  "server.status_changed": [["servers"], ["health"], ["cameras"]],
-  "alarm.updated": [["alarms"]],
-  "alarm.created": [["alarms"]],
-  "alarm.acknowledged": [["alarms"]],
+  "server.status": [["servers"], ["health"], ["cameras"], ["maps"]],
+  "server.status_changed": [["servers"], ["health"], ["cameras"], ["maps"]],
+  "alarm.updated": [["alarms"], ["maps"]],
+  "alarm.created": [["alarms"], ["maps"]],
+  "alarm.acknowledged": [["alarms"], ["maps"]],
   "notification.created": [["notifications"]],
-  "camera.status_changed": [["cameras"], ["health"]],
+  "camera.status_changed": [["cameras"], ["health"], ["maps"]],
 };
 const catchUpKeys = [...new Set(Object.values(invalidationsByType).flat().map((k) => JSON.stringify(k)))].map((k) => JSON.parse(k) as string[]);
 
@@ -106,6 +106,7 @@ export function useRealtimeFeed({ enabled = true, random = Math.random }: Realti
         }
 
         // No replay: catch up once per (re)connect.
+        notifyFrameListeners({ op: "resync" });
         invalidate(qc, catchUpKeys);
         stableTimer = setTimeout(() => (attempt = 0), STABLE_AFTER_MS);
       };
