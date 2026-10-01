@@ -13,6 +13,7 @@ import {
   stagePlacement,
   stepBearing,
   undoDraft,
+  updateStagedPosition,
   type DraftPlacement,
 } from "./placementDraft";
 
@@ -116,5 +117,23 @@ describe("placementDraft", () => {
     expect(stepBearing(5, -15)).toBe(350);
     expect(stepBearing(0, -15)).toBe(345);
     expect(stepBearing(0, 10)).toBe(10); // free rotation stays exact
+  });
+});
+
+describe("updateStagedPosition", () => {
+  it("moves the staged entry without adding an undo step: a drag is ONE gesture", () => {
+    let state = stagePlacement(emptyDraft(), entry({ lat: 1, lng: 2 }), 7);
+    const historyBefore = state.past.length;
+
+    state = updateStagedPosition(state, "c1", 3, 4);
+
+    expect(state.entries.c1).toMatchObject({ lat: 3, lng: 4 });
+    expect(state.past.length).toBe(historyBefore);
+    expect(state.revisions.c1).toBe(7);
+  });
+
+  it("ignores cameras with no staged change", () => {
+    const state = emptyDraft();
+    expect(updateStagedPosition(state, "cX", 1, 2)).toBe(state);
   });
 });

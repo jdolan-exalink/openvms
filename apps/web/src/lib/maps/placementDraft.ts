@@ -108,6 +108,13 @@ export function pendingPlacements(state: DraftState): PendingPlacement[] {
   }));
 }
 
+/** Update a placed camera during one pointer gesture without snapshotting each move. */
+export function updateStagedPosition(state: DraftState, entityId: string, lat: number, lng: number): DraftState {
+  const entry = state.entries[entityId];
+  if (!entry || (entry.lat === lat && entry.lng === lng)) return state;
+  return { ...state, entries: { ...state.entries, [entityId]: { ...entry, lat, lng } } };
+}
+
 /** commitPlacement drops a saved change and remembers the revision the server returned. */
 export function commitPlacement(state: DraftState, entityId: string, revision: number): DraftState {
   const next = clone(state);

@@ -48,6 +48,9 @@ export interface MapCanvasProps {
   onSelectSite?: (siteId: string) => void;
   /** Clicks that did not land on any feature — the editor places/moves on these. */
   onMapClick?: (point: { lng: number; lat: number }) => void;
+  onCameraDragStart?: (cameraId: string) => void;
+  onCameraDragMove?: (cameraId: string, point: { lng: number; lat: number }) => void;
+  onCameraDragEnd?: (cameraId: string, point: { lng: number; lat: number }) => void;
   onMapReady?: (map: maplibregl.Map) => void;
   onMoveEnd?: (view: { center: [number, number]; zoom: number; bounds: LngLatBounds }) => void;
   onReapplyCustomLayers?: () => void;
@@ -75,6 +78,9 @@ export function MapCanvas({
   onContextMenuCamera,
   onSelectSite,
   onMapClick,
+  onCameraDragStart,
+  onCameraDragMove,
+  onCameraDragEnd,
   onMapReady,
   onMoveEnd,
   onReapplyCustomLayers,
@@ -91,6 +97,9 @@ export function MapCanvas({
   const onMoveEndRef = useRef(onMoveEnd);
   const onSelectCameraRef = useRef(onSelectCamera);
   const onMapClickRef = useRef(onMapClick);
+  const onCameraDragStartRef = useRef(onCameraDragStart);
+  const onCameraDragMoveRef = useRef(onCameraDragMove);
+  const onCameraDragEndRef = useRef(onCameraDragEnd);
   const onHoverCameraRef = useRef(onHoverCamera);
   const onDoubleClickCameraRef = useRef(onDoubleClickCamera);
   const onContextMenuCameraRef = useRef(onContextMenuCamera);
@@ -117,6 +126,9 @@ export function MapCanvas({
     onContextMenuCameraRef.current = onContextMenuCamera;
     onSelectSiteRef.current = onSelectSite;
     onMapClickRef.current = onMapClick;
+    onCameraDragStartRef.current = onCameraDragStart;
+    onCameraDragMoveRef.current = onCameraDragMove;
+    onCameraDragEndRef.current = onCameraDragEnd;
     camerasRef.current = cameras;
     sitesRef.current = sites;
     zonesRef.current = zones;
@@ -271,6 +283,29 @@ export function MapCanvas({
       if (feat?.properties?.id) {
         onSelectCameraRef.current?.(feat.properties.id);
       }
+    });
+
+    // Drag is enabled only when the editor supplies these callbacks. MapLibre's
+    // layer-specific mousedown keeps empty-space placement and ordinary view pans intact.
+    let draggingCameraId: string | undefined;
+    map.on("mousedown", "cam-point-circle", (event) => {
+      const id = event.features?.[0]?.properties?.id;
+      if (!id || !onCameraDragStartRef.current || !onCameraDragMoveRef.current) return;
+      draggingCameraId = String(id);
+      map.dragPan.disable();
+      map.getCanvas().style.cursor = "grabbing";
+      onCameraDragStartRef.current(draggingCameraId);
+    });
+    map.on("mousemove", (event) => {
+      if (draggingCameraId) onCameraDragMoveRef.current?.(draggingCameraId, event.lngLat);
+    });
+    map.on("mouseup", (event) => {
+      if (!draggingCameraId) return;
+      const id = draggingCameraId;
+      draggingCameraId = undefined;
+      map.dragPan.enable();
+      map.getCanvas().style.cursor = "";
+      onCameraDragEndRef.current?.(id, event.lngLat);
     });
 
     // Site overview click

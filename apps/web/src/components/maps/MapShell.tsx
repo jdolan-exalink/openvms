@@ -14,6 +14,7 @@ import {
   pendingPlacements,
   rebasePlacement,
   stageMany,
+  updateStagedPosition,
   stagePlacement,
   undoDraft,
   type DraftPlacement,
@@ -171,6 +172,8 @@ function MapShellContent({
   const [draft, setDraft] = useState<DraftState>(emptyDraft);
   const [armedCameraId, setArmedCameraId] = useState<string>();
   const [activeDraftId, setActiveDraftId] = useState<string>();
+  const cameraDragIdRef = useRef<string | undefined>(undefined);
+  const cameraDragMovedRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
   const pending = pendingPlacements(draft);
@@ -221,6 +224,48 @@ function MapShellContent({
     }
     if (armedCameraId) placeCameraAt(armedCameraId, point);
     else if (selectedCameraId) placeCameraAt(selectedCameraId, point);
+  };
+
+  const handleCameraDragStart = (cameraId: string) => {
+    if (!editActive) return;
+    cameraDragIdRef.current = cameraId;
+    cameraDragMovedRef.current = false;
+    setActiveDraftId(cameraId);
+  };
+
+  const handleCameraDragMove = (cameraId: string, point: { lng: number; lat: number }) => {
+    if (!editActive || cameraDragIdRef.current !== cameraId) return;
+    const camera = cameras.find((item) => item.id === cameraId);
+    if (!camera || camera.position.kind !== "geo") return;
+    const originalPosition = camera.position;
+    const firstMove = !cameraDragMovedRef.current;
+    cameraDragMovedRef.current = true;
+    setDraft((previous) => {
+      let next = previous;
+      if (firstMove) {
+        const current = previous.entries[cameraId] ?? {
+          entityId: cameraId,
+          entityType: "camera" as const,
+          siteId: currentSite?.id ?? camera.siteId,
+          lat: originalPosition.lat,
+          lng: originalPosition.lng,
+          bearingDeg: camera.camera.bearingDeg ?? 0,
+          fovDeg: camera.camera.fovDeg,
+          rangeM: camera.camera.rangeM,
+          cameraType: camera.camera.cameraType,
+          ptz: camera.camera.ptz,
+          lpr: camera.camera.lpr,
+        };
+        next = stagePlacement(previous, current, knownRevision(cameraId));
+      }
+      return updateStagedPosition(next, cameraId, point.lat, point.lng);
+    });
+  };
+
+  const handleCameraDragEnd = (cameraId: string, point: { lng: number; lat: number }) => {
+    handleCameraDragMove(cameraId, point);
+    cameraDragIdRef.current = undefined;
+    cameraDragMovedRef.current = false;
   };
 
   const handleMapDrop = (event: DragEvent) => {
@@ -421,7 +466,23 @@ function MapShellContent({
 
   // Panels read `cameras` (everything authorized); the canvas only draws what survives the
   // active filters, so a filtered-out camera is still pinnable from an existing deep link.
-  const visibleCameras = useMemo(() => applyFilters(cameras, filters), [cameras, filters]);
+  const visibleCameras = useMemo(() => applyFilters(cameras.map((camera) => {
+    const staged = draft.entries[camera.id];
+    if (!staged) return camera;
+    return {
+      ...camera,
+      position: { kind: "geo" as const, lat: staged.lat, lng: staged.lng },
+      camera: {
+        ...camera.camera,
+        bearingDeg: staged.bearingDeg,
+        fovDeg: staged.fovDeg,
+        rangeM: staged.rangeM,
+        cameraType: staged.cameraType ?? camera.camera.cameraType,
+        ptz: staged.ptz ?? camera.camera.ptz,
+        lpr: staged.lpr ?? camera.camera.lpr,
+      },
+    };
+  }), filters), [cameras, filters, draft.entries]);
   const layerVisibility = useMemo(() => ({
     cameras: layers.cameras,
     sites: layers.sites,
@@ -653,6 +714,9 @@ function MapShellContent({
           onContextMenuCamera={(id, point) => setContextMenu({ cameraId: id, ...point })}
           onSelectSite={(id) => handleSelectSite(id)}
           onMapClick={handleMapClick}
+          onCameraDragStart={editActive ? handleCameraDragStart : undefined}
+          onCameraDragMove={editActive ? handleCameraDragMove : undefined}
+          onCameraDragEnd={editActive ? handleCameraDragEnd : undefined}
         />
 
         <aside className="absolute left-3 top-16 z-10 max-h-[70%] w-72 overflow-auto space-y-2">

@@ -503,12 +503,12 @@ smoke** (no WS event flood), package named `@openvms/test`.
   network and would never exercise the fallback).
 
 ## New units (2026-10-01, PO request): edit-mode monitoring center + camera editor
-- [ ] M-W11 — Persistent monitoring center: in edit mode (maps.edit) pin the site's
+- [x] M-W11 — Persistent monitoring center: in edit mode (maps.edit) pin the site's
   monitoring center from the current view (PATCH /sites/{id}/geo: lat/lng/default_zoom);
   an open map re-centers when the selected site (or its center) changes.
-- [ ] M-W12 — Camera icons: bullet/dome/ptz selectable in the placement properties form,
+- [x] M-W12 — Camera icons: bullet/dome/ptz selectable in the placement properties form,
   persisted through placement `props`, rendered per type in the canvas sprite.
-- [ ] M-W13 — Drag & drop of placed cameras in edit mode: pointer drag stages a move
+- [x] M-W13 — Drag & drop of placed cameras in edit mode: pointer drag stages a move
   draft (keeping the If-Match revision) that the existing save flow writes.
 
 ### M-W11 evidence (2026-10-01)
@@ -526,3 +526,63 @@ smoke** (no WS event flood), package named `@openvms/test`.
 - Checks: MapShell 30/30, full web 528/528 (83 files), typecheck/lint PASS, perf smoke
   PASS. The centering behavior inside the real MapCanvas GL component remains
   headless-unverifiable; the canvas harness exercises the MapShell contract instead.
+
+## M-W12 and M-W13 — camera type and placed-camera dragging (2026-10-01)
+Route: delegated per task; trigger: five-file mapping and multi-file behavior spanning
+placement draft/form/MapShell/canvas. Strict TDD ON (user-confirmed): RED → GREEN → REFACTOR.
+Runner: `pnpm --filter @openvms/web test`; required closure checks are focused Maps tests,
+full web tests, `typecheck`, `lint`, `build`, and `git diff --check`, all sequential.
+Delivery: `ask-on-risk`; chain strategy `feature-branch-chain` (user-selected). M-W12 is
+committed locally as `f911c20`; M-W13 is implemented and verified, with its work-unit commit
+pending. No remote delivery or deployment has occurred.
+
+- [x] M-W12 — Add camera type (`bullet`/`fixed`, `dome`, `ptz`) to placement draft/form,
+  MapShell and save props; render a per-camera glyph while preserving server alarm/offline/
+  warning/unreachable icon precedence. Preserve legacy backend type/flags (including
+  `fisheye`, `lpr`, `ptz`) when editing; never silently normalize or erase flags.
+  Acceptance: form round-trips supported type, save persists props, canvas chooses type glyph,
+  and status precedence remains unchanged. Rollback: W12 source/tests only.
+- [x] M-W13 — Pointer-drag already-placed cameras only while edit mode is active; stage one
+  move retaining the original knownRevision/If-Match, update draft position and preview it,
+  without one undo snapshot per pointer movement. Acceptance: pointer interaction stages the
+  final location, preserves revision, produces a single undoable move, and does not move
+  cameras in view mode. Rollback: W13 source/tests only.
+- Unit boundary: W12 and W13 remain separate rollback/work-unit boundaries. W12 is committed;
+  W13 source/tests and tracker updates are the pending local work unit.
+
+### M-W12 evidence
+- RED: supplied focused five-file suite had 8 failures (63 pass) across the absent type UI,
+  draft helper, props serialization, camera glyph selection, and MapShell type save/drag paths.
+- GREEN: focused Maps suite excluding the distinctly scoped pending M-W13 pointer-drag test:
+  63 passed, 1 skipped (5 files). Type selection and legacy PTZ/LPR flags are carried through
+  the placement props; online-only type glyph selection leaves alarm/offline/warning/unreachable
+  state glyphs authoritative.
+- Full web suite was attempted and has one expected pending M-W13 failure; typecheck/build also
+  report the test's not-yet-implemented drag callback props. Lint PASS (one existing center
+  dependency warning); full final verification is repeated after W13 closes.
+- W12 rollback boundary: `placementDraft.ts`, `placements.ts`, `PlacementPropsForm.tsx`,
+  `entityIndex.ts`, `sprite.ts`, and the W12 seed in `MapShell.tsx` plus associated W12 tests.
+- W12 final checks, repeated at W13 closure: focused suite 64/64; full web 536/536 (83 files);
+  typecheck PASS; lint PASS (one center dependency warning); build PASS (existing >500KB
+  chunk warning); `git diff --check` PASS.
+- W12 commit: `f911c20` (`feat(maps): add camera type icons and placement props`). Its post-commit
+  accumulated range assessment was high (91 paths/8086 lines); user declined that candidate.
+
+### M-W13 evidence
+- RED: the isolated MapShell drag test failed before implementation because no drag callbacks
+  were wired and Save never appeared. Its supplied test also consumed the Request body twice;
+  corrected to parse once while retaining both assertions.
+- GREEN: focused Maps integration + draft helper, 42/42; full focused Maps command, 64/64.
+- Drag is gated by edit-mode callbacks and begins on an already-rendered camera feature;
+  pointer movement stages only the latest position with knownRevision, uses a single undo
+  snapshot per drag gesture, and the canvas camera collection previews draft coordinates.
+- W13 final checks: full web 536/536 (83 files); typecheck PASS; lint PASS (one existing
+  center dependency warning); build PASS (existing >500KB chunk warning); `git diff --check`
+  PASS. Runtime Maps canvas pointer wiring is covered through MapShell callback integration;
+  no standalone WebGL interaction harness was added.
+- W13 rollback boundary: MapCanvas drag callback wiring, MapShell drag staging/preview,
+  updateStagedPosition, and the drag integration test adjustment.
+- W13 candidate assessment: medium risk, `review_due=false` / `under_budget`; user declined
+  this candidate, so no review receipt or approval exists. Ordinary delivery is unmanaged by
+  that candidate choice.
+- W13 remains uncommitted for parent delivery. No remote operation or deployment has occurred.

@@ -458,6 +458,40 @@ it("shows no import entry point without maps.edit_device", async () => {
   expect(screen.queryByRole("button", { name: "Importar CSV" })).not.toBeInTheDocument();
 });
 
+// --- Camera editor (M-W12/M-W13) -----------------------------------------------------
+it("saves the camera type through the placement props", async () => {
+  const { fetchSpy } = await setupEditor();
+  fireEvent.click(screen.getByRole("button", { name: "Marker c1" }));
+  act(() => canvasHarness.props?.onMapClick?.({ lng: 0.5, lat: 0.25 }));
+
+  fireEvent.click(await screen.findByRole("button", { name: "PTZ" }));
+  fireEvent.click(screen.getByRole("button", { name: "Guardar (1)" }));
+
+  await waitFor(() => expect(placementPuts(fetchSpy)).toHaveLength(1));
+  const body = JSON.parse(await placementPuts(fetchSpy)[0]!.text()) as { props: Record<string, unknown> };
+  expect(body.props).toEqual({ camera_type: "ptz", ptz: false, lpr: false });
+});
+
+it("stages a placed camera move by dragging the marker (edit mode)", async () => {
+  const { fetchSpy } = await setupEditor();
+  act(() => canvasHarness.props?.onCameraDragStart?.("c1"));
+  act(() => canvasHarness.props?.onCameraDragMove?.("c1", { lng: 0.7, lat: 0.35 }));
+  act(() => canvasHarness.props?.onCameraDragMove?.("c1", { lng: 0.8, lat: 0.4 }));
+  expect(canvasHarness.props?.cameras?.find(camera => camera.id === "c1")?.position)
+    .toEqual({ kind: "geo", lat: 0.4, lng: 0.8 });
+  act(() => canvasHarness.props?.onCameraDragEnd?.("c1", { lng: 0.8, lat: 0.4 }));
+
+  fireEvent.click(await screen.findByRole("button", { name: "Guardar (1)" }));
+
+  await waitFor(() => expect(placementPuts(fetchSpy)).toHaveLength(1));
+  const req = placementPuts(fetchSpy)[0]!;
+  const body = JSON.parse(await req.text()) as Record<string, unknown>;
+  expect(body).toMatchObject({ lat: 0.4, lng: 0.8 });
+  expect(req.headers.get("If-Match")).toBe(`"1"`);
+  // The drag keeps everything else the placement already had.
+  expect(body).toMatchObject({ bearing_deg: 0, fov_deg: 60, range_m: 100 });
+});
+
 // --- Monitoring center (M-W11) ---------------------------------------------
 const twoSiteOverview = () => json({ items: [
   { id: "s", name: "Site", lat: 0, lng: 0, camera_count: 5, online_cameras: 5, offline_cameras: 0, degraded_cameras: 0, alarm_count: 0 },
