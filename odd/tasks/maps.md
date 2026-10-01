@@ -455,3 +455,21 @@ smoke** (no WS event flood), package named `@openvms/test`.
 - Rollback baseline: M-B8 docs `b171e12`; M-W10 commits listed above. No staging beyond
   that, no deployment performed by this writer.
 - Next: push `feat/maps` to `origin` (PO decision recorded 2026-10-01).
+
+### M-W10 follow-up (2026-10-01, after first Docker deploy)
+- The deployed stack rendered a dead map: MapLibre v6 resolves its worker relative to its
+  own bundle URL, so production builds asked for /assets/maplibre-gl-worker.mjs, which no
+  bundler emits — Caddy answered with the SPA fallback and every worker died ("Worker
+  failed to load"; jsdom never exercises worker loading, which is why the unit suite
+  missed it). The perf smoke itself was blind too: fps/entities come from the overlay and
+  React state, not from GL. Fixed with Vite `?worker&url` (self-contained bundled worker,
+  `worker.format: "es"`) wired through `maplibregl.config.WORKER_URL` (`adacbbe`), and the
+  smoke now fails on console errors, WebSocket-noise excluded (`3a54ba2`); verified served
+  as JavaScript through Caddy and smoke green ×6.
+- Deployed basemap: `/tiles/world.pmtiles` (the DefaultConfig path) had no file behind it
+  ("Wrong magic number"); a real PMTiles archive now lives in the web container (ephemeral
+  until the image is recreated).
+- Known pre-existing, out of Maps scope: GET /notifications 403s for the platform admin —
+  `ListNotifications` requires a tenant and the platform user has none
+  (internal/rules/service.go); and Live media WebSockets cannot open against frigate-mock
+  (no real streams).
