@@ -67,7 +67,7 @@ Complete implementation and documentation first, then run the sequential command
 under **Deferred final runners and proof** in [`odd/tasks/maps.md`](../../odd/tasks/maps.md).
 Do not equate authored regression coverage with executed or passing tests.
 
-- [x] Local automated web checks, production build, synthetic performance harness and applicable Go race checks observed.
+- [ ] Current follow-up acceptance: web tests/typecheck/lint/build pass locally; synthetic performance remains unresolved (54 ms writer, 57 ms baseline, 74 ms candidate against 50 ms). Earlier successful harness/Go checks are historical, not proof for this candidate.
 - [ ] Multi-site and coordinate-less navigation works for the intended deployed account.
 - [ ] Live / Investigate / Analytics have the distinct workflows above; Events and Playback retain camera context.
 - [ ] Place, save, reload, drag, save, type/FOV edit, zone operations and center persistence work.
@@ -78,3 +78,21 @@ Do not equate authored regression coverage with executed or passing tests.
 
 No remote probe, permission change, deployment, push or PR is implied by this guide. The
 reported deployment URL identifies a symptom; it does not establish its version or grants.
+
+## Camera event notices
+
+With `events.view`, Maps shows new indexed camera alerts/detections over their visible placed
+markers without selecting a camera. The latest notice replaces only that camera's previous
+notice. Each validated notice stays visible for five seconds; a bounded five-second detail
+request budget and one delayed retry do not prolong a notice already displayed.
+
+REST event details remain permission-filtered and authoritative. Labels, severity and plates
+are actual indexed values. A permitted available snapshot uses the existing snapshot route;
+otherwise the event thumbnail is used. Failed images show **Image unavailable**, never live
+video or a fabricated vehicle photo. `snapshots.view` does not grant event access.
+
+These are indexed Frigate review events, not every raw object lifecycle. Push timestamps are
+event start times, so the UI accepts starts within the preceding two minutes; events indexed
+later may be omitted. Deduplication retains at most 512 event IDs per active context. Site,
+identity, permission and camera visibility changes cancel stale requests/notices; camera status
+changes do not reset the five-second display. Existing ingestion latency is unchanged.

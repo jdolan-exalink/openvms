@@ -40,6 +40,7 @@ import { MapOperationsPanel } from "./panel/MapOperationsPanel";
 import { AlarmPanel } from "./panel/AlarmPanel";
 import { SiteHealthPanel } from "./panel/SiteHealthPanel";
 import type { Map as MapLibreMap } from "maplibre-gl";
+import { CameraEventPopups } from "./events/CameraEventPopups";
 import { MapCanvas } from "./canvas/MapCanvas";
 import { MapToolbar } from "./MapToolbar";
 import { HierarchyBreadcrumb } from "./HierarchyBreadcrumb";
@@ -102,6 +103,7 @@ function MapShellContent({
   const [focusModeOverride, setFocusModeOverride] = useState<"none" | "current-site">();
   const focusMode = focusModeOverride ?? storedPrefs?.focus_mode ?? "none";
   const mapRef = useRef<MapLibreMap | null>(null);
+  const [readyMap, setReadyMap] = useState<MapLibreMap | null>(null);
   useEffect(() => { realtimeStore.connect(); return () => realtimeStore.destroy(); }, [realtimeStore]);
   const [hoverLiveOverride, setHoverLiveOverride] = useState<boolean>();
   const hoverLiveEnabled = hoverLiveOverride ?? storedPrefs?.hover_live ?? liveOnHover;
@@ -761,6 +763,7 @@ function MapShellContent({
           realtimeStore={realtimeStore}
           onMapReady={map => {
             mapRef.current = map;
+            setReadyMap(map);
             // The long-task budget starts when MapLibre first reports a full render:
             // tasks before idle are init work, tasks after idle are the steady state
             // the design budgets at 50 ms.
@@ -788,6 +791,9 @@ function MapShellContent({
           onCameraDragMove={editActive ? handleCameraDragMove : undefined}
           onCameraDragEnd={editActive ? handleCameraDragEnd : undefined}
         />
+
+        <CameraEventPopups map={readyMap} cameras={visibleCameras} tenantId={me.data?.tenant_id}
+          siteId={currentSite?.id} canEvents={can(me.data, "events.view")} canSnapshots={can(me.data, "snapshots.view")} />
 
         <aside className="absolute left-3 top-28 md:top-20 z-10 max-h-[65%] w-72 overflow-auto space-y-2">
           <MapOperationsPanel
