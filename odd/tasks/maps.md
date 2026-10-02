@@ -1328,3 +1328,20 @@ compressed to meet a size target. Parent decides the new native review candidate
 - Bounded source-fix commit: `a93784d9e91310c840ea98d350e72def159f6617` (3 files;
   42 additions + 4 deletions = 46 authored lines). Parent should assess the candidate containing
   this correction, not the pre-fix 040e146 bytes. No native review or deployment performed here.
+
+### Authorized compact geographic layout (2026-10-02)
+
+The user's latest explicit request to arrange every camera close together authorizes replacing
+previous geographic positions for this layout only. All 26 real Casa cameras now have distinct
+positions in a 35-meter grid (approximately 175 × 140 meters) around the unchanged current site
+center (-31.107187045294246, -60.09585033385747). Native audited writes: 26, revisions 27–52;
+request `maps-compact-layout-e1f1c757-917f-4040-8881-5c116882b2f5`.
+Camera properties, floor positions, servers, events and alarms were preserved. Saved preferences
+already contained `filters: {}` with cameras enabled, so no preference change was necessary;
+all 26 geographic entities are eligible. Connectivity snapshot: 24 online, two unknown.
+The API was restored unchanged; readiness and web returned 200. Private rollback evidence:
+`/tmp/maps-compact-layout-e1f1c757-917f-4040-8881-5c116882b2f5-rollback.json` (0600).
+Rollback must refuse subsequent user-modified revisions. No frontend deployment was performed.
+New map/plan features and corrected visibility remain locally verified but unpublished; M-W27
+and real-account acceptance remain pending. Browser refresh is required to discard stale client state;
+at distant zoom levels, clusters represent multiple cameras rather than individual markers.
