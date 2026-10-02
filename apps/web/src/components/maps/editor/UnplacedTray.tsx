@@ -1,7 +1,7 @@
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { cameraIcon, siteIcon, serverIcon, offlineIcon } from "@/lib/inventoryIcons";
 import { GripVertical } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 export const DRAG_MIME = "application/x-openvms-map-camera";
 
@@ -17,6 +17,8 @@ export interface UnplacedTrayProps {
   siteName?: string;
   armedId?: string;
   onArm: (cameraId: string) => void;
+  /** Touch/pen direct drag; the receiving canvas validates the actual drop bounds. */
+  onPointerDrop?: (cameraId:string,clientX:number,clientY:number)=>void;
   /** Offered only when the site has coordinates to place the cameras at. */
   onPlaceAll?: () => void;
   /** Offered only to holders of maps.edit_device (the backend's import permission). */
@@ -30,7 +32,8 @@ export interface UnplacedTrayProps {
  * answers PO decision 3 ("ubicar todas en el centro del sitio") for sites that already
  * know where they are.
  */
-export function UnplacedTray({ siteName, cameras, armedId, onArm, onPlaceAll, onImport, onClose }: UnplacedTrayProps) {
+export function UnplacedTray({ siteName, cameras, armedId, onArm, onPlaceAll, onImport, onClose, onPointerDrop }: UnplacedTrayProps) {
+  const pointerDrag=useRef<{id:string;x:number;y:number;pointer:number;moved:boolean}|undefined>(undefined);
   const [draggingId, setDraggingId] = useState<string>();
   return (
     <section aria-label="Sin ubicar" className="w-64 rounded-xl border border-line bg-surface p-3 shadow-lg">
@@ -60,6 +63,23 @@ export function UnplacedTray({ siteName, cameras, armedId, onArm, onPlaceAll, on
                 <button
                   type="button"
                   draggable
+                  style={{touchAction:onPointerDrop?"none":undefined}}
+                  onPointerDown={event=>{
+                    if(!onPointerDrop||event.pointerType==="mouse"||!event.isPrimary)return;
+                    pointerDrag.current={id:camera.id,x:event.clientX,y:event.clientY,pointer:event.pointerId,moved:false};
+                    event.currentTarget.setPointerCapture(event.pointerId);
+                  }}
+                  onPointerMove={event=>{
+                    const drag=pointerDrag.current;if(!drag||drag.pointer!==event.pointerId)return;
+                    if(Math.hypot(event.clientX-drag.x,event.clientY-drag.y)>5){drag.moved=true;setDraggingId(drag.id);}
+                  }}
+                  onPointerUp={event=>{
+                    const drag=pointerDrag.current;if(!drag||drag.pointer!==event.pointerId)return;
+                    pointerDrag.current=undefined;setDraggingId(undefined);
+                    if(drag.moved){event.preventDefault();onPointerDrop?.(drag.id,event.clientX,event.clientY);}
+                  }}
+                  onPointerCancel={()=>{pointerDrag.current=undefined;setDraggingId(undefined);}}
+                  onLostPointerCapture={()=>{pointerDrag.current=undefined;setDraggingId(undefined);}}
                   aria-pressed={armedId === camera.id}
                   onDragStart={(event) => {
                     event.dataTransfer.setData(DRAG_MIME, camera.id);

@@ -106,3 +106,31 @@ layer preferences still apply. The status panel is a legend, not a visibility to
 are green; offline/no-signal cameras are gray with an X badge. Alarm counts appear independently in
 red badges, including on online and offline cameras and clusters. Zones and FOV coverage stay below
 camera/site identity layers. This does not change permissions, stored coordinates or alarm records.
+
+## Geographic maps and private plant plans
+
+Select **Site**, then **Map** to choose a geographic map or a named plant/floor plan. Cities are
+sites; a site can contain multiple buildings and named maps. Only one map is active at a time.
+A private plan does not load geographic tiles. Invalid floor links never open a different site.
+
+With `maps.edit`, open **Manage maps**, create a building and a map with a unique ordinal, then
+upload PNG, restricted SVG or a selected PDF page in Edit mode. Review the converted preview and
+save its background explicitly. Only canonical PNG is stored; PDF workers/resources are local.
+Raw SVG/PDF is never persisted. Private images use authenticated requests and revocable blob URLs.
+
+With `maps.edit_device`, drag authorized camera cards directly onto the plan, or move existing
+markers (mouse, touch or pen). **Undo**, **Redo**, **Save placements** and **Discard floor changes**
+apply only to this map. Positions use top-left normalized x/y, independently of geographic and
+other-floor coordinates. Marker glyphs stay fixed-size above the background while zooming.
+Offline/unknown cameras remain gray with an X; green means online and alarm badges are separate.
+
+Map switching waits for explicit save/discard when camera drafts or an upload preview are pending.
+Revision conflicts remain visible and never retry writes automatically. Refresh and inspect the
+current state before attempting a new write. Empty-map/building deletion is permission-scoped and
+may be refused by the backend; occupied maps are not deleted. Per-camera placement removal is not
+exposed because the compact entity contract does not supply a safe placement identity. Moving is
+supported; geographic coverage/zones remain available only in geographic mode.
+
+Live, Events and Playback links retain the selected camera context and their existing permissions.
+Five-second real event notices project to the selected floor marker, not geographic coordinates.
+Local fixture/browser checks do not substitute for deployed real-camera/media acceptance.

@@ -1,17 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import { convertPlan, type ConvertedPlan } from "@/lib/maps/planConversion";
+import { ApiError } from "@/api/client";
 import { uploadFloorPlan } from "@/lib/maps/plans";
-interface PlanUploadProps { siteId:string; floorId:string; revision:number; onSaved:()=>void }
+interface PlanUploadProps { siteId:string; floorId:string; revision:number; onSaved:()=>void; onConflict?:()=>void;onDirty?:(dirty:boolean)=>void }
 /** A keyed context cancels conversion/upload and revokes all previews when the map changes. */
 export function PlanUpload(props: PlanUploadProps) {
   return <PlanUploadContext key={`${props.siteId}/${props.floorId}/${props.revision}`} {...props}/>;
 }
-function PlanUploadContext({siteId,floorId,revision,onSaved}:PlanUploadProps) {
+function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty}:PlanUploadProps) {
   const [file,setFile] = useState<File>();
   const [page,setPage] = useState(1);
   const [preview,setPreview] = useState<(ConvertedPlan & {url:string})>();
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState<string>();
+  useEffect(()=>{onDirty?.(!!preview||busy);return()=>onDirty?.(false);},[preview,busy,onDirty]);
   const request = useRef<AbortController | null>(null);
   const previewUrl = useRef<string | null>(null);
   useEffect(()=>()=>{
@@ -41,7 +43,7 @@ function PlanUploadContext({siteId,floorId,revision,onSaved}:PlanUploadProps) {
       await uploadFloorPlan(siteId,floorId,revision,preview.blob,controller.signal);
       if(!controller.signal.aborted) {clearPreview();onSaved();}
     } catch(cause) {
-      if(!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "No se pudo guardar el fondo.");
+      if(!controller.signal.aborted) {setError(cause instanceof Error ? cause.message : "No se pudo guardar el fondo.");if(cause instanceof ApiError && cause.status===409)onConflict?.();}
     } finally {if(!controller.signal.aborted) setBusy(false);}
   }
   return <section aria-label="Fondo del plano" className="space-y-2 rounded-xl border border-line bg-surface p-3 text-xs shadow-lg">
@@ -64,7 +66,7 @@ function PlanUploadContext({siteId,floorId,revision,onSaved}:PlanUploadProps) {
     <p className="text-muted">PNG, SVG o una página PDF; máximo 20 MiB. Revisa la vista previa antes de guardar.</p>
     <div className="flex gap-2"><button type="button" disabled={!preview || busy} onClick={()=>void save()}
       className="rounded bg-accent px-3 py-1 text-white disabled:opacity-40">Guardar fondo</button>
-      {busy && <button type="button" onClick={()=>{request.current?.abort();setBusy(false);clearPreview();}}>Cancelar</button>}
+      {(busy||preview) && <button type="button" onClick={()=>{request.current?.abort();setBusy(false);clearPreview();}}>Cancelar</button>}
     </div>
   </section>;
 }

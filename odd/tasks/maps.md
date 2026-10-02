@@ -1017,10 +1017,10 @@ no old lifecycle invocation, receipt or review authority claimed. Parent owns ne
   alarm badges. Focused prefs/entity/layers/panel/MapShell checks, full web/typecheck/lint/build.
 - [x] M-W24 — Floor/map integrity, CRUD and private image storage (local backend completion;
   frontend conversion/rendering and deployment remain M-W25–27).
-- [ ] M-W25 — Safe PNG/SVG/PDF upload and selected-page conversion to canonical PNG; bounded
+- [x] M-W25 — Safe PNG/SVG/PDF upload and selected-page conversion to canonical PNG; bounded
   local-worker PDF rendering and restricted off-DOM SVG sanitization, preview/cancellation;
   PNG/SVG/PDF actual-byte validation and no raw active-document persistence.
-- [ ] M-W26 — Optional geographic basemap, site/building/named-floor selector and private plan
+- [x] M-W26 — Optional geographic basemap, site/building/named-floor selector and private plan
   renderer/editor; normalized independent floor placements, direct camera dragging, explicit
   revision-aware save, permission-scoped hierarchy/image controls and five-second real notices.
 - [ ] M-W27 — Integrated verification and configuration-preserving local deployment acceptance.
@@ -1195,3 +1195,96 @@ raise root Node minimum to >=22.13.0. No removed isEvalSupported option.
   Frigate, production config, token creation, push, PR or merge operation performed.
 - Next: fresh single writer reads this file/mirror and all named modules, integrates selected floor Maps UI,
   permission-scoped controls and normalized camera editor, then performs authorized real-browser fixtures.
+
+### M-W26 concrete selected-map UI acceptance (fresh single writer)
+
+- Route: delegated direct; coordinated selector, private canvas/editor, API helpers and paired tests.
+- Keep geographic MapShell unchanged behind a MapWorkspace selector. Site selects a city; named
+  building/floor maps select one active map, never a simultaneous dashboard. Floor selection skips
+  geographic provider creation. Invalid floor/site URLs show an explicit recovery, not another map.
+- FloorMap owns normalized top-left x/y drafts, undo/redo, explicit save and per-placement revisions;
+  all connection states render with canonical inventory glyphs above the background. Geo coordinates
+  and other-floor placements are neither loaded as drafts nor rewritten.
+- Private image queries include site/floor/revision, abort stale requests and revoke object URLs.
+  maps.edit gates hierarchy/upload; maps.edit_device gates drag/save. Site detail refreshes after
+  hierarchy/image writes or conflicts, without automatic mutation retry. Pending edits block map
+  navigation until explicit discard. Real event notices share projection, not fake geographic points.
+- Focused unit/integration RED before implementation, then GREEN/refactor. Final checks sequential:
+  focused floor/selector/events/upload/conversion tests, full web tests, typecheck, lint, build,
+  diff check. Isolated production-build browser API fixtures prove PNG/SVG/two-page PDF preview,
+  canonical PNG upload, local PDF worker, independent floor drag/save/reload and visible conflicts.
+- No remote operation, native review lifecycle, operational DB/config/credential mutation or deploy.
+  Existing synthetic performance failure and real-account/media/deploy acceptance remain pending.
+
+
+### M-W25/M-W26 completed local UI and browser evidence (2026-10-02)
+
+M-W25 and M-W26 are complete locally. M-W27 deployment and real-account/media acceptance remain
+open. This entry supersedes only the earlier foundation's *pending integration* status, not its
+historical results or the unresolved synthetic performance failure.
+
+- UI: `/maps` uses MapWorkspace to select an authorized site and one named building/floor map,
+  or the existing geographic MapShell. Floor URLs are validated against current site details;
+  selected floor mode never requests geographic provider configuration or tiles. Geographic
+  entity reads now explicitly request `is_geo=true`; floor query keys include site and floor.
+- Manage maps uses native typed create/rename/delete hierarchy endpoints and exact revisions;
+  unique ordinals remain explicit because deleted ordinals stay reserved. maps.edit gates
+  hierarchy/background writes; maps.edit_device gates camera movement/save. Backend remains
+  authoritative, including refusal to delete occupied maps. No permission bypass was introduced.
+- Upload UI integrates existing M-W25 conversion, preview, selected PDF page and cancellation.
+  Private background GET/PUT use the authenticated client; revisions refresh site detail, conflicts
+  stay visible without retry. Image object URLs are assigned/revoked by canvas lifecycle. Upload
+  previews and camera drafts prevent accidental map switching until explicit save/discard.
+- Floor canvas keeps canonical inventory camera icons fixed-size above optional PNG background,
+  green online and gray-X unavailable, independent red alarm badges. Direct tray drag works with
+  mouse and touch/pen; marker movement has threshold/capture/cancel/outside-drop handling. Pan/zoom
+  share normalized top-left projection. Undo/redo and explicit save affect only selected floor
+  x/y; known placement revisions and camera properties are preserved. Floor media actions retain
+  camera context. Five-second authoritative event notices use explicit floor projection.
+- Strict TDD RED: floor helper/canvas/workspace modules absent; floor event projection absent;
+  upload preview dirty notification absent. Additional observed RED: premature post-save dirty
+  clearing and stale unplaced-cache duplicates. GREEN fixes retain draft markers/navigation dirty
+  through entity/unplaced refetch, synchronously notify staging, and deduplicate against current
+  placed cameras. React lifecycle normalization uses render-derived mode/selection and DOM image
+  effects, avoiding new hook lint warnings. No formatting dependency or configuration was added.
+- Final focused command: `pnpm --filter @openvms/web test src/lib/maps/floorEditor.test.ts src/components/maps/canvas/FloorPlanCanvas.test.tsx src/components/maps/events/CameraEventPopups.test.tsx src/components/maps/MapWorkspace.test.tsx src/components/maps/FloorMap.test.tsx src/components/maps/editor/PlanUpload.test.tsx src/lib/maps/planConversion.test.ts src/lib/maps/plans.test.ts src/lib/maps/planConversion.pdf.test.ts src/components/maps/editor/UnplacedTray.test.tsx src/components/maps/editor/MapHierarchyControls.test.tsx`: PASS 56/56, 11 files, 7.23s.
+- Final settled-source sequential checks: `pnpm --filter @openvms/web test` PASS 602/602, 96 files,
+  41.52s; web `typecheck` PASS; `lint` PASS (only pre-existing MapShell center-effect warning);
+  `build` PASS (2.89s Vite phase; existing >500 kB chunk warning); `pnpm --filter @openvms/test typecheck`
+  PASS; `git diff --check` PASS. No overlapping test/build processes; no Go changes or Go rerun.
+- Browser command: `pnpm --filter @openvms/test exec playwright test tests/maps-plans.spec.ts --output <isolated-local-output>`:
+  final PASS 3/3, 18.5s including production-build preview. Uses only local mocked authorized APIs,
+  a fixture-only fake sessionStorage token and disposable browser contexts; no production credentials,
+  DB, inventory, configuration, Frigate or remote access. API and static requests are both observed;
+  all external origins are blocked. Existing failed performance artifacts remain untouched.
+- Browser proof: actual PNG red pixels and sanitized SVG blue pixels; actual two-page PDF page 2
+  produces green 200x160 canonical PNG bytes; local production PDF worker request is observed;
+  private binary PUT has exact If-Match and authorization, no raw SVG/PDF persistence. Revision
+  conflict stays visible without an overwrite. Floor drag/save/reload, fixed-size gray marker after
+  zoom, protected map switch, same camera on two independent maps, native CDP touch drop and cancelled
+  touch movement all pass. No geographic config request or external SVG/CDN request occurs.
+- Historical preliminary results are not final proof: initial browser 1 pass / 2 failures identified
+  the post-save synchronization window and a fixture checking markers before refresh. One bounded
+  correction passed all 3. A later RED-backed stale-cache dedup guard was verified by the final full
+  batch and browser; final request instrumentation also observes API requests, avoiding a false
+  negative from route-handler precedence. Preliminary build caught missing `zones` in a new typed
+  hierarchy test fixture; corrected before final checks. No failure or threshold was waived.
+- No operational data changed. All 26 manually arranged geographic placements remain untouched
+  because this source work performs no operational writes. Fixture floor positions are not real data.
+- Limitations: no per-camera placement removal control (compact entity response lacks safe placement
+  identity); moving is supported. Floor coverage/zones are explicitly unsupported, not fake geo data.
+  Real deployed image/media/events/account acceptance remains M-W27/M-W17. Synthetic performance
+  remains FAILED 54/57/74ms > unchanged 50ms; not rerun, waived or causally attributed here.
+- Native RDD assessment/consent/receipt, deployment, push/PR/merge remain parent-owned. No old
+  lifecycle or consent invocation was reused. Conventional local source work-unit identity follows.
+- Rollback: revert M-W26 workspace/floor/canvas/helper/UI integration and paired tests/docs only;
+  geographic/editor behavior remains M-W23, M-W24 backend remains independent, and M-W25 conversion
+  foundation can remain for later integration. Stored geo/floor placements are never rewritten.
+
+#### M-W26 work-unit boundary
+
+This selected-map UI is one cohesive source work unit (20 files; 1,160 authored additions+deletions
+before this note). Selector, authorized private image lifecycle, normalized editor and actual browser
+proof ship together; splitting by file type would leave another unused foundation. The 400-line
+heuristic is advisory. Existing `feature-branch-chain` applies; no tests/docs were omitted or code
+compressed to meet a size target. Parent decides the new native review candidate and PR slices.

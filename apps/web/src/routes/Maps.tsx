@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { meQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
-import { MapShell } from "@/components/maps/MapShell";
+import { MapWorkspace } from "@/components/maps/MapWorkspace";
 import type { MapMode } from "@/lib/maps/types";
 import { ShieldAlert } from "lucide-react";
 
@@ -47,6 +47,7 @@ export function Maps() {
         ...prev,
         site: siteId,
         camera: undefined,
+        floor: undefined,
       }),
 
     });
@@ -78,8 +79,10 @@ export function Maps() {
 
   return (
     <div className="relative h-[calc(100dvh-10rem)] min-h-0 w-full overflow-hidden md:h-full md:flex-1">
-      <MapShell
+      <MapWorkspace
         initialSiteId={search.site}
+        initialFloorId={search.floor}
+        onSelectMap={(site,floor) => void navigate({to:"/maps",search:prev=>({...prev,mode:search.mode,site,floor,camera:undefined})})}
         initialCameraId={search.camera}
         initialMode={search.mode || "live"}
         canEdit={canEdit}

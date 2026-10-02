@@ -94,3 +94,12 @@ it("allows recently indexed reviews whose event start precedes publication by th
   await emit(frame("e", { ts: new Date(Date.now() - 30000).toISOString() }));
   expect(screen.getByText("AB123CD")).toBeInTheDocument();
 });
+it("uses an explicit floor projection without passing normalized coordinates to MapLibre", async()=>{
+ const floor={...camera,position:{kind:"floor",floorId:"f",x:.2,y:.3}} as CameraEntity;
+ const project=vi.fn(()=>({x:45,y:80}));
+ render(<CameraEventPopups {...props} map={null} cameras={[floor]} projectCamera={project} projectionKey="f"/>);
+ await emit();expect(screen.getByText("AB123CD")).toBeInTheDocument();
+ expect(project).toHaveBeenCalledWith(floor);
+ expect(screen.getByRole("region",{name:"Camera event: Entrance"})).toHaveStyle({left:"45px",top:"68px"});
+ act(()=>vi.advanceTimersByTime(5000));expect(screen.queryByText("AB123CD")).not.toBeInTheDocument();
+});

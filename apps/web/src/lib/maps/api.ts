@@ -178,7 +178,7 @@ export const siteEntitiesQuery = (siteId: string) =>
     queryFn: async () => {
       const res = unwrap(
         await api.GET("/api/v1/maps/sites/{siteId}/entities", {
-          params: { path: { siteId } },
+          params: { path: { siteId }, query: { is_geo: true } },
         }),
       );
       return {

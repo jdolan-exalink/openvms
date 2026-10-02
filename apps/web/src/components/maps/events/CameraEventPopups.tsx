@@ -7,6 +7,9 @@ import type { CameraEntity } from "@/lib/maps/types";
 
 interface Props {
   map: Map | null;
+  /** Explicit floor projection avoids interpreting normalized coordinates as longitude. */
+  projectCamera?: (camera: CameraEntity) => {x:number;y:number} | undefined;
+  projectionKey?: string;
   cameras: CameraEntity[];
   tenantId?: string | null;
   siteId?: string;
@@ -19,7 +22,7 @@ const LIFETIME = 5000;
 const EVENT_START_RECENCY_MS = 120000;
 
 /** REST remains authoritative; push transport IDs are deliberately not event IDs. */
-export function CameraEventPopups({ map, cameras, tenantId, siteId, canEvents, canSnapshots }: Props) {
+export function CameraEventPopups({ map, cameras, tenantId, siteId, canEvents, canSnapshots, projectCamera, projectionKey }: Props) {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [, moved] = useState(0);
   useEffect(() => {
@@ -28,11 +31,12 @@ export function CameraEventPopups({ map, cameras, tenantId, siteId, canEvents, c
     map.on("move", update);
     return () => { map.off("move", update); };
   }, [map, canEvents]);
-  const eligibleKey = JSON.stringify(cameras.filter(camera => camera.position.kind === "geo")
+  const floorProjection=!!projectCamera;
+  const eligibleKey = JSON.stringify(cameras.filter(camera => floorProjection ? camera.position.kind === "floor" : camera.position.kind === "geo")
     .map(camera => [camera.id, camera.siteId]).sort());
   // Status/name/coordinate updates keep notices alive; eligibility and identity changes cancel them.
   useEffect(() => {
-    if (!canEvents || !tenantId || !map) return;
+    if (!canEvents || !tenantId || (!map && !floorProjection)) return;
     const eligible = new globalThis.Map<string, string>(JSON.parse(eligibleKey) as [string, string][]);
     let active = true;
     const seen = new Set<string>();
@@ -82,13 +86,14 @@ export function CameraEventPopups({ map, cameras, tenantId, siteId, canEvents, c
       for (const request of pending.values()) { request.abort.abort(); clearTimeout(request.timer); clearTimeout(request.retry); }
       setNotices([]);
     };
-  }, [map, eligibleKey, tenantId, siteId, canEvents]);
-  if (!canEvents || !map) return null;
+  }, [map, eligibleKey, tenantId, siteId, canEvents, floorProjection, projectionKey]);
+  if (!canEvents || (!map && !projectCamera)) return null;
   return <div className="pointer-events-none absolute inset-0 overflow-hidden z-20" aria-live="polite">
     {notices.map(notice => {
       const camera = cameras.find(item => item.id === notice.cameraId);
-      if (!camera || camera.position.kind !== "geo") return null;
-      const point = map.project([camera.position.lng, camera.position.lat]);
+      if (!camera) return null;
+      const point = projectCamera ? projectCamera(camera) : camera.position.kind === "geo" ? map?.project([camera.position.lng, camera.position.lat]) : undefined;
+      if (!point) return null;
       return <EventCard key={notice.id} notice={notice} name={camera.name} x={point.x} y={point.y} canSnapshots={canSnapshots} />;
     })}
   </div>;

@@ -39,3 +39,8 @@ it("shows conflict without automatically overwriting",async()=>{
  await screen.findByAltText("Vista previa del plano");fireEvent.click(screen.getByRole("button",{name:"Guardar fondo"}));
  expect(await screen.findByText("Map revision changed")).toBeInTheDocument();expect(uploadFloorPlan).toHaveBeenCalledTimes(1);
 });
+it("reports unsaved previews so map navigation requires an explicit discard",async()=>{
+ const dirty=vi.fn();vi.mocked(convertPlan).mockResolvedValue({blob:new Blob(["png"],{type:"image/png"}),width:2,height:2,warnings:[],pageCount:1});
+ render(<PlanUpload {...props} onDirty={dirty}/>);choose();await screen.findByAltText("Vista previa del plano");
+ expect(dirty).toHaveBeenLastCalledWith(true);
+});
