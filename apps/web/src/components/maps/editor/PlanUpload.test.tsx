@@ -1,0 +1,41 @@
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { PlanUpload } from "./PlanUpload";
+import { convertPlan } from "@/lib/maps/planConversion";
+import { uploadFloorPlan } from "@/lib/maps/plans";
+vi.mock("@/lib/maps/planConversion",()=>({convertPlan:vi.fn()}));
+vi.mock("@/lib/maps/plans",()=>({uploadFloorPlan:vi.fn()}));
+beforeEach(()=> {vi.stubGlobal("URL",Object.assign(URL,{createObjectURL:vi.fn(()=>"blob:preview"),revokeObjectURL:vi.fn()}));vi.mocked(convertPlan).mockReset();vi.mocked(uploadFloorPlan).mockReset();});
+afterEach(()=>vi.unstubAllGlobals());
+const props={siteId:"s",floorId:"f",revision:7,onSaved:vi.fn()};
+const choose = () => fireEvent.change(screen.getByLabelText("Archivo de plano"),{target:{files:[new File(["pdf"],"test.pdf",{type:"application/pdf"})]}});
+it("previews chosen page and warnings before explicit revision-aware save",async()=>{
+ vi.mocked(convertPlan).mockResolvedValue({blob:new Blob(["png"],{type:"image/png"}),width:40,height:20,warnings:["Content removed"],pageCount:2});
+ vi.mocked(uploadFloorPlan).mockResolvedValue({id:"f",building_id:"b",name:"Floor",ordinal:0,revision:8});
+ render(<PlanUpload {...props}/>);choose();
+ expect(uploadFloorPlan).not.toHaveBeenCalled();
+ expect(await screen.findByText("Content removed")).toBeInTheDocument();
+ fireEvent.change(screen.getByLabelText("Página PDF"),{target:{value:"2"}});
+ await waitFor(()=>expect(convertPlan).toHaveBeenCalledTimes(2));
+ await waitFor(()=>expect(screen.getByRole("button",{name:"Guardar fondo"})).not.toBeDisabled());
+ fireEvent.click(screen.getByRole("button",{name:"Guardar fondo"}));
+ await waitFor(()=>expect(uploadFloorPlan).toHaveBeenCalledWith("s","f",7,expect.any(Blob),expect.any(AbortSignal)));
+});
+it("cancels superseded work and ignores late conversion after context changes",async()=>{
+ let finish!: (value: Awaited<ReturnType<typeof convertPlan>>)=>void;
+ vi.mocked(convertPlan).mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+ const view=render(<PlanUpload {...props}/>);choose();
+ const signal=vi.mocked(convertPlan).mock.calls[0]?.[1]?.signal;
+ view.rerender(<PlanUpload {...props} floorId="other"/>);
+ expect(signal?.aborted).toBe(true);
+ finish({blob:new Blob(["png"]),width:2,height:2,warnings:[],pageCount:1});
+ await waitFor(()=>expect(screen.queryByAltText("Vista previa del plano")).not.toBeInTheDocument());
+ expect(uploadFloorPlan).not.toHaveBeenCalled();
+});
+it("shows conflict without automatically overwriting",async()=>{
+ vi.mocked(convertPlan).mockResolvedValue({blob:new Blob(["png"],{type:"image/png"}),width:2,height:2,warnings:[],pageCount:1});
+ vi.mocked(uploadFloorPlan).mockRejectedValue(new Error("Map revision changed"));
+ render(<PlanUpload {...props}/>);choose();
+ await screen.findByAltText("Vista previa del plano");fireEvent.click(screen.getByRole("button",{name:"Guardar fondo"}));
+ expect(await screen.findByText("Map revision changed")).toBeInTheDocument();expect(uploadFloorPlan).toHaveBeenCalledTimes(1);
+});

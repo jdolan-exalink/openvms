@@ -57,3 +57,36 @@ Cleanup failures are logged for operations follow-up, not misreported as success
 Inventory moving to another site does not move its stored map coordinates automatically. A stale
 placement is excluded from the old site's entity read by current inventory site/tenant checks;
 coordinates remain stored for explicit reconciliation, not silently deleted or reassigned.
+
+## Browser conversion
+
+The local frontend conversion foundation accepts actual PNG, SVG or PDF bytes, not filename
+extensions or declared MIME types. It converts a selected PDF page or restricted SVG into PNG
+for preview and explicit save; raw documents never reach the image API. UI integration into the
+named-map selector and real-browser proof remain pending in M-W26.
+
+| Input | Supported behavior |
+| --- | --- |
+| PNG | Validate IHDR dimensions before browser decoding; decode and reencode |
+| SVG | Off-DOM XML validation and strict DOMPurify allowlist; basic geometry/text only |
+| PDF | PDF.js 6.3.289, one selected page from at most 100; encrypted PDFs rejected |
+
+All input/output is limited to 20 MiB; images must fit 8192 pixels per side and 16 million pixels.
+SVG has an additional 2 MiB text, 5000-element, 32-level nesting and 100000-character per
+path/points limit. SVG scripts/events, DTD/entities, CSS, external resources, image/use,
+foreignObject, animation, symbols and URL paints are unsupported. Removed content is reported
+in the preview warning; diagrams using those features may lose detail. Use a trusted PNG export
+when exact rendering is important. SVG is never injected into a live document or iframe.
+
+PDF viewport and embedded-image bounds apply before rendering. Runtime worker, CMaps, standard
+fonts, color profiles and WASM resources ship from the same local PDF.js version; no CDN is used.
+The frontend requires Node >=22.13.0 to build. PDF/SVG modules load lazily. Conversion has a
+15-second asynchronous deadline and cancellation destroys PDF tasks and revokes preview URLs.
+This is **not a sandbox**: browser main-thread stalls and hostile document resource exhaustion
+cannot be completely contained by an asynchronous timer. The independently bounded backend
+PNG decoder/reencoder remains the trust boundary.
+
+Private-plan helpers use the authenticated API client, binary PNG bodies and exact floor revision
+`If-Match`. A conflict is shown rather than retried or overwritten automatically. Preview object
+URLs are revoked on replacement, cancellation and map-context/unmount changes. Uploaded original
+filenames are display text only, not storage keys or URLs.

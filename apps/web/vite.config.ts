@@ -1,4 +1,5 @@
 import { defineConfig } from "vitest/config";
+import { localPdfAssets } from "./pdf-assets.js";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath } from "node:url";
@@ -7,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const api = process.env.VITE_API_PROXY ?? "http://localhost:8080";
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), localPdfAssets()],
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
   server: {
     port: 5173,
