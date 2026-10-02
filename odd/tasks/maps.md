@@ -1299,3 +1299,28 @@ compressed to meet a size target. Parent decides the new native review candidate
 - M-W25/M-W26 checked only after integrated UI and actual production-build fixture/browser proof.
   M-W27 remains pending. Next: parent spot-check/independent verification and candidate assessment,
   then explicit native consent/deployment authorization as applicable. No deployment is claimed.
+
+### M-W26 bounded server-outage connectivity correction (2026-10-02)
+
+- Independent verifier identified a deterministic floor-only regression: an entity with stale
+  `status=online` and `metadata.serverOffline=true` remained green because the floor canvas ignored
+  the server-offline override. Parent authorized this source-only correction; no scope expansion.
+- FloorPlanCanvas now reuses canonical `computeDisplayState(status, 0, serverOffline)`. Zero alarms
+  deliberately separates connection color from alarm badges. UNREACHABLE/OFFLINE/NO_SIGNAL remain
+  visible gray with X; online remains green and alarm counts remain independent. Data connection
+  tokens use the same canonical connectivity as geographic markers.
+- Strict TDD RED: `pnpm --filter @openvms/web test src/components/maps/canvas/FloorPlanCanvas.test.tsx`:
+  1 failure / 2 passes; expected gray-X, observed green stale-online marker. Fixture metadata now
+  honors the existing required CameraEntity contract rather than relying on an incomplete cast.
+- Final sequential source-fix checks: `pnpm --filter @openvms/web test src/components/maps/canvas/FloorPlanCanvas.test.tsx src/lib/maps/entityIndex.test.ts src/components/maps/FloorMap.test.tsx src/components/maps/events/CameraEventPopups.test.tsx`:
+  PASS 31/31, 4 files, 1.90s; web `typecheck` PASS; `lint` PASS with only existing center-effect warning;
+  `build` PASS (1.43s Vite phase; existing large-chunk warning); `git diff --check` PASS.
+- Full 602-test and 3/3 browser evidence above describe the pre-correction candidate and were NOT
+  rerun for this bounded correction, per parent instruction. Parent owns independent spot-check,
+  new candidate assessment/consent and deployment; no old 040e146 preflight is claimed applicable.
+- Source scope: floor canvas and its paired regression test only, plus this recovery evidence.
+  No production data/config/session/credential mutation, remote operation, native review, deployment,
+  performance rerun, new dependency or broader refactor. Separate operational repositioning is
+  parent-owned and cannot be inferred from this source worker's historical coordinate-preservation proof.
+- Rollback: revert this connectivity override and paired test only; preserve all M-W25/M-W26
+  selector, upload, floor positions, editor and real operational inventory. Exact source commit follows.

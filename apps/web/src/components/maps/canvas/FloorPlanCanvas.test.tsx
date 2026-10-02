@@ -7,7 +7,7 @@ beforeEach(() => vi.stubGlobal("ResizeObserver", class {
   disconnect() { }
 }));
 afterEach(() => vi.unstubAllGlobals());
-const cams = ["online", "offline", "unknown"].map((status, n) => ({ id: `c${n}`, name: `Camera ${n}`, siteId: "s", status, activeAlarms: n === 0 ? 2 : 0, position: { kind: "floor", floorId: "f", x: .25 + n * .1, y: .4 } })) as CameraEntity[];
+const cams = ["online", "offline", "unknown"].map((status, n) => ({ id: `c${n}`, name: `Camera ${n}`, siteId: "s", metadata: {}, status, activeAlarms: n === 0 ? 2 : 0, position: { kind: "floor", floorId: "f", x: .25 + n * .1, y: .4 } })) as CameraEntity[];
 it("keeps every state visible with canonical fixed-size icons above the image", () => {
   render(<FloorPlanCanvas imageUrl="blob:plan" width={400} height={200} cameras={cams} editable={false} onPlace={vi.fn()} onSelect={vi.fn()}/>);
   expect(screen.getAllByRole("button", { name: /Camera \d/ })).toHaveLength(3);
@@ -24,4 +24,14 @@ it("accepts direct tray drop only on the canvas, with normalized coordinates", (
   Object.defineProperties(drop, { clientX: { value: 100 }, clientY: { value: 100 } });
   fireEvent(viewport, drop);
   expect(place).toHaveBeenCalledWith("c", { x: .25, y: .5 });
+});
+it("shows a server-outage camera in gray with X even if its last camera status is online", () => {
+  const camera = { ...cams[0]!, metadata: { serverOffline: true }, activeAlarms: 3 };
+  render(<FloorPlanCanvas width={400} height={200} cameras={[camera]} editable={false} onPlace={vi.fn()} onSelect={vi.fn()}/>);
+  const marker = screen.getByRole("button", { name: "Camera 0" });
+  expect(marker).toHaveClass("border-muted", "text-muted");
+  expect(marker).not.toHaveClass("text-ok");
+  expect(marker).toHaveAttribute("data-connection", "unreachable");
+  expect(screen.getByLabelText("Unavailable")).toBeInTheDocument();
+  expect(screen.getByText("3")).toBeInTheDocument();
 });
