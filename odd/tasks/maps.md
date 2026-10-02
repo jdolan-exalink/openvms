@@ -1288,3 +1288,14 @@ before this note). Selector, authorized private image lifecycle, normalized edit
 proof ship together; splitting by file type would leave another unused foundation. The 400-line
 heuristic is advisory. Existing `feature-branch-chain` applies; no tests/docs were omitted or code
 compressed to meet a size target. Parent decides the new native review candidate and PR slices.
+
+#### M-W26 commit and recovery locator
+
+- Local Conventional source work unit: `343cafe3f2324e443d388a8b4414b289f9263815` on `feat/maps`.
+  Actual commit: 20 files, 1,150 additions + 18 deletions = 1,168 authored changed lines;
+  no generated files or AI attribution. Base `2312af3` retains M-W25 foundation/backend history.
+- Task file and full current-section Engram mirror `odd/maps/tasks/custom-background-followup`
+  (observation 252) synchronized/read back. Proof-only documentation follow-up records this SHA.
+- M-W25/M-W26 checked only after integrated UI and actual production-build fixture/browser proof.
+  M-W27 remains pending. Next: parent spot-check/independent verification and candidate assessment,
+  then explicit native consent/deployment authorization as applicable. No deployment is claimed.
