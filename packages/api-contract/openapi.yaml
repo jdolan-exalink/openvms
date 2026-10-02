@@ -2466,6 +2466,238 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/maps/sites/{siteId}/buildings:
+    post:
+      tags: [maps]
+      operationId: createMapBuilding
+      summary: createMapBuilding
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MapBuildingInput" }
+      responses:
+        "201":
+          description: Successful operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MapBuilding" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/maps/sites/{siteId}/buildings/{buildingId}:
+    patch:
+      tags: [maps]
+      operationId: updateMapBuilding
+      summary: updateMapBuilding
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: buildingId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MapBuildingInput" }
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MapBuilding" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [maps]
+      operationId: deleteMapBuilding
+      summary: deleteMapBuilding
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: buildingId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Successful operation
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/maps/sites/{siteId}/buildings/{buildingId}/floors:
+    post:
+      tags: [maps]
+      operationId: createMapFloor
+      summary: createMapFloor
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: buildingId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MapFloorInput" }
+      responses:
+        "201":
+          description: Successful operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MapFloor" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/maps/sites/{siteId}/floors/{floorId}:
+    patch:
+      tags: [maps]
+      operationId: updateMapFloor
+      summary: updateMapFloor
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: floorId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MapFloorInput" }
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MapFloor" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [maps]
+      operationId: deleteMapFloor
+      summary: deleteMapFloor
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: floorId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        "204":
+          description: Successful operation
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/maps/sites/{siteId}/floors/{floorId}/plan:
+    put:
+      tags: [maps]
+      operationId: uploadMapFloorPlan
+      summary: uploadMapFloorPlan
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: floorId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: If-Match
+          in: header
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          image/png:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MapFloor" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    get:
+      tags: [maps]
+      operationId: getMapFloorPlan
+      summary: getMapFloorPlan
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: floorId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Successful operation
+          content:
+            image/png:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/v1/maps/unplaced:
     get:
       tags: [maps]
@@ -2476,6 +2708,10 @@ paths:
         - name: site_id
           in: query
           required: true
+          schema: { type: string, format: uuid }
+        - name: floor_id
+          in: query
+          description: Omit for geographic placement, or select a floor plan.
           schema: { type: string, format: uuid }
       responses:
         "200":
@@ -3934,10 +4170,22 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/MapSiteOverview" }
+    MapBuildingInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+    MapFloorInput:
+      type: object
+      required: [name, ordinal]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        ordinal: { type: integer, minimum: -10000, maximum: 10000 }
     MapFloor:
       type: object
       required: [id, building_id, name, ordinal]
       properties:
+        revision: { type: integer, format: int64 }
         id: { type: string, format: uuid }
         building_id: { type: string, format: uuid }
         name: { type: string }
@@ -3951,6 +4199,7 @@ components:
       type: object
       required: [id, site_id, name, floors]
       properties:
+        revision: { type: integer, format: int64 }
         id: { type: string, format: uuid }
         site_id: { type: string, format: uuid }
         name: { type: string }

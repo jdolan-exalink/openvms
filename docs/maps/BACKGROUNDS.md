@@ -25,3 +25,31 @@ Renaming/replacing/deleting a map requires its exact revision; wildcard overwrit
 Deleting an occupied floor or a building with active floors is refused, preserving user layouts.
 Floor ordinals remain unique even after soft deletion in the existing schema; a reused ordinal
 returns conflict. No coordinate/schema migration is required for this foundation.
+
+## HTTP contract
+
+All paths below are under `/api/v1/maps/sites/{siteId}` and require authentication.
+
+| Operation | Path | Body / permission |
+| --- | --- | --- |
+| Create grouping | `POST /buildings` | `{name}` / `maps.edit` |
+| Rename/remove grouping | `PATCH` / `DELETE /buildings/{buildingId}` | Rename `{name}` / `maps.edit` |
+| Create plan | `POST /buildings/{buildingId}/floors` | `{name, ordinal}` / `maps.edit` |
+| Rename/reorder/remove plan | `PATCH` / `DELETE /floors/{floorId}` | Update `{name, ordinal}` / `maps.edit` |
+| Replace background | `PUT /floors/{floorId}/plan` | Binary `image/png` / `maps.edit` |
+| Read background | `GET /floors/{floorId}/plan` | PNG, `private, no-store` / `maps.view` |
+
+PATCH, DELETE and image PUT require `If-Match` with the exact revision returned by creation,
+mutation or site details. Existing maps feature flag gates every new endpoint. Upload dimensions
+come from server decoding. `plan_key` is opaque storage metadata, not a public/signed URL; clients
+read images only through the authenticated plan endpoint. No filename, object key, raw document,
+external resource URL or client dimensions are accepted in the upload contract.
+
+`GET /api/v1/maps/unplaced?site_id={siteId}&floor_id={floorId}` selects floor-unplaced cameras;
+omitting `floor_id` retains geographic semantics. Camera visibility remains permission-filtered.
+A geographically placed camera may still be unplaced on a selected floor. Positions are normalized
+`x/y` on floors and remain separate from latitude/longitude.
+
+Failed or uncertain uploads are cleaned up by a new server-owned UUID key; the prior background
+and revision remain unchanged. A successful replacement removes only its previous owned plan blob.
+Cleanup failures are logged for operations follow-up, not misreported as successful cleanup.

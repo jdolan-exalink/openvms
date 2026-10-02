@@ -38,6 +38,7 @@ func setupMapsTest(t *testing.T, enableMaps bool) *testMapsEnv {
 	env := demofix.Setup(t)
 	mapsSvc := &maps.Service{
 		Store:  env.Store,
+		Blobs:  &mapPlanBlobs{memBlobs: &memBlobs{}},
 		Config: maps.DefaultConfig(),
 		Log:    pgtest.Discard(),
 	}

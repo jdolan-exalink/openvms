@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/maps"
 )
@@ -142,7 +144,11 @@ func (h *Handlers) GetMapUnplacedCameras(ctx context.Context, req gen.GetMapUnpl
 	if !h.Features.Maps || h.Maps == nil {
 		return gen.GetMapUnplacedCameras404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
 	}
-	cams, err := h.Maps.GetUnplacedCameras(ctx, a, req.Params.SiteId)
+	var floors []uuid.UUID
+	if req.Params.FloorId != nil {
+		floors = append(floors, *req.Params.FloorId)
+	}
+	cams, err := h.Maps.GetUnplacedCameras(ctx, a, req.Params.SiteId, floors...)
 	if err != nil {
 		return nil, err
 	}
@@ -486,6 +492,7 @@ func toMapSiteDetails(s *maps.SiteDetails) gen.MapSiteDetails {
 				}
 			}
 			floors = append(floors, gen.MapFloor{
+				Revision:        &f.Revision,
 				Id:              f.ID,
 				BuildingId:      f.BuildingID,
 				Name:            f.Name,
@@ -505,6 +512,7 @@ func toMapSiteDetails(s *maps.SiteDetails) gen.MapSiteDetails {
 			}
 		}
 		buildings = append(buildings, gen.MapBuilding{
+			Revision:  &b.Revision,
 			Id:        b.ID,
 			SiteId:    b.SiteID,
 			Name:      b.Name,

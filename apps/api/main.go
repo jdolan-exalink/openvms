@@ -135,7 +135,7 @@ func run() error {
 	brandingSvc := &branding.Service{Store: st, Blobs: store, Log: log}
 	clipWatermarkSvc := &clipwatermark.Service{Store: st, Media: mediaSvc, Branding: brandingSvc, Blobs: store, Log: log}
 	alarmsSvc := &alarms.Service{Store: st, Pub: &jetstreamPublisher{js: js}, Log: log}
-	mapsSvc := &maps.Service{Store: st, Config: maps.DefaultConfig(), Log: log}
+	mapsSvc := &maps.Service{Store: st, Blobs: store, Config: maps.DefaultConfig(), Log: log}
 	// Land the default view where the server actually is (public-IP geolocation, with an
 	// OPENVMS_MAPS_CENTER override); the lookup is best-effort and never blocks startup.
 	mapsSvc.Config.DefaultCenter = maps.DetectServerCenter(ctx, log)
