@@ -1324,3 +1324,7 @@ compressed to meet a size target. Parent decides the new native review candidate
   parent-owned and cannot be inferred from this source worker's historical coordinate-preservation proof.
 - Rollback: revert this connectivity override and paired test only; preserve all M-W25/M-W26
   selector, upload, floor positions, editor and real operational inventory. Exact source commit follows.
+
+- Bounded source-fix commit: `a93784d9e91310c840ea98d350e72def159f6617` (3 files;
+  42 additions + 4 deletions = 46 authored lines). Parent should assess the candidate containing
+  this correction, not the pre-fix 040e146 bytes. No native review or deployment performed here.
