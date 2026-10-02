@@ -996,3 +996,130 @@ push or merge was requested/performed, and source normalization has no configure
 - Recovery mirror: full current navigation/drag follow-up under
   `odd/maps/tasks/navigation-drag-followup`, linked to this file and existing main observation 120
   plus retained history topics; parent can reconcile its normal main mirror without losing history.
+
+## Always-visible cameras and custom backgrounds follow-up (2026-10-02)
+
+Locator: `odd/tasks/maps.md`; full current-section mirror: `odd/maps/tasks/custom-background-followup`.
+Authorized intent: show cameras regardless of connection/alarm state; offline/unknown gray with
+explicit missing-connection badge, alarms separate. Support multiple named maps (cities/plants)
+and optional geographic basemap or uploaded PNG/SVG/PDF backgrounds in future units.
+Preserve all 26 user placements (26 placed, 0 unplaced, parent observation 09:40 UTC), real inventory,
+configuration, alerts and unrelated preferences. Historical 16-camera snapshots remain historical.
+Route: delegated direct, multiple non-trivial source/test files and preparation for writing.
+Strict TDD ON from current AGENTS: `pnpm --filter @openvms/web test`; observed RED/GREEN/REFACTOR required.
+Forecast: 1200–2100 authored lines across the complete scope, not this immediate unit.
+Delivery: existing `ask-on-risk` / `feature-branch-chain`; no push/PR/merge authorized.
+Pending prior review consent for 0711fbd is superseded only by changed candidate bytes, not granted;
+no old lifecycle invocation, receipt or review authority claimed. Parent owns new assessment/consent.
+
+- [x] M-W23 — Always-visible camera states; legacy status/priority preferences no longer exclude
+  cameras; preserve explicit site/server/type/camera selection; gray offline/unknown and independent
+  alarm badges. Focused prefs/entity/layers/panel/MapShell checks, full web/typecheck/lint/build.
+- [x] M-W24 — Floor/map integrity, CRUD and private image storage (local backend completion;
+  frontend conversion/rendering and deployment remain M-W25–27).
+- [ ] M-W25 — Safe PNG/SVG/PDF upload and conversion; scoped read-only research pending.
+- [ ] M-W26 — Optional geographic basemap, named-map selector and plan renderer/editor.
+- [ ] M-W27 — Integrated verification and configuration-preserving local deployment acceptance.
+
+Historical M-W23 immediate scope was visibility only. No database preferences reset, coordinate rewrite, floor implementation
+or deployment. Synthetic performance remains unresolved (54/57/74 ms > unchanged 50 ms); do not rerun
+or waive it. Real browser/media acceptance remains pending. Rollback: revert only M-W23 source/tests;
+existing geoplacements and independent alarm records are untouched. Local M-W23 proof follows; future units remain pending.
+
+
+### M-W23 local work-unit evidence
+
+- Local Conventional source commit: `f4e36334fc77088b4b6cb998463e11a5f1feb48c` on `feat/maps`;
+  13 source/test/operations-doc files, 128 additions + 108 deletions = 236 authored changed lines.
+- RED: focused five-file regression suite 7 failures / 58 passes. Includes 26-camera model with
+  24 online (20 alarmed) and 2 unknown; saved ONLINE/alert preferences cannot exclude any camera.
+  MapShell legacy-filter startup failed before fix. Separate layer reconciliation RED 1 failure / 4 passes.
+- GREEN/REFACTOR: final focused prefs/entity/panel/layers/visibility/MapShell/UnplacedTray suite
+  PASS 79/79 in 8.70 seconds; independent connection tokens/color and alarm counters retained.
+  Existing fixture assertion corrected 1 to actual 5 cameras; no behavior/test expectation waived.
+- Initial full run PASS 565/565; typecheck/build caught new test-only clusterProperties type access.
+  Corrected test inspection, then final complete sequential checks repeated on settled source bytes:
+  `pnpm --filter @openvms/web test`: PASS 565/565, 87 files, 62.99 seconds.
+  `pnpm --filter @openvms/web typecheck`: PASS, exit 0.
+  `pnpm --filter @openvms/web lint`: PASS, exit 0; existing center-effect dependency warning.
+  `pnpm --filter @openvms/web build`: PASS, exit 0; existing >500 kB bundle warning.
+  `git diff --check`: PASS, exit 0.
+- Focused command: `pnpm --filter @openvms/web test src/lib/maps/prefs.test.ts src/lib/maps/entityIndex.test.ts src/components/maps/panel/FiltersPanel.test.tsx src/components/maps/canvas/layers/cameraLayers.test.ts src/components/maps/canvas/layers/visibility.test.ts src/components/maps/MapShell.test.tsx src/components/maps/editor/UnplacedTray.test.tsx`.
+- Missing layers repaired independently of source existence. Stable owned-layer ordering is
+  zones → FOV → sites → cameras → effects. Tests cover repair, repeated reconciliation and order;
+  real browser rendering is not inferred from the deterministic helper/mock integration proof.
+- No database records/preferences/placements/configuration changed. Existing 26 coordinates
+  preserved by avoiding operational writes. No review lifecycle, receipt, deployment or remote work.
+- Runtime harness: NOT RERUN, known synthetic performance remains failed at 54/57/74 ms > 50 ms;
+  no waiver or causal attribution. Real-account/browser/media acceptance pending M-W27/M-W17.
+- Rollback: revert `f4e3633` (prefs/entity-index rendering, panel legend, canvas layer reconciliation,
+  layer badges/groups, paired tests and operations doc) without touching inventory or stored coordinates.
+- Native RDD: unavailable/not assessed by this bounded writer; parent owns exact new committed
+  candidate assessment, consent and any lifecycle. No old pending-consent command executed.
+- M-W24–27 remain unchecked; upload research and product decisions feed later units.
+  Next: parent independent verification/assessment and configuration-preserving deployment decision.
+
+### M-W24 authorized backend scope (2026-10-02)
+
+Route: delegated direct; hierarchy, private asset service/API, SQL and generated contracts
+require coordinated non-trivial files. Strict TDD ON from current AGENTS; runner
+`go test -race ./internal/maps ./internal/api ./internal/branding`; focused integration
+`go test -race -tags integration ./internal/api ./internal/store` uses pgtest disposable containers.
+No production database, deployment, remote credentials or UI mutation authorized in this worker.
+
+- [x] M-W24a — Validate active tenant/site/building/floor identity for placements, import,
+  zones and entity reads; floor-aware unplaced preserves existing geographic contract.
+- [x] M-W24b — Named building/floor create/update/delete, existing maps.edit scopes, revisions,
+  audited writes; preserve geo and other-floor placements.
+- [x] M-W24c — Private canonical PNG upload/download, maps.edit/maps.view site checks; bounded
+  20 MiB / 8192 side / 16 million pixels, full decode/reencode, server-owned keys and nosniff.
+- [x] M-W24d — Regenerate Go/TS API types, sequential functional/type checks and commit proof.
+
+Accept uploads only as canonical PNG; SVG/PDF conversion belongs to M-W25 and never stores raw
+active documents. Existing 26 geographic placements remain untouched. Source rollback: revert
+M-W24 work-unit commits only; no coordinate or inventory migration. Runtime HTTP proof supplied
+by disposable-infrastructure integration tests, not production/browser inference. Parent owns RDD.
+
+### M-W24 final local backend evidence
+
+- Source work units (local Conventional Commits, no AI attribution):
+  `99bf1fa1f8e997d07116cec413f8fd258087a0bc` — canonical bounded PNG validator, tests/docs (111 authored lines).
+  `8bb6b0b85bc87ac3c396265b22a5040e4dc4a6a5` — scoped hierarchy/private blob lifecycle and floor integrity (514).
+  `b2255a8` — generated-contract HTTP APIs, private PNG upload/download, wiring and integration/docs (629).
+  `1f2e7ac` — hide stale placements after inventory moves, preserving coordinates (40).
+  Total 1,294 authored additions+deletions, generated Go/SQL/TS outputs excluded; all generated bytes committed.
+  Larger lifecycle/API units remain cohesive (ownership/transaction/concurrency and public contract/wiring/tests);
+  400 lines is advisory, not a reason to omit tests or fragment working behavior. Existing feature-branch-chain applies.
+- Strict TDD RED: wrong-site floor write incorrectly returned 200; new hierarchy API returned 404 before endpoints;
+  canonical PNG helper missing before implementation; moved inventory remained in old-site entity read (200).
+  Initial integration test setup used unsupported multi-statement prepared SQL and was corrected before meaningful RED.
+  Initial SQLC expressions without whitespace around `= @` and ambiguous inferred EXISTS/OR output were corrected;
+  final generated SQL methods match actual UUID/boolean contracts.
+- Final focused integration: `go test -race -tags integration ./internal/api -run 'TestMapsHierarchyPrivatePlanLifecycle|TestMapsFloorRejectsOtherSiteAndDeletedBuilding|TestMapsFloorPlacementValidation|TestMapsMovedInventoryIsNotVisibleOnOldSite' -count=1`: PASS 4 top-level tests, package 14.812s.
+  Covers cross-site/deleted-building floor rejection, geo+two floor positions, floor-aware unplaced,
+  private authenticated PNG roundtrip/nosniff/no-store, unauthorized image rejection, uncertain upload cleanup,
+  exact revision conflict, occupied map deletion refusal, and moved-inventory read isolation.
+- Full integration `go test -race -tags integration ./internal/api ./internal/store`: PASS api 209.755s,
+  store 4.551s on the API/private-PNG candidate BEFORE the final bounded moved-inventory join fix.
+  Full integration was NOT repeated after that fix, per parent instruction; final focused test above is final-byte proof.
+  All integration uses existing pgtest disposable local containers, never production services/database.
+- Final `go test -race ./internal/maps ./internal/api ./internal/branding ./apps/api`: PASS;
+  maps/branding cached, API 2.870s, apps/api compiled with no test files. Canonical PNG suite covers eight cases,
+  including corrupted payload, trailing active bytes stripped, oversized bytes/side/pixel declarations and raw SVG/PDF rejection.
+- Final `pnpm --filter @openvms/web typecheck`: PASS; `git diff --check`: PASS.
+  Generation: `go generate ./internal/store ./internal/api/gen`, `pnpm generate` PASS on final contract.
+  No web dependencies, UI, production data, existing 26 placements, config or credentials changed.
+- Permissions: maps.edit for hierarchy/image writes, maps.view for site-plan reads; placement writes retain
+  maps.edit_device and unplaced camera visibility remains permission-filtered. No new catalog permissions/admin bypass.
+  PATCH/DELETE/image PUT require exact If-Match revision; new endpoints honor existing maps feature flag.
+- Handoff: POST site buildings {name}; PATCH/DELETE building; POST building floors {name,ordinal};
+  PATCH/DELETE floor; PUT/GET floor plan binary image/png, under `/api/v1/maps/sites/{siteId}`.
+  Existing site details expose revision; unplaced accepts optional floor_id. plan_key is opaque, not an image URL;
+  retrieve images only through authenticated `/floors/{floorId}/plan`.
+- Constraints: PNG only server-side; SVG/PDF selected-page rasterization still M-W25. No coordinate/schema migration.
+  Existing unique floor ordinals remain reserved after soft deletion (reuse returns conflict).
+  Deletion refuses occupied floor maps/buildings with active floors; cleanup failures are logged, not claimed cleared.
+- Browser/real-account/media acceptance, configuration-preserving deployment and known synthetic performance
+  remain pending; no native assessment/receipt or remote delivery created by this worker.
+  Rollback: revert these four work units only; stored geo/floor placements are never rewritten by this source work.
+  Next: parent independent spot-check, M-W25 conversion and M-W26 selector/renderer/editor.
