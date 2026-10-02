@@ -1199,9 +1199,9 @@ SELECT
         0
     )::int AS alarm_count
 FROM map_placements p
-LEFT JOIN cameras c ON c.id = p.entity_id AND p.entity_type = 'camera' AND c.tenant_id = p.tenant_id AND c.deleted_at IS NULL
-LEFT JOIN frigate_servers fs ON fs.id = p.entity_id AND p.entity_type = 'server' AND fs.tenant_id = p.tenant_id AND fs.deleted_at IS NULL
-LEFT JOIN map_devices md ON md.id = p.entity_id AND p.entity_type = 'device' AND md.tenant_id = p.tenant_id AND md.deleted_at IS NULL
+LEFT JOIN cameras c ON c.id = p.entity_id AND p.entity_type = 'camera' AND c.tenant_id = p.tenant_id AND c.site_id = p.site_id AND c.deleted_at IS NULL
+LEFT JOIN frigate_servers fs ON fs.id = p.entity_id AND p.entity_type = 'server' AND fs.tenant_id = p.tenant_id AND fs.site_id = p.site_id AND fs.deleted_at IS NULL
+LEFT JOIN map_devices md ON md.id = p.entity_id AND p.entity_type = 'device' AND md.tenant_id = p.tenant_id AND md.site_id = p.site_id AND md.deleted_at IS NULL
 WHERE p.site_id = $2
   AND ($1::uuid IS NULL OR p.tenant_id = $1)
   AND ($3::uuid IS NULL OR p.floor_id = $3)

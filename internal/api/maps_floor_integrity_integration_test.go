@@ -4,6 +4,7 @@ package api_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -49,5 +50,34 @@ func TestMapsFloorRejectsOtherSiteAndDeletedBuilding(t *testing.T) {
 	status, _, body = te.request(http.MethodPut, fmt.Sprintf("/api/v1/maps/placements/camera/%s", cam.ID), te.AdminToken, nil, gen.MapUpsertPlacementRequest{SiteId: cam.SiteID, FloorId: &floor, X: &x, Y: &y})
 	if status != http.StatusNotFound {
 		t.Fatalf("deleted building floor must be rejected: %d %s", status, body)
+	}
+}
+
+func TestMapsMovedInventoryIsNotVisibleOnOldSite(t *testing.T) {
+	te := setupMapsTest(t, true)
+	cam := te.Cameras["frigate-h01/acceso_norte"]
+	lat, lng := -31.1, -60.1
+	status, _, body := te.request(http.MethodPut, fmt.Sprintf("/api/v1/maps/placements/camera/%s", cam.ID), te.AdminToken, nil, gen.MapUpsertPlacementRequest{SiteId: cam.SiteID, Lat: &lat, Lng: &lng})
+	if status != 200 {
+		t.Fatalf("create placement: %d %s", status, body)
+	}
+	newSite := uuid.New()
+	ctx := context.Background()
+	if err := te.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `INSERT INTO sites(id,tenant_id,name) VALUES($1,$2,'Moved inventory')`, newSite, te.Demo.TenantID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE cameras SET site_id=$1 WHERE id=$2`, newSite, cam.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, _, body = te.request(http.MethodGet, fmt.Sprintf("/api/v1/maps/sites/%s/entities", cam.SiteID), te.AdminToken, nil, nil)
+	var result gen.MapEntitiesResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		t.Fatal(err)
+	}
+	if status != 200 || len(result.Entities) != 0 {
+		t.Fatalf("old site must not expose moved inventory: %d %s", status, body)
 	}
 }

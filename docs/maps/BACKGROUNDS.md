@@ -53,3 +53,7 @@ A geographically placed camera may still be unplaced on a selected floor. Positi
 Failed or uncertain uploads are cleaned up by a new server-owned UUID key; the prior background
 and revision remain unchanged. A successful replacement removes only its previous owned plan blob.
 Cleanup failures are logged for operations follow-up, not misreported as successful cleanup.
+
+Inventory moving to another site does not move its stored map coordinates automatically. A stale
+placement is excluded from the old site's entity read by current inventory site/tenant checks;
+coordinates remain stored for explicit reconciliation, not silently deleted or reassigned.
