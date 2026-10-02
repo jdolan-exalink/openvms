@@ -14,10 +14,10 @@ describe("entityIndex", () => {
       { ...baseCamera, camera: { ...baseCamera.camera, cameraType: "dome" } },
       { ...baseCamera, id: "cam-2", camera: { ...baseCamera.camera, cameraType: "ptz" } },
       { ...baseCamera, id: "cam-3", camera: { ...baseCamera.camera, cameraType: "fixed" } },
-      { ...baseCamera, id: "cam-4", activeAlarms: 2 }, // alarm wins over type
+      { ...baseCamera, id: "cam-4", activeAlarms: 2 }, // alarm does not replace connectivity identity
     ]);
     const icons = index.toFeatureCollection().features.map((f) => f.properties.icon);
-    expect(icons).toEqual(["cam-dome", "cam-ptz", "cam-normal", "cam-alarm"]);
+    expect(icons).toEqual(["cam-dome", "cam-ptz", "cam-normal", "cam-normal"]);
   });
 
   it("renders server-only metadata outages as unreachable", () => {
@@ -91,6 +91,18 @@ describe("entityIndex", () => {
       expect(feat?.properties.lpr).toBe(1);
     });
 
+    it("retains online green and unknown gray independently of active alarms", () => {
+      const online = cameraToFeature({ ...baseCamera, activeAlarms: 2 })!;
+      expect(online.properties.color).toBe(STATE_COLORS.ONLINE);
+      expect(online.properties.st).toBe("online");
+      expect(online.properties.display_state).toBe("ALARM");
+      const unknown = cameraToFeature({ ...baseCamera, status: "unknown", activeAlarms: 1 })!;
+      expect(unknown.properties.color).toBe(STATE_COLORS.NO_SIGNAL);
+      expect(unknown.properties.st).toBe("no_signal");
+      expect(unknown.properties.alarms).toBe(1);
+      expect(unknown.geometry.coordinates).toEqual([-58.3816, -34.6037]);
+    });
+
     it("returns null for floor placement", () => {
       const floorCamera: CameraEntity = {
         ...baseCamera,
@@ -124,7 +136,8 @@ describe("entityIndex", () => {
       index.patchAlarms("cam-1", 3);
       fc = index.toFeatureCollection();
       expect(fc.features[0]!.properties.display_state).toBe("ALARM");
-      expect(fc.features[0]!.properties.color).toBe(STATE_COLORS.ALARM);
+      expect(fc.features[0]!.properties.color).toBe(STATE_COLORS.DEGRADED);
+      expect(fc.features[0]!.properties.alarms).toBe(3);
 
       // Server offline override
       index.patchAlarms("cam-1", 0);

@@ -1,10 +1,8 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api, unwrap } from "@/api/client";
-import { computeDisplayState } from "./entityIndex";
 import {
   DEFAULT_LAYER_PREFERENCE,
   type CameraEntity,
-  type CameraDisplayState,
   type LayerPreference,
   type MapFilters,
 } from "./types";
@@ -47,32 +45,21 @@ const has = <T>(values: readonly T[] | undefined): values is readonly T[] =>
 
 /**
  * applyFilters narrows the cameras that get drawn. Every dimension is optional and they
- * combine with AND, so an empty filter set draws everything the actor is authorized to see.
+ * combine with AND. Legacy status/priority preferences never hide operational inventory.
  */
 export function applyFilters(cameras: CameraEntity[], filters?: MapFilters): CameraEntity[] {
   if (!filters) return cameras;
   const sites = has(filters.site_ids) ? new Set(filters.site_ids) : null;
   const cameraIds = has(filters.camera_ids) ? new Set(filters.camera_ids) : null;
   const serverIds = has(filters.server_ids) ? new Set(filters.server_ids) : null;
-  const statuses = has(filters.status) ? new Set<string>(filters.status) : null;
   const types = has(filters.camera_types) ? new Set<string>(filters.camera_types) : null;
-  const alertOnly = filters.priority?.includes("alert") ?? false;
-  if (!sites && !cameraIds && !serverIds && !statuses && !types && !alertOnly) return cameras;
+  if (!sites && !cameraIds && !serverIds && !types) return cameras;
 
   return cameras.filter((camera) => {
     if (sites && !sites.has(camera.siteId)) return false;
     if (cameraIds && !cameraIds.has(camera.id)) return false;
     if (serverIds && !serverIds.has(camera.serverId ?? "")) return false;
     if (types && !types.has(camera.camera.cameraType)) return false;
-    if (alertOnly && camera.activeAlarms === 0) return false;
-    if (statuses) {
-      const display = computeDisplayState(
-        camera.status,
-        camera.activeAlarms,
-        camera.metadata.serverOffline === true,
-      ) satisfies CameraDisplayState;
-      if (!statuses.has(display)) return false;
-    }
     return true;
   });
 }

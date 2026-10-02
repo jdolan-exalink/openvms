@@ -260,7 +260,7 @@ const putPrefsRequests = (fetchSpy: { mock: { calls: unknown[][] } }) =>
 it("hydrates saved preferences, applies them to the canvas and persists later changes", async () => {
   const { fetchSpy } = await setup(false, {
     layers: { coverage: false, cameras: false, sites: false, events_alarm: false },
-    filters: {},
+    filters: { status: ["ONLINE"], priority: ["alert"] },
     focus_mode: "current-site",
     hover_live: true,
   });
@@ -274,11 +274,12 @@ it("hydrates saved preferences, applies them to the canvas and persists later ch
   }));
   expect(screen.getByLabelText("Incident focus")).toHaveValue("current-site");
   expect(screen.getByRole("checkbox", { name: "Live on hover" })).toBeChecked();
+  expect(canvasHarness.props?.cameras).toHaveLength(5);
   // Hydration must not write back: it would clobber a newer blob saved by another tab.
   expect(putPrefsRequests(fetchSpy)).toHaveLength(0);
 
   fireEvent.click(screen.getByTitle("Filtros"));
-  fireEvent.click(await screen.findByRole("checkbox", { name: "Offline" }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: "PTZ" }));
   await waitFor(() => expect(canvasHarness.props?.cameras).toHaveLength(0));
   expect(screen.queryByRole("button", { name: "Marker c0" })).not.toBeInTheDocument();
 

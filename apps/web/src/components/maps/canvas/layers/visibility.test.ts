@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LAYER_GROUPS, applyLayerVisibility, builtLayerIds, ownedLayerIds } from "./visibility";
+import { LAYER_GROUPS, reconcileOwnedLayers, applyLayerVisibility, builtLayerIds, ownedLayerIds } from "./visibility";
 
 describe("layer visibility groups", () => {
   it("groups every layer the builders declare exactly once", () => {
@@ -30,4 +30,22 @@ describe("layer visibility groups", () => {
     expect(setLayoutProperty).toHaveBeenCalledTimes(1);
     expect(setLayoutProperty).toHaveBeenCalledWith("cam-label", "visibility", "none");
   });
+});
+
+it("repairs missing layers even with existing sources and orders objects above coverage", () => {
+  const present = new Set(["zone-fill", "cam-point-circle"]);
+  const map = {
+    getLayer: (id: string) => present.has(id),
+    addLayer: vi.fn((layer: { id: string }) => { present.add(layer.id); }),
+    moveLayer: vi.fn(),
+  };
+  reconcileOwnedLayers(map as never);
+  expect(present.size).toBe(builtLayerIds().length);
+  expect(map.addLayer.mock.calls.map(([layer]) => layer.id)).not.toContain("cam-point-circle");
+  const order = map.moveLayer.mock.calls.map(([id]) => id);
+  expect(order.indexOf("cam-point-circle")).toBeGreaterThan(order.indexOf("fov-outline"));
+  expect(order.indexOf("site-icon")).toBeGreaterThan(order.indexOf("zone-label"));
+  map.addLayer.mockClear();
+  reconcileOwnedLayers(map as never);
+  expect(map.addLayer).not.toHaveBeenCalled();
 });

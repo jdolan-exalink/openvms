@@ -96,3 +96,13 @@ event start times, so the UI accepts starts within the preceding two minutes; ev
 later may be omitted. Deduplication retains at most 512 event IDs per active context. Site,
 identity, permission and camera visibility changes cancel stale requests/notices; camera status
 changes do not reset the five-second display. Existing ingestion latency is unchanged.
+
+
+### Camera visibility and connection status
+
+Placed cameras remain visible regardless of connection state or active alarms. Legacy saved
+status/priority filters no longer exclude markers; explicit site/server/camera/type selection and
+layer preferences still apply. The status panel is a legend, not a visibility toggle. Online cameras
+are green; offline/no-signal cameras are gray with an X badge. Alarm counts appear independently in
+red badges, including on online and offline cameras and clusters. Zones and FOV coverage stay below
+camera/site identity layers. This does not change permissions, stored coordinates or alarm records.

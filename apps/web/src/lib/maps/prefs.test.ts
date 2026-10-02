@@ -46,26 +46,16 @@ describe("applyFilters", () => {
     expect(applyFilters(cameras, undefined)).toHaveLength(cameras.length);
   });
 
-  it("combines status, camera type and alarm presence", () => {
-    const onlyDown = applyFilters(cameras, { status: ["OFFLINE"] });
-    expect(onlyDown.map((c) => c.id)).toEqual(["down"]);
-
-    const onlyPtz = applyFilters(cameras, { camera_types: ["ptz"] });
-    expect(onlyPtz.map((c) => c.id)).toEqual(["ptz"]);
-
-    const onlyAlert = applyFilters(cameras, { priority: ["alert"] });
-    expect(onlyAlert.map((c) => c.id)).toEqual(["alarm"]);
-
-    const downAndPtz = applyFilters(cameras, { status: ["OFFLINE"], camera_types: ["ptz"] });
-    expect(downAndPtz.map((c) => c.id)).toEqual([]);
-  });
-
-  it("reports the display state, not the raw status, when matching", () => {
-    const serverDown = camera({ id: "unreachable", metadata: { serverOffline: true } });
-    expect(applyFilters([serverDown, ...cameras], { status: ["UNREACHABLE"] }).map((c) => c.id))
-      .toEqual(["unreachable"]);
-    expect(applyFilters([serverDown, ...cameras], { status: ["ONLINE"] }).map((c) => c.id))
-      .not.toContain("unreachable");
+  it("ignores legacy status and priority exclusions without changing explicit dimensions", () => {
+    const inventory = Array.from({ length: 26 }, (_, i) => camera({
+      id: `camera-${i}`, status: i < 24 ? "online" : "unknown", activeAlarms: i < 20 ? 1 : 0,
+    }));
+    const legacy: MapFilters = { status: ["ONLINE"], priority: ["alert"] };
+    expect(applyFilters(inventory, legacy)).toHaveLength(26);
+    expect(legacy).toEqual({ status: ["ONLINE"], priority: ["alert"] });
+    expect(applyFilters(cameras, { status: ["OFFLINE"], camera_types: ["ptz"] }).map(c => c.id)).toEqual(["ptz"]);
+    const serverDown = camera({ metadata: { serverOffline: true } });
+    expect(applyFilters([serverDown], { status: ["ONLINE"] })).toEqual([serverDown]);
   });
 
   it("restricts by site, camera and server when those are set", () => {

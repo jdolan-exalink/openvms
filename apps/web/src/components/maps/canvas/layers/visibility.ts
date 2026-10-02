@@ -13,7 +13,7 @@ import { buildZonesLayers } from "./zonesLayer";
  * group so ownedLayerIds() covers them.
  */
 export const LAYER_GROUPS = {
-  cameras: ["cam-cluster", "cam-cluster-count", "cam-cluster-icon", "cam-cluster-badge-alarms", "cam-point-halo", "cam-point-circle", "cam-point-icon", "cam-offline-badge", "cam-label"],
+  cameras: ["cam-cluster", "cam-cluster-count", "cam-cluster-icon", "cam-cluster-badge-alarms", "cam-point-halo", "cam-point-circle", "cam-point-icon", "cam-offline-badge", "cam-point-badge-alarms", "cam-label"],
   sites: ["site-health-ring", "site-point", "site-label", "site-icon", "site-offline-badge"],
   zones: ["zone-fill", "zone-outline", "zone-label"],
   coverage: ["fov-fill", "fov-outline"],
@@ -54,5 +54,21 @@ export function applyLayerVisibility(
     for (const id of ids) {
       if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", value);
     }
+  }
+}
+
+/** Sources may survive a style update while individual layers do not. Repair independently,
+ * then keep device identity above polygons/coverage and effects above device markers. */
+export function reconcileOwnedLayers(
+  map: Pick<MapLibreMap, "getLayer" | "addLayer" | "moveLayer">,
+  coverage = true,
+): void {
+  const ordered = [
+    ...buildZonesLayers(), ...buildFovLayers(coverage), ...buildSiteLayers(),
+    ...buildCameraLayers(), ...buildFxLayers(),
+  ];
+  for (const layer of ordered) {
+    if (!map.getLayer(layer.id)) map.addLayer(layer);
+    map.moveLayer(layer.id);
   }
 }

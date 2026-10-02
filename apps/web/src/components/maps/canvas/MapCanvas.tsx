@@ -15,12 +15,12 @@ import type { CameraEntity, MapProviderConfig, Site, Zone } from "@/lib/maps/typ
 import { type BoundingBox } from "@/lib/maps/geo";
 import { EntityIndex } from "@/lib/maps/entityIndex";
 import { buildMapStyle, getThemeColors, MapStyleController } from "./MapStyleController";
-import { buildCameraLayers, buildCamerasSource, CAMERAS_SOURCE_ID } from "./layers/cameraLayers";
-import { buildFovLayers, buildFovSource, camerasToFovCollection, FOV_SOURCE_ID } from "./layers/fovLayer";
-import { buildSiteLayers, buildSitesSource, SITES_SOURCE_ID, sitesToFeatureCollection } from "./layers/sitesLayer";
-import { buildZonesLayers, buildZonesSource, zonesToFeatureCollection, ZONES_SOURCE_ID } from "./layers/zonesLayer";
-import { buildFxLayers, buildFxSource, FX_SOURCE_ID } from "./layers/fxLayers";
-import { applyLayerVisibility, type LayerGroup } from "./layers/visibility";
+import { buildCamerasSource, CAMERAS_SOURCE_ID } from "./layers/cameraLayers";
+import { buildFovSource, camerasToFovCollection, FOV_SOURCE_ID } from "./layers/fovLayer";
+import { buildSitesSource, SITES_SOURCE_ID, sitesToFeatureCollection } from "./layers/sitesLayer";
+import { buildZonesSource, zonesToFeatureCollection, ZONES_SOURCE_ID } from "./layers/zonesLayer";
+import { buildFxSource, FX_SOURCE_ID } from "./layers/fxLayers";
+import { reconcileOwnedLayers, applyLayerVisibility, type LayerGroup } from "./layers/visibility";
 import { AnimationBudget, isPrefersReducedMotion } from "@/lib/maps/animationBudget";
 import { defaultMapRealtimeStore, MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { registerSdfSprites } from "./sprite";
@@ -142,25 +142,16 @@ export function MapCanvas({
       // 1. Sites Source & Layers (Country / Overview level)
       if (!map.getSource(SITES_SOURCE_ID)) {
         map.addSource(SITES_SOURCE_ID, buildSitesSource(sitesRef.current));
-        for (const layer of buildSiteLayers()) {
-          if (!map.getLayer(layer.id)) map.addLayer(layer);
-        }
       }
 
       // 1b. Zones Source & Layers (site polygons, underneath every device layer)
       if (!map.getSource(ZONES_SOURCE_ID)) {
         map.addSource(ZONES_SOURCE_ID, buildZonesSource(zonesRef.current));
-        for (const layer of buildZonesLayers()) {
-          if (!map.getLayer(layer.id)) map.addLayer(layer);
-        }
       }
 
       // 2. FOV Cones Source & Layers (Street level, rendered underneath cameras)
       if (!map.getSource(FOV_SOURCE_ID)) {
         map.addSource(FOV_SOURCE_ID, buildFovSource());
-        for (const layer of buildFovLayers(coverageRef.current)) {
-          if (!map.getLayer(layer.id)) map.addLayer(layer);
-        }
       }
 
       // 3. Cameras Source & Layers (Clustered & Unclustered)
@@ -171,18 +162,14 @@ export function MapCanvas({
         const entityIndex = new EntityIndex(patched);
         sourceSpec.data = entityIndex.toFeatureCollection();
         map.addSource(CAMERAS_SOURCE_ID, sourceSpec);
-        for (const layer of buildCameraLayers()) {
-          if (!map.getLayer(layer.id)) map.addLayer(layer);
-        }
       }
 
       // 4. FX Source & Layers (Ripples & Alarm Pulses, rendered on top of cameras)
       if (!map.getSource(FX_SOURCE_ID)) {
         map.addSource(FX_SOURCE_ID, buildFxSource());
-        for (const layer of buildFxLayers()) {
-          if (!map.getLayer(layer.id)) map.addLayer(layer);
-        }
       }
+
+      reconcileOwnedLayers(map, coverageRef.current);
 
       // The style can be rebuilt at any moment (theme swap, provider change), so the user's
       // layer preferences have to be re-applied every time these layers come back.

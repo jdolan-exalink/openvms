@@ -25,7 +25,7 @@ export const STATE_COLORS: Record<CameraDisplayState, string> = {
   OFFLINE: "#7e8a9a",
   NO_SIGNAL: "#7e8a9a",
   RECORDING_ERROR: "#f59e0b",
-  UNREACHABLE: "#586864",
+  UNREACHABLE: "#7e8a9a",
   ALARM: "#ef3f46",
 };
 
@@ -63,11 +63,13 @@ export function cameraToFeature(entity: CameraEntity, serverOffline = false): Fe
   if (entity.position.kind !== "geo") return null;
 
   const displayState = computeDisplayState(entity.status, entity.activeAlarms, serverOffline || !!entity.metadata.serverOffline);
-  const color = STATE_COLORS[displayState];
-  const icon = displayState === "ONLINE"
+  // Connectivity controls the base marker; alarms remain an independent badge.
+  const connectivity = computeDisplayState(entity.status, 0, serverOffline || !!entity.metadata.serverOffline);
+  const color = STATE_COLORS[connectivity];
+  const icon = connectivity === "ONLINE"
     ? entity.camera.cameraType === "dome" ? "cam-dome"
       : entity.camera.cameraType === "ptz" ? "cam-ptz" : "cam-normal"
-    : STATE_ICONS[displayState];
+    : STATE_ICONS[connectivity];
 
   return {
     type: "Feature",
@@ -81,7 +83,7 @@ export function cameraToFeature(entity: CameraEntity, serverOffline = false): Fe
       name: entity.name,
       site_id: entity.siteId,
       server_id: entity.serverId,
-      st: displayState.toLowerCase(),
+      st: connectivity.toLowerCase(),
       display_state: displayState,
       alarms: entity.activeAlarms,
       bearing: entity.camera.bearingDeg,

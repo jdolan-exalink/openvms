@@ -62,3 +62,14 @@ it("keeps camera identity visible in clusters and uses a separate offline X badg
   expect(camera?.type === "symbol" && camera.layout?.["icon-image"]).toBe("cam-normal");
   expect(layers.find(l => l.id === "cam-offline-badge")?.type).toBe("symbol");
 });
+
+it("keeps alarm badges separate from connectivity colors and unknown cameras visible", () => {
+  const source = buildCamerasSource();
+  expect(JSON.stringify(source.clusterProperties)).toContain("no_signal");
+  const layers = buildCameraLayers();
+  const cluster = layers.find(l => l.id === "cam-cluster");
+  expect(cluster?.type === "circle" && JSON.stringify(cluster.paint?.["circle-color"])).not.toContain("alarms");
+  expect(layers.find(l => l.id === "cam-point-badge-alarms")).toBeDefined();
+  const circle = layers.find(l => l.id === "cam-point-circle");
+  expect(circle?.type === "circle" && circle.paint?.["circle-opacity"]).not.toBe(0);
+});

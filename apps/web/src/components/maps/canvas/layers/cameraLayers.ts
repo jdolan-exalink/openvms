@@ -20,8 +20,8 @@ export function buildCamerasSource(): GeoJSONSourceSpecification {
     promoteId: "id",
     clusterProperties: {
       alarms: ["+", ["case", [">", ["get", "alarms"], 0], 1, 0]],
-      offline: ["+", ["case", ["in", ["get", "st"], ["literal", ["offline", "unreachable"]]], 1, 0]],
-      warnings: ["+", ["case", ["in", ["get", "st"], ["literal", ["degraded", "no_signal"]]], 1, 0]],
+      offline: ["+", ["case", ["in", ["get", "st"], ["literal", ["offline", "unreachable", "no_signal"]]], 1, 0]],
+      warnings: ["+", ["case", ["in", ["get", "st"], ["literal", ["degraded"]]], 1, 0]],
     },
   };
 }
@@ -36,8 +36,6 @@ export function buildCameraLayers(): LayerSpecification[] {
     paint: {
       "circle-color": [
         "case",
-        [">", ["get", "alarms"], 0],
-        "#ef3f46", // worst: alarms
         [">", ["get", "offline"], 0],
         "#7e8a9a", // next: offline / unreachable
         [">", ["get", "warnings"], 0],
@@ -195,11 +193,22 @@ export function buildCameraLayers(): LayerSpecification[] {
     paint: { "icon-color": "#ef3f46", "icon-halo-color": "#ffffff", "icon-halo-width": 1.5 },
   };
 
+  const cameraAlarmsBadge: SymbolLayerSpecification = {
+    id: "cam-point-badge-alarms", type: "symbol", source: CAMERAS_SOURCE_ID,
+    filter: ["all", ["!", ["has", "point_count"]], [">", ["get", "alarms"], 0]],
+    layout: {
+      "text-field": ["concat", "!", ["to-string", ["get", "alarms"]]],
+      "text-size": 10, "text-offset": [-1.4, -1.4], "text-allow-overlap": true,
+    },
+    paint: { "text-color": "#ffffff", "text-halo-color": "#ef3f46", "text-halo-width": 3 },
+  };
+
   return [
     cameraHaloLayer,
     cameraCircleLayer,
     cameraIconLayer,
     offlineBadge,
+    cameraAlarmsBadge,
     clusterCircleLayer,
     clusterCountLayer,
     clusterIcon,

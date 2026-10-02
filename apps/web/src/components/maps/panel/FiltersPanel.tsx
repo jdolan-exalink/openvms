@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { STATE_COLORS } from "@/lib/maps/entityIndex";
 import type { CameraDisplayState, MapFilters } from "@/lib/maps/types";
 
 export interface FiltersPanelProps {
@@ -59,18 +60,13 @@ export function FiltersPanel({ filters, onChange, onClose }: FiltersPanelProps) 
       </header>
 
       <fieldset className="mb-3">
-        <legend className="mb-1 text-xs font-medium text-muted">Estado</legend>
+        <legend className="mb-1 text-xs font-medium text-muted">Estado (leyenda)</legend>
         <div className="space-y-1">
           {STATUSES.map(({ value, label }) => (
-            <label key={value} className="flex cursor-pointer items-center gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                checked={filters.status?.includes(value) ?? false}
-                onChange={() => onChange({ ...filters, status: toggle(filters.status, value) })}
-                className="size-3.5 accent-accent"
-              />
+            <div key={value} className="flex items-center gap-2 text-sm text-ink">
+              <span aria-hidden className="size-3 rounded-full" style={{ backgroundColor: STATE_COLORS[value] }} />
               {label}
-            </label>
+            </div>
           ))}
         </div>
       </fieldset>
@@ -93,7 +89,7 @@ export function FiltersPanel({ filters, onChange, onClose }: FiltersPanelProps) 
       </fieldset>
 
       <p className="border-t border-line pt-2 text-xs text-muted">
-        Sin un filtro activo se muestran todas las cámaras autorizadas.
+        Todas las cámaras se muestran independientemente de su estado o alarmas.
       </p>
     </section>
   );
