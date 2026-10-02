@@ -62,10 +62,11 @@ SET name = coalesce(sqlc.narg('name'), name),
 WHERE id = @id AND tenant_id = @tenant_id AND deleted_at IS NULL
 RETURNING *;
 
--- name: DeleteMapBuilding :exec
+-- name: DeleteMapBuilding :one
 UPDATE map_buildings
 SET deleted_at = now(), revision = nextval('map_revision')
-WHERE id = @id AND tenant_id = @tenant_id;
+WHERE id = @id AND tenant_id = @tenant_id AND deleted_at IS NULL
+RETURNING *;
 
 -- name: ListMapFloorsByBuilding :many
 SELECT * FROM map_floors
@@ -99,10 +100,11 @@ SET name = coalesce(sqlc.narg('name'), name),
 WHERE id = @id AND tenant_id = @tenant_id AND deleted_at IS NULL
 RETURNING *;
 
--- name: DeleteMapFloor :exec
+-- name: DeleteMapFloor :one
 UPDATE map_floors
 SET deleted_at = now(), revision = nextval('map_revision')
-WHERE id = @id AND tenant_id = @tenant_id;
+WHERE id = @id AND tenant_id = @tenant_id AND deleted_at IS NULL
+RETURNING *;
 
 -- name: ListMapDevicesBySite :many
 SELECT * FROM map_devices
@@ -217,7 +219,8 @@ WHERE c.site_id = @site_id
   AND c.deleted_at IS NULL
   AND NOT EXISTS (
       SELECT 1 FROM map_placements p
-      WHERE p.entity_type = 'camera' AND p.entity_id = c.id AND p.floor_id IS NULL
+      WHERE p.entity_type = 'camera' AND p.entity_id = c.id AND p.tenant_id = c.tenant_id AND p.site_id = c.site_id
+        AND ((sqlc.narg('floor_id')::uuid IS NULL AND p.floor_id IS NULL) OR p.floor_id = sqlc.narg('floor_id'))
   )
 ORDER BY c.display_name ASC;
 
@@ -231,12 +234,18 @@ ORDER BY c.id;
 
 -- name: ListMapZonesBySite :many
 SELECT * FROM map_zones
-WHERE site_id = @site_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')) AND deleted_at IS NULL
+WHERE map_zones.site_id = sqlc.arg('site_id')::uuid AND (sqlc.narg('tenant_id')::uuid IS NULL OR map_zones.tenant_id = sqlc.narg('tenant_id')) AND map_zones.deleted_at IS NULL
+AND EXISTS(SELECT 1 FROM sites s WHERE s.id = map_zones.site_id AND s.tenant_id = map_zones.tenant_id AND s.deleted_at IS NULL)
+AND (map_zones.floor_id IS NULL OR EXISTS(SELECT 1 FROM map_floors f JOIN map_buildings b ON b.id = f.building_id AND b.tenant_id = f.tenant_id
+ WHERE f.id = map_zones.floor_id AND f.tenant_id = map_zones.tenant_id AND b.site_id = map_zones.site_id AND f.deleted_at IS NULL AND b.deleted_at IS NULL))
 ORDER BY name ASC;
 
 -- name: GetMapZone :one
 SELECT * FROM map_zones
-WHERE id = @id AND (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')) AND deleted_at IS NULL;
+WHERE map_zones.id = sqlc.arg('id')::uuid AND (sqlc.narg('tenant_id')::uuid IS NULL OR map_zones.tenant_id = sqlc.narg('tenant_id')) AND map_zones.deleted_at IS NULL
+AND EXISTS(SELECT 1 FROM sites s WHERE s.id = map_zones.site_id AND s.tenant_id = map_zones.tenant_id AND s.deleted_at IS NULL)
+AND (map_zones.floor_id IS NULL OR EXISTS(SELECT 1 FROM map_floors f JOIN map_buildings b ON b.id = f.building_id AND b.tenant_id = f.tenant_id
+ WHERE f.id = map_zones.floor_id AND f.tenant_id = map_zones.tenant_id AND b.site_id = map_zones.site_id AND f.deleted_at IS NULL AND b.deleted_at IS NULL));
 
 -- name: CreateMapZone :one
 INSERT INTO map_zones (
@@ -333,7 +342,7 @@ ORDER BY s.name ASC;
 -- name: ListMapFloorsBySite :many
 SELECT f.*
 FROM map_floors f
-JOIN map_buildings b ON b.id = f.building_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR b.tenant_id = f.tenant_id)
+JOIN map_buildings b ON b.id = f.building_id AND b.tenant_id = f.tenant_id
 WHERE b.site_id = @site_id AND (sqlc.narg('tenant_id')::uuid IS NULL OR f.tenant_id = sqlc.narg('tenant_id')) AND f.deleted_at IS NULL AND b.deleted_at IS NULL
 ORDER BY f.building_id ASC, f.ordinal ASC;
 
@@ -380,9 +389,9 @@ SELECT
         0
     )::int AS alarm_count
 FROM map_placements p
-LEFT JOIN cameras c ON c.id = p.entity_id AND p.entity_type = 'camera' AND (sqlc.narg('tenant_id')::uuid IS NULL OR c.tenant_id = p.tenant_id) AND c.deleted_at IS NULL
-LEFT JOIN frigate_servers fs ON fs.id = p.entity_id AND p.entity_type = 'server' AND (sqlc.narg('tenant_id')::uuid IS NULL OR fs.tenant_id = p.tenant_id) AND fs.deleted_at IS NULL
-LEFT JOIN map_devices md ON md.id = p.entity_id AND p.entity_type = 'device' AND (sqlc.narg('tenant_id')::uuid IS NULL OR md.tenant_id = p.tenant_id) AND md.deleted_at IS NULL
+LEFT JOIN cameras c ON c.id = p.entity_id AND p.entity_type = 'camera' AND c.tenant_id = p.tenant_id AND c.deleted_at IS NULL
+LEFT JOIN frigate_servers fs ON fs.id = p.entity_id AND p.entity_type = 'server' AND fs.tenant_id = p.tenant_id AND fs.deleted_at IS NULL
+LEFT JOIN map_devices md ON md.id = p.entity_id AND p.entity_type = 'device' AND md.tenant_id = p.tenant_id AND md.deleted_at IS NULL
 WHERE p.site_id = @site_id
   AND (sqlc.narg('tenant_id')::uuid IS NULL OR p.tenant_id = sqlc.narg('tenant_id'))
   AND (sqlc.narg('floor_id')::uuid IS NULL OR p.floor_id = sqlc.narg('floor_id'))
@@ -391,6 +400,10 @@ WHERE p.site_id = @site_id
       sqlc.narg('min_lat')::double precision IS NULL
       OR (p.lat >= sqlc.narg('min_lat') AND p.lat <= sqlc.narg('max_lat') AND p.lng >= sqlc.narg('min_lng') AND p.lng <= sqlc.narg('max_lng'))
   )
+  AND (p.floor_id IS NULL OR EXISTS (
+      SELECT 1 FROM map_floors f JOIN map_buildings b ON b.id=f.building_id AND b.tenant_id=f.tenant_id
+      WHERE f.id=p.floor_id AND f.tenant_id=p.tenant_id AND b.site_id=p.site_id
+        AND f.deleted_at IS NULL AND b.deleted_at IS NULL))
   AND (
       (p.entity_type = 'camera' AND c.id IS NOT NULL)
       OR (p.entity_type = 'server' AND fs.id IS NOT NULL)
@@ -398,3 +411,28 @@ WHERE p.site_id = @site_id
   )
 ORDER BY p.revision ASC;
 
+
+-- name: GetMapFloorOnSite :one
+SELECT f.* FROM map_floors f
+JOIN map_buildings b ON b.id=f.building_id AND b.tenant_id=f.tenant_id
+JOIN sites s ON s.id=b.site_id AND s.tenant_id=b.tenant_id
+WHERE f.id= @id AND f.tenant_id= @tenant_id AND b.site_id= @site_id
+  AND f.deleted_at IS NULL AND b.deleted_at IS NULL AND s.deleted_at IS NULL
+FOR SHARE OF f,b,s;
+
+-- name: GetMapBuildingOnSite :one
+SELECT b.* FROM map_buildings b JOIN sites s ON s.id = b.site_id AND s.tenant_id = b.tenant_id
+WHERE b.id = @id AND b.tenant_id = @tenant_id AND b.site_id = @site_id
+AND b.deleted_at IS NULL AND s.deleted_at IS NULL
+FOR UPDATE OF b;
+
+-- name: LockMapFloorOnSite :one
+SELECT f.* FROM map_floors f JOIN map_buildings b ON b.id = f.building_id AND b.tenant_id = f.tenant_id
+JOIN sites s ON s.id = b.site_id AND s.tenant_id = b.tenant_id
+WHERE f.id = @id AND f.tenant_id = @tenant_id AND b.site_id = @site_id
+AND f.deleted_at IS NULL AND b.deleted_at IS NULL AND s.deleted_at IS NULL
+FOR UPDATE OF f FOR SHARE OF b,s;
+
+-- name: MapFloorHasContent :one
+SELECT (EXISTS(SELECT 1 FROM map_placements p WHERE p.floor_id = sqlc.arg('floor_id')::uuid AND p.tenant_id = sqlc.arg('tenant_id')::uuid)
+ OR EXISTS(SELECT 1 FROM map_zones z WHERE z.floor_id = sqlc.arg('floor_id')::uuid AND z.tenant_id = sqlc.arg('tenant_id')::uuid AND z.deleted_at IS NULL))::boolean AS has_content;

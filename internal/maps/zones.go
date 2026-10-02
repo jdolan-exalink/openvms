@@ -121,14 +121,8 @@ func (s *Service) CreateZone(ctx context.Context, actor authz.Actor, siteID uuid
 			return err
 		}
 
-		if req.FloorID != nil {
-			_, err := q.GetMapFloor(ctx, db.GetMapFloorParams{
-				ID:       *req.FloorID,
-				TenantID: site.TenantID,
-			})
-			if err != nil {
-				return store.Classify(err)
-			}
+		if err := validateFloorOnSite(ctx, q, site.TenantID, siteID, req.FloorID); err != nil {
+			return err
 		}
 
 		var uid *uuid.UUID
@@ -222,6 +216,9 @@ func (s *Service) UpdateZone(ctx context.Context, actor authz.Actor, zoneID uuid
 		floorID := zone.FloorID
 		if req.FloorID != nil {
 			floorID = req.FloorID
+		}
+		if err := validateFloorOnSite(ctx, q, zone.TenantID, zone.SiteID, floorID); err != nil {
+			return err
 		}
 		isFloor := floorID != nil
 

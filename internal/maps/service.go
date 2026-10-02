@@ -15,6 +15,7 @@ import (
 
 // Service provides maps use cases.
 type Service struct {
+	Blobs  PlanBlobs
 	Store  *store.Store
 	Config Config
 	Log    *slog.Logger
@@ -134,6 +135,7 @@ func (s *Service) GetSiteDetails(ctx context.Context, actor authz.Actor, siteID 
 				planContentType = &pct
 			}
 			floorsByBuilding[f.BuildingID] = append(floorsByBuilding[f.BuildingID], Floor{
+				Revision:        f.Revision,
 				ID:              f.ID,
 				BuildingID:      f.BuildingID,
 				Name:            f.Name,
@@ -153,6 +155,7 @@ func (s *Service) GetSiteDetails(ctx context.Context, actor authz.Actor, siteID 
 				bFloors = []Floor{}
 			}
 			buildings = append(buildings, Building{
+				Revision:  b.Revision,
 				ID:        b.ID,
 				SiteID:    b.SiteID,
 				Name:      b.Name,
@@ -223,6 +226,9 @@ func (s *Service) GetSiteEntities(ctx context.Context, actor authz.Actor, siteID
 			return err
 		}
 
+		if err := validateFloorOnSite(ctx, q, site.TenantID, siteID, filter.FloorID); err != nil {
+			return err
+		}
 		rev, err := q.GetMapSiteRevision(ctx, db.GetMapSiteRevisionParams{SiteID: siteID, TenantID: &site.TenantID})
 		if err != nil {
 			return store.Classify(err)

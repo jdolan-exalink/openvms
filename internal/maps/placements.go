@@ -18,7 +18,11 @@ import (
 )
 
 // GetUnplacedCameras returns cameras on the site that have no geographic placement.
-func (s *Service) GetUnplacedCameras(ctx context.Context, actor authz.Actor, siteID uuid.UUID) ([]UnplacedCamera, error) {
+func (s *Service) GetUnplacedCameras(ctx context.Context, actor authz.Actor, siteID uuid.UUID, selectedFloor ...uuid.UUID) ([]UnplacedCamera, error) {
+	var floorID *uuid.UUID
+	if len(selectedFloor) > 0 {
+		floorID = &selectedFloor[0]
+	}
 	var out []UnplacedCamera
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		chk, err := access.Load(ctx, q, actor)
@@ -33,9 +37,13 @@ func (s *Service) GetUnplacedCameras(ctx context.Context, actor authz.Actor, sit
 			return err
 		}
 
+		if err := validateFloorOnSite(ctx, q, site.TenantID, siteID, floorID); err != nil {
+			return err
+		}
 		rows, err := q.ListUnplacedCamerasBySite(ctx, db.ListUnplacedCamerasBySiteParams{
 			SiteID:   siteID,
-			TenantID: actor.TenantID,
+			FloorID:  floorID,
+			TenantID: &site.TenantID,
 		})
 		if err != nil {
 			return err
@@ -138,6 +146,9 @@ func (s *Service) UpsertPlacement(ctx context.Context, actor authz.Actor, entity
 			return err
 		}
 
+		if err := validateFloorOnSite(ctx, q, site.TenantID, req.SiteID, req.FloorID); err != nil {
+			return err
+		}
 		// Verify entity exists and belongs to the site
 		switch entityType {
 		case "camera":
@@ -145,7 +156,7 @@ func (s *Service) UpsertPlacement(ctx context.Context, actor authz.Actor, entity
 			if err != nil {
 				return store.Classify(err)
 			}
-			if cam.SiteID != req.SiteID {
+			if cam.SiteID != req.SiteID || cam.TenantID != site.TenantID {
 				return &ValidationError{Msg: "camera does not belong to specified site"}
 			}
 		case "server":
@@ -153,7 +164,7 @@ func (s *Service) UpsertPlacement(ctx context.Context, actor authz.Actor, entity
 			if err != nil {
 				return store.Classify(err)
 			}
-			if srv.SiteID != req.SiteID {
+			if srv.SiteID != req.SiteID || srv.TenantID != site.TenantID {
 				return &ValidationError{Msg: "server does not belong to specified site"}
 			}
 		case "device":

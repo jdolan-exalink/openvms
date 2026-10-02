@@ -76,6 +76,7 @@ type SiteOverview struct {
 
 // Floor represents a building floor.
 type Floor struct {
+	Revision        int64           `json:"revision"`
 	ID              uuid.UUID       `json:"id"`
 	BuildingID      uuid.UUID       `json:"building_id"`
 	Name            string          `json:"name"`
@@ -89,6 +90,7 @@ type Floor struct {
 
 // Building represents a physical building on a site.
 type Building struct {
+	Revision  int64           `json:"revision"`
 	ID        uuid.UUID       `json:"id"`
 	SiteID    uuid.UUID       `json:"site_id"`
 	Name      string          `json:"name"`

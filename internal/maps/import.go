@@ -283,7 +283,7 @@ func (s *Service) ImportPlacements(ctx context.Context, actor authz.Actor, siteI
 
 		camRows, err := q.ListSiteCamerasForImport(ctx, db.ListSiteCamerasForImportParams{
 			SiteID:   siteID,
-			TenantID: actor.TenantID,
+			TenantID: &site.TenantID,
 		})
 		if err != nil {
 			return store.Classify(err)

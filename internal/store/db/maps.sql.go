@@ -282,10 +282,11 @@ func (q *Queries) CreateMapZone(ctx context.Context, arg CreateMapZoneParams) (M
 	return i, err
 }
 
-const deleteMapBuilding = `-- name: DeleteMapBuilding :exec
+const deleteMapBuilding = `-- name: DeleteMapBuilding :one
 UPDATE map_buildings
 SET deleted_at = now(), revision = nextval('map_revision')
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+RETURNING id, tenant_id, site_id, name, footprint, lat, lng, revision, created_at, updated_at, deleted_at
 `
 
 type DeleteMapBuildingParams struct {
@@ -293,9 +294,23 @@ type DeleteMapBuildingParams struct {
 	TenantID uuid.UUID
 }
 
-func (q *Queries) DeleteMapBuilding(ctx context.Context, arg DeleteMapBuildingParams) error {
-	_, err := q.db.Exec(ctx, deleteMapBuilding, arg.ID, arg.TenantID)
-	return err
+func (q *Queries) DeleteMapBuilding(ctx context.Context, arg DeleteMapBuildingParams) (MapBuilding, error) {
+	row := q.db.QueryRow(ctx, deleteMapBuilding, arg.ID, arg.TenantID)
+	var i MapBuilding
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.SiteID,
+		&i.Name,
+		&i.Footprint,
+		&i.Lat,
+		&i.Lng,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
 }
 
 const deleteMapDevice = `-- name: DeleteMapDevice :exec
@@ -314,10 +329,11 @@ func (q *Queries) DeleteMapDevice(ctx context.Context, arg DeleteMapDeviceParams
 	return err
 }
 
-const deleteMapFloor = `-- name: DeleteMapFloor :exec
+const deleteMapFloor = `-- name: DeleteMapFloor :one
 UPDATE map_floors
 SET deleted_at = now(), revision = nextval('map_revision')
-WHERE id = $1 AND tenant_id = $2
+WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+RETURNING id, tenant_id, building_id, name, ordinal, plan_key, plan_content_type, plan_width_px, plan_height_px, georef, revision, created_at, updated_at, deleted_at
 `
 
 type DeleteMapFloorParams struct {
@@ -325,9 +341,26 @@ type DeleteMapFloorParams struct {
 	TenantID uuid.UUID
 }
 
-func (q *Queries) DeleteMapFloor(ctx context.Context, arg DeleteMapFloorParams) error {
-	_, err := q.db.Exec(ctx, deleteMapFloor, arg.ID, arg.TenantID)
-	return err
+func (q *Queries) DeleteMapFloor(ctx context.Context, arg DeleteMapFloorParams) (MapFloor, error) {
+	row := q.db.QueryRow(ctx, deleteMapFloor, arg.ID, arg.TenantID)
+	var i MapFloor
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.BuildingID,
+		&i.Name,
+		&i.Ordinal,
+		&i.PlanKey,
+		&i.PlanContentType,
+		&i.PlanWidthPx,
+		&i.PlanHeightPx,
+		&i.Georef,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
 }
 
 const deleteMapPlacement = `-- name: DeleteMapPlacement :exec
@@ -439,6 +472,38 @@ func (q *Queries) GetMapBuilding(ctx context.Context, arg GetMapBuildingParams) 
 	return i, err
 }
 
+const getMapBuildingOnSite = `-- name: GetMapBuildingOnSite :one
+SELECT b.id, b.tenant_id, b.site_id, b.name, b.footprint, b.lat, b.lng, b.revision, b.created_at, b.updated_at, b.deleted_at FROM map_buildings b JOIN sites s ON s.id = b.site_id AND s.tenant_id = b.tenant_id
+WHERE b.id = $1 AND b.tenant_id = $2 AND b.site_id = $3
+AND b.deleted_at IS NULL AND s.deleted_at IS NULL
+FOR UPDATE OF b
+`
+
+type GetMapBuildingOnSiteParams struct {
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	SiteID   uuid.UUID
+}
+
+func (q *Queries) GetMapBuildingOnSite(ctx context.Context, arg GetMapBuildingOnSiteParams) (MapBuilding, error) {
+	row := q.db.QueryRow(ctx, getMapBuildingOnSite, arg.ID, arg.TenantID, arg.SiteID)
+	var i MapBuilding
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.SiteID,
+		&i.Name,
+		&i.Footprint,
+		&i.Lat,
+		&i.Lng,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getMapDevice = `-- name: GetMapDevice :one
 SELECT id, tenant_id, site_id, kind, name, status, props, created_at, updated_at, deleted_at FROM map_devices
 WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
@@ -479,6 +544,43 @@ type GetMapFloorParams struct {
 
 func (q *Queries) GetMapFloor(ctx context.Context, arg GetMapFloorParams) (MapFloor, error) {
 	row := q.db.QueryRow(ctx, getMapFloor, arg.ID, arg.TenantID)
+	var i MapFloor
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.BuildingID,
+		&i.Name,
+		&i.Ordinal,
+		&i.PlanKey,
+		&i.PlanContentType,
+		&i.PlanWidthPx,
+		&i.PlanHeightPx,
+		&i.Georef,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getMapFloorOnSite = `-- name: GetMapFloorOnSite :one
+SELECT f.id, f.tenant_id, f.building_id, f.name, f.ordinal, f.plan_key, f.plan_content_type, f.plan_width_px, f.plan_height_px, f.georef, f.revision, f.created_at, f.updated_at, f.deleted_at FROM map_floors f
+JOIN map_buildings b ON b.id=f.building_id AND b.tenant_id=f.tenant_id
+JOIN sites s ON s.id=b.site_id AND s.tenant_id=b.tenant_id
+WHERE f.id= $1 AND f.tenant_id= $2 AND b.site_id= $3
+  AND f.deleted_at IS NULL AND b.deleted_at IS NULL AND s.deleted_at IS NULL
+FOR SHARE OF f,b,s
+`
+
+type GetMapFloorOnSiteParams struct {
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	SiteID   uuid.UUID
+}
+
+func (q *Queries) GetMapFloorOnSite(ctx context.Context, arg GetMapFloorOnSiteParams) (MapFloor, error) {
+	row := q.db.QueryRow(ctx, getMapFloorOnSite, arg.ID, arg.TenantID, arg.SiteID)
 	var i MapFloor
 	err := row.Scan(
 		&i.ID,
@@ -706,7 +808,10 @@ func (q *Queries) GetMapView(ctx context.Context, arg GetMapViewParams) (MapView
 
 const getMapZone = `-- name: GetMapZone :one
 SELECT id, tenant_id, site_id, floor_id, name, kind, geometry, min_lat, min_lng, max_lat, max_lng, style, metadata, revision, created_by, updated_by, created_at, updated_at, deleted_at FROM map_zones
-WHERE id = $1 AND ($2::uuid IS NULL OR tenant_id = $2) AND deleted_at IS NULL
+WHERE map_zones.id = $1::uuid AND ($2::uuid IS NULL OR map_zones.tenant_id = $2) AND map_zones.deleted_at IS NULL
+AND EXISTS(SELECT 1 FROM sites s WHERE s.id = map_zones.site_id AND s.tenant_id = map_zones.tenant_id AND s.deleted_at IS NULL)
+AND (map_zones.floor_id IS NULL OR EXISTS(SELECT 1 FROM map_floors f JOIN map_buildings b ON b.id = f.building_id AND b.tenant_id = f.tenant_id
+ WHERE f.id = map_zones.floor_id AND f.tenant_id = map_zones.tenant_id AND b.site_id = map_zones.site_id AND f.deleted_at IS NULL AND b.deleted_at IS NULL))
 `
 
 type GetMapZoneParams struct {
@@ -911,18 +1016,18 @@ func (q *Queries) ListMapFloorsByBuilding(ctx context.Context, arg ListMapFloors
 const listMapFloorsBySite = `-- name: ListMapFloorsBySite :many
 SELECT f.id, f.tenant_id, f.building_id, f.name, f.ordinal, f.plan_key, f.plan_content_type, f.plan_width_px, f.plan_height_px, f.georef, f.revision, f.created_at, f.updated_at, f.deleted_at
 FROM map_floors f
-JOIN map_buildings b ON b.id = f.building_id AND ($1::uuid IS NULL OR b.tenant_id = f.tenant_id)
-WHERE b.site_id = $2 AND ($1::uuid IS NULL OR f.tenant_id = $1) AND f.deleted_at IS NULL AND b.deleted_at IS NULL
+JOIN map_buildings b ON b.id = f.building_id AND b.tenant_id = f.tenant_id
+WHERE b.site_id = $1 AND ($2::uuid IS NULL OR f.tenant_id = $2) AND f.deleted_at IS NULL AND b.deleted_at IS NULL
 ORDER BY f.building_id ASC, f.ordinal ASC
 `
 
 type ListMapFloorsBySiteParams struct {
-	TenantID *uuid.UUID
 	SiteID   uuid.UUID
+	TenantID *uuid.UUID
 }
 
 func (q *Queries) ListMapFloorsBySite(ctx context.Context, arg ListMapFloorsBySiteParams) ([]MapFloor, error) {
-	rows, err := q.db.Query(ctx, listMapFloorsBySite, arg.TenantID, arg.SiteID)
+	rows, err := q.db.Query(ctx, listMapFloorsBySite, arg.SiteID, arg.TenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -1094,9 +1199,9 @@ SELECT
         0
     )::int AS alarm_count
 FROM map_placements p
-LEFT JOIN cameras c ON c.id = p.entity_id AND p.entity_type = 'camera' AND ($1::uuid IS NULL OR c.tenant_id = p.tenant_id) AND c.deleted_at IS NULL
-LEFT JOIN frigate_servers fs ON fs.id = p.entity_id AND p.entity_type = 'server' AND ($1::uuid IS NULL OR fs.tenant_id = p.tenant_id) AND fs.deleted_at IS NULL
-LEFT JOIN map_devices md ON md.id = p.entity_id AND p.entity_type = 'device' AND ($1::uuid IS NULL OR md.tenant_id = p.tenant_id) AND md.deleted_at IS NULL
+LEFT JOIN cameras c ON c.id = p.entity_id AND p.entity_type = 'camera' AND c.tenant_id = p.tenant_id AND c.deleted_at IS NULL
+LEFT JOIN frigate_servers fs ON fs.id = p.entity_id AND p.entity_type = 'server' AND fs.tenant_id = p.tenant_id AND fs.deleted_at IS NULL
+LEFT JOIN map_devices md ON md.id = p.entity_id AND p.entity_type = 'device' AND md.tenant_id = p.tenant_id AND md.deleted_at IS NULL
 WHERE p.site_id = $2
   AND ($1::uuid IS NULL OR p.tenant_id = $1)
   AND ($3::uuid IS NULL OR p.floor_id = $3)
@@ -1105,6 +1210,10 @@ WHERE p.site_id = $2
       $5::double precision IS NULL
       OR (p.lat >= $5 AND p.lat <= $6 AND p.lng >= $7 AND p.lng <= $8)
   )
+  AND (p.floor_id IS NULL OR EXISTS (
+      SELECT 1 FROM map_floors f JOIN map_buildings b ON b.id=f.building_id AND b.tenant_id=f.tenant_id
+      WHERE f.id=p.floor_id AND f.tenant_id=p.tenant_id AND b.site_id=p.site_id
+        AND f.deleted_at IS NULL AND b.deleted_at IS NULL))
   AND (
       (p.entity_type = 'camera' AND c.id IS NOT NULL)
       OR (p.entity_type = 'server' AND fs.id IS NOT NULL)
@@ -1364,7 +1473,10 @@ func (q *Queries) ListMapViews(ctx context.Context, arg ListMapViewsParams) ([]M
 
 const listMapZonesBySite = `-- name: ListMapZonesBySite :many
 SELECT id, tenant_id, site_id, floor_id, name, kind, geometry, min_lat, min_lng, max_lat, max_lng, style, metadata, revision, created_by, updated_by, created_at, updated_at, deleted_at FROM map_zones
-WHERE site_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2) AND deleted_at IS NULL
+WHERE map_zones.site_id = $1::uuid AND ($2::uuid IS NULL OR map_zones.tenant_id = $2) AND map_zones.deleted_at IS NULL
+AND EXISTS(SELECT 1 FROM sites s WHERE s.id = map_zones.site_id AND s.tenant_id = map_zones.tenant_id AND s.deleted_at IS NULL)
+AND (map_zones.floor_id IS NULL OR EXISTS(SELECT 1 FROM map_floors f JOIN map_buildings b ON b.id = f.building_id AND b.tenant_id = f.tenant_id
+ WHERE f.id = map_zones.floor_id AND f.tenant_id = map_zones.tenant_id AND b.site_id = map_zones.site_id AND f.deleted_at IS NULL AND b.deleted_at IS NULL))
 ORDER BY name ASC
 `
 
@@ -1506,7 +1618,8 @@ WHERE c.site_id = $1
   AND c.deleted_at IS NULL
   AND NOT EXISTS (
       SELECT 1 FROM map_placements p
-      WHERE p.entity_type = 'camera' AND p.entity_id = c.id AND p.floor_id IS NULL
+      WHERE p.entity_type = 'camera' AND p.entity_id = c.id AND p.tenant_id = c.tenant_id AND p.site_id = c.site_id
+        AND (($3::uuid IS NULL AND p.floor_id IS NULL) OR p.floor_id = $3)
   )
 ORDER BY c.display_name ASC
 `
@@ -1514,6 +1627,7 @@ ORDER BY c.display_name ASC
 type ListUnplacedCamerasBySiteParams struct {
 	SiteID   uuid.UUID
 	TenantID *uuid.UUID
+	FloorID  *uuid.UUID
 }
 
 type ListUnplacedCamerasBySiteRow struct {
@@ -1525,7 +1639,7 @@ type ListUnplacedCamerasBySiteRow struct {
 }
 
 func (q *Queries) ListUnplacedCamerasBySite(ctx context.Context, arg ListUnplacedCamerasBySiteParams) ([]ListUnplacedCamerasBySiteRow, error) {
-	rows, err := q.db.Query(ctx, listUnplacedCamerasBySite, arg.SiteID, arg.TenantID)
+	rows, err := q.db.Query(ctx, listUnplacedCamerasBySite, arg.SiteID, arg.TenantID, arg.FloorID)
 	if err != nil {
 		return nil, err
 	}
@@ -1548,6 +1662,59 @@ func (q *Queries) ListUnplacedCamerasBySite(ctx context.Context, arg ListUnplace
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockMapFloorOnSite = `-- name: LockMapFloorOnSite :one
+SELECT f.id, f.tenant_id, f.building_id, f.name, f.ordinal, f.plan_key, f.plan_content_type, f.plan_width_px, f.plan_height_px, f.georef, f.revision, f.created_at, f.updated_at, f.deleted_at FROM map_floors f JOIN map_buildings b ON b.id = f.building_id AND b.tenant_id = f.tenant_id
+JOIN sites s ON s.id = b.site_id AND s.tenant_id = b.tenant_id
+WHERE f.id = $1 AND f.tenant_id = $2 AND b.site_id = $3
+AND f.deleted_at IS NULL AND b.deleted_at IS NULL AND s.deleted_at IS NULL
+FOR UPDATE OF f FOR SHARE OF b,s
+`
+
+type LockMapFloorOnSiteParams struct {
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	SiteID   uuid.UUID
+}
+
+func (q *Queries) LockMapFloorOnSite(ctx context.Context, arg LockMapFloorOnSiteParams) (MapFloor, error) {
+	row := q.db.QueryRow(ctx, lockMapFloorOnSite, arg.ID, arg.TenantID, arg.SiteID)
+	var i MapFloor
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.BuildingID,
+		&i.Name,
+		&i.Ordinal,
+		&i.PlanKey,
+		&i.PlanContentType,
+		&i.PlanWidthPx,
+		&i.PlanHeightPx,
+		&i.Georef,
+		&i.Revision,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const mapFloorHasContent = `-- name: MapFloorHasContent :one
+SELECT (EXISTS(SELECT 1 FROM map_placements p WHERE p.floor_id = $1::uuid AND p.tenant_id = $2::uuid)
+ OR EXISTS(SELECT 1 FROM map_zones z WHERE z.floor_id = $1::uuid AND z.tenant_id = $2::uuid AND z.deleted_at IS NULL))::boolean AS has_content
+`
+
+type MapFloorHasContentParams struct {
+	FloorID  uuid.UUID
+	TenantID uuid.UUID
+}
+
+func (q *Queries) MapFloorHasContent(ctx context.Context, arg MapFloorHasContentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, mapFloorHasContent, arg.FloorID, arg.TenantID)
+	var has_content bool
+	err := row.Scan(&has_content)
+	return has_content, err
 }
 
 const updateMapBuilding = `-- name: UpdateMapBuilding :one

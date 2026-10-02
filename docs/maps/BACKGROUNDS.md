@@ -15,3 +15,13 @@ SVG/PDF browser conversion must finish before uploading; raw documents are never
 `go test -race ./internal/maps -run TestCanonicalPlanPNG` covers valid PNG, trailing active
 content, corrupt image data, non-PNG documents, encoded-size limits and oversized dimensions.
 These are bounded image-validation tests, not browser rendering or production deployment proof.
+
+## Hierarchy and concurrency
+
+Named buildings group floor maps within one tenant/site. Active floor/building/site ownership is
+checked for placements, zones and floor entity reads; unplaced queries may select a floor without
+changing the existing geographic default. Row locks serialize map removal against placement writes.
+Renaming/replacing/deleting a map requires its exact revision; wildcard overwrites are rejected.
+Deleting an occupied floor or a building with active floors is refused, preserving user layouts.
+Floor ordinals remain unique even after soft deletion in the existing schema; a reused ordinal
+returns conflict. No coordinate/schema migration is required for this foundation.
