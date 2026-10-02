@@ -1017,8 +1017,12 @@ no old lifecycle invocation, receipt or review authority claimed. Parent owns ne
   alarm badges. Focused prefs/entity/layers/panel/MapShell checks, full web/typecheck/lint/build.
 - [x] M-W24 — Floor/map integrity, CRUD and private image storage (local backend completion;
   frontend conversion/rendering and deployment remain M-W25–27).
-- [ ] M-W25 — Safe PNG/SVG/PDF upload and conversion; scoped read-only research pending.
-- [ ] M-W26 — Optional geographic basemap, named-map selector and plan renderer/editor.
+- [ ] M-W25 — Safe PNG/SVG/PDF upload and selected-page conversion to canonical PNG; bounded
+  local-worker PDF rendering and restricted off-DOM SVG sanitization, preview/cancellation;
+  PNG/SVG/PDF actual-byte validation and no raw active-document persistence.
+- [ ] M-W26 — Optional geographic basemap, site/building/named-floor selector and private plan
+  renderer/editor; normalized independent floor placements, direct camera dragging, explicit
+  revision-aware save, permission-scoped hierarchy/image controls and five-second real notices.
 - [ ] M-W27 — Integrated verification and configuration-preserving local deployment acceptance.
 
 Historical M-W23 immediate scope was visibility only. No database preferences reset, coordinate rewrite, floor implementation
@@ -1123,3 +1127,71 @@ by disposable-infrastructure integration tests, not production/browser inference
   remain pending; no native assessment/receipt or remote delivery created by this worker.
   Rollback: revert these four work units only; stored geo/floor placements are never rewritten by this source work.
   Next: parent independent spot-check, M-W25 conversion and M-W26 selector/renderer/editor.
+
+### M-W25/M-W26 frontend authorization and acceptance
+
+Route: delegated direct, sequential single writer; conversion, API helpers, selectors, renderer and
+paired tests require coordinated non-trivial files. Skills: work-unit-commits and cognitive-doc-design.
+Strict TDD ON from current AGENTS; runner `pnpm --filter @openvms/web test`.
+M-W25 accepts only actual PNG, restricted SVG or selected PDF page, input/output <=20 MiB,
+8192 maximum side / 16 million pixels, <=100 PDF pages, cancellation and 15-second timeout.
+PDF worker/fonts/CMaps/WASM are bundled locally; SVG never enters live DOM. Browser conversion
+is resource-bounded best effort, not a security sandbox; backend decode/reencode remains authoritative.
+M-W26 preserves 26 manually arranged geographic placements; a camera may have independent
+geographic and multiple floor positions. Site/floor scoped queries and URLs cannot load another
+floor silently. Images load authenticated blobs, never opaque plan keys as URLs; stale loads cancel
+and object URLs revoke. Floor editor retains explicit save/undo/redo and independent revisions.
+Acceptance: focused adversarial conversion tests and real browser PNG/SVG/two-page PDF proof;
+floor selection/drag/save/reload/permission/URL regressions; full web/typecheck/lint/build and diff check.
+No production writes, configuration/data changes, deployment, remote credentials, push/PR/merge
+or review consent authorized to this worker. Existing deployment, media and performance warnings remain.
+Dependencies: verified official research observation 253; pdfjs-dist 6.3.289, DOMPurify 3.4.16;
+raise root Node minimum to >=22.13.0. No removed isEvalSupported option.
+
+### M-W25 local conversion foundation handoff (not full UI completion)
+
+- Local source work unit: `67af245661623e8a009fb68b1f674b4982ba114c`, Conventional Commit on `feat/maps`.
+  507 authored additions+deletions, excluding 150 generated lockfile lines; dependencies/tests/docs
+  stay with the bounded conversion behavior. The advisory 400-line heuristic does not omit
+  adversarial/security tests or split a working conversion boundary. Existing feature-branch-chain applies.
+- Dependencies installed in foreground: `pnpm --filter @openvms/web add pdfjs-dist@6.3.289 dompurify@3.4.16`,
+  PASS; exact versions in web manifest and lock. Root build engine now Node >=22.13.0.
+- Strict TDD RED: conversion/API/preview modules missing before implementation; additional meaningful
+  empty-password encrypted PDF regression failed before metadata EncryptFilterName guard. GREEN:
+  focused conversion/PDF/PNG API/preview suite PASS 20/20, four files, 1.53 seconds.
+- Final settled-byte sequential batch, no concurrent build/test: full web PASS 585/585, 91 files,
+  44.18 seconds; typecheck PASS; lint PASS (one pre-existing MapShell center-effect warning);
+  build PASS, 2.15 seconds Vite phase (pre-existing >500 kB bundle warning); diff check PASS.
+- Historical preliminary checks are NOT final proof: typecheck initially failed a local plugin index
+  and test Blob type boundary; lint initially failed missing cause on translated PDF error. All corrected.
+  An early build accidentally overlapped full tests and was killed exit137; that historical full run
+  failed two tests (a timed Live-route interaction and the intentionally newly added encrypted-PDF RED).
+  The isolated settled-byte final batch above passed; no OOM workaround, runner change or threshold waiver.
+- Conversion: actual byte detection, PNG IHDR validation, strict off-DOM DOMPurify SVG restriction with
+  visible removal warnings, selected PDF page <=100 pages, encrypted-password and empty-password rejection,
+  viewport/embedded-image limits, 15-second async deadline, cancellation/task destruction and URL cleanup.
+- Local PDF resource plugin `apps/web/pdf-assets.ts` emitted 195 local CMap/font/WASM/ICC assets under
+  `dist/assets/pdfjs-6.3.289/`; PDF worker is lazy imported via package worker `?url` when conversion is wired.
+  Current production Maps chunk does NOT include the unused conversion UI yet; build does not prove
+  PDF worker or conversions execute in a real browser. No CDN, production test hook or fixture route added.
+- Helper interfaces to read before M-W26 integration:
+  `apps/web/src/lib/maps/planConversion.ts` — `convertPlan(file,{page?,signal?})` returns
+  `{blob,width,height,warnings,pageCount}`; `identifyPlan`, `sanitizePlanSvg`, dimension/page validators.
+  `apps/web/src/lib/maps/plans.ts` — `loadFloorPlan(siteId,floorId,signal)` returns authenticated PNG Blob;
+  `uploadFloorPlan(siteId,floorId,revision,blob,signal?)` sends binary PNG with exact If-Match and returns
+  generated MapFloor response. Binary OpenAPI string is serialized as the unchanged Blob, never JSON.
+  `apps/web/src/components/maps/editor/PlanUpload.tsx` — props `{siteId,floorId,revision,onSaved}`;
+  keyed context aborts conversion/upload and revokes preview URLs on floor/revision/unmount changes.
+  Parent must gate this UI with maps.edit and refresh site detail on saved/conflict; backend independently
+  enforces maps.edit/image writes and maps.view/private reads. A conflict never retries blindly.
+- M-W25 remains UNCHECKED: local foundation complete, but actual upload UI must be integrated in M-W26
+  and real-browser PNG/SVG/two-page PDF conversion/production-worker proof remains pending there.
+  M-W26 not started by this worker. M-W27 deployment and prior real-account/media acceptance remain open.
+- Runtime harness: NOT RUN; actual browser fixture proof belongs to M-W26 integration. Known synthetic
+  performance remains FAILED 54/57/74 ms > unchanged 50 ms, not rerun or waived.
+- Rollback: revert only `67af245` conversion/helpers/component/deps/plugin/docs/engine; no backend changes,
+  database writes, real events, inventory or any of the 26 manually positioned geographic cameras changed.
+- Native RDD assessment/consent/receipt and deployment remain parent-owned; no lifecycle, SSH, credential,
+  Frigate, production config, token creation, push, PR or merge operation performed.
+- Next: fresh single writer reads this file/mirror and all named modules, integrates selected floor Maps UI,
+  permission-scoped controls and normalized camera editor, then performs authorized real-browser fixtures.
