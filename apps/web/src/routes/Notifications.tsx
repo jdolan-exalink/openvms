@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { notificationsQuery } from "@/api/queries";
@@ -6,6 +7,7 @@ import { Button, Empty, ErrorNote, PageHeader, Summary } from "@/components/ui";
 
 /** Notificaciones: full in-app inbox fed by rules; realtime pushes invalidate this list. */
 export function Notifications() {
+  const t = useT();
   const [unreadOnly, setUnreadOnly] = useState(false);
   const list = useQuery(notificationsQuery({ unread_only: unreadOnly || undefined, limit: 100 }));
   const { markRead, markAll } = useNotificationActions();
@@ -14,8 +16,8 @@ export function Notifications() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <PageHeader
-        title="Notificaciones"
-        description="Avisos generados por tus reglas de automatización."
+        title={t("Notificaciones")}
+        description={t("Avisos generados por tus reglas de automatización.")}
         actions={
           <Button disabled={unread === 0 || markAll.isPending} onClick={() => markAll.mutate()}>
             Marcar todas como leídas

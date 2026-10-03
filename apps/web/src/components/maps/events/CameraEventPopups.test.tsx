@@ -68,7 +68,9 @@ it("retries detail once and grants five seconds of actual visibility and cancels
   act(() => vi.advanceTimersByTime(4999)); expect(screen.getByText("AB123CD")).toBeInTheDocument();
   act(() => vi.advanceTimersByTime(1)); expect(screen.queryByText("AB123CD")).not.toBeInTheDocument();
   harness.get.mockRejectedValue(new Error("unavailable")); await emit(frame("next")); view.unmount();
-  await act(async () => { vi.advanceTimersByTime(500); }); expect(harness.get).toHaveBeenCalledTimes(3);
+  await act(async () => { vi.advanceTimersByTime(500); });
+  // fail, success, one color refresh, then the replacement that unmount cancels.
+  expect(harness.get).toHaveBeenCalledTimes(4);
 });
 it("ignores mismatched REST identities and skips unavailable snapshots", async () => {
   harness.get.mockResolvedValueOnce({ data: { ...detail(), camera_id: "wrong" } });
@@ -100,6 +102,27 @@ it("uses an explicit floor projection without passing normalized coordinates to 
  render(<CameraEventPopups {...props} map={null} cameras={[floor]} projectCamera={project} projectionKey="f"/>);
  await emit();expect(screen.getByText("AB123CD")).toBeInTheDocument();
  expect(project).toHaveBeenCalledWith(floor);
- expect(screen.getByRole("region",{name:"Camera event: Entrance"})).toHaveStyle({left:"45px",top:"68px"});
+ expect(screen.getByRole("region",{name:"Camera event: Entrance"})).toHaveStyle({left:"45px",top:"64px"});
  act(()=>vi.advanceTimersByTime(5000));expect(screen.queryByText("AB123CD")).not.toBeInTheDocument();
+});
+
+it("opens the vehicle snapshot from a plate balloon", async () => {
+  const onOpenPlate = vi.fn();
+  render(<CameraEventPopups {...props} onOpenPlate={onOpenPlate} />);
+  await emit();
+  fireEvent.click(screen.getByRole("region", { name: "Camera event: Entrance" }));
+  expect(onOpenPlate).toHaveBeenCalledWith(expect.objectContaining({
+    id: "e", plate: "AB123CD", cameraName: "Entrance", imageUrl: "/media/v1/events/e/snapshot.jpg",
+  }));
+  expect(onOpenPlate.mock.calls[0]?.[0]?.origin?.width).toEqual(expect.any(Number));
+});
+
+it("shows critical alerts and LPR reads, and keeps ordinary detections off the map", async () => {
+  harness.get.mockResolvedValueOnce({ data: { ...detail("quiet"), plates: [], severity: "detection" } });
+  render(<CameraEventPopups {...props} />);
+  await emit(frame("quiet"));
+  expect(screen.queryByRole("region", { name: "Camera event: Entrance" })).not.toBeInTheDocument();
+  harness.get.mockResolvedValue({ data: { ...detail("crit"), plates: [], severity: "alert" } });
+  await emit(frame("crit"));
+  expect(screen.getByText("Alerta crítica")).toBeInTheDocument();
 });

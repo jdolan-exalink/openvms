@@ -75,6 +75,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SystemInfo"
+  /api/v1/system/capacity:
+    get:
+      tags: [system]
+      operationId: getSystemCapacity
+      summary: Host resources and ONNX crop throughput
+      responses:
+        "200":
+          description: Current machine and classifier capacity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemCapacity"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/classify/policy:
+    get:
+      tags: [system]
+      operationId: getClassifyPolicy
+      summary: Fine classifier switches for visible servers and cameras
+      responses:
+        "200":
+          description: Switches. A missing row is enabled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClassifyPolicy"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/servers/{serverId}/body-classify:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [servers]
+      operationId: setServerBodyClassify
+      summary: Turn the fine vehicle classifier on or off for a server
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BodyClassifyInput" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BodyClassifyInput" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/body-classify:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [cameras]
+      operationId: setCameraBodyClassify
+      summary: Turn the fine vehicle classifier on or off for a camera
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BodyClassifyInput" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BodyClassifyInput" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/me:
     get:
       tags: [identity]
@@ -1055,6 +1123,8 @@ paths:
         - { name: reviewed, in: query, schema: { type: boolean } }
         - { name: has_snapshot, in: query, schema: { type: boolean }, description: "Only events Frigate reported a saved snapshot for on at least one detection." }
         - { name: has_preview, in: query, schema: { type: boolean }, description: "Only events whose preview clip has been copied to central storage." }
+        - { name: vehicle_type, in: query, style: form, explode: true, schema: { type: array, items: { type: string } }, description: "Match enriched vehicle types (car, suv, pickup, van, truck, bus, motorcycle)." }
+        - { name: vehicle_color, in: query, style: form, explode: true, schema: { type: array, items: { type: string } }, description: "Match enriched vehicle colors." }
         - { name: cursor, in: query, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
       responses:
@@ -1150,6 +1220,25 @@ paths:
       responses:
         "200":
           description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Event" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/events/{eventId}/reprocess:
+    parameters:
+      - { name: eventId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [events]
+      operationId: reprocessEvent
+      summary: Read color and classification again (events.review)
+      description: >
+        Queues the stored capture for a new color and type reading. Does not raise alarms.
+        The response shows the job as pending until the worker finishes.
+      responses:
+        "200":
+          description: Event with the classification job pending
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Event" }
@@ -3453,6 +3542,84 @@ components:
           type: integer
           format: int64
           description: Latest applied database migration.
+    SystemCapacity:
+      type: object
+      required: [cpu, memory, disk, gpu, openvino, classifier]
+      properties:
+        cpu:
+          type: object
+          required: [model, online, percent]
+          properties:
+            model: { type: string }
+            online: { type: integer }
+            percent: { type: number, format: float }
+        memory:
+          type: object
+          required: [total_bytes, available_bytes]
+          properties:
+            total_bytes: { type: integer, format: int64 }
+            available_bytes: { type: integer, format: int64 }
+        disk:
+          type: object
+          required: [path, total_bytes, free_bytes]
+          properties:
+            path: { type: string }
+            total_bytes: { type: integer, format: int64 }
+            free_bytes: { type: integer, format: int64 }
+        gpu:
+          type: object
+          required: [present, vendor, name]
+          properties:
+            present: { type: boolean }
+            vendor: { type: string }
+            name: { type: string }
+        openvino:
+          type: object
+          required: [installed, active, runtime]
+          properties:
+            installed: { type: boolean }
+            active: { type: boolean }
+            runtime: { type: string }
+        classifier:
+          type: object
+          required: [installed, measuring, cameras_on, cameras_total]
+          properties:
+            installed: { type: boolean }
+            measuring: { type: boolean }
+            model: { type: string }
+            latency_ms: { type: number, format: float }
+            crops_per_second: { type: number, format: float }
+            crops_per_minute: { type: number, format: float }
+            threads: { type: integer }
+            cameras_on: { type: integer }
+            cameras_total: { type: integer }
+    ClassifyPolicy:
+      type: object
+      required: [servers, cameras]
+      properties:
+        servers:
+          type: array
+          items:
+            type: object
+            required: [id, enabled]
+            properties:
+              id: { type: string, format: uuid }
+              enabled: { type: boolean }
+        cameras:
+          type: array
+          items:
+            type: object
+            required: [id, server_id, enabled, effective]
+            properties:
+              id: { type: string, format: uuid }
+              server_id: { type: string, format: uuid }
+              enabled: { type: boolean }
+              effective: { type: boolean }
+    BodyClassifyInput:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
     Error:
       type: object
       required: [code, message]
@@ -3513,6 +3680,43 @@ components:
           description: >-
             The VMS has copied this event's preview clip to central storage (an OpenVMS-internal
             signal, not a probe of Frigate's own preview availability).
+        attributes:
+          $ref: "#/components/schemas/EventAttributes"
+    EventAttributes:
+      type: object
+      properties:
+        vehicle: { $ref: "#/components/schemas/VehicleAttributes" }
+        person: { $ref: "#/components/schemas/PersonAttributes" }
+        vehicle_job:
+          type: string
+          enum: [pending, processing, completed, failed]
+          description: Set while a vehicle classification job exists for this event.
+        person_job:
+          type: string
+          enum: [pending, processing, completed, failed]
+          description: Set while a clothing classification job exists for this event.
+    PersonAttributes:
+      type: object
+      required: [upper_color, upper_confidence, lower_color, lower_confidence, color_quality]
+      properties:
+        upper_color: { type: string, example: blue, description: Shirt or jacket color. }
+        upper_confidence: { type: number, format: float, minimum: 0, maximum: 1 }
+        lower_color: { type: string, example: black, description: Pants or skirt color. }
+        lower_confidence: { type: number, format: float, minimum: 0, maximum: 1 }
+        color_quality: { type: string, enum: [good, medium, low] }
+    VehicleAttributes:
+      type: object
+      required: [type, type_confidence, color, color_confidence, color_quality]
+      properties:
+        type: { type: string, example: suv }
+        type_confidence: { type: number, format: float, minimum: 0, maximum: 1 }
+        color: { type: string, example: black }
+        color_confidence: { type: number, format: float, minimum: 0, maximum: 1 }
+        color_quality: { type: string, enum: [good, medium, low] }
+        trailer_color:
+          type: string
+          description: Color of the trailer when the type is a truck with a trailer. Empty otherwise.
+        trailer_color_confidence: { type: number, format: float, minimum: 0, maximum: 1 }
     EventPage:
       type: object
       required: [items]
@@ -3555,6 +3759,9 @@ components:
           format: uuid
           nullable: true
           description: Indexed event that contains this read, when known.
+        vehicle:
+          $ref: "#/components/schemas/VehicleAttributes"
+          description: Type and color of the vehicle that carried this plate, once enrichment has finished.
     PlateReadPage:
       type: object
       required: [items]
@@ -3761,6 +3968,13 @@ components:
         site_name: { type: string }
         camera_id: { type: string, format: uuid }
         camera_name: { type: string }
+        server_name: { type: string }
+        vehicle:
+          $ref: "#/components/schemas/VehicleAttributes"
+          description: OpenVMS classification of the vehicle on this alarm, when the event was enriched.
+        person:
+          $ref: "#/components/schemas/PersonAttributes"
+          description: Upper and lower clothing color when the event includes a person.
         event_id: { type: string, format: uuid }
         event_severity: { type: string }
         event_start_time: { type: string, format: date-time }
@@ -3913,6 +4127,14 @@ components:
           items: { type: string }
         severities:
           type: array
+          items: { type: string }
+        vehicle_types:
+          type: array
+          description: Matched after vehicle enrichment. Empty means any type.
+          items: { type: string }
+        vehicle_colors:
+          type: array
+          description: Matched after vehicle enrichment. Empty means any color.
           items: { type: string }
         duration_seconds:
           type: integer

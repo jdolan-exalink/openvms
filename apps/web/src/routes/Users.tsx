@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { KeyRound, Plus } from "lucide-react";
@@ -14,6 +15,7 @@ const statusText: Record<string, string> = { active: "Activo", disabled: "Deshab
 
 /** Users is user administration (PRD §21-26). Permissions are assigned in Permisos. */
 export function Users() {
+  const t = useT();
   const me = useQuery(meQuery);
   const users = useQuery(usersQuery);
   const groups = useQuery(groupsQuery);
@@ -32,8 +34,8 @@ export function Users() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title="Usuarios"
-        description="Cada usuario ve solo lo que sus permisos, directos o por grupo, le otorgan."
+        title={t("Usuarios")}
+        description={t("Cada usuario ve solo lo que sus permisos, directos o por grupo, le otorgan.")}
         actions={
           manage ? (
             <Button variant="primary" onClick={() => setEditing("new")}>

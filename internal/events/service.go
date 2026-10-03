@@ -20,6 +20,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
+	"github.com/jdolan-exalink/openvms/internal/vehicle"
 )
 
 // Service answers event and plate searches. Every query is limited in SQL to the cameras
@@ -66,6 +67,35 @@ type Event struct {
 	// HasPreview is true once the event's preview clip has been copied to central storage
 	// (preview_key populated); an OpenVMS-internal signal, not a Frigate probe (PRD §20/§44).
 	HasPreview bool
+	// Vehicle is set once enrichment has stored type and color. Nil until then.
+	Vehicle *VehicleAttr
+	// Person is set once clothing colors are stored. Nil until then.
+	Person *PersonAttr
+	// VehicleJob and PersonJob are pending, processing, completed, or failed
+	// while a classification job exists. Empty when the event was never queued.
+	VehicleJob string
+	PersonJob  string
+}
+
+// PersonAttr is the upper and lower clothing color of one person.
+type PersonAttr struct {
+	UpperColor      string
+	UpperConfidence float32
+	LowerColor      string
+	LowerConfidence float32
+	ColorQuality    string
+}
+
+// VehicleAttr is the persisted vehicle enrichment for one event.
+type VehicleAttr struct {
+	Type            string
+	TypeConfidence  float32
+	Color           string
+	ColorConfidence float32
+	ColorQuality    string
+	// TrailerColor is set for a truck with a trailer. Empty otherwise.
+	TrailerColor           string
+	TrailerColorConfidence float32
 }
 
 type Filter struct {
@@ -78,6 +108,8 @@ type Filter struct {
 	Labels         []string
 	Zones          []string
 	SubLabels      []string
+	VehicleTypes   []string
+	VehicleColors  []string
 	Severity       string
 	// Plate matches events with a plate containing this text (normalized).
 	Plate       string
@@ -163,19 +195,62 @@ func idSet(ids []uuid.UUID) map[uuid.UUID]bool {
 
 const eventColumns = `e.id, e.tenant_id, e.site_id, s.name, e.server_id, fs.name, e.camera_id, c.display_name, c.lpr, e.remote_id,
 e.severity, e.labels, e.sub_labels, e.zones, e.plates, e.start_time, e.end_time, e.reviewed, e.thumb_key <> '',
-e.has_snapshot, e.preview_key <> '', e.lpr`
+e.has_snapshot, e.preview_key <> '', e.lpr,
+va.vehicle_type, va.vehicle_type_confidence, va.vehicle_color, va.vehicle_color_confidence, va.color_quality,
+va.trailer_color, va.trailer_color_confidence,
+pa.upper_color, pa.upper_color_confidence, pa.lower_color, pa.lower_color_confidence, pa.color_quality,
+vj.status, pj.status`
 
 const eventJoins = `FROM events e
 JOIN cameras c ON c.id = e.camera_id
 JOIN sites s ON s.id = e.site_id
-JOIN frigate_servers fs ON fs.id = e.server_id`
+JOIN frigate_servers fs ON fs.id = e.server_id
+LEFT JOIN vehicle_attributes va ON va.event_id = e.id
+LEFT JOIN person_attributes pa ON pa.event_id = e.id
+LEFT JOIN vehicle_attribute_jobs vj ON vj.event_id = e.id
+LEFT JOIN person_attribute_jobs pj ON pj.event_id = e.id`
 
 func scanEvent(row pgx.Row) (Event, error) {
 	var e Event
+	var vType, vColor, vQuality, trailer *string
+	var vTypeConf, vColorConf, trailerConf *float32
+	var upper, lower, pQuality *string
+	var upperConf, lowerConf *float32
+	var vehicleJob, personJob *string
 	err := row.Scan(&e.ID, &e.TenantID, &e.SiteID, &e.SiteName, &e.ServerID, &e.ServerName, &e.CameraID, &e.CameraName, &e.CameraLPR, &e.RemoteID,
 		&e.Severity, &e.Labels, &e.SubLabels, &e.Zones, &e.Plates, &e.StartTime, &e.EndTime, &e.Reviewed, &e.HasThumbnail,
-		&e.HasSnapshot, &e.HasPreview, &e.LPR)
-	return e, err
+		&e.HasSnapshot, &e.HasPreview, &e.LPR,
+		&vType, &vTypeConf, &vColor, &vColorConf, &vQuality, &trailer, &trailerConf,
+		&upper, &upperConf, &lower, &lowerConf, &pQuality,
+		&vehicleJob, &personJob)
+	if err != nil {
+		return e, err
+	}
+	if vType != nil && vColor != nil && vQuality != nil && vTypeConf != nil && vColorConf != nil {
+		e.Vehicle = &VehicleAttr{
+			Type: *vType, TypeConfidence: *vTypeConf,
+			Color: *vColor, ColorConfidence: *vColorConf, ColorQuality: *vQuality,
+		}
+		if trailer != nil {
+			e.Vehicle.TrailerColor = *trailer
+		}
+		if trailerConf != nil {
+			e.Vehicle.TrailerColorConfidence = *trailerConf
+		}
+	}
+	if vehicleJob != nil {
+		e.VehicleJob = *vehicleJob
+	}
+	if personJob != nil {
+		e.PersonJob = *personJob
+	}
+	if upper != nil && lower != nil && pQuality != nil && upperConf != nil && lowerConf != nil {
+		e.Person = &PersonAttr{
+			UpperColor: *upper, UpperConfidence: *upperConf,
+			LowerColor: *lower, LowerConfidence: *lowerConf, ColorQuality: *pQuality,
+		}
+	}
+	return e, nil
 }
 
 // ListEvents searches the index newest first. Plates and sub_labels (which carry recognized
@@ -187,7 +262,7 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 	err := s.tx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
 		perm := authz.EventsView
 		if f.Plate != "" || len(f.Labels) > 0 || len(f.Zones) > 0 || len(f.SubLabels) > 0 || f.From != nil ||
-			f.HasSnapshot != nil || f.HasPreview != nil {
+			f.HasSnapshot != nil || f.HasPreview != nil || len(f.VehicleTypes) > 0 || len(f.VehicleColors) > 0 {
 			perm = authz.EventsSearch
 		}
 		cams, err := c.CameraIDs(ctx, perm)
@@ -264,6 +339,12 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 		}
 		if f.HasPreview != nil {
 			b.add("(e.preview_key <> '') = ?", *f.HasPreview)
+		}
+		if len(f.VehicleTypes) > 0 {
+			b.add("va.vehicle_type = ANY(?)", f.VehicleTypes)
+		}
+		if len(f.VehicleColors) > 0 {
+			b.add("va.vehicle_color = ANY(?)", f.VehicleColors)
 		}
 		if f.Cursor != "" {
 			t, id, err := decodeCursor(f.Cursor)
@@ -428,6 +509,27 @@ func (s *Service) SetReviewed(ctx context.Context, actor authz.Actor, id uuid.UU
 	return out, err
 }
 
+// Reprocess queues color and classification again for one event. Historical
+// alarms are not raised. The returned event already shows the job as pending.
+func (s *Service) Reprocess(ctx context.Context, actor authz.Actor, id uuid.UUID) (Event, error) {
+	var out Event
+	err := s.tx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
+		e, err := getEvent(ctx, tx, c, authz.EventsReview, id)
+		if err != nil {
+			return err
+		}
+		if err := vehicle.Requeue(ctx, tx, e.ID, e.TenantID, e.Labels); err != nil {
+			return err
+		}
+		if err := vehicle.RequeuePerson(ctx, tx, e.ID, e.TenantID, e.Labels); err != nil {
+			return err
+		}
+		out, err = getEvent(ctx, tx, c, authz.EventsReview, id)
+		return err
+	})
+	return out, err
+}
+
 // MaxBulkReview bounds one SetReviewedBulk call.
 const MaxBulkReview = 200
 
@@ -483,6 +585,7 @@ type PlateRead struct {
 	SeenAt     time.Time
 	// EventID is the indexed review item that contains this read, when known.
 	EventID *uuid.UUID
+	Vehicle *VehicleAttr
 }
 
 type PlateFilter struct {
@@ -550,11 +653,19 @@ func (s *Service) ListPlates(ctx context.Context, actor authz.Actor, f PlateFilt
 		b.args = append(b.args, n+1)
 		q := `SELECT l.id, l.site_id, s.name, l.server_id, fs.name, l.camera_id, c.display_name, l.plate, l.plate_normalized,
        l.score, l.label, l.zones, l.seen_at,
-       (SELECT e.id FROM events e WHERE e.server_id = l.server_id AND l.remote_event_id = ANY(e.detection_ids) LIMIT 1)
+       ev.event_id, ev.vehicle_type, ev.vehicle_type_confidence, ev.vehicle_color, ev.vehicle_color_confidence, ev.color_quality
 FROM lpr_reads l
 JOIN cameras c ON c.id = l.camera_id
 JOIN sites s ON s.id = l.site_id
 JOIN frigate_servers fs ON fs.id = l.server_id
+LEFT JOIN LATERAL (
+    SELECT e.id AS event_id, va.vehicle_type, va.vehicle_type_confidence,
+           va.vehicle_color, va.vehicle_color_confidence, va.color_quality
+    FROM events e
+    LEFT JOIN vehicle_attributes va ON va.event_id = e.id
+    WHERE e.server_id = l.server_id AND e.detection_ids @> ARRAY[l.remote_event_id]
+    LIMIT 1
+) ev ON true
 WHERE ` + b.sql() + fmt.Sprintf(" ORDER BY l.seen_at DESC, l.id DESC LIMIT $%d", len(b.args))
 		rows, err := tx.Query(ctx, q, b.args...)
 		if err != nil {
@@ -563,9 +674,18 @@ WHERE ` + b.sql() + fmt.Sprintf(" ORDER BY l.seen_at DESC, l.id DESC LIMIT $%d",
 		defer rows.Close()
 		for rows.Next() {
 			var r PlateRead
+			var vType, vColor, vQuality *string
+			var vTypeConf, vColorConf *float32
 			if err := rows.Scan(&r.ID, &r.SiteID, &r.SiteName, &r.ServerID, &r.ServerName, &r.CameraID, &r.CameraName,
-				&r.Plate, &r.Normalized, &r.Score, &r.Label, &r.Zones, &r.SeenAt, &r.EventID); err != nil {
+				&r.Plate, &r.Normalized, &r.Score, &r.Label, &r.Zones, &r.SeenAt, &r.EventID,
+				&vType, &vTypeConf, &vColor, &vColorConf, &vQuality); err != nil {
 				return err
+			}
+			if vType != nil && vColor != nil && vQuality != nil && vTypeConf != nil && vColorConf != nil {
+				r.Vehicle = &VehicleAttr{
+					Type: *vType, TypeConfidence: *vTypeConf,
+					Color: *vColor, ColorConfidence: *vColorConf, ColorQuality: *vQuality,
+				}
 			}
 			out.Items = append(out.Items, r)
 		}

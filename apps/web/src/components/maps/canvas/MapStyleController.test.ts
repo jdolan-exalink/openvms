@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildMapStyle, MapStyleController, type ThemeColors } from "./MapStyleController";
+import { buildMapStyle, MapStyleController, repairHostedStyle, type ThemeColors } from "./MapStyleController";
+import type { StyleSpecification } from "maplibre-gl";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapProviderConfig } from "@/lib/maps/types";
 
@@ -108,6 +109,26 @@ describe("MapStyleController buildMapStyle", () => {
     const paint = rasterLayer?.paint as any;
     expect(paint?.["raster-brightness-max"]).toBeUndefined();
     expect(paint?.["raster-opacity"]).toBe(1.0);
+  });
+});
+
+describe("repairHostedStyle", () => {
+  it("replaces fonts and sprites the tile server no longer serves", () => {
+    const style = {
+      version: 8,
+      sources: {},
+      layers: [
+        { id: "woods", type: "fill", paint: { "fill-pattern": "wood-pattern" } },
+        { id: "towns", type: "symbol", layout: { "text-font": ["Open Sans Regular", "Arial Unicode MS Regular"], "icon-image": ["step", ["zoom"], "circle-11", 9, ""] } },
+      ],
+    } as StyleSpecification;
+    const repaired = repairHostedStyle(style);
+    const woods = repaired.layers[0] as { paint: Record<string, unknown> };
+    expect(woods.paint["fill-pattern"]).toBeUndefined();
+    expect(woods.paint["fill-color"]).toBe("#1c3a2a");
+    const towns = repaired.layers[1] as { layout: Record<string, unknown> };
+    expect(towns.layout["text-font"]).toEqual(["Noto Sans Regular"]);
+    expect(towns.layout["icon-image"]).toEqual(["step", ["zoom"], "circle_11", 9, ""]);
   });
 });
 

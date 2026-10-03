@@ -61,6 +61,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/system/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Host resources and ONNX crop throughput */
+        get: operations["getSystemCapacity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/classify/policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Fine classifier switches for visible servers and cameras */
+        get: operations["getClassifyPolicy"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/body-classify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Turn the fine vehicle classifier on or off for a server */
+        put: operations["setServerBodyClassify"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/body-classify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Turn the fine vehicle classifier on or off for a camera */
+        put: operations["setCameraBodyClassify"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me": {
         parameters: {
             query?: never;
@@ -789,6 +861,28 @@ export interface paths {
         head?: never;
         /** Mark an event reviewed or not (events.review) */
         patch: operations["updateEvent"];
+        trace?: never;
+    };
+    "/api/v1/events/{eventId}/reprocess": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read color and classification again (events.review)
+         * @description Queues the stored capture for a new color and type reading. Does not raise alarms. The response shows the job as pending until the worker finishes.
+         */
+        post: operations["reprocessEvent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/events/{eventId}/thumbnail": {
@@ -2500,6 +2594,69 @@ export interface components {
              */
             schema_version: number;
         };
+        SystemCapacity: {
+            cpu: {
+                model: string;
+                online: number;
+                /** Format: float */
+                percent: number;
+            };
+            memory: {
+                /** Format: int64 */
+                total_bytes: number;
+                /** Format: int64 */
+                available_bytes: number;
+            };
+            disk: {
+                path: string;
+                /** Format: int64 */
+                total_bytes: number;
+                /** Format: int64 */
+                free_bytes: number;
+            };
+            gpu: {
+                present: boolean;
+                vendor: string;
+                name: string;
+            };
+            openvino: {
+                installed: boolean;
+                active: boolean;
+                runtime: string;
+            };
+            classifier: {
+                installed: boolean;
+                measuring: boolean;
+                model?: string;
+                /** Format: float */
+                latency_ms?: number;
+                /** Format: float */
+                crops_per_second?: number;
+                /** Format: float */
+                crops_per_minute?: number;
+                threads?: number;
+                cameras_on: number;
+                cameras_total: number;
+            };
+        };
+        ClassifyPolicy: {
+            servers: {
+                /** Format: uuid */
+                id: string;
+                enabled: boolean;
+            }[];
+            cameras: {
+                /** Format: uuid */
+                id: string;
+                /** Format: uuid */
+                server_id: string;
+                enabled: boolean;
+                effective: boolean;
+            }[];
+        };
+        BodyClassifyInput: {
+            enabled: boolean;
+        };
         Error: {
             code: string;
             message: string;
@@ -2544,6 +2701,55 @@ export interface components {
             has_snapshot: boolean;
             /** @description The VMS has copied this event's preview clip to central storage (an OpenVMS-internal signal, not a probe of Frigate's own preview availability). */
             has_preview: boolean;
+            attributes?: components["schemas"]["EventAttributes"];
+        };
+        EventAttributes: {
+            vehicle?: components["schemas"]["VehicleAttributes"];
+            person?: components["schemas"]["PersonAttributes"];
+            /**
+             * @description Set while a vehicle classification job exists for this event.
+             * @enum {string}
+             */
+            vehicle_job?: "pending" | "processing" | "completed" | "failed";
+            /**
+             * @description Set while a clothing classification job exists for this event.
+             * @enum {string}
+             */
+            person_job?: "pending" | "processing" | "completed" | "failed";
+        };
+        PersonAttributes: {
+            /**
+             * @description Shirt or jacket color.
+             * @example blue
+             */
+            upper_color: string;
+            /** Format: float */
+            upper_confidence: number;
+            /**
+             * @description Pants or skirt color.
+             * @example black
+             */
+            lower_color: string;
+            /** Format: float */
+            lower_confidence: number;
+            /** @enum {string} */
+            color_quality: "good" | "medium" | "low";
+        };
+        VehicleAttributes: {
+            /** @example suv */
+            type: string;
+            /** Format: float */
+            type_confidence: number;
+            /** @example black */
+            color: string;
+            /** Format: float */
+            color_confidence: number;
+            /** @enum {string} */
+            color_quality: "good" | "medium" | "low";
+            /** @description Color of the trailer when the type is a truck with a trailer. Empty otherwise. */
+            trailer_color?: string;
+            /** Format: float */
+            trailer_color_confidence?: number;
         };
         EventPage: {
             items: components["schemas"]["Event"][];
@@ -2590,6 +2796,8 @@ export interface components {
              * @description Indexed event that contains this read, when known.
              */
             event_id?: string | null;
+            /** @description Type and color of the vehicle that carried this plate, once enrichment has finished. */
+            vehicle?: components["schemas"]["VehicleAttributes"];
         };
         PlateReadPage: {
             items: components["schemas"]["PlateRead"][];
@@ -2836,6 +3044,11 @@ export interface components {
             /** Format: uuid */
             camera_id: string;
             camera_name: string;
+            server_name?: string;
+            /** @description OpenVMS classification of the vehicle on this alarm, when the event was enriched. */
+            vehicle?: components["schemas"]["VehicleAttributes"];
+            /** @description Upper and lower clothing color when the event includes a person. */
+            person?: components["schemas"]["PersonAttributes"];
             /** Format: uuid */
             event_id: string;
             event_severity: string;
@@ -2971,6 +3184,10 @@ export interface components {
             labels?: string[];
             zones?: string[];
             severities?: string[];
+            /** @description Matched after vehicle enrichment. Empty means any type. */
+            vehicle_types?: string[];
+            /** @description Matched after vehicle enrichment. Empty means any color. */
+            vehicle_colors?: string[];
             duration_seconds?: number;
         };
         RuleActions: {
@@ -3653,6 +3870,106 @@ export interface operations {
                     "application/json": components["schemas"]["SystemInfo"];
                 };
             };
+        };
+    };
+    getSystemCapacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current machine and classifier capacity */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemCapacity"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    getClassifyPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switches. A missing row is enabled. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClassifyPolicy"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    setServerBodyClassify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BodyClassifyInput"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BodyClassifyInput"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setCameraBodyClassify: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BodyClassifyInput"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BodyClassifyInput"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getMe: {
@@ -4995,6 +5312,10 @@ export interface operations {
                 has_snapshot?: boolean;
                 /** @description Only events whose preview clip has been copied to central storage. */
                 has_preview?: boolean;
+                /** @description Match enriched vehicle types (car, suv, pickup, van, truck, bus, motorcycle). */
+                vehicle_type?: string[];
+                /** @description Match enriched vehicle colors. */
+                vehicle_color?: string[];
                 cursor?: string;
                 limit?: number;
             };
@@ -5116,6 +5437,31 @@ export interface operations {
         };
         responses: {
             /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Event"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    reprocessEvent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                eventId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Event with the classification job pending */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -18,7 +18,7 @@ func uuids(p *[]uuid.UUID) []uuid.UUID {
 }
 
 func toEvent(e events.Event) gen.Event {
-	return gen.Event{
+	out := gen.Event{
 		Id: e.ID, TenantId: e.TenantID, SiteId: e.SiteID, SiteName: e.SiteName,
 		ServerId: e.ServerID, ServerName: e.ServerName, CameraId: e.CameraID, CameraName: e.CameraName,
 		RemoteId: e.RemoteID, Severity: gen.Severity(e.Severity), Labels: e.Labels, SubLabels: e.SubLabels,
@@ -26,6 +26,37 @@ func toEvent(e events.Event) gen.Event {
 		Reviewed: e.Reviewed, HasThumbnail: e.HasThumbnail,
 		HasSnapshot: e.HasSnapshot, HasPreview: e.HasPreview,
 	}
+	if e.Vehicle != nil || e.Person != nil || e.VehicleJob != "" || e.PersonJob != "" {
+		out.Attributes = &gen.EventAttributes{}
+	}
+	if e.VehicleJob != "" {
+		job := gen.EventAttributesVehicleJob(e.VehicleJob)
+		out.Attributes.VehicleJob = &job
+	}
+	if e.PersonJob != "" {
+		job := gen.EventAttributesPersonJob(e.PersonJob)
+		out.Attributes.PersonJob = &job
+	}
+	if e.Vehicle != nil {
+		out.Attributes.Vehicle = &gen.VehicleAttributes{
+			Type: e.Vehicle.Type, TypeConfidence: e.Vehicle.TypeConfidence,
+			Color: e.Vehicle.Color, ColorConfidence: e.Vehicle.ColorConfidence,
+			ColorQuality: gen.VehicleAttributesColorQuality(e.Vehicle.ColorQuality),
+		}
+		if e.Vehicle.TrailerColor != "" {
+			out.Attributes.Vehicle.TrailerColor = &e.Vehicle.TrailerColor
+			conf := e.Vehicle.TrailerColorConfidence
+			out.Attributes.Vehicle.TrailerColorConfidence = &conf
+		}
+	}
+	if e.Person != nil {
+		out.Attributes.Person = &gen.PersonAttributes{
+			UpperColor: e.Person.UpperColor, UpperConfidence: e.Person.UpperConfidence,
+			LowerColor: e.Person.LowerColor, LowerConfidence: e.Person.LowerConfidence,
+			ColorQuality: gen.PersonAttributesColorQuality(e.Person.ColorQuality),
+		}
+	}
+	return out
 }
 
 func nextCursor(c string) *string {
@@ -47,6 +78,12 @@ func (h *Handlers) ListEvents(ctx context.Context, r gen.ListEventsRequestObject
 		Plate:          deref(p.Plate), From: p.From, To: p.To, Reviewed: p.Reviewed,
 		HasSnapshot: p.HasSnapshot, HasPreview: p.HasPreview,
 		Cursor: deref(p.Cursor), Limit: deref(p.Limit),
+	}
+	if p.VehicleType != nil {
+		f.VehicleTypes = *p.VehicleType
+	}
+	if p.VehicleColor != nil {
+		f.VehicleColors = *p.VehicleColor
 	}
 	if p.Label != nil {
 		f.Labels = *p.Label
@@ -100,6 +137,18 @@ func (h *Handlers) GetEvent(ctx context.Context, r gen.GetEventRequestObject) (g
 		return nil, err
 	}
 	return gen.GetEvent200JSONResponse(toEvent(e)), nil
+}
+
+func (h *Handlers) ReprocessEvent(ctx context.Context, r gen.ReprocessEventRequestObject) (gen.ReprocessEventResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	e, err := h.Events.Reprocess(ctx, a, r.EventId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ReprocessEvent200JSONResponse(toEvent(e)), nil
 }
 
 func (h *Handlers) UpdateEvent(ctx context.Context, r gen.UpdateEventRequestObject) (gen.UpdateEventResponseObject, error) {
@@ -162,11 +211,19 @@ func (h *Handlers) ListPlateReads(ctx context.Context, r gen.ListPlateReadsReque
 		if pr.Score != nil {
 			score = pr.Score
 		}
-		out.Items = append(out.Items, gen.PlateRead{
+		item := gen.PlateRead{
 			Id: pr.ID, SiteId: pr.SiteID, SiteName: pr.SiteName, ServerId: pr.ServerID, ServerName: pr.ServerName,
 			CameraId: pr.CameraID, CameraName: pr.CameraName, Plate: pr.Plate, PlateNormalized: pr.Normalized,
 			Score: score, Label: pr.Label, Zones: pr.Zones, SeenAt: pr.SeenAt, EventId: pr.EventID,
-		})
+		}
+		if pr.Vehicle != nil {
+			item.Vehicle = &gen.VehicleAttributes{
+				Type: pr.Vehicle.Type, TypeConfidence: pr.Vehicle.TypeConfidence,
+				Color: pr.Vehicle.Color, ColorConfidence: pr.Vehicle.ColorConfidence,
+				ColorQuality: gen.VehicleAttributesColorQuality(pr.Vehicle.ColorQuality),
+			}
+		}
+		out.Items = append(out.Items, item)
 	}
 	return out, nil
 }

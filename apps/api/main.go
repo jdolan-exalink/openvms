@@ -159,6 +159,7 @@ func run() error {
 			MaxFailures: cfg.LoginMaxFailures, LockFor: cfg.LoginLockout,
 		},
 		Log:          log,
+		WorkerURL:    cfg.WorkerURL,
 		CheckTimeout: 2 * time.Second,
 		Checks: []health.Check{
 			{Name: "postgres", Probe: pool.Ping},

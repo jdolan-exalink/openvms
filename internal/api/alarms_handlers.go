@@ -8,13 +8,14 @@ import (
 )
 
 func toAlarm(a alarms.Alarm) gen.Alarm {
-	return gen.Alarm{
+	out := gen.Alarm{
 		Id:                 a.ID,
 		TenantId:           a.TenantID,
 		SiteId:             a.SiteID,
 		SiteName:           a.SiteName,
 		CameraId:           a.CameraID,
 		CameraName:         a.CameraName,
+		ServerName:         &a.ServerName,
 		EventId:            a.EventID,
 		EventSeverity:      a.EventSeverity,
 		EventStartTime:     a.EventStartTime,
@@ -37,6 +38,21 @@ func toAlarm(a alarms.Alarm) gen.Alarm {
 		CreatedAt:          a.CreatedAt,
 		UpdatedAt:          a.UpdatedAt,
 	}
+	if a.VehicleType != "" {
+		out.Vehicle = &gen.VehicleAttributes{
+			Type: a.VehicleType, TypeConfidence: a.VehicleTypeConfidence,
+			Color: a.VehicleColor, ColorConfidence: a.VehicleColorConfidence,
+			ColorQuality: gen.VehicleAttributesColorQuality(a.ColorQuality),
+		}
+	}
+	if a.UpperColor != "" {
+		out.Person = &gen.PersonAttributes{
+			UpperColor: a.UpperColor, UpperConfidence: a.UpperColorConfidence,
+			LowerColor: a.LowerColor, LowerConfidence: a.LowerColorConfidence,
+			ColorQuality: gen.PersonAttributesColorQuality(a.PersonColorQuality),
+		}
+	}
+	return out
 }
 
 func toTransition(t alarms.Transition) gen.AlarmTransition {

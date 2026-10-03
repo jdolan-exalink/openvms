@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
@@ -28,6 +29,7 @@ const INITIAL_NOW = unixNow();
  * recordings and the VMS event index, HLS playback from the origin Frigate, and clip export.
  */
 export function Playback() {
+  const t = useT();
   const search = useSearch({ from: "/app/playback" });
   const navigate = useNavigate();
   const me = useQuery(meQuery);
@@ -143,8 +145,8 @@ export function Playback() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4">
       <PageHeader
-        title="Grabaciones"
-        description="La grabación se reproduce sincronizada desde el Frigate de origen; el VMS no guarda video."
+        title={t("Grabaciones")}
+        description={t("La grabación se reproduce sincronizada desde el Frigate de origen; el VMS no guarda video.")}
       />
       <div className="grid gap-3 sm:grid-cols-3">
         <Field label={selectedCameraIds.length > 0 ? "Cámara principal" : "Cámara"}>

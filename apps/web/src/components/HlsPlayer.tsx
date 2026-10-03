@@ -1,5 +1,6 @@
 import Hls from "hls.js";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { ZoomFrame } from "@/components/DigitalZoom";
 import { cn } from "@/lib/cn";
 
 export type HlsPlayerHandle = { video: HTMLVideoElement | null };
@@ -163,32 +164,35 @@ export const HlsPlayer = forwardRef<
   const showPoster = !!posterSrc && waiting;
 
   return (
-    <div className={cn("relative bg-black", className)}>
-      <video
-        ref={video}
-        className="size-full object-contain"
-        controls={controls}
-        muted={muted}
-        playsInline
-        aria-label={ariaLabel}
-        onTimeUpdate={(e) => onTime?.(start + e.currentTarget.currentTime)}
-      />
-      {posterSrc && (
-        <img
-          src={posterSrc}
-          alt=""
-          draggable={false}
-          onError={() => posterFallback && posterSrc !== posterFallback && setPosterSrc(posterFallback)}
-          className={cn("pointer-events-none absolute inset-0 size-full object-contain transition-opacity duration-150 motion-reduce:transition-none", showPoster ? "opacity-100" : "opacity-0")}
+    <ZoomFrame resetKey={`${cameraId}:${start}:${end}`} className={className} picture={(zoom) => (
+      <>
+        <video
+          ref={video}
+          className="size-full object-contain"
+          controls={controls && zoom.scale <= 1}
+          muted={muted}
+          playsInline
+          aria-label={ariaLabel}
+          onTimeUpdate={(e) => onTime?.(start + e.currentTarget.currentTime)}
         />
-      )}
+        {posterSrc && (
+          <img
+            src={posterSrc}
+            alt=""
+            draggable={false}
+            onError={() => posterFallback && posterSrc !== posterFallback && setPosterSrc(posterFallback)}
+            className={cn("pointer-events-none absolute inset-0 size-full object-contain transition-opacity duration-150 motion-reduce:transition-none", showPoster ? "opacity-100" : "opacity-0")}
+          />
+        )}
+      </>
+    )}>
       {showPoster && posterChip && !error && (
-        <span role="status" className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-1.5 rounded bg-black/60 px-2 py-0.5 text-[11px] text-white/90">
+        <span role="status" className="pointer-events-none absolute bottom-2 left-2 z-[3] flex items-center gap-1.5 rounded bg-black/60 px-2 py-0.5 text-[11px] text-white/90">
           <span aria-hidden className="size-2.5 animate-spin rounded-full border border-white/40 border-t-white motion-reduce:animate-none" />
           Cargando grabación…
         </span>
       )}
-      {error && <div className="absolute inset-0 flex items-center justify-center p-4 text-center text-sm text-white/80">{error}</div>}
-    </div>
+      {error && <div className="absolute inset-0 z-[3] flex items-center justify-center p-4 text-center text-sm text-white/80">{error}</div>}
+    </ZoomFrame>
   );
 });

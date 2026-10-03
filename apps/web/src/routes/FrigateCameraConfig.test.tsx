@@ -134,4 +134,20 @@ describe("FrigateCameraConfig", () => {
     const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH")!;
     expect(await patch.clone().json()).toEqual({ sections: { zones: { puerta: null, patio: { coordinates: "0.1,0.1,0.9,0.1,0.5,0.9" } } } });
   });
+
+  it("saves the OpenVMS fields from the General tab", async () => {
+    const fetchMock = mount({}, {
+      "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.manage", effect: "allow" }] }),
+      "/api/v1/cameras/c1": () => json({ id: "c1", display_name: "acceso", enabled: true, default_live_quality: "sub", description: "", location: "", tags: [] }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "General" }));
+    fireEvent.change(await screen.findByLabelText("Ubicación"), { target: { value: "Boca norte" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    await waitFor(() => {
+      const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH" && new URL(r.url).pathname === "/api/v1/cameras/c1");
+      expect(patch).toBeDefined();
+    });
+    const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH" && new URL(r.url).pathname === "/api/v1/cameras/c1")!;
+    expect(await patch.clone().json()).toMatchObject({ location: "Boca norte", display_name: "acceso" });
+  });
 });

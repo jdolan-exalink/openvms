@@ -211,7 +211,10 @@ func (s *Service) UpdateSite(ctx context.Context, actor authz.Actor, id uuid.UUI
 }
 
 // ErrSiteNotEmpty is returned when deleting a site that still has servers.
-var ErrSiteNotEmpty = errors.New("site still has Frigate servers; move or remove them first")
+var ErrSiteNotEmpty = errors.New("este sitio todavía tiene servidores; movelos a otro sitio antes de eliminarlo")
+
+// ErrLastSite is returned when deleting the tenant's only remaining site.
+var ErrLastSite = errors.New("siempre tiene que quedar al menos un sitio")
 
 func (s *Service) DeleteSite(ctx context.Context, actor authz.Actor, id uuid.UUID) error {
 	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
@@ -221,6 +224,13 @@ func (s *Service) DeleteSite(ctx context.Context, actor authz.Actor, id uuid.UUI
 		}
 		if err := c.Require(authz.SitesManage, access.Site(site.TenantID, site.ID)); err != nil {
 			return err
+		}
+		n, err := q.CountTenantSites(ctx, site.TenantID)
+		if err != nil {
+			return err
+		}
+		if n <= 1 {
+			return ErrLastSite
 		}
 		if site.ServerCount > 0 {
 			return ErrSiteNotEmpty

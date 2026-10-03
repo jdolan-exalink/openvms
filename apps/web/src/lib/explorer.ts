@@ -86,11 +86,13 @@ export function buildTree(input: {
 // prefixes so both kinds of drop target coexist in the one DndContext.
 const TREE_CAMERA = "tcam:";
 const TREE_FOLDER = "tfolder:";
+const TREE_SERVER = "tserver:";
 const TREE_ROOT = "troot:";
 const CAMERA = "camera:";
 
 export const treeCameraDropId = (id: string) => `${TREE_CAMERA}${id}`;
 export const treeFolderId = (id: string) => `${TREE_FOLDER}${id}`;
+export const treeServerDragId = (id: string) => `${TREE_SERVER}${id}`;
 export const treeRootDropId = (serverId: string) => `${TREE_ROOT}${serverId}`;
 
 const strip = (id: string | number, prefix: string) => (String(id).startsWith(prefix) ? String(id).slice(prefix.length) : null);

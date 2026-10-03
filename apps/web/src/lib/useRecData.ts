@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQueries } from "@tanstack/react-query";
 import { useEffect, useMemo } from "react";
 import { eventsQuery, recordingsQuery } from "@/api/queries";
 import { ApiError } from "@/api/client";
+import { vehicleHeadline, vehiclePaint } from "@/lib/format";
 import { DAY_S, mergeSpans, type Span } from "@/lib/timeScale";
 
 /** Event pages (500 each) fetched for the timeline markers; more days are dense enough to cluster anyway. */
@@ -62,6 +63,8 @@ export function useRecData(cameraIds: string[], day: number, enabled: boolean) {
             cameraId: e.camera_id,
             label: e.labels[0] ?? "",
             detail: e.plates?.[0] || e.sub_labels?.[0] || undefined,
+            color: e.labels.some((label) => label === "car" || label === "motorcycle") ? vehiclePaint(e.attributes?.vehicle) ?? undefined : undefined,
+            title: vehicleHeadline(e.attributes?.vehicle) ?? undefined,
           };
         })
         .sort((a, b) => a.time - b.time),

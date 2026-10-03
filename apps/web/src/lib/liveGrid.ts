@@ -1,3 +1,5 @@
+import { parsePanes, type Pane } from "./presentations";
+
 /**
  * liveGrid holds pure, framework-free logic for the Live screen's camera grid: resizing,
  * placing a camera into a slot, reordering tiles by drag, and persisting/restoring the current
@@ -6,7 +8,18 @@
  */
 
 export type Quality = "sub" | "main";
-export type Tile = { camera_id: string; quality: Quality } | null;
+export type LiveMapRef = { site_id: string; floor_id?: string; name: string };
+export type CameraTile = { camera_id: string; quality: Quality };
+export type MapGridTile = { map: LiveMapRef };
+export type Tile = CameraTile | MapGridTile | null;
+
+export function cameraIdOf(tile: Tile): string | undefined {
+  return tile && "camera_id" in tile ? tile.camera_id : undefined;
+}
+
+export function isMapTile(tile: Tile): tile is MapGridTile {
+  return !!tile && "map" in tile;
+}
 
 /** resizeTiles truncates or pads tiles to the requested grid dimensions, keeping existing order. */
 export function resizeTiles(tiles: Tile[], columns: number, rows = columns): Tile[] {
@@ -54,7 +67,7 @@ export function swapTiles(tiles: Tile[], a: number, b: number): Tile[] {
  * otherwise it behaves like placeCameraAt.
  */
 export function placeCameraUnique(tiles: Tile[], index: number, cameraId: string, quality: Quality): Tile[] {
-  const at = tiles.findIndex((t) => t?.camera_id === cameraId);
+  const at = tiles.findIndex((t) => cameraIdOf(t) === cameraId);
   return at >= 0 ? swapTiles(tiles, at, index) : placeCameraAt(tiles, index, cameraId, quality);
 }
 
@@ -63,9 +76,10 @@ export function duplicateTileIndexes(tiles: Tile[]): Set<number> {
   const seen = new Set<string>();
   const duplicates = new Set<number>();
   tiles.forEach((t, i) => {
-    if (!t) return;
-    if (seen.has(t.camera_id)) duplicates.add(i);
-    else seen.add(t.camera_id);
+    const id = cameraIdOf(t);
+    if (!id) return;
+    if (seen.has(id)) duplicates.add(i);
+    else seen.add(id);
   });
   return duplicates;
 }
@@ -97,7 +111,23 @@ function cameraIdFromDragId(id: string | number): string | null {
   return s.startsWith(CAMERA_PREFIX) ? s.slice(CAMERA_PREFIX.length) : null;
 }
 
-export type DragResolution = { type: "place"; index: number; cameraId: string } | { type: "reorder"; from: number; to: number } | null;
+export type DragResolution =
+  | { type: "place"; index: number; cameraId: string }
+  | { type: "reorder"; from: number; to: number }
+  | { type: "fill-server"; serverId: string }
+  | { type: "fill-folder"; folderId: string }
+  | null;
+
+/** The whole live grid, so a server or folder can be dropped on the gap between tiles. */
+export const LIVE_GRID_DROP_ID = "live-grid";
+
+const SERVER_DRAG_PREFIX = "tserver:";
+const FOLDER_DRAG_PREFIX = "tfolder:";
+
+function stripPrefix(id: string | number, prefix: string): string | null {
+  const s = String(id);
+  return s.startsWith(prefix) ? s.slice(prefix.length) : null;
+}
 
 /**
  * resolveDragEnd turns a dnd-kit drag's (active, over) ids into what happened: placing a
@@ -106,6 +136,13 @@ export type DragResolution = { type: "place"; index: number; cameraId: string } 
  */
 export function resolveDragEnd(activeId: string | number, overId: string | number | null): DragResolution {
   const toIndex = tileIndexFromDragId(overId);
+  const overGrid = overId !== null && (String(overId) === LIVE_GRID_DROP_ID || toIndex !== null);
+  if (overGrid) {
+    const serverId = stripPrefix(activeId, SERVER_DRAG_PREFIX);
+    if (serverId) return { type: "fill-server", serverId };
+    const folderId = stripPrefix(activeId, FOLDER_DRAG_PREFIX);
+    if (folderId) return { type: "fill-folder", folderId };
+  }
   if (toIndex === null) return null;
   const cameraId = cameraIdFromDragId(activeId);
   if (cameraId !== null) return { type: "place", index: toIndex, cameraId };
@@ -114,7 +151,47 @@ export function resolveDragEnd(activeId: string | number, overId: string | numbe
   return null;
 }
 
-export type StoredSelection = { columns: number; rows: number; tiles: Tile[] };
+/**
+ * layoutForCount picks the smallest layout that can show `count` cameras.
+ * When none is large enough it returns the largest one.
+ */
+export function layoutForCount(layouts: { columns: number; rows: number }[], count: number): { columns: number; rows: number } {
+  const sorted = [...layouts].sort((a, b) => a.columns * a.rows - b.columns * b.rows);
+  const fallback = sorted[0] ?? { columns: 1, rows: 1 };
+  if (count <= 1) return fallback;
+  return sorted.find((layout) => layout.columns * layout.rows >= count) ?? sorted[sorted.length - 1] ?? fallback;
+}
+
+/** tilesForCameras fills a fresh grid with cameras in order, leaving leftover cells empty. */
+export function tilesForCameras(cameras: { id: string; quality: Quality }[], columns: number, rows: number): { tiles: Tile[]; skipped: number } {
+  const cells = Math.max(0, columns * rows);
+  const tiles: Tile[] = Array.from({ length: cells }, (_, index) => {
+    const camera = cameras[index];
+    return camera ? { camera_id: camera.id, quality: camera.quality } : null;
+  });
+  return { tiles, skipped: Math.max(0, cameras.length - cells) };
+}
+
+/**
+ * placeInOpenCell puts a camera in the first empty cell of the current grid.
+ * A full grid replaces the first cell. A camera already on the grid stays where it is.
+ */
+export function placeInOpenCell(tiles: Tile[], cameraId: string, quality: Quality): { tiles: Tile[]; index: number } {
+  const existing = tiles.findIndex((tile) => cameraIdOf(tile) === cameraId);
+  if (existing >= 0) return { tiles, index: existing };
+  const empty = tiles.findIndex((tile) => tile === null);
+  const index = empty >= 0 ? empty : 0;
+  if (index >= tiles.length) return { tiles, index: -1 };
+  return { tiles: placeCameraUnique(tiles, index, cameraId, quality), index };
+}
+
+export function fitTiles(tiles: Tile[], count: number): Tile[] {
+  const next = tiles.slice(0, Math.max(0, count));
+  while (next.length < count) next.push(null);
+  return next;
+}
+
+export type StoredSelection = { columns: number; rows: number; tiles: Tile[]; panes?: Pane[] };
 
 const STORAGE_PREFIX = "openvms.live.selection.v1";
 
@@ -123,8 +200,8 @@ export function liveSelectionKey(tenantId: string | null, userId: string): strin
   return `${STORAGE_PREFIX}:${tenantId ?? "platform"}:${userId}`;
 }
 
-export function serializeSelection(columns: number, tiles: Tile[], rows = columns): string {
-  return JSON.stringify({ columns, rows, tiles });
+export function serializeSelection(columns: number, tiles: Tile[], rows = columns, panes?: Pane[]): string {
+  return JSON.stringify(panes ? { columns, rows, tiles, panes } : { columns, rows, tiles });
 }
 
 /**
@@ -142,16 +219,24 @@ export function parseSelection(raw: string | null, validCameraIds: ReadonlySet<s
     return null;
   }
   if (!parsed || typeof parsed !== "object") return null;
-  const { columns, rows, tiles } = parsed as { columns?: unknown; rows?: unknown; tiles?: unknown };
+  const record = parsed as { columns?: unknown; rows?: unknown; tiles?: unknown; panes?: unknown };
+  const { columns, rows, tiles } = record;
   if (typeof columns !== "number" || !Number.isInteger(columns) || columns < 1 || !Array.isArray(tiles)) return null;
   const resolvedRows = rows === undefined ? columns : rows;
   if (typeof resolvedRows !== "number" || !Number.isInteger(resolvedRows) || resolvedRows < 1) return null;
   const cleaned: Tile[] = tiles.map((t): Tile => {
     if (!t || typeof t !== "object") return null;
-    const { camera_id, quality } = t as { camera_id?: unknown; quality?: unknown };
-    if (typeof camera_id !== "string" || !validCameraIds.has(camera_id)) return null;
-    return { camera_id, quality: quality === "main" ? "main" : "sub" };
+    const record = t as { camera_id?: unknown; quality?: unknown; map?: unknown };
+    if (record.map && typeof record.map === "object") {
+      const map = record.map as { site_id?: unknown; floor_id?: unknown; name?: unknown };
+      if (typeof map.site_id !== "string" || typeof map.name !== "string" || !map.name) return null;
+      return { map: { site_id: map.site_id, name: map.name, floor_id: typeof map.floor_id === "string" ? map.floor_id : undefined } };
+    }
+    if (typeof record.camera_id !== "string" || !validCameraIds.has(record.camera_id)) return null;
+    return { camera_id: record.camera_id, quality: record.quality === "main" ? "main" : "sub" };
   });
+  const panes = parsePanes(columns, resolvedRows, record.panes);
+  if (panes) return { columns, rows: resolvedRows, tiles: fitTiles(cleaned, panes.length), panes };
   return { columns, rows: resolvedRows, tiles: resizeTiles(cleaned, columns, resolvedRows) };
 }
 
@@ -163,7 +248,10 @@ export type FillResult = { tiles: Tile[]; added: number; already: number; skippe
  */
 export function fillTiles(tiles: Tile[], cameras: { id: string; quality: Quality }[]): FillResult {
   const next = tiles.slice();
-  const present = new Set(next.flatMap((t) => (t ? [t.camera_id] : [])));
+  const present = new Set(next.flatMap((t) => {
+    const id = cameraIdOf(t);
+    return id ? [id] : [];
+  }));
   let added = 0;
   let already = 0;
   let skipped = 0;

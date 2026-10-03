@@ -64,7 +64,8 @@ describe("Alarms Route", () => {
     renderPage(() => <Alarms />);
 
     expect(await screen.findByText("Cámara Principal")).toBeInTheDocument();
-    expect(screen.getByText("person, vehicle")).toBeInTheDocument();
+    expect(screen.getByText("Persona, vehicle")).toBeInTheDocument();
+    expect(screen.getByText("Clasificación:")).toBeInTheDocument();
     expect(screen.getByText("Abierta")).toBeInTheDocument();
     expect(screen.getByText("Sin asignar")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Reconocer/i })).toBeInTheDocument();

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCheck, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
@@ -5,6 +6,7 @@ import { api, unwrap, type Schemas } from "@/api/client";
 import { alarmAssigneesQuery, alarmsQuery, camerasQuery, type AlarmFilter } from "@/api/queries";
 import { Modal } from "@/components/Modal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, Th } from "@/components/ui";
+import { VehicleFacts } from "@/components/VehicleMark";
 import { fmtDateTime } from "@/lib/format";
 
 type Alarm = Schemas["Alarm"];
@@ -20,6 +22,7 @@ const statusBadgeStyles: Record<AlarmStatus, { label: string; bg: string; text: 
 };
 
 export function Alarms() {
+  const t = useT();
   const qc = useQueryClient();
   const [filter, setFilter] = useState<AlarmFilter>({ status_group: "active" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -123,8 +126,8 @@ export function Alarms() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title="Alarmas"
-        description="Bandeja de alarmas por eventos de alerta. Reconocé, asigná y resolvé incidentes en tiempo real."
+        title={t("Alarmas")}
+        description={t("Bandeja de alarmas por eventos de alerta. Reconocé, asigná y resolvé incidentes en tiempo real.")}
       />
 
       <ErrorNote error={alarms.error ?? mutationError} />
@@ -266,16 +269,12 @@ export function Alarms() {
                       <span className="rounded bg-bad px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-bg">
                         {a.event_severity}
                       </span>
-                      {a.event_labels && a.event_labels.length > 0 && (
-                        <span className="text-xs text-muted">
-                          {a.event_labels.join(", ")}
-                        </span>
-                      )}
+                      <VehicleFacts labels={a.event_labels ?? []} vehicle={a.vehicle} person={a.person} serverName={a.server_name} />
                     </div>
                   </td>
                   <td>
                     <div className="font-medium">{a.camera_name}</div>
-                    <div className="text-xs text-muted">{a.site_name}</div>
+                    <div className="text-xs text-muted">{a.site_name}{a.server_name ? ` · ${a.server_name}` : ""}</div>
                   </td>
                   <td className="text-xs whitespace-nowrap">
                     {fmtDateTime(a.event_start_time)}

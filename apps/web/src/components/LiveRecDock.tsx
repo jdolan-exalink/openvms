@@ -4,7 +4,7 @@ import { DayCalendar } from "@/components/DayCalendar";
 import { DayTimeline, type TimelineCamera, type TimelineEvent } from "@/components/DayTimeline";
 import { Button, Select } from "@/components/ui";
 import { fmtDateTime } from "@/lib/format";
-import { moveToDay, REC_ENTRY_OFFSET_S, REC_SPEEDS, stepEvent } from "@/lib/liveRec";
+import { moveToDay, REC_LIVE_EDGE_S, REC_SPEEDS, stepEvent } from "@/lib/liveRec";
 import type { RecTransport } from "@/lib/useRecPlayback";
 
 const STEPS = [
@@ -49,7 +49,7 @@ export function LiveRecDock({
     const ends = cameras.flatMap((c) => c.spans.map((s) => s.end));
     return ends.length ? Math.max(...ends) : undefined;
   }, [cameras]);
-  const liveEdge = now - REC_ENTRY_OFFSET_S;
+  const liveEdge = now - REC_LIVE_EDGE_S;
   const goNow = () => seek(latestRecorded !== undefined && latestRecorded - 5 < liveEdge ? latestRecorded - 5 : liveEdge);
   const step = (seconds: number) => seek(Math.min(position + seconds, liveEdge), { play: playing });
   const toEvent = (dir: 1 | -1) => {

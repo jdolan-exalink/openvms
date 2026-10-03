@@ -100,6 +100,17 @@ SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status
        e.end_time AS event_end_time,
        e.labels AS event_labels,
        e.sub_labels AS event_sub_labels,
+       fs.name AS server_name,
+       COALESCE(va.vehicle_type, '') AS vehicle_type,
+       COALESCE(va.vehicle_type_confidence, 0)::real AS vehicle_type_confidence,
+       COALESCE(va.vehicle_color, '') AS vehicle_color,
+       COALESCE(va.vehicle_color_confidence, 0)::real AS vehicle_color_confidence,
+       COALESCE(va.color_quality, '') AS color_quality,
+       COALESCE(pa.upper_color, '') AS upper_color,
+       COALESCE(pa.upper_color_confidence, 0)::real AS upper_color_confidence,
+       COALESCE(pa.lower_color, '') AS lower_color,
+       COALESCE(pa.lower_color_confidence, 0)::real AS lower_color_confidence,
+       COALESCE(pa.color_quality, '') AS person_color_quality,
        COALESCE(u_assignee.display_name, '')::text AS assigned_to_name,
        COALESCE(u_ack.display_name, '')::text AS acknowledged_by_name,
        COALESCE(u_res.display_name, '')::text AS resolved_by_name,
@@ -108,6 +119,9 @@ FROM alarms a
 JOIN sites s ON s.id = a.site_id
 JOIN cameras c ON c.id = a.camera_id
 JOIN events e ON e.id = a.event_id
+JOIN frigate_servers fs ON fs.id = e.server_id
+LEFT JOIN vehicle_attributes va ON va.event_id = e.id
+LEFT JOIN person_attributes pa ON pa.event_id = e.id
 LEFT JOIN users u_assignee ON u_assignee.id = a.assigned_to
 LEFT JOIN users u_ack ON u_ack.id = a.acknowledged_by
 LEFT JOIN users u_res ON u_res.id = a.resolved_by
@@ -116,33 +130,44 @@ WHERE a.id = $1
 `
 
 type GetAlarmRow struct {
-	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	SiteID             uuid.UUID
-	CameraID           uuid.UUID
-	EventID            uuid.UUID
-	Source             string
-	Status             string
-	AssignedTo         *uuid.UUID
-	AcknowledgedBy     *uuid.UUID
-	AcknowledgedAt     *time.Time
-	ResolvedBy         *uuid.UUID
-	ResolvedAt         *time.Time
-	ClosedBy           *uuid.UUID
-	ClosedAt           *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	SiteName           string
-	CameraName         string
-	EventSeverity      string
-	EventStartTime     time.Time
-	EventEndTime       *time.Time
-	EventLabels        []string
-	EventSubLabels     []string
-	AssignedToName     string
-	AcknowledgedByName string
-	ResolvedByName     string
-	ClosedByName       string
+	ID                     uuid.UUID
+	TenantID               uuid.UUID
+	SiteID                 uuid.UUID
+	CameraID               uuid.UUID
+	EventID                uuid.UUID
+	Source                 string
+	Status                 string
+	AssignedTo             *uuid.UUID
+	AcknowledgedBy         *uuid.UUID
+	AcknowledgedAt         *time.Time
+	ResolvedBy             *uuid.UUID
+	ResolvedAt             *time.Time
+	ClosedBy               *uuid.UUID
+	ClosedAt               *time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	SiteName               string
+	CameraName             string
+	EventSeverity          string
+	EventStartTime         time.Time
+	EventEndTime           *time.Time
+	EventLabels            []string
+	EventSubLabels         []string
+	ServerName             string
+	VehicleType            string
+	VehicleTypeConfidence  float32
+	VehicleColor           string
+	VehicleColorConfidence float32
+	ColorQuality           string
+	UpperColor             string
+	UpperColorConfidence   float32
+	LowerColor             string
+	LowerColorConfidence   float32
+	PersonColorQuality     string
+	AssignedToName         string
+	AcknowledgedByName     string
+	ResolvedByName         string
+	ClosedByName           string
 }
 
 func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, error) {
@@ -172,6 +197,17 @@ func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, erro
 		&i.EventEndTime,
 		&i.EventLabels,
 		&i.EventSubLabels,
+		&i.ServerName,
+		&i.VehicleType,
+		&i.VehicleTypeConfidence,
+		&i.VehicleColor,
+		&i.VehicleColorConfidence,
+		&i.ColorQuality,
+		&i.UpperColor,
+		&i.UpperColorConfidence,
+		&i.LowerColor,
+		&i.LowerColorConfidence,
+		&i.PersonColorQuality,
 		&i.AssignedToName,
 		&i.AcknowledgedByName,
 		&i.ResolvedByName,
@@ -243,6 +279,17 @@ SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status
        e.end_time AS event_end_time,
        e.labels AS event_labels,
        e.sub_labels AS event_sub_labels,
+       fs.name AS server_name,
+       COALESCE(va.vehicle_type, '') AS vehicle_type,
+       COALESCE(va.vehicle_type_confidence, 0)::real AS vehicle_type_confidence,
+       COALESCE(va.vehicle_color, '') AS vehicle_color,
+       COALESCE(va.vehicle_color_confidence, 0)::real AS vehicle_color_confidence,
+       COALESCE(va.color_quality, '') AS color_quality,
+       COALESCE(pa.upper_color, '') AS upper_color,
+       COALESCE(pa.upper_color_confidence, 0)::real AS upper_color_confidence,
+       COALESCE(pa.lower_color, '') AS lower_color,
+       COALESCE(pa.lower_color_confidence, 0)::real AS lower_color_confidence,
+       COALESCE(pa.color_quality, '') AS person_color_quality,
        COALESCE(u_assignee.display_name, '')::text AS assigned_to_name,
        COALESCE(u_ack.display_name, '')::text AS acknowledged_by_name,
        COALESCE(u_res.display_name, '')::text AS resolved_by_name,
@@ -251,6 +298,9 @@ FROM alarms a
 JOIN sites s ON s.id = a.site_id
 JOIN cameras c ON c.id = a.camera_id
 JOIN events e ON e.id = a.event_id
+JOIN frigate_servers fs ON fs.id = e.server_id
+LEFT JOIN vehicle_attributes va ON va.event_id = e.id
+LEFT JOIN person_attributes pa ON pa.event_id = e.id
 LEFT JOIN users u_assignee ON u_assignee.id = a.assigned_to
 LEFT JOIN users u_ack ON u_ack.id = a.acknowledged_by
 LEFT JOIN users u_res ON u_res.id = a.resolved_by
@@ -278,33 +328,44 @@ type ListAlarmsParams struct {
 }
 
 type ListAlarmsRow struct {
-	ID                 uuid.UUID
-	TenantID           uuid.UUID
-	SiteID             uuid.UUID
-	CameraID           uuid.UUID
-	EventID            uuid.UUID
-	Source             string
-	Status             string
-	AssignedTo         *uuid.UUID
-	AcknowledgedBy     *uuid.UUID
-	AcknowledgedAt     *time.Time
-	ResolvedBy         *uuid.UUID
-	ResolvedAt         *time.Time
-	ClosedBy           *uuid.UUID
-	ClosedAt           *time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	SiteName           string
-	CameraName         string
-	EventSeverity      string
-	EventStartTime     time.Time
-	EventEndTime       *time.Time
-	EventLabels        []string
-	EventSubLabels     []string
-	AssignedToName     string
-	AcknowledgedByName string
-	ResolvedByName     string
-	ClosedByName       string
+	ID                     uuid.UUID
+	TenantID               uuid.UUID
+	SiteID                 uuid.UUID
+	CameraID               uuid.UUID
+	EventID                uuid.UUID
+	Source                 string
+	Status                 string
+	AssignedTo             *uuid.UUID
+	AcknowledgedBy         *uuid.UUID
+	AcknowledgedAt         *time.Time
+	ResolvedBy             *uuid.UUID
+	ResolvedAt             *time.Time
+	ClosedBy               *uuid.UUID
+	ClosedAt               *time.Time
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	SiteName               string
+	CameraName             string
+	EventSeverity          string
+	EventStartTime         time.Time
+	EventEndTime           *time.Time
+	EventLabels            []string
+	EventSubLabels         []string
+	ServerName             string
+	VehicleType            string
+	VehicleTypeConfidence  float32
+	VehicleColor           string
+	VehicleColorConfidence float32
+	ColorQuality           string
+	UpperColor             string
+	UpperColorConfidence   float32
+	LowerColor             string
+	LowerColorConfidence   float32
+	PersonColorQuality     string
+	AssignedToName         string
+	AcknowledgedByName     string
+	ResolvedByName         string
+	ClosedByName           string
 }
 
 func (q *Queries) ListAlarms(ctx context.Context, arg ListAlarmsParams) ([]ListAlarmsRow, error) {
@@ -348,6 +409,17 @@ func (q *Queries) ListAlarms(ctx context.Context, arg ListAlarmsParams) ([]ListA
 			&i.EventEndTime,
 			&i.EventLabels,
 			&i.EventSubLabels,
+			&i.ServerName,
+			&i.VehicleType,
+			&i.VehicleTypeConfidence,
+			&i.VehicleColor,
+			&i.VehicleColorConfidence,
+			&i.ColorQuality,
+			&i.UpperColor,
+			&i.UpperColorConfidence,
+			&i.LowerColor,
+			&i.LowerColorConfidence,
+			&i.PersonColorQuality,
 			&i.AssignedToName,
 			&i.AcknowledgedByName,
 			&i.ResolvedByName,

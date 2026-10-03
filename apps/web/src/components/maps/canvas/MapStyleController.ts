@@ -101,6 +101,40 @@ function getLightFallbackColors(): ThemeColors {
   };
 }
 
+const hostedFonts = new Set(["Noto Sans Regular", "Noto Sans Bold", "Noto Sans Italic"]);
+
+function repairImageRef(value: unknown): unknown {
+  if (value === "circle-11") return "circle_11";
+  if (Array.isArray(value)) return value.map(repairImageRef);
+  return value;
+}
+
+/** OpenFreeMap's dark style still names sprites and fonts the tile server no longer serves. */
+export function repairHostedStyle(style: StyleSpecification): StyleSpecification {
+  const next = structuredClone(style);
+  for (const layer of next.layers) {
+    const layout = layer.layout as Record<string, unknown> | undefined;
+    const fonts = layout?.["text-font"];
+    if (Array.isArray(fonts) && fonts.some((font) => typeof font === "string" && !hostedFonts.has(font))) {
+      layout!["text-font"] = ["Noto Sans Regular"];
+    }
+    if (layout && "icon-image" in layout) layout["icon-image"] = repairImageRef(layout["icon-image"]);
+    const paint = (layer as { paint?: Record<string, unknown> }).paint;
+    if (paint?.["fill-pattern"] === "wood-pattern") {
+      delete paint["fill-pattern"];
+      paint["fill-color"] ??= "#1c3a2a";
+      paint["fill-opacity"] ??= 0.4;
+    }
+  }
+  return next;
+}
+
+export async function loadRepairedStyle(url: string): Promise<StyleSpecification> {
+  const response = await fetch(url, { cache: "reload" });
+  if (!response.ok) throw new Error(`No se pudo cargar el estilo del mapa (${response.status}).`);
+  return repairHostedStyle((await response.json()) as StyleSpecification);
+}
+
 export function buildMapStyle(provider: MapProviderConfig, theme: ThemeColors = getThemeColors()): StyleSpecification {
   registerPMTilesProtocol();
 
@@ -311,7 +345,12 @@ export class MapStyleController {
     if (this.provider.kind === "vector-style") {
       const url = theme.isDark ? this.provider.styleUrl?.dark : this.provider.styleUrl?.light;
       if (url) {
-        this.map.setStyle(url, { diff: true });
+        const map = this.map;
+        void loadRepairedStyle(url).then((style) => {
+          if (this.map === map) map.setStyle(style, { diff: false });
+        }).catch(() => {
+          if (this.map === map) map.setStyle(url, { diff: true });
+        });
         return;
       }
     }

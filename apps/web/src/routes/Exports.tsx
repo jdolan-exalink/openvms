@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Trash2 } from "lucide-react";
 import { api, unwrap } from "@/api/client";
@@ -9,6 +10,7 @@ const statusText: Record<string, string> = { pending: "En cola", running: "Gener
 
 /** Exports lists clips requested through the VMS; files stay in the origin Frigate. */
 export function Exports() {
+  const t = useT();
   const qc = useQueryClient();
   const exports = useQuery(exportsQuery);
   const remove = useMutation({
@@ -18,7 +20,7 @@ export function Exports() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
-      <PageHeader title="Exportaciones" description="Clips pedidos desde Eventos o Grabaciones. Frigate los genera y el VMS los descarga por vos." />
+      <PageHeader title={t("Exportaciones")} description={t("Clips pedidos desde Eventos o Grabaciones. Frigate los genera y el VMS los descarga por vos.")} />
       <ErrorNote error={exports.error ?? remove.error} />
       {exports.data?.length === 0 && <Empty>Todavía no hay exportaciones.</Empty>}
       {!!exports.data?.length && (

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { KeyRound, Plus } from "lucide-react";
@@ -11,6 +12,7 @@ import { can } from "@/lib/perm";
 
 /** Groups of users. Grants given to a group apply to all its members. */
 export function Groups() {
+  const t = useT();
   const me = useQuery(meQuery);
   const groups = useQuery(groupsQuery);
   const users = useQuery(usersQuery);
@@ -24,8 +26,8 @@ export function Groups() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title="Grupos"
-        description="Los permisos que le des a un grupo valen para todos sus miembros."
+        title={t("Grupos")}
+        description={t("Los permisos que le des a un grupo valen para todos sus miembros.")}
         actions={
           manage ? (
             <Button variant="primary" onClick={() => setEditing("new")}>

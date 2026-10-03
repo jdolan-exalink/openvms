@@ -3,10 +3,12 @@ import type {
   FillLayerSpecification,
   GeoJSONSourceSpecification,
   LayerSpecification,
+  CircleLayerSpecification,
   LineLayerSpecification,
   SymbolLayerSpecification,
 } from "maplibre-gl";
-import type { Feature, FeatureCollection, Polygon } from "geojson";
+import type { Feature, FeatureCollection, LineString, Point, Polygon } from "geojson";
+import { ZONE_KIND_COLOR } from "@/lib/maps/zoneDraft";
 import type { Zone, ZoneKind } from "@/lib/maps/types";
 
 export const ZONES_SOURCE_ID = "zones";
@@ -15,6 +17,7 @@ export interface ZoneFeatureProperties {
   id: string;
   name: string;
   kind: ZoneKind;
+  color?: string;
 }
 
 /** One colour family per kind: security reads blue, perimeter amber, warning red. */
@@ -22,12 +25,12 @@ const kindColor: ExpressionSpecification = [
   "match",
   ["get", "kind"],
   "security",
-  "#1683f8",
+  ZONE_KIND_COLOR.security,
   "perimeter",
-  "#f59e0b",
+  ZONE_KIND_COLOR.perimeter,
   "warning",
-  "#ef3f46",
-  "#a855f7",
+  ZONE_KIND_COLOR.warning,
+  ZONE_KIND_COLOR.custom,
 ];
 
 export function zonesToFeatureCollection(zones: Zone[]): FeatureCollection<Polygon, ZoneFeatureProperties> {
@@ -47,6 +50,7 @@ export function zonesToFeatureCollection(zones: Zone[]): FeatureCollection<Polyg
         id: zone.id,
         name: zone.name,
         kind: zone.kind,
+        ...(zone.style.color ? { color: zone.style.color } : {}),
       },
     });
   }
@@ -70,7 +74,7 @@ export function buildZonesLayers(): LayerSpecification[] {
     type: "fill",
     source: ZONES_SOURCE_ID,
     paint: {
-      "fill-color": kindColor,
+      "fill-color": ["case", ["has", "color"], ["get", "color"], kindColor],
       "fill-opacity": 0.15,
     },
   };
@@ -80,7 +84,7 @@ export function buildZonesLayers(): LayerSpecification[] {
     type: "line",
     source: ZONES_SOURCE_ID,
     paint: {
-      "line-color": kindColor,
+      "line-color": ["case", ["has", "color"], ["get", "color"], kindColor],
       "line-width": 2,
       "line-opacity": 0.9,
     },
@@ -106,4 +110,66 @@ export function buildZonesLayers(): LayerSpecification[] {
   };
 
   return [zoneFill, zoneOutline, zoneLabel];
+}
+
+export const ZONE_SKETCH_SOURCE_ID = "zone-sketch";
+
+export interface ZoneSketch {
+  points: Array<{ lng: number; lat: number }>;
+  color: string;
+  closed: boolean;
+}
+
+/** sketchToFeatureCollection draws the polygon under construction, including the first vertices. */
+export function sketchToFeatureCollection(sketch?: ZoneSketch): FeatureCollection {
+  const features: Feature[] = [];
+  if (!sketch || sketch.points.length === 0) return { type: "FeatureCollection", features };
+  const color = sketch.color;
+  sketch.points.forEach((point, index) => {
+    const geometry: Point = { type: "Point", coordinates: [point.lng, point.lat] };
+    features.push({ type: "Feature", geometry, properties: { color, index } });
+  });
+  if (sketch.points.length >= 2) {
+    const coordinates = sketch.points.map((point) => [point.lng, point.lat]);
+    if (sketch.closed) coordinates.push([sketch.points[0]!.lng, sketch.points[0]!.lat]);
+    const geometry: LineString = { type: "LineString", coordinates };
+    features.push({ type: "Feature", geometry, properties: { color } });
+  }
+  if (sketch.points.length >= 3) {
+    const ring = sketch.points.map((point) => [point.lng, point.lat]);
+    ring.push([sketch.points[0]!.lng, sketch.points[0]!.lat]);
+    const geometry: Polygon = { type: "Polygon", coordinates: [ring] };
+    features.push({ type: "Feature", geometry, properties: { color } });
+  }
+  return { type: "FeatureCollection", features };
+}
+
+export function buildZoneSketchLayers(): LayerSpecification[] {
+  const fill: FillLayerSpecification = {
+    id: "zone-sketch-fill",
+    type: "fill",
+    source: ZONE_SKETCH_SOURCE_ID,
+    filter: ["==", ["geometry-type"], "Polygon"],
+    paint: { "fill-color": ["get", "color"], "fill-opacity": 0.28 },
+  };
+  const line: LineLayerSpecification = {
+    id: "zone-sketch-line",
+    type: "line",
+    source: ZONE_SKETCH_SOURCE_ID,
+    filter: ["==", ["geometry-type"], "LineString"],
+    paint: { "line-color": ["get", "color"], "line-width": 2, "line-dasharray": [1.2, 1] },
+  };
+  const vertex: CircleLayerSpecification = {
+    id: "zone-sketch-vertex",
+    type: "circle",
+    source: ZONE_SKETCH_SOURCE_ID,
+    filter: ["==", ["geometry-type"], "Point"],
+    paint: {
+      "circle-radius": 6,
+      "circle-color": ["get", "color"],
+      "circle-stroke-width": 2,
+      "circle-stroke-color": "#ffffff",
+    },
+  };
+  return [fill, line, vertex];
 }

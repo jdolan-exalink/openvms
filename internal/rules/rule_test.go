@@ -110,6 +110,19 @@ func TestConditionsMatchesServerOffline(t *testing.T) {
 	}
 }
 
+func TestConditionsVehicleAttributes(t *testing.T) {
+	c := rules.Conditions{VehicleTypes: []string{"pickup"}, VehicleColors: []string{"black"}}
+	if c.MatchesEvent(rules.EventContext{Labels: []string{"car"}}) {
+		t.Fatal("event without attributes must not match a vehicle rule")
+	}
+	if !c.MatchesEvent(rules.EventContext{VehicleType: "pickup", VehicleColor: "black"}) {
+		t.Fatal("expected pickup black to match")
+	}
+	if c.MatchesEvent(rules.EventContext{VehicleType: "suv", VehicleColor: "black"}) {
+		t.Fatal("did not expect suv to match a pickup rule")
+	}
+}
+
 func TestConditionsSiteFilter(t *testing.T) {
 	siteA, siteB := uuid.New(), uuid.New()
 	c := rules.Conditions{SiteIDs: []uuid.UUID{siteA}}

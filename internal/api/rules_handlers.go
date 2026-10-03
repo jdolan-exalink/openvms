@@ -28,6 +28,12 @@ func toRule(r rules.Rule) gen.Rule {
 	if len(c.Severities) > 0 {
 		cond.Severities = &c.Severities
 	}
+	if len(c.VehicleTypes) > 0 {
+		cond.VehicleTypes = &c.VehicleTypes
+	}
+	if len(c.VehicleColors) > 0 {
+		cond.VehicleColors = &c.VehicleColors
+	}
 	if c.DurationSeconds > 0 {
 		cond.DurationSeconds = &c.DurationSeconds
 	}
@@ -75,6 +81,12 @@ func fromRuleConditions(c *gen.RuleConditions) rules.Conditions {
 	}
 	if c.Severities != nil {
 		out.Severities = *c.Severities
+	}
+	if c.VehicleTypes != nil {
+		out.VehicleTypes = *c.VehicleTypes
+	}
+	if c.VehicleColors != nil {
+		out.VehicleColors = *c.VehicleColors
 	}
 	if c.DurationSeconds != nil {
 		out.DurationSeconds = *c.DurationSeconds

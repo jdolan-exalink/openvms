@@ -7,23 +7,30 @@ import type {
 
 export const CAMERAS_SOURCE_ID = "cameras";
 
-export function buildCamerasSource(): GeoJSONSourceSpecification {
-  return {
+/** Clustering starts only once the map is fairly far out, so nearby cameras stay editable longer. */
+export const CAMERA_CLUSTER_RADIUS = 28;
+export const CAMERA_CLUSTER_MAX_ZOOM = 11;
+
+export function buildCamerasSource(options?: { cluster?: boolean }): GeoJSONSourceSpecification {
+  const cluster = options?.cluster !== false;
+  const source: GeoJSONSourceSpecification = {
     type: "geojson",
     data: {
       type: "FeatureCollection",
       features: [],
     },
-    cluster: true,
-    clusterRadius: 50,
-    clusterMaxZoom: 16,
     promoteId: "id",
-    clusterProperties: {
-      alarms: ["+", ["case", [">", ["get", "alarms"], 0], 1, 0]],
-      offline: ["+", ["case", ["in", ["get", "st"], ["literal", ["offline", "unreachable", "no_signal"]]], 1, 0]],
-      warnings: ["+", ["case", ["in", ["get", "st"], ["literal", ["degraded"]]], 1, 0]],
-    },
   };
+  if (!cluster) return source;
+  source.cluster = true;
+  source.clusterRadius = CAMERA_CLUSTER_RADIUS;
+  source.clusterMaxZoom = CAMERA_CLUSTER_MAX_ZOOM;
+  source.clusterProperties = {
+    alarms: ["+", ["case", [">", ["get", "alarms"], 0], 1, 0]],
+    offline: ["+", ["case", ["in", ["get", "st"], ["literal", ["offline", "unreachable", "no_signal"]]], 1, 0]],
+    warnings: ["+", ["case", ["in", ["get", "st"], ["literal", ["degraded"]]], 1, 0]],
+  };
+  return source;
 }
 
 export function buildCameraLayers(): LayerSpecification[] {

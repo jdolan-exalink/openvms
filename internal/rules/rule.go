@@ -23,6 +23,8 @@ type Conditions struct {
 	Zones           []string    `json:"zones,omitempty"`
 	MapZoneIDs      []uuid.UUID `json:"map_zone_ids,omitempty"`
 	Severities      []string    `json:"severities,omitempty"`
+	VehicleTypes    []string    `json:"vehicle_types,omitempty"`
+	VehicleColors   []string    `json:"vehicle_colors,omitempty"`
 	DurationSeconds int         `json:"duration_seconds,omitempty"`
 }
 
@@ -62,18 +64,20 @@ type Notification struct {
 }
 
 type EventContext struct {
-	ID         uuid.UUID
-	TenantID   uuid.UUID
-	SiteID     uuid.UUID
-	ServerID   uuid.UUID
-	CameraID   uuid.UUID
-	CameraName string
-	SiteName   string
-	Severity   string
-	Labels     []string
-	Zones      []string
-	MapZoneIDs []uuid.UUID
-	Start      time.Time
+	ID           uuid.UUID
+	TenantID     uuid.UUID
+	SiteID       uuid.UUID
+	ServerID     uuid.UUID
+	CameraID     uuid.UUID
+	CameraName   string
+	SiteName     string
+	Severity     string
+	Labels       []string
+	Zones        []string
+	MapZoneIDs   []uuid.UUID
+	Start        time.Time
+	VehicleType  string
+	VehicleColor string
 }
 
 func containsID(ids []uuid.UUID, id uuid.UUID) bool {
@@ -116,6 +120,12 @@ func (c Conditions) MatchesEvent(ev EventContext) bool {
 		return false
 	}
 	if len(c.Zones) > 0 && !matchesAny(c.Zones, ev.Zones) {
+		return false
+	}
+	if len(c.VehicleTypes) > 0 && !matchesAny(c.VehicleTypes, []string{ev.VehicleType}) {
+		return false
+	}
+	if len(c.VehicleColors) > 0 && !matchesAny(c.VehicleColors, []string{ev.VehicleColor}) {
 		return false
 	}
 	if len(c.MapZoneIDs) > 0 {

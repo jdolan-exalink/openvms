@@ -1,31 +1,155 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ShieldCheck } from "lucide-react";
 import { api, unwrap, type Schemas } from "@/api/client";
 import { alarmAssigneesQuery } from "@/api/queries";
+import { VehicleFacts } from "@/components/VehicleMark";
+import { fmtDateTime } from "@/lib/format";
+import { listProtectedImages, protectRemoteImage } from "@/lib/protectedImages";
+import { MapGrowFrame, useGrowClose, type GrowRect } from "./MapGrowFrame";
 
 type Action = "acknowledge" | "assign" | "investigate" | "resolve" | "close" | "comments";
 const labels: Record<Action, string> = {
-  acknowledge: "Acknowledge", assign: "Assign", investigate: "Investigate", resolve: "Resolve", close: "Close", comments: "Add comment",
+  acknowledge: "Marcar como vista",
+  assign: "Asignar",
+  investigate: "Investigar",
+  resolve: "Resolver",
+  close: "Cerrar alarma",
+  comments: "Guardar comentario",
+};
+const statusLabel: Record<string, string> = {
+  open: "Nueva",
+  acknowledged: "Vista",
+  assigned: "Asignada",
+  investigating: "En revisión",
+  resolved: "Resuelta",
+  closed: "Cerrada",
 };
 
 export function AlarmPanel({ alarms, canManage }: { alarms: Schemas["Alarm"][]; canManage: boolean }) {
-  const [selected, setSelected] = useState<string>();
-  const alarm = alarms.find(item => item.id === selected);
-  return <section aria-label="Alarms" className="rounded border border-line bg-surface p-3">
-    <h2>Alarms</h2>
-    {!alarms.length && <p>No alarms in this site</p>}
-    <ul>{alarms.map(item => <li key={item.id}><button onClick={() => setSelected(item.id)}>
-      {item.camera_name} — {item.status}
-    </button></li>)}</ul>
-    {alarm && <AlarmDetail key={alarm.id} alarm={alarm} canManage={canManage} />}
-  </section>;
+  const [selected, setSelected] = useState<{ alarm: Schemas["Alarm"]; origin?: GrowRect }>();
+  const fresh = useFreshAlarmIds(alarms);
+  return (
+    <section aria-label="Alarms" className="space-y-2">
+      {!alarms.length && <p className="p-2 text-xs text-muted">No hay alarmas en este sitio</p>}
+      <ul className="space-y-2">
+        {alarms.map((item) => (
+          <li key={item.id} className={fresh.has(item.id) ? "alarm-card-in" : undefined}>
+            <AlarmCard alarm={item} onOpen={(origin) => setSelected({ alarm: item, origin })} />
+          </li>
+        ))}
+      </ul>
+      {selected && createPortal(
+        <AlarmPreview
+          alarm={selected.alarm}
+          origin={selected.origin}
+          canManage={canManage}
+          onClose={() => setSelected(undefined)}
+        />,
+        document.body,
+      )}
+    </section>
+  );
 }
 
-function AlarmDetail({ alarm, canManage }: { alarm: Schemas["Alarm"]; canManage: boolean }) {
+/** The first list is the current set. Later ids slide in once. */
+function useFreshAlarmIds(alarms: Schemas["Alarm"][]) {
+  const known = useRef<Set<string> | null>(null);
+  const [fresh, setFresh] = useState<Set<string>>(() => new Set());
+  const signature = alarms.map((alarm) => alarm.id).join("\0");
+  useEffect(() => {
+    const ids = signature ? signature.split("\0") : [];
+    if (known.current === null) {
+      known.current = new Set(ids);
+      return;
+    }
+    const arrived = ids.filter((id) => !known.current?.has(id));
+    for (const id of ids) known.current.add(id);
+    if (!arrived.length) return;
+    setFresh(new Set(arrived));
+    const timer = window.setTimeout(() => setFresh(new Set()), 700);
+    return () => window.clearTimeout(timer);
+  }, [signature]);
+  return fresh;
+}
+
+function AlarmCard({ alarm, onOpen }: { alarm: Schemas["Alarm"]; onOpen: (origin?: GrowRect) => void }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const snapshot = `/media/v1/events/${encodeURIComponent(alarm.event_id)}/snapshot.jpg`;
+  const seen = alarm.status !== "open";
+  return (
+    <button
+      type="button"
+      onClick={(event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        onOpen({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+      }}
+      className="block w-full overflow-hidden rounded-xl border border-bad/40 bg-bg/50 text-left shadow-sm hover:border-bad"
+    >
+      <span className="relative block h-24 bg-black">
+        {imageFailed ? (
+          <span className="flex h-full items-center justify-center text-[11px] text-white/60">Sin imagen</span>
+        ) : (
+          <img src={snapshot} alt="" className="size-full object-cover" onError={() => setImageFailed(true)} />
+        )}
+        <span className={`absolute left-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold ${seen ? "bg-black/70 text-white" : "bg-bad text-white"}`}>
+          {statusLabel[alarm.status] ?? alarm.status}
+        </span>
+      </span>
+      <span className="block space-y-1 px-2 py-1.5">
+        <span className="block truncate text-xs font-semibold text-ink">{alarm.camera_name}</span>
+        <VehicleFacts labels={alarm.event_labels} vehicle={alarm.vehicle} person={alarm.person} serverName={alarm.server_name} />
+        <span className="block text-[10px] text-muted">{fmtDateTime(alarm.created_at)}</span>
+      </span>
+    </button>
+  );
+}
+
+function AlarmPreview({ alarm, origin, canManage, onClose }: { alarm: Schemas["Alarm"]; origin?: GrowRect; canManage: boolean; onClose: () => void }) {
+  const [failed, setFailed] = useState(false);
+  const snapshot = `/media/v1/events/${encodeURIComponent(alarm.event_id)}/snapshot.jpg`;
+  return (
+    <MapGrowFrame label={`Alarma ${alarm.camera_name}`} origin={origin} onClose={onClose} fixed className="z-50">
+      <div className="relative aspect-video w-full bg-black">
+        {failed ? (
+          <p className="flex size-full items-center justify-center text-sm text-white/70">Imagen no disponible</p>
+        ) : (
+          <img src={snapshot} alt={`Alarma en ${alarm.camera_name}`} className="size-full object-contain" onError={() => setFailed(true)} />
+        )}
+        <div data-map-drag className="absolute inset-x-0 top-0 z-[3] flex cursor-grab items-center gap-2 bg-gradient-to-b from-black/80 to-transparent px-3 py-2 text-xs text-white active:cursor-grabbing">
+          <span className="rounded bg-bad px-1.5 py-0.5 text-[10px] font-semibold">{statusLabel[alarm.status] ?? alarm.status}</span>
+          <span className="min-w-0 truncate font-medium">{alarm.camera_name}</span>
+          <PreviewClose />
+        </div>
+      </div>
+      <div className="px-3 py-2">
+        <VehicleFacts labels={alarm.event_labels} vehicle={alarm.vehicle} person={alarm.person} serverName={alarm.server_name} />
+      </div>
+      <AlarmActions alarm={alarm} canManage={canManage} imageUrl={snapshot} />
+    </MapGrowFrame>
+  );
+}
+
+function PreviewClose() {
+  const close = useGrowClose();
+  return (
+    <button type="button" onClick={close} className="ml-auto rounded p-1 hover:bg-white/20" aria-label="Cerrar vista de alarma">
+      ×
+    </button>
+  );
+}
+
+function AlarmActions({ alarm, canManage, imageUrl }: { alarm: Schemas["Alarm"]; canManage: boolean; imageUrl: string }) {
   const client = useQueryClient();
   const [comment, setComment] = useState("");
   const [assignee, setAssignee] = useState("");
-  const history = useQuery({ queryKey: ["alarms", alarm.id, "transitions"],
+  const [protectError, setProtectError] = useState("");
+  const saved = useQuery({ queryKey: ["protected-images"], queryFn: listProtectedImages });
+  const protectedId = `alarm:${alarm.id}`;
+  const alreadyProtected = saved.data?.some((item) => item.id === protectedId) ?? false;
+  const history = useQuery({
+    queryKey: ["alarms", alarm.id, "transitions"],
     queryFn: async () => unwrap(await api.GET("/api/v1/alarms/{alarmId}/transitions", { params: { path: { alarmId: alarm.id } } })),
   });
   const assignees = useQuery({ ...alarmAssigneesQuery(alarm.id), enabled: canManage });
@@ -33,13 +157,22 @@ function AlarmDetail({ alarm, canManage }: { alarm: Schemas["Alarm"]; canManage:
     mutationFn: async (next: Action) => {
       if (!canManage) throw new Error("Alarm management permission required");
       const params = { path: { alarmId: alarm.id } };
+      const note = comment.trim();
       switch (next) {
-        case "acknowledge": return unwrap(await api.POST("/api/v1/alarms/{alarmId}/acknowledge", { params }));
-        case "resolve": return unwrap(await api.POST("/api/v1/alarms/{alarmId}/resolve", { params }));
-        case "assign": return unwrap(await api.POST("/api/v1/alarms/{alarmId}/assign", { params, body: { user_id: assignee } }));
-        case "investigate": return unwrap(await api.POST("/api/v1/alarms/{alarmId}/investigate", { params, body: { comment } }));
-        case "close": return unwrap(await api.POST("/api/v1/alarms/{alarmId}/close", { params, body: { comment } }));
-        case "comments": return unwrap(await api.POST("/api/v1/alarms/{alarmId}/comments", { params, body: { comment } }));
+        case "acknowledge":
+          await unwrap(await api.POST("/api/v1/alarms/{alarmId}/acknowledge", { params }));
+          if (note) await unwrap(await api.POST("/api/v1/alarms/{alarmId}/comments", { params, body: { comment: note } }));
+          return;
+        case "resolve":
+          return unwrap(await api.POST("/api/v1/alarms/{alarmId}/resolve", { params }));
+        case "assign":
+          return unwrap(await api.POST("/api/v1/alarms/{alarmId}/assign", { params, body: { user_id: assignee } }));
+        case "investigate":
+          return unwrap(await api.POST("/api/v1/alarms/{alarmId}/investigate", { params, body: { comment: note } }));
+        case "close":
+          return unwrap(await api.POST("/api/v1/alarms/{alarmId}/close", { params, body: { comment: note } }));
+        case "comments":
+          return unwrap(await api.POST("/api/v1/alarms/{alarmId}/comments", { params, body: { comment: note } }));
       }
     },
     onSuccess: () => {
@@ -47,27 +180,72 @@ function AlarmDetail({ alarm, canManage }: { alarm: Schemas["Alarm"]; canManage:
       void client.invalidateQueries({ queryKey: ["maps"] });
     },
   });
+  const protect = useMutation({
+    mutationFn: () => protectRemoteImage({
+      id: protectedId,
+      kind: "alarm",
+      title: alarm.camera_name,
+      detail: statusLabel[alarm.status] ?? alarm.status,
+      comment,
+      imageUrl,
+    }),
+    onSuccess: () => {
+      setProtectError("");
+      void client.invalidateQueries({ queryKey: ["protected-images"] });
+    },
+    onError: (error: Error) => setProtectError(error.message),
+  });
   const legal = (next: Action) => {
     if (next === "comments") return !!comment.trim();
     if (alarm.status === "closed") return false;
     if (alarm.status === "resolved" && !["close", "investigate"].includes(next)) return false;
+    if (next === "acknowledge" && alarm.status !== "open") return false;
     return next !== "assign" || !!assignee;
   };
-  return <div>
-    <h3>History</h3>
-    {history.isError && <p role="alert">{history.error.message}</p>}
-    <ul>{history.data?.map(item => <li key={item.id}>{item.at} {item.actor_name} {item.to_status} {item.comment}</li>)}</ul>
-    {canManage && <div>
-      <label>Comment<textarea aria-label="Comment" value={comment} onChange={event => setComment(event.target.value)} /></label>
-      <label>Assignee<select aria-label="Assignee" value={assignee} onChange={event => setAssignee(event.target.value)}>
-        <option value="">Select assignee</option>
-        {assignees.data?.map(item => <option key={item.id} value={item.id}>{item.display_name || item.username}</option>)}
-      </select></label>
-      {assignees.isError && <p role="alert">{assignees.error.message}</p>}
-      {(Object.keys(labels) as Action[]).map(next => <button key={next} disabled={action.isPending || !legal(next)}
-        onClick={() => action.mutate(next)}>{labels[next]}</button>)}
-      {action.isError && <p role="alert">{action.error.message}</p>}
-      {action.isSuccess && <p role="status">Action completed</p>}
-    </div>}
-  </div>;
+  return (
+    <div className="space-y-2 bg-surface p-3 text-xs text-ink">
+      {history.isError && <p role="alert">{history.error.message}</p>}
+      <ul className="max-h-16 space-y-0.5 overflow-auto text-[11px] text-muted">
+        {history.data?.map((item) => (
+          <li key={item.id}>{item.at} {item.actor_name} {item.to_status} {item.comment}</li>
+        ))}
+      </ul>
+      <button
+        type="button"
+        disabled={alreadyProtected || protect.isPending}
+        onClick={() => protect.mutate()}
+        className="inline-flex items-center gap-1 rounded border border-line px-2 py-1 hover:bg-raised disabled:opacity-60"
+      >
+        <ShieldCheck className="size-3.5" aria-hidden />
+        {alreadyProtected ? "Imagen protegida" : "Proteger imagen"}
+      </button>
+      {protectError && <p role="alert">{protectError}</p>}
+      {protect.isSuccess && <p role="status">La copia quedó en Imágenes protegidas</p>}
+      {canManage && (
+        <div className="space-y-2">
+          <label className="block">
+            Comentario
+            <textarea aria-label="Comment" value={comment} onChange={(event) => setComment(event.target.value)} className="mt-1 w-full rounded border border-line bg-bg px-2 py-1" rows={2} />
+          </label>
+          <label className="block">
+            Responsable
+            <select aria-label="Assignee" value={assignee} onChange={(event) => setAssignee(event.target.value)} className="mt-1 w-full rounded border border-line bg-bg px-2 py-1">
+              <option value="">Elegir responsable</option>
+              {assignees.data?.map((item) => <option key={item.id} value={item.id}>{item.display_name || item.username}</option>)}
+            </select>
+          </label>
+          {assignees.isError && <p role="alert">{assignees.error.message}</p>}
+          <div className="flex flex-wrap gap-1">
+            {(Object.keys(labels) as Action[]).map((next) => (
+              <button key={next} type="button" disabled={action.isPending || !legal(next)} onClick={() => action.mutate(next)} className="rounded border border-line px-2 py-1 hover:bg-raised disabled:opacity-50">
+                {labels[next]}
+              </button>
+            ))}
+          </div>
+          {action.isError && <p role="alert">{action.error.message}</p>}
+          {action.isSuccess && <p role="status">Acción registrada</p>}
+        </div>
+      )}
+    </div>
+  );
 }

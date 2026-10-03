@@ -102,6 +102,14 @@ services:
     environment:
       <<: *go-env
       TRUST_FORWARDED_FOR: "true"
+      HOST_PROC: /host/proc
+      HOST_DRM: /host/drm
+      HOST_DISK: /hostfs
+      WORKER_URL: http://worker:8081
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys/class/drm:/host/drm:ro
+      - /:/hostfs:ro
     ports: ["127.0.0.1:8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }

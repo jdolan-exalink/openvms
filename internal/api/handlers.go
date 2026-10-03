@@ -37,6 +37,7 @@ type Handlers struct {
 	Maps          *maps.Service
 	Features      config.Features
 	Log           *slog.Logger
+	WorkerURL     string
 	Checks        []health.Check
 	CheckTimeout  time.Duration
 	SchemaVersion func(ctx context.Context) (int64, error)

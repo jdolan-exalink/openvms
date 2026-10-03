@@ -1,26 +1,24 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { alarmsQuery, serversQuery, meQuery, camerasQuery } from "@/api/queries";
+import { alarmsQuery, cameraFoldersQuery, serversQuery, meQuery, camerasQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
 import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery, siteZonesQuery, unplacedCamerasQuery } from "@/lib/maps/api";
 import { applyFilters, mapUserPrefsQuery, mergeLayers, saveMapUserPrefs } from "@/lib/maps/prefs";
 import {
   DEFAULT_PLACEMENT,
-  canUndo,
   commitPlacement,
   emptyDraft,
   markConflict,
   pendingPlacements,
   rebasePlacement,
-  stageMany,
   updateStagedPosition,
   stagePlacement,
-  undoDraft,
   type DraftPlacement,
   type DraftState,
 } from "@/lib/maps/placementDraft";
-import { canvasDropPoint, spreadCameraPositions } from "@/lib/maps/editorInteractions";
+import { canvasDropPoint } from "@/lib/maps/editorInteractions";
 import { savePlacements } from "@/lib/maps/placements";
 import {
   addZonePoint,
@@ -29,6 +27,7 @@ import {
   reopenZonePolygon,
   undoZonePoint,
   validateZoneDraft,
+  ZONE_KIND_COLOR,
   zoneToDraft,
   type ZoneDraft,
 } from "@/lib/maps/zoneDraft";
@@ -37,27 +36,31 @@ import { EMPTY_FILTERS, type CameraEntity, type LayerPreference, type MapFilters
 import { MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { IncidentFocus } from "@/lib/maps/incidentPolicy";
 import { MapOperationsPanel } from "./panel/MapOperationsPanel";
+import { MapSocSidebar } from "./panel/MapSocSidebar";
+import { MapMaximizedCamera } from "./panel/MapMaximizedCamera";
+import { MapPlateSnapshot, type PlateSnapshotTarget } from "./panel/MapPlateSnapshot";
+import { captureGrowOrigin, rectFromElement, type GrowRect } from "./panel/MapGrowFrame";
 import { AlarmPanel } from "./panel/AlarmPanel";
-import { SiteHealthPanel } from "./panel/SiteHealthPanel";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import { CameraEventPopups } from "./events/CameraEventPopups";
 import { MapCanvas } from "./canvas/MapCanvas";
 import { MapToolbar } from "./MapToolbar";
-import { HierarchyBreadcrumb } from "./HierarchyBreadcrumb";
 import { CameraPreview } from "./panel/CameraPreview";
 import { CameraPanel } from "./panel/CameraPanel";
 import { CameraContextMenu } from "./panel/CameraContextMenu";
 import { LayersPanel } from "./panel/LayersPanel";
 import { FiltersPanel } from "./panel/FiltersPanel";
-import { UnplacedTray, DRAG_MIME } from "./editor/UnplacedTray";
+import { DRAG_MIME } from "./editor/UnplacedTray";
+import { MapEditSidebar } from "./editor/MapEditSidebar";
 import { PlacementPropsForm } from "./editor/PlacementPropsForm";
-import { CsvImportForm } from "./editor/CsvImportForm";
 import { ZonesPanel } from "./editor/ZonesPanel";
 import { HoverIntentManager, type HoverIntentState } from "@/lib/maps/hoverIntent";
 import { installPerfMetrics, perfMetricsEnabled, type PerfMetrics } from "@/lib/maps/perfMetrics";
 import { subscribeFrames } from "@/lib/realtime";
 import { saveSiteMonitoringCenter } from "@/lib/maps/sites";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
+import { usePinnedMapWindows } from "./panel/usePinnedMapWindows";
+import { useFeatures } from "@/lib/features";
 import { ErrorNote } from "../ui";
 import { Loader2 } from "lucide-react";
 
@@ -70,6 +73,12 @@ export interface MapShellProps {
   onSelectCamera?: (cameraId: string | undefined) => void;
   liveOnHover?: boolean;
   onModeChange?: (mode: MapMode) => void;
+  /** Host element for the mode tabs when the workspace draws one shared bar. */
+  modeSlot?: HTMLElement | null;
+  /** The workspace owns the bar, so this shell does not draw a second one. */
+  hostedChrome?: boolean;
+  /** Map catalog shown at the top of the edit sidebar. */
+  editorMaps?: ReactNode;
 }
 
 export function MapShell(props: MapShellProps) {
@@ -88,9 +97,13 @@ function MapShellContent({
   onSelectSite,
   onSelectCamera,
   onModeChange,
+  modeSlot,
+  hostedChrome = false,
+  editorMaps,
 }: MapShellProps) {
   const navigate = useNavigate();
   const me = useQuery(meQuery);
+  const { persistentPlayers } = useFeatures();
   const prefsQuery = useQuery(mapUserPrefsQuery);
   const storedPrefs = prefsQuery.data;
   const prefsSettled = prefsQuery.isSuccess || prefsQuery.isError;
@@ -100,8 +113,7 @@ function MapShellContent({
   // Preferences are restored at render time from the query result: the overrides only record
   // what the user changed during this visit, so a background refetch can never move a map the
   // operator is already working with, and no effect ever has to seed state.
-  const [focusModeOverride, setFocusModeOverride] = useState<"none" | "current-site">();
-  const focusMode = focusModeOverride ?? storedPrefs?.focus_mode ?? "none";
+  const focusMode = storedPrefs?.focus_mode ?? "none";
   const mapRef = useRef<MapLibreMap | null>(null);
   const [readyMap, setReadyMap] = useState<MapLibreMap | null>(null);
   useEffect(() => { realtimeStore.connect(); return () => realtimeStore.destroy(); }, [realtimeStore]);
@@ -128,7 +140,15 @@ function MapShellContent({
     setRenderedCameraId(initialCameraId);
     setSelectedCameraId(initialCameraId);
   }
-  const [pinnedCameraIds, setPinnedCameraIds] = useState<string[]>(initialCameraId ? [initialCameraId] : []);
+  const pinned = usePinnedMapWindows(me.data?.tenant_id ?? null, me.data?.id, `geo:${selectedSiteId ?? "overview"}`);
+  const seededWindow = useRef("");
+  useEffect(() => {
+    if (!pinned.ready || !initialCameraId) return;
+    const token = `${selectedSiteId ?? ""}:${initialCameraId}`;
+    if (seededWindow.current === token) return;
+    seededWindow.current = token;
+    pinned.pin(initialCameraId);
+  }, [pinned.ready, pinned.pin, initialCameraId, selectedSiteId]);
   const [contextMenu, setContextMenu] = useState<{ cameraId: string; x: number; y: number } | null>(null);
   const [hoverState, setHoverState] = useState<HoverIntentState>({
     cameraId: null,
@@ -184,6 +204,10 @@ function MapShellContent({
     ...camerasQuery({ site_id: currentSite?.id }),
     enabled: !!currentSite && can(me.data, "cameras.view"),
   });
+  const foldersQuery = useQuery({
+    ...cameraFoldersQuery,
+    enabled: !!currentSite && can(me.data, "cameras.view"),
+  });
 
   // --- Placement editor (M-W8) -------------------------------------------------------
   // Everything the operator changes stays in the draft; nothing is written until Save,
@@ -204,9 +228,12 @@ function MapShellContent({
   const cameraDragMovedRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [dropReady, setDropReady] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [maximizedCameraId, setMaximizedCameraId] = useState<string>();
+  const [maximizedOrigin, setMaximizedOrigin] = useState<GrowRect>();
+  const [plateSnapshot, setPlateSnapshot] = useState<PlateSnapshotTarget>();
   const [saveError, setSaveError] = useState<string>();
   const pending = pendingPlacements(draft);
-  const siteCenter = currentSite?.center?.kind === "geo" ? currentSite.center : undefined;
   const knownRevision = (entityId: string): number | undefined =>
     draft.revisions[entityId] ?? entitiesQuery.data?.entities.find((e) => e.id === entityId)?.revision;
 
@@ -312,19 +339,6 @@ function MapShellContent({
     placeCameraAt(cameraId, { lng: point.lng, lat: point.lat });
   };
 
-  const handlePlaceAll = () => {
-    if (!currentSite || !siteCenter || !unplacedCameras?.length) return;
-    setArmedCameraId(undefined);
-    setDraft(stageMany(draft, spreadCameraPositions(unplacedCameras.filter(camera => !draft.entries[camera.id]).map(camera => camera.id), siteCenter).map((camera) => ({
-      entityId: camera.id,
-      entityType: "camera" as const,
-      siteId: currentSite.id,
-      lat: camera.lat,
-      lng: camera.lng,
-      ...DEFAULT_PLACEMENT,
-    }))));
-  };
-
   const handleDraftChange = (patch: Partial<DraftPlacement>) => {
     if (!activeDraftId) return;
     const current = draft.entries[activeDraftId];
@@ -351,6 +365,12 @@ function MapShellContent({
           queryClient.invalidateQueries({ queryKey: ["maps", "unplaced", currentSite.id] }),
         ]);
       }
+      if (outcome.saved.length > 0 && outcome.conflicts.length === 0 && outcome.failed.length === 0) {
+        setArmedCameraId(undefined);
+        setActiveDraftId(undefined);
+        setMode("live");
+        onModeChange?.("live");
+      }
     } finally {
       setSaving(false);
     }
@@ -365,19 +385,6 @@ function MapShellContent({
       (next, entityId) => rebasePlacement(next, entityId, fresh.entities.find((e) => e.id === entityId)?.revision),
       prev,
     ));
-  };
-
-  // --- CSV import (M-B8) ---------------------------------------------------------------
-  // The import endpoint demands maps.edit_device, so the entry point is offered only to
-  // that permission; only an apply refreshes the lists (a dry run writes nothing).
-  const canImport = can(me.data, "maps.edit_device");
-  const [importOpen, setImportOpen] = useState(false);
-  const handleImportApplied = async () => {
-    if (!currentSite) return;
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["maps", "sites", currentSite.id, "entities"] }),
-      queryClient.invalidateQueries({ queryKey: ["maps", "unplaced", currentSite.id] }),
-    ]);
   };
 
   // --- Zone editor (M-W9) --------------------------------------------------------------
@@ -398,8 +405,9 @@ function MapShellContent({
     setZoneDraft(undefined);
     setZoneError(undefined);
     setSaveError(undefined);
-    setImportOpen(false);
-    setPinnedCameraIds([]);
+    setMaximizedCameraId(undefined);
+    setMaximizedOrigin(undefined);
+    setPlateSnapshot(undefined);
     setContextMenu(null);
   }
 
@@ -466,6 +474,40 @@ function MapShellContent({
     void snapshot.revision;
     return realtimeStore.patchCameras(baseCameras).cameras;
   }, [baseCameras, realtimeStore, snapshot.revision]);
+  const editCameras = useMemo(() => {
+    const placed = new Set(cameras.map((camera) => camera.id));
+    for (const id of Object.keys(draft.entries)) placed.add(id);
+    const rows = new Map<string, { id: string; name: string; status: string; serverId?: string; serverName?: string; folderId?: string | null; placed: boolean }>();
+    for (const camera of inventoryQuery.data ?? []) {
+      rows.set(camera.id, {
+        id: camera.id,
+        name: camera.display_name,
+        status: camera.status,
+        serverId: camera.server_id,
+        serverName: servers.data?.find((server) => server.id === camera.server_id)?.name,
+        folderId: camera.folder_id,
+        placed: placed.has(camera.id),
+      });
+    }
+    for (const camera of cameras) {
+      if (!rows.has(camera.id)) rows.set(camera.id, { id: camera.id, name: camera.name, status: camera.status, serverId: camera.serverId, placed: true });
+    }
+    for (const camera of unplacedCameras ?? []) {
+      const current = rows.get(camera.id);
+      rows.set(camera.id, {
+        id: camera.id,
+        name: camera.name,
+        status: camera.status,
+        serverId: current?.serverId,
+        serverName: current?.serverName,
+        folderId: current?.folderId,
+        placed: placed.has(camera.id),
+      });
+    }
+    return [...rows.values()];
+  }, [cameras, draft.entries, inventoryQuery.data, servers.data, unplacedCameras]);
+  const treeFolders = (foldersQuery.data?.items ?? []).map((folder) => ({ id: folder.id, name: folder.name, serverId: folder.server_id, sortOrder: folder.sort_order }));
+  const treeServers = (servers.data ?? []).map((server) => ({ id: server.id, name: server.name }));
 
   // --- Performance overlay (M-W10) --------------------------------------------------
   // Installed only in dev builds or with `?perf` in the URL: production users never pay
@@ -553,18 +595,16 @@ function MapShellContent({
   }, [baseCameras, currentSite?.id, focusPolicy, realtimeStore]);
 
   const pinnedCameras = useMemo(() => {
-    const ids = selectedCameraId && !pinnedCameraIds.includes(selectedCameraId)
-      ? [...pinnedCameraIds.slice(-3), selectedCameraId] : pinnedCameraIds;
-    return ids
-      .map((id) => cameras.find((c) => c.id === id))
-      .filter((c): c is CameraEntity => c !== undefined);
-  }, [pinnedCameraIds, cameras, selectedCameraId]);
+    return pinned.windows
+      .map((window) => cameras.find((camera) => camera.id === window.id))
+      .filter((camera): camera is CameraEntity => camera !== undefined);
+  }, [pinned.windows, cameras]);
 
   const hoveredCamera = useMemo(() => {
     if (!hoverState.cameraId || hoverState.stage === "none") return null;
-    if (pinnedCameraIds.includes(hoverState.cameraId)) return null;
+    if (pinned.windows.some((window) => window.id === hoverState.cameraId)) return null;
     return cameras.find((c) => c.id === hoverState.cameraId) ?? null;
-  }, [hoverState, pinnedCameraIds, cameras]);
+  }, [hoverState, pinned.windows, cameras]);
 
   const contextMenuCamera = useMemo(() => {
     if (!contextMenu) return null;
@@ -644,6 +684,30 @@ function MapShellContent({
     onModeChange?.(nextMode);
   };
 
+  const modeChrome = (
+    <>
+      <MapToolbar
+        embedded={!!modeSlot}
+        mode={mode}
+        onModeChange={handleModeChange}
+        canEdit={canEdit}
+        coverage={coverage}
+        onToggleCoverage={() => setLayersOverride({ ...layers, coverage: !layers.coverage })}
+        onToggleLayers={() => setLayersOpen(!layersOpen)}
+        onToggleFilters={() => setFiltersOpen(!filtersOpen)}
+        layersActive={layersOpen}
+        filtersActive={filtersOpen}
+      />
+      {can(me.data, "live.view") && (
+        <label className="order-6 flex items-center gap-2 px-1 text-xs">
+          <input type="checkbox" checked={hoverLiveEnabled}
+            onChange={(event) => setHoverLiveOverride(event.target.checked)} />
+          Live on hover
+        </label>
+      )}
+    </>
+  );
+
 
   const handleSelectSite = (siteId: string | undefined) => {
     focusPolicy.interact();
@@ -654,17 +718,11 @@ function MapShellContent({
   };
 
   const handlePinCamera = (cameraId: string) => {
-    setPinnedCameraIds((prev) => {
-      if (prev.includes(cameraId)) return prev;
-      if (prev.length >= 4) {
-        return [...prev.slice(1), cameraId]; // FIFO drop oldest
-      }
-      return [...prev, cameraId];
-    });
+    pinned.pin(cameraId);
   };
 
   const handleUnpinCamera = (cameraId: string) => {
-    setPinnedCameraIds((prev) => prev.filter((id) => id !== cameraId));
+    pinned.unpin(cameraId);
     if (selectedCameraId === cameraId) {
       setSelectedCameraId(undefined);
       onSelectCamera?.(undefined);
@@ -673,7 +731,9 @@ function MapShellContent({
 
   const handleOpenLive = (cameraId: string) => {
     if (!can(me.data, "live.view")) return;
-    void navigate({ to: "/live", search: { camera: cameraId } });
+    setMaximizedOrigin(captureGrowOrigin(cameraId) ?? rectFromElement(document.activeElement));
+    setMaximizedCameraId(cameraId);
+    setContextMenu(null);
   };
 
   const handleAddToLive = (cameraId: string) => {
@@ -705,7 +765,7 @@ function MapShellContent({
   };
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-bg"
+    <div className="relative flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-bg"
       onPointerDownCapture={() => focusPolicy.interact()} onWheelCapture={() => focusPolicy.interact()}
       onKeyDownCapture={() => focusPolicy.interact()}
       onDragOver={(event) => {
@@ -721,44 +781,14 @@ function MapShellContent({
       {dropReady && <div role="status" className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/10">
         <span className="rounded-lg bg-surface px-4 py-2 text-sm font-medium text-accent shadow-lg">Suelta la cámara para colocarla</span>
       </div>}
-      {/* Floating Top Controls Bar */}
-      <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex flex-wrap items-center justify-between gap-2 px-4">
-        <div className="pointer-events-auto">
-          <HierarchyBreadcrumb
-            sites={sites}
-            currentSite={currentSite}
-            onSelectSite={(id) => handleSelectSite(id)}
-            onClearSite={() => handleSelectSite(undefined)}
-          />
+      {modeSlot ? createPortal(modeChrome, modeSlot) : hostedChrome ? null : (
+        <div className="pointer-events-none absolute left-3 top-3 z-30">
+          <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-white/10 bg-surface/90 p-1 shadow-lg backdrop-blur">{modeChrome}</div>
         </div>
-
-        <div className="pointer-events-auto flex items-center gap-2">
-          {can(me.data, "live.view") && (
-            <label className="flex items-center gap-2 rounded border border-line bg-surface px-2 py-1 text-xs">
-              <input type="checkbox" checked={hoverLiveEnabled}
-                onChange={(event) => setHoverLiveOverride(event.target.checked)} />
-              Live on hover
-            </label>
-          )}
-          <label>Incident focus<select aria-label="Incident focus" value={focusMode} onChange={event => {
-            setFocusModeOverride(event.target.value === "current-site" ? "current-site" : "none");
-          }}><option value="none">None</option><option value="current-site">Current site</option></select></label>
-          <MapToolbar
-            mode={mode}
-            onModeChange={handleModeChange}
-            canEdit={canEdit}
-            coverage={coverage}
-            onToggleCoverage={() => setLayersOverride({ ...layers, coverage: !layers.coverage })}
-            onToggleLayers={() => setLayersOpen(!layersOpen)}
-            onToggleFilters={() => setFiltersOpen(!filtersOpen)}
-            layersActive={layersOpen}
-            filtersActive={filtersOpen}
-          />
-        </div>
-      </div>
+      )}
 
       {/* Map Canvas */}
-      <div className="relative h-full w-full flex-1">
+      <div data-map-stage className="relative min-h-0 w-full flex-1 overflow-hidden">
         <MapCanvas
           realtimeStore={realtimeStore}
           onMapReady={map => {
@@ -787,43 +817,59 @@ function MapShellContent({
           onContextMenuCamera={(id, point) => setContextMenu({ cameraId: id, ...point })}
           onSelectSite={(id) => handleSelectSite(id)}
           onMapClick={handleMapClick}
-          onCameraDragStart={editActive ? handleCameraDragStart : undefined}
-          onCameraDragMove={editActive ? handleCameraDragMove : undefined}
-          onCameraDragEnd={editActive ? handleCameraDragEnd : undefined}
+          onCameraDragStart={editActive && !(zoneDraft && !zoneDraft.closed) ? handleCameraDragStart : undefined}
+          onCameraDragMove={editActive && !(zoneDraft && !zoneDraft.closed) ? handleCameraDragMove : undefined}
+          onCameraDragEnd={editActive && !(zoneDraft && !zoneDraft.closed) ? handleCameraDragEnd : undefined}
+          drawingZone={!!zoneDraft && !zoneDraft.closed}
+          zoneSketch={zoneDraft ? { points: zoneDraft.points, color: zoneDraft.color || ZONE_KIND_COLOR[zoneDraft.kind], closed: zoneDraft.closed } : undefined}
+          clusterCameras={!editActive}
         />
 
         <CameraEventPopups map={readyMap} cameras={visibleCameras} tenantId={me.data?.tenant_id}
-          siteId={currentSite?.id} canEvents={can(me.data, "events.view")} canSnapshots={can(me.data, "snapshots.view")} />
+          siteId={currentSite?.id} canEvents={can(me.data, "events.view")} canSnapshots={can(me.data, "snapshots.view")}
+          quietNoticeId={plateSnapshot?.id}
+          onOpenPlate={(target) => setPlateSnapshot(target)} />
 
-        <aside className="absolute left-3 top-28 md:top-20 z-10 max-h-[65%] w-72 overflow-auto space-y-2">
-          <MapOperationsPanel
-            mode={mode} sites={sites} currentSite={currentSite} requestedSiteId={selectedSiteId}
-            cameras={cameras} inventory={inventoryQuery.data} visibleCount={visibleCameras.length}
-            camerasVisible={layers.cameras} canEdit={canEdit}
-            canLive={can(me.data, "live.view")} canEvents={can(me.data, "events.view")}
-            canPlayback={can(me.data, "recordings.view")} canInventory={can(me.data, "cameras.view")}
-            selectedCameraId={selectedCameraId}
-            loading={overviewQuery.isLoading || (!!currentSite && entitiesQuery.isLoading)}
-            errors={[
-              { label: "Site overview", error: overviewQuery.error, retry: () => void overviewQuery.refetch() },
-              { label: "Camera placements", error: entitiesQuery.error, retry: () => void entitiesQuery.refetch() },
-              { label: "Camera inventory", error: inventoryQuery.error, retry: () => void inventoryQuery.refetch() },
-              { label: "Zones", error: zonesQuery.error, retry: () => void zonesQuery.refetch() },
-              { label: "Unplaced cameras", error: unplacedQuery.error, retry: () => void unplacedQuery.refetch() },
-              { label: "Saved preferences", error: prefsQuery.error, retry: () => void prefsQuery.refetch() },
-            ]}
-            onSelectSite={handleSelectSite} onSelectCamera={handleSelectCamera}
-            onEdit={() => handleModeChange("edit")} onOpenLive={handleOpenLive}
-            onEvents={(cameraId) => void navigate({ to: "/events", search: { camera: cameraId, site: currentSite?.id } })}
-            onPlayback={(cameraId) => void navigate({ to: "/playback", search: { camera: cameraId } })}
-            onResetVisibility={() => { setFiltersOverride(EMPTY_FILTERS); setLayersOverride({ ...layers, cameras: true, sites: true }); }}
+        {!editActive && (
+          <MapSocSidebar
+            open={sidebarOpen}
+            onToggle={() => setSidebarOpen((current) => !current)}
+            alarmCount={alarms.data?.length ?? 0}
+            showAlarms={!!currentSite && can(me.data, "alarms.view")}
+            showLpr={can(me.data, "lpr.view")}
+            siteId={currentSite?.id}
+            onSelectCamera={handleSelectCamera}
+            onOpenRead={setPlateSnapshot}
+            cameras={<>
+              <MapOperationsPanel
+                mode={mode} sites={sites} currentSite={currentSite} requestedSiteId={selectedSiteId}
+                cameras={cameras} inventory={inventoryQuery.data} folders={treeFolders} servers={treeServers} visibleCount={visibleCameras.length}
+                camerasVisible={layers.cameras} canEdit={canEdit}
+                canLive={can(me.data, "live.view")} canEvents={can(me.data, "events.view")}
+                canPlayback={can(me.data, "recordings.view")} canInventory={can(me.data, "cameras.view")}
+                selectedCameraId={selectedCameraId}
+                loading={overviewQuery.isLoading || (!!currentSite && entitiesQuery.isLoading)}
+                errors={[
+                  { label: "Site overview", error: overviewQuery.error, retry: () => void overviewQuery.refetch() },
+                  { label: "Camera placements", error: entitiesQuery.error, retry: () => void entitiesQuery.refetch() },
+                  { label: "Camera inventory", error: inventoryQuery.error, retry: () => void inventoryQuery.refetch() },
+                  { label: "Zones", error: zonesQuery.error, retry: () => void zonesQuery.refetch() },
+                  { label: "Unplaced cameras", error: unplacedQuery.error, retry: () => void unplacedQuery.refetch() },
+                  { label: "Saved preferences", error: prefsQuery.error, retry: () => void prefsQuery.refetch() },
+                ]}
+                onSelectSite={handleSelectSite} onSelectCamera={handleSelectCamera}
+                onEdit={() => handleModeChange("edit")} onOpenLive={handleOpenLive}
+                onEvents={(cameraId) => void navigate({ to: "/events", search: { camera: cameraId, site: currentSite?.id } })}
+                onPlayback={(cameraId) => void navigate({ to: "/playback", search: { camera: cameraId } })}
+                onResetVisibility={() => { setFiltersOverride(EMPTY_FILTERS); setLayersOverride({ ...layers, cameras: true, sites: true }); }}
+              />
+            </>}
+            alarms={<>
+              {alarms.isError && <ErrorNote error={alarms.error} />}
+              <AlarmPanel alarms={alarms.data ?? []} canManage={can(me.data, "alarms.manage")} />
+            </>}
           />
-          {currentSite && can(me.data, "alarms.view") && <>
-            {alarms.isError && <ErrorNote error={alarms.error} />}
-            <AlarmPanel alarms={alarms.data ?? []} canManage={can(me.data, "alarms.manage")} />
-          </>}
-          {currentSite && entitiesQuery.isSuccess && <SiteHealthPanel cameras={cameras} siteId={currentSite.id} onSite={handleSelectSite} onCamera={handleSelectCamera} />}
-        </aside>
+        )}
 
         {/* Layer and filter preference panels */}
         {(layersOpen || filtersOpen) && (
@@ -837,112 +883,100 @@ function MapShellContent({
           </div>
         )}
 
-        {/* Placement editor: unplaced tray, the unsaved change's properties, save & undo */}
+        {editActive && editorMaps && (
+          <div className="absolute left-3 top-16 z-30 w-72 rounded-xl border border-white/10 bg-surface/90 p-2 text-ink shadow-2xl backdrop-blur">
+            {editorMaps}
+          </div>
+        )}
+
         {editActive && (
-          <aside className="absolute bottom-3 left-1/2 z-30 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-start gap-2">
-            {unplacedCameras ? <UnplacedTray
-              siteName={currentSite?.name}
-              cameras={unplacedCameras.map(camera => ({ ...camera,
-                serverName: servers.data?.find(server => server.id === inventoryQuery.data?.find(item => item.id === camera.id)?.server_id)?.name,
-              }))}
-              armedId={armedCameraId}
-              onArm={setArmedCameraId}
-              onPlaceAll={siteCenter ? handlePlaceAll : undefined}
-              onImport={canImport ? () => setImportOpen(true) : undefined}
-            /> : <p role="status" className="rounded border border-line bg-surface p-3 text-xs">Unplaced camera inventory is unavailable. Wait for data or retry the failed request.</p>}
-            {importOpen && currentSite && (
-              <CsvImportForm
-                siteId={currentSite.id}
-                onClose={() => setImportOpen(false)}
-                onApplied={() => void handleImportApplied()}
-              />
-            )}
-            {activeDraftId && draft.entries[activeDraftId] && (
-              <PlacementPropsForm
-                name={cameras.find((camera) => camera.id === activeDraftId)?.name
-                  ?? (unplacedCameras ?? []).find((camera) => camera.id === activeDraftId)?.name
-                  ?? "Cámara"}
-                draft={draft.entries[activeDraftId]}
-                onChange={handleDraftChange}
-              />
-            )}
-            {pending.length > 0 && (
-              <div className="w-56 rounded border border-line bg-surface p-3 shadow-sm">
-                <p className="mb-2 text-xs text-muted">{pending.length} cambio(s) sin guardar</p>
-                {saveError && (
-                  <p role="alert" className="mb-2 text-xs text-bad">{saveError}</p>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  {draft.conflicts.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => void handleRebase()}
-                      className="rounded border border-bad px-2 py-1 text-xs font-medium text-bad"
-                    >
-                      Rebase
-                    </button>
-                  )}
+          <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-30 flex w-80 min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-surface/90 text-ink shadow-2xl backdrop-blur">
+            <header className="border-b border-white/10 px-3 py-2">
+              <h2 className="text-sm font-semibold">Edición</h2>
+              <p className="text-[11px] text-muted">{pending.length} cambio(s) sin guardar</p>
+            </header>
+            <div className="shrink-0 space-y-2 border-b border-white/10 p-2">
+              {unplacedCameras === undefined && (
+                <p role="status" className="text-xs text-muted">El inventario de cámaras sin ubicar no está disponible.</p>
+              )}
+              {saveError && <p role="alert" className="text-xs text-bad">{saveError}</p>}
+              {draft.conflicts.length > 0 && (
+                <button type="button" onClick={() => void handleRebase()} className="rounded border border-bad px-2 py-1 text-xs font-medium text-bad">
+                  Rebase
+                </button>
+              )}
+              {can(me.data, "maps.edit") && (
+                <div>
+                  {centerError && <p role="alert" className="mb-1 text-xs text-bad">{centerError}</p>}
                   <button
                     type="button"
-                    onClick={() => setDraft(undoDraft(draft))}
-                    disabled={!canUndo(draft)}
-                    className="rounded border border-line px-2 py-1 text-xs text-ink disabled:opacity-50"
+                    disabled={centerSaving}
+                    onClick={() => void handleSetMonitoringCenter()}
+                    className="w-full rounded border border-line px-2 py-1 text-xs text-ink hover:bg-raised disabled:opacity-50"
+                    title="Guarda la vista actual como centro del sitio: al entrar al mapa se abre aquí"
                   >
-                    Deshacer
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleSave()}
-                    disabled={saving}
-                    className="rounded bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
-                  >
-                    Guardar ({pending.length})
+                    Fijar centro de monitoreo aquí
                   </button>
                 </div>
+              )}
+              {activeDraftId && draft.entries[activeDraftId] && (
+                <PlacementPropsForm
+                  name={cameras.find((camera) => camera.id === activeDraftId)?.name
+                    ?? (unplacedCameras ?? []).find((camera) => camera.id === activeDraftId)?.name
+                    ?? "Cámara"}
+                  draft={draft.entries[activeDraftId]}
+                  onChange={handleDraftChange}
+                />
+              )}
+            </div>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="min-h-0 flex-1 p-2">
+                <MapEditSidebar cameras={editCameras} folders={treeFolders} servers={treeServers} armedId={armedCameraId} onArm={setArmedCameraId} />
               </div>
-            )}
-            {can(me.data, "maps.edit") && (
-              <div className="rounded border border-line bg-surface p-2 shadow-sm">
-                {centerError && <p role="alert" className="mb-1 text-xs text-bad">{centerError}</p>}
-                <button
-                  type="button"
-                  disabled={centerSaving}
-                  onClick={() => void handleSetMonitoringCenter()}
-                  className="w-full rounded border border-line px-2 py-1 text-xs text-ink hover:bg-raised disabled:opacity-50"
-                  title="Guarda la vista actual como centro del sitio: al entrar al mapa se abre aquí"
-                >
-                  Fijar centro de monitoreo aquí
-                </button>
+              <div className="max-h-[48%] shrink-0 overflow-auto border-t border-white/10">
+                <ZonesPanel
+                  zones={zonesQuery.data ?? []}
+                  draft={zoneDraft}
+                  canEdit={canCreateZone}
+                  error={zoneError}
+                  saving={zoneSaving}
+                  onStartCreate={handleZoneStart}
+                  onSelectZone={handleZoneSelect}
+                  onDraftChange={handleZoneDraftPatch}
+                  onClosePolygon={() => setZoneDraft((prev) => (prev ? closeZonePolygon(prev) : prev))}
+                  onReopenPolygon={() => setZoneDraft((prev) => (prev ? reopenZonePolygon(prev) : prev))}
+                  onUndoPoint={() => setZoneDraft((prev) => (prev ? undoZonePoint(prev) : prev))}
+                  onSave={() => void handleZoneSave()}
+                  onDelete={(zoneId) => void handleZoneDelete(zoneId)}
+                  onCancel={() => {
+                    setZoneDraft(undefined);
+                    setZoneError(undefined);
+                  }}
+                />
               </div>
-            )}
-          </aside>
-        )}
-        {/* Zone editor: pick or draw a zone, then save the geometry the backend validates */}
-        {editActive && (
-          <aside className="absolute bottom-3 right-3 z-30 max-h-[70%] w-80 overflow-auto">
-            <ZonesPanel
-              zones={zonesQuery.data ?? []}
-              draft={zoneDraft}
-              canEdit={canCreateZone}
-              error={zoneError}
-              saving={zoneSaving}
-              onStartCreate={handleZoneStart}
-              onSelectZone={handleZoneSelect}
-              onDraftChange={handleZoneDraftPatch}
-              onClosePolygon={() => setZoneDraft((prev) => (prev ? closeZonePolygon(prev) : prev))}
-              onReopenPolygon={() => setZoneDraft((prev) => (prev ? reopenZonePolygon(prev) : prev))}
-              onUndoPoint={() => setZoneDraft((prev) => (prev ? undoZonePoint(prev) : prev))}
-              onSave={() => void handleZoneSave()}
-              onDelete={(zoneId) => void handleZoneDelete(zoneId)}
-              onCancel={() => {
-                setZoneDraft(undefined);
-                setZoneError(undefined);
-              }}
-            />
+            </div>
+            <footer className="flex shrink-0 gap-2 border-t border-white/10 p-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setDraft(emptyDraft());
+                  setArmedCameraId(undefined);
+                  setActiveDraftId(undefined);
+                  setSaveError(undefined);
+                  handleModeChange("live");
+                }}
+                className="flex-1 rounded border border-line px-2 py-1.5 text-xs text-ink"
+              >
+                Cancelar
+              </button>
+              <button type="button" onClick={() => void handleSave()} disabled={saving || pending.length === 0} className="flex-1 rounded bg-accent px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+                {pending.length > 0 ? `Guardar (${pending.length})` : "Guardar ubicaciones"}
+              </button>
+            </footer>
           </aside>
         )}
         {/* Hover preview floating card */}
-        {mode === "live" && can(me.data, "live.view") && hoveredCamera && (
+        {mode === "live" && can(me.data, "live.view") && hoveredCamera && hoveredCamera.id !== maximizedCameraId && (
           <CameraPreview
             camera={hoveredCamera}
             onHoverEnter={() => hoverManager.cancelLeave()}
@@ -951,6 +985,7 @@ function MapShellContent({
             stage={hoverState.stage}
             position={{ x: hoverState.x, y: hoverState.y }}
             liveOnHover={hoverLiveEnabled}
+            persistent={persistentPlayers}
             canPreview={can(me.data, "live.view")}
             onPin={handlePinCamera}
             onOpenLive={handleOpenLive}
@@ -959,17 +994,30 @@ function MapShellContent({
 
         {/* Pinned Camera Panel (max 4 pinned previews) */}
         <CameraPanel
-          pinnedCameras={mode === "live" && can(me.data, "live.view") ? pinnedCameras : []}
-          allCameras={cameras}
+          pinnedCameras={mode === "live" && can(me.data, "live.view") ? pinnedCameras.filter((camera) => camera.id !== maximizedCameraId) : []}
+          windows={pinned.windows}
           sites={sites}
           onUnpin={handleUnpinCamera}
-          onSelectCamera={handleSelectCamera}
           onOpenLive={handleOpenLive}
-          onAddToLive={can(me.data, "live.view") ? handleAddToLive : undefined}
+          onMove={pinned.move}
+          onArrange={pinned.arrange}
+          persistent={persistentPlayers}
           canPreview={can(me.data, "live.view")}
         />
 
         {/* Right-click Context Menu */}
+        {maximizedCameraId && cameras.find((camera) => camera.id === maximizedCameraId) && (
+          <MapMaximizedCamera
+            camera={cameras.find((camera) => camera.id === maximizedCameraId)!}
+            origin={maximizedOrigin}
+            persistent={persistentPlayers}
+            closeOnEscape={!plateSnapshot}
+            onClose={() => { setMaximizedCameraId(undefined); setMaximizedOrigin(undefined); }}
+          />
+        )}
+
+        {plateSnapshot && <MapPlateSnapshot target={plateSnapshot} onClose={() => setPlateSnapshot(undefined)} />}
+
         {mode === "live" && can(me.data, "live.view") && contextMenu && contextMenuCamera && (
           <CameraContextMenu
             camera={contextMenuCamera}

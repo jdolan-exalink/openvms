@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { cn } from "@/lib/cn";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { PlayerSession, type SessionSnapshot } from "@/lib/live/PlayerSession";
 import { usePlayerSession } from "@/lib/live/PlayerSessionProvider";
 import { SurfaceSlot, useSurfaceLayer } from "@/lib/live/SurfaceLayer";
+import { IDENTITY_ZOOM, type DigitalZoom } from "@/lib/live/digitalZoom";
+import { ZoomFrame } from "./DigitalZoom";
 import { PlayerStatusOverlay } from "./PlayerStatusOverlay";
 
 type MsePlayerProps = {
@@ -34,6 +35,8 @@ type MsePlayerProps = {
    * stays alive with its last frame and reconnects when this turns false again. Persistent only.
    */
   suspended?: boolean;
+  /** How the picture fills the tile. Map windows use cover so the snapshot underneath is fully hidden. */
+  objectFit?: "contain" | "cover";
 };
 
 /**
@@ -41,35 +44,27 @@ type MsePlayerProps = {
  * go2rtc MSE websocket. It is a thin view over a PlayerSession (lib/live), which owns the
  * `<video>`, the websocket and the reconnect policy; this component only renders it.
  */
-export function MsePlayer({ persistent = false, surface = false, ...props }: MsePlayerProps) {
+export function MsePlayer({ persistent = false, surface = false, objectFit, ...props }: MsePlayerProps) {
   const layer = useSurfaceLayer();
   if (persistent && surface && layer) return <SurfaceMsePlayer {...props} />;
-  return persistent ? <PersistentMsePlayer {...props} /> : <PrivateMsePlayer {...props} />;
+  return persistent ? <PersistentMsePlayer {...props} objectFit={objectFit} /> : <PrivateMsePlayer {...props} objectFit={objectFit} />;
 }
 
-function PlayerView({
-  host,
+function PlayerChrome({
   snapshot,
-  className,
   cameraId,
   onRetry,
 }: {
-  host: React.RefObject<HTMLDivElement | null>;
   snapshot: SessionSnapshot;
-  className?: string;
-  /** Set for persistent sessions: shows the last frame / snapshot and retry instead of plain text. */
   cameraId?: string;
   onRetry?: () => void;
 }) {
   const showing = snapshot.state === "ACTIVE" || snapshot.state === "WARM";
+  if (showing) return null;
+  if (cameraId) return <PlayerStatusOverlay cameraId={cameraId} snapshot={snapshot} onRetry={onRetry} />;
   return (
-    <div ref={host} className={cn("relative overflow-hidden bg-black", className)}>
-      {!showing && cameraId && <PlayerStatusOverlay cameraId={cameraId} snapshot={snapshot} onRetry={onRetry} />}
-      {!showing && !cameraId && (
-        <div className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white/70">
-          {snapshot.state === "ERROR" ? snapshot.message || "Error de video" : snapshot.message || "Conectando…"}
-        </div>
-      )}
+    <div className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white/70">
+      {snapshot.state === "ERROR" ? snapshot.message || "Error de video" : snapshot.message || "Conectando…"}
     </div>
   );
 }
@@ -102,6 +97,7 @@ function usePersistentSession(
   // A tile hidden by expand is not "offscreen": it stays WARM (above) instead of reconnecting later.
   useEffect(() => {
     session?.setSuspended("offscreen", active && !inViewport);
+    return () => session?.setSuspended("offscreen", false);
   }, [session, active, inViewport]);
   useEffect(() => {
     session?.setSuspended("rec", suspended);
@@ -118,7 +114,10 @@ function useInViewport(ref: React.RefObject<HTMLElement | null>): boolean {
     const observer = new IntersectionObserver(
       (entries) => {
         const last = entries[entries.length - 1];
-        if (last) setInViewport(last.isIntersecting);
+        // A box that has not been laid out yet is not "off screen"; suspending it
+        // drops the socket and the next paint is a black tile.
+        if (!last || last.boundingClientRect.width < 1 || last.boundingClientRect.height < 1) return;
+        setInViewport(last.isIntersecting);
       },
       { rootMargin: "120px" },
     );
@@ -129,38 +128,58 @@ function useInViewport(ref: React.RefObject<HTMLElement | null>): boolean {
 }
 
 /** PersistentMsePlayer shows a manager-owned session; unmounting only detaches the `<video>`. */
-function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
-  const host = useRef<HTMLDivElement>(null);
-  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, host);
-  useEffect(() => {
-    const el = host.current;
+function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
+  const frame = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
+  const layer = useSurfaceLayer();
+  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, frame);
+  useLayoutEffect(() => {
+    const el = stage.current;
     if (!session || !el) return;
     session.setMuted(muted);
     session.attach(el);
-    return () => session.detach();
-  }, [session, muted]);
-  return <PlayerView host={host} snapshot={snapshot} className={className} cameraId={cameraId} onRetry={() => session?.retryNow()} />;
+    session.setObjectFit(objectFit);
+    return () => {
+      if (!layer?.restore(session)) session.detach();
+    };
+  }, [session, muted, layer, objectFit]);
+  return (
+    <ZoomFrame frameRef={frame} stageRef={stage} resetKey={`${cameraId}:${quality}`} className={className}>
+      <PlayerChrome snapshot={snapshot} cameraId={cameraId} onRetry={() => session?.retryNow()} />
+    </ZoomFrame>
+  );
 }
 
 /** SurfaceMsePlayer leaves the `<video>` in the VideoSurfaceLayer and only reserves its slot here. */
 function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
-  const host = useRef<HTMLDivElement>(null);
-  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, host);
+  const frame = useRef<HTMLDivElement>(null);
+  const layer = useSurfaceLayer();
+  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, frame);
   useEffect(() => {
     session?.setMuted(muted);
   }, [session, muted]);
+  const onZoom = useCallback(
+    (zoom: DigitalZoom) => {
+      if (session) layer?.setPictureZoom(session, zoom);
+    },
+    [session, layer],
+  );
+  useEffect(() => {
+    if (!session || !layer) return;
+    return () => layer.setPictureZoom(session, IDENTITY_ZOOM);
+  }, [session, layer]);
   const showing = snapshot.state === "ACTIVE" || snapshot.state === "WARM";
   return (
-    <div ref={host} className={cn("relative overflow-hidden bg-black", className)}>
+    <ZoomFrame frameRef={frame} resetKey={`${cameraId}:${quality}`} className={className} scalePicture={false} onZoom={onZoom}>
       <SurfaceSlot session={session} className="absolute inset-0" />
       {!showing && <PlayerStatusOverlay cameraId={cameraId} snapshot={snapshot} onRetry={() => session?.retryNow()} />}
-    </div>
+    </ZoomFrame>
   );
 }
 
 /** PrivateMsePlayer owns its session: it closes with the component (the legacy behaviour). */
-function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
-  const container = useRef<HTMLDivElement>(null);
+function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, onError, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
+  const stage = useRef<HTMLDivElement>(null);
   const session = useRef<PlayerSession | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot>(IDLE_SNAPSHOT);
   const onErrorRef = useRef(onError);
@@ -172,20 +191,25 @@ function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, 
   });
 
   useEffect(() => {
-    const host = container.current;
+    const host = stage.current;
     if (!host) return;
     const s = new PlayerSession({ cameraId, quality, muted: mutedRef.current, onError: (m) => onErrorRef.current?.(m) });
     session.current = s;
     setSnapshot(s.getSnapshot());
     const off = s.subscribe(() => setSnapshot(s.getSnapshot()));
     s.attach(host);
+    s.setObjectFit(objectFit);
     s.connect();
     return () => {
       off();
       s.close("unmount");
       session.current = null;
     };
-  }, [cameraId, quality]);
+  }, [cameraId, quality, objectFit]);
 
-  return <PlayerView host={container} snapshot={snapshot} className={className} />;
+  return (
+    <ZoomFrame stageRef={stage} resetKey={`${cameraId}:${quality}`} className={className}>
+      <PlayerChrome snapshot={snapshot} />
+    </ZoomFrame>
+  );
 }

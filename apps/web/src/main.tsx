@@ -14,7 +14,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { bootLocale } from "./i18n";
 import { router } from "./router";
+
+bootLocale();
 
 try {
   if (localStorage.getItem("openvms.theme") === "light") {

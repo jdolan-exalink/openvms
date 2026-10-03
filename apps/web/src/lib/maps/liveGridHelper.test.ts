@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi, afterEach } from "vitest";
 import { addCameraToLiveGrid } from "./liveGridHelper";
-import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
+import { cameraIdOf, liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 
 describe("addCameraToLiveGrid", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -19,8 +19,8 @@ describe("addCameraToLiveGrid", () => {
 
     const parsed = parseSelection(raw, new Set(["cam-100"]));
     expect(parsed).not.toBeNull();
-    expect(parsed?.tiles[0]?.camera_id).toBe("cam-100");
-    expect(parsed?.tiles[0]?.quality).toBe("sub");
+    expect(cameraIdOf(parsed?.tiles[0] ?? null)).toBe("cam-100");
+    expect(parsed?.tiles[0] && "quality" in parsed.tiles[0] ? parsed.tiles[0].quality : undefined).toBe("sub");
   });
 
   it("does not duplicate camera if already in grid", () => {
@@ -30,9 +30,9 @@ describe("addCameraToLiveGrid", () => {
 
     const key = liveSelectionKey("t", "u");
     const parsed = parseSelection(localStorage.getItem(key), new Set(["cam-1", "cam-2"]));
-    const cam1Tiles = parsed?.tiles.filter((t) => t?.camera_id === "cam-1");
+    const cam1Tiles = parsed?.tiles.filter((t) => cameraIdOf(t) === "cam-1");
     expect(cam1Tiles).toHaveLength(1);
-    expect(cam1Tiles?.[0]?.quality).toBe("main");
+    expect(cam1Tiles?.[0] && "quality" in cam1Tiles[0] ? cam1Tiles[0].quality : undefined).toBe("main");
   });
   it("preserves multiple stored cameras and rectangular dimensions", () => {
     const key = liveSelectionKey("t", "u");
@@ -43,7 +43,7 @@ describe("addCameraToLiveGrid", () => {
     const saved = parseSelection(localStorage.getItem(key), new Set(["a", "b", "c"]));
     expect(saved?.columns).toBe(2);
     expect(saved?.rows).toBe(3);
-    expect(saved?.tiles.slice(0, 3).map(t => t?.camera_id)).toEqual(["a", "b", "c"]);
+    expect(saved?.tiles.slice(0, 3).map(t => cameraIdOf(t))).toEqual(["a", "b", "c"]);
   });
 
   it("grows rows when a stored grid is full", () => {
@@ -55,7 +55,7 @@ describe("addCameraToLiveGrid", () => {
     const saved = parseSelection(localStorage.getItem(key), new Set(["a", "b", "c"]));
     expect(saved?.columns).toBe(2);
     expect(saved?.rows).toBe(2);
-    expect(saved?.tiles.map(t => t?.camera_id ?? null)).toEqual(["a", "b", "c", null]);
+    expect(saved?.tiles.map(t => cameraIdOf(t) ?? null)).toEqual(["a", "b", "c", null]);
   });
 
   it("updates a duplicate in place without growing dimensions", () => {

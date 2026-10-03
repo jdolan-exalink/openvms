@@ -67,7 +67,7 @@ export function CameraContextMenu({
           className="flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-left text-ink hover:bg-raised transition-colors"
         >
           <ExternalLink className="size-3.5 text-muted" />
-          <span>Open in Live View</span>
+          <span>Maximizar</span>
         </button>
 
         {onAddToLive && (

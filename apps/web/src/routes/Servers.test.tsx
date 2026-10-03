@@ -99,6 +99,21 @@ describe("Servers", () => {
     const writes = (m: ReturnType<typeof setup>, method: string) =>
       m.mock.calls.map(([r]) => r as Request).filter((r) => r.method === method && new URL(r.url).pathname === "/api/v1/servers/a");
 
+    it("offers a new Frigate and an existing one that stays untouched", async () => {
+      const fetchMock = setup(manager);
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: "Registrar servidor" }));
+      expect(screen.getByRole("button", { name: /Servidor Frigate nuevo/ })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /Servidor Frigate existente/ }));
+      const panel = screen.getByRole("form", { name: "Servidor Frigate existente" });
+      expect(panel).toHaveTextContent("La sesión SSH hace solo esto");
+      expect(panel).toHaveTextContent("OpenVMS no modifica este servidor");
+      expect(within(panel).getByLabelText("Host SSH")).toBeInTheDocument();
+      expect(within(panel).getByRole("button", { name: "Instalar agente" })).toBeDisabled();
+      const calls = fetchMock.mock.calls.map(([r]) => new URL((r as Request).url).pathname);
+      expect(calls.filter((path) => path.includes("probe"))).toHaveLength(0);
+    });
+
     it("hides edit and delete without servers.manage", async () => {
       setup({ id: "u", tenant_id: "t", grants: [] });
       renderPage(Servers);

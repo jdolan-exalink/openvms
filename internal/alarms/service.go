@@ -85,33 +85,44 @@ type Service struct {
 }
 
 type Alarm struct {
-	ID                 uuid.UUID  `json:"id"`
-	TenantID           uuid.UUID  `json:"tenant_id"`
-	SiteID             uuid.UUID  `json:"site_id"`
-	SiteName           string     `json:"site_name"`
-	CameraID           uuid.UUID  `json:"camera_id"`
-	CameraName         string     `json:"camera_name"`
-	EventID            uuid.UUID  `json:"event_id"`
-	EventSeverity      string     `json:"event_severity"`
-	EventStartTime     time.Time  `json:"event_start_time"`
-	EventEndTime       *time.Time `json:"event_end_time,omitempty"`
-	EventLabels        []string   `json:"event_labels"`
-	EventSubLabels     []string   `json:"event_sub_labels"`
-	Source             string     `json:"source"`
-	Status             string     `json:"status"`
-	AssignedTo         *uuid.UUID `json:"assigned_to,omitempty"`
-	AssignedToName     *string    `json:"assigned_to_name,omitempty"`
-	AcknowledgedBy     *uuid.UUID `json:"acknowledged_by,omitempty"`
-	AcknowledgedByName *string    `json:"acknowledged_by_name,omitempty"`
-	AcknowledgedAt     *time.Time `json:"acknowledged_at,omitempty"`
-	ResolvedBy         *uuid.UUID `json:"resolved_by,omitempty"`
-	ResolvedByName     *string    `json:"resolved_by_name,omitempty"`
-	ResolvedAt         *time.Time `json:"resolved_at,omitempty"`
-	ClosedBy           *uuid.UUID `json:"closed_by,omitempty"`
-	ClosedByName       *string    `json:"closed_by_name,omitempty"`
-	ClosedAt           *time.Time `json:"closed_at,omitempty"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
+	ID                     uuid.UUID  `json:"id"`
+	TenantID               uuid.UUID  `json:"tenant_id"`
+	SiteID                 uuid.UUID  `json:"site_id"`
+	SiteName               string     `json:"site_name"`
+	CameraID               uuid.UUID  `json:"camera_id"`
+	CameraName             string     `json:"camera_name"`
+	EventID                uuid.UUID  `json:"event_id"`
+	EventSeverity          string     `json:"event_severity"`
+	EventStartTime         time.Time  `json:"event_start_time"`
+	EventEndTime           *time.Time `json:"event_end_time,omitempty"`
+	EventLabels            []string   `json:"event_labels"`
+	EventSubLabels         []string   `json:"event_sub_labels"`
+	ServerName             string     `json:"server_name,omitempty"`
+	VehicleType            string     `json:"vehicle_type,omitempty"`
+	VehicleTypeConfidence  float32    `json:"vehicle_type_confidence,omitempty"`
+	VehicleColor           string     `json:"vehicle_color,omitempty"`
+	VehicleColorConfidence float32    `json:"vehicle_color_confidence,omitempty"`
+	ColorQuality           string     `json:"color_quality,omitempty"`
+	UpperColor             string     `json:"upper_color,omitempty"`
+	UpperColorConfidence   float32    `json:"upper_color_confidence,omitempty"`
+	LowerColor             string     `json:"lower_color,omitempty"`
+	LowerColorConfidence   float32    `json:"lower_color_confidence,omitempty"`
+	PersonColorQuality     string     `json:"person_color_quality,omitempty"`
+	Source                 string     `json:"source"`
+	Status                 string     `json:"status"`
+	AssignedTo             *uuid.UUID `json:"assigned_to,omitempty"`
+	AssignedToName         *string    `json:"assigned_to_name,omitempty"`
+	AcknowledgedBy         *uuid.UUID `json:"acknowledged_by,omitempty"`
+	AcknowledgedByName     *string    `json:"acknowledged_by_name,omitempty"`
+	AcknowledgedAt         *time.Time `json:"acknowledged_at,omitempty"`
+	ResolvedBy             *uuid.UUID `json:"resolved_by,omitempty"`
+	ResolvedByName         *string    `json:"resolved_by_name,omitempty"`
+	ResolvedAt             *time.Time `json:"resolved_at,omitempty"`
+	ClosedBy               *uuid.UUID `json:"closed_by,omitempty"`
+	ClosedByName           *string    `json:"closed_by_name,omitempty"`
+	ClosedAt               *time.Time `json:"closed_at,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
 }
 
 type Transition struct {
@@ -910,33 +921,44 @@ func mapGetAlarmRow(r db.GetAlarmRow) Alarm {
 		closedByName = &r.ClosedByName
 	}
 	return Alarm{
-		ID:                 r.ID,
-		TenantID:           r.TenantID,
-		SiteID:             r.SiteID,
-		SiteName:           r.SiteName,
-		CameraID:           r.CameraID,
-		CameraName:         r.CameraName,
-		EventID:            r.EventID,
-		EventSeverity:      r.EventSeverity,
-		EventStartTime:     r.EventStartTime,
-		EventEndTime:       r.EventEndTime,
-		EventLabels:        r.EventLabels,
-		EventSubLabels:     r.EventSubLabels,
-		Source:             r.Source,
-		Status:             r.Status,
-		AssignedTo:         r.AssignedTo,
-		AssignedToName:     assignedToName,
-		AcknowledgedBy:     r.AcknowledgedBy,
-		AcknowledgedByName: ackByName,
-		AcknowledgedAt:     r.AcknowledgedAt,
-		ResolvedBy:         r.ResolvedBy,
-		ResolvedByName:     resByName,
-		ResolvedAt:         r.ResolvedAt,
-		ClosedBy:           r.ClosedBy,
-		ClosedByName:       closedByName,
-		ClosedAt:           r.ClosedAt,
-		CreatedAt:          r.CreatedAt,
-		UpdatedAt:          r.UpdatedAt,
+		ID:                     r.ID,
+		TenantID:               r.TenantID,
+		SiteID:                 r.SiteID,
+		SiteName:               r.SiteName,
+		CameraID:               r.CameraID,
+		CameraName:             r.CameraName,
+		EventID:                r.EventID,
+		EventSeverity:          r.EventSeverity,
+		EventStartTime:         r.EventStartTime,
+		EventEndTime:           r.EventEndTime,
+		EventLabels:            r.EventLabels,
+		EventSubLabels:         r.EventSubLabels,
+		ServerName:             r.ServerName,
+		VehicleType:            r.VehicleType,
+		VehicleTypeConfidence:  r.VehicleTypeConfidence,
+		VehicleColor:           r.VehicleColor,
+		VehicleColorConfidence: r.VehicleColorConfidence,
+		ColorQuality:           r.ColorQuality,
+		UpperColor:             r.UpperColor,
+		UpperColorConfidence:   r.UpperColorConfidence,
+		LowerColor:             r.LowerColor,
+		LowerColorConfidence:   r.LowerColorConfidence,
+		PersonColorQuality:     r.PersonColorQuality,
+		Source:                 r.Source,
+		Status:                 r.Status,
+		AssignedTo:             r.AssignedTo,
+		AssignedToName:         assignedToName,
+		AcknowledgedBy:         r.AcknowledgedBy,
+		AcknowledgedByName:     ackByName,
+		AcknowledgedAt:         r.AcknowledgedAt,
+		ResolvedBy:             r.ResolvedBy,
+		ResolvedByName:         resByName,
+		ResolvedAt:             r.ResolvedAt,
+		ClosedBy:               r.ClosedBy,
+		ClosedByName:           closedByName,
+		ClosedAt:               r.ClosedAt,
+		CreatedAt:              r.CreatedAt,
+		UpdatedAt:              r.UpdatedAt,
 	}
 }
 
@@ -958,32 +980,43 @@ func mapListAlarmRow(r db.ListAlarmsRow) Alarm {
 		closedByName = &r.ClosedByName
 	}
 	return Alarm{
-		ID:                 r.ID,
-		TenantID:           r.TenantID,
-		SiteID:             r.SiteID,
-		SiteName:           r.SiteName,
-		CameraID:           r.CameraID,
-		CameraName:         r.CameraName,
-		EventID:            r.EventID,
-		EventSeverity:      r.EventSeverity,
-		EventStartTime:     r.EventStartTime,
-		EventEndTime:       r.EventEndTime,
-		EventLabels:        r.EventLabels,
-		EventSubLabels:     r.EventSubLabels,
-		Source:             r.Source,
-		Status:             r.Status,
-		AssignedTo:         r.AssignedTo,
-		AssignedToName:     assignedToName,
-		AcknowledgedBy:     r.AcknowledgedBy,
-		AcknowledgedByName: ackByName,
-		AcknowledgedAt:     r.AcknowledgedAt,
-		ResolvedBy:         r.ResolvedBy,
-		ResolvedByName:     resByName,
-		ResolvedAt:         r.ResolvedAt,
-		ClosedBy:           r.ClosedBy,
-		ClosedByName:       closedByName,
-		ClosedAt:           r.ClosedAt,
-		CreatedAt:          r.CreatedAt,
-		UpdatedAt:          r.UpdatedAt,
+		ID:                     r.ID,
+		TenantID:               r.TenantID,
+		SiteID:                 r.SiteID,
+		SiteName:               r.SiteName,
+		CameraID:               r.CameraID,
+		CameraName:             r.CameraName,
+		EventID:                r.EventID,
+		EventSeverity:          r.EventSeverity,
+		EventStartTime:         r.EventStartTime,
+		EventEndTime:           r.EventEndTime,
+		EventLabels:            r.EventLabels,
+		EventSubLabels:         r.EventSubLabels,
+		ServerName:             r.ServerName,
+		VehicleType:            r.VehicleType,
+		VehicleTypeConfidence:  r.VehicleTypeConfidence,
+		VehicleColor:           r.VehicleColor,
+		VehicleColorConfidence: r.VehicleColorConfidence,
+		ColorQuality:           r.ColorQuality,
+		UpperColor:             r.UpperColor,
+		UpperColorConfidence:   r.UpperColorConfidence,
+		LowerColor:             r.LowerColor,
+		LowerColorConfidence:   r.LowerColorConfidence,
+		PersonColorQuality:     r.PersonColorQuality,
+		Source:                 r.Source,
+		Status:                 r.Status,
+		AssignedTo:             r.AssignedTo,
+		AssignedToName:         assignedToName,
+		AcknowledgedBy:         r.AcknowledgedBy,
+		AcknowledgedByName:     ackByName,
+		AcknowledgedAt:         r.AcknowledgedAt,
+		ResolvedBy:             r.ResolvedBy,
+		ResolvedByName:         resByName,
+		ResolvedAt:             r.ResolvedAt,
+		ClosedBy:               r.ClosedBy,
+		ClosedByName:           closedByName,
+		ClosedAt:               r.ClosedAt,
+		CreatedAt:              r.CreatedAt,
+		UpdatedAt:              r.UpdatedAt,
 	}
 }

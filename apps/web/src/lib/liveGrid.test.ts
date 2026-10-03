@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraDragId, liveSelectionKey, parseSelection, duplicateTileIndexes, placeCameraUnique, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, type Tile,
+  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile,
 } from "./liveGrid";
 
 describe("resizeTiles", () => {
@@ -85,6 +85,55 @@ describe("resolveDragEnd", () => {
   it("is a no-op when dropped onto something that isn't a tile", () => {
     expect(resolveDragEnd(cameraDragId("cam-1"), "not-a-tile")).toBeNull();
   });
+
+  it("resolves dropping a server or a folder onto the grid as a fill", () => {
+    expect(resolveDragEnd("tserver:srv-1", tileDragId(0))).toEqual({ type: "fill-server", serverId: "srv-1" });
+    expect(resolveDragEnd("tfolder:fld-1", LIVE_GRID_DROP_ID)).toEqual({ type: "fill-folder", folderId: "fld-1" });
+    expect(resolveDragEnd("tserver:srv-1", "not-a-tile")).toBeNull();
+  });
+});
+
+describe("layoutForCount", () => {
+  const layouts = [
+    { columns: 1, rows: 1 },
+    { columns: 2, rows: 2 },
+    { columns: 4, rows: 4 },
+  ];
+
+  it("picks the smallest layout that fits every camera", () => {
+    expect(layoutForCount(layouts, 1)).toEqual({ columns: 1, rows: 1 });
+    expect(layoutForCount(layouts, 3)).toEqual({ columns: 2, rows: 2 });
+    expect(layoutForCount(layouts, 5)).toEqual({ columns: 4, rows: 4 });
+  });
+
+  it("uses the largest layout when there are more cameras than cells", () => {
+    expect(layoutForCount(layouts, 40)).toEqual({ columns: 4, rows: 4 });
+    expect(tilesForCameras([{ id: "a", quality: "sub" }, { id: "b", quality: "sub" }, { id: "c", quality: "main" }], 2, 1)).toEqual({
+      tiles: [{ camera_id: "a", quality: "sub" }, { camera_id: "b", quality: "sub" }],
+      skipped: 1,
+    });
+  });
+});
+
+describe("placeInOpenCell", () => {
+  const tiles: Tile[] = [{ camera_id: "cam-1", quality: "sub" }, null, { camera_id: "cam-2", quality: "sub" }];
+
+  it("uses the first empty cell", () => {
+    expect(placeInOpenCell(tiles, "cam-3", "sub")).toEqual({
+      tiles: [{ camera_id: "cam-1", quality: "sub" }, { camera_id: "cam-3", quality: "sub" }, { camera_id: "cam-2", quality: "sub" }],
+      index: 1,
+    });
+  });
+
+  it("replaces the first cell when the grid is full", () => {
+    const full: Tile[] = [{ camera_id: "cam-1", quality: "sub" }, { camera_id: "cam-2", quality: "sub" }];
+    expect(placeInOpenCell(full, "cam-3", "main").index).toBe(0);
+    expect(placeInOpenCell(full, "cam-3", "main").tiles[0]).toEqual({ camera_id: "cam-3", quality: "main" });
+  });
+
+  it("keeps a camera that is already on the grid", () => {
+    expect(placeInOpenCell(tiles, "cam-2", "main")).toEqual({ tiles, index: 2 });
+  });
 });
 
 describe("liveSelectionKey", () => {
@@ -129,6 +178,16 @@ describe("serializeSelection / parseSelection", () => {
     expect(parseSelection(JSON.stringify({ tiles: [] }), validIds)).toBeNull();
     expect(parseSelection(JSON.stringify({ columns: 0, tiles: [] }), validIds)).toBeNull();
     expect(parseSelection(JSON.stringify({ columns: 1.5, tiles: [] }), validIds)).toBeNull();
+  });
+
+  it("keeps a named map tile beside authorized cameras", () => {
+    const withMap = serializeSelection(2, [{ map: { site_id: "s", name: "Planta", floor_id: "f" } }, { camera_id: "cam-1", quality: "sub" }]);
+    expect(parseSelection(withMap, validIds)?.tiles).toEqual([
+      { map: { site_id: "s", name: "Planta", floor_id: "f" } },
+      { camera_id: "cam-1", quality: "sub" },
+      null,
+      null,
+    ]);
   });
 });
 

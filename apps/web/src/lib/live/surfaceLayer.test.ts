@@ -58,11 +58,13 @@ describe("VideoSurfaceLayerController", () => {
 
     const first = slotAt({ left: 10, top: 20, width: 300, height: 200 });
     const release = layer.register(session, first);
-    const wrapper = video.parentElement as HTMLElement;
+    const stage = video.parentElement as HTMLElement;
+    const wrapper = stage.parentElement as HTMLElement;
     expect(wrapper.parentElement).toBe(host);
     expect(wrapper.style.transform).toBe("translate3d(10px, 20px, 0)");
     expect(wrapper.style.width).toBe("300px");
     expect(wrapper.style.visibility).toBe("visible");
+    expect(stage.getAttribute("data-video-zoom")).toBe("cam-1");
 
     // The cell moved (drag and drop / layout / expand): only the transform changes.
     release();
@@ -70,7 +72,7 @@ describe("VideoSurfaceLayerController", () => {
     layer.register(session, slotAt({ left: 400, top: 300, width: 600, height: 400 }));
     expect(wrapper.style.transform).toBe("translate3d(400px, 300px, 0)");
     expect(wrapper.style.height).toBe("400px");
-    expect(video.parentElement).toBe(wrapper);
+    expect(video.parentElement?.parentElement).toBe(wrapper);
     expect(wrapper.parentElement).toBe(host);
   });
 
@@ -81,11 +83,27 @@ describe("VideoSurfaceLayerController", () => {
     layer.setHost(host);
     const { session, video, setState } = fakeSession("RECONNECTING");
     layer.register(session, slotAt({ left: 0, top: 0, width: 100, height: 100 }));
-    const wrapper = video.parentElement as HTMLElement;
+    const wrapper = video.parentElement?.parentElement as HTMLElement;
     expect(wrapper.style.visibility).toBe("hidden");
     setState("ACTIVE");
     expect(wrapper.style.visibility).toBe("visible");
     setState("EVICTED");
     expect(host.contains(wrapper)).toBe(false);
+  });
+
+  it("zooms an inner stage and leaves the video element without a transform", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const layer = new VideoSurfaceLayerController();
+    layer.setHost(host);
+    const { session, video } = fakeSession();
+    layer.register(session, slotAt({ left: 8, top: 12, width: 160, height: 90 }));
+    layer.setPictureZoom(session, { scale: 2, x: -10, y: -20 });
+    const stage = video.parentElement as HTMLElement;
+    expect(stage.style.transform).toBe("translate(-10px, -20px) scale(2)");
+    expect(video.style.transform).toBe("");
+    expect(stage.parentElement?.style.transform).toBe("translate3d(8px, 12px, 0)");
+    layer.setPictureZoom(session, { scale: 1, x: 0, y: 0 });
+    expect(stage.style.transform).toBe("");
   });
 });

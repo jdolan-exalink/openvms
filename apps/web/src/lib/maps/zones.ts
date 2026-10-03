@@ -1,5 +1,5 @@
 import { api, unwrap } from "@/api/client";
-import { zoneDraftToPolygon, type ZoneDraft } from "./zoneDraft";
+import { ZONE_KIND_COLOR, zoneDraftToPolygon, type ZoneDraft } from "./zoneDraft";
 
 /**
  * saveZone writes the draft with the contract's two verbs: a draft that already knows its
@@ -9,11 +9,12 @@ import { zoneDraftToPolygon, type ZoneDraft } from "./zoneDraft";
  */
 export async function saveZone(siteId: string, draft: ZoneDraft): Promise<void> {
   const geometry = zoneDraftToPolygon(draft) as unknown as Record<string, never>;
+  const style = { color: draft.color || ZONE_KIND_COLOR[draft.kind] } as unknown as Record<string, never>;
   if (draft.zoneId) {
     unwrap(
       await api.PATCH("/api/v1/maps/zones/{zoneId}", {
         params: { path: { zoneId: draft.zoneId } },
-        body: { name: draft.name, kind: draft.kind, geometry },
+        body: { name: draft.name, kind: draft.kind, geometry, style },
       }),
     );
     return;
@@ -21,7 +22,7 @@ export async function saveZone(siteId: string, draft: ZoneDraft): Promise<void> 
   unwrap(
     await api.POST("/api/v1/maps/sites/{siteId}/zones", {
       params: { path: { siteId } },
-      body: { name: draft.name, kind: draft.kind, geometry },
+      body: { name: draft.name, kind: draft.kind, geometry, style },
     }),
   );
 }

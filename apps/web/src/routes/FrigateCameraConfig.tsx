@@ -1,17 +1,19 @@
+import { useT } from "@/i18n";
 import { faArrowLeft, faArrowsRotate, faCircleCheck, faTriangleExclamation } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { type FormEvent, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { cameraFrigateDocQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
+import { cameraFrigateDocQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
+import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FrigateHistory } from "@/components/frigate/FrigateHistory";
 import { LabelPicker } from "@/components/frigate/LabelPicker";
 import { SectionPanel } from "@/components/frigate/SectionPanel";
 import { Modal } from "@/components/Modal";
 import { ZoneEditorModal, type ZoneEditorValue } from "@/components/zones/ZoneEditorModal";
-import { Button, ErrorNote, PageHeader } from "@/components/ui";
+import { Button, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
   buildPatch, deepEqual, diffValues, formatValue, isLiveSection, type JSchema, kindOf, orderSections, parseVersion, pathLabel, resolve, schemaAt,
@@ -22,6 +24,7 @@ import { can } from "@/lib/perm";
 
 type SectionResult = Schemas["FrigateSectionResult"];
 const HISTORY = "__history";
+const GENERAL = "__general";
 
 const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isEmptyMask = (v: unknown) => v == null || v === "" || (Array.isArray(v) && v.length === 0) || (isRec(v) && Object.keys(v).length === 0);
@@ -61,6 +64,7 @@ function saveRestart(serverId: string, on: boolean) {
 }
 
 export function FrigateCameraConfig() {
+  const t = useT();
   const { cameraId } = useParams({ strict: false }) as { cameraId: string };
   const qc = useQueryClient();
   const me = useQuery(meQuery);
@@ -180,8 +184,8 @@ export function FrigateCameraConfig() {
   const ctx = { root: root ?? {}, secretsVisible, readOnly };
   const header = (
     <PageHeader
-      title={`Frigate · ${doc.data?.camera_name ?? "Cámara"}`}
-      description={version ? `Configuración de la cámara en Frigate ${version}. Los cambios se aplican al servidor.` : undefined}
+      title={`Frigate · ${doc.data?.camera_name ?? t("Cámara")}`}
+      description={version ? t("Configuración de la cámara en Frigate {version}. Los cambios se aplican al servidor.", { version }) : undefined}
       actions={
         <Link to="/cameras" className="inline-flex items-center gap-2 text-sm text-muted hover:text-ink">
           <FontAwesomeIcon icon={faArrowLeft} aria-hidden /> Volver a cámaras
@@ -199,7 +203,6 @@ export function FrigateCameraConfig() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4">
-      {header}
       {needsRestart && (
         <RestartBanner serverId={doc.data.server_id} canRestart={canRestart} onDone={() => setNeedsRestart(false)} />
       )}
@@ -216,15 +219,24 @@ export function FrigateCameraConfig() {
         error={apply.error ? new Error(`${apply.error.message} Las secciones anteriores pudieron aplicarse: revisa el historial o recarga para ver el estado actual.`) : null}
       />
 
-      <div className="grid gap-4 md:grid-cols-[14rem_1fr]">
-        <nav aria-label="Secciones de configuración" className="flex flex-row gap-1 overflow-x-auto md:flex-col md:overflow-visible">
+      <CameraIdentity name={doc.data.camera_name} version={version} config={config} />
+      <div className="flex flex-col gap-3">
+        <nav aria-label="Secciones de configuración" className="flex flex-wrap gap-1 rounded-xl bg-bg p-1">
+          <button
+            type="button"
+            aria-current={activeSection === GENERAL ? "page" : undefined}
+            onClick={() => setActive(GENERAL)}
+            className={cn("rounded-lg px-3 py-1.5 text-xs font-medium whitespace-nowrap", activeSection === GENERAL ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
+          >
+            {t("General")}
+          </button>
           {sections.map((s) => (
             <button
               key={s}
               type="button"
               aria-current={activeSection === s ? "page" : undefined}
               onClick={() => setActive(s)}
-              className={cn("flex items-center justify-between gap-2 rounded px-3 py-2 text-left text-sm whitespace-nowrap hover:bg-raised", activeSection === s && "bg-raised font-medium")}
+              className={cn("rounded-lg px-3 py-1.5 text-left text-xs font-medium whitespace-nowrap", activeSection === s ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
             >
               <span className="flex flex-col">
                 <span>{sectionLabel(s)}{dirty.includes(s) && <span aria-label="con cambios" className="ml-1 text-accent">●</span>}</span>
@@ -236,14 +248,16 @@ export function FrigateCameraConfig() {
             type="button"
             aria-current={activeSection === HISTORY ? "page" : undefined}
             onClick={() => setActive(HISTORY)}
-            className={cn("rounded px-3 py-2 text-left text-sm whitespace-nowrap hover:bg-raised md:mt-2 md:border-t md:border-line", activeSection === HISTORY && "bg-raised font-medium")}
+            className={cn("rounded-lg px-3 py-1.5 text-left text-xs font-medium whitespace-nowrap", activeSection === HISTORY ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
           >
             Historial
           </button>
         </nav>
 
-        <section aria-label={activeSection === HISTORY ? "Historial" : sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded border border-line bg-surface p-4">
-          {activeSection === HISTORY ? (
+        <section aria-label={activeSection === HISTORY ? "Historial" : activeSection === GENERAL ? t("General") : sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded border border-line bg-surface p-4">
+          {activeSection === GENERAL ? (
+            <CameraGeneral cameraId={cameraId} canManage={can(me.data, "cameras.manage")} />
+          ) : activeSection === HISTORY ? (
             <FrigateHistory serverId={doc.data.server_id} cameraId={cameraId} secretsVisible={secretsVisible} canRollback={!readOnly && secretsVisible} onRestored={() => setNeedsRestart(true)} />
           ) : (
             activeSection && (
@@ -259,7 +273,7 @@ export function FrigateCameraConfig() {
             />
             )
           )}
-          {activeSection !== HISTORY && Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
+          {activeSection !== HISTORY && activeSection !== GENERAL && Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
             <p role="alert" className="text-xs text-bad">Hay valores no válidos en esta sección.</p>
           )}
         </section>
@@ -307,6 +321,121 @@ export function FrigateCameraConfig() {
         </Modal>
       )}
     </div>
+  );
+}
+
+function CameraIdentity({ name, version, config }: { name: string; version: string; config: Record<string, unknown> }) {
+  const detect = isRec(config.detect) ? config.detect : undefined;
+  const width = typeof detect?.width === "number" ? detect.width : undefined;
+  const height = typeof detect?.height === "number" ? detect.height : undefined;
+  const onvif = isRec(config.onvif) ? config.onvif : undefined;
+  const host = typeof onvif?.host === "string" && onvif.host && !onvif.host.includes("*") ? onvif.host : undefined;
+  return (
+    <div className="flex flex-col gap-3 border-b border-line pb-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight text-ink">{name}</h1>
+          <p className="text-sm text-muted">Frigate {version || "—"}</p>
+        </div>
+        <Link to="/cameras" className="inline-flex items-center gap-2 text-sm text-muted hover:text-ink">
+          <FontAwesomeIcon icon={faArrowLeft} aria-hidden /> Volver a cámaras
+        </Link>
+      </div>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
+        <div><dt className="text-muted">Versión</dt><dd className="font-mono">{version || "—"}</dd></div>
+        <div><dt className="text-muted">Resolución</dt><dd className="font-mono">{width && height ? `${width}×${height}` : "—"}</dd></div>
+        <div><dt className="text-muted">Host</dt><dd className="font-mono">{host ?? "—"}</dd></div>
+      </dl>
+    </div>
+  );
+}
+
+function CameraGeneral({ cameraId, canManage }: { cameraId: string; canManage: boolean }) {
+  const camera = useQuery({
+    queryKey: ["cameras", cameraId, "one"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/cameras/{cameraId}", { params: { path: { cameraId } } })),
+    retry: false,
+  });
+  if (camera.isLoading) return <p className="text-sm text-muted">Cargando ajustes…</p>;
+  if (camera.error || !camera.data) return <ErrorNote error={camera.error ?? new Error("No se pudo leer la cámara.")} />;
+  return <CameraGeneralForm camera={camera.data} canManage={canManage} />;
+}
+
+function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; canManage: boolean }) {
+  const qc = useQueryClient();
+  const [name, setName] = useState(camera.display_name);
+  const [enabled, setEnabled] = useState(camera.enabled);
+  const [quality, setQuality] = useState(camera.default_live_quality);
+  const [description, setDescription] = useState(camera.description);
+  const [location, setLocation] = useState(camera.location);
+  const [tags, setTags] = useState(camera.tags.join(", "));
+  const [invalid, setInvalid] = useState(false);
+  const save = useMutation({
+    mutationFn: async () =>
+      unwrap(await api.PATCH("/api/v1/cameras/{cameraId}", {
+        params: { path: { cameraId: camera.id } },
+        body: {
+          display_name: name.trim(),
+          enabled,
+          default_live_quality: quality,
+          description: description.trim(),
+          location: location.trim(),
+          tags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+        },
+      })),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["cameras"] });
+    },
+  });
+  function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) {
+      setInvalid(true);
+      return;
+    }
+    setInvalid(false);
+    save.mutate();
+  }
+  const policy = useQuery(classifyPolicyQuery);
+  const row = policy.data?.cameras.find((item) => item.id === camera.id);
+  if (!canManage) return <p className="text-sm text-muted">Necesitás cameras.manage para editar el nombre, la ubicación y el resto de los datos de OpenVMS.</p>;
+  return (
+    <form onSubmit={submit} className="grid gap-3 sm:grid-cols-2">
+      <div className="sm:col-span-2">
+        <BodyClassifySwitch scope="camera" id={camera.id} enabled={row?.enabled ?? true} />
+        {row && row.enabled && !row.effective && (
+          <p className="mt-1 text-xs text-muted">El servidor de esta cámara tiene la clasificación fina apagada.</p>
+        )}
+      </div>
+      <Field label="Nombre">
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} aria-invalid={invalid} />
+      </Field>
+      <label className="flex items-center gap-2 self-end pb-2 text-sm">
+        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+        Habilitada
+      </label>
+      {invalid && <p role="alert" className="text-xs text-bad sm:col-span-2">El nombre no puede estar vacío.</p>}
+      <Field label="Calidad en vivo por defecto" hint="Flujo que usa la cámara al añadirla a la grilla de Vivo.">
+        <Select value={quality} onChange={(e) => setQuality(e.target.value as Schemas["Camera"]["default_live_quality"])}>
+          <option value="sub">Sub (menor calidad)</option>
+          <option value="main">Main (alta calidad)</option>
+        </Select>
+      </Field>
+      <Field label="Ubicación">
+        <TextInput value={location} maxLength={200} onChange={(e) => setLocation(e.target.value)} />
+      </Field>
+      <Field label="Descripción">
+        <TextInput value={description} maxLength={1000} onChange={(e) => setDescription(e.target.value)} />
+      </Field>
+      <Field label="Etiquetas" hint="Separadas por comas (máximo 20).">
+        <TextInput value={tags} onChange={(e) => setTags(e.target.value)} />
+      </Field>
+      <div className="flex items-center justify-end gap-2 sm:col-span-2">
+        <ErrorNote error={save.error} />
+        <Button type="submit" variant="primary" disabled={save.isPending}>{save.isPending ? "Guardando…" : "Guardar"}</Button>
+      </div>
+      {save.isSuccess && <p role="status" className="text-xs text-ok sm:col-span-2">Guardado en OpenVMS. Las demás pestañas se aplican en el servidor Frigate.</p>}
+    </form>
   );
 }
 

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { Trash2 } from "lucide-react";
@@ -50,6 +51,7 @@ function summarizeGrants(n: number) {
 
 /** Permissions assigns permission + scope + effect to users and groups (PRD §27-31). */
 export function Permissions() {
+  const t = useT();
   const search = useSearch({ strict: false }) as { subject?: string };
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -82,7 +84,7 @@ export function Permissions() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
-      <PageHeader title="Permisos" description="Un permiso vale en su alcance y todo lo que contiene. Una denegación siempre gana sobre un permiso." />
+      <PageHeader title={t("Permisos")} description={t("Un permiso vale en su alcance y todo lo que contiene. Una denegación siempre gana sobre un permiso.")} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="sm:w-72">
           <Field label="Buscar sujeto">

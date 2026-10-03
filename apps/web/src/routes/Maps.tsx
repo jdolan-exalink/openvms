@@ -78,7 +78,7 @@ export function Maps() {
   };
 
   return (
-    <div className="relative h-[calc(100dvh-10rem)] min-h-0 w-full overflow-hidden md:h-full md:flex-1">
+    <div className="relative flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <MapWorkspace
         initialSiteId={search.site}
         initialFloorId={search.floor}

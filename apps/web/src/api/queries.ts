@@ -13,6 +13,19 @@ export const readinessQuery = queryOptions({
   refetchInterval: 10_000,
 });
 
+export const systemCapacityQuery = queryOptions({
+  queryKey: ["system", "capacity"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/system/capacity")),
+  refetchInterval: 15_000,
+  retry: false,
+});
+
+export const classifyPolicyQuery = queryOptions({
+  queryKey: ["classify", "policy"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/classify/policy")),
+  retry: false,
+});
+
 export const systemInfoQuery = queryOptions({
   queryKey: ["system", "info"],
   queryFn: async () => {
@@ -122,6 +135,8 @@ export type EventFilter = {
   reviewed?: boolean;
   has_snapshot?: boolean;
   has_preview?: boolean;
+  vehicle_type?: string[];
+  vehicle_color?: string[];
   limit?: number;
 };
 
@@ -143,6 +158,7 @@ export type PlateFilter = {
   camera_group_id?: string[];
   from?: string;
   to?: string;
+  limit?: number;
 };
 
 export const platesQuery = (filter: PlateFilter) =>

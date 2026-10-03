@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { History } from "lucide-react";
@@ -7,7 +8,8 @@ import { cameraGroupsQuery, meQuery, type PlateFilter, platesQuery, sitesQuery }
 import { PlateDetailModal } from "@/components/PlateDetailModal";
 import { type FilterChip, SearchSummary } from "@/components/SearchSummary";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, TextInput, Th } from "@/components/ui";
-import { fmtDateTime, fromLocalInput, labelName } from "@/lib/format";
+import { VehicleFacts } from "@/components/VehicleMark";
+import { fmtDateTime, fromLocalInput } from "@/lib/format";
 import { can } from "@/lib/perm";
 
 /**
@@ -51,6 +53,7 @@ function toFilter(f: Form): PlateFilter {
 
 /** Plates is the global LPR search (PRD §41-45) across every authorized Frigate. */
 export function Plates() {
+  const t = useT();
   const me = useQuery(meQuery);
   const sites = useQuery(sitesQuery);
   const cameraGroups = useQuery(cameraGroupsQuery);
@@ -78,7 +81,7 @@ export function Plates() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
-      <PageHeader title="Patentes" description="Lecturas de patentes de todos los servidores. Los espacios y guiones se ignoran al buscar." />
+      <PageHeader title={t("Patentes")} description={t("Lecturas de patentes de todos los servidores. Los espacios y guiones se ignoran al buscar.")} />
       <form
         className="grid gap-3 rounded border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-5"
         onSubmit={(e) => {
@@ -173,7 +176,9 @@ export function Plates() {
                   >
                     {r.plate_normalized}
                   </span>
-                  <span className="ml-2 text-xs text-muted">{labelName(r.label)}</span>
+                  <div className="mt-1">
+                    <VehicleFacts labels={r.label ? [r.label] : []} vehicle={r.vehicle} serverName={r.server_name} />
+                  </div>
                   {canPreviewSnapshot && hoveredId === r.id && <PlatePreview read={r} />}
                 </td>
                 <td className="whitespace-nowrap">{fmtDateTime(r.seen_at)}</td>

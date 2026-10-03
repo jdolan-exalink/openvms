@@ -1,9 +1,13 @@
+import type { DigitalZoom } from "./digitalZoom";
+import { zoomTransform } from "./digitalZoom";
 import type { PlayerSession } from "./PlayerSession";
 
 type Entry = {
   session: PlayerSession;
   /** Per-session container that holds the persistent `<video>` for as long as the session lives. */
   wrapper: HTMLDivElement;
+  /** Inner box that receives digital zoom. The `<video>` itself never gets a CSS transform. */
+  stage: HTMLDivElement;
   slot: HTMLElement | null;
   /** Ancestors of the slot that clip it (scroll containers), resolved when the slot registers. */
   clippers: HTMLElement[];
@@ -31,9 +35,10 @@ function clippingAncestors(el: HTMLElement): HTMLElement[] {
 /**
  * VideoSurfaceLayerController hosts the persistent `<video>` of live sessions in one fixed
  * overlay layer and positions each one over the placeholder ("slot") a grid cell registered
- * for it. Because the `<video>` lives in the layer and only its transform changes, drag and
- * drop, layout changes and expand never re-parent it, which is what pauses a video when the
- * DOM moves it. Positions are refreshed (GPU-composited `translate3d`) on ResizeObserver,
+ * for it. Because the `<video>` lives in the layer and only the wrapper's position changes,
+ * drag and drop, layout changes and expand never re-parent it, which is what pauses a video
+ * when the DOM moves it. Digital zoom scales an inner stage, never the `<video>` element.
+ * Positions are refreshed (GPU-composited `translate3d`) on ResizeObserver,
  * scroll, resize and pointer/key activity, and then for a short settle period so transitions
  * and dnd-kit transforms are followed frame by frame.
  *
@@ -65,6 +70,7 @@ export class VideoSurfaceLayerController {
     }
     window.addEventListener("scroll", this.request, { capture: true, passive: true });
     window.addEventListener("resize", this.request, { passive: true });
+    document.addEventListener("fullscreenchange", this.request);
     window.addEventListener("pointermove", this.request, { passive: true });
     window.addEventListener("keydown", this.request, { passive: true });
     window.addEventListener("transitionend", this.request, { capture: true, passive: true });
@@ -75,6 +81,7 @@ export class VideoSurfaceLayerController {
     this.running = false;
     window.removeEventListener("scroll", this.request, { capture: true });
     window.removeEventListener("resize", this.request);
+    document.removeEventListener("fullscreenchange", this.request);
     window.removeEventListener("pointermove", this.request);
     window.removeEventListener("keydown", this.request);
     window.removeEventListener("transitionend", this.request, { capture: true });
@@ -112,6 +119,17 @@ export class VideoSurfaceLayerController {
     if (!this.frame && this.running) this.frame = raf(this.tick);
   };
 
+  /**
+   * setPictureZoom scales the inner stage of a session. The wrapper keeps its slot position.
+   * Passing 1× clears the zoom. Unknown sessions are ignored.
+   */
+  setPictureZoom(session: PlayerSession, zoom: DigitalZoom): void {
+    const entry = this.entries.get(session);
+    if (!entry) return;
+    entry.stage.style.transformOrigin = "0 0";
+    entry.stage.style.transform = zoomTransform(zoom);
+  }
+
   /** layoutNow repositions every video synchronously (used by tests and after registration). */
   layoutNow(): boolean {
     let changed = false;
@@ -140,9 +158,22 @@ export class VideoSurfaceLayerController {
       willChange: "transform",
       visibility: "hidden",
     } satisfies Partial<CSSStyleDeclaration>);
+    const stage = document.createElement("div");
+    stage.setAttribute("data-video-zoom", session.cameraId);
+    Object.assign(stage.style, {
+      position: "absolute",
+      top: "0",
+      right: "0",
+      bottom: "0",
+      left: "0",
+      width: "100%",
+      height: "100%",
+      transformOrigin: "0 0",
+    } satisfies Partial<CSSStyleDeclaration>);
+    wrapper.appendChild(stage);
     this.host?.appendChild(wrapper);
-    session.attach(wrapper);
-    const entry: Entry = { session, wrapper, slot: null, clippers: [], playing: false, applied: "", unsubscribe: () => {} };
+    session.attach(stage);
+    const entry: Entry = { session, wrapper, stage, slot: null, clippers: [], playing: false, applied: "", unsubscribe: () => {} };
     const sync = () => {
       const { state } = session.getSnapshot();
       if (state === "EVICTED") return this.drop(entry);
@@ -157,6 +188,20 @@ export class VideoSurfaceLayerController {
     entry.playing = ((s) => s === "ACTIVE" || s === "WARM")(session.getSnapshot().state);
     this.entries.set(session, entry);
     return entry;
+  }
+
+  /**
+   * restore puts the video back on the layer after a card borrowed it (map preview).
+   * Returns false when this session was never registered, so the caller can detach it.
+   */
+  restore(session: PlayerSession): boolean {
+    const entry = this.entries.get(session);
+    if (!entry) return false;
+    session.attach(entry.stage);
+    entry.applied = "";
+    this.layout(entry);
+    this.request();
+    return true;
   }
 
   /** drop forgets an evicted session and removes its container. */

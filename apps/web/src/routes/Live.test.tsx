@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { AppShell } from "@/components/AppShell";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
@@ -227,7 +227,7 @@ describe("Live", () => {
     });
   });
 
-  it("offers the standard 3×2 layout as six tiles in three columns", async () => {
+  it("offers the standard 3×3 layout as nine tiles in three columns", async () => {
     stubBrowserAPIs();
     vi.stubGlobal(
       "fetch",
@@ -247,9 +247,10 @@ describe("Live", () => {
     });
     const socketCount = FakeSocket.created;
     expect(screen.getByRole("status", { name: "Status: online" })).toBeInTheDocument();
-    fireEvent.click(await screen.findByRole("button", { name: "Layout 3 by 2" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Presentación" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "3×3" }));
 
-    expect(screen.getAllByLabelText(/^Cuadro \d+$/)).toHaveLength(6);
+    expect(screen.getAllByLabelText(/^Cuadro \d+$/)).toHaveLength(9);
     expect(screen.getByLabelText("Grilla de video")).toHaveStyle({ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" });
     expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video);
     expect(FakeSocket.created).toBe(socketCount);
@@ -358,8 +359,12 @@ describe("Live", () => {
     fireEvent.click(await screen.findByText("Puerta norte"));
     fireEvent.click(await screen.findByText("Porton sur"));
     // Grid is 2x2 by default: tile 1 = Puerta norte, tile 2 = Porton sur.
-    expect(screen.getByLabelText("Cuadro 1").textContent).toContain("Puerta norte");
-    expect(screen.getByLabelText("Cuadro 2").textContent).toContain("Porton sur");
+    // querySelector stays cheap while the 220ms click delay is still pending; getByLabelText
+    // builds an accessible-name dump of the whole page on each miss and stalls jsdom.
+    await waitFor(() => {
+      expect(document.querySelector('[aria-label="Cuadro 1"]')?.textContent).toContain("Puerta norte");
+      expect(document.querySelector('[aria-label="Cuadro 2"]')?.textContent).toContain("Porton sur");
+    });
 
     // jsdom never lays out elements, so dnd-kit's keyboard sensor (which picks a directional
     // neighbor by comparing real getBoundingClientRect() rects) has nothing to compare. Give the
@@ -385,8 +390,8 @@ describe("Live", () => {
     fireEvent.keyDown(document.activeElement ?? tile1, { code: "Space" });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Cuadro 1").textContent).toContain("Porton sur");
-      expect(screen.getByLabelText("Cuadro 2").textContent).toContain("Puerta norte");
+      expect(document.querySelector('[aria-label="Cuadro 1"]')?.textContent).toContain("Porton sur");
+      expect(document.querySelector('[aria-label="Cuadro 2"]')?.textContent).toContain("Puerta norte");
     });
   });
 
@@ -405,8 +410,13 @@ describe("Live", () => {
 
     renderPage(Live);
 
-    await screen.findByLabelText("Nombre de la vista");
-    expect(screen.queryByText("Guardar vista actual")).not.toBeInTheDocument();
+    await screen.findByText("No hay cámaras visibles.");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    fireEvent.contextMenu(screen.getByRole("button", { name: /^Cámaras/ }));
+    expect(screen.queryByRole("menuitem", { name: "Guardar grilla como vista" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Nombre de la vista")).not.toBeInTheDocument();
     expect(screen.queryByText("Compartida con mi organización")).not.toBeInTheDocument();
   });
 
@@ -425,7 +435,15 @@ describe("Live", () => {
 
     renderPage(Live);
 
-    expect(await screen.findByText("Guardar vista actual")).toBeInTheDocument();
+    await screen.findByText("No hay cámaras visibles.");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    fireEvent.contextMenu(screen.getByRole("button", { name: /^Cámaras/ }));
+    expect(screen.getByRole("menuitem", { name: "Guardar grilla como vista" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Guardar grilla como vista" }));
+    expect(await screen.findByLabelText("Nombre de la vista")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Guardar" })).toBeInTheDocument();
   });
 
   it("shows the API error when saving a view fails despite the gate (server-side denial)", async () => {
@@ -448,8 +466,15 @@ describe("Live", () => {
 
     renderPage(Live);
 
+    await screen.findByText("No hay cámaras visibles.");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    fireEvent.contextMenu(screen.getByRole("button", { name: /^Cámaras/ }));
+    expect(screen.getByRole("menuitem", { name: "Guardar grilla como vista" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Guardar grilla como vista" }));
     fireEvent.change(await screen.findByLabelText("Nombre de la vista"), { target: { value: "Turno noche" } });
-    fireEvent.click(screen.getByText("Guardar vista actual"));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("No tenés permiso para guardar esta vista.");
   });
@@ -482,14 +507,16 @@ describe("Live", () => {
     );
   };
 
-  it("groups saved views into private and shared groups", async () => {
+  it("lists saved views inside the camera tree", async () => {
     viewsApi([savedView("v1", "Turno noche", false, true), savedView("v2", "Perímetro", true, false)]);
 
     renderPage(Live);
 
-    await screen.findByRole("button", { name: /Turno noche/ });
-    expect(within(screen.getByRole("listitem", { name: "Privadas" })).getByText("Turno noche")).toBeInTheDocument();
-    expect(within(screen.getByRole("listitem", { name: "Compartidas" })).getByText("Perímetro")).toBeInTheDocument();
+    const turno = await screen.findByRole("button", { name: "Turno noche" });
+    const tree = screen.getByRole("navigation", { name: "Cámaras" });
+    expect(tree).toContainElement(turno);
+    expect(within(tree).getByRole("button", { name: /Perímetro/ })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Vistas guardadas" })).not.toBeInTheDocument();
   });
 
   it("announces the active view, its visibility and read-only state", async () => {
@@ -498,13 +525,11 @@ describe("Live", () => {
     renderPage(Live);
 
     const item = await screen.findByRole("button", { name: /Perímetro/ });
-    expect(screen.getByRole("status", { name: "Vista activa" })).toHaveTextContent("Vista sin guardar");
+    expect(item).not.toHaveAttribute("aria-current", "true");
     fireEvent.click(item);
-    const status = screen.getByRole("status", { name: "Vista activa" });
-    expect(status).toHaveTextContent("Perímetro");
-    expect(status).toHaveTextContent("Compartida");
-    expect(status).toHaveTextContent("Solo lectura");
     expect(item).toHaveAttribute("aria-current", "true");
+    expect(item).toHaveAttribute("title", expect.stringContaining("Compartida"));
+    expect(item).toHaveAttribute("title", expect.stringContaining("Solo lectura"));
   });
 
   it("shows who owns a shared view in the list and the status line", async () => {
@@ -513,10 +538,10 @@ describe("Live", () => {
     renderPage(Live);
 
     const shared = await screen.findByRole("button", { name: "Perímetro · Marta Gómez" });
-    // Private views are the caller's own: no owner suffix.
-    expect(screen.getByRole("button", { name: "Turno noche" })).toBeInTheDocument();
-    fireEvent.click(shared);
-    expect(screen.getByRole("status", { name: "Vista activa" })).toHaveTextContent("Compartida por Marta Gómez");
+    const privateView = screen.getByRole("button", { name: "Turno noche" });
+    expect(shared.querySelector("[data-icon='cloud']")).not.toBeNull();
+    expect(privateView.querySelector("[data-icon='cloud']")).toBeNull();
+    expect(shared).toHaveAttribute("title", expect.stringContaining("Compartida por Marta Gómez"));
   });
 
   it("filters saved views with the explorer search", async () => {
@@ -586,7 +611,27 @@ describe("Live", () => {
     renderPage(Live);
 
     const group = await screen.findByRole("group", { name: "Layout de la grilla" });
-    expect(group).toContainElement(screen.getByRole("button", { name: "Layout 2 by 2" }));
+    expect(group).toContainElement(screen.getByRole("button", { name: "Presentación" }));
+    expect(group).toContainElement(screen.getByRole("button", { name: "Pantalla completa" }));
+    expect(screen.queryByText(/Doble clic agrega/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Presentación" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim()).slice(0, 8)).toEqual(["1", "3", "2×2", "3×3", "4×4", "5×5", "6×6", "8×8"]);
+    expect(screen.getByRole("menuitem", { name: "Editar presentaciones..." })).toBeInTheDocument();
+  });
+
+  it("removes a grid line in the presentation editor and applies the new shape", async () => {
+    viewsApi([]);
+    renderPage(Live);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Presentación" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Editar presentaciones..." }));
+    fireEvent.click(screen.getByRole("option", { name: "2×2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Nueva" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Quitar línea" })[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "Aceptar" }));
+
+    await waitFor(() => expect(screen.getAllByLabelText(/^Cuadro \d+$/)).toHaveLength(3));
+    expect(screen.getByLabelText("Grilla de video")).toHaveStyle({ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" });
   });
 });
 
@@ -619,7 +664,8 @@ describe("Live with persistent players (P0 acceptance)", () => {
 
   it("moving a camera from cell 1 to cell 8 keeps the same session and does not reconnect", async () => {
     await renderPersistent();
-    fireEvent.click(screen.getByRole("button", { name: "Layout 3 by 3" }));
+    fireEvent.click(screen.getByRole("button", { name: "Presentación" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "3×3" }));
     const video = screen.getByLabelText("Cuadro 1").querySelector("video");
     expect(video).not.toBeNull();
     expect(FakeSocket.created).toBe(2);
@@ -675,16 +721,20 @@ describe("Live with persistent players (P0 acceptance)", () => {
   it("changing the layout keeps the sessions of cameras that stay visible", async () => {
     await renderPersistent();
     const video = screen.getByLabelText("Cuadro 1").querySelector("video");
-    fireEvent.click(screen.getByRole("button", { name: "Layout 4 by 4" }));
-    fireEvent.click(screen.getByRole("button", { name: "Layout 3 by 2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Presentación" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "4×4" }));
+    fireEvent.click(screen.getByRole("button", { name: "Presentación" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "3×3" }));
     expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video);
     expect(FakeSocket.created).toBe(2);
   });
 
-  it("offers the 25 and 32 camera walls only with persistent players", async () => {
+  it("offers the 5×5, 6×6 and 8×8 presentations from the layout menu", async () => {
     await renderPersistent();
-    expect(screen.getByRole("button", { name: "Layout 5 by 5" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Layout 8 by 4" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Presentación" }));
+    expect(screen.getByRole("menuitem", { name: "5×5" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "6×6" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "8×8" })).toBeInTheDocument();
   });
 
   describe("LIVE/REC mode", () => {
@@ -719,12 +769,14 @@ describe("Live with persistent players (P0 acceptance)", () => {
     it("switches to REC from the toggle and back to LIVE, clearing the URL state", async () => {
       setup(withRecordings);
       const { router } = renderPage(Live);
-      fireEvent.click(await screen.findByRole("button", { name: "Grabaciones" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Grabado" }));
       expect(await screen.findByRole("region", { name: "Controles de grabación" })).toBeInTheDocument();
       await waitFor(() => expect(router.state.location.search).toMatchObject({ mode: "rec" }));
-      expect(screen.getByRole("button", { name: "Grabaciones" })).toHaveAttribute("aria-pressed", "true");
+      const started = new Date(String((router.state.location.search as { t?: string }).t)).getTime();
+      expect(Math.abs(started - (Date.now() - 5 * 60 * 1000))).toBeLessThan(5_000);
+      expect(screen.getByRole("button", { name: "Grabado" })).toHaveAttribute("aria-pressed", "true");
 
-      fireEvent.click(screen.getByRole("button", { name: "En vivo" }));
+      fireEvent.click(screen.getByRole("button", { name: "Vivo" }));
       await waitFor(() => expect(screen.queryByRole("region", { name: "Controles de grabación" })).toBeNull());
       expect(router.state.location.search).not.toHaveProperty("mode");
       expect(router.state.location.search).not.toHaveProperty("t");

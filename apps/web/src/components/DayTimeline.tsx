@@ -26,6 +26,10 @@ export type TimelineEvent = {
   label?: string;
   /** Plate text or recognized name, when there is one. */
   detail?: string;
+  /** Paint swatch, once vehicle color is confident. */
+  color?: string;
+  /** Type and color line, when enrichment is confident. */
+  title?: string;
 };
 
 const RULER_H = 20;
@@ -433,6 +437,16 @@ export function DayTimeline({
           ctx.lineWidth = 1;
           ctx.globalAlpha = 1;
         }
+        const paint = c.count === 1 ? items[c.from]?.color : undefined;
+        if (paint) {
+          const s = 10;
+          const sx = Math.round(x0);
+          const sy = Math.round(y + (MARK_H - s) / 2);
+          ctx.fillStyle = "#111";
+          ctx.fillRect(sx - 1, sy - 1, s + 2, s + 2);
+          ctx.fillStyle = paint;
+          ctx.fillRect(sx, sy, s, s);
+        }
         if (c.count > 1 && x1 - x0 >= 14) {
           ctx.fillStyle = "#000";
           ctx.font = "bold 9px ui-monospace, monospace";
@@ -559,7 +573,8 @@ export function DayTimeline({
         <>
           <div className="flex items-center gap-1.5 font-medium">
             <Icon className="size-3.5 shrink-0" style={{ color: CATEGORY_COLOR[cat] }} aria-hidden />
-            {detectionTitle(first.label ?? "", first.detail)}
+            {first.color && <span className="inline-block size-2.5 shrink-0 rounded-[2px] border border-black/50" style={{ backgroundColor: first.color }} aria-hidden />}
+            {first.title || detectionTitle(first.label ?? "", first.detail)}
           </div>
           <div className="text-muted">
             {clock(first.time)}

@@ -22,17 +22,16 @@ describe("Map operational states", () => {
     fireEvent.click(screen.getByRole("button", { name: /Unlocated site/ }));
     expect(props.onSelectSite).toHaveBeenCalledWith("s");
   });
-  it("explains inventory versus placement and provides an editor action", () => {
-    const props = setup({ currentSite: site });
-    expect(screen.getByText(/Camera inventory exists separately/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open placement editor" }));
-    expect(props.onEdit).toHaveBeenCalledOnce();
+  it("explains inventory versus placement", () => {
+    setup({ currentSite: site });
+    expect(screen.getByLabelText("Find camera")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open placement editor" })).not.toBeInTheDocument();
   });
   it("retries failed placement data rather than reporting empty inventory", () => {
     const retry = vi.fn();
     setup({ currentSite: site, errors: [{ label: "Camera placements", error: new Error("Forbidden"), retry }] });
     expect(screen.getByRole("alert")).toHaveTextContent("Forbidden");
-    expect(screen.queryByText(/Camera inventory exists separately/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ubicación guardada/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry camera placements" }));
     expect(retry).toHaveBeenCalledOnce();
   });
@@ -51,7 +50,7 @@ describe("Map operational states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open camera events" }));
     expect(props.onEvents).toHaveBeenCalledWith("c");
     expect(screen.queryByRole("button", { name: "Open camera playback" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Live:/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Maximizar:/ })).not.toBeInTheDocument();
   });
   it("labels analytics as current summaries, not fabricated historical heatmaps", () => {
     setup({ mode: "analytics", currentSite: site });

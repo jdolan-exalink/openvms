@@ -7,7 +7,7 @@ COPY apps/web/package.json apps/web/
 RUN pnpm install --frozen-lockfile
 COPY packages ./packages
 COPY apps/web ./apps/web
-RUN pnpm --filter @openvms/web build
+RUN NODE_OPTIONS=--max-old-space-size=1024 pnpm --filter @openvms/web build
 
 FROM caddy:2-alpine
 COPY deploy/docker/Caddyfile /etc/caddy/Caddyfile

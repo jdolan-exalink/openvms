@@ -1,14 +1,16 @@
+import { useT } from "@/i18n";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { CheckCheck, Download, History } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { CheckCheck, Download, History, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraGroupsQuery, camerasQuery, type EventFilter, eventsQuery, meQuery, sitesQuery } from "@/api/queries";
 import { SearchSummary, type FilterChip } from "@/components/SearchSummary";
 import { Modal } from "@/components/Modal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { commonLabels, fmtDateTime, fmtDuration, fromLocalInput, labelName } from "@/lib/format";
+import { VehicleFacts } from "@/components/VehicleMark";
+import { commonLabels, fmtDateTime, fmtDuration, fromLocalInput, labelName, vehicleColorOptions, vehicleTypeOptions } from "@/lib/format";
 import { emptyEventsForm as emptyForm, type EventsForm as Form, formToSearch, parseEventsSearch, searchToForm } from "@/lib/eventsSearch";
 import { can } from "@/lib/perm";
 
@@ -30,6 +32,8 @@ function toFilter(f: Form): EventFilter {
     reviewed: f.pending ? false : undefined,
     has_snapshot: f.hasSnapshot ? true : undefined,
     has_preview: f.hasPreview ? true : undefined,
+    vehicle_type: f.vehicleType ? [f.vehicleType] : undefined,
+    vehicle_color: f.vehicleColor ? [f.vehicleColor] : undefined,
     limit: 48,
   };
 }
@@ -43,6 +47,8 @@ function appliedChips(f: Form, names: { site?: string; camera?: string; group?: 
   if (f.camera) out.push({ key: "camera", label: `Cámara: ${names.camera ?? f.camera}`, clear: { camera: "" } });
   if (f.cameraGroup) out.push({ key: "group", label: `Grupo: ${names.group ?? f.cameraGroup}`, clear: { cameraGroup: "" } });
   if (f.label) out.push({ key: "label", label: `Objeto: ${labelName(f.label)}`, clear: { label: "" } });
+  if (f.vehicleType) out.push({ key: "vehicleType", label: `Tipo de vehículo: ${vehicleTypeOptions.find((o) => o.value === f.vehicleType)?.label ?? f.vehicleType}`, clear: { vehicleType: "" } });
+  if (f.vehicleColor) out.push({ key: "vehicleColor", label: `Color: ${vehicleColorOptions.find((o) => o.value === f.vehicleColor)?.label ?? f.vehicleColor}`, clear: { vehicleColor: "" } });
   if (f.zone.trim()) out.push({ key: "zone", label: `Zona: ${f.zone.trim()}`, clear: { zone: "" } });
   if (f.subLabel.trim()) out.push({ key: "subLabel", label: `Sub-etiqueta: ${f.subLabel.trim()}`, clear: { subLabel: "" } });
   if (f.severity) out.push({ key: "severity", label: `Tipo: ${f.severity === "alert" ? "Solo alertas" : "Solo detecciones"}`, clear: { severity: "" } });
@@ -57,6 +63,7 @@ function appliedChips(f: Form, names: { site?: string; camera?: string; group?: 
 
 /** Events is the federated event index (PRD §34-40): every authorized Frigate in one list. */
 export function Events() {
+  const t = useT();
   const me = useQuery(meQuery);
   const sites = useQuery(sitesQuery);
   const cameras = useQuery(camerasQuery({}));
@@ -111,7 +118,7 @@ export function Events() {
 
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-6">
-      <PageHeader title="Eventos" description="Alertas y detecciones de todos los servidores Frigate que podés ver, en una sola lista." />
+      <PageHeader title={t("Eventos")} description={t("Alertas y detecciones de todos los servidores Frigate que podés ver, en una sola lista.")} />
       <form
         className="grid gap-3 rounded border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={(e) => {
@@ -156,6 +163,22 @@ export function Events() {
               <option key={l} value={l}>
                 {labelName(l)}
               </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Tipo de vehículo">
+          <Select value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)}>
+            <option value="">Todos</option>
+            {vehicleTypeOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Color">
+          <Select value={form.vehicleColor} onChange={(e) => set("vehicleColor", e.target.value)}>
+            <option value="">Todos</option>
+            {vehicleColorOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </Select>
         </Field>
@@ -248,18 +271,15 @@ export function Events() {
                 selected.has(e.id) && "border-accent ring-2 ring-accent",
               )}
             >
-              <Thumb event={e} />
+              <Thumb event={e} snapshot={can(me.data, "snapshots.view")} />
               <div className="flex flex-col gap-1 p-2 text-sm">
                 <div className="flex items-center gap-2">
                   <span className={cn("rounded px-1.5 py-0.5 font-mono text-[10px] uppercase", e.severity === "alert" ? "bg-bad/20 text-bad" : "bg-raised text-muted")}>
                     {e.severity === "alert" ? "Alerta" : "Detección"}
                   </span>
-                  <span className="truncate font-medium">{e.labels.map(labelName).join(", ") || "—"}</span>
                   <ReviewBadge reviewed={e.reviewed} />
                 </div>
-                <div className="truncate text-xs text-muted">
-                  {e.camera_name} · {e.site_name}
-                </div>
+                <VehicleFacts labels={e.labels} vehicle={e.attributes?.vehicle} person={e.attributes?.person} serverName={e.server_name} cameraName={e.camera_name} vehicleJob={e.attributes?.vehicle_job} personJob={e.attributes?.person_job} />
                 <div className="flex items-center justify-between text-xs text-muted">
                   <span>{fmtDateTime(e.start_time)}</span>
                   {e.plates.length > 0 && <span className="rounded bg-accent/15 px-1.5 font-mono text-accent">{e.plates.join(" ")}</span>}
@@ -351,17 +371,22 @@ function ReviewBadge({ reviewed }: { reviewed: boolean }) {
   );
 }
 
-function Thumb({ event }: { event: Schemas["Event"] }) {
+function Thumb({ event, snapshot }: { event: Schemas["Event"]; snapshot: boolean }) {
+  const [src, setSrc] = useState(snapshot && event.has_snapshot ? `/media/v1/events/${event.id}/snapshot.jpg` : `/api/v1/events/${event.id}/thumbnail`);
   const [failed, setFailed] = useState(false);
   return (
     <div className="aspect-video bg-raised">
       {!failed && (
         <img
-          src={`/api/v1/events/${event.id}/thumbnail`}
+          src={src}
           alt=""
           loading="lazy"
           className="size-full object-cover"
-          onError={() => setFailed(true)}
+          onError={() => {
+            const thumb = `/api/v1/events/${event.id}/thumbnail`;
+            if (src !== thumb) setSrc(thumb);
+            else setFailed(true);
+          }}
         />
       )}
     </div>
@@ -378,6 +403,32 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
       void qc.invalidateQueries({ queryKey: ["events"] });
     },
   });
+  const classifiable = e.labels.some((label) => ["car", "car-verified", "truck", "bus", "motorcycle", "person"].includes(label));
+  const reading = e.attributes?.vehicle_job === "pending" || e.attributes?.vehicle_job === "processing" || e.attributes?.person_job === "pending" || e.attributes?.person_job === "processing";
+  const reprocess = useMutation({
+    mutationFn: async () => unwrap(await api.POST("/api/v1/events/{eventId}/reprocess", { params: { path: { eventId: e.id } } })),
+    onSuccess: (updated) => {
+      setE(updated);
+      void qc.invalidateQueries({ queryKey: ["events"] });
+    },
+  });
+  useEffect(() => {
+    if (!reading) return;
+    let stop = false;
+    const timer = setInterval(() => {
+      void (async () => {
+        const next = await unwrap(await api.GET("/api/v1/events/{eventId}", { params: { path: { eventId: e.id } } }));
+        if (stop) return;
+        setE(next);
+        const still = next.attributes?.vehicle_job === "pending" || next.attributes?.vehicle_job === "processing" || next.attributes?.person_job === "pending" || next.attributes?.person_job === "processing";
+        if (!still) void qc.invalidateQueries({ queryKey: ["events"] });
+      })();
+    }, 2000);
+    return () => {
+      stop = true;
+      clearInterval(timer);
+    };
+  }, [reading, e.id, qc]);
   const exp = useMutation({
     mutationFn: async () => {
       const start = new Date(new Date(e.start_time).getTime() - 5000);
@@ -395,13 +446,10 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
   return (
     <Modal title="Detalle del evento" onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <h3 className="text-base font-medium">{e.labels.map(labelName).join(", ") || "Evento"}</h3>
+        <VehicleFacts labels={e.labels} vehicle={e.attributes?.vehicle} person={e.attributes?.person} serverName={e.server_name} cameraName={e.camera_name} vehicleJob={e.attributes?.vehicle_job} personJob={e.attributes?.person_job} />
         <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
           <span className={cn("rounded px-1.5 py-0.5 font-mono text-[10px] uppercase", e.severity === "alert" ? "bg-bad/20 text-bad" : "bg-raised text-muted")}>
             {e.severity === "alert" ? "Alerta" : "Detección"}
-          </span>
-          <span>
-            {e.camera_name} · {e.server_name} · {e.site_name}
           </span>
           <ReviewBadge reviewed={e.reviewed} />
         </p>
@@ -421,7 +469,7 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
           <dt className="text-muted">Patentes</dt>
           <dd className="font-mono">{e.plates.join(" ") || "—"}</dd>
         </dl>
-        <ErrorNote error={review.error ?? exp.error} />
+        <ErrorNote error={review.error ?? exp.error ?? reprocess.error} />
         {exp.data && <p role="status" className="text-sm text-ok">Exportación iniciada. La vas a encontrar en Exportaciones.</p>}
         {review.isSuccess && (
           <p role="status" className="text-sm text-ok">
@@ -437,6 +485,12 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
           {can(me, "exports.create") && (
             <Button onClick={() => exp.mutate()} disabled={exp.isPending || !!exp.data}>
               <Download className="size-4" aria-hidden /> Exportar clip
+            </Button>
+          )}
+          {can(me, "events.review") && classifiable && (
+            <Button onClick={() => reprocess.mutate()} disabled={reprocess.isPending || reading}>
+              <RefreshCw className={cn("size-4", (reprocess.isPending || reading) && "animate-spin")} aria-hidden />{" "}
+              {reprocess.isPending || reading ? "Reprocesando…" : "Reprocesar"}
             </Button>
           )}
           {can(me, "events.review") && (

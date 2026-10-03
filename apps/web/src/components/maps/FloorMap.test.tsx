@@ -38,7 +38,7 @@ async function setup(permissions: string[], conflict = false, slowRefresh = fals
   const dirty = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}><FloorMap siteId="s" floor={{ id: "f", building_id: "b", name: "Plan", ordinal: 0, revision: 1 }} initialMode="edit" onDirty={dirty} onPlanSaved={vi.fn()}/></QueryClientProvider>);
-  await screen.findByText("Floor camera");
+  await screen.findByRole("button", { name: "Floor camera" });
   return { writes, dirty, fetch, release: () => release() };
 }
 it("isolates floor positions and stages direct drag until explicit save", async () => {
@@ -46,11 +46,11 @@ it("isolates floor positions and stages direct drag until explicit save", async 
   expect(screen.queryByText("Geographic only")).not.toBeInTheDocument();
   expect(screen.queryByText("Other floor")).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Drop foreign"));
-  expect(screen.queryByText("1 unsaved changes")).not.toBeInTheDocument();
+  expect(screen.queryByText("1 cambio(s) sin guardar")).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Drop camera"));
   expect(writes).toHaveLength(0);
   expect(dirty).toHaveBeenLastCalledWith(true);
-  fireEvent.click(screen.getByText("Save placements (1)"));
+  fireEvent.click(screen.getByText("Guardar (1)"));
   await waitFor(() => expect(writes).toHaveLength(1));
   expect(await writes[0]!.json()).toEqual({ site_id: "s", floor_id: "f", x: .3, y: .6 });
   await waitFor(() => expect(dirty).toHaveBeenLastCalledWith(false));
@@ -59,32 +59,32 @@ it("gates uploads and writes independently, preserving failed changes without re
   const { writes } = await setup(["maps.edit_device"], true);
   expect(screen.queryByText("Upload controls")).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Drop camera"));
-  fireEvent.click(screen.getByText("Save placements (1)"));
+  fireEvent.click(screen.getByText("Guardar (1)"));
   await screen.findByText(/new: Placement changed/);
   expect(writes).toHaveLength(1);
-  expect(screen.getByText("1 unsaved changes")).toBeInTheDocument();
-  fireEvent.click(screen.getByText("Discard floor changes"));
-  expect(screen.queryByText("1 unsaved changes")).not.toBeInTheDocument();
+  expect(screen.getByText("1 cambio(s) sin guardar")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Cancelar"));
+  expect(screen.queryByText("1 cambio(s) sin guardar")).not.toBeInTheDocument();
 });
 it("maps.edit alone can upload but cannot place cameras", async () => {
   const { writes } = await setup(["maps.edit"]);
   expect(screen.getByText("Upload controls")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Drop camera"));
-  expect(screen.queryByText("1 unsaved changes")).not.toBeInTheDocument();
+  expect(screen.queryByText("1 cambio(s) sin guardar")).not.toBeInTheDocument();
   expect(writes).toHaveLength(0);
 });
 it("keeps pending markers and navigation dirty until post-save refresh finishes", async () => {
   const { writes, dirty, release } = await setup(["maps.edit_device"], false, true);
   fireEvent.click(screen.getByText("Drop camera"));
-  await screen.findByText("New camera", { selector: "span" });
-  fireEvent.click(screen.getByText("Save placements (1)"));
+  await screen.findByRole("button", { name: "New camera" });
+  fireEvent.click(screen.getByText("Guardar (1)"));
   await waitFor(() => expect(writes).toHaveLength(1));
-  expect(screen.getByText("New camera", { selector: "span" })).toBeInTheDocument();
+  expect(screen.getAllByText("New camera").length).toBeGreaterThan(1);
   expect(dirty).toHaveBeenLastCalledWith(true);
   release();
   await waitFor(() => expect(dirty).toHaveBeenLastCalledWith(false));
 });
 it("does not duplicate a placed camera when unplaced cache is temporarily stale", async () => {
   await setup(["maps.edit_device"], false, false, true);
-  expect(screen.getAllByText("Floor camera")).toHaveLength(1);
+  expect(screen.getAllByRole("button", { name: "Floor camera" })).toHaveLength(1);
 });

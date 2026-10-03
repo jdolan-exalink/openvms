@@ -1,6 +1,6 @@
 import type { CameraEntity } from "@/lib/maps/types";
 import type { HoverStage } from "@/lib/maps/hoverIntent";
-import { SurfaceSlot } from "@/lib/live/SurfaceLayer";
+import { MsePlayer } from "@/components/MsePlayer";
 import { usePlayerSession } from "@/lib/live/PlayerSessionProvider";
 import { STATE_COLORS, computeDisplayState } from "@/lib/maps/entityIndex";
 import { ExternalLink, Pin, Video } from "lucide-react";
@@ -13,6 +13,8 @@ export interface CameraPreviewProps {
   onPin?: (cameraId: string) => void;
   onOpenLive?: (cameraId: string) => void;
   liveOnHover?: boolean;
+  /** Same shared session as Live. The picture stays inside this card. */
+  persistent?: boolean;
   canPreview?: boolean;
   onHoverEnter?: () => void;
   onHoverLeave?: () => void;
@@ -26,13 +28,15 @@ export function CameraPreview({
   onPin,
   onOpenLive,
   liveOnHover = false,
+  persistent = false,
   canPreview = true,
   onHoverEnter,
   onHoverLeave,
 }: CameraPreviewProps) {
   const shouldRenderVideo = stage === "live" && liveOnHover && canPreview;
   const shouldPrewarm = canPreview && (stage === "prewarm" || stage === "live");
-  const session = usePlayerSession(shouldPrewarm ? camera.id : "", "sub", camera.serverId);
+  // Opens the shared sub session before the picture is shown. The player below places the <video>.
+  usePlayerSession(shouldPrewarm ? camera.id : "", "sub", camera.serverId);
 
   const displayState = computeDisplayState(
     camera.status,
@@ -56,6 +60,8 @@ export function CameraPreview({
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onHoverLeave?.();
       }}
       style={{ left: `${left}px`, top: `${top}px` }}
+      data-map-source={camera.id}
+      data-map-source-rank="2"
       className="pointer-events-auto absolute w-72 rounded-lg border border-line bg-surface p-3 shadow-xl "
     >
       <div className="relative z-[3] flex items-start justify-between gap-2 mb-2">
@@ -89,8 +95,8 @@ export function CameraPreview({
               type="button"
               onClick={() => onOpenLive(camera.id)}
               className="rounded p-1 text-muted hover:bg-raised hover:text-ink transition-colors"
-              title="Open in Live View"
-              aria-label="Open in Live View"
+              title="Maximizar en el mapa"
+              aria-label="Maximizar"
             >
               <ExternalLink className="size-3.5" />
             </button>
@@ -104,7 +110,7 @@ export function CameraPreview({
             key={snapshotUrl}
             src={snapshotUrl}
             alt={camera.name}
-            className="size-full object-cover"
+            className="absolute inset-0 size-full object-cover"
             loading="eager"
             onLoad={(event) => event.currentTarget.style.removeProperty("display")}
             onError={(e) => {
@@ -112,7 +118,15 @@ export function CameraPreview({
             }}
           />
           {shouldRenderVideo && (
-            <SurfaceSlot session={session} preserveOwner className="absolute inset-0 size-full" />
+            <MsePlayer
+              cameraId={camera.id}
+              quality="sub"
+              serverId={camera.serverId}
+              persistent={persistent}
+              objectFit="cover"
+              active
+              className="absolute inset-0 size-full bg-transparent"
+            />
           )}
         </div>
       ) : (

@@ -25,6 +25,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
+	"github.com/jdolan-exalink/openvms/internal/vehicle"
 )
 
 // Blobs stores thumbnails; *objectstore.Store implements it.
@@ -285,6 +286,12 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 			if isNew {
 				created = append(created, ev)
 				cameraNames[cam.ID] = cam.Name
+				if err := vehicle.Enqueue(ctx, tx, ev.ID, ev.TenantID, ev.Labels); err != nil {
+					return err
+				}
+				if err := vehicle.EnqueuePerson(ctx, tx, ev.ID, ev.TenantID, ev.Labels); err != nil {
+					return err
+				}
 			}
 			// On every upsert, not only inserts: a detection promoted to alert opens its
 			// alarm later. A downgrade leaves an existing alarm untouched.

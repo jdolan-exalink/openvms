@@ -49,10 +49,13 @@ describe("primary navigation and context header", () => {
     expect(eventsLink).toHaveAttribute("aria-current", "page");
     expect(eventsLink).toHaveClass("bg-accent/15");
     expect(screen.getByLabelText("Encabezado de página")).toHaveTextContent(/Investigación.*Eventos/);
-    expect(screen.getByRole("button", { name: "Cerrar sesión" })).toBeInTheDocument();
-    const themeToggle = screen.getByRole("button", { name: /modo claro/i });
-    expect(themeToggle).toBeInTheDocument();
-    expect(themeToggle).not.toHaveTextContent(/Modo claro|Modo oscuro/);
+    fireEvent.click(screen.getByRole("button", { name: "Cuenta" }));
+    expect(screen.getByRole("menuitem", { name: "Cerrar sesión" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Cambiar contraseña" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Modo claro" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "EN" }));
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Events" })).toBeInTheDocument();
   });
 
   it("marks the settings destination active on an unprefixed settings route", async () => {

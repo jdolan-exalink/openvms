@@ -42,7 +42,7 @@ describe("zoneDraft", () => {
 
     draft = undoZonePoint(draft);
     expect(draft.points).toHaveLength(2);
-    expect(undoZonePoint(draft).points).toHaveLength(2);
+    expect(undoZonePoint(draft).points).toHaveLength(1);
   });
 
   it("reports exactly what the backend would reject", () => {

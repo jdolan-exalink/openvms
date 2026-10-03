@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
@@ -26,6 +27,7 @@ const defaultMinutes = 5;
 
 /** Rules: guided form for automation rules (no JSON). Requires notifications.manage. */
 export function Rules() {
+  const t = useT();
   const qc = useQueryClient();
   const rules = useQuery(rulesQuery);
   const [editing, setEditing] = useState<Rule | "new" | null>(null);
@@ -48,7 +50,7 @@ export function Rules() {
   if (forbidden) {
     return (
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <PageHeader title="Reglas" />
+        <PageHeader title={t("Reglas")} />
         <Empty>No tenés permiso para administrar reglas. Pedile a un administrador el permiso de gestión de notificaciones.</Empty>
       </div>
     );
@@ -57,8 +59,8 @@ export function Rules() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title="Reglas"
-        description="Automatizá alarmas y notificaciones a partir de eventos y de la caída de cámaras o servidores."
+        title={t("Reglas")}
+        description={t("Automatizá alarmas y notificaciones a partir de eventos y de la caída de cámaras o servidores.")}
         actions={
           <Button variant="primary" onClick={() => setEditing("new")}>
             <Plus className="size-4" aria-hidden /> Nueva regla
@@ -162,6 +164,8 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
     labels: c.labels ?? ([] as string[]),
     zones: c.zones ?? ([] as string[]),
     severities: c.severities ?? ([] as string[]),
+    vehicle_types: c.vehicle_types ?? ([] as string[]),
+    vehicle_colors: c.vehicle_colors ?? ([] as string[]),
     minutes: String(c.duration_seconds ? Math.round(c.duration_seconds / 60) : defaultMinutes),
     create_alarm: rule?.actions.create_alarm ?? true,
     notify_in_app: rule?.actions.notify_in_app ?? true,
@@ -177,6 +181,8 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
       if (f.labels.length) out.labels = f.labels;
       if (f.zones.length) out.zones = f.zones;
       if (f.severities.length) out.severities = f.severities;
+      if (f.vehicle_types.length) out.vehicle_types = f.vehicle_types;
+      if (f.vehicle_colors.length) out.vehicle_colors = f.vehicle_colors;
       return out;
     }
     const out: Schemas["RuleConditions"] = { duration_seconds: Math.max(1, Number(f.minutes) || defaultMinutes) * 60 };
@@ -284,6 +290,37 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
               options={eventSeverities}
               selected={f.severities}
               onToggle={(v) => setF({ ...f, severities: flip(f.severities, v) })}
+            />
+            <CheckGroup
+              legend="Tipo de vehículo (vacío = cualquiera)"
+              options={[
+                { value: "car", label: "Auto" },
+                { value: "sedan", label: "Sedán" },
+                { value: "hatchback", label: "Hatchback" },
+                { value: "suv", label: "SUV" },
+                { value: "pickup", label: "Pickup" },
+                { value: "van", label: "Utilitario" },
+                { value: "station_wagon", label: "Familiar" },
+                { value: "micro", label: "Citadino" },
+                { value: "truck", label: "Camión" },
+                { value: "bus", label: "Colectivo" },
+                { value: "motorcycle", label: "Moto" },
+              ]}
+              selected={f.vehicle_types}
+              onToggle={(v) => setF({ ...f, vehicle_types: flip(f.vehicle_types, v) })}
+            />
+            <CheckGroup
+              legend="Color del vehículo (vacío = cualquiera)"
+              options={[
+                { value: "black", label: "Negro" },
+                { value: "white", label: "Blanco" },
+                { value: "gray", label: "Gris" },
+                { value: "silver", label: "Plata" },
+                { value: "red", label: "Rojo" },
+                { value: "blue", label: "Azul" },
+              ]}
+              selected={f.vehicle_colors}
+              onToggle={(v) => setF({ ...f, vehicle_colors: flip(f.vehicle_colors, v) })}
             />
           </>
         )}

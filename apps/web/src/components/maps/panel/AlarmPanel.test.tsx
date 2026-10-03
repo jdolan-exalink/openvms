@@ -23,25 +23,27 @@ it("offers read-only history without management controls", async () => {
   setup(false);
   fireEvent.click(screen.getByRole("button", { name: /Entrance/ }));
   expect(await screen.findByText(/Existing note/)).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Acknowledge" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Marcar como vista" })).not.toBeInTheDocument();
 });
 it("uses all authorized lifecycle endpoints and comments", async () => {
   const writes = setup();
   fireEvent.click(screen.getByRole("button", { name: /Entrance/ }));
   await screen.findByText(/Existing note/);
   fireEvent.change(screen.getByLabelText("Comment"), { target: { value: "Investigating" } });
-  for (const action of ["Acknowledge", "Investigate", "Resolve", "Close", "Add comment"]) {
+  fireEvent.click(screen.getByRole("button", { name: "Marcar como vista" }));
+  await screen.findByText("Acción registrada");
+  for (const action of ["Investigar", "Resolver", "Cerrar alarma", "Guardar comentario"]) {
     fireEvent.click(screen.getByRole("button", { name: action }));
-    await screen.findByText("Action completed");
+    await screen.findByText("Acción registrada");
   }
   fireEvent.change(screen.getByLabelText("Assignee"), { target: { value: "u" } });
-  fireEvent.click(screen.getByRole("button", { name: "Assign" }));
-  await screen.findByText("Action completed");
-  expect(writes).toEqual(["acknowledge", "investigate", "resolve", "close", "comments", "assign"]);
+  fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
+  await screen.findByText("Acción registrada");
+  expect(writes).toEqual(["acknowledge", "comments", "investigate", "resolve", "close", "comments", "assign"]);
 });
 it("shows API authorization errors rather than claiming success", async () => {
   setup(true, true);
   fireEvent.click(screen.getByRole("button", { name: /Entrance/ }));
-  fireEvent.click(await screen.findByRole("button", { name: "Resolve" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Resolver" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Denied");
 });

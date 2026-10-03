@@ -44,18 +44,6 @@ describe("UnplacedTray", () => {
     expect(onPlaceAll).toHaveBeenCalledTimes(1);
   });
 
-  it("offers the CSV import alongside the placement actions", () => {
-    const onImport = vi.fn();
-    render(<UnplacedTray cameras={cameras} onArm={() => {}} onPlaceAll={() => {}} onImport={onImport} />);
-    fireEvent.click(screen.getByRole("button", { name: "Importar CSV" }));
-    expect(onImport).toHaveBeenCalledTimes(1);
-  });
-
-  it("hides the import without the permission", () => {
-    render(<UnplacedTray cameras={cameras} onArm={() => {}} onPlaceAll={() => {}} />);
-    expect(screen.queryByRole("button", { name: "Importar CSV" })).not.toBeInTheDocument();
-  });
-
   it("says so when nothing is left to place", () => {
     render(<UnplacedTray cameras={[]} onArm={() => {}} onPlaceAll={() => {}} />);
     expect(screen.getByText(/Todas las cámaras del sitio están ubicadas/)).toBeInTheDocument();

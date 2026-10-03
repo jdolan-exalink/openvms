@@ -1,16 +1,16 @@
-import { DndContext, DragOverlay, type DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, DragOverlay, type DragEndEvent, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { rectSortingStrategy, rectSwappingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
 import { faAnglesRight } from "@fortawesome/free-solid-svg-icons";
-import { faFolderOpen, faPen, faTrash } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { Camera, CircleCheck, CircleHelp, CircleX, History, Maximize2, Minimize2, Save, Trash2, X } from "lucide-react";
+import { Camera, CircleCheck, CircleHelp, CircleX, History, Maximize2, Minimize2, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
+import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { MsePlayer } from "@/components/MsePlayer";
 import { useFeatures } from "@/lib/features";
 import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
@@ -20,14 +20,16 @@ import { LiveModeToggle } from "@/components/LiveModeToggle";
 import { setContextSidebarCollapsed, useContextSidebarPortalTarget, useTopBarActionsPortalTarget } from "@/components/AppShell";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { type ExplorerActions, LiveExplorer } from "@/components/LiveExplorer";
-import type { MenuItem } from "@/components/ContextMenu";
+import { Modal } from "@/components/Modal";
+import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/Presentations";
 import { Button, ErrorNote, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  duplicateTileIndexes, fillTiles, growLayout, liveSelectionKey, parseSelection, placeCameraAt, placeCameraUnique, resizeTiles, resolveDragEnd, reorderTiles,
+  cameraIdOf, duplicateTileIndexes, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, resizeTiles, resolveDragEnd, reorderTiles,
   serializeSelection, swapTiles, tileDragId,
   type Tile,
 } from "@/lib/liveGrid";
+import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
 import { assignRecPlayers, parseRecSearch, pickMaster, REC_ENTRY_OFFSET_S, recSearch } from "@/lib/liveRec";
 import { loadSidebarCollapsed, saveSidebarCollapsed } from "@/lib/explorer";
 import { can } from "@/lib/perm";
@@ -36,16 +38,20 @@ import { useRecData } from "@/lib/useRecData";
 import { useRecPlayback } from "@/lib/useRecPlayback";
 import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
 
+/** copyViewName picks «Nombre (copia)» or «Nombre (copia 2)» so a duplicate stays unique. */
+function copyViewName(name: string, taken: Set<string>): string {
+  const base = `${name} (copia)`;
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let n = 2; n < 100; n++) {
+    const candidate = `${name} (copia ${n})`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+  return `${base} ${taken.size + 1}`;
+}
+
 const unixNow = () => Math.floor(Date.now() / 1000);
 /** How often the shared REC time is written to the URL while playing. */
 const URL_SYNC_MS = 15_000;
-
-const GRID_LAYOUTS = [
-  { columns: 1, rows: 1 }, { columns: 2, rows: 1 }, { columns: 2, rows: 2 },
-  { columns: 3, rows: 2 }, { columns: 3, rows: 3 }, { columns: 4, rows: 3 }, { columns: 4, rows: 4 },
-];
-// Large walls (25 and 32 cameras); offered with persistent players, which pause off-screen tiles.
-const LARGE_GRID_LAYOUTS = [{ columns: 5, rows: 5 }, { columns: 8, rows: 4 }];
 
 /**
  * Live is the multi-server live screen (PRD §46-49): a camera tree grouped by site and
@@ -61,16 +67,26 @@ export function Live() {
 
   const [columns, setColumns] = useState(2);
   const [rows, setRows] = useState(2);
+  const [panes, setPanes] = useState<Pane[]>(() => uniformPanes(2, 2));
+  const [catalog, setCatalog] = useState<Presentation[]>(loadCatalog);
+  const [editorOpen, setEditorOpen] = useState(false);
   const [tiles, setTiles] = useState<Tile[]>(() => Array(4).fill(null));
   const [selected, setSelected] = useState(0);
   const [focus, setFocus] = useState<number | null>(null);
   const [viewId, setViewId] = useState("");
-  const [saveName, setSaveName] = useState("");
   const [playbackCameraId, setPlaybackCameraId] = useState<string | null>(null);
-  const [shared, setShared] = useState(false);
+  const [viewDialog, setViewDialog] = useState<null | { mode: "create" } | { mode: "edit"; id: string }>(null);
+  const [dialogName, setDialogName] = useState("");
+  const [dialogShared, setDialogShared] = useState(false);
   // Set once the saved grid selection (or the default) has been applied, so the persistence
   // effect below never fires before restoration and overwrites a saved selection with defaults.
   const [restored, setRestored] = useState(false);
+  const tilesRef = useRef(tiles);
+  const selectedRef = useRef(selected);
+  useEffect(() => {
+    tilesRef.current = tiles;
+    selectedRef.current = selected;
+  }, [tiles, selected]);
   const [consumedCamera, setConsumedCamera] = useState<string | undefined>();
   const folderApi = useCameraFolders(cameras.data);
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(loadSidebarCollapsed);
@@ -96,7 +112,24 @@ export function Live() {
   const sidebarMount = useContextSidebarPortalTarget();
   const topBar = useTopBarActionsPortalTarget();
   const { persistentPlayers, videoSurfaceLayer } = useFeatures();
-  const layouts = persistentPlayers ? [...GRID_LAYOUTS, ...LARGE_GRID_LAYOUTS] : GRID_LAYOUTS;
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    const sync = () => {
+      const on = document.fullscreenElement === document.documentElement;
+      setFullscreen(on);
+      document.documentElement.toggleAttribute("data-live-fullscreen", on);
+    };
+    document.addEventListener("fullscreenchange", sync);
+    return () => {
+      document.removeEventListener("fullscreenchange", sync);
+      document.documentElement.removeAttribute("data-live-fullscreen");
+    };
+  }, []);
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) void document.exitFullscreen?.();
+    else void document.documentElement.requestFullscreen?.();
+  };
+  const uniformLayouts = DEFAULT_PRESENTATIONS.filter((item) => item.panes.length === item.columns * item.rows).map((item) => ({ columns: item.columns, rows: item.rows }));
 
   const camById = useMemo(() => new Map(cameras.data?.map((c) => [c.id, c])), [cameras.data]);
 
@@ -129,6 +162,7 @@ export function Live() {
       if (saved) {
         setColumns(saved.columns);
         setRows(saved.rows);
+        setPanes(saved.panes ?? uniformPanes(saved.columns, saved.rows));
         setTiles(saved.tiles);
       }
     } catch {
@@ -140,11 +174,11 @@ export function Live() {
   useEffect(() => {
     if (!restored || !me.data) return;
     try {
-      localStorage.setItem(liveSelectionKey(me.data.tenant_id, me.data.id), serializeSelection(columns, tiles, rows));
+      localStorage.setItem(liveSelectionKey(me.data.tenant_id, me.data.id), serializeSelection(columns, tiles, rows, panes));
     } catch {
       // Storage unavailable (private mode, quota): the grid still works for this session.
     }
-  }, [restored, me.data, columns, rows, tiles]);
+  }, [restored, me.data, columns, rows, tiles, panes]);
 
   // A Maps handoff is consumed only after REST has supplied the authorized camera list.
   const requestedCamera = typeof search.camera === "string" ? search.camera : undefined;
@@ -154,7 +188,7 @@ export function Live() {
     setConsumedCamera(requestedCamera);
     const allowed = cameras.data.find((camera) => camera.id === requestedCamera);
     if (allowed && can(me.data, "live.view")) {
-      const existing = tiles.findIndex((tile) => tile?.camera_id === requestedCamera);
+      const existing = tiles.findIndex((tile) => cameraIdOf(tile) === requestedCamera);
       if (existing >= 0) setSelected(existing);
       else {
         const empty = tiles.findIndex((tile) => tile === null);
@@ -182,25 +216,34 @@ export function Live() {
   const setGrid = (nextColumns: number, nextRows: number) => {
     setColumns(nextColumns);
     setRows(nextRows);
+    setPanes(uniformPanes(nextColumns, nextRows));
     setTiles((t) => resizeTiles(t, nextColumns, nextRows));
     setSelected((s) => Math.min(s, nextColumns * nextRows - 1));
+    setFocus(null);
+  };
+  const applyPresentation = (presentation: Presentation) => {
+    setColumns(presentation.columns);
+    setRows(presentation.rows);
+    setPanes(presentation.panes);
+    setTiles((current) => fitTiles(current, presentation.panes.length));
+    setSelected((index) => Math.min(index, Math.max(0, presentation.panes.length - 1)));
     setFocus(null);
   };
 
   // index defaults to the currently selected tile (click-to-place); dragging a camera from the
   // list onto a specific slot passes that slot's index explicitly instead.
-  const place = (cameraId: string, index: number = selected) => {
-    setTiles((t) => {
-      const defaultQuality = cameras.data?.find((c) => c.id === cameraId)?.default_live_quality ?? "sub";
-      const quality = columns === 1 ? "main" : defaultQuality;
-      // With persistent players a camera is never shown twice: placing one that is already on
-      // the grid moves it here (swapping cells), keeping its running session.
-      const next = persistentPlayers ? placeCameraUnique(t, index, cameraId, quality) : placeCameraAt(t, index, cameraId, quality);
-      // After a click (not a drag), move the selection to the next empty tile.
-      const empty = next.findIndex((x, i) => x === null && i !== index);
-      if (empty >= 0) setSelected(empty);
-      return next;
-    });
+  const place = (cameraId: string, index?: number) => {
+    const at = index ?? selectedRef.current;
+    const defaultQuality = cameras.data?.find((c) => c.id === cameraId)?.default_live_quality ?? "sub";
+    const quality = columns === 1 ? "main" : defaultQuality;
+    // The ref updates immediately so two clicks before the next render fill two cells.
+    const source = tilesRef.current;
+    const next = persistentPlayers ? placeCameraUnique(source, at, cameraId, quality) : placeCameraAt(source, at, cameraId, quality);
+    const empty = next.findIndex((cell, i) => cell === null && i !== at);
+    tilesRef.current = next;
+    if (empty >= 0) selectedRef.current = empty;
+    setTiles(next);
+    if (empty >= 0) setSelected(empty);
   };
 
   // Swapping (not shifting) keeps every other tile in its cell, so only the two swapped cameras move.
@@ -222,42 +265,89 @@ export function Live() {
       return;
     }
     if (resolution.type === "place") place(resolution.cameraId, resolution.index);
-    else reorder(resolution.from, resolution.to);
+    else if (resolution.type === "reorder") reorder(resolution.from, resolution.to);
+    else if (resolution.type === "fill-server") showGroup(camerasOfServer(resolution.serverId), servers.data?.find((server) => server.id === resolution.serverId)?.name ?? "El servidor");
+    else showGroup(camerasOfFolder(resolution.folderId), folderApi.folders.find((folder) => folder.id === resolution.folderId)?.name ?? "La carpeta");
   };
 
-  const loadView = (id: string) => {
-    setViewId(id);
-    const v = views.data?.find((x) => x.id === id);
-    if (!v) return;
+  const showView = (v: Schemas["View"]) => {
+    setViewId(v.id);
     const n = v.layout.columns;
-    const nextRows = v.layout.cells.length ? Math.ceil(v.layout.cells.length / n) : n;
+    const next: Tile[] = v.layout.cells.map((c) => (c.camera_id ? { camera_id: c.camera_id, quality: c.quality ?? "sub" } : null));
+    const remembered = recallViewPanes(v.id, n, next.length);
+    const nextRows = remembered?.rows ?? (next.length ? Math.ceil(next.length / n) : n);
+    const nextPanes = remembered?.panes ?? uniformPanes(n, nextRows);
     setColumns(n);
     setRows(nextRows);
-    const next: Tile[] = v.layout.cells.map((c) => (c.camera_id ? { camera_id: c.camera_id, quality: c.quality ?? "sub" } : null));
-    setTiles(resizeTiles(next, n, nextRows));
-    setSaveName(v.name);
-    setShared(v.shared);
+    setPanes(nextPanes);
+    setTiles(fitTiles(next, nextPanes.length));
     setFocus(null);
   };
-
-  const current = views.data?.find((v) => v.id === viewId);
-  const privateViews = views.data?.filter((v) => !v.shared) ?? [];
-  const sharedViews = views.data?.filter((v) => v.shared) ?? [];
-  const body = (): Schemas["ViewInput"] => ({
-    name: saveName.trim(),
-    shared,
-    tenant_id: me.data?.tenant_id ?? cameras.data?.find((c) => tiles.some((t) => t?.camera_id === c.id))?.tenant_id,
-    layout: { columns, cells: tiles.map((t) => (t ? { camera_id: t.camera_id, quality: t.quality } : { quality: "sub" })) },
+  const loadView = (id: string) => {
+    const v = views.data?.find((x) => x.id === id);
+    if (v) showView(v);
+  };
+  const currentLayout = (): Schemas["ViewLayout"] => ({
+    columns,
+    cells: tiles.map((t) => (t && "camera_id" in t ? { camera_id: t.camera_id, quality: t.quality } : { quality: "sub" })),
   });
+  const openViewProperties = (id: string) => {
+    const view = views.data?.find((item) => item.id === id);
+    if (!view?.editable) return;
+    setDialogName(view.name);
+    setDialogShared(view.shared);
+    setViewDialog({ mode: "edit", id });
+  };
+  const openNewView = () => {
+    setDialogName("");
+    setDialogShared(false);
+    setViewDialog({ mode: "create" });
+  };
   const save = useMutation({
-    mutationFn: async (asNew: boolean) =>
-      asNew || !current?.editable
-        ? unwrap(await api.POST("/api/v1/views", { body: body() }))
-        : unwrap(await api.PUT("/api/v1/views/{viewId}", { params: { path: { viewId: current.id } }, body: body() })),
+    mutationFn: async () => {
+      const name = dialogName.trim();
+      const tenantId = me.data?.tenant_id ?? cameras.data?.find((c) => tiles.some((t) => cameraIdOf(t) === c.id))?.tenant_id;
+      if (viewDialog?.mode === "edit") {
+        const view = views.data?.find((item) => item.id === viewDialog.id);
+        if (!view) throw new Error("La vista ya no existe.");
+        return unwrap(
+          await api.PUT("/api/v1/views/{viewId}", {
+            params: { path: { viewId: view.id } },
+            body: { name, shared: dialogShared, tenant_id: view.tenant_id, layout: viewId === view.id ? currentLayout() : view.layout },
+          }),
+        );
+      }
+      return unwrap(await api.POST("/api/v1/views", { body: { name, shared: dialogShared, tenant_id: tenantId, layout: currentLayout() } }));
+    },
     onSuccess: async (v) => {
       await qc.invalidateQueries({ queryKey: ["views"] });
-      setViewId(v.id);
+      if (viewDialog?.mode === "create" || viewId === v.id) {
+        setViewId(v.id);
+        rememberViewPanes(v.id, columns, rows, panes);
+      }
+      setViewDialog(null);
     },
+  });
+  const duplicate = useMutation({
+    mutationFn: async (id: string) => {
+      const view = views.data?.find((item) => item.id === id);
+      if (!view) throw new Error("La vista ya no existe.");
+      const taken = new Set((views.data ?? []).map((item) => item.name.toLowerCase()));
+      const created = unwrap(
+        await api.POST("/api/v1/views", {
+          body: { name: copyViewName(view.name, taken), shared: false, tenant_id: view.tenant_id, layout: view.layout },
+        }),
+      );
+      return { created, sourceId: id };
+    },
+    onSuccess: async ({ created, sourceId }) => {
+      const remembered = recallViewPanes(sourceId, created.layout.columns, created.layout.cells.length) ?? (viewId === sourceId ? { columns, rows, panes } : null);
+      if (remembered) rememberViewPanes(created.id, remembered.columns, remembered.rows, remembered.panes);
+      await qc.invalidateQueries({ queryKey: ["views"] });
+      showView(created);
+      flash(`Se duplicó «${created.name}».`);
+    },
+    onError: (err) => flash(err instanceof Error && err.message ? err.message : "No se pudo duplicar la vista.", "warn"),
   });
   const remove = useMutation({
     mutationFn: async (id: string) => unwrap(await api.DELETE("/api/v1/views/{viewId}", { params: { path: { viewId: id } } })),
@@ -275,17 +365,54 @@ export function Live() {
     else flash(r.already > 1 ? `Esas cámaras ya están ${target}.` : `La cámara ya está ${target}.`, "warn");
   };
   const cameraQuality = (id: string, cols: number) => (cols === 1 ? "main" : (camById.get(id)?.default_live_quality ?? "sub")) as "main" | "sub";
+  const byCamera = (a: Schemas["Camera"], b: Schemas["Camera"]) => a.sort_order - b.sort_order || a.display_name.localeCompare(b.display_name);
+  const camerasOfServer = (serverId: string) => {
+    const all = (cameras.data ?? []).filter((camera) => camera.enabled && camera.server_id === serverId);
+    const folders = folderApi.folders.filter((folder) => folder.server_id === serverId).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
+    const folderIds = new Set(folders.map((folder) => folder.id));
+    return [
+      ...folders.flatMap((folder) => all.filter((camera) => camera.folder_id === folder.id).sort(byCamera)),
+      ...all.filter((camera) => camera.folder_id == null || !folderIds.has(camera.folder_id)).sort(byCamera),
+    ];
+  };
+  const camerasOfFolder = (folderId: string) => (cameras.data ?? []).filter((camera) => camera.enabled && camera.folder_id === folderId).sort(byCamera);
+  const showGroup = (list: Schemas["Camera"][], label: string) => {
+    if (list.length === 0) {
+      flash(`${label} no tiene cámaras.`, "warn");
+      return;
+    }
+    const layout = presentationForCount(DEFAULT_PRESENTATIONS, list.length);
+    const built = fitTiles(list.map((camera): Tile => ({ camera_id: camera.id, quality: cameraQuality(camera.id, layout.columns) })), layout.panes.length);
+    const skipped = Math.max(0, list.length - layout.panes.length);
+    setColumns(layout.columns);
+    setRows(layout.rows);
+    setPanes(layout.panes);
+    setTiles(built);
+    setSelected(0);
+    setFocus(null);
+    setViewId("");
+    if (skipped > 0) flash(`${label}: se muestran ${list.length - skipped} de ${list.length} cámaras. La grilla más grande es ${layout.name}.`, "warn");
+    else flash(`${label}: ${layout.name} con ${plural(list.length)}.`);
+  };
+  const placeInOpen = (cameraId: string) => {
+    if (!camById.has(cameraId)) return;
+    setTiles((current) => {
+      const next = placeInOpenCell(current, cameraId, cameraQuality(cameraId, columns));
+      if (next.index >= 0) setSelected(next.index);
+      return next.tiles;
+    });
+  };
 
   // Context menu "Agregar a vista > Grilla actual": fills empty cells and, when full, grows the grid to the next layout.
   const addToGrid = (ids: string[]) => {
     const visible = ids.filter((id) => camById.has(id));
-    const present = new Set(tiles.flatMap((t) => (t ? [t.camera_id] : [])));
+    const present = new Set(tiles.flatMap((t) => { const id = cameraIdOf(t); return id ? [id] : []; }));
     const fresh = visible.filter((id) => !present.has(id));
     let cols = columns;
     let base = tiles;
     const free = tiles.filter((t) => t === null).length;
     if (fresh.length > free) {
-      const next = growLayout(layouts, tiles.length, tiles.length - free + fresh.length);
+      const next = growLayout(uniformLayouts, tiles.length, tiles.length - free + fresh.length);
       if (next) {
         cols = next.columns;
         base = resizeTiles(tiles, next.columns, next.rows);
@@ -310,7 +437,7 @@ export function Live() {
       await unwrap(
         await api.PUT("/api/v1/views/{viewId}", {
           params: { path: { viewId: view.id } },
-          body: { name: view.name, shared: view.shared, tenant_id: view.tenant_id, layout: { columns: n, cells: res.tiles.map((t) => (t ? { camera_id: t.camera_id, quality: t.quality } : { quality: "sub" as const })) } },
+          body: { name: view.name, shared: view.shared, tenant_id: view.tenant_id, layout: { columns: n, cells: res.tiles.map((t) => (t && "camera_id" in t ? { camera_id: t.camera_id, quality: t.quality } : { quality: "sub" as const })) } },
         }),
       );
       await qc.invalidateQueries({ queryKey: ["views"] });
@@ -336,24 +463,24 @@ export function Live() {
   const duplicates = useMemo(() => (persistentPlayers ? duplicateTileIndexes(tiles) : new Set<number>()), [persistentPlayers, tiles]);
 
   const transport = useRecPlayback({ active: rec, seedT: urlT ?? now - REC_ENTRY_OFFSET_S, now });
-  const gridCameraIds = useMemo(() => [...new Set(tiles.flatMap((t) => (t && camById.has(t.camera_id) ? [t.camera_id] : [])))], [tiles, camById]);
+  const gridCameraIds = useMemo(() => [...new Set(tiles.flatMap((t) => { const id = cameraIdOf(t); return id && camById.has(id) ? [id] : []; }))], [tiles, camById]);
   const recData = useRecData(gridCameraIds, transport.day, rec);
   const denied = useMemo(() => new Set(recData.denied), [recData.denied]);
-  const focusedCameraId = focus !== null ? tiles[focus]?.camera_id : undefined;
+  const focusedCameraId = focus !== null ? cameraIdOf(tiles[focus] ?? null) : undefined;
   const { players: recPlayers, limited: recLimited } = useMemo(
     () => assignRecPlayers(focusedCameraId ? [focusedCameraId] : gridCameraIds, (id) => !denied.has(id)),
     [focusedCameraId, gridCameraIds, denied],
   );
   const hasCoverage = (id: string) => (recData.spans[id]?.length ?? 0) > 0;
   const syncIds = useMemo(() => recPlayers.filter((id) => !recData.loaded.includes(id) || (recData.spans[id]?.length ?? 0) > 0), [recPlayers, recData.loaded, recData.spans]);
-  const masterId = pickMaster(syncIds, tiles[selected]?.camera_id, hasCoverage);
+  const masterId = pickMaster(syncIds, cameraIdOf(tiles[selected] ?? null), hasCoverage);
   useSyncedPlayback(rec ? masterId : "", syncIds, (id) => transport.players.current.get(id)?.video);
   const timelineCameras = useMemo(
     () => gridCameraIds.filter((id) => !denied.has(id)).map((id) => ({ id, name: camById.get(id)?.display_name ?? id, spans: recData.spans[id] ?? [], live: camById.get(id)?.status === "online" })),
     [gridCameraIds, denied, camById, recData.spans],
   );
 
-  // Entering REC via the toggle starts at now - 30 s, or at the latest recording when the cameras stopped earlier.
+  // Entering GRABADO starts five minutes before now and plays. If the cameras stopped earlier, it starts at the end of the last recording.
   const entryPending = useRef(false);
   const setMode = (next: "live" | "rec") => {
     entryPending.current = next === "rec";
@@ -393,98 +520,13 @@ export function Live() {
     ? camById.get(activeDrag.slice("camera:".length))?.display_name
     : activeDrag?.startsWith("tfolder:")
       ? folderApi.folders.find((f) => f.id === activeDrag.slice("tfolder:".length))?.name
-      : undefined;
+      : activeDrag?.startsWith("tserver:")
+        ? servers.data?.find((server) => server.id === activeDrag.slice("tserver:".length))?.name
+        : undefined;
   const modeToggle = <LiveModeToggle rec={rec} onChange={setMode} />;
-  const topBarActions = canRec && topBar.available && topBar.target ? createPortal(modeToggle, topBar.target) : null;
-  const renderViews = (query: string, bindViewMenu: (build: () => MenuItem[]) => object) => {
-    const match = (v: Schemas["View"]) => !query || v.name.toLowerCase().includes(query);
-    const groups = [
-      { label: "Privadas", items: privateViews.filter(match) },
-      { label: "Compartidas", items: sharedViews.filter(match) },
-    ];
-    const viewButton = "flex w-full min-w-0 items-center gap-1 rounded px-1.5 py-0.5 text-left text-sm hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent";
-    return (
-      <div className="flex flex-col gap-2">
-        <ul aria-label="Vistas" className="flex flex-col">
-          <li>
-            <button type="button" aria-current={viewId === "" ? "true" : undefined} onClick={() => setViewId("")} className={cn(viewButton, viewId === "" && "bg-raised font-medium")}>
-              Vista sin guardar
-            </button>
-          </li>
-          {groups.map(
-            (group) =>
-              group.items.length > 0 && (
-                <li key={group.label} aria-label={group.label}>
-                  <p className="px-1.5 pt-1 text-[11px] font-semibold uppercase tracking-wide text-muted">{group.label}</p>
-                  <ul className="flex flex-col">
-                    {group.items.map((v) => (
-                      <li key={v.id}>
-                        <button
-                          type="button"
-                          aria-current={viewId === v.id ? "true" : undefined}
-                          onClick={() => loadView(v.id)}
-                          className={cn(viewButton, viewId === v.id && "bg-raised font-medium")}
-                          {...bindViewMenu(() => [
-                            { id: "open", label: "Abrir", icon: faFolderOpen, onSelect: () => loadView(v.id) },
-                            {
-                              id: "edit",
-                              label: "Editar",
-                              icon: faPen,
-                              disabled: !v.editable,
-                              hint: v.editable ? undefined : "Solo lectura",
-                              // Edit = load the view and focus its name so the existing Guardar flow applies.
-                              onSelect: () => {
-                                loadView(v.id);
-                                setTimeout(() => document.querySelector<HTMLInputElement>('input[aria-label="Nombre de la vista"]')?.focus(), 0);
-                              },
-                            },
-                            ...(v.editable ? [{ id: "delete", label: "Eliminar", icon: faTrash, danger: true, onSelect: () => setDeleteViewId(v.id) } satisfies MenuItem] : []),
-                          ])}
-                        >
-                          <span className="truncate">{v.shared && v.owner_name ? `${v.name} · ${v.owner_name}` : v.name}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </li>
-              ),
-          )}
-        </ul>
-        <p role="status" aria-label="Vista activa" className="px-1 text-xs text-muted">
-          {current
-            ? `${current.name} · ${current.shared ? (current.owner_name ? `Compartida por ${current.owner_name}` : "Compartida") : "Privada"}${current.editable ? "" : " · Solo lectura: guardar crea una copia propia"}`
-            : "Vista sin guardar"}
-        </p>
-        <TextInput aria-label="Nombre de la vista" placeholder="Nombre de la vista" value={saveName} onChange={(e) => setSaveName(e.target.value)} />
-        {can(me.data, "views.create_shared") && (
-          <label className="flex items-center gap-2 text-xs">
-            <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} /> Compartida con mi organización
-          </label>
-        )}
-        <div className="flex flex-wrap gap-1.5">
-          {/* Creating a view needs views.create_private (or views.create_shared once
-              Compartida is checked); editing an existing view the caller owns or can
-              manage does not, so the button stays available for that case regardless. */}
-          {(current?.editable || can(me.data, "views.create_private") || can(me.data, "views.create_shared")) && (
-            <Button onClick={() => save.mutate(false)} disabled={!saveName.trim() || save.isPending}>
-              <Save className="size-4" aria-hidden /> {current?.editable ? "Guardar" : "Guardar vista actual"}
-            </Button>
-          )}
-          {current?.editable && (
-            <>
-              <Button onClick={() => save.mutate(true)} disabled={!saveName.trim() || save.isPending}>
-                Guardar como nueva
-              </Button>
-              <Button onClick={() => remove.mutate(current.id)} aria-label="Borrar vista" title="Borrar vista">
-                <Trash2 className="size-4" aria-hidden />
-              </Button>
-            </>
-          )}
-        </div>
-        <ErrorNote error={save.error ?? remove.error} />
-      </div>
-    );
-  };
+  const topBarActions = canRec && !fullscreen && topBar.available && topBar.target ? createPortal(modeToggle, topBar.target) : null;
+  const canCreateView = can(me.data, "views.create_private") || can(me.data, "views.create_shared");
+  const canShareView = can(me.data, "views.create_shared");
   const sidebarContent = (
     <LiveExplorer
       cameras={cameras.data ?? []}
@@ -492,11 +534,18 @@ export function Live() {
       servers={servers.data ?? []}
       folderApi={folderApi}
       onPick={place}
+      onDoublePlace={placeInOpen}
       onPlayback={setPlaybackCameraId}
       canViewRecordings={can(me.data, "recordings.view")}
       onCollapse={() => setSidebarCollapsed(true)}
-      renderViews={renderViews}
-      viewCount={views.data?.length ?? 0}
+      views={views.data ?? []}
+      activeViewId={viewId}
+      onOpenView={loadView}
+      onEditView={openViewProperties}
+      onDuplicateView={(id) => duplicate.mutate(id)}
+      onDeleteView={setDeleteViewId}
+      onCreateView={openNewView}
+      canCreateView={canCreateView}
       notice={treeNotice}
       noticeTone={noticeTone}
       actions={explorerActions}
@@ -508,12 +557,12 @@ export function Live() {
     : sidebarCollapsed ? null : <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-64">{sidebarContent}</aside>;
 
   return (
-    <div className="flex flex-col gap-2 md:h-full md:min-h-0">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       <h1 className="sr-only">En vivo</h1>
       {topBarActions}
       <DndContext sensors={sensors} onDragStart={(e) => setActiveDrag(String(e.active.id))} onDragCancel={() => setActiveDrag(null)} onDragEnd={handleDragEnd}>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-          <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+          <section data-live-stage className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
             <div role="group" aria-label="Layout de la grilla" className="flex shrink-0 flex-wrap items-center gap-1">
               {sidebarCollapsed && (
                 <button
@@ -526,42 +575,29 @@ export function Live() {
                   <FontAwesomeIcon icon={faAnglesRight} fixedWidth className="text-sm" aria-hidden />
                 </button>
               )}
-              {layouts.map(({ columns: layoutColumns, rows: layoutRows }) => (
-                <button
-                  key={`${layoutColumns}x${layoutRows}`}
-                  type="button"
-                  onClick={() => setGrid(layoutColumns, layoutRows)}
-                  aria-pressed={layoutColumns === columns && layoutRows === rows && focus === null}
-                  aria-label={`Layout ${layoutColumns} by ${layoutRows}`}
-                  className={cn(
-                    "rounded border border-line px-2 py-1 font-mono text-xs",
-                    layoutColumns === columns && layoutRows === rows && focus === null ? "bg-accent text-bg" : "bg-surface hover:bg-raised",
-                  )}
-                >
-                  {layoutColumns}×{layoutRows}
-                </button>
-              ))}
-              <span className="ml-2 hidden truncate text-xs text-muted 2xl:inline">Elegí un cuadro y después una cámara del árbol, o arrastrala.</span>
-              {canRec && !topBar.available && <div className="ml-auto">{modeToggle}</div>}
+              <LayoutMenu catalog={catalog} active={{ columns, panes }} onSelect={applyPresentation} onEdit={() => setEditorOpen(true)} />
+              <FullscreenButton active={fullscreen} onClick={toggleFullscreen} />
+              {canRec && (fullscreen || !topBar.available) && <div className="ml-auto">{modeToggle}</div>}
             </div>
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
-              <div role="group" aria-label="Grilla de video" data-mode={rec ? "rec" : "live"}
+              <LiveGridFrame role="group" label="Grilla de video" mode={rec ? "rec" : "live"}
                 className={cn(
-                  "grid gap-1 rounded-md ring-2 md:min-h-0 md:flex-1 md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
+                  "grid min-h-0 flex-1 gap-1 overflow-y-auto rounded-md ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
                   rec ? "ring-bad/50" : "ring-ok/40",
                 )}
                 style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, "--grid-rows": focus !== null ? 1 : rows } as CSSProperties}
               >
                 {shown.map((i) => {
                   const t = tiles[i] ?? null;
-                  const cam = t ? camById.get(t.camera_id) : undefined;
+                  const cameraId = cameraIdOf(t);
+                  const cam = cameraId ? camById.get(cameraId) : undefined;
                   const isHidden = focus !== null && focus !== i;
                   let recLayer: ReactNode = null;
-                  if (rec && t && cam && !isHidden) {
-                    const id = t.camera_id;
+                  if (rec && cameraId && cam && !isHidden) {
+                    const id = cameraId;
                     const state: RecTileState = denied.has(id)
                       ? "denied"
-                      : tiles.findIndex((x) => x?.camera_id === id) !== i
+                      : tiles.findIndex((x) => cameraIdOf(x) === id) !== i
                         ? "duplicate"
                         : recLimited.has(id)
                           ? "limited"
@@ -572,8 +608,9 @@ export function Live() {
                   }
                   return (
                     <GridTile
-                      key={persistentPlayers ? (t && !duplicates.has(i) ? `camera:${t.camera_id}` : `cell:${i}`) : i}
+                      key={persistentPlayers ? (cameraId && !duplicates.has(i) ? `camera:${cameraId}` : `cell:${i}`) : i}
                       index={i}
+                      placement={focus === null && panes[i] ? { gridColumn: `${panes[i].col + 1} / span ${panes[i].colSpan}`, gridRow: `${panes[i].row + 1} / span ${panes[i].rowSpan}` } : undefined}
                       tile={t}
                       camera={cam}
                       isSelected={selected === i}
@@ -587,7 +624,7 @@ export function Live() {
                       serverId={cam?.server_id}
                       canViewRecordings={can(me.data, "recordings.view")}
                       status={cam?.status}
-                      quality={persistentPlayers ? (t?.quality ?? "sub") : focus === i || columns === 1 ? "main" : (t?.quality ?? "sub")}
+                      quality={persistentPlayers ? (t && "quality" in t ? t.quality : "sub") : focus === i || columns === 1 ? "main" : (t && "quality" in t ? t.quality : "sub")}
                       onSelect={() => setSelected(i)}
                       onToggleFocus={() => t && setFocus(focus === null ? i : null)}
                       onRemove={() => {
@@ -597,16 +634,16 @@ export function Live() {
                     />
                   );
                 })}
-              </div>
+              </LiveGridFrame>
             </SortableContext>
             {rec && <LiveRecDock
                 transport={transport}
                 cameras={timelineCameras}
                 events={recData.events}
                 now={now}
-                selectedId={tiles[selected]?.camera_id}
+                selectedId={cameraIdOf(tiles[selected] ?? null)}
                 onSelectCamera={(id) => {
-                  const idx = tiles.findIndex((t) => t?.camera_id === id);
+                  const idx = tiles.findIndex((t) => cameraIdOf(t) === id);
                   if (idx >= 0) setSelected(idx);
                 }}
               />}
@@ -617,6 +654,40 @@ export function Live() {
           {dragLabel ? <div className="pointer-events-none rounded border border-accent bg-surface px-2 py-1 text-xs shadow-lg">{dragLabel}</div> : null}
         </DragOverlay>
       </DndContext>
+      {editorOpen && (
+        <PresentationEditor
+          catalog={catalog}
+          active={{ columns, panes }}
+          onCancel={() => setEditorOpen(false)}
+          onAccept={(next, selectedId) => {
+            setCatalog(next);
+            saveCatalog(next);
+            const selected = next.find((item) => item.id === selectedId);
+            if (selected) applyPresentation(selected);
+            setEditorOpen(false);
+          }}
+        />
+      )}
+      {viewDialog && (
+        <Modal title="Propiedades" onClose={() => setViewDialog(null)} className="max-w-md">
+          <TextInput aria-label="Nombre de la vista" placeholder="Nombre de la vista" value={dialogName} onChange={(event) => setDialogName(event.target.value)} />
+          {canShareView ? (
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={dialogShared} onChange={(event) => setDialogShared(event.target.checked)} /> Compartida con mi organización
+            </label>
+          ) : (
+            viewDialog.mode === "edit" && dialogShared && <p className="text-sm text-muted">Compartida con mi organización</p>
+          )}
+          {viewDialog.mode === "edit" && viewId === viewDialog.id && <p className="text-xs text-muted">Al guardar se actualiza el diseño que está en la grilla.</p>}
+          <ErrorNote error={save.error} />
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setViewDialog(null)}>Cancelar</Button>
+            <Button variant="primary" onClick={() => save.mutate()} disabled={!dialogName.trim() || save.isPending}>
+              Guardar
+            </Button>
+          </div>
+        </Modal>
+      )}
       {deleteViewId && (
         <ConfirmDialog
           title="Eliminar vista"
@@ -639,8 +710,18 @@ export function Live() {
   );
 }
 
+function LiveGridFrame({ className, style, role, label, mode, children }: { className?: string; style?: CSSProperties; role?: string; label: string; mode?: string; children: ReactNode }) {
+  const { setNodeRef } = useDroppable({ id: LIVE_GRID_DROP_ID });
+  return (
+    <div ref={setNodeRef} role={role} aria-label={label} data-mode={mode} className={className} style={style}>
+      {children}
+    </div>
+  );
+}
+
 function GridTile({
   index,
+  placement,
   tile,
   camera,
   isSelected,
@@ -660,6 +741,7 @@ function GridTile({
   onRemove,
 }: {
   index: number;
+  placement?: CSSProperties;
   tile: Tile;
   camera: Schemas["Camera"] | undefined;
   isSelected: boolean;
@@ -683,7 +765,7 @@ function GridTile({
   onRemove: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
-  const style = { transform: CSS.Transform.toString(transform), transition };
+  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...placement };
   return (
     <div
       ref={setNodeRef}
@@ -700,7 +782,23 @@ function GridTile({
       {...attributes}
       {...listeners}
     >
-      {tile && camera ? (
+      {tile && isMapTile(tile) ? (
+        <>
+          <LiveMapTile map={tile.map} />
+          <button
+            type="button"
+            title="Quitar mapa"
+            aria-label={`Quitar ${tile.map.name}`}
+            className="absolute right-2 top-2 z-[3] rounded bg-black/70 p-1 text-white hover:bg-white/20"
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
+          >
+            <X className="size-3.5" aria-hidden />
+          </button>
+        </>
+      ) : tile && camera && "camera_id" in tile ? (
         <>
           {isDuplicate ? (
             <div className="relative size-full">

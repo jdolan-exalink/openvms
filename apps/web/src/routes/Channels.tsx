@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
@@ -42,6 +43,7 @@ type TestOutcome = { name: string; results: Schemas["NotificationChannelTestResu
 
 /** Channels: external notification channels (webhook, email, WhatsApp, Telegram). Requires notifications.manage. */
 export function Channels() {
+  const t = useT();
   const qc = useQueryClient();
   const channels = useQuery(channelsQuery);
   const deliveries = useQuery(deliveriesQuery());
@@ -79,7 +81,7 @@ export function Channels() {
   if (channels.error instanceof ApiError && channels.error.status === 403) {
     return (
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <PageHeader title="Canales" />
+        <PageHeader title={t("Canales")} />
         <Empty>No tenés permiso para administrar canales. Pedile a un administrador el permiso de gestión de notificaciones.</Empty>
       </div>
     );
@@ -88,8 +90,8 @@ export function Channels() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title="Canales"
-        description="Destinos externos (webhook, correo, WhatsApp, Telegram) que las reglas pueden notificar."
+        title={t("Canales")}
+        description={t("Destinos externos (webhook, correo, WhatsApp, Telegram) que las reglas pueden notificar.")}
         actions={
           <Button variant="primary" onClick={() => setEditing("new")}>
             <Plus className="size-4" aria-hidden /> Nuevo canal

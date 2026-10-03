@@ -9,13 +9,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 
 	// PDW-7: the clip watermark job (internal/clipwatermark) burns the tenant's configured
@@ -45,6 +49,8 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
 	"github.com/jdolan-exalink/openvms/internal/store"
+	"github.com/jdolan-exalink/openvms/internal/store/db"
+	"github.com/jdolan-exalink/openvms/internal/vehicle"
 )
 
 const service = "openvms-worker"
@@ -152,6 +158,57 @@ func run() error {
 	clipWorker := &clipwatermark.Worker{Store: st, Adapters: adapters, Blobs: objects, Log: log}
 	go clipWorker.Run(ctx)
 
+	vehicles := &vehicle.Worker{
+		Store: st, Blobs: objects, Log: log, Rules: rulesSvc,
+		Crops: func(ctx context.Context, serverID uuid.UUID, detectionID string) ([]byte, error) {
+			return objectCrop(ctx, st, adapters, serverID, detectionID)
+		},
+		Rects: func(ctx context.Context, serverID uuid.UUID, detectionID string) (string, [4]float64, [4]float64, bool) {
+			return objectRect(ctx, st, adapters, serverID, detectionID)
+		},
+		Publish: func(ctx context.Context, tenantID, eventID uuid.UUID) {
+			data, _ := json.Marshal(map[string]string{"event_id": eventID.String(), "tenant_id": tenantID.String()})
+			if err := nc.Publish("event.attributes."+tenantID.String(), data); err != nil {
+				log.WarnContext(ctx, "publish vehicle attributes", "error", err)
+			}
+		},
+	}
+	modelPath := os.Getenv("VEHICLE_BODY_MODEL")
+	if modelPath == "" {
+		modelPath = "/opt/openvms/vehicle-body.onnx"
+	}
+	capacity := &atomic.Value{}
+	capacity.Store(bodyReport{Measuring: false, Ready: false})
+	if _, err := os.Stat(modelPath); err == nil {
+		libraryPath := os.Getenv("ONNXRUNTIME_SHARED_LIBRARY")
+		if libraryPath == "" {
+			libraryPath = "/opt/openvms/libonnxruntime.so.1.29.0"
+		}
+		if body, err := vehicle.OpenBodyClassifier(modelPath, libraryPath); err != nil {
+			log.Warn("vehicle body classifier disabled", "error", err)
+		} else {
+			vehicles.Body = body
+			capacity.Store(bodyReport{Measuring: true, Ready: true, Model: "autolens-efficientnet-b2", Threads: 2})
+			go func() {
+				ms, err := body.Benchmark()
+				if err != nil || ms <= 0 {
+					log.Warn("vehicle body benchmark", "error", err)
+					capacity.Store(bodyReport{Ready: true, Model: "autolens-efficientnet-b2", Threads: 2})
+					return
+				}
+				capacity.Store(bodyReport{
+					Ready: true, Model: "autolens-efficientnet-b2", Threads: 2,
+					LatencyMs: ms, CropsPerSecond: 1000 / ms, CropsPerMinute: 60000 / ms,
+				})
+				log.Info("vehicle body benchmark", "latency_ms", ms, "crops_per_second", 1000/ms)
+			}()
+			log.Info("vehicle body classifier ready", "model", modelPath)
+		}
+	}
+	for range 4 {
+		go vehicles.Run(ctx)
+	}
+
 	poller := &inventory.HealthPoller{
 		Svc:         inv,
 		Adapters:    adapters,
@@ -174,7 +231,10 @@ func run() error {
 	}
 	go poller.Run(ctx)
 
-	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: probes(pool.Ping, func(ctx context.Context) error { return natsx.Ping(ctx, nc) }), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: probes(func() bodyReport {
+		v, _ := capacity.Load().(bodyReport)
+		return v
+	}, pool.Ping, func(ctx context.Context) error { return natsx.Ping(ctx, nc) }), ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("probe server", "error", err)
@@ -188,9 +248,23 @@ func run() error {
 	return srv.Shutdown(sctx)
 }
 
+type bodyReport struct {
+	Ready          bool    `json:"ready"`
+	Measuring      bool    `json:"measuring"`
+	Model          string  `json:"model"`
+	LatencyMs      float64 `json:"latency_ms"`
+	CropsPerSecond float64 `json:"crops_per_second"`
+	CropsPerMinute float64 `json:"crops_per_minute"`
+	Threads        int     `json:"threads"`
+}
+
 // probes serves /health/live and /health/ready for the container orchestrator.
-func probes(checks ...func(context.Context) error) http.Handler {
+func probes(capacity func() bodyReport, checks ...func(context.Context) error) http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /capacity", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(capacity())
+	})
 	mux.HandleFunc("GET /health/live", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
@@ -206,6 +280,78 @@ func probes(checks ...func(context.Context) error) http.Handler {
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
 	})
 	return mux
+}
+
+func objectCrop(ctx context.Context, st *store.Store, adapters *inventory.Adapters, serverID uuid.UUID, detectionID string) ([]byte, error) {
+	var srv db.FrigateServer
+	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		var err error
+		srv, err = q.GetServerRow(ctx, serverID)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	ad, err := adapters.Get(ctx, srv)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := ad.Media().Open(ctx, "/api/events/"+url.PathEscape(detectionID)+"/snapshot.jpg", url.Values{"crop": {"1"}}, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("snapshot status %d", resp.StatusCode)
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+}
+
+func objectRect(ctx context.Context, st *store.Store, adapters *inventory.Adapters, serverID uuid.UUID, detectionID string) (string, [4]float64, [4]float64, bool) {
+	var srv db.FrigateServer
+	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		var err error
+		srv, err = q.GetServerRow(ctx, serverID)
+		return err
+	})
+	if err != nil {
+		return "", [4]float64{}, [4]float64{}, false
+	}
+	ad, err := adapters.Get(ctx, srv)
+	if err != nil {
+		return "", [4]float64{}, [4]float64{}, false
+	}
+	resp, err := ad.Media().Open(ctx, "/api/events/"+url.PathEscape(detectionID), nil, nil)
+	if err != nil {
+		return "", [4]float64{}, [4]float64{}, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", [4]float64{}, [4]float64{}, false
+	}
+	var payload struct {
+		Label string `json:"label"`
+		Data  struct {
+			Box    []float64 `json:"box"`
+			Region []float64 `json:"region"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&payload); err != nil {
+		return "", [4]float64{}, [4]float64{}, false
+	}
+	box, okBox := four(payload.Data.Box)
+	region, okRegion := four(payload.Data.Region)
+	if payload.Label == "" || !okBox || !okRegion {
+		return "", [4]float64{}, [4]float64{}, false
+	}
+	return payload.Label, box, region, true
+}
+
+func four(v []float64) ([4]float64, bool) {
+	if len(v) != 4 {
+		return [4]float64{}, false
+	}
+	return [4]float64{v[0], v[1], v[2], v[3]}, true
 }
 
 // jetstreamPublisher adapts JetStream to the rules service's Publisher.

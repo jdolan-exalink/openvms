@@ -10,6 +10,17 @@ SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status
        e.end_time AS event_end_time,
        e.labels AS event_labels,
        e.sub_labels AS event_sub_labels,
+       fs.name AS server_name,
+       COALESCE(va.vehicle_type, '') AS vehicle_type,
+       COALESCE(va.vehicle_type_confidence, 0)::real AS vehicle_type_confidence,
+       COALESCE(va.vehicle_color, '') AS vehicle_color,
+       COALESCE(va.vehicle_color_confidence, 0)::real AS vehicle_color_confidence,
+       COALESCE(va.color_quality, '') AS color_quality,
+       COALESCE(pa.upper_color, '') AS upper_color,
+       COALESCE(pa.upper_color_confidence, 0)::real AS upper_color_confidence,
+       COALESCE(pa.lower_color, '') AS lower_color,
+       COALESCE(pa.lower_color_confidence, 0)::real AS lower_color_confidence,
+       COALESCE(pa.color_quality, '') AS person_color_quality,
        COALESCE(u_assignee.display_name, '')::text AS assigned_to_name,
        COALESCE(u_ack.display_name, '')::text AS acknowledged_by_name,
        COALESCE(u_res.display_name, '')::text AS resolved_by_name,
@@ -18,6 +29,9 @@ FROM alarms a
 JOIN sites s ON s.id = a.site_id
 JOIN cameras c ON c.id = a.camera_id
 JOIN events e ON e.id = a.event_id
+JOIN frigate_servers fs ON fs.id = e.server_id
+LEFT JOIN vehicle_attributes va ON va.event_id = e.id
+LEFT JOIN person_attributes pa ON pa.event_id = e.id
 LEFT JOIN users u_assignee ON u_assignee.id = a.assigned_to
 LEFT JOIN users u_ack ON u_ack.id = a.acknowledged_by
 LEFT JOIN users u_res ON u_res.id = a.resolved_by
@@ -36,6 +50,17 @@ SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status
        e.end_time AS event_end_time,
        e.labels AS event_labels,
        e.sub_labels AS event_sub_labels,
+       fs.name AS server_name,
+       COALESCE(va.vehicle_type, '') AS vehicle_type,
+       COALESCE(va.vehicle_type_confidence, 0)::real AS vehicle_type_confidence,
+       COALESCE(va.vehicle_color, '') AS vehicle_color,
+       COALESCE(va.vehicle_color_confidence, 0)::real AS vehicle_color_confidence,
+       COALESCE(va.color_quality, '') AS color_quality,
+       COALESCE(pa.upper_color, '') AS upper_color,
+       COALESCE(pa.upper_color_confidence, 0)::real AS upper_color_confidence,
+       COALESCE(pa.lower_color, '') AS lower_color,
+       COALESCE(pa.lower_color_confidence, 0)::real AS lower_color_confidence,
+       COALESCE(pa.color_quality, '') AS person_color_quality,
        COALESCE(u_assignee.display_name, '')::text AS assigned_to_name,
        COALESCE(u_ack.display_name, '')::text AS acknowledged_by_name,
        COALESCE(u_res.display_name, '')::text AS resolved_by_name,
@@ -44,6 +69,9 @@ FROM alarms a
 JOIN sites s ON s.id = a.site_id
 JOIN cameras c ON c.id = a.camera_id
 JOIN events e ON e.id = a.event_id
+JOIN frigate_servers fs ON fs.id = e.server_id
+LEFT JOIN vehicle_attributes va ON va.event_id = e.id
+LEFT JOIN person_attributes pa ON pa.event_id = e.id
 LEFT JOIN users u_assignee ON u_assignee.id = a.assigned_to
 LEFT JOIN users u_ack ON u_ack.id = a.acknowledged_by
 LEFT JOIN users u_res ON u_res.id = a.resolved_by

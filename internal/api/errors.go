@@ -66,6 +66,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "conflict", "a resource with the same name already exists"
 	case errors.Is(err, inventory.ErrSiteNotEmpty):
 		return http.StatusConflict, "site_not_empty", err.Error()
+	case errors.Is(err, inventory.ErrLastSite):
+		return http.StatusConflict, "last_site", err.Error()
 	case errors.Is(err, clipwatermark.ErrNotReady):
 		return http.StatusConflict, "not_ready", "the clip watermark job is not ready yet"
 	case errors.Is(err, frigate.ErrConfigEditUnsupported):

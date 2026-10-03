@@ -3,10 +3,13 @@ import { useNavigate } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { clearToken, setToken } from "@/api/auth";
 import { api, unwrap } from "@/api/client";
+import { AccountMenu } from "@/components/AccountMenu";
 import { Button, ErrorNote, Field, TextInput } from "@/components/ui";
 import { brandIcon as Brand } from "@/components/nav";
+import { useT } from "@/i18n";
 
 export function Login() {
+  const t = useT();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"password" | "token">("password");
@@ -56,14 +59,17 @@ export function Login() {
       await enter();
     } catch {
       clearToken();
-      setError(new Error("El token no es válido o está vencido."));
+      setError(new Error(t("El token no es válido o está vencido.")));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4">
+    <main className="relative flex min-h-dvh items-center justify-center px-4">
+      <div className="absolute right-4 top-4">
+        <AccountMenu />
+      </div>
       <div className="flex w-full max-w-sm flex-col gap-4 rounded border border-line bg-surface p-6">
         <div className="flex items-center gap-2">
           <Brand className="size-5 text-accent" aria-hidden />
@@ -71,10 +77,10 @@ export function Login() {
         </div>
         {mode === "password" ? (
           <form onSubmit={submitPassword} className="flex flex-col gap-4">
-            <Field label="Usuario">
+            <Field label={t("Usuario")}>
               <TextInput required autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} disabled={needTotp} />
             </Field>
-            <Field label="Contraseña">
+            <Field label={t("Contraseña")}>
               <TextInput
                 required
                 type="password"
@@ -85,7 +91,7 @@ export function Login() {
               />
             </Field>
             {needTotp && (
-              <Field label="Código de verificación" hint="Los 6 dígitos de tu app de autenticación.">
+              <Field label={t("Código de verificación")} hint={t("Los 6 dígitos de tu app de autenticación.")}>
                 <TextInput
                   required
                   autoFocus
@@ -99,17 +105,17 @@ export function Login() {
             )}
             <ErrorNote error={error} />
             <Button type="submit" variant="primary" disabled={busy}>
-              {busy ? "Verificando…" : needTotp ? "Verificar" : "Ingresar"}
+              {busy ? t("Verificando…") : needTotp ? t("Verificar") : t("Ingresar")}
             </Button>
           </form>
         ) : (
           <form onSubmit={submitToken} className="flex flex-col gap-4">
-            <Field label="Token de acceso" hint="Lo genera un administrador con vmsctl token.">
+            <Field label={t("Token de acceso")} hint={t("Lo genera un administrador con vmsctl token.")}>
               <TextInput type="password" autoComplete="off" required value={token} onChange={(e) => setTokenValue(e.target.value)} placeholder="ovms_…" />
             </Field>
             <ErrorNote error={error} />
             <Button type="submit" variant="primary" disabled={busy || !token.trim()}>
-              {busy ? "Verificando…" : "Ingresar"}
+              {busy ? t("Verificando…") : t("Ingresar")}
             </Button>
           </form>
         )}
@@ -122,7 +128,7 @@ export function Login() {
             setMode(mode === "password" ? "token" : "password");
           }}
         >
-          {mode === "password" ? "Ingresar con un token de API" : "Ingresar con usuario y contraseña"}
+          {mode === "password" ? t("Ingresar con un token de API") : t("Ingresar con usuario y contraseña")}
         </button>
       </div>
     </main>

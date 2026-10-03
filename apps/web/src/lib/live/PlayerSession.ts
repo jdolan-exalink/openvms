@@ -106,6 +106,7 @@ export class PlayerSession {
   private objectURL = "";
   private cancelFrame: (() => void) | undefined;
   private connectCount = 0;
+  private boxObserver: ResizeObserver | undefined;
 
   constructor(opts: PlayerSessionOptions) {
     this.cameraId = opts.cameraId;
@@ -127,8 +128,19 @@ export class PlayerSession {
     this.video.className = "size-full object-contain";
     this.video.autoplay = true;
     this.video.playsInline = true;
+    // A <video> paints opaque black before the first frame. Stay invisible until
+    // the decoder has a picture so the snapshot underneath remains visible.
+    this.video.style.opacity = "0";
+    this.video.addEventListener("loadeddata", this.revealFrame);
+    this.video.addEventListener("resize", this.revealFrame);
+    this.video.addEventListener("playing", this.revealFrame);
     this.setMuted(opts.muted ?? true);
   }
+
+  /** revealFrame shows the element once the decoder has a real picture. */
+  private revealFrame = (): void => {
+    if (this.video.videoWidth > 0) this.video.style.opacity = "1";
+  };
 
   // ---- observable state -------------------------------------------------------------
 
@@ -181,18 +193,51 @@ export class PlayerSession {
   attach(container: HTMLElement): void {
     if (this.closed) return;
     if (this.video.parentElement !== container) container.appendChild(this.video);
+    this.watchBox(container);
     this.resumePlayback();
   }
 
   /** detach removes the `<video>` from the DOM without closing anything. */
   detach(): void {
+    this.boxObserver?.disconnect();
+    this.boxObserver = undefined;
     this.video.remove();
+  }
+
+  /**
+   * watchBox keeps the element filling its box and resumes playback once the box has a
+   * real size. A CSS transform on the `<video>` itself makes Chrome paint the frame
+   * several times, shifted, so this only sets geometry.
+   */
+  private watchBox(container: HTMLElement): void {
+    this.boxObserver?.disconnect();
+    const fit = () => {
+      const v = this.video;
+      v.style.position = "absolute";
+      v.style.inset = "0";
+      v.style.width = "100%";
+      v.style.height = "100%";
+      v.style.transform = "";
+      this.revealFrame();
+      if (container.clientWidth < 2 || container.clientHeight < 2) return;
+      if (v.paused && this.objectURL) void v.play()?.catch(() => {});
+    };
+    if (typeof ResizeObserver !== "undefined") {
+      this.boxObserver = new ResizeObserver(fit);
+      this.boxObserver.observe(container);
+    }
+    fit();
   }
 
   setMuted(muted: boolean): void {
     this.video.muted = muted;
     if (muted) this.video.setAttribute("muted", "");
     else this.video.removeAttribute("muted");
+  }
+
+  /** setObjectFit chooses how the picture fills its box. Undefined keeps the default contain. */
+  setObjectFit(fit?: "contain" | "cover"): void {
+    this.video.style.objectFit = fit ?? "";
   }
 
   /** markWarm flags the session as running without a visible view (kept for a quick return). */
@@ -252,6 +297,11 @@ export class PlayerSession {
     this.cancelFrame?.();
     document.removeEventListener("visibilitychange", this.onVisibility);
     this.video.removeEventListener("pause", this.onPause);
+    this.video.removeEventListener("loadeddata", this.revealFrame);
+    this.video.removeEventListener("resize", this.revealFrame);
+    this.video.removeEventListener("playing", this.revealFrame);
+    this.boxObserver?.disconnect();
+    this.boxObserver = undefined;
     this.dropSocket();
     if (this.snapshot.poster) URL.revokeObjectURL(this.snapshot.poster);
     this.video.removeAttribute("src");

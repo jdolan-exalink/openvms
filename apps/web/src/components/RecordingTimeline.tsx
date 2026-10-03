@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { fmtTime, labelName } from "@/lib/format";
+import { fmtTime, labelName, vehicleHeadline, vehiclePaint } from "@/lib/format";
 
 const DAY = 24 * 3600;
 
@@ -12,7 +12,7 @@ export function RecordingTimeline({
 }: {
   day: number;
   spans: { start_time: string; end_time: string }[];
-  events: { id: string; start_time: string; severity: string; labels: string[] }[];
+  events: { id: string; start_time: string; severity: string; labels: string[]; attributes?: { vehicle?: { type?: string; type_confidence?: number; color?: string; color_confidence?: number } } }[];
   position: number;
   onSeek: (time: number) => void;
 }) {
@@ -44,13 +44,17 @@ export function RecordingTimeline({
         })}
         {events.map((item) => {
           const time = new Date(item.start_time).getTime() / 1000;
+          const paint = item.labels.some((label) => label === "car" || label === "motorcycle") ? vehiclePaint(item.attributes?.vehicle) : null;
+          const headline = vehicleHeadline(item.attributes?.vehicle);
           return (
             <div
               key={item.id}
-              title={`${item.labels.map(labelName).join(", ")} · ${fmtTime(item.start_time)}`}
+              title={`${headline ?? item.labels.map(labelName).join(", ")} · ${fmtTime(item.start_time)}`}
               className={item.severity === "alert" ? "absolute top-0 h-3 w-0.5 bg-bad" : "absolute top-0 h-2 w-0.5 bg-warn"}
               style={{ left: pct(time) }}
-            />
+            >
+              {paint && <span className="absolute top-3 left-1/2 size-2.5 -translate-x-1/2 rounded-[2px] border border-black/60" style={{ backgroundColor: paint }} />}
+            </div>
           );
         })}
         <div className="absolute inset-y-0 w-0.5 bg-ink" style={{ left: pct(position) }} />

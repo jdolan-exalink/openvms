@@ -1,4 +1,5 @@
 import { Video, Search, BarChart3, Edit3, SlidersHorizontal, Layers, Radar } from "lucide-react";
+import { useT } from "@/i18n";
 import type { MapMode } from "@/lib/maps/types";
 import { cn } from "@/lib/cn";
 
@@ -12,6 +13,8 @@ export interface MapToolbarProps {
   onToggleFilters?: () => void;
   layersActive?: boolean;
   filtersActive?: boolean;
+  /** Sit inside a parent bar instead of drawing a second box. */
+  embedded?: boolean;
 }
 
 const MODES: { id: MapMode; label: string; icon: typeof Video; requiresEdit?: boolean }[] = [
@@ -31,10 +34,12 @@ export function MapToolbar({
   onToggleFilters,
   layersActive = false,
   filtersActive = false,
+  embedded = false,
 }: MapToolbarProps) {
+  const t = useT();
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-line bg-surface/90 p-1 shadow-sm backdrop-blur-xs">
-      <div className="flex items-center gap-0.5 rounded-md bg-bg/50 p-0.5" role="tablist" aria-label="Modo de mapa">
+    <div className={embedded ? "contents" : "flex items-center gap-2 rounded-lg border border-line bg-surface/90 p-1 shadow-sm backdrop-blur-xs"}>
+      <div className="order-1 flex items-center gap-0.5 rounded-md bg-bg/50 p-0.5" role="tablist" aria-label={t("Modo de mapa")}>
         {MODES.filter((m) => !m.requiresEdit || canEdit).map((m) => {
           const Icon = m.icon;
           const active = mode === m.id;
@@ -52,22 +57,28 @@ export function MapToolbar({
                   : "text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent",
               )}
             >
+              {m.id === "live" && (
+                <span className="relative flex size-2.5 items-center justify-center" data-live-led={active ? "on" : "off"} aria-hidden>
+                  {active && <span className="absolute size-2.5 animate-ping rounded-full bg-ok" />}
+                  <span className={cn("relative size-2 rounded-full", active ? "bg-ok shadow-[0_0_8px] shadow-ok" : "bg-ok/40")} />
+                </span>
+              )}
               <Icon className="size-3.5" aria-hidden />
-              <span>{m.label}</span>
+              <span>{t(m.label)}</span>
             </button>
           );
         })}
       </div>
 
-      <div className="h-4 w-px bg-line" aria-hidden />
+      <div className="order-5 h-4 w-px bg-line" aria-hidden />
 
-      <div className="flex items-center gap-1">
+      <div className="order-5 flex items-center gap-1">
         {onToggleCoverage && (
           <button
             type="button"
             onClick={onToggleCoverage}
             aria-pressed={coverage}
-            title={coverage ? "Ocultar conos FOV (Cobertura)" : "Mostrar conos FOV (Cobertura)"}
+            title={coverage ? t("Ocultar conos FOV (Cobertura)") : t("Mostrar conos FOV (Cobertura)")}
             className={cn(
               "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
               coverage && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",
@@ -82,7 +93,7 @@ export function MapToolbar({
             type="button"
             onClick={onToggleLayers}
             aria-pressed={layersActive}
-            title="Capas del mapa"
+            title={t("Capas del mapa")}
             className={cn(
               "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
               layersActive && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",
@@ -97,7 +108,7 @@ export function MapToolbar({
             type="button"
             onClick={onToggleFilters}
             aria-pressed={filtersActive}
-            title="Filtros"
+            title={t("Filtros")}
             className={cn(
               "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
               filtersActive && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",

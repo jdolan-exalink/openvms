@@ -55,6 +55,9 @@ type Config struct {
 	LivePongWait           time.Duration
 
 	ShutdownTimeout time.Duration
+
+	// WorkerURL is the worker probe address. The API reads ONNX throughput from it.
+	WorkerURL string
 }
 
 // WahaConfig locates the WAHA service. An empty BaseURL disables WhatsApp channels.
@@ -83,6 +86,7 @@ func Load(service string) (Config, error) {
 		ValkeyAddr:              str("VALKEY_ADDR", "localhost:6379"),
 		NATSURL:                 str("NATS_URL", "nats://localhost:4222"),
 		ShutdownTimeout:         duration("SHUTDOWN_TIMEOUT", 15*time.Second),
+		WorkerURL:               str("WORKER_URL", "http://worker:8081"),
 		TrustForwardedFor:       boolean("TRUST_FORWARDED_FOR", false),
 		HealthInterval:          duration("HEALTH_INTERVAL", 30*time.Second),
 		EventSyncInterval:       duration("EVENT_SYNC_INTERVAL", 5*time.Second),

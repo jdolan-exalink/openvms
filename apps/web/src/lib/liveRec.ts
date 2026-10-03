@@ -8,8 +8,10 @@
 export const REC_MAX_PLAYERS = 16;
 export const REC_LIMIT_NOTICE = `Reproducción limitada a ${REC_MAX_PLAYERS} cámaras`;
 export const REC_SPEEDS = [0.5, 1, 2, 4, 8] as const;
-/** Entering REC starts this far behind the live edge so the recording exists. */
-export const REC_ENTRY_OFFSET_S = 30;
+/** Recordings are addressable this far behind now; closer than this the file may not exist yet. */
+export const REC_LIVE_EDGE_S = 30;
+/** Entering GRABADO starts playback this far before the current time and plays from there. */
+export const REC_ENTRY_OFFSET_S = 5 * 60;
 
 export const startOfLocalDay = (unix: number): number => {
   const d = new Date(unix * 1000);

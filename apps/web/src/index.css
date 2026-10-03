@@ -63,6 +63,46 @@ body {
   @apply bg-bg text-ink font-sans antialiased;
 }
 
+/* Live fullscreen covers the document so the video surface layer stays inside it.
+   Fullscreening only the grid hides those videos and the tiles go black. */
+html[data-live-fullscreen],
+html[data-live-fullscreen] body {
+  background: var(--bg-app);
+}
+html[data-live-fullscreen] [data-shell="openvms"] {
+  padding-left: 0;
+}
+html[data-live-fullscreen] [data-shell-region="primary-nav"],
+html[data-live-fullscreen] [data-shell-region="context-sidebar-frame"],
+html[data-live-fullscreen] [data-shell-region="page-header"],
+html[data-live-fullscreen] #mobile-nav-drawer {
+  display: none;
+}
+html[data-live-fullscreen] [data-shell-region="main-workspace"] {
+  padding: 0.5rem;
+}
+
+@keyframes soc-popup {
+  0% { opacity: 0; transform: translateY(18px) scale(0.94); }
+  62% { opacity: 1; transform: translateY(-6px) scale(1.02); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.soc-popup {
+  animation: soc-popup 0.48s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: bottom center;
+}
+
+@keyframes alarm-card-in {
+  0% { opacity: 0; transform: translateX(-22px) scale(0.97); }
+  58% { opacity: 1; transform: translateX(6px) scale(1); }
+  100% { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+.alarm-card-in {
+  animation: alarm-card-in 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

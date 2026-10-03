@@ -1,15 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { meQuery } from "@/api/queries";
+import { alarmsQuery, cameraFoldersQuery, camerasQuery, meQuery, serversQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
+import { mapsOverviewQuery } from "@/lib/maps/api";
 import type { CameraEntity, MapMode } from "@/lib/maps/types";
 import { floorEntitiesQuery, floorUnplacedQuery, emptyFloorDraft, stageFloor, undoFloor, redoFloor, saveFloorPlacement, type Point } from "@/lib/maps/floorEditor";
 import { loadFloorPlan } from "@/lib/maps/plans";
 import type { WorkspaceFloor } from "./MapWorkspace";
 import { FloorPlanCanvas, type FloorPlanCanvasHandle } from "./canvas/FloorPlanCanvas";
-import { UnplacedTray } from "./editor/UnplacedTray";
+import { MapEditSidebar } from "./editor/MapEditSidebar";
 import { PlanUpload } from "./editor/PlanUpload";
+import { MapSocSidebar } from "./panel/MapSocSidebar";
+import { MapOperationsPanel } from "./panel/MapOperationsPanel";
+import { AlarmPanel } from "./panel/AlarmPanel";
+import { MapPlateSnapshot, type PlateSnapshotTarget } from "./panel/MapPlateSnapshot";
+import { MapMaximizedCamera } from "./panel/MapMaximizedCamera";
+import { CameraPanel } from "./panel/CameraPanel";
+import { captureGrowOrigin, rectFromElement, type GrowRect } from "./panel/MapGrowFrame";
+import { usePinnedMapWindows } from "./panel/usePinnedMapWindows";
+import { useFeatures } from "@/lib/features";
+import { ErrorNote } from "../ui";
 interface Props {
   siteId: string;
   floor: WorkspaceFloor;
@@ -18,9 +29,11 @@ interface Props {
   onDirty: (dirty: boolean) => void;
   onPlanSaved: () => void;
   onSelectCamera?: (id: string | undefined) => void;
+  editorMaps?: ReactNode;
 }
-export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, onPlanSaved, onSelectCamera }: Props) {
+export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, onPlanSaved, onSelectCamera, editorMaps }: Props) {
   const me = useQuery(meQuery);
+  const { persistentPlayers } = useFeatures();
   const client = useQueryClient();
   const navigate = useNavigate();
   const entities = useQuery(floorEntitiesQuery(siteId, floor.id));
@@ -41,6 +54,20 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
   const [planError, setPlanError] = useState<string>();
   const [selected, setSelected] = useState<string>();
   const [armed, setArmed] = useState<string>();
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [plateSnapshot, setPlateSnapshot] = useState<PlateSnapshotTarget>();
+  const [maximizedId, setMaximizedId] = useState<string>();
+  const [maximizedOrigin, setMaximizedOrigin] = useState<GrowRect>();
+  const pinned = usePinnedMapWindows(me.data?.tenant_id ?? null, me.data?.id, `floor:${floor.id}`);
+  const liveChrome = mode !== "edit";
+  const overview = useQuery({ ...mapsOverviewQuery, enabled: liveChrome });
+  const currentSite = overview.data?.find((site) => site.id === siteId);
+  const inventory = useQuery({ ...camerasQuery({ site_id: siteId }), enabled: liveChrome && can(me.data, "cameras.view") });
+  const folders = useQuery({ ...cameraFoldersQuery, enabled: liveChrome && can(me.data, "cameras.view") });
+  const alarms = useQuery({ ...alarmsQuery({ site_id: siteId, limit: 100 }), enabled: liveChrome && can(me.data, "alarms.view") });
+  const servers = useQuery({ ...serversQuery, enabled: liveChrome && can(me.data, "servers.view") });
+  const treeFolders = (folders.data?.items ?? []).map((folder) => ({ id: folder.id, name: folder.name, serverId: folder.server_id, sortOrder: folder.sort_order }));
+  const treeServers = (servers.data ?? []).map((server) => ({ id: server.id, name: server.name }));
   const pending = Object.entries(draft.entries);
   useEffect(() => { onDirty(pending.length > 0 || planDirty || saving); }, [pending.length, planDirty, saving, onDirty]);
   const editable = mode === "edit" && can(me.data, "maps.edit_device");
@@ -91,38 +118,128 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
   }
   const selectedCamera = cameras.find(camera => camera.id === selected);
   const tray = (unplaced.data ?? []).filter(camera => !draft.entries[camera.id] && !source.some(placed => placed.id === camera.id));
-  return <section className="flex h-full min-h-0 flex-col gap-2" aria-label={`Map: ${floor.name}`}>
- <div className="flex flex-wrap items-center gap-2 text-xs">
- <strong>{floor.name}</strong><label>Mode<select aria-label="Floor map mode" value={mode} disabled={planDirty} onChange={event => { const next = event.target.value as MapMode; setModeState({ initial: initialMode, value: next }); onModeChange?.(next); }}>
-  <option value="live">Live</option><option value="investigate">Investigate</option><option value="analytics">Analytics</option>
-  {(can(me.data, "maps.edit_device") || can(me.data, "maps.edit")) && <option value="edit">Edit</option>}
- </select></label><span className="text-muted">All connection states remain visible. Alarms are shown separately.</span>
- </div>
+  const sidebarCameras = [
+    ...cameras.map((camera) => ({ id: camera.id, name: camera.name, status: camera.status, placed: true })),
+    ...tray.map((camera) => ({ id: camera.id, name: camera.name, status: camera.status, placed: false })),
+  ];
+  const pinnedCameras = pinned.windows.flatMap((window) => {
+    const camera = cameras.find((item) => item.id === window.id);
+    return camera ? [camera] : [];
+  });
+  const maximized = cameras.find((camera) => camera.id === maximizedId);
+  function selectCamera(id: string) {
+    setSelected(id);
+    onSelectCamera?.(id);
+    const camera = cameras.find((item) => item.id === id);
+    if (camera?.position.kind === "floor") canvasRef.current?.focus({ x: camera.position.x, y: camera.position.y });
+    if (mode === "live" && can(me.data, "live.view")) pinned.pin(id);
+  }
+  function openCamera(id: string) {
+    if (!can(me.data, "live.view")) return;
+    setMaximizedOrigin(captureGrowOrigin(id) ?? rectFromElement(document.activeElement));
+    setMaximizedId(id);
+  }
+  function unpinCamera(id: string) {
+    pinned.unpin(id);
+    if (selected === id) {
+      setSelected(undefined);
+      onSelectCamera?.(undefined);
+    }
+  }
+  return <section className="relative flex h-full min-h-0 flex-1 flex-col gap-2 overflow-hidden" aria-label={`Mapa: ${floor.name}`}>
  {[{ label: "Camera placements", query: entities }, { label: "Unplaced cameras", query: unplaced }, { label: "Private background", query: plan }].map(({ label, query }) => query.isError &&
       <div key={label} role="alert">{label}: {query.error.message} <button onClick={() => void query.refetch()}>Retry {label.toLowerCase()}</button></div>)}
- <div className="flex min-h-0 flex-1 gap-2">
- <aside className="w-64 shrink-0 space-y-2 overflow-auto">
-  {editable && <UnplacedTray siteName={floor.name} cameras={tray} armedId={armed} onArm={id => { setArmed(id); }} onPointerDrop={(id, x, y) => canvasRef.current?.dropCamera(id, x, y)}/>}
-  {armed && editable && <button onClick={() => place(armed, { x: .5, y: .5 })}>Place selected camera at center</button>}
-  {planError && <p role="alert">{planError}</p>}
-  {mode === "edit" && can(me.data, "maps.edit") && (floor.revision ? <PlanUpload siteId={siteId} floorId={floor.id} revision={floor.revision} onDirty={setPlanDirty} onSaved={() => { setPlanError(undefined); onPlanSaved(); }} onConflict={() => { setPlanError("The background changed on the server. Reload and review it before uploading again. Nothing was overwritten."); onPlanSaved(); }}/> : <p role="alert">Current map revision is unavailable. Reload the map list before uploading.</p>)}
-  {pending.length > 0 && <div className="rounded border border-line bg-surface p-2 text-xs">
-  <p>{pending.length} unsaved changes</p>{error && <p role="alert">{error}</p>}
-  <button disabled={saving || !draft.past.length} onClick={() => setDraft(undoFloor(draft))}>Undo</button>
-  <button disabled={saving || !draft.future.length} onClick={() => setDraft(redoFloor(draft))}>Redo</button>
-  <button disabled={saving || !editable} onClick={() => void save()}>Save placements ({pending.length})</button>
-  <button disabled={saving} onClick={() => { setDraft(emptyFloorDraft()); setError(undefined); }}>Discard floor changes</button>
-  {error && <p>Changes were not retried. Discard and reload before placing again if the revision changed.</p>}
-  </div>}
-  {selectedCamera && <section aria-label="Selected floor camera" className="space-y-2 rounded border border-line bg-surface p-2 text-xs">
-  <strong>{selectedCamera.name}</strong><p>Connection: {selectedCamera.status}</p><p>Active alarms: {selectedCamera.activeAlarms}</p>
-  {can(me.data, "live.view") && <button onClick={() => void navigate({ to: "/live", search: { camera: selectedCamera.id } })}>Open Live</button>}
+ <div data-map-stage className="relative min-h-0 flex-1 overflow-hidden">
+  {mode === "edit" && (editorMaps || can(me.data, "maps.edit")) && (
+    <div className="absolute left-3 top-16 z-30 flex max-h-[calc(100%-5rem)] w-72 flex-col gap-2 overflow-auto">
+     {editorMaps && <div className="rounded-xl border border-white/10 bg-surface/90 p-2 shadow-2xl backdrop-blur">{editorMaps}</div>}
+     {planError && <p role="alert" className="rounded-xl border border-bad/40 bg-surface/90 p-2 text-xs text-bad shadow-2xl">{planError}</p>}
+     {can(me.data, "maps.edit") && (floor.revision ? <PlanUpload siteId={siteId} floorId={floor.id} revision={floor.revision} source={plan.data} onDirty={setPlanDirty} onSaved={() => { setPlanError(undefined); onPlanSaved(); }} onConflict={() => { setPlanError("The background changed on the server. Reload and review it before uploading again. Nothing was overwritten."); onPlanSaved(); }}/> : <p role="alert" className="rounded-xl border border-white/10 bg-surface/90 p-2 text-xs shadow-2xl">La revisión del mapa no está disponible. Recargá la lista antes de subir un plano.</p>)}
+    </div>
+  )}
+  {mode === "edit" && <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-20 flex w-80 min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-surface/90 shadow-2xl backdrop-blur">
+   <div className="min-h-0 flex-1 p-2"><MapEditSidebar cameras={sidebarCameras} armedId={armed} onArm={setArmed}/></div>
+   <footer className="shrink-0 space-y-2 border-t border-white/10 p-2 text-xs">
+    <p className="text-muted">{pending.length} cambio(s) sin guardar</p>
+    {armed && editable && <button type="button" onClick={() => place(armed, { x: .5, y: .5 })} className="rounded border border-line bg-surface px-2 py-1 text-xs">Ubicar en el centro</button>}
+    {error && <p role="alert">{error}</p>}
+    <div className="flex gap-2">
+     <button type="button" disabled={saving || !draft.past.length} onClick={() => setDraft(undoFloor(draft))}>Deshacer</button>
+     <button type="button" disabled={saving || !draft.future.length} onClick={() => setDraft(redoFloor(draft))}>Rehacer</button>
+    </div>
+    <div className="flex gap-2">
+     <button type="button" className="flex-1 rounded border border-line px-2 py-1.5" onClick={() => { setDraft(emptyFloorDraft()); setError(undefined); setModeState({ initial: initialMode, value: "live" }); onModeChange?.("live"); }}>Cancelar</button>
+     <button type="button" className="flex-1 rounded bg-accent px-2 py-1.5 font-medium text-white disabled:opacity-50" disabled={saving || !editable || pending.length === 0} onClick={() => void save()}>{pending.length > 0 ? `Guardar (${pending.length})` : "Guardar"}</button>
+    </div>
+    {error && <p>No se reintentó. Cancelá y recargá si cambió la revisión.</p>}
+   </footer>
+  </aside>}
+  {liveChrome && <MapSocSidebar
+    open={sidebarOpen}
+    onToggle={() => setSidebarOpen((current) => !current)}
+    alarmCount={alarms.data?.length ?? 0}
+    showAlarms={can(me.data, "alarms.view")}
+    showLpr={can(me.data, "lpr.view")}
+    siteId={siteId}
+    onSelectCamera={selectCamera}
+    onOpenRead={setPlateSnapshot}
+    cameras={<>
+      <MapOperationsPanel
+        mode={mode}
+        sites={overview.data ?? []}
+        currentSite={currentSite}
+        requestedSiteId={siteId}
+        cameras={cameras}
+        inventory={inventory.data}
+        folders={treeFolders}
+        servers={treeServers}
+        visibleCount={cameras.length}
+        camerasVisible
+        canEdit={can(me.data, "maps.edit") || can(me.data, "maps.edit_device")}
+        canLive={can(me.data, "live.view")}
+        canEvents={can(me.data, "events.view")}
+        canPlayback={can(me.data, "recordings.view")}
+        canInventory={can(me.data, "cameras.view")}
+        selectedCameraId={selected}
+        loading={overview.isLoading || entities.isLoading}
+        errors={[
+          { label: "Site overview", error: overview.error, retry: () => void overview.refetch() },
+          { label: "Camera placements", error: entities.error, retry: () => void entities.refetch() },
+          { label: "Camera inventory", error: inventory.error, retry: () => void inventory.refetch() },
+        ]}
+        onSelectSite={() => undefined}
+        onSelectCamera={selectCamera}
+        onEdit={() => { setModeState({ initial: initialMode, value: "edit" }); onModeChange?.("edit"); }}
+        onOpenLive={openCamera}
+        onEvents={(id) => void navigate({ to: "/events", search: { camera: id, site: siteId } })}
+        onPlayback={(id) => void navigate({ to: "/playback", search: { camera: id } })}
+        onResetVisibility={() => undefined}
+      />
+    </>}
+    alarms={<>
+      {alarms.isError && <ErrorNote error={alarms.error} />}
+      <AlarmPanel alarms={alarms.data ?? []} canManage={can(me.data, "alarms.manage")} />
+    </>}
+  />}
+  {plateSnapshot && <MapPlateSnapshot target={plateSnapshot} onClose={() => setPlateSnapshot(undefined)} />}
+  {mode === "live" && <CameraPanel
+    pinnedCameras={pinnedCameras.filter((camera) => camera.id !== maximizedId)}
+    windows={pinned.windows}
+    sites={overview.data}
+    onUnpin={unpinCamera}
+    onOpenLive={openCamera}
+    onMove={pinned.move}
+    onArrange={pinned.arrange}
+    persistent={persistentPlayers}
+    canPreview={can(me.data, "live.view")}
+  />}
+  {maximized && <MapMaximizedCamera camera={maximized} origin={maximizedOrigin} persistent={persistentPlayers} closeOnEscape={!plateSnapshot} onClose={() => { setMaximizedId(undefined); setMaximizedOrigin(undefined); }} />}
+  {mode === "investigate" && selectedCamera && <section aria-label="Selected floor camera" className="absolute right-3 top-16 z-20 max-w-xs space-y-2 rounded border border-line bg-surface p-2 text-xs">
+  <strong>{selectedCamera.name}</strong>
   {can(me.data, "events.view") && <button onClick={() => void navigate({ to: "/events", search: { camera: selectedCamera.id, site: siteId } })}>Events</button>}
   {can(me.data, "recordings.view") && <button onClick={() => void navigate({ to: "/playback", search: { camera: selectedCamera.id } })}>Playback</button>}
   </section>}
-  {mode === "edit" && <p className="text-xs text-muted">Drag a camera directly onto the plan, or drag an existing marker. Save explicitly. Floor coverage and zones are not supported here; geographic positions stay unchanged.</p>}
- </aside>
- <div className="min-w-0 flex-1"><FloorPlanCanvas ref={canvasRef} key={`${siteId}/${floor.id}`} imageBlob={plan.data} width={floor.plan_width_px || 1000} height={floor.plan_height_px || 1000} cameras={cameras} editable={editable && !saving} onPlace={place} onSelect={id => { setSelected(id); onSelectCamera?.(id); }} tenantId={me.data?.tenant_id} siteId={siteId} floorId={floor.id} canEvents={can(me.data, "events.view")} canSnapshots={can(me.data, "snapshots.view")}/></div>
+  <div className="absolute inset-0"><FloorPlanCanvas ref={canvasRef} key={`${siteId}/${floor.id}`} imageBlob={plan.data} width={floor.plan_width_px || 1000} height={floor.plan_height_px || 1000} cameras={cameras} editable={editable && !saving} onPlace={place} onSelect={id => { if (mode === "edit") { setSelected(id); onSelectCamera?.(id); } else selectCamera(id); }} onOpen={mode === "live" ? openCamera : undefined} tenantId={me.data?.tenant_id} siteId={siteId} floorId={floor.id} canEvents={can(me.data, "events.view")} canSnapshots={can(me.data, "snapshots.view")}/></div>
  </div>
 </section>;
 }

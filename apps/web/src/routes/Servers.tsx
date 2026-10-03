@@ -1,15 +1,18 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { meQuery, serversQuery, sitesQuery, syncStatusQuery } from "@/api/queries";
+import { classifyPolicyQuery, meQuery, serversQuery, sitesQuery, syncStatusQuery } from "@/api/queries";
+import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
 export function Servers() {
+  const t = useT();
   const me = useQuery(meQuery);
   const servers = useQuery(serversQuery);
   const sites = useQuery(sitesQuery);
@@ -25,12 +28,14 @@ export function Servers() {
   const [deleting, setDeleting] = useState<Schemas["Server"] | null>(null);
   const sync = useQuery(syncStatusQuery);
   const syncOf = new Map(sync.data?.map((s) => [s.server_id, s]));
+  const policy = useQuery(classifyPolicyQuery);
+  const serverOn = new Map(policy.data?.servers.map((s) => [s.id, s.enabled]));
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title="Servidores"
-        description="Servidores Frigate registrados y su salud. El worker los consulta cada 30 segundos."
+        title={t("Servidores")}
+        description={t("Servidores Frigate registrados y su salud. El worker los consulta cada 30 segundos.")}
         actions={
           can(me.data, "servers.manage") && !registering ? (
             <Button variant="primary" onClick={() => setRegistering(true)}>
@@ -69,6 +74,7 @@ export function Servers() {
               <Th className="text-right">Cámaras</Th>
               <Th>Almacenamiento</Th>
               <Th>Eventos</Th>
+              <Th>Clasificación</Th>
               <Th />
             </tr>
           </thead>
@@ -103,6 +109,14 @@ export function Servers() {
                 </td>
                 <td className="text-xs">
                   <SyncCell status={syncOf.get(s.id)} />
+                </td>
+                <td>
+                  <BodyClassifySwitch
+                    scope="server"
+                    id={s.id}
+                    enabled={serverOn.get(s.id) ?? true}
+                    disabled={!can(me.data, "servers.manage")}
+                  />
                 </td>
                 <td className="text-right">
                   <div className="flex flex-wrap items-start justify-end gap-2">
@@ -355,9 +369,114 @@ const capLabels: [keyof Schemas["Capabilities"], string][] = [
   ["ptz", "PTZ"],
 ];
 
+function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existing") => void; onCancel: () => void }) {
+  return (
+    <section aria-label="Tipo de servidor" className="flex flex-col gap-4 rounded border border-line bg-surface p-4">
+      <div>
+        <h2 className="text-base font-semibold">¿Qué servidor vas a agregar?</h2>
+        <p className="mt-1 text-sm text-muted">Un Frigate nuevo se conecta por su URL. Uno que ya está en producción solo recibe el agente de OpenVMS.</p>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2">
+        <button type="button" onClick={() => onPick("new")} className="rounded border border-line bg-bg p-4 text-left hover:border-accent hover:bg-raised">
+          <span className="block font-medium">Servidor Frigate nuevo</span>
+          <span className="mt-1 block text-sm text-muted">OpenVMS prueba la URL, registra el servidor e importa las cámaras.</span>
+        </button>
+        <button type="button" onClick={() => onPick("existing")} className="rounded border border-line bg-bg p-4 text-left hover:border-accent hover:bg-raised">
+          <span className="block font-medium">Servidor Frigate existente</span>
+          <span className="mt-1 block text-sm text-muted">La sesión SSH solo instala el agente. Frigate, Docker, MQTT y la configuración quedan como están.</span>
+        </button>
+      </div>
+      <div>
+        <Button onClick={onCancel}>Cancelar</Button>
+      </div>
+    </section>
+  );
+}
+
+function ExistingFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void }) {
+  const [form, setForm] = useState({ site_id: "", name: "", host: "", port: "22", username: "", password: "" });
+  const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value });
+  return (
+    <form
+      onSubmit={(e) => e.preventDefault()}
+      className="flex flex-col gap-4 rounded border border-line bg-surface p-4"
+      aria-label="Servidor Frigate existente"
+    >
+      <div>
+        <h2 className="text-base font-semibold">Servidor Frigate existente</h2>
+        <p className="mt-1 text-sm text-muted">OpenVMS se conecta por SSH, instala el agente y cierra la sesión. A partir de ahí habla solo con el agente.</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="rounded border border-line bg-bg p-3 text-sm">
+          <p className="font-medium">La sesión SSH hace solo esto</p>
+          <ol className="mt-2 list-decimal space-y-1 pl-4 text-muted">
+            <li>Conectarse al servidor</li>
+            <li>Detectar arquitectura y sistema operativo</li>
+            <li>Instalar OpenVMS Edge Agent</li>
+            <li>Habilitar el servicio systemd</li>
+            <li>Registrar el agente contra OpenVMS Central</li>
+            <li>Cerrar la sesión SSH</li>
+          </ol>
+        </div>
+        <div className="rounded border border-line bg-bg p-3 text-sm">
+          <p className="font-medium">OpenVMS no modifica este servidor</p>
+          <ul className="mt-2 list-disc space-y-1 pl-4 text-muted">
+            <li>No actualiza Linux, Frigate, MQTT, NTP ni Docker</li>
+            <li>No cambia docker-compose, config.yml ni el almacenamiento</li>
+            <li>No reinicia Frigate ni toca la aceleración de hardware</li>
+          </ul>
+        </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Sitio">
+          <Select required value={form.site_id} onChange={set("site_id")}>
+            <option value="">Elegí un sitio</option>
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Nombre">
+          <TextInput required value={form.name} onChange={set("name")} placeholder="Frigate-H01" />
+        </Field>
+        <Field label="Host SSH">
+          <TextInput required value={form.host} onChange={set("host")} placeholder="10.20.0.11" autoComplete="off" />
+        </Field>
+        <Field label="Puerto SSH">
+          <TextInput required inputMode="numeric" value={form.port} onChange={set("port")} />
+        </Field>
+        <Field label="Usuario SSH">
+          <TextInput required value={form.username} onChange={set("username")} autoComplete="off" />
+        </Field>
+        <Field label="Contraseña SSH" hint="Se usa una sola vez para instalar el agente y no queda en el servidor Frigate.">
+          <TextInput required type="password" value={form.password} onChange={set("password")} autoComplete="new-password" />
+        </Field>
+      </div>
+      <p className="text-sm text-muted">
+        Después de instalarse, el agente lee la configuración real de Frigate (el contenedor, el config.yml que monte y el almacenamiento) y la importa sin reescribir el archivo. El servidor queda como importado: OpenVMS lo monitorea y no edita su configuración hasta que actives esa administración.
+      </p>
+      <div className="flex gap-2">
+        <Button type="submit" variant="primary" disabled title="La instalación del agente por SSH es el paso que sigue en este flujo">
+          Instalar agente
+        </Button>
+        <Button onClick={onBack}>Volver</Button>
+        <Button onClick={onDone}>Cancelar</Button>
+      </div>
+    </form>
+  );
+}
+
 // RegisterServer is the two-step wizard from PRD §59: test the connection and show what
-// Frigate reports, then register it and import its cameras.
+// Frigate reports, then register it and import its cameras. An existing Frigate takes the
+// agent path and does not use this probe.
 function RegisterServer({ sites, onDone }: { sites: Schemas["Site"][]; onDone: () => void }) {
+  const [kind, setKind] = useState<"new" | "existing" | null>(null);
+  if (kind === null) return <ServerKindPicker onPick={setKind} onCancel={onDone} />;
+  if (kind === "existing") return <ExistingFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} />;
+  return <NewFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} />;
+}
+
+function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
     site_id: "",
@@ -490,6 +609,7 @@ function RegisterServer({ sites, onDone }: { sites: Schemas["Site"][]; onDone: (
         <Button type="submit" variant="primary" disabled={probe.isPending || create.isPending}>
           {probe.data ? (create.isPending ? "Registrando…" : "Registrar servidor") : probe.isPending ? "Probando…" : "Probar conexión"}
         </Button>
+        <Button onClick={onBack}>Volver</Button>
         <Button onClick={onDone}>Cancelar</Button>
       </div>
     </form>

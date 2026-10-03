@@ -1,5 +1,7 @@
-import { validateZoneDraft, type ZoneDraft } from "@/lib/maps/zoneDraft";
+import { validateZoneDraft, ZONE_KIND_COLOR, type ZoneDraft } from "@/lib/maps/zoneDraft";
 import type { Zone, ZoneKind } from "@/lib/maps/types";
+
+const ZONE_COLORS = ["#1683f8", "#22c55e", "#f59e0b", "#ef3f46", "#a855f7", "#f8fafc"];
 
 const KIND_LABELS: Record<ZoneKind, string> = {
   security: "seguridad",
@@ -130,7 +132,33 @@ export function ZonesPanel({
             ))}
           </select>
 
+          <p className="text-xs text-muted">
+            {draft.closed ? "Polígono cerrado." : "Hacé clic en el mapa para marcar cada punto."}
+          </p>
           <p className="text-xs text-muted">Puntos: {draft.points.length}</p>
+          <div>
+            <p className="mb-1 text-xs text-muted">Color</p>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {ZONE_COLORS.map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  aria-label={`Color ${color}`}
+                  aria-pressed={(draft.color ?? ZONE_KIND_COLOR[draft.kind]) === color}
+                  onClick={() => onDraftChange({ color })}
+                  className="size-5 rounded-full border border-white/30"
+                  style={{ backgroundColor: color }}
+                />
+              ))}
+              <input
+                type="color"
+                aria-label="Color de la zona"
+                value={draft.color ?? ZONE_KIND_COLOR[draft.kind]}
+                onChange={(event) => onDraftChange({ color: event.target.value })}
+                className="size-6 cursor-pointer rounded border border-line bg-transparent"
+              />
+            </div>
+          </div>
 
           {errors.map((message) => (
             <p key={message} className="text-xs text-bad">

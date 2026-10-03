@@ -2,6 +2,13 @@ import type { Polygon } from "geojson";
 import { hasSelfIntersection } from "@/lib/zoneGeometry";
 import type { Zone, ZoneKind } from "./types";
 
+export const ZONE_KIND_COLOR: Record<ZoneKind, string> = {
+  security: "#1683f8",
+  perimeter: "#f59e0b",
+  warning: "#ef3f46",
+  custom: "#a855f7",
+};
+
 /**
  * A zone under construction: vertices accumulate on map clicks until the operator closes
  * the polygon, mirroring exactly what the backend validates (closed GeoJSON ring, at least
@@ -15,6 +22,8 @@ export interface ZoneDraft {
   kind: ZoneKind;
   points: Array<{ lng: number; lat: number }>;
   closed: boolean;
+  /** CSS color stored in the zone style. Empty means the kind colour. */
+  color?: string;
 }
 
 export function emptyZoneDraft(): ZoneDraft {
@@ -27,9 +36,9 @@ export function addZonePoint(draft: ZoneDraft, point: { lng: number; lat: number
   return { ...draft, points: [...draft.points, point] };
 }
 
-/** undoZonePoint drops the last vertex but never empties the draft below two: a closed polygon reopens because its shape changed. */
+/** undoZonePoint drops the last vertex and reopens the polygon so drawing can continue. */
 export function undoZonePoint(draft: ZoneDraft): ZoneDraft {
-  if (draft.points.length < 3) return draft;
+  if (draft.points.length === 0) return draft;
   return { ...draft, points: draft.points.slice(0, -1), closed: false };
 }
 
@@ -76,6 +85,7 @@ export function zoneToDraft(zone: Zone): ZoneDraft {
     zoneId: zone.id,
     name: zone.name,
     kind: zone.kind,
+    color: zone.style.color,
     points: ring.slice(0, -1).map((pos) => ({ lng: pos[0]!, lat: pos[1]! })),
     closed: true,
   };

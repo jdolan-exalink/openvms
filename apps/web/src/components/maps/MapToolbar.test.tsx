@@ -13,7 +13,9 @@ describe("MapToolbar", () => {
       />,
     );
 
-    expect(screen.getByRole("tab", { name: /en vivo/i })).toBeInTheDocument();
+    const live = screen.getByRole("tab", { name: /en vivo/i });
+    expect(live).toBeInTheDocument();
+    expect(live.querySelector("[data-live-led='on']")).toBeTruthy();
     expect(screen.getByRole("tab", { name: /investigar/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /analítica/i })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /editor/i })).not.toBeInTheDocument();

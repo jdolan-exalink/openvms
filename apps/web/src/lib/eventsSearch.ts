@@ -13,6 +13,8 @@ export type EventsForm = {
   pending: boolean;
   hasSnapshot: boolean;
   hasPreview: boolean;
+  vehicleType: string;
+  vehicleColor: string;
 };
 
 export const emptyEventsForm: EventsForm = {
@@ -29,6 +31,8 @@ export const emptyEventsForm: EventsForm = {
   pending: false,
   hasSnapshot: false,
   hasPreview: false,
+  vehicleType: "",
+  vehicleColor: "",
 };
 
 /** EventsSearch is the validated query string of /events; absent keys mean "no filter". */
@@ -46,6 +50,8 @@ export type EventsSearch = {
   pending?: true;
   snapshot?: true;
   preview?: true;
+  vtype?: string;
+  vcolor?: string;
 };
 
 // TanStack Router JSON-parses search values, so "123456" reaches us as a number and "true" as a
@@ -71,6 +77,8 @@ export function parseEventsSearch(s: Record<string, unknown>): EventsSearch {
     pending: flag(s.pending),
     snapshot: flag(s.snapshot),
     preview: flag(s.preview),
+    vtype: str(s.vtype),
+    vcolor: str(s.vcolor),
   };
   // Undefined keys would serialize as noise in the URL.
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as EventsSearch;
@@ -91,6 +99,8 @@ export function searchToForm(s: EventsSearch): EventsForm {
     pending: !!s.pending,
     hasSnapshot: !!s.snapshot,
     hasPreview: !!s.preview,
+    vehicleType: s.vtype ?? "",
+    vehicleColor: s.vcolor ?? "",
   };
 }
 
@@ -109,5 +119,7 @@ export function formToSearch(f: EventsForm): EventsSearch {
     pending: f.pending,
     snapshot: f.hasSnapshot,
     preview: f.hasPreview,
+    vtype: f.vehicleType,
+    vcolor: f.vehicleColor,
   });
 }

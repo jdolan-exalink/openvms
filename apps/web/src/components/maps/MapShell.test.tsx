@@ -6,7 +6,6 @@ import { routeTree } from "@/router";
 import { json, stubApi } from "@/test-utils";
 import { PlayerSession } from "@/lib/live/PlayerSession";
 import { PlayerSessionManager } from "@/lib/live/PlayerSessionManager";
-import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import type { MapCanvasProps } from "./canvas/MapCanvas";
 
 const canvasHarness = vi.hoisted(() => ({ props: null as MapCanvasProps | null, easeTo: vi.fn() }));
@@ -161,39 +160,35 @@ describe("Maps camera interaction integration", () => {
     expect(screen.queryByRole("button", { name: "Pin preview" })).not.toBeInTheDocument();
   });
 
-  it.each(["double-click", "context menu", "panel"])("%s hands off the camera through the real Live route", async (action) => {
-    localStorage.setItem(liveSelectionKey("t", "u"), serializeSelection(2, [
-      { camera_id: "c0", quality: "main" }, null, null, null,
-    ]));
+  it.each(["double-click", "context menu", "panel"])("%s maximizes the camera over the map", async (action) => {
     const { router } = await setup();
     const marker = screen.getByRole("button", { name: "Marker c1" });
     if (action === "double-click") fireEvent.doubleClick(marker);
     else {
       if (action === "context menu") fireEvent.contextMenu(marker);
       else fireEvent.click(marker);
-      fireEvent.click(screen.getByRole("button", { name: "Open in Live View" }));
+      fireEvent.click(screen.getByRole("button", { name: "Maximizar" }));
     }
-    await waitFor(() => expect(router.state.location.pathname).toBe("/live"));
-    await waitFor(() => {
-      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t", "u")), new Set(["c0", "c1"]));
-      expect(saved?.tiles.slice(0, 2)).toEqual([
-        { camera_id: "c0", quality: "main" }, { camera_id: "c1", quality: "sub" },
-      ]);
-    });
+    expect(await screen.findByRole("dialog", { name: "Cámara maximizada: Camera 1" })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/maps");
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar cámara" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Cámara maximizada: Camera 1" })).not.toBeInTheDocument());
   });
 });
 
 it("integrates authorized alarms and grouped site health with focus off by default", async () => {
   await setup(true);
+  fireEvent.click(screen.getByRole("tab", { name: /Alarmas/ }));
   expect(await screen.findByRole("region", { name: "Alarms" })).toHaveTextContent("Entrance");
-  expect(screen.getByLabelText("Incident focus")).toHaveValue("none");
+  fireEvent.click(screen.getByRole("tab", { name: "Cámaras" }));
   fireEvent.click(screen.getByRole("button", { name: "Server outage" }));
-  expect(await screen.findByText("Server srv offline")).toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "Site health" })).toHaveTextContent("5 cameras affected");
+  await waitFor(() => expect(canvasHarness.props?.realtimeStore?.isServerOffline("srv")).toBe(true));
+  expect(screen.queryByRole("region", { name: "Site health" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Open placement editor" })).not.toBeInTheDocument();
 });
 
 it("focuses only explicit current-site incidents, without selecting a camera, and respects manual navigation and reduced motion", async () => {
-  await setup(true);
+  const { queryClient } = await setup(true);
   vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
   act(() => canvasHarness.props?.onMapReady?.({ easeTo: canvasHarness.easeTo, getZoom: () => 14, once: () => {} } as never));
   const emit = (id: string, site = "s") => act(() => canvasHarness.props?.realtimeStore?.handleFrame({
@@ -201,7 +196,7 @@ it("focuses only explicit current-site incidents, without selecting a camera, an
   }));
   emit("default");
   expect(canvasHarness.easeTo).not.toHaveBeenCalled();
-  fireEvent.change(screen.getByLabelText("Incident focus"), { target: { value: "current-site" } });
+  act(() => queryClient.setQueryData(["maps", "prefs"], { focus_mode: "current-site" }));
   emit("unrelated", "other");
   expect(canvasHarness.easeTo).not.toHaveBeenCalled();
   emit("focus");
@@ -221,14 +216,13 @@ it("focuses only explicit current-site incidents, without selecting a camera, an
 it("replaces realtime state at the existing user and tenant identity boundary", async () => {
   const { queryClient } = await setup(true);
   fireEvent.click(screen.getByRole("button", { name: "Server outage" }));
-  expect(await screen.findByText("Server srv offline")).toBeInTheDocument();
+  await waitFor(() => expect(canvasHarness.props?.realtimeStore?.isServerOffline("srv")).toBe(true));
   const previous = canvasHarness.props?.realtimeStore;
   act(() => queryClient.setQueryData(["me"], { id: "other-user", tenant_id: "other-tenant", grants: [
     { permission: "maps.view", effect: "allow", scope_type: "platform" },
     { permission: "alarms.view", effect: "allow", scope_type: "platform" },
   ] }));
   await waitFor(() => expect(canvasHarness.props?.realtimeStore).not.toBe(previous));
-  expect(screen.queryByText("Server srv offline")).not.toBeInTheDocument();
   expect(canvasHarness.props?.realtimeStore?.isServerOffline("srv")).toBe(false);
 });
 
@@ -241,14 +235,13 @@ it("seeds camera counts from real Maps queries and keeps terminal lifecycle upda
   });
   expect(canvasHarness.props?.cameras?.find(camera => camera.id === "c0")?.activeAlarms).toBe(2);
 });
-it("navigates from grouped health to an authorized camera and site", async () => {
-  const { router } = await setup(true);
+it("keeps site health and the placement editor out of the camera list", async () => {
+  await setup(true);
   fireEvent.click(screen.getByRole("button", { name: "Server outage" }));
-  fireEvent.click(await screen.findByRole("button", { name: "View Camera 0" }));
-  await waitFor(() => expect(router.state.location.search).toMatchObject({ camera: "c0" }));
-  fireEvent.click(screen.getByRole("button", { name: "View site" }));
-  await waitFor(() => expect(router.state.location.search).toMatchObject({ site: "s" }));
-  expect(router.state.location.search.camera).toBeUndefined();
+  await waitFor(() => expect(canvasHarness.props?.realtimeStore?.isServerOffline("srv")).toBe(true));
+  expect(screen.queryByRole("button", { name: "View site" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /View Camera/ })).not.toBeInTheDocument();
+  expect(screen.queryByText(/cameras affected/)).not.toBeInTheDocument();
 });
 
 const putPrefsRequests = (fetchSpy: { mock: { calls: unknown[][] } }) =>
@@ -272,7 +265,6 @@ it("hydrates saved preferences, applies them to the canvas and persists later ch
     alarmFx: false,
     detectionFx: true,
   }));
-  expect(screen.getByLabelText("Incident focus")).toHaveValue("current-site");
   expect(screen.getByRole("checkbox", { name: "Live on hover" })).toBeChecked();
   expect(canvasHarness.props?.cameras).toHaveLength(5);
   // Hydration must not write back: it would clobber a newer blob saved by another tab.
@@ -323,7 +315,7 @@ async function setupEditor(routes: Record<string, () => Response> = {}, extraGra
     },
   });
   fireEvent.click(screen.getByRole("tab", { name: "Editor" }));
-  await screen.findByRole("region", { name: "Sin ubicar" });
+  await screen.findByRole("region", { name: "Cámaras del mapa" });
   return view;
 }
 
@@ -349,7 +341,7 @@ it("discards a staged placement through undo before anything is written", async 
   act(() => canvasHarness.props?.onMapClick?.({ lng: -58.4, lat: -34.6 }));
   await screen.findByRole("button", { name: "Guardar (1)" });
 
-  fireEvent.click(screen.getByRole("button", { name: "Deshacer" }));
+  fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
   expect(screen.queryByRole("button", { name: "Guardar (1)" })).not.toBeInTheDocument();
   expect(placementPuts(fetchSpy)).toHaveLength(0);
 });
@@ -388,78 +380,6 @@ it("moves a placed camera as a draft that keeps its If-Match revision", async ()
   expect(placementPuts(fetchSpy)[0]!.headers.get("If-Match")).toBe(`"1"`);
   const body = JSON.parse(await placementPuts(fetchSpy)[0]!.text()) as Record<string, unknown>;
   expect(body).toMatchObject({ lat: 0.25, lng: 0.5, fov_deg: 60, range_m: 100, bearing_deg: 0 });
-});
-
-it("spreads only unplaced cameras near the site center in one undo step", async () => {
-  const { fetchSpy } = await setupEditor();
-  fireEvent.click(screen.getByRole("button", { name: "Distribuir provisionalmente" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Guardar (2)" }));
-
-  await waitFor(() => expect(placementPuts(fetchSpy)).toHaveLength(2));
-  const bodies = await Promise.all(
-    placementPuts(fetchSpy).map(async (request) => JSON.parse(await request.text()) as Record<string, unknown>),
-  );
-  expect(new Set(bodies.map(body => `${body.lat},${body.lng}`)).size).toBe(2);
-  expect(bodies.every(body => Math.abs(Number(body.lat)) < 0.001 && Math.abs(Number(body.lng)) < 0.001)).toBe(true);
-});
-
-// --- CSV import (M-B8) ------------------------------------------------------
-const importRequests = (fetchSpy: { mock: { calls: unknown[][] } }) =>
-  fetchSpy.mock.calls
-    .map(([input]) => input as Request)
-    .filter((request) => request && typeof request === "object" && request.method === "POST"
-      && new URL(request.url).pathname === "/api/v1/maps/placements/import");
-
-it("imports placements from CSV and refreshes the unplaced tray and the site", async () => {
-  const { fetchSpy, queryClient } = await setupEditor(
-    {
-      "POST /api/v1/maps/placements/import": () =>
-        json({ dry_run: false, rows: 1, upserted: 1, errors: [] }),
-    },
-    [{ permission: "maps.edit_device", effect: "allow", scope_type: "platform" }],
-  );
-  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-
-  fireEvent.click(screen.getByRole("button", { name: "Importar CSV" }));
-  fireEvent.change(await screen.findByRole("textbox"), {
-    target: { value: "camera,lat,lng\nNueva cam,-34.6,-58.4" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: /^Importar$/ }));
-
-  await waitFor(() => expect(importRequests(fetchSpy)).toHaveLength(1));
-  const body = JSON.parse(await importRequests(fetchSpy)[0]!.text()) as Record<string, unknown>;
-  expect(body).toMatchObject({ site_id: "s", dry_run: false });
-  await waitFor(() => {
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["maps", "unplaced", "s"] });
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["maps", "sites", "s", "entities"] });
-  });
-  // The applied import closes the form and keeps the tray usable.
-  await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument());
-});
-
-it("keeps the lists untouched while the import is still a dry run", async () => {
-  const { fetchSpy, queryClient } = await setupEditor(
-    {
-      "POST /api/v1/maps/placements/import": () =>
-        json({ dry_run: true, rows: 1, upserted: 0, errors: [] }),
-    },
-    [{ permission: "maps.edit_device", effect: "allow", scope_type: "platform" }],
-  );  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
-
-  fireEvent.click(screen.getByRole("button", { name: "Importar CSV" }));
-  fireEvent.change(await screen.findByRole("textbox"), {
-    target: { value: "camera,lat,lng\nNueva cam,-34.6,-58.4" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Validar" }));
-
-  await screen.findByText(/1 filas/);
-  expect(importRequests(fetchSpy)).toHaveLength(1);
-  expect(invalidate).not.toHaveBeenCalled();
-});
-
-it("shows no import entry point without maps.edit_device", async () => {
-  await setupEditor();
-  expect(screen.queryByRole("button", { name: "Importar CSV" })).not.toBeInTheDocument();
 });
 
 // --- Camera editor (M-W12/M-W13) -----------------------------------------------------
@@ -702,7 +622,7 @@ describe("Operational Maps completion", () => {
   it("updates mode when browser history goes back", async () => {
     const { router } = await setup();
     fireEvent.click(screen.getByRole("tab", { name: "Analítica" }));
-    await screen.findByText("Current site summary");
+    await screen.findByText("Inventory (overview)");
     await act(async () => { router.history.back(); });
     await waitFor(() => expect(screen.getByRole("tab", { name: "En vivo" })).toHaveAttribute("aria-selected", "true"));
   });

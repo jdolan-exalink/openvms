@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { KeyRound, Plus } from "lucide-react";
@@ -11,6 +12,7 @@ import { can } from "@/lib/perm";
 
 /** Camera groups allow grouping cameras for permissions and view layouts. */
 export function CameraGroups() {
+  const t = useT();
   const qc = useQueryClient();
   const me = useQuery(meQuery);
   const groups = useQuery(cameraGroupsQuery);
@@ -27,8 +29,8 @@ export function CameraGroups() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title="Grupos de cámaras"
-        description="Agrupá cámaras para asignar permisos o visualización conjunta."
+        title={t("Grupos de cámaras")}
+        description={t("Agrupá cámaras para asignar permisos o visualización conjunta.")}
         actions={
           manage ? (
             <Button variant="primary" onClick={() => setEditing("new")}>

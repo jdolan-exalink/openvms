@@ -443,6 +443,32 @@ type PermissionGrant struct {
 	CreatedAt   time.Time
 }
 
+type PersonAttribute struct {
+	EventID              uuid.UUID
+	TenantID             uuid.UUID
+	SiteID               uuid.UUID
+	CameraID             uuid.UUID
+	UpperColor           string
+	UpperColorConfidence float32
+	LowerColor           string
+	LowerColorConfidence float32
+	ColorQuality         string
+	ModelName            string
+	ModelVersion         string
+	ProcessedAt          time.Time
+}
+
+type PersonAttributeJob struct {
+	EventID    uuid.UUID
+	TenantID   uuid.UUID
+	Status     string
+	Attempts   int32
+	Reevaluate bool
+	LastError  string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 type Rule struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID
@@ -545,6 +571,32 @@ type UserGroup struct {
 type UserGroupMember struct {
 	GroupID uuid.UUID
 	UserID  uuid.UUID
+}
+
+type VehicleAttribute struct {
+	EventID                uuid.UUID
+	TenantID               uuid.UUID
+	SiteID                 uuid.UUID
+	CameraID               uuid.UUID
+	VehicleType            string
+	VehicleTypeConfidence  float32
+	VehicleColor           string
+	VehicleColorConfidence float32
+	ColorQuality           string
+	ModelName              string
+	ModelVersion           string
+	ProcessedAt            time.Time
+}
+
+type VehicleAttributeJob struct {
+	EventID    uuid.UUID
+	TenantID   uuid.UUID
+	Status     string
+	Attempts   int32
+	LastError  string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	Reevaluate bool
 }
 
 type View struct {

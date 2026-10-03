@@ -4,6 +4,7 @@ import { type KeyboardEvent, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { brandingQuery, meQuery } from "@/api/queries";
 import { Button, ErrorNote } from "@/components/ui";
+import { VehicleFacts } from "@/components/VehicleMark";
 import { DEFAULT_WATERMARK_TIMEZONE, fmtWatermarkTimestamp } from "@/lib/format";
 import { can } from "@/lib/perm";
 import { Modal } from "./Modal";
@@ -175,6 +176,10 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
           <div>
             <dt className="text-xs text-muted">Confianza</dt>
             <dd>{read.score != null ? `${Math.round(read.score * 100)}%` : "—"}</dd>
+          </div>
+          <div className="col-span-2">
+            <dt className="text-xs text-muted">Vehículo</dt>
+            <dd className="mt-1"><VehicleFacts labels={read.label ? [read.label] : []} vehicle={read.vehicle} serverName={read.server_name} /></dd>
           </div>
         </dl>
 

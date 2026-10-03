@@ -1,3 +1,4 @@
+import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ChangeEvent, type FormEvent, useMemo, useState } from "react";
 import { api, unwrap } from "@/api/client";
@@ -47,6 +48,7 @@ function readAsBase64(file: File): Promise<string> {
  * there is no dedicated "branding" permission in internal/authz/catalog.go).
  */
 export function Branding() {
+  const t = useT();
   const me = useQuery(meQuery);
   const tenantId = me.data?.tenant_id ?? "";
   const branding = useQuery(brandingQuery(tenantId));
@@ -112,8 +114,8 @@ export function Branding() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <PageHeader
-        title="Marca de agua"
-        description="Nombre y logo del propietario que se graban en las fotos y clips descargados, y se muestran como superposición al verlos."
+        title={t("Marca de agua")}
+        description={t("Nombre y logo del propietario que se graban en las fotos y clips descargados, y se muestran como superposición al verlos.")}
       />
       <ErrorNote error={branding.error} />
       {branding.data && (

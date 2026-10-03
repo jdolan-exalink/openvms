@@ -10,12 +10,18 @@ describe("cameraLayers", () => {
     const source = buildCamerasSource();
     expect(source.type).toBe("geojson");
     expect(source.cluster).toBe(true);
-    expect(source.clusterRadius).toBe(50);
-    expect(source.clusterMaxZoom).toBe(16);
+    expect(source.clusterRadius).toBe(28);
+    expect(source.clusterMaxZoom).toBe(11);
     expect(source.promoteId).toBe("id");
     expect(source.clusterProperties).toHaveProperty("alarms");
     expect(source.clusterProperties).toHaveProperty("offline");
     expect(source.clusterProperties).toHaveProperty("warnings");
+  });
+
+  it("leaves every camera separate when clustering is off", () => {
+    const source = buildCamerasSource({ cluster: false });
+    expect(source.cluster).toBeUndefined();
+    expect(source.clusterMaxZoom).toBeUndefined();
   });
 
   it("builds camera and cluster layers with proper filters and bindings", () => {

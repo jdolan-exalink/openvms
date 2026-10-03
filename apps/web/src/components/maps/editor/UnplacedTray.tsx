@@ -21,8 +21,6 @@ export interface UnplacedTrayProps {
   onPointerDrop?: (cameraId:string,clientX:number,clientY:number)=>void;
   /** Offered only when the site has coordinates to place the cameras at. */
   onPlaceAll?: () => void;
-  /** Offered only to holders of maps.edit_device (the backend's import permission). */
-  onImport?: () => void;
   onClose?: () => void;
 }
 
@@ -32,7 +30,7 @@ export interface UnplacedTrayProps {
  * answers PO decision 3 ("ubicar todas en el centro del sitio") for sites that already
  * know where they are.
  */
-export function UnplacedTray({ siteName, cameras, armedId, onArm, onPlaceAll, onImport, onClose, onPointerDrop }: UnplacedTrayProps) {
+export function UnplacedTray({ siteName, cameras, armedId, onArm, onPlaceAll, onClose, onPointerDrop }: UnplacedTrayProps) {
   const pointerDrag=useRef<{id:string;x:number;y:number;pointer:number;moved:boolean}|undefined>(undefined);
   const [draggingId, setDraggingId] = useState<string>();
   return (
@@ -56,7 +54,6 @@ export function UnplacedTray({ siteName, cameras, armedId, onArm, onPlaceAll, on
         <p className="text-xs text-muted">Todas las cámaras del sitio están ubicadas.</p>
       ) : (
         <>
-          <p className="mb-2 text-xs text-muted">Arrastra una cámara al mapa. Con teclado, selecciona una y luego el punto de destino.</p>
           <ul className="max-h-48 space-y-1 overflow-auto">
             {cameras.map((camera) => (
               <li key={camera.id}>
@@ -118,15 +115,6 @@ export function UnplacedTray({ siteName, cameras, armedId, onArm, onPlaceAll, on
           )}
           {onPlaceAll && <p className="mt-1 text-[10px] text-muted">Posiciones aproximadas, no ubicaciones reales.</p>}
         </>
-      )}
-      {onImport && (
-        <button
-          type="button"
-          onClick={onImport}
-          className="mt-2 w-full rounded border border-line px-2 py-1 text-xs text-ink hover:bg-raised"
-        >
-          Importar CSV
-        </button>
       )}
     </section>
   );

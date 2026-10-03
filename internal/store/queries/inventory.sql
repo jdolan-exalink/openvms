@@ -42,6 +42,9 @@ WHERE id = @id AND deleted_at IS NULL;
 -- name: SoftDeleteSite :exec
 UPDATE sites SET deleted_at = now(), deleted_by = @deleted_by WHERE id = @id AND deleted_at IS NULL;
 
+-- name: CountTenantSites :one
+SELECT count(*)::int FROM sites WHERE tenant_id = @tenant_id AND deleted_at IS NULL;
+
 -- name: ListServers :many
 SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count

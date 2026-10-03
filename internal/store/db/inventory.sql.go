@@ -88,6 +88,17 @@ func (q *Queries) CountFolderCameras(ctx context.Context, folderID *uuid.UUID) (
 	return column_1, err
 }
 
+const countTenantSites = `-- name: CountTenantSites :one
+SELECT count(*)::int FROM sites WHERE tenant_id = $1 AND deleted_at IS NULL
+`
+
+func (q *Queries) CountTenantSites(ctx context.Context, tenantID uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countTenantSites, tenantID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createCameraFolder = `-- name: CreateCameraFolder :one
 INSERT INTO camera_folders (tenant_id, server_id, name, sort_order)
 VALUES ($1, $2, $3,

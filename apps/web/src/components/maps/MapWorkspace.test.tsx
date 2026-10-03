@@ -25,23 +25,23 @@ async function setup(extra: Record<string, () => Response> = {}, props: Record<s
 it("keeps geography default and validates a floor against its active site", async () => {
   await setup({}, { initialFloorId: "not-in-site" });
   expect(screen.queryByText("Geographic canvas")).not.toBeInTheDocument();
-  expect(screen.getByRole("alert")).toHaveTextContent("not available in this site");
-  fireEvent.click(screen.getByRole("button", { name: "Open geographic map" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("no está en este sitio");
+  fireEvent.click(screen.getByRole("button", { name: "Abrir mapa geográfico" }));
   await screen.findByText("Geographic canvas");
 });
 it("selects one floor without constructing geography or offering unauthorized writes", async () => {
   await setup({}, { initialFloorId: "f" });
   expect(screen.queryByText("Geographic canvas")).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Create map" })).not.toBeInTheDocument();
-  expect(screen.getByRole("combobox", { name: "Map" })).toHaveValue("f");
+  expect(screen.getByRole("combobox", { name: "Mapa" })).toHaveValue("f");
 });
 it("requires explicit discard before changing maps with pending floor edits", async () => {
   const select = vi.fn();
   await setup({}, { initialFloorId: "f", onSelectFloor: select });
   fireEvent.click(screen.getByRole("button", { name: "Stage floor" }));
-  fireEvent.change(screen.getByRole("combobox", { name: "Map" }), { target: { value: "" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "Mapa" }), { target: { value: "" } });
   expect(select).not.toHaveBeenCalled();
-  expect(screen.getByRole("combobox", { name: "Map" })).toHaveValue("f");
-  fireEvent.click(screen.getByRole("button", { name: "Discard changes and switch" }));
+  expect(screen.getByRole("combobox", { name: "Mapa" })).toHaveValue("f");
+  fireEvent.click(screen.getByRole("button", { name: "Descartar y cambiar" }));
   await waitFor(() => expect(select).toHaveBeenCalledWith(undefined));
 });

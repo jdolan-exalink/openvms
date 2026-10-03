@@ -58,38 +58,60 @@ describe("Maps shared preview ownership", () => {
     expect(release).toHaveBeenCalledWith("c1", "sub");
   });
 
-  it("optional live hover attaches only through the shared surface and does not reconnect", () => {
+  it("optional live hover plays inside the card and does not reconnect", () => {
     const connect = vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
     const attach = vi.spyOn(PlayerSession.prototype, "attach");
-    const view = render(preview("prewarm", true), { wrapper });
-    view.rerender(preview("live", true));
+    const view = render(<CameraPreview camera={camera} stage="prewarm" position={{ x: 10, y: 20 }} liveOnHover persistent />, { wrapper });
+    view.rerender(<CameraPreview camera={camera} stage="live" position={{ x: 10, y: 20 }} liveOnHover persistent />);
     expect(connect).toHaveBeenCalledTimes(1);
-    expect(attach).toHaveBeenCalledTimes(1);
-    expect(screen.getByTestId("video-surface-layer").querySelector("video")).not.toBeNull();
-    expect(document.querySelector("[data-surface-slot='c1']")).not.toBeNull();
+    expect(attach).toHaveBeenCalled();
+    const card = screen.getByTestId("camera-hover-preview");
+    expect(card.querySelector("video")).not.toBeNull();
+    expect(screen.getByTestId("video-surface-layer").querySelector("video")).toBeNull();
+    expect(screen.getByAltText("North")).toBeInTheDocument();
   });
 
-  it("keeps another owner's video in the shared layer", async () => {
+  it("returns a borrowed video to the other owner when the hover closes", async () => {
     vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
     function Owner() {
       const session = usePlayerSession("c1", "sub", "srv");
       return <SurfaceSlot session={session} />;
     }
-    const view = render(<><Owner />{preview("prewarm", true)}</>, { wrapper });
-    const video = screen.getByTestId("video-surface-layer").querySelector("video");
-    const parent = video?.parentElement;
-    await act(async () => view.rerender(<><Owner />{preview("live", true)}</>));
-    expect(video?.parentElement).toBe(parent);
+    const live = <CameraPreview camera={camera} stage="live" position={{ x: 10, y: 20 }} liveOnHover persistent />;
+    const view = render(<><Owner />{live}</>, { wrapper });
+    const card = screen.getByTestId("camera-hover-preview");
+    const video = card.querySelector("video");
+    expect(video).not.toBeNull();
+    await act(async () => view.rerender(<Owner />));
     expect(screen.getByTestId("video-surface-layer")).toContainElement(video);
   });
 
-  it("renders nearby geo cameras but no fake actionable PTZ controls", () => {
+  it("renders the compact preview without nearby cameras or the live grid action", () => {
     vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
-    render(<CameraPanel pinnedCameras={[camera]} allCameras={[camera, {
-      ...camera, id: "c2", name: "East", position: { kind: "geo", lat: 0, lng: 0.001 },
-    }, { ...camera, id: "floor", name: "Floor", position: { kind: "floor", floorId: "f", x: 0, y: 0 } }]}
-      onUnpin={() => {}} onSelectCamera={() => {}} onOpenLive={() => {}} />, { wrapper });
-    expect(screen.getByText("Nearby Cameras (1)")).toBeInTheDocument();
-    expect(screen.queryByTitle("PTZ controls")).not.toBeInTheDocument();
+    render(<CameraPanel pinnedCameras={[camera]} onUnpin={() => {}} onOpenLive={() => {}} />, { wrapper });
+    expect(screen.queryByText(/Nearby Cameras/)).not.toBeInTheDocument();
+    expect(screen.queryByText("Live Grid")).not.toBeInTheDocument();
+    expect(screen.queryByText("PTZ")).not.toBeInTheDocument();
+  });
+
+  it("drags a preview from its header and reports the new place", () => {
+    vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
+    const onMove = vi.fn();
+    render(<CameraPanel pinnedCameras={[camera]} windows={[{ id: "c1", x: 40, y: 50 }]} onUnpin={() => {}} onOpenLive={() => {}} onMove={onMove} />, { wrapper });
+    const layer = screen.getByTestId("pinned-windows");
+    vi.spyOn(layer, "getBoundingClientRect").mockReturnValue({
+      left: 0, top: 0, width: 1000, height: 800, right: 1000, bottom: 800, x: 0, y: 0, toJSON() { return {}; },
+    });
+    fireEvent.pointerDown(screen.getByRole("heading", { name: "North" }), { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerUp(window, { clientX: 80, clientY: 40 });
+    expect(onMove).toHaveBeenCalledWith("c1", 110, 80);
+  });
+
+  it("orders every open window from the header", () => {
+    vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
+    const onArrange = vi.fn();
+    render(<CameraPanel pinnedCameras={[camera]} onUnpin={() => {}} onOpenLive={() => {}} onArrange={onArrange} />, { wrapper });
+    fireEvent.click(screen.getByRole("button", { name: "Ordenar ventanas" }));
+    expect(onArrange).toHaveBeenCalledTimes(1);
   });
 });

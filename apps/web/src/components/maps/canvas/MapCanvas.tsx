@@ -14,13 +14,13 @@ import type { Point } from "geojson";
 import type { CameraEntity, MapProviderConfig, Site, Zone } from "@/lib/maps/types";
 import { type BoundingBox } from "@/lib/maps/geo";
 import { EntityIndex } from "@/lib/maps/entityIndex";
-import { buildMapStyle, getThemeColors, MapStyleController } from "./MapStyleController";
+import { buildMapStyle, getThemeColors, loadRepairedStyle, MapStyleController } from "./MapStyleController";
 import { buildCamerasSource, CAMERAS_SOURCE_ID } from "./layers/cameraLayers";
 import { buildFovSource, camerasToFovCollection, FOV_SOURCE_ID } from "./layers/fovLayer";
 import { buildSitesSource, SITES_SOURCE_ID, sitesToFeatureCollection } from "./layers/sitesLayer";
-import { buildZonesSource, zonesToFeatureCollection, ZONES_SOURCE_ID } from "./layers/zonesLayer";
+import { buildZoneSketchLayers, buildZonesSource, sketchToFeatureCollection, ZONE_SKETCH_SOURCE_ID, zonesToFeatureCollection, ZONES_SOURCE_ID, type ZoneSketch } from "./layers/zonesLayer";
 import { buildFxSource, FX_SOURCE_ID } from "./layers/fxLayers";
-import { reconcileOwnedLayers, applyLayerVisibility, type LayerGroup } from "./layers/visibility";
+import { reconcileOwnedLayers, applyLayerVisibility, LAYER_GROUPS, type LayerGroup } from "./layers/visibility";
 import { AnimationBudget, isPrefersReducedMotion } from "@/lib/maps/animationBudget";
 import { defaultMapRealtimeStore, MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { registerSdfSprites } from "./sprite";
@@ -49,12 +49,18 @@ export interface MapCanvasProps {
   onSelectSite?: (siteId: string) => void;
   /** Clicks that did not land on any feature — the editor places/moves on these. */
   onMapClick?: (point: { lng: number; lat: number }) => void;
+  /** While a zone is open, every map click adds a vertex, including clicks on a camera. */
+  drawingZone?: boolean;
+  /** Vertices of the zone currently being drawn. */
+  zoneSketch?: ZoneSketch;
   onCameraDragStart?: (cameraId: string) => void;
   onCameraDragMove?: (cameraId: string, point: { lng: number; lat: number }) => void;
   onCameraDragEnd?: (cameraId: string, point: { lng: number; lat: number }) => void;
   onMapReady?: (map: maplibregl.Map) => void;
   onMoveEnd?: (view: { center: [number, number]; zoom: number; bounds: LngLatBounds }) => void;
   onReapplyCustomLayers?: () => void;
+  /** Edit mode keeps every camera separate so markers can be dragged at any zoom. */
+  clusterCameras?: boolean;
   className?: string;
 }
 
@@ -79,12 +85,15 @@ export function MapCanvas({
   onContextMenuCamera,
   onSelectSite,
   onMapClick,
+  drawingZone = false,
+  zoneSketch,
   onCameraDragStart,
   onCameraDragMove,
   onCameraDragEnd,
   onMapReady,
   onMoveEnd,
   onReapplyCustomLayers,
+  clusterCameras = true,
   className = "relative h-full w-full overflow-hidden",
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -98,6 +107,8 @@ export function MapCanvas({
   const onMoveEndRef = useRef(onMoveEnd);
   const onSelectCameraRef = useRef(onSelectCamera);
   const onMapClickRef = useRef(onMapClick);
+  const drawingZoneRef = useRef(drawingZone);
+  const zoneSketchRef = useRef(zoneSketch);
   const onCameraDragStartRef = useRef(onCameraDragStart);
   const onCameraDragMoveRef = useRef(onCameraDragMove);
   const onCameraDragEndRef = useRef(onCameraDragEnd);
@@ -110,6 +121,9 @@ export function MapCanvas({
   const zonesRef = useRef(zones);
   const coverageRef = useRef(coverage);
   const layerVisibilityRef = useRef(layerVisibility);
+  const clusterRef = useRef(clusterCameras);
+  clusterRef.current = clusterCameras;
+  const installedClusterRef = useRef<boolean | null>(null);
 
   const setupCustomLayersRef = useRef<(map: maplibregl.Map) => void>(() => {});
 
@@ -127,6 +141,8 @@ export function MapCanvas({
     onContextMenuCameraRef.current = onContextMenuCamera;
     onSelectSiteRef.current = onSelectSite;
     onMapClickRef.current = onMapClick;
+    drawingZoneRef.current = drawingZone;
+    zoneSketchRef.current = zoneSketch;
     onCameraDragStartRef.current = onCameraDragStart;
     onCameraDragMoveRef.current = onCameraDragMove;
     onCameraDragEndRef.current = onCameraDragEnd;
@@ -148,6 +164,9 @@ export function MapCanvas({
       if (!map.getSource(ZONES_SOURCE_ID)) {
         map.addSource(ZONES_SOURCE_ID, buildZonesSource(zonesRef.current));
       }
+      if (!map.getSource(ZONE_SKETCH_SOURCE_ID)) {
+        map.addSource(ZONE_SKETCH_SOURCE_ID, { type: "geojson", data: sketchToFeatureCollection(zoneSketchRef.current) });
+      }
 
       // 2. FOV Cones Source & Layers (Street level, rendered underneath cameras)
       if (!map.getSource(FOV_SOURCE_ID)) {
@@ -156,7 +175,8 @@ export function MapCanvas({
 
       // 3. Cameras Source & Layers (Clustered & Unclustered)
       if (!map.getSource(CAMERAS_SOURCE_ID)) {
-        const sourceSpec = buildCamerasSource();
+        const sourceSpec = buildCamerasSource({ cluster: clusterRef.current });
+        installedClusterRef.current = clusterRef.current;
         const store = realtimeStore ?? defaultMapRealtimeStore;
         const { cameras: patched } = store.patchCameras(camerasRef.current);
         const entityIndex = new EntityIndex(patched);
@@ -174,6 +194,9 @@ export function MapCanvas({
       // The style can be rebuilt at any moment (theme swap, provider change), so the user's
       // layer preferences have to be re-applied every time these layers come back.
       applyLayerVisibility(map, layerVisibilityRef.current ?? {});
+      for (const layer of buildZoneSketchLayers()) {
+        if (!map.getLayer(layer.id)) map.addLayer(layer);
+      }
 
       onReapplyCustomLayers?.();
     };
@@ -199,16 +222,18 @@ export function MapCanvas({
       onMapReady: initOnMapReady,
     } = initialOptionsRef.current;
 
-    const initialStyle =
+    const hostedStyle =
       initProvider.kind === "vector-style" && initProvider.styleUrl
         ? getThemeColors().isDark
-          ? initProvider.styleUrl.dark || buildMapStyle(initProvider)
-          : initProvider.styleUrl.light || buildMapStyle(initProvider)
-        : buildMapStyle(initProvider);
+          ? initProvider.styleUrl.dark
+          : initProvider.styleUrl.light
+        : undefined;
 
     const map = new maplibregl.Map({
       container: containerRef.current,
-      style: initialStyle,
+      style: hostedStyle
+        ? { version: 8, sources: {}, layers: [{ id: "background", type: "background", paint: { "background-color": getThemeColors().background } }] }
+        : buildMapStyle(initProvider),
       center: initCenter,
       zoom: initZoom,
       pitch: initPitch,
@@ -216,8 +241,18 @@ export function MapCanvas({
       attributionControl: false,
     });
 
+    map.on("styleimagemissing", (event) => {
+      if (!map.hasImage(event.id)) map.addImage(event.id, { width: 1, height: 1, data: new Uint8Array(4) });
+    });
+    if (hostedStyle) {
+      void loadRepairedStyle(hostedStyle).then((style) => {
+        if (mapRef.current === map) map.setStyle(style);
+      }).catch(() => {
+        if (mapRef.current === map) map.setStyle(hostedStyle);
+      });
+    }
+
     map.addControl(new maplibregl.NavigationControl({ showCompass: true, showZoom: true }), "top-right");
-    map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
     const controller = new MapStyleController(initProvider, () => setupCustomLayersRef.current(map));
     controller.attach(map);
@@ -267,6 +302,7 @@ export function MapCanvas({
 
     // Unclustered camera click
     map.on("click", "cam-point-circle", (e) => {
+      if (drawingZoneRef.current) return;
       if (cameraDrag.consumeClick()) return;
       const feat = e.features?.[0];
       if (feat?.properties?.id) {
@@ -300,6 +336,10 @@ export function MapCanvas({
     // handlers above keep owning everything the operator clicked on purpose.
     map.on("click", (e) => {
       if (!onMapClickRef.current) return;
+      if (drawingZoneRef.current) {
+        onMapClickRef.current({ lng: e.lngLat.lng, lat: e.lngLat.lat });
+        return;
+      }
       const featureLayers = ["cam-cluster", "cam-point-circle", "site-point"].filter((id) => map.getLayer(id));
       const hits = featureLayers.length
         ? map.queryRenderedFeatures(e.point, { layers: featureLayers })
@@ -506,6 +546,26 @@ export function MapCanvas({
     }
   }, [cameras, coverage, realtimeStore]);
 
+  // Clustering is fixed when the source is created. Edit mode rebuilds it without clusters
+  // so a zoomed-out site still exposes every marker.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map?.isStyleLoaded() || !map.getSource(CAMERAS_SOURCE_ID)) return;
+    if (installedClusterRef.current === clusterCameras) return;
+    for (const id of LAYER_GROUPS.cameras) {
+      if (map.getLayer(id)) map.removeLayer(id);
+    }
+    map.removeSource(CAMERAS_SOURCE_ID);
+    const spec = buildCamerasSource({ cluster: clusterCameras });
+    const store = realtimeStore ?? defaultMapRealtimeStore;
+    const { cameras: patched } = store.patchCameras(camerasRef.current);
+    spec.data = new EntityIndex(patched).toFeatureCollection();
+    map.addSource(CAMERAS_SOURCE_ID, spec);
+    installedClusterRef.current = clusterCameras;
+    reconcileOwnedLayers(map, coverageRef.current);
+    applyLayerVisibility(map, layerVisibilityRef.current ?? {});
+  }, [clusterCameras, realtimeStore]);
+
   // Update sites GeoJSON data
   useEffect(() => {
     const map = mapRef.current;
@@ -525,6 +585,13 @@ export function MapCanvas({
       source.setData(zonesToFeatureCollection(zones));
     }
   }, [zones]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const source = map.getSource(ZONE_SKETCH_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    source?.setData(sketchToFeatureCollection(zoneSketch));
+  }, [zoneSketch]);
 
   // Toggle layer-group visibility from the saved preferences
   useEffect(() => {
