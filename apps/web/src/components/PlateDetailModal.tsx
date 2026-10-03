@@ -3,21 +3,28 @@ import { Download } from "lucide-react";
 import { type KeyboardEvent, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { brandingQuery, meQuery } from "@/api/queries";
+import { ArPlate } from "@/components/plates/ArPlate";
 import { Button, ErrorNote } from "@/components/ui";
 import { VehicleFacts } from "@/components/VehicleMark";
 import { DEFAULT_WATERMARK_TIMEZONE, fmtWatermarkTimestamp } from "@/lib/format";
 import { can } from "@/lib/perm";
+import { useT, type MessageKey } from "@/i18n";
 import { Modal } from "./Modal";
 
 const downloadLinkClass = "inline-flex items-center gap-2 rounded border border-line px-3 py-1.5 text-sm hover:bg-raised";
 
 type DetailTab = "photo" | "clip";
-const TABS: { id: DetailTab; label: string }[] = [
-  { id: "photo", label: "Foto" },
-  { id: "clip", label: "Clip" },
+const TABS: { id: DetailTab; label: MessageKey }[] = [
+  { id: "photo", label: "plates.photo" },
+  { id: "clip", label: "plates.clip" },
 ];
 
-const clipJobStatusText: Record<string, string> = { queued: "En cola", running: "Generando", done: "Lista", failed: "Falló" };
+const clipStatusKey: Record<string, MessageKey> = {
+  queued: "plates.clipQueued",
+  running: "plates.clipRunning",
+  done: "plates.clipDone",
+  failed: "plates.clipFailed",
+};
 
 /**
  * ClipWatermarkDownload (PDW-5): starts a clip watermark job (PDW-4), polls its status while
@@ -25,6 +32,7 @@ const clipJobStatusText: Record<string, string> = { queued: "En cola", running: 
  * UX as Exports.tsx, scoped to this one plate read instead of a list.
  */
 function ClipWatermarkDownload({ readId }: { readId: string }) {
+  const t = useT();
   const [jobId, setJobId] = useState<string | null>(null);
   const create = useMutation({
     mutationFn: async () =>
@@ -46,7 +54,7 @@ function ClipWatermarkDownload({ readId }: { readId: string }) {
   if (jobId === null) {
     return (
       <Button onClick={() => create.mutate()} disabled={create.isPending}>
-        <Download className="size-4" aria-hidden /> Preparar clip con marca de agua
+        <Download className="size-4" aria-hidden /> {t("plates.downloadClip")}
       </Button>
     );
   }
@@ -56,12 +64,12 @@ function ClipWatermarkDownload({ readId }: { readId: string }) {
     <div className="flex flex-col gap-1">
       {status === "done" && (
         <a href={`/api/v1/lpr/reads/${readId}/clip-watermark-jobs/${jobId}/download`} className={downloadLinkClass}>
-          <Download className="size-4" aria-hidden /> Descargar clip
+          <Download className="size-4" aria-hidden /> {t("plates.downloadClipReady")}
         </a>
       )}
       {status !== "done" && (
         <p className="text-sm text-muted" role="status">
-          {status === "failed" ? "No se pudo generar el clip." : `Preparando clip… (${clipJobStatusText[status]})`}
+          {status === "failed" ? t("plates.clipFailedLong") : t("plates.clipPreparing", { status: t(clipStatusKey[status] ?? "plates.clipQueued") })}
         </p>
       )}
       {status === "failed" && job.data?.error && <p role="alert" className="text-xs text-bad">{job.data.error}</p>}
@@ -124,6 +132,7 @@ function panelId(id: DetailTab) {
  * PDW-4).
  */
 export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]; onClose: () => void }) {
+  const tr = useT();
   const me = useQuery(meQuery);
   const tenantId = me.data?.tenant_id ?? "";
   const branding = useQuery(brandingQuery(tenantId));
@@ -158,51 +167,52 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
   };
 
   return (
-    <Modal title={`Patente ${read.plate_normalized}`} onClose={onClose}>
+    <Modal title={tr("plates.detailTitle", { plate: read.plate_normalized })} onClose={onClose}>
       <div className="flex flex-col gap-4">
+        <ArPlate plate={read.plate_normalized || read.plate} large />
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
           <div>
-            <dt className="text-xs text-muted">Fecha</dt>
+            <dt className="text-xs text-muted">{tr("plates.date")}</dt>
             <dd>{fmtWatermarkTimestamp(read.seen_at, timezone)}</dd>
           </div>
           <div>
-            <dt className="text-xs text-muted">Cámara</dt>
+            <dt className="text-xs text-muted">{tr("common.camera")}</dt>
             <dd>{read.camera_name}</dd>
           </div>
           <div>
-            <dt className="text-xs text-muted">Sitio</dt>
+            <dt className="text-xs text-muted">{tr("common.site")}</dt>
             <dd>{read.site_name}</dd>
           </div>
           <div>
-            <dt className="text-xs text-muted">Confianza</dt>
+            <dt className="text-xs text-muted">{tr("plates.confidence")}</dt>
             <dd>{read.score != null ? `${Math.round(read.score * 100)}%` : "—"}</dd>
           </div>
           <div className="col-span-2">
-            <dt className="text-xs text-muted">Vehículo</dt>
+            <dt className="text-xs text-muted">{tr("plates.vehicle")}</dt>
             <dd className="mt-1"><VehicleFacts labels={read.label ? [read.label] : []} vehicle={read.vehicle} serverName={read.server_name} /></dd>
           </div>
         </dl>
 
-        <div role="tablist" aria-label="Foto y clip de la lectura" className="flex gap-1 border-b border-line">
-          {TABS.map((t, index) => (
+        <div role="tablist" aria-label={tr("plates.tabs")} className="flex gap-1 border-b border-line">
+          {TABS.map((tabItem, index) => (
             <button
-              key={t.id}
+              key={tabItem.id}
               ref={(el) => {
                 tabRefs.current[index] = el;
               }}
               type="button"
               role="tab"
-              id={tabId(t.id)}
-              aria-controls={panelId(t.id)}
-              aria-selected={tab === t.id}
-              tabIndex={tab === t.id ? 0 : -1}
-              onClick={() => setTab(t.id)}
+              id={tabId(tabItem.id)}
+              aria-controls={panelId(tabItem.id)}
+              aria-selected={tab === tabItem.id}
+              tabIndex={tab === tabItem.id ? 0 : -1}
+              onClick={() => setTab(tabItem.id)}
               onKeyDown={(e) => onTabKeyDown(e, index)}
               className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-medium ${
-                tab === t.id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"
+                tab === tabItem.id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"
               }`}
             >
-              {t.label}
+              {tr(tabItem.label)}
             </button>
           ))}
         </div>
@@ -212,18 +222,18 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
             {canViewPhoto ? (
               <div className="relative overflow-hidden rounded border border-line">
                 <img
-                  src={`/media/v1/lpr/reads/${read.id}/snapshot.jpg`}
-                  alt={`Foto de la lectura de patente ${read.plate_normalized}`}
-                  className="w-full"
+                  src={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?quality=100`}
+                  alt={tr("plates.photoAlt", { plate: read.plate_normalized })}
+                  className="max-h-[70vh] w-full bg-black object-contain"
                 />
                 <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
               </div>
             ) : (
-              <p className="text-sm text-muted">No tenés permiso para ver la foto de esta lectura.</p>
+              <p className="text-sm text-muted">{tr("plates.noPhoto")}</p>
             )}
             {canDownloadPhoto && (
-              <a href={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?download=1`} className={downloadLinkClass}>
-                <Download className="size-4" aria-hidden /> Descargar foto con marca de agua
+              <a href={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?quality=100&download=1`} className={downloadLinkClass}>
+                <Download className="size-4" aria-hidden /> {tr("plates.downloadPhoto")}
               </a>
             )}
           </div>
@@ -233,13 +243,13 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
           <div id={panelId("clip")} role="tabpanel" aria-labelledby={tabId("clip")} tabIndex={0} className="flex flex-col gap-4">
             {canViewClip ? (
               <div className="relative overflow-hidden rounded border border-line">
-                <video controls preload="metadata" className="w-full bg-black" src={`/media/v1/lpr/reads/${read.id}/clip.mp4`}>
-                  Tu navegador no puede reproducir este video.
+                <video controls preload="metadata" className="max-h-[70vh] w-full bg-black" src={`/media/v1/lpr/reads/${read.id}/clip.mp4`}>
+                  {tr("plates.clipUnsupported")}
                 </video>
                 <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
               </div>
             ) : (
-              <p className="text-sm text-muted">No tenés permiso para ver el clip de esta lectura.</p>
+              <p className="text-sm text-muted">{tr("plates.noClip")}</p>
             )}
             {canRequestClip && <ClipWatermarkDownload readId={read.id} />}
           </div>

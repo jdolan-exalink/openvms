@@ -12,13 +12,12 @@ import (
 // The open-wheel class is a racing-car bucket from that dataset and is not a
 // street type, so a win there is discarded.
 const (
-	bodyModelName       = "autolens-efficientnet-b2"
-	bodyModelVersion    = "5"
-	bodyTemperature     = 1.779860258102417
-	bodyMinConfidence   = 0.45
-	bodyShapeConfidence = 0.55
-	bodySize            = 224
-	bodyResize          = 256
+	bodyModelName     = "autolens-efficientnet-b2"
+	bodyModelVersion  = "5"
+	bodyTemperature   = 1.779860258102417
+	bodyMinConfidence = 0.45
+	bodySize          = 224
+	bodyResize        = 256
 )
 
 var bodyLabels = []string{
@@ -80,7 +79,7 @@ func decideBody(logits []float32) (string, float32, bool) {
 // bodyKeepsShape reports that the crop classifier was sure enough that a long
 // box is still that body, and not an articulated truck.
 func bodyKeepsShape(typ string, conf float32) bool {
-	if conf < bodyShapeConfidence {
+	if conf < bodyMinConfidence {
 		return false
 	}
 	switch typ {

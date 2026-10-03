@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fmtWatermarkTimestamp } from "./format";
+import { detectionNames, fmtWatermarkTimestamp } from "./format";
+
+describe("detectionNames", () => {
+  it("collapses verified copies and hides the plate label", () => {
+    expect(detectionNames(["motorcycle", "motorcycle-verified", "car", "car-verified", "license_plate"])).toEqual(["Moto", "Auto"]);
+  });
+});
 
 describe("fmtWatermarkTimestamp", () => {
   it("renders UTC with an explicit +00:00 offset", () => {

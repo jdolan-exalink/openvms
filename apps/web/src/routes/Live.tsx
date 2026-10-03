@@ -17,7 +17,8 @@ import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { LiveRecDock } from "@/components/LiveRecDock";
 import { RecTile, type RecTileState } from "@/components/RecTile";
 import { LiveModeToggle } from "@/components/LiveModeToggle";
-import { setContextSidebarCollapsed, useContextSidebarPortalTarget, useTopBarActionsPortalTarget } from "@/components/AppShell";
+import { setContextSidebarCollapsed, useTopBarActionsPortalTarget } from "@/components/AppShell";
+import { useT } from "@/i18n";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { type ExplorerActions, LiveExplorer } from "@/components/LiveExplorer";
 import { Modal } from "@/components/Modal";
@@ -25,13 +26,13 @@ import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/P
 import { Button, ErrorNote, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  cameraIdOf, duplicateTileIndexes, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, resizeTiles, resolveDragEnd, reorderTiles,
+  cameraIdOf, duplicateTileIndexes, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
   serializeSelection, swapTiles, tileDragId,
   type Tile,
 } from "@/lib/liveGrid";
 import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
 import { assignRecPlayers, parseRecSearch, pickMaster, REC_ENTRY_OFFSET_S, recSearch } from "@/lib/liveRec";
-import { loadSidebarCollapsed, saveSidebarCollapsed } from "@/lib/explorer";
+import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { can } from "@/lib/perm";
 import { useCameraFolders } from "@/lib/useCameraFolders";
 import { useRecData } from "@/lib/useRecData";
@@ -58,6 +59,7 @@ const URL_SYNC_MS = 15_000;
  * server, a grid of live tiles from any Frigate, and saved views.
  */
 export function Live() {
+  const tr = useT();
   const me = useQuery(meQuery);
   const cameras = useQuery(camerasQuery({}));
   const sites = useQuery(sitesQuery);
@@ -89,7 +91,12 @@ export function Live() {
   }, [tiles, selected]);
   const [consumedCamera, setConsumedCamera] = useState<string | undefined>();
   const folderApi = useCameraFolders(cameras.data);
-  const [sidebarCollapsed, setSidebarCollapsedState] = useState(loadSidebarCollapsed);
+  const [sidebarPinned, setSidebarPinnedState] = useState(loadSidebarPinned);
+  const [edgeOpen, setEdgeOpen] = useState(false);
+  const edgeHover = useRef(false);
+  const dragging = useRef(false);
+  const pinnedRef = useRef(sidebarPinned);
+  const hideEdge = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [treeNotice, setTreeNotice] = useState<string | null>(null);
   const [noticeTone, setNoticeTone] = useState<"ok" | "warn">("warn");
   const [deleteViewId, setDeleteViewId] = useState<string | null>(null);
@@ -99,17 +106,29 @@ export function Live() {
     setTimeout(() => setTreeNotice(null), 4000);
   };
   const [activeDrag, setActiveDrag] = useState<string | null>(null);
-  const setSidebarCollapsed = (next: boolean) => {
-    setSidebarCollapsedState(next);
-    saveSidebarCollapsed(next);
+  const setSidebarPinned = (next: boolean) => {
+    pinnedRef.current = next;
+    setSidebarPinnedState(next);
+    saveSidebarPinned(next);
   };
-  // The shell owns the sidebar's width; the route only says whether it is collapsed. Reset on
-  // leaving Live so other screens keep their context sidebar.
+  const revealEdge = () => {
+    edgeHover.current = true;
+    clearTimeout(hideEdge.current);
+    setEdgeOpen(true);
+  };
+  const concealEdge = () => {
+    edgeHover.current = false;
+    clearTimeout(hideEdge.current);
+    hideEdge.current = setTimeout(() => {
+      if (!edgeHover.current && !pinnedRef.current && !dragging.current) setEdgeOpen(false);
+    }, 280);
+  };
+  useEffect(() => () => clearTimeout(hideEdge.current), []);
+  // The explorer is the same edge panel in the page and in fullscreen, so the shell column stays shut.
   useEffect(() => {
-    setContextSidebarCollapsed(sidebarCollapsed);
+    setContextSidebarCollapsed(true);
     return () => setContextSidebarCollapsed(false);
-  }, [sidebarCollapsed]);
-  const sidebarMount = useContextSidebarPortalTarget();
+  }, []);
   const topBar = useTopBarActionsPortalTarget();
   const { persistentPlayers, videoSurfaceLayer } = useFeatures();
   const [fullscreen, setFullscreen] = useState(false);
@@ -254,20 +273,37 @@ export function Live() {
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const handleDragEnd = (event: DragEndEvent) => {
+  const placeMap = (map: { site_id: string; floor_id?: string; name: string }, index?: number) => {
+    const at = index ?? selectedRef.current;
+    const next = placeMapAt(tilesRef.current, at, map);
+    const empty = next.findIndex((cell, i) => cell === null && i !== at);
+    tilesRef.current = next;
+    if (empty >= 0) selectedRef.current = empty;
+    setTiles(next);
+    if (empty >= 0) setSelected(empty);
+  };
+
+  const finishDrag = () => {
+    dragging.current = false;
     setActiveDrag(null);
+    if (!edgeHover.current && !pinnedRef.current) setEdgeOpen(false);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    finishDrag();
     const resolution = resolveDragEnd(event.active.id, event.over?.id ?? null);
     if (!resolution) {
       // Not a grid drop: it may be a move inside the shared explorer tree.
       if (folderApi.drop(event.active.id, event.over?.id ?? null) === "rejected") {
-        flash("No se puede mover entre servidores.", "warn");
+        flash(tr("live.cannotMoveServers"), "warn");
       }
       return;
     }
     if (resolution.type === "place") place(resolution.cameraId, resolution.index);
+    else if (resolution.type === "place-map") placeMap(resolution.map, resolution.index);
     else if (resolution.type === "reorder") reorder(resolution.from, resolution.to);
-    else if (resolution.type === "fill-server") showGroup(camerasOfServer(resolution.serverId), servers.data?.find((server) => server.id === resolution.serverId)?.name ?? "El servidor");
-    else showGroup(camerasOfFolder(resolution.folderId), folderApi.folders.find((folder) => folder.id === resolution.folderId)?.name ?? "La carpeta");
+    else if (resolution.type === "fill-server") showGroup(camerasOfServer(resolution.serverId), servers.data?.find((server) => server.id === resolution.serverId)?.name ?? tr("live.theServer"));
+    else showGroup(camerasOfFolder(resolution.folderId), folderApi.folders.find((folder) => folder.id === resolution.folderId)?.name ?? tr("live.theFolder"));
   };
 
   const showView = (v: Schemas["View"]) => {
@@ -309,7 +345,7 @@ export function Live() {
       const tenantId = me.data?.tenant_id ?? cameras.data?.find((c) => tiles.some((t) => cameraIdOf(t) === c.id))?.tenant_id;
       if (viewDialog?.mode === "edit") {
         const view = views.data?.find((item) => item.id === viewDialog.id);
-        if (!view) throw new Error("La vista ya no existe.");
+        if (!view) throw new Error(tr("live.viewGone"));
         return unwrap(
           await api.PUT("/api/v1/views/{viewId}", {
             params: { path: { viewId: view.id } },
@@ -331,7 +367,7 @@ export function Live() {
   const duplicate = useMutation({
     mutationFn: async (id: string) => {
       const view = views.data?.find((item) => item.id === id);
-      if (!view) throw new Error("La vista ya no existe.");
+      if (!view) throw new Error(tr("live.viewGone"));
       const taken = new Set((views.data ?? []).map((item) => item.name.toLowerCase()));
       const created = unwrap(
         await api.POST("/api/v1/views", {
@@ -347,7 +383,7 @@ export function Live() {
       showView(created);
       flash(`Se duplicó «${created.name}».`);
     },
-    onError: (err) => flash(err instanceof Error && err.message ? err.message : "No se pudo duplicar la vista.", "warn"),
+    onError: (err) => flash(err instanceof Error && err.message ? err.message : tr("live.duplicateFailed"), "warn"),
   });
   const remove = useMutation({
     mutationFn: async (id: string) => unwrap(await api.DELETE("/api/v1/views/{viewId}", { params: { path: { viewId: id } } })),
@@ -428,7 +464,7 @@ export function Live() {
   const addToView = useMutation({
     mutationFn: async (v: { id: string; ids: string[] }) => {
       const view = views.data?.find((x) => x.id === v.id);
-      if (!view) throw new Error("La vista ya no existe.");
+      if (!view) throw new Error(tr("live.viewGone"));
       const n = view.layout.columns;
       const nextRows = view.layout.cells.length ? Math.ceil(view.layout.cells.length / n) : n;
       const existing = resizeTiles(view.layout.cells.map((c): Tile => (c.camera_id ? { camera_id: c.camera_id, quality: c.quality ?? "sub" } : null)), n, nextRows);
@@ -445,7 +481,7 @@ export function Live() {
       return { view, res, saved: true };
     },
     onSuccess: ({ view, res }) => reportFill(res, `a la vista «${view.name}»`),
-    onError: (err) => flash(err instanceof Error && err.message ? `No se pudo actualizar la vista: ${err.message}` : "No se pudo actualizar la vista.", "warn"),
+    onError: (err) => flash(err instanceof Error && err.message ? tr("live.updateFailedDetail", { message: err.message }) : tr("live.updateFailed"), "warn"),
   });
   const explorerActions: ExplorerActions = {
     editableViews: (views.data ?? []).filter((v) => v.editable).map((v) => ({ id: v.id, name: v.name })),
@@ -520,9 +556,11 @@ export function Live() {
     ? camById.get(activeDrag.slice("camera:".length))?.display_name
     : activeDrag?.startsWith("tfolder:")
       ? folderApi.folders.find((f) => f.id === activeDrag.slice("tfolder:".length))?.name
-      : activeDrag?.startsWith("tserver:")
+        : activeDrag?.startsWith("tserver:")
         ? servers.data?.find((server) => server.id === activeDrag.slice("tserver:".length))?.name
-        : undefined;
+        : activeDrag
+          ? mapFromDragId(activeDrag)?.name
+          : undefined;
   const modeToggle = <LiveModeToggle rec={rec} onChange={setMode} />;
   const topBarActions = canRec && !fullscreen && topBar.available && topBar.target ? createPortal(modeToggle, topBar.target) : null;
   const canCreateView = can(me.data, "views.create_private") || can(me.data, "views.create_shared");
@@ -537,7 +575,12 @@ export function Live() {
       onDoublePlace={placeInOpen}
       onPlayback={setPlaybackCameraId}
       canViewRecordings={can(me.data, "recordings.view")}
-      onCollapse={() => setSidebarCollapsed(true)}
+      pinned={sidebarPinned}
+      onTogglePin={() => setSidebarPinned(!sidebarPinned)}
+      canEvents={can(me.data, "events.view")}
+      canLpr={can(me.data, "lpr.view")}
+      canMaps={can(me.data, "maps.view")}
+      onPlaceMap={placeMap}
       views={views.data ?? []}
       activeViewId={viewId}
       onOpenView={loadView}
@@ -552,35 +595,49 @@ export function Live() {
       error={cameras.error}
     />
   );
-  const sidebar = sidebarMount.available
-    ? sidebarMount.target ? createPortal(sidebarContent, sidebarMount.target) : null
-    : sidebarCollapsed ? null : <aside className="flex w-full shrink-0 flex-col gap-3 lg:w-64">{sidebarContent}</aside>;
+  const edgeVisible = sidebarPinned || edgeOpen;
+  const sidebar = createPortal(
+    <div
+      data-testid="live-edge"
+      className={cn("fixed inset-y-0 z-40", fullscreen ? "left-0" : "left-16", edgeVisible ? "w-80 max-w-[85vw]" : "w-3")}
+      onPointerEnter={revealEdge}
+      onPointerLeave={concealEdge}
+    >
+      <aside hidden={!edgeVisible} aria-label={tr("live.explorer")} className="flex h-full min-h-0 w-80 max-w-[85vw] flex-col border-r border-line bg-surface px-3 py-4 shadow-2xl">
+        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-0.5 bg-accent/70" />
+        {sidebarContent}
+      </aside>
+      {!edgeVisible && (
+        <button type="button" aria-label={tr("live.showExplorer")} title={tr("live.showExplorer")} className="absolute inset-0 flex items-center justify-center bg-surface/95 text-muted" onClick={revealEdge}>
+          <FontAwesomeIcon icon={faAnglesRight} className="text-[10px]" aria-hidden />
+        </button>
+      )}
+    </div>,
+    document.body,
+  );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <h1 className="sr-only">En vivo</h1>
+    <div className={cn("flex min-h-0 flex-1 flex-col gap-2", sidebarPinned && "pl-80")}>
+      <h1 className="sr-only">{tr("nav.live")}</h1>
       {topBarActions}
-      <DndContext sensors={sensors} onDragStart={(e) => setActiveDrag(String(e.active.id))} onDragCancel={() => setActiveDrag(null)} onDragEnd={handleDragEnd}>
+      <DndContext
+        sensors={sensors}
+        onDragStart={(e) => {
+          dragging.current = true;
+          setActiveDrag(String(e.active.id));
+        }}
+        onDragCancel={finishDrag}
+        onDragEnd={handleDragEnd}
+      >
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
           <section data-live-stage className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-            <div role="group" aria-label="Layout de la grilla" className="flex shrink-0 flex-wrap items-center gap-1">
-              {sidebarCollapsed && (
-                <button
-                  type="button"
-                  onClick={() => setSidebarCollapsed(false)}
-                  aria-label="Mostrar explorador"
-                  title="Mostrar explorador"
-                  className="mr-1 rounded border border-line bg-surface p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
-                >
-                  <FontAwesomeIcon icon={faAnglesRight} fixedWidth className="text-sm" aria-hidden />
-                </button>
-              )}
+            <div role="group" aria-label={tr("live.gridLayout")} className="flex shrink-0 flex-wrap items-center gap-1">
               <LayoutMenu catalog={catalog} active={{ columns, panes }} onSelect={applyPresentation} onEdit={() => setEditorOpen(true)} />
               <FullscreenButton active={fullscreen} onClick={toggleFullscreen} />
               {canRec && (fullscreen || !topBar.available) && <div className="ml-auto">{modeToggle}</div>}
             </div>
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
-              <LiveGridFrame role="group" label="Grilla de video" mode={rec ? "rec" : "live"}
+              <LiveGridFrame role="group" label={tr("live.videoGrid")} mode={rec ? "rec" : "live"}
                 className={cn(
                   "grid min-h-0 flex-1 gap-1 overflow-y-auto rounded-md ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
                   rec ? "ring-bad/50" : "ring-ok/40",
@@ -669,30 +726,30 @@ export function Live() {
         />
       )}
       {viewDialog && (
-        <Modal title="Propiedades" onClose={() => setViewDialog(null)} className="max-w-md">
-          <TextInput aria-label="Nombre de la vista" placeholder="Nombre de la vista" value={dialogName} onChange={(event) => setDialogName(event.target.value)} />
+        <Modal title={tr("live.properties")} onClose={() => setViewDialog(null)} className="max-w-md">
+          <TextInput aria-label={tr("live.viewName")} placeholder={tr("live.viewName")} value={dialogName} onChange={(event) => setDialogName(event.target.value)} />
           {canShareView ? (
             <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={dialogShared} onChange={(event) => setDialogShared(event.target.checked)} /> Compartida con mi organización
+              <input type="checkbox" checked={dialogShared} onChange={(event) => setDialogShared(event.target.checked)} /> {tr("live.sharedOrg")}
             </label>
           ) : (
-            viewDialog.mode === "edit" && dialogShared && <p className="text-sm text-muted">Compartida con mi organización</p>
+            viewDialog.mode === "edit" && dialogShared && <p className="text-sm text-muted">{tr("live.sharedOrg")}</p>
           )}
-          {viewDialog.mode === "edit" && viewId === viewDialog.id && <p className="text-xs text-muted">Al guardar se actualiza el diseño que está en la grilla.</p>}
+          {viewDialog.mode === "edit" && viewId === viewDialog.id && <p className="text-xs text-muted">{tr("live.saveUpdatesGrid")}</p>}
           <ErrorNote error={save.error} />
           <div className="flex justify-end gap-2">
-            <Button onClick={() => setViewDialog(null)}>Cancelar</Button>
+            <Button onClick={() => setViewDialog(null)}>{tr("common.cancel")}</Button>
             <Button variant="primary" onClick={() => save.mutate()} disabled={!dialogName.trim() || save.isPending}>
-              Guardar
+              {tr("live.save")}
             </Button>
           </div>
         </Modal>
       )}
       {deleteViewId && (
         <ConfirmDialog
-          title="Eliminar vista"
-          message={`Se eliminará la vista «${views.data?.find((v) => v.id === deleteViewId)?.name ?? ""}». Esta acción no se puede deshacer.`}
-          confirmLabel="Eliminar"
+          title={tr("live.deleteView")}
+          message={tr("live.deleteViewMessage", { name: views.data?.find((v) => v.id === deleteViewId)?.name ?? "" })}
+          confirmLabel={tr("live.delete")}
           pending={remove.isPending}
           error={remove.error}
           onCancel={() => setDeleteViewId(null)}
@@ -764,13 +821,14 @@ function GridTile({
   onToggleFocus: () => void;
   onRemove: () => void;
 }) {
+  const tr = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...placement };
   return (
     <div
       ref={setNodeRef}
       style={style}
-      aria-label={`Cuadro ${index + 1}`}
+      aria-label={tr("live.cell", { index: index + 1 })}
       onClick={onSelect}
       onDoubleClick={onToggleFocus}
       className={cn(
@@ -787,8 +845,8 @@ function GridTile({
           <LiveMapTile map={tile.map} />
           <button
             type="button"
-            title="Quitar mapa"
-            aria-label={`Quitar ${tile.map.name}`}
+            title={tr("live.removeMap")}
+            aria-label={tr("live.removeNamed", { name: tile.map.name })}
             className="absolute right-2 top-2 z-[3] rounded bg-black/70 p-1 text-white hover:bg-white/20"
             onClick={(event) => {
               event.stopPropagation();
@@ -803,7 +861,7 @@ function GridTile({
           {isDuplicate ? (
             <div className="relative size-full">
               <img src={`/media/v1/cameras/${tile.camera_id}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-contain opacity-60" />
-              <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white">Ya visible en otra celda</span>
+              <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white">{tr("live.alreadyVisible")}</span>
             </div>
           ) : recLayer && !persistent ? null : (
             // Without persistent players a live socket would keep streaming under REC, so it is
@@ -821,14 +879,14 @@ function GridTile({
             </span>
             <span className="ml-auto flex shrink-0 gap-1">
               {canViewRecordings && (
-                <Link to="/playback" search={{ camera: tile.camera_id }} title="Grabaciones" aria-label={`Grabaciones de ${camera.display_name}`} className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
+                <Link to="/playback" search={{ camera: tile.camera_id }} title={tr("nav.recordings")} aria-label={tr("live.recordingsOf", { name: camera.display_name })} className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
                   <History className="size-3.5" aria-hidden />
                 </Link>
               )}
               <button
                 type="button"
-                title={isFocused ? "Volver a la grilla" : "Ampliar"}
-                aria-label={isFocused ? "Volver a la grilla" : "Ampliar"}
+                title={isFocused ? tr("live.backToGrid") : tr("live.expandTile")}
+                aria-label={isFocused ? tr("live.backToGrid") : tr("live.expandTile")}
                 className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -839,8 +897,8 @@ function GridTile({
               </button>
               <button
                 type="button"
-                title="Quitar"
-                aria-label={`Quitar ${camera.display_name}`}
+                title={tr("live.remove")}
+                aria-label={tr("live.removeNamed", { name: camera.display_name })}
                 className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -853,7 +911,7 @@ function GridTile({
           </div>
         </>
       ) : (
-        <div className="flex size-full items-center justify-center text-xs text-muted">{tile && !camera ? "Cámara sin acceso" : "Vacío"}</div>
+        <div className="flex size-full items-center justify-center text-xs text-muted">{tile && !camera ? tr("live.noAccess") : tr("live.emptyCell")}</div>
       )}
     </div>
   );

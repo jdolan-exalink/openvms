@@ -2,6 +2,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useT } from "@/i18n";
 import { eventsQuery, recordingsQuery } from "@/api/queries";
 import { HlsPlayer } from "@/components/HlsPlayer";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
@@ -27,6 +28,7 @@ export function LivePlaybackPanel({
   cameraName: string;
   onClose: () => void;
 }) {
+  const t = useT();
   const [now, setNow] = useState(unixNow);
   const [instant, setInstant] = useState(now - 600);
   const [day, setDay] = useState(startOfDay(now));
@@ -51,27 +53,27 @@ export function LivePlaybackPanel({
   };
 
   return (
-    <section aria-label={`Grabaciones de ${cameraName}`} className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-3">
+    <section aria-label={t("live.recordingsOf", { name: cameraName })} className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-3">
       <header className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h2 className="truncate text-sm font-semibold">Grabaciones · {cameraName}</h2>
-          <p className="text-xs text-muted">Línea de tiempo y HLS de esta cámara</p>
+          <h2 className="truncate text-sm font-semibold">{t("live.recordingsHeading", { name: cameraName })}</h2>
+          <p className="text-xs text-muted">{t("live.timelineAndHls")}</p>
         </div>
-        <Button aria-label="Cerrar grabaciones" onClick={onClose}><X className="size-4" aria-hidden /></Button>
+        <Button aria-label={t("live.closeRecordings")} onClick={onClose}><X className="size-4" aria-hidden /></Button>
       </header>
       <div className="grid gap-2 sm:grid-cols-2">
-        <Field label="Día">
+        <Field label={t("live.day")}>
           <div className="flex items-center gap-1">
-            <Button aria-label="Día anterior" onClick={() => setDay(day - DAY)}><ChevronLeft className="size-4" /></Button>
+            <Button aria-label={t("live.previousDay")} onClick={() => setDay(day - DAY)}><ChevronLeft className="size-4" /></Button>
             <TextInput
               type="date"
               value={toLocalInput(new Date(day * 1000)).slice(0, 10)}
               onChange={(event) => event.target.value && setDay(startOfDay(new Date(`${event.target.value}T00:00`).getTime() / 1000))}
             />
-            <Button aria-label="Día siguiente" onClick={() => setDay(Math.min(day + DAY, startOfDay(now)))}><ChevronRight className="size-4" /></Button>
+            <Button aria-label={t("live.nextDay")} onClick={() => setDay(Math.min(day + DAY, startOfDay(now)))}><ChevronRight className="size-4" /></Button>
           </div>
         </Field>
-        <Field label="Ir a">
+        <Field label={t("live.goTo")}>
           <TextInput
             type="datetime-local"
             value={toLocalInput(new Date(instant * 1000))}
@@ -94,13 +96,13 @@ export function LivePlaybackPanel({
         end={winEnd}
         startOffset={instant - winStart}
         onTime={setPosition}
-        ariaLabel={`Reproducción HLS de ${cameraName}`}
+        ariaLabel={t("live.hlsPlayback", { name: cameraName })}
         className="aspect-video w-full rounded border border-line"
       />
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
         <span>{fmtDateTime(new Date(position * 1000))}</span>
         <Link to="/playback" search={{ camera: cameraId }} className="text-accent underline">
-          Abrir página de grabaciones de {cameraName}
+          {t("live.openRecordingsPageOf", { name: cameraName })}
         </Link>
       </div>
     </section>

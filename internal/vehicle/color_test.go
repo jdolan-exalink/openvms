@@ -375,6 +375,31 @@ func TestSquareBoxIsNotATrailer(t *testing.T) {
 	}
 }
 
+func TestSideViewCarIsNotATrailer(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 320, 180))
+	for y := 0; y < 180; y++ {
+		for x := 0; x < 320; x++ {
+			img.SetRGBA(x, y, color.RGBA{40, 40, 40, 255})
+		}
+	}
+	// 260×100 is a side-on car (2.6), not an articulated truck.
+	for y := 40; y < 140; y++ {
+		img.SetRGBA(20, y, color.RGBA{0, 255, 0, 255})
+		img.SetRGBA(21, y, color.RGBA{0, 255, 0, 255})
+		img.SetRGBA(280, y, color.RGBA{0, 255, 0, 255})
+		img.SetRGBA(281, y, color.RGBA{0, 255, 0, 255})
+	}
+	for x := 20; x < 282; x++ {
+		img.SetRGBA(x, 40, color.RGBA{0, 255, 0, 255})
+		img.SetRGBA(x, 41, color.RGBA{0, 255, 0, 255})
+		img.SetRGBA(x, 138, color.RGBA{0, 255, 0, 255})
+		img.SetRGBA(x, 139, color.RGBA{0, 255, 0, 255})
+	}
+	if _, _, ok := ClassifyRig(img); ok {
+		t.Fatal("a side-view car was called a trailer")
+	}
+}
+
 func TestTypeFromLabelsDoesNotInventSUV(t *testing.T) {
 	typ, conf := TypeFromLabels([]string{"car"})
 	if typ != "car" || conf < TypeMinConfidence {
@@ -394,6 +419,14 @@ func TestTypeFromLabelsDoesNotInventSUV(t *testing.T) {
 	typ, _ = TypeFromLabels([]string{"car", "motorcycle"})
 	if typ != "car" {
 		t.Fatalf("car first = %s, want car", typ)
+	}
+	typ, conf = SubjectType([]string{"motorcycle", "motorcycle-verified", "car", "car-verified"}, true)
+	if typ != "car" || conf < TypeMinConfidence {
+		t.Fatalf("green box with a car = %s %.2f, want car", typ, conf)
+	}
+	typ, _ = SubjectType([]string{"motorcycle", "person"}, false)
+	if typ != "motorcycle" {
+		t.Fatalf("motorcycle without a car box = %s", typ)
 	}
 	typ, _ = TypeFromLabels([]string{"bicycle", "motorcycle"})
 	if typ != "motorcycle" {

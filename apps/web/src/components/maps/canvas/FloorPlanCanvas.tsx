@@ -26,6 +26,9 @@ interface Props {
   floorId?: string;
   canEvents?: boolean;
   canSnapshots?: boolean;
+  /** Last pan and zoom for this plan. Maps and Live share it. */
+  initialView?: PlanView;
+  onViewChange?: (view: PlanView) => void;
 }
 type Gesture = {
   pointer: number;
@@ -35,7 +38,7 @@ type Gesture = {
   moved: boolean;
 };
 /** Image and fixed-size markers share one projection, independent of the geographic engine. */
-export function FloorPlanCanvas({ ref, imageUrl, imageBlob, width, height, cameras, editable, onPlace, onSelect, onOpen, tenantId, siteId, floorId, canEvents = false, canSnapshots = false }: Props) {
+export function FloorPlanCanvas({ ref, imageUrl, imageBlob, width, height, cameras, editable, onPlace, onSelect, onOpen, tenantId, siteId, floorId, canEvents = false, canSnapshots = false, initialView, onViewChange }: Props) {
   const viewport = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
   useEffect(() => {
@@ -48,7 +51,10 @@ export function FloorPlanCanvas({ ref, imageUrl, imageBlob, width, height, camer
   }, [imageBlob]);
   const gesture = useRef<Gesture | undefined>(undefined);
   const [size, setSize] = useState({ width: 400, height: 200 });
-  const [view, setView] = useState<PlanView>({ scale: 1, x: 0, y: 0 });
+  const [view, setView] = useState<PlanView>(initialView ?? { scale: 1, x: 0, y: 0 });
+  const onViewChangeRef = useRef(onViewChange);
+  useEffect(() => { onViewChangeRef.current = onViewChange; });
+  useEffect(() => { onViewChangeRef.current?.(view); }, [view]);
   const [preview, setPreview] = useState<{
     id: string;
     point: Point;

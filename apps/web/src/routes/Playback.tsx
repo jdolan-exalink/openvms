@@ -145,16 +145,16 @@ export function Playback() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-4">
       <PageHeader
-        title={t("Grabaciones")}
-        description={t("La grabación se reproduce sincronizada desde el Frigate de origen; el VMS no guarda video.")}
+        title={t("nav.recordings")}
+        description={t("settings.playback")}
       />
       <div className="grid gap-3 sm:grid-cols-3">
-        <Field label={selectedCameraIds.length > 0 ? "Cámara principal" : "Cámara"}>
+        <Field label={selectedCameraIds.length > 0 ? t("live.primaryCamera") : t("common.camera")}>
           <Select
             value={primaryCameraId}
             onChange={(e) => handleSelectFirstCamera(e.target.value)}
           >
-            <option value="">Elegí una cámara</option>
+            <option value="">{t("live.chooseCamera")}</option>
             {cameras.data?.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.display_name}
@@ -162,9 +162,9 @@ export function Playback() {
             ))}
           </Select>
         </Field>
-        <Field label="Día">
+        <Field label={t("live.day")}>
           <div className="flex items-center gap-1">
-            <Button aria-label="Día anterior" onClick={() => setDay(day - DAY)}>
+            <Button aria-label={t("live.previousDay")} onClick={() => setDay(day - DAY)}>
               <ChevronLeft className="size-4" />
             </Button>
             <TextInput
@@ -172,12 +172,12 @@ export function Playback() {
               value={toLocalInput(new Date(day * 1000)).slice(0, 10)}
               onChange={(e) => e.target.value && setDay(startOfDay(new Date(e.target.value + "T00:00").getTime() / 1000))}
             />
-            <Button aria-label="Día siguiente" onClick={() => setDay(Math.min(day + DAY, startOfDay(now)))}>
+            <Button aria-label={t("live.nextDay")} onClick={() => setDay(Math.min(day + DAY, startOfDay(now)))}>
               <ChevronRight className="size-4" />
             </Button>
           </div>
         </Field>
-        <Field label="Ir a">
+        <Field label={t("live.goTo")}>
           <TextInput
             type="datetime-local"
             value={toLocalInput(new Date(instant * 1000))}
@@ -196,7 +196,7 @@ export function Playback() {
       {selectedCameraIds.length > 0 && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-line bg-surface p-2 text-xs">
           <div className="flex items-center gap-2">
-            <span className="text-muted">Cámaras sincronizadas ({selectedCameraIds.length}/4):</span>
+            <span className="text-muted">{t("live.syncedCameras", { count: selectedCameraIds.length })}</span>
             <div className="flex flex-wrap items-center gap-1.5">
               {selectedCameraIds.map((id) => {
                 const cam = cameraMap.get(id);
@@ -215,7 +215,7 @@ export function Playback() {
                       <button
                         type="button"
                         onClick={() => removeCamera(id)}
-                        aria-label={`Quitar ${cam?.display_name ?? id}`}
+                        aria-label={t("live.removeNamed", { name: cam?.display_name ?? id })}
                         className="rounded hover:bg-black/10 dark:hover:bg-white/10"
                       >
                         <X className="size-3" aria-hidden />
@@ -238,7 +238,7 @@ export function Playback() {
                   }
                 }}
               >
-                <option value="">+ Agregar cámara sincronizada</option>
+                <option value="">{t("live.addSyncedCamera")}</option>
                 {availableToAdd.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.display_name}
@@ -251,7 +251,7 @@ export function Playback() {
       )}
 
       {selectedCameraIds.length === 0 && (
-        <p className="text-sm text-muted">Elegí una cámara para ver su línea de tiempo.</p>
+        <p className="text-sm text-muted">{t("live.chooseCameraTimeline")}</p>
       )}
 
       {selectedCameraIds.length > 0 && (
@@ -292,7 +292,7 @@ export function Playback() {
                       </span>
                       {isPrimary ? (
                         <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium text-accent border border-accent/30">
-                          Línea de tiempo
+                          {t("live.timeline")}
                         </span>
                       ) : (
                         <button
@@ -300,14 +300,14 @@ export function Playback() {
                           onClick={() => setPrimary(camId)}
                           className="text-[10px] text-muted hover:text-ink underline"
                         >
-                          Ver línea de tiempo
+                          {t("live.viewTimeline")}
                         </button>
                       )}
                     </div>
                     {selectedCameraIds.length > 1 && (
                       <button
                         type="button"
-                        aria-label={`Quitar cámara ${cam?.display_name ?? camId}`}
+                        aria-label={t("live.removeCamera", { name: cam?.display_name ?? camId })}
                         onClick={() => removeCamera(camId)}
                         className="rounded p-1 text-muted hover:bg-raised hover:text-ink"
                       >
@@ -327,7 +327,7 @@ export function Playback() {
                     end={winEnd}
                     startOffset={instant - winStart}
                     onTime={isPrimary ? setPosition : undefined}
-                    ariaLabel={`Reproducción HLS de ${cam?.display_name ?? "la cámara"}`}
+                    ariaLabel={t("live.hlsPlayback", { name: cam?.display_name ?? t("live.theCamera") })}
                     className="aspect-video w-full rounded border border-line"
                   />
                 </div>
@@ -361,6 +361,7 @@ function ExportForm({
   position: number;
   cameraName?: string;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -392,22 +393,22 @@ function ExportForm({
       }}
     >
       <div className="sm:col-span-4 text-xs font-semibold text-muted">
-        Exportar clip {cameraName ? `de ${cameraName}` : ""}
+        {cameraName ? t("live.exportClipOf", { name: cameraName }) : t("events.exportClip")}
       </div>
-      <Field label="Exportar desde" hint="Vacío: 30 s antes de la posición actual.">
+      <Field label={t("live.exportFrom")} hint={t("live.exportFromHint")}>
         <TextInput type="datetime-local" step={1} value={from} onChange={(e) => setFrom(e.target.value)} />
       </Field>
-      <Field label="Hasta" hint="Máximo 2 horas.">
+      <Field label={t("common.to")} hint={t("live.untilHint")}>
         <TextInput type="datetime-local" step={1} value={to} onChange={(e) => setTo(e.target.value)} />
       </Field>
-      <Field label="Nombre">
-        <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Opcional" />
+      <Field label={t("live.clipName")}>
+        <TextInput value={name} onChange={(e) => setName(e.target.value)} placeholder={t("live.optional")} />
       </Field>
       <div className="flex flex-col justify-end gap-1">
         <Button type="submit" variant="primary" disabled={exp.isPending}>
-          <Download className="size-4" aria-hidden /> Exportar
+          <Download className="size-4" aria-hidden /> {t("live.export")}
         </Button>
-        {exp.data && <span className="text-xs text-ok">Exportación iniciada.</span>}
+        {exp.data && <span className="text-xs text-ok">{t("live.exportStartedShort")}</span>}
       </div>
       <div className="sm:col-span-4">
         <ErrorNote error={exp.error} />

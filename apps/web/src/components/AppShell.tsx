@@ -64,6 +64,7 @@ function setSidebarWidth(width: number, persist: boolean) {
  * animation frame; the keyboard resizes in 16 px steps and double click restores the default.
  */
 function SidebarResizeHandle({ width, onDragChange }: { width: number; onDragChange: (dragging: boolean) => void }) {
+  const t = useT();
   const drag = useRef<{ startX: number; startWidth: number; frame: number; latest: number } | null>(null);
   const max = maxSidebarWidth(typeof window === "undefined" ? 1600 : window.innerWidth);
   useEffect(() => () => {
@@ -106,12 +107,12 @@ function SidebarResizeHandle({ width, onDragChange }: { width: number; onDragCha
     <div
       role="separator"
       aria-orientation="vertical"
-      aria-label="Redimensionar barra lateral"
+      aria-label={t("common.resizeSidebar")}
       aria-valuenow={width}
       aria-valuemin={SIDEBAR_MIN_WIDTH}
       aria-valuemax={max}
       tabIndex={0}
-      title="Arrastrar para redimensionar; doble clic para restablecer"
+      title={t("common.resizeHint")}
       data-shell-region="context-sidebar-resize"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -175,7 +176,7 @@ export function AppShell({ primaryNav, contextSidebar, fitViewport = false, chil
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-surface focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-ink focus:shadow-lg focus:ring-2 focus:ring-accent"
       >
-        {t("Saltar al contenido")}
+        {t("common.skipToContent")}
       </a>
       <div className={cn("flex flex-col bg-bg pl-16 md:flex-row md:pl-0", fitViewport ? "h-dvh max-h-dvh min-h-0 overflow-hidden" : "min-h-dvh")} data-shell="openvms">
         <aside aria-label="Primary Nav Rail" className="fixed inset-y-0 left-0 z-40 flex w-16 shrink-0 overflow-y-auto md:static md:z-auto" data-shell-region="primary-nav">

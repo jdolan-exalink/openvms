@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { type ReactNode, useRef } from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
@@ -13,9 +14,9 @@ export function Modal({ title, onClose, children, className }: { title: string; 
   const containerRef = useRef<HTMLDivElement>(null);
   useFocusTrap(containerRef, onClose);
 
-  return (
+  const dialog = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -31,4 +32,5 @@ export function Modal({ title, onClose, children, className }: { title: string; 
       </div>
     </div>
   );
+  return createPortal(dialog, document.body);
 }

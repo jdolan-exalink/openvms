@@ -1,0 +1,22 @@
+const messages = {
+  cameraGroups: "Agrupá cámaras para asignar permisos o visualización conjunta.",
+  notifications: "Avisos generados por tus reglas de automatización.",
+  plates: "Lecturas de patentes de todos los servidores. Los espacios y guiones se ignoran al buscar.",
+  playback: "La grabación se reproduce sincronizada desde el Frigate de origen; el VMS no guarda video.",
+  groupPermissions: "Los permisos que le des a un grupo valen para todos sus miembros.",
+  sites: "Ubicaciones físicas. Cada sitio agrupa uno o más servidores Frigate.",
+  permissionRule: "Un permiso vale en su alcance y todo lo que contiene. Una denegación siempre gana sobre un permiso.",
+  watermark: "Nombre y logo del propietario que se graban en las fotos y clips descargados, y se muestran como superposición al verlos.",
+  cameraConfig: "Configuración de la cámara en Frigate {version}. Los cambios se aplican al servidor.",
+  rules: "Automatizá alarmas y notificaciones a partir de eventos y de la caída de cámaras o servidores.",
+  camerasOnly: "Solo aparecen las cámaras que tu usuario tiene permiso para ver.",
+  dashboard: "Estado de la plataforma central y del inventario que tu usuario puede ver.",
+  alarms: "Bandeja de alarmas por eventos de alerta. Reconocé, asigná y resolvé incidentes en tiempo real.",
+  users: "Cada usuario ve solo lo que sus permisos, directos o por grupo, le otorgan.",
+  audit: "Registro inalterable de accesos y cambios.",
+  events: "Alertas y detecciones de todos los servidores Frigate que podés ver, en una sola lista.",
+  exports: "Clips pedidos desde Eventos o Grabaciones. Frigate los genera y el VMS los descarga por vos.",
+  channels: "Destinos externos (webhook, correo, WhatsApp, Telegram) que las reglas pueden notificar.",
+  servers: "Servidores Frigate registrados y su salud. El worker los consulta cada 30 segundos.",
+} as const;
+export default messages;

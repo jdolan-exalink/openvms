@@ -29,8 +29,8 @@ export function CameraGroups() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title={t("Grupos de cámaras")}
-        description={t("Agrupá cámaras para asignar permisos o visualización conjunta.")}
+        title={t("nav.cameraGroups")}
+        description={t("settings.cameraGroups")}
         actions={
           manage ? (
             <Button variant="primary" onClick={() => setEditing("new")}>

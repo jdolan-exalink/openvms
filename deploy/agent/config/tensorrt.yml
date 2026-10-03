@@ -1,0 +1,12 @@
+mqtt:
+  enabled: false
+
+auth:
+  enabled: false
+
+detectors:
+  tensorrt:
+    type: tensorrt
+    device: 0
+
+cameras: {}

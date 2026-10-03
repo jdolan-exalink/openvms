@@ -16,8 +16,8 @@ export function Notifications() {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-6">
       <PageHeader
-        title={t("Notificaciones")}
-        description={t("Avisos generados por tus reglas de automatización.")}
+        title={t("nav.notifications")}
+        description={t("settings.notifications")}
         actions={
           <Button disabled={unread === 0 || markAll.isPending} onClick={() => markAll.mutate()}>
             Marcar todas como leídas

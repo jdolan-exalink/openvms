@@ -53,7 +53,7 @@ export function Audit() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
-      <PageHeader title={t("Auditoría")} description={t("Registro inalterable de accesos y cambios.")} />
+      <PageHeader title={t("nav.audit")} description={t("settings.audit")} />
       <form
         className="grid gap-3 rounded border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-5"
         onSubmit={(e) => {

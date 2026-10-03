@@ -330,13 +330,20 @@ func (g *Gateway) lprReadCamera(w http.ResponseWriter, r *http.Request, p authz.
 	return a, cam, lr, true
 }
 
-// lprReadSnapshot serves the Frigate tracked-object snapshot for one LPR read
-// (lpr_reads.remote_event_id), full frame with the detection bounding box (bbox=1 unless
-// ?bbox=0 is sent) at the highest quality Frigate offers (quality=100, no downscale), so
-// the plate photo shown on hover in the Plates page, and at full size in the plate detail
-// modal (PDW-2), shows the actual read instead of another object from the same event (which
-// the event's own /events/{id}/snapshot.jpg endpoint would, since it always uses
-// detections[0]).
+// snapshotQuality keeps the full-quality frame unless the list asked for a lighter thumb.
+// Values outside 20–100 are ignored so a card cannot request a broken encode.
+func snapshotQuality(raw string) string {
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 20 || n > 100 {
+		return "100"
+	}
+	return strconv.Itoa(n)
+}
+
+// lprReadSnapshot serves the Frigate snapshot of the tracked object that produced
+// this plate read (lpr_reads.remote_event_id), not detections[0] of the parent review.
+// ?crop=1 asks Frigate for that object's crop, which is the plate-reading photo.
+// Without it the response is the full frame, with the box drawn unless ?bbox=0.
 func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 	a, cam, lr, ok := g.lprReadCamera(w, r, authz.SnapshotsView)
 	if !ok {
@@ -347,8 +354,10 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 		g.fail(w, r, a, err)
 		return
 	}
-	q := url.Values{"quality": {"100"}}
-	if r.URL.Query().Get("bbox") != "0" {
+	q := url.Values{"quality": {snapshotQuality(r.URL.Query().Get("quality"))}}
+	if r.URL.Query().Get("crop") == "1" {
+		q.Set("crop", "1")
+	} else if r.URL.Query().Get("bbox") != "0" {
 		q.Set("bbox", "1")
 	}
 	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(lr.RemoteEventID)+"/snapshot.jpg", q, r.Header)

@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { TagInput } from "@/components/TagInput";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
-import { knownLabels } from "@/lib/format";
+import { knownLabels, vehicleTypeOptions } from "@/lib/format";
 
 type Rule = Schemas["Rule"];
 type Trigger = Schemas["RuleTriggerType"];
@@ -50,7 +50,7 @@ export function Rules() {
   if (forbidden) {
     return (
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <PageHeader title={t("Reglas")} />
+        <PageHeader title={t("nav.rules")} />
         <Empty>No tenés permiso para administrar reglas. Pedile a un administrador el permiso de gestión de notificaciones.</Empty>
       </div>
     );
@@ -59,8 +59,8 @@ export function Rules() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title={t("Reglas")}
-        description={t("Automatizá alarmas y notificaciones a partir de eventos y de la caída de cámaras o servidores.")}
+        title={t("nav.rules")}
+        description={t("settings.rules")}
         actions={
           <Button variant="primary" onClick={() => setEditing("new")}>
             <Plus className="size-4" aria-hidden /> Nueva regla
@@ -293,19 +293,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
             />
             <CheckGroup
               legend="Tipo de vehículo (vacío = cualquiera)"
-              options={[
-                { value: "car", label: "Auto" },
-                { value: "sedan", label: "Sedán" },
-                { value: "hatchback", label: "Hatchback" },
-                { value: "suv", label: "SUV" },
-                { value: "pickup", label: "Pickup" },
-                { value: "van", label: "Utilitario" },
-                { value: "station_wagon", label: "Familiar" },
-                { value: "micro", label: "Citadino" },
-                { value: "truck", label: "Camión" },
-                { value: "bus", label: "Colectivo" },
-                { value: "motorcycle", label: "Moto" },
-              ]}
+              options={vehicleTypeOptions()}
               selected={f.vehicle_types}
               onToggle={(v) => setF({ ...f, vehicle_types: flip(f.vehicle_types, v) })}
             />

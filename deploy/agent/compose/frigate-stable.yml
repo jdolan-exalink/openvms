@@ -1,0 +1,20 @@
+# Coral (USB or PCIe). Standard Frigate image.
+name: openvms-frigate
+services:
+  frigate:
+    container_name: frigate
+    privileged: true
+    restart: unless-stopped
+    image: ghcr.io/blakeblackshear/frigate:stable
+    shm_size: "256mb"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - ./config:/config
+      - ./storage:/media/frigate
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+    ports:
+      - "5000:5000"
+      - "8554:8554"
+      - "8555:8555/tcp"
+      - "8555:8555/udp"

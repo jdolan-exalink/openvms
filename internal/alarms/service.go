@@ -103,6 +103,8 @@ type Alarm struct {
 	VehicleColor           string     `json:"vehicle_color,omitempty"`
 	VehicleColorConfidence float32    `json:"vehicle_color_confidence,omitempty"`
 	ColorQuality           string     `json:"color_quality,omitempty"`
+	TrailerColor           string     `json:"trailer_color,omitempty"`
+	TrailerColorConfidence float32    `json:"trailer_color_confidence,omitempty"`
 	UpperColor             string     `json:"upper_color,omitempty"`
 	UpperColorConfidence   float32    `json:"upper_color_confidence,omitempty"`
 	LowerColor             string     `json:"lower_color,omitempty"`
@@ -939,6 +941,8 @@ func mapGetAlarmRow(r db.GetAlarmRow) Alarm {
 		VehicleColor:           r.VehicleColor,
 		VehicleColorConfidence: r.VehicleColorConfidence,
 		ColorQuality:           r.ColorQuality,
+		TrailerColor:           r.TrailerColor,
+		TrailerColorConfidence: r.TrailerColorConfidence,
 		UpperColor:             r.UpperColor,
 		UpperColorConfidence:   r.UpperColorConfidence,
 		LowerColor:             r.LowerColor,
@@ -998,6 +1002,8 @@ func mapListAlarmRow(r db.ListAlarmsRow) Alarm {
 		VehicleColor:           r.VehicleColor,
 		VehicleColorConfidence: r.VehicleColorConfidence,
 		ColorQuality:           r.ColorQuality,
+		TrailerColor:           r.TrailerColor,
+		TrailerColorConfidence: r.TrailerColorConfidence,
 		UpperColor:             r.UpperColor,
 		UpperColorConfidence:   r.UpperColorConfidence,
 		LowerColor:             r.LowerColor,

@@ -6,6 +6,7 @@ import { can } from "@/lib/perm";
 import { mapsOverviewQuery } from "@/lib/maps/api";
 import type { CameraEntity, MapMode } from "@/lib/maps/types";
 import { floorEntitiesQuery, floorUnplacedQuery, emptyFloorDraft, stageFloor, undoFloor, redoFloor, saveFloorPlacement, type Point } from "@/lib/maps/floorEditor";
+import { loadPlanView, savePlanView } from "@/lib/maps/mapView";
 import { loadFloorPlan } from "@/lib/maps/plans";
 import type { WorkspaceFloor } from "./MapWorkspace";
 import { FloorPlanCanvas, type FloorPlanCanvasHandle } from "./canvas/FloorPlanCanvas";
@@ -211,7 +212,7 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
         onSelectCamera={selectCamera}
         onEdit={() => { setModeState({ initial: initialMode, value: "edit" }); onModeChange?.("edit"); }}
         onOpenLive={openCamera}
-        onEvents={(id) => void navigate({ to: "/events", search: { camera: id, site: siteId } })}
+        onEvents={(id) => void navigate({ to: "/events", search: { camera: id } })}
         onPlayback={(id) => void navigate({ to: "/playback", search: { camera: id } })}
         onResetVisibility={() => undefined}
       />
@@ -236,10 +237,10 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
   {maximized && <MapMaximizedCamera camera={maximized} origin={maximizedOrigin} persistent={persistentPlayers} closeOnEscape={!plateSnapshot} onClose={() => { setMaximizedId(undefined); setMaximizedOrigin(undefined); }} />}
   {mode === "investigate" && selectedCamera && <section aria-label="Selected floor camera" className="absolute right-3 top-16 z-20 max-w-xs space-y-2 rounded border border-line bg-surface p-2 text-xs">
   <strong>{selectedCamera.name}</strong>
-  {can(me.data, "events.view") && <button onClick={() => void navigate({ to: "/events", search: { camera: selectedCamera.id, site: siteId } })}>Events</button>}
+  {can(me.data, "events.view") && <button onClick={() => void navigate({ to: "/events", search: { camera: selectedCamera.id } })}>Events</button>}
   {can(me.data, "recordings.view") && <button onClick={() => void navigate({ to: "/playback", search: { camera: selectedCamera.id } })}>Playback</button>}
   </section>}
-  <div className="absolute inset-0"><FloorPlanCanvas ref={canvasRef} key={`${siteId}/${floor.id}`} imageBlob={plan.data} width={floor.plan_width_px || 1000} height={floor.plan_height_px || 1000} cameras={cameras} editable={editable && !saving} onPlace={place} onSelect={id => { if (mode === "edit") { setSelected(id); onSelectCamera?.(id); } else selectCamera(id); }} onOpen={mode === "live" ? openCamera : undefined} tenantId={me.data?.tenant_id} siteId={siteId} floorId={floor.id} canEvents={can(me.data, "events.view")} canSnapshots={can(me.data, "snapshots.view")}/></div>
+  <div className="absolute inset-0"><FloorPlanCanvas ref={canvasRef} key={`${siteId}/${floor.id}/${me.data?.id ?? "pending"}`} imageBlob={plan.data} width={floor.plan_width_px || 1000} height={floor.plan_height_px || 1000} cameras={cameras} editable={editable && !saving} onPlace={place} onSelect={id => { if (mode === "edit") { setSelected(id); onSelectCamera?.(id); } else selectCamera(id); }} onOpen={mode === "live" ? openCamera : undefined} tenantId={me.data?.tenant_id} siteId={siteId} floorId={floor.id} canEvents={can(me.data, "events.view")} canSnapshots={can(me.data, "snapshots.view")} initialView={me.data ? loadPlanView(me.data.tenant_id, me.data.id, floor.id) ?? undefined : undefined} onViewChange={view => { if (me.data) savePlanView(me.data.tenant_id, me.data.id, floor.id, view); }}/></div>
  </div>
 </section>;
 }

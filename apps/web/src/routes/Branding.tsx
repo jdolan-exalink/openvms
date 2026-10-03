@@ -114,8 +114,8 @@ export function Branding() {
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <PageHeader
-        title={t("Marca de agua")}
-        description={t("Nombre y logo del propietario que se graban en las fotos y clips descargados, y se muestran como superposición al verlos.")}
+        title={t("nav.watermark")}
+        description={t("settings.watermark")}
       />
       <ErrorNote error={branding.error} />
       {branding.data && (

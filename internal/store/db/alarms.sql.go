@@ -106,6 +106,8 @@ SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status
        COALESCE(va.vehicle_color, '') AS vehicle_color,
        COALESCE(va.vehicle_color_confidence, 0)::real AS vehicle_color_confidence,
        COALESCE(va.color_quality, '') AS color_quality,
+       COALESCE(va.trailer_color, '') AS trailer_color,
+       COALESCE(va.trailer_color_confidence, 0)::real AS trailer_color_confidence,
        COALESCE(pa.upper_color, '') AS upper_color,
        COALESCE(pa.upper_color_confidence, 0)::real AS upper_color_confidence,
        COALESCE(pa.lower_color, '') AS lower_color,
@@ -159,6 +161,8 @@ type GetAlarmRow struct {
 	VehicleColor           string
 	VehicleColorConfidence float32
 	ColorQuality           string
+	TrailerColor           string
+	TrailerColorConfidence float32
 	UpperColor             string
 	UpperColorConfidence   float32
 	LowerColor             string
@@ -203,6 +207,8 @@ func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, erro
 		&i.VehicleColor,
 		&i.VehicleColorConfidence,
 		&i.ColorQuality,
+		&i.TrailerColor,
+		&i.TrailerColorConfidence,
 		&i.UpperColor,
 		&i.UpperColorConfidence,
 		&i.LowerColor,
@@ -285,6 +291,8 @@ SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status
        COALESCE(va.vehicle_color, '') AS vehicle_color,
        COALESCE(va.vehicle_color_confidence, 0)::real AS vehicle_color_confidence,
        COALESCE(va.color_quality, '') AS color_quality,
+       COALESCE(va.trailer_color, '') AS trailer_color,
+       COALESCE(va.trailer_color_confidence, 0)::real AS trailer_color_confidence,
        COALESCE(pa.upper_color, '') AS upper_color,
        COALESCE(pa.upper_color_confidence, 0)::real AS upper_color_confidence,
        COALESCE(pa.lower_color, '') AS lower_color,
@@ -357,6 +365,8 @@ type ListAlarmsRow struct {
 	VehicleColor           string
 	VehicleColorConfidence float32
 	ColorQuality           string
+	TrailerColor           string
+	TrailerColorConfidence float32
 	UpperColor             string
 	UpperColorConfidence   float32
 	LowerColor             string
@@ -415,6 +425,8 @@ func (q *Queries) ListAlarms(ctx context.Context, arg ListAlarmsParams) ([]ListA
 			&i.VehicleColor,
 			&i.VehicleColorConfidence,
 			&i.ColorQuality,
+			&i.TrailerColor,
+			&i.TrailerColorConfidence,
 			&i.UpperColor,
 			&i.UpperColorConfidence,
 			&i.LowerColor,

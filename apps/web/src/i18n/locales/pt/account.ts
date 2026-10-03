@@ -1,0 +1,21 @@
+const messages = {
+  adminAskedPassword: "Um administrador pediu que você troque a senha.",
+  currentPassword: "Senha atual",
+  newPassword: "Nova senha",
+  passwordRules: "No mínimo 10 caracteres, com letras e números ou símbolos.",
+  repeatPassword: "Repetir a nova senha",
+  passwordMismatch: "As novas senhas não coincidem.",
+  passwordUpdated: "Senha atualizada. As suas outras sessões foram encerradas.",
+  changePassword: "Trocar senha",
+  twoFactor: "Verificação em duas etapas",
+  twoFactorOn: "Ativada. Ao entrar, é pedido um código do seu aplicativo autenticador.",
+  passwordToDisable: "Senha para desativar",
+  disable: "Desativar",
+  setupKey: "Adicione esta chave no seu aplicativo (Google Authenticator, Aegis, 1Password…) com “Inserir chave de configuração”, ou abra o link no celular:",
+  appCode: "Código mostrado pelo aplicativo",
+  enable: "Ativar",
+  twoFactorHelp: "Protege a sua conta mesmo que alguém saiba a sua senha.",
+  setup: "Configurar",
+  languageSaved: "O idioma da interface fica salvo neste navegador.",
+} as const;
+export default messages;

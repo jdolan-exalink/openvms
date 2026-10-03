@@ -1,0 +1,12 @@
+mqtt:
+  enabled: false
+
+auth:
+  enabled: false
+
+detectors:
+  coral:
+    type: edgetpu
+    device: usb
+
+cameras: {}

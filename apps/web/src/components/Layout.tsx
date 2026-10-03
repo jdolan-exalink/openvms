@@ -33,7 +33,7 @@ export function Layout() {
   const t = useT();
   const pageContextRaw = getPageContext(pathname);
   const pageContext = { section: t(pageContextRaw.section), title: t(pageContextRaw.title) };
-  const pageTitle = isLive && liveRec ? t("Grabaciones") : pageContext.title;
+  const pageTitle = isLive && liveRec ? t("nav.recordings") : pageContext.title;
   const [mobileOpen, setMobileOpen] = useState(false);
   const [omniboxOpen, setOmniboxOpen] = useState(false);
   const logout = useLogout();
@@ -69,10 +69,10 @@ export function Layout() {
         <AppShell
           primaryNav={
             <div className="flex min-h-full w-16 shrink-0 flex-col items-center border-r border-line bg-surface py-3">
-              <Link to="/live" aria-label={t("OpenVMS: En vivo")} title="OpenVMS" className="mb-5 flex size-10 items-center justify-center rounded-xl text-accent hover:bg-raised">
+              <Link to="/live" aria-label={t("common.brandLive")} title="OpenVMS" className="mb-5 flex size-10 items-center justify-center rounded-xl text-accent hover:bg-raised">
                 <Brand className="size-5" aria-hidden />
               </Link>
-              <nav className="flex w-full flex-1 flex-col items-center gap-4 overflow-y-auto" aria-label={t("Navegación principal")}>
+              <nav className="flex w-full flex-1 flex-col items-center gap-4 overflow-y-auto" aria-label={t("common.mainNav")}>
                 {navGroups.map((group, i) => (
                   <NavGroupLinks key={group.title ?? i} group={group} me={me.data} pathname={pathname} features={features} />
                 ))}
@@ -83,12 +83,12 @@ export function Layout() {
           contextSidebar={isLive ? <div id="live-context-sidebar" className="flex min-h-0 flex-col gap-3" /> : undefined}
         >
           <div className={cn("min-w-0", fitWorkspace && "flex min-h-0 flex-1 flex-col")}>
-            <header data-shell-region="page-header" className={cn("flex min-h-14 items-center justify-between gap-3 border-b border-line", fitWorkspace ? "mb-2 shrink-0 pb-2 md:min-h-11" : "mb-6 pb-4")} aria-label={t("Encabezado de página")}>
+            <header data-shell-region="page-header" className={cn("flex min-h-14 items-center justify-between gap-3 border-b border-line", fitWorkspace ? "mb-2 shrink-0 pb-2 md:min-h-11" : "mb-6 pb-4")} aria-label={t("common.pageHeader")}>
               <div className="flex min-w-0 items-center gap-3">
                 <button
                   type="button"
                   onClick={() => setMobileOpen(true)}
-                  aria-label={t("Abrir menú de navegación")}
+                  aria-label={t("common.openMenu")}
                   aria-expanded={mobileOpen}
                   aria-controls="mobile-nav-drawer"
                   className="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent md:hidden"
@@ -110,11 +110,11 @@ export function Layout() {
                 <button
                   type="button"
                   onClick={() => setOmniboxOpen(true)}
-                  aria-label={t("Buscar en OpenVMS (Ctrl+K)")}
+                  aria-label={t("common.searchOpenVms")}
                   className="flex items-center gap-2 rounded-lg border border-line bg-surface px-3 py-1.5 text-xs text-muted hover:bg-raised hover:text-ink transition-colors"
                 >
                   <Search className="size-3.5" aria-hidden />
-                  <span className="hidden sm:inline">{t("Buscar...")}</span>
+                  <span className="hidden sm:inline">{t("common.searchPlaceholder")}</span>
                   <kbd className="hidden sm:inline-flex items-center gap-0.5 rounded border border-line bg-bg px-1.5 py-0.5 font-mono text-[10px] text-muted">
                     <span className="text-xs">⌘</span>K
                   </kbd>
@@ -160,13 +160,13 @@ export function Layout() {
                 <button
                   type="button"
                   onClick={() => setMobileOpen(false)}
-                  aria-label={t("Cerrar menú")}
+                  aria-label={t("common.closeMenu")}
                   className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
                 >
                   <X className="size-4" aria-hidden />
                 </button>
               </div>
-              <nav className="flex flex-1 flex-col gap-4 overflow-y-auto pr-1" aria-label={t("Navegación móvil")}>
+              <nav className="flex flex-1 flex-col gap-4 overflow-y-auto pr-1" aria-label={t("common.mobileNav")}>
                 {mobileNavGroups.map((group, idx) => (
                   <div key={group.title ?? idx} className="flex flex-col gap-0.5">
                     {group.title && (
@@ -192,7 +192,7 @@ export function Layout() {
                         <span
                           key={item.label}
                           className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted/50"
-                          title={t("{label} · Llega en {milestone}", { label: t(item.label), milestone: item.milestone ?? "" })}
+                          title={t("nav.comingIn", { label: t(item.label), milestone: item.milestone ?? "" })}
                         >
                           <FontAwesomeIcon icon={item.icon} fixedWidth className="shrink-0 text-sm" aria-hidden />
                           <span>{t(item.label)}</span>
@@ -228,7 +228,7 @@ function NavGroupLinks({ group, me, pathname, features }: { group: NavGroup; me:
             <FontAwesomeIcon icon={item.icon} fixedWidth className="text-[17px]" aria-hidden />
           </Link>
         ) : (
-          <span key={item.label} aria-label={t("{label}, próximamente", { label: t(item.label) })} title={t("{label} · Llega en {milestone}", { label: t(item.label), milestone: item.milestone ?? "" })} className={classes}>
+          <span key={item.label} aria-label={t("nav.comingSoon", { label: t(item.label) })} title={t("nav.comingIn", { label: t(item.label), milestone: item.milestone ?? "" })} className={classes}>
             <FontAwesomeIcon icon={item.icon} fixedWidth className="text-[17px]" aria-hidden />
           </span>
         );
@@ -241,9 +241,9 @@ function getPageContext(pathname: string) {
   const groups = [...settingsNavGroups, ...navGroups];
   for (const group of groups) {
     const item = group.items.find((candidate) => candidate.to && (pathname === candidate.to || (candidate.to !== "/live" && candidate.to !== "/settings" && pathname.startsWith(`${candidate.to}/`))));
-    if (item) return { section: group.title ?? (item.to === "/settings" ? "Configuración" : item.to === "/live" ? "Operaciones" : "OpenVMS"), title: item.label };
+    if (item) return { section: group.title ?? (item.to === "/settings" ? "nav.settings" : item.to === "/live" ? "nav.operations" : "nav.brand"), title: item.label };
   }
-  return { section: "OpenVMS", title: "Workspace" };
+  return { section: "nav.brand" as const, title: "nav.workspace" as const };
 }
 
 function useLogout() {

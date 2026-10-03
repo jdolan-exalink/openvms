@@ -188,6 +188,7 @@ function AlarmActions({ alarm, canManage, imageUrl }: { alarm: Schemas["Alarm"];
       detail: statusLabel[alarm.status] ?? alarm.status,
       comment,
       imageUrl,
+      fullUrl: imageUrl,
     }),
     onSuccess: () => {
       setProtectError("");

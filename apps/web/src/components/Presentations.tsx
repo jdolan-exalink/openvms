@@ -1,5 +1,6 @@
 import { Fullscreen, Shrink, Trash2 } from "lucide-react";
 import { type CSSProperties, useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui";
 import { useT } from "@/i18n";
 import { Modal } from "@/components/Modal";
@@ -8,6 +9,20 @@ import {
   clampGrid, DEFAULT_PRESENTATIONS, divisionName, gridSegments, MAX_GRID, samePanes, toggleSegment, uniformPresentation,
   type GridSegment, type Presentation,
 } from "@/lib/presentations";
+
+const toolButton =
+  "inline-flex size-8 shrink-0 items-center justify-center rounded border border-line bg-surface hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent";
+
+/** presentationId works on plain HTTP, where crypto.randomUUID is missing. */
+function presentationId(): string {
+  try {
+    const id = globalThis.crypto?.randomUUID?.();
+    if (id) return `c-${id}`;
+  } catch {
+    // Insecure origins throw instead of omitting the method.
+  }
+  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 /** LayoutGlyph draws one presentation as the small blue window used in the layout menu. */
 export function LayoutGlyph({ presentation, className }: { presentation: Pick<Presentation, "columns" | "rows" | "panes">; className?: string }) {
@@ -85,8 +100,8 @@ function PresentationCanvas({ presentation, locked, onToggle }: { presentation: 
           key={`${segment.orientation}-${segment.col}-${segment.row}`}
           type="button"
           disabled={locked}
-          aria-label={segment.solid ? t("Quitar línea") : t("Restaurar línea")}
-          title={segment.solid ? t("Quitar línea") : t("Restaurar línea")}
+          aria-label={segment.solid ? t("live.removeLine") : t("live.restoreLine")}
+          title={segment.solid ? t("live.removeLine") : t("live.restoreLine")}
           className="absolute z-10 hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-default disabled:hover:bg-transparent"
           style={segmentStyle(segment, presentation.columns, presentation.rows)}
           onClick={() => { if (!locked) onToggle(segment); }}
@@ -99,12 +114,11 @@ function PresentationCanvas({ presentation, locked, onToggle }: { presentation: 
 }
 
 function LatticeField({ label, value, disabled, onChange }: { label: string; value: number; disabled?: boolean; onChange: (value: number) => void }) {
-  const t = useT();
   return (
     <label className={cn("flex items-center gap-2 text-sm", disabled && "text-muted")}>
-      {t(label)}
+      {label}
       <input
-        aria-label={t(label)}
+        aria-label={label}
         type="number"
         min={1}
         max={MAX_GRID}
@@ -145,7 +159,7 @@ export function PresentationEditor({
   const createCustom = () => {
     const source = selected ?? DEFAULT_PRESENTATIONS[2] ?? DEFAULT_PRESENTATIONS[0];
     if (!source) return;
-    const next: Presentation = { ...source, id: `c-${crypto.randomUUID()}`, builtin: false, name: divisionName(source.panes.length) };
+    const next: Presentation = { ...source, id: presentationId(), builtin: false, name: divisionName(source.panes.length) };
     setDraft((list) => [...list, next]);
     setSelectedId(next.id);
   };
@@ -170,8 +184,8 @@ export function PresentationEditor({
       {!item.builtin && (
         <button
           type="button"
-          aria-label={t("Eliminar {name}", { name: item.name })}
-          title={t("Eliminar {name}", { name: item.name })}
+          aria-label={t("common.deleteNamed", { name: item.name })}
+          title={t("common.deleteNamed", { name: item.name })}
           onClick={() => removeCustom(item.id)}
           className="px-2 text-muted hover:bg-raised hover:text-fg"
         >
@@ -181,31 +195,31 @@ export function PresentationEditor({
     </li>
   );
   return (
-    <Modal title={t("Editar presentaciones")} onClose={onCancel} className="max-w-4xl">
+    <Modal title={t("live.edit")} onClose={onCancel} className="max-w-4xl">
       <div className="grid items-start gap-4 md:grid-cols-[16rem_1fr]">
         <div className="min-w-0">
           <div className="mb-1 flex items-center justify-between gap-2">
-            <p className="text-xs font-medium text-muted">{t("Presentaciones")}</p>
-            <Button onClick={createCustom}>{t("Nueva")}</Button>
+            <p className="text-xs font-medium text-muted">{t("live.presentations")}</p>
+            <Button onClick={createCustom}>{t("common.new")}</Button>
           </div>
-          <ul role="listbox" aria-label={t("Presentaciones")} className="max-h-80 overflow-auto rounded border border-line">
-            <li className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted">{t("Estándar")}</li>
+          <ul role="listbox" aria-label={t("live.presentations")} className="max-h-80 overflow-auto rounded border border-line">
+            <li className="px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted">{t("live.standard")}</li>
             {standards.map(renderRow)}
-            <li className="border-t border-line px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted">{t("Personalizadas")}</li>
-            {customs.length === 0 && <li className="px-2 py-2 text-xs text-muted">{t("Todavía no hay personalizadas.")}</li>}
+            <li className="border-t border-line px-2 py-1 text-[11px] font-medium uppercase tracking-wide text-muted">{t("live.custom")}</li>
+            {customs.length === 0 && <li className="px-2 py-2 text-xs text-muted">{t("live.noCustom")}</li>}
             {customs.map(renderRow)}
           </ul>
         </div>
         <div className="flex min-w-0 flex-col gap-3">
           <div className="flex flex-wrap items-center justify-center gap-4">
-            <LatticeField label={t("Columnas")} value={selected.columns} disabled={locked} onChange={(columns) => replace(retitle({ ...uniformPresentation(columns, selected.rows, selected.id), builtin: false }))} />
-            <LatticeField label={t("Filas")} value={selected.rows} disabled={locked} onChange={(rows) => replace(retitle({ ...uniformPresentation(selected.columns, rows, selected.id), builtin: false }))} />
+            <LatticeField label={t("live.columns")} value={selected.columns} disabled={locked} onChange={(columns) => replace(retitle({ ...uniformPresentation(columns, selected.rows, selected.id), builtin: false }))} />
+            <LatticeField label={t("live.rows")} value={selected.rows} disabled={locked} onChange={(rows) => replace(retitle({ ...uniformPresentation(selected.columns, rows, selected.id), builtin: false }))} />
           </div>
           <PresentationCanvas presentation={selected} locked={locked} onToggle={(segment) => replace(retitle({ ...selected, panes: toggleSegment(selected.panes, segment) }))} />
           <p className="text-center text-xs text-muted">
             {locked
-              ? t("Las estándar no se modifican. Usá Nueva para copiar esta forma y editarla.")
-              : t("La línea blanca está puesta. La línea ámbar está quitada: un clic la restaura.")}
+              ? t("live.standardLocked")
+              : t("live.lineHint")}
           </p>
         </div>
       </div>
@@ -214,11 +228,11 @@ export function PresentationEditor({
           disabled={customs.length === 0}
           onClick={() => { setDraft(DEFAULT_PRESENTATIONS); setSelectedId(DEFAULT_PRESENTATIONS[0]?.id ?? ""); }}
         >
-          {t("Quitar personalizadas")}
+          {t("live.removeCustom")}
         </Button>
         <div className="flex gap-2">
-          <Button onClick={onCancel}>{t("Cancelar")}</Button>
-          <Button variant="primary" onClick={() => onAccept(draft, selected.id)}>{t("Aceptar")}</Button>
+          <Button onClick={onCancel}>{t("common.cancel")}</Button>
+          <Button variant="primary" onClick={() => onAccept(draft, selected.id)}>{t("common.accept")}</Button>
         </div>
       </div>
     </Modal>
@@ -241,14 +255,28 @@ export function LayoutMenu({
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const [menuBox, setMenuBox] = useState<{ top: number; left: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const current = catalog.find((item) => item.columns === active.columns && samePanes(item.panes, active.panes));
+
+  const toggleMenu = () => {
+    if (open) {
+      setOpen(false);
+      return;
+    }
+    const rect = rootRef.current?.getBoundingClientRect();
+    if (rect) setMenuBox({ top: rect.bottom + 4, left: rect.left });
+    setOpen(true);
+  };
 
   useEffect(() => {
     if (!open) return;
     const onPointer = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      const target = event.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") setOpen(false);
@@ -268,15 +296,15 @@ export function LayoutMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        aria-label={t("Presentación")}
-        title={current?.name ?? t("Presentación")}
-        onClick={() => setOpen((value) => !value)}
-        className={cn("rounded border border-line bg-surface p-1.5 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent", open && "border-accent")}
+        aria-label={t("live.presentation")}
+        title={current?.name ?? t("live.presentation")}
+        onClick={toggleMenu}
+        className={cn(toolButton, open && "border-accent")}
       >
-        <LayoutGlyph presentation={current ?? { columns: active.columns, rows: Math.max(...active.panes.map((pane) => pane.row + pane.rowSpan), 1), panes: active.panes }} className="size-4" />
+        <LayoutGlyph presentation={current ?? { columns: active.columns, rows: Math.max(...active.panes.map((pane) => pane.row + pane.rowSpan), 1), panes: active.panes }} className="size-4 p-0" />
       </button>
-      {open && (
-        <div id={menuId} role="menu" aria-label={t("Presentaciones")} className="absolute left-0 z-30 mt-1 max-h-80 w-52 overflow-auto rounded border border-line bg-surface py-1 shadow-lg">
+      {open && menuBox && createPortal(
+        <div ref={menuRef} id={menuId} role="menu" aria-label={t("live.presentations")} className="fixed z-[70] max-h-80 w-52 overflow-auto rounded border border-line bg-surface py-1 shadow-lg" style={{ top: menuBox.top, left: menuBox.left }}>
           {catalog.filter((item) => item.builtin).map((item) => {
             const selected = item.id === current?.id;
             return (
@@ -295,7 +323,7 @@ export function LayoutMenu({
           })}
           {catalog.some((item) => !item.builtin) && (
             <>
-              <div className="my-1 border-t border-line px-2 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted">{t("Personalizadas")}</div>
+              <div className="my-1 border-t border-line px-2 pt-1 text-[11px] font-medium uppercase tracking-wide text-muted">{t("live.custom")}</div>
               {catalog.filter((item) => !item.builtin).map((item) => {
                 const selected = item.id === current?.id;
                 return (
@@ -321,9 +349,10 @@ export function LayoutMenu({
             onClick={() => { setOpen(false); onEdit(); }}
             className="w-full px-3 py-1.5 text-left text-sm hover:bg-raised"
           >
-            {t("Editar presentaciones...")}
+            {t("live.editEllipsis")}
           </button>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -336,10 +365,10 @@ export function FullscreenButton({ active, onClick }: { active: boolean; onClick
     <button
       type="button"
       aria-pressed={active}
-      aria-label={active ? t("Salir de pantalla completa") : t("Pantalla completa")}
-      title={active ? t("Salir de pantalla completa") : t("Pantalla completa")}
+      aria-label={active ? t("live.exitFullscreen") : t("live.fullscreen")}
+      title={active ? t("live.exitFullscreen") : t("live.fullscreen")}
       onClick={onClick}
-      className="rounded border border-line bg-surface p-1.5 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+      className={toolButton}
     >
       <Icon className="size-4" aria-hidden />
     </button>

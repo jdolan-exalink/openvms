@@ -1,0 +1,21 @@
+const messages = {
+  adminAskedPassword: "An administrator asked you to change your password.",
+  currentPassword: "Current password",
+  newPassword: "New password",
+  passwordRules: "At least 10 characters, with letters and numbers or symbols.",
+  repeatPassword: "Repeat the new password",
+  passwordMismatch: "The new passwords do not match.",
+  passwordUpdated: "Password updated. Your other sessions were signed out.",
+  changePassword: "Change password",
+  twoFactor: "Two-step verification",
+  twoFactorOn: "On. Signing in asks for a code from your authenticator app.",
+  passwordToDisable: "Password to turn it off",
+  disable: "Turn off",
+  setupKey: "Add this key in your app (Google Authenticator, Aegis, 1Password…) with “Enter setup key”, or open the link from your phone:",
+  appCode: "Code shown by the app",
+  enable: "Turn on",
+  twoFactorHelp: "Protects your account even if someone knows your password.",
+  setup: "Set up",
+  languageSaved: "The interface language is saved in this browser.",
+} as const;
+export default messages;

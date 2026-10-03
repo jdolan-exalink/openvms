@@ -8,7 +8,7 @@ Registro de las decisiones que el PRD dejaba abiertas o que cambian respecto de 
 | Contrato API | **OpenAPI primero**: `oapi-codegen` (strict server sobre chi) y `openapi-typescript` + `openapi-fetch` | El contrato es la fuente de verdad (PRD §75) y CI verifica que el código generado esté al día. |
 | Migraciones | **goose**, SQL plano, embebidas en el binario | Compatible con sqlc y sin funciones bajo licencia comercial. La API aplica las pendientes al arrancar (`MIGRATE_ON_START`). |
 | Routing web | **TanStack Router** | Rutas y search params tipados; los filtros de búsqueda van a vivir en la URL. |
-| Idioma de la UI | Español | Operadores en Argentina. Se puede internacionalizar más adelante. |
+| Idioma de la UI | Español, con catálogo por archivo | Operadores en Argentina. Cada idioma es una carpeta en `apps/web/src/i18n/locales`. Ver `docs/i18n.md`. |
 | Transporte Agent ↔ Central | **ConnectRPC** con mTLS (a implementar en M7) | Stream bidireccional iniciado por el Agent, atraviesa NAT, protobuf compartido. |
 | Video en vivo | **MSE sobre WebSocket vía Media Gateway** primero, WebRTC después (M5) | MSE no necesita TURN ni transcodificar y es el fallback que ya usa Frigate. |
 | Sincronización con Frigate | Un único paquete *connector* que corre en el worker (sin Agent) o en el Edge Agent | Permite el MVP sin instalar nada en los sitios y el Agent reutiliza código probado. |

@@ -1,4 +1,5 @@
-import { appearanceColor, labelName, vehicleColorText, vehiclePaint, vehicleQualification } from "@/lib/format";
+import { useT } from "@/i18n";
+import { appearanceColor, detectionNames, vehicleColorText, vehiclePaint, vehicleQualification } from "@/lib/format";
 
 type Vehicle = {
   type?: string;
@@ -21,24 +22,24 @@ function Swatch({ color }: { color: string | null }) {
   return <span className="inline-block size-3 shrink-0 rounded-[3px] border border-black/50" style={{ backgroundColor: color }} aria-hidden />;
 }
 
-function percent(confidence?: number, text?: string): string {
-  if (text === "Detectando" || text === "No detectado" || confidence == null || confidence <= 0) return "";
+function percent(confidence: number | undefined, text: string, detecting: string, undetected: string): string {
+  if (text === detecting || text === undetected || confidence == null || confidence <= 0) return "";
   return ` ${Math.round(confidence * 100)}%`;
 }
 
-function Reading({ text, paint, confidence }: { text: string; paint: string | null; confidence?: number }) {
-  if (text === "Detectando") {
+function Reading({ text, paint, confidence, detecting, undetected }: { text: string; paint: string | null; confidence?: number; detecting: string; undetected: string }) {
+  if (text === detecting) {
     return (
       <span className="inline-flex items-center gap-1">
         <span className="size-1.5 animate-pulse rounded-full bg-accent" aria-hidden />
-        Detectando
+        {detecting}
       </span>
     );
   }
   return (
     <>
       <Swatch color={paint} />
-      {text}{percent(confidence, text)}
+      {text}{percent(confidence, text, detecting, undetected)}
     </>
   );
 }
@@ -49,7 +50,7 @@ function jobPending(job?: Job) {
 
 /** VehicleFacts separates Frigate's detection from OpenVMS classification, paint and clothing. */
 export function VehicleFacts({
-  labels,
+  labels = [],
   vehicle,
   person,
   serverName,
@@ -57,7 +58,7 @@ export function VehicleFacts({
   vehicleJob,
   personJob,
 }: {
-  labels: string[];
+  labels?: string[];
   vehicle?: Vehicle | null;
   person?: Person | null;
   serverName?: string;
@@ -65,49 +66,65 @@ export function VehicleFacts({
   vehicleJob?: Job;
   personJob?: Job;
 }) {
-  const detection = labels.map(labelName).filter(Boolean).join(", ") || "—";
+  const t = useT();
+  const detecting = t("labels.detecting");
+  const undetected = t("labels.undetected");
+  const tone = { detecting, undetected };
+  const detection = detectionNames(labels).join(", ") || "—";
   const waiting = jobPending(vehicleJob);
-  const qualification = waiting ? "Detectando" : vehicleQualification(labels, vehicle);
-  const color = waiting ? "Detectando" : vehicleColorText(labels, vehicle);
-  const paint = color && color !== "No detectado" && color !== "Detectando" ? vehiclePaint(vehicle ?? undefined) : null;
+  const qualification = waiting ? detecting : vehicleQualification(labels, vehicle);
+  const color = waiting ? detecting : vehicleColorText(labels, vehicle);
+  const paint = color && color !== undetected && color !== detecting ? vehiclePaint(vehicle ?? undefined) : null;
   const rig = !waiting && vehicle?.type === "truck_trailer";
   const trailer = rig ? appearanceColor(vehicle?.trailer_color) : null;
   const clothingPending = jobPending(personJob);
   const upper = labels.includes("person") ? appearanceColor(person?.upper_color, clothingPending) : null;
   const lower = labels.includes("person") ? appearanceColor(person?.lower_color, clothingPending) : null;
+  const place = cameraName
+    ? t("labels.cameraLine", { name: serverName ? `${cameraName} · ${serverName}` : cameraName })
+    : serverName
+      ? t("labels.serverLine", { name: serverName })
+      : "";
   return (
-    <div className="flex min-w-0 flex-col gap-0.5 text-xs">
-      <span className="truncate"><span className="text-muted">Detección: </span>{detection}</span>
-      <span className="truncate">
-        <span className="text-muted">Clasificación: </span>
-        {waiting ? <Reading text="Detectando" paint={null} /> : <>{qualification}{percent(vehicle?.type_confidence, qualification)}</>}
+    <div className="flex min-w-0 flex-col gap-0.5 text-xs leading-4">
+      <span className="truncate"><span className="text-muted">{t("labels.factDetection")}: </span>{detection}</span>
+      <span className="truncate font-medium text-fg">
+        <span className="font-normal text-muted">{t("labels.factClassification")}: </span>
+        {waiting ? <Reading text={detecting} paint={null} {...tone} /> : <>{qualification}{percent(vehicle?.type_confidence, qualification, detecting, undetected)}</>}
       </span>
-      {color && (
-        <span className="inline-flex items-center gap-1.5">
-          <span className="text-muted">{rig ? "Camión: " : "Color: "}</span>
-          <Reading text={color} paint={paint} confidence={vehicle?.color_confidence} />
+      {(color || trailer) && (
+        <span className="flex min-w-0 items-center gap-1.5 truncate">
+          {color && (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span className="text-muted">{rig ? `${t("labels.factTruck")}: ` : `${t("labels.factColor")}: `}</span>
+              <Reading text={color} paint={paint} confidence={vehicle?.color_confidence} {...tone} />
+            </span>
+          )}
+          {trailer && (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span className="text-muted">{color ? `· ${t("labels.factTrailer")}:` : `${t("labels.factTrailer")}:`} </span>
+              <Reading text={trailer.text} paint={trailer.paint} confidence={vehicle?.trailer_color_confidence} {...tone} />
+            </span>
+          )}
         </span>
       )}
-      {trailer && (
-        <span className="inline-flex items-center gap-1.5">
-          <span className="text-muted">Acoplado: </span>
-          <Reading text={trailer.text} paint={trailer.paint} confidence={vehicle?.trailer_color_confidence} />
+      {(upper || lower) && (
+        <span className="flex min-w-0 items-center gap-1.5 truncate">
+          {upper && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-muted">{t("labels.factUpper")}: </span>
+              <Reading text={upper.text} paint={upper.paint} {...tone} />
+            </span>
+          )}
+          {lower && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="text-muted">{upper ? `· ${t("labels.factLower")}:` : `${t("labels.factLower")}:`} </span>
+              <Reading text={lower.text} paint={lower.paint} {...tone} />
+            </span>
+          )}
         </span>
       )}
-      {upper && (
-        <span className="inline-flex items-center gap-1.5">
-          <span className="text-muted">Arriba: </span>
-          <Reading text={upper.text} paint={upper.paint} />
-        </span>
-      )}
-      {lower && (
-        <span className="inline-flex items-center gap-1.5">
-          <span className="text-muted">Abajo: </span>
-          <Reading text={lower.text} paint={lower.paint} />
-        </span>
-      )}
-      {serverName && <span className="truncate"><span className="text-muted">Servidor: </span>{serverName}</span>}
-      {cameraName && <span className="truncate"><span className="text-muted">Cámara: </span>{cameraName}</span>}
+      {place && <span className="truncate text-muted">{place}</span>}
     </div>
   );
 }

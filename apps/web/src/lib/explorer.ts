@@ -212,6 +212,7 @@ export function applyReorder(cams: Camera[], folders: Folder[], r: Reorder): { c
 export type ExplorerPrefs = { closed: Record<string, boolean>; sections: { cameras: boolean; views: boolean } };
 const PREFS_KEY = "openvms.live.explorer.v1";
 const SIDEBAR_KEY = "openvms.live.sidebar.collapsed";
+const PIN_KEY = "openvms.live.sidebar.pinned";
 const defaultPrefs = (): ExplorerPrefs => ({ closed: {}, sections: { cameras: true, views: true } });
 
 export function loadPrefs(): ExplorerPrefs {
@@ -249,5 +250,21 @@ export function saveSidebarCollapsed(collapsed: boolean) {
     localStorage.setItem(SIDEBAR_KEY, collapsed ? "1" : "0");
   } catch {
     // Storage unavailable: not persisted.
+  }
+}
+
+export function loadSidebarPinned(): boolean {
+  try {
+    return localStorage.getItem(PIN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveSidebarPinned(pinned: boolean) {
+  try {
+    localStorage.setItem(PIN_KEY, pinned ? "1" : "0");
+  } catch {
+    // Storage unavailable: the pin lasts for this session only.
   }
 }

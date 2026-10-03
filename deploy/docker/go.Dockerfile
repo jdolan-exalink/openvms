@@ -19,12 +19,14 @@ RUN go mod download
 COPY apps ./apps
 COPY internal ./internal
 COPY migrations ./migrations
+COPY deploy/agent ./deploy/agent
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Version=${VERSION} \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Commit=${COMMIT} \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
     -o /out/app ./apps/${APP} \
+ && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/edge-agent ./apps/edge-agent \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/vmsctl ./apps/vmsctl
 
 # The worker links onnxruntime and ships the vehicle-body model. The API stays
@@ -67,5 +69,6 @@ ENTRYPOINT ["/app"]
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 COPY --from=build /out/app /app
 COPY --from=build /out/vmsctl /vmsctl
+COPY --from=build /out/edge-agent /opt/openvms/edge-agent
 USER nonroot:nonroot
 ENTRYPOINT ["/app"]

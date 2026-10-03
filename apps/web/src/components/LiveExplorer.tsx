@@ -2,8 +2,8 @@ import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import {
-  faAnglesDown, faAnglesLeft, faAnglesUp, faArrowUpRightFromSquare, faCloud, faCopy, faGear, faMap, faTableCells, faBookmark, faChevronDown, faChevronRight, faClockRotateLeft, faFolder, faFolderOpen,
-  faFolderPlus, faFolderTree, faGripVertical, faMagnifyingGlass, faPen, faTrash,
+  faAnglesDown, faAnglesUp, faArrowUpRightFromSquare, faCloud, faCopy, faGear, faMap, faTableCells, faBookmark, faChevronDown, faChevronRight, faClockRotateLeft, faFolder, faFolderOpen,
+  faFolderPlus, faFolderTree, faGripVertical, faMagnifyingGlass, faPen, faThumbtack, faTrash,
 } from "@fortawesome/free-solid-svg-icons";
 import { siteIcon as faBuilding, serverIcon as faServer, cameraIcon as faVideo } from "@/lib/inventoryIcons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -14,7 +14,9 @@ import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { ErrorNote, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { buildTree, type Camera, type Folder, type FolderNode, loadPrefs, type ServerNode, savePrefs, treeCameraDropId, treeFolderId, treeRootDropId, treeServerDragId } from "@/lib/explorer";
-import { cameraDragId } from "@/lib/liveGrid";
+import { LiveDetectionsPanel, LiveLprPanel, LiveMapsPanel } from "@/components/LiveSidePanels";
+import { cameraDragId, type LiveMapRef } from "@/lib/liveGrid";
+import { useT } from "@/i18n";
 import type { useCameraFolders } from "@/lib/useCameraFolders";
 
 type FolderApi = ReturnType<typeof useCameraFolders>;
@@ -42,19 +44,19 @@ const useMenuCtx = () => {
 };
 
 /** "Agregar a vista" submenu: the current grid plus every saved view the user can edit. */
-function addToViewItem(actions: ExplorerActions, ids: string[]): MenuItem {
+function addToViewItem(actions: ExplorerActions, ids: string[], t: ReturnType<typeof useT>): MenuItem {
   const empty = ids.length === 0;
   return {
     id: "add",
-    label: "Agregar a vista",
+    label: t("live.addToView"),
     icon: faTableCells,
     disabled: empty,
     children: [
-      { id: "add-grid", label: "Grilla actual", icon: faTableCells, onSelect: () => actions.addToGrid(ids) },
+      { id: "add-grid", label: t("live.currentGrid"), icon: faTableCells, onSelect: () => actions.addToGrid(ids) },
       { separator: true, id: "add-sep" },
       ...(actions.editableViews.length
         ? actions.editableViews.map((v): MenuItem => ({ id: `add-view-${v.id}`, label: v.name, icon: faBookmark, onSelect: () => actions.addToView(v.id, ids) }))
-        : [{ id: "add-none", label: "Sin vistas editables", disabled: true } satisfies MenuItem]),
+        : [{ id: "add-none", label: t("live.noEditableViews"), disabled: true } satisfies MenuItem]),
     ],
   };
 }
@@ -125,7 +127,12 @@ export function LiveExplorer({
   onDoublePlace,
   onPlayback,
   canViewRecordings,
-  onCollapse,
+  pinned,
+  onTogglePin,
+  canEvents,
+  canLpr,
+  canMaps,
+  onPlaceMap,
   views,
   activeViewId,
   onOpenView,
@@ -148,7 +155,14 @@ export function LiveExplorer({
   onDoublePlace: (id: string) => void;
   onPlayback: (id: string) => void;
   canViewRecordings: boolean;
-  onCollapse: () => void;
+  /** A pinned explorer stays on screen when the pointer leaves the left edge. */
+  pinned: boolean;
+  onTogglePin: () => void;
+  canEvents: boolean;
+  canLpr: boolean;
+  canMaps: boolean;
+  /** Click or drop a map onto the current grid. */
+  onPlaceMap: (map: LiveMapRef) => void;
   /** Saved views shown inside the camera tree, the way a site lists its views. */
   views: Schemas["View"][];
   activeViewId: string;
@@ -163,7 +177,9 @@ export function LiveExplorer({
   actions: ExplorerActions;
   error?: unknown;
 }) {
+  const t = useT();
   const [q, setQ] = useState("");
+  const [tab, setTab] = useState<"cameras" | "maps" | "detections" | "lpr">("cameras");
   const [prefs, setPrefs] = useState(loadPrefs);
   const update = useCallback((fn: (p: typeof prefs) => typeof prefs) => {
     setPrefs((p) => {
@@ -182,7 +198,7 @@ export function LiveExplorer({
   );
   const total = tree.reduce((n, s) => n + s.count, 0);
   const placedViews = useMemo(() => placeViews(views, tree, sites, query), [views, tree, sites, query]);
-  const saveViewItem = (): MenuItem[] => (canCreateView ? [{ id: "save-view", label: "Guardar grilla como vista", icon: faTableCells, onSelect: onCreateView }] : []);
+  const saveViewItem = (): MenuItem[] => (canCreateView ? [{ id: "save-view", label: t("live.saveGridAsView"), icon: faTableCells, onSelect: onCreateView }] : []);
 
   const navigate = useNavigate();
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[]; opener: HTMLElement | null } | null>(null);
@@ -217,33 +233,44 @@ export function LiveExplorer({
 
   return (
     <MenuCtx.Provider value={{ bind, actions, navigate }}>
-    <div className="flex min-h-0 min-w-0 flex-col gap-2 md:flex-1" data-live-sidebar="true" aria-label="Explorador" role="region">
-      <div className="flex shrink-0 items-center gap-2">
-        <h2 className="min-w-0 truncate px-1 text-sm font-semibold">Explorador</h2>
+    <div className="flex min-h-0 min-w-0 flex-col gap-2 md:flex-1" data-live-sidebar="true" aria-label={t("live.sidebar")} role="region">
+      <div className="flex shrink-0 items-center gap-0.5">
+        <div role="tablist" aria-label={t("live.sections")} className="flex min-w-0 flex-1 overflow-x-auto text-[11px] font-medium">
+          <SideTab id="cameras" current={tab} onSelect={setTab}>{t("live.cameras")}</SideTab>
+          <SideTab id="maps" current={tab} onSelect={setTab}>{t("live.maps")}</SideTab>
+          <SideTab id="detections" current={tab} onSelect={setTab}>{t("live.detections")}</SideTab>
+          <SideTab id="lpr" current={tab} onSelect={setTab}>{t("maps.lpr")}</SideTab>
+        </div>
         <button
           type="button"
-          onClick={onCollapse}
-          aria-label="Ocultar explorador"
-          title="Ocultar explorador"
-          className="ml-auto rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+          aria-pressed={pinned}
+          onClick={onTogglePin}
+          aria-label={pinned ? t("live.unpin") : t("live.pin")}
+          title={pinned ? t("live.unpin") : t("live.pin")}
+          className={cn("shrink-0 rounded p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent", pinned ? "text-accent" : "text-muted hover:text-ink")}
         >
-          <Icon icon={faAnglesLeft} className="text-sm" />
+          <Icon icon={faThumbtack} className="text-sm" />
         </button>
       </div>
-      <div className="relative shrink-0">
-        <Icon icon={faMagnifyingGlass} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-        <TextInput aria-label="Buscar en el explorador" placeholder="Buscar cámaras, carpetas o vistas" className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} />
-      </div>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden">
+      {tab === "cameras" && (
+        <div className="relative shrink-0">
+          <Icon icon={faMagnifyingGlass} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
+          <TextInput aria-label={t("live.searchExplorer")} placeholder={t("live.searchPlaceholder")} className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+      )}
+      {tab === "maps" && <LiveMapsPanel sites={sites} canMaps={canMaps} onPlace={onPlaceMap} />}
+      {tab === "detections" && <LiveDetectionsPanel canEvents={canEvents} onPick={onPick} />}
+      {tab === "lpr" && <LiveLprPanel canLpr={canLpr} onPick={onPick} />}
+      {tab === "cameras" && <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden">
         <Section
-          title="Cámaras"
+          title={t("live.cameras")}
           icon={faFolderTree}
           open={prefs.sections.cameras}
           onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, cameras: !p.sections.cameras } }))}
           count={total}
           menu={bind(() => saveViewItem())}
         >
-          <nav aria-label="Cámaras" className="flex min-w-0 flex-col text-sm">
+          <nav aria-label={t("live.cameras")} className="flex min-w-0 flex-col text-sm">
             {placedViews.orphans.map((view) => (
               <ViewRow key={view.id} view={view} active={view.id === activeViewId} canCreateView={canCreateView} onOpen={onOpenView} onEdit={onEditView} onDuplicate={onDuplicateView} onDelete={onDeleteView} />
             ))}
@@ -257,11 +284,11 @@ export function LiveExplorer({
                   className="flex w-full min-w-0 items-center gap-1 py-1 text-left font-medium"
                   {...bind(() => [
                     ...saveViewItem(),
-                    ...(actions.canConfigureSites ? [{ id: "cfg", label: "Configurar", icon: faGear, onSelect: () => void navigate({ to: "/sites" }) } satisfies MenuItem] : []),
-                    { id: "map", label: "Nuevo mapa", icon: faMap, disabled: true, hint: "Próximamente" },
+                    ...(actions.canConfigureSites ? [{ id: "cfg", label: t("live.configure"), icon: faGear, onSelect: () => void navigate({ to: "/sites" }) } satisfies MenuItem] : []),
+                    { id: "map", label: t("live.newMap"), icon: faMap, disabled: true, hint: t("live.comingSoon") },
                     { separator: true, id: "sep" },
-                    { id: "expand", label: "Expandir todo", icon: faAnglesDown, onSelect: () => setSiteOpen(site, true) },
-                    { id: "collapse", label: "Contraer todo", icon: faAnglesUp, onSelect: () => setSiteOpen(site, false) },
+                    { id: "expand", label: t("live.expandAll"), icon: faAnglesDown, onSelect: () => setSiteOpen(site, true) },
+                    { id: "collapse", label: t("live.collapseAll"), icon: faAnglesUp, onSelect: () => setSiteOpen(site, false) },
                   ])}
                 >
                   <Chevron open={isOpen(`site:${site.id}`)} />
@@ -297,7 +324,7 @@ export function LiveExplorer({
                   ))}
               </div>
             ))}
-            {tree.length === 0 && placedViews.orphans.length === 0 && <p className="py-2 text-xs text-muted">{query ? "Sin resultados." : "No hay cámaras visibles."}</p>}
+            {tree.length === 0 && placedViews.orphans.length === 0 && <p className="py-2 text-xs text-muted">{query ? t("live.noResults") : t("live.noCameras")}</p>}
           </nav>
           {notice && (
             <p role="status" className={cn("rounded border px-2 py-1 text-xs", noticeTone === "ok" ? "border-ok/40 bg-ok/10 text-ok" : "border-warn/40 bg-warn/10 text-warn")}>
@@ -306,12 +333,12 @@ export function LiveExplorer({
           )}
         </Section>
         <ErrorNote error={mutationError} />
-      </div>
+      </div>}
       {confirmDelete && (
         <ConfirmDialog
-          title="Eliminar carpeta"
-          message={`Se eliminará la carpeta «${confirmDelete.name}». Sus cámaras vuelven a la raíz del servidor; no se borra ninguna cámara.`}
-          confirmLabel="Eliminar"
+          title={t("live.deleteFolder")}
+          message={t("live.deleteFolderMessage", { name: confirmDelete.name })}
+          confirmLabel={t("live.delete")}
           pending={folderApi.remove.isPending}
           error={folderApi.remove.error}
           onCancel={() => setConfirmDelete(null)}
@@ -321,6 +348,21 @@ export function LiveExplorer({
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} returnFocusTo={menu.opener} onClose={() => setMenu(null)} />}
     </div>
     </MenuCtx.Provider>
+  );
+}
+
+function SideTab<T extends string>({ id, current, onSelect, children }: { id: T; current: T; onSelect: (tab: T) => void; children: ReactNode }) {
+  const selected = current === id;
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={selected}
+      onClick={() => onSelect(id)}
+      className={cn("shrink-0 whitespace-nowrap px-1.5 py-2", selected ? "border-b-2 border-accent text-accent" : "text-muted hover:text-ink")}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -377,12 +419,13 @@ function ViewRow({
   onDuplicate: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const t = useT();
   const { bind } = useMenuCtx();
-  const detail = [view.shared ? (view.owner_name ? `Compartida por ${view.owner_name}` : "Compartida") : "Privada", view.editable ? "" : "Solo lectura"].filter(Boolean).join(" · ");
+  const detail = [view.shared ? (view.owner_name ? t("live.sharedBy", { name: view.owner_name }) : t("live.shared")) : t("live.privateView"), view.editable ? "" : t("live.readOnly")].filter(Boolean).join(" · ");
   const menu = bind(() => [
-    { id: "edit", label: "Editar", icon: faPen, disabled: !view.editable, hint: view.editable ? undefined : "Solo lectura", onSelect: () => onEdit(view.id) },
-    { id: "duplicate", label: "Duplicar", icon: faCopy, disabled: !canCreateView, hint: canCreateView ? undefined : "Sin permiso", onSelect: () => onDuplicate(view.id) },
-    { id: "delete", label: "Eliminar", icon: faTrash, danger: true, disabled: !view.editable, hint: view.editable ? undefined : "Solo lectura", onSelect: () => onDelete(view.id) },
+    { id: "edit", label: t("live.editItem"), icon: faPen, disabled: !view.editable, hint: view.editable ? undefined : t("live.readOnly"), onSelect: () => onEdit(view.id) },
+    { id: "duplicate", label: t("live.duplicateItem"), icon: faCopy, disabled: !canCreateView, hint: canCreateView ? undefined : t("live.noPermission"), onSelect: () => onDuplicate(view.id) },
+    { id: "delete", label: t("live.delete"), icon: faTrash, danger: true, disabled: !view.editable, hint: view.editable ? undefined : t("live.readOnly"), onSelect: () => onDelete(view.id) },
   ]);
   return (
     <div className={cn(indent, "flex min-w-0 items-center")}>
@@ -390,7 +433,7 @@ function ViewRow({
         type="button"
         aria-current={active ? "true" : undefined}
         aria-label={view.shared && view.owner_name ? `${view.name} · ${view.owner_name}` : view.name}
-        title={`${view.name}. ${detail}. Clic para abrirla.`}
+        title={t("live.openViewHint", { name: view.name, detail })}
         onClick={() => onOpen(view.id)}
         className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left hover:bg-raised", active && "bg-raised font-medium")}
         {...menu}
@@ -445,21 +488,22 @@ function ServerBranch({
     id: treeServerDragId(server.id),
     data: { kind: "server", serverId: server.id } satisfies DragData,
   });
+  const t = useT();
   const { bind, actions, navigate } = useMenuCtx();
   const cameraIds = [...server.folders.flatMap((f) => f.cameras), ...server.rootCameras].map((c) => c.id);
   const menu = bind(() => [
-    addToViewItem(actions, cameraIds),
-    ...(actions.canConfigureServers ? [{ id: "cfg", label: "Configurar", icon: faGear, onSelect: () => void navigate({ to: "/servers", search: { site_id: siteId, server_id: server.id } }) } satisfies MenuItem] : []),
+    addToViewItem(actions, cameraIds, t),
+    ...(actions.canConfigureServers ? [{ id: "cfg", label: t("live.configure"), icon: faGear, onSelect: () => void navigate({ to: "/servers", search: { site_id: siteId, server_id: server.id } }) } satisfies MenuItem] : []),
   ]);
   return (
-    <div className={cn("ml-3 min-w-0", drop.foreign && "opacity-40")} title={drop.foreign ? "No se puede mover entre servidores" : undefined}>
+    <div className={cn("ml-3 min-w-0", drop.foreign && "opacity-40")} title={drop.foreign ? t("live.cannotMove") : undefined}>
       <div ref={setNodeRef} className={cn("flex min-w-0 items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-accent")}>
         <button
           ref={setDragRef}
           type="button"
           onClick={() => toggle(key)}
           aria-expanded={isOpen(key)}
-          title={`${server.name}. Arrastrá a la grilla para ver todas sus cámaras.`}
+          title={t("live.serverDragHint", { name: server.name })}
           className={cn("flex min-w-0 flex-1 cursor-grab items-center gap-1 py-0.5 text-left text-muted", isDragging && "opacity-50")}
           {...attributes}
           {...listeners}
@@ -479,8 +523,8 @@ function ServerBranch({
           <button
             type="button"
             onClick={onStartCreate}
-            aria-label={`Nueva carpeta en ${server.name}`}
-            title="Nueva carpeta"
+            aria-label={t("live.newFolderIn", { name: server.name })}
+            title={t("live.newFolder")}
             className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
           >
             <Icon icon={faFolderPlus} />
@@ -489,7 +533,7 @@ function ServerBranch({
       </div>
       {isOpen(key) && (
         <>
-          {creating && <NameInput label={`Nombre de la nueva carpeta en ${server.name}`} initial="" onSubmit={onCreate} onCancel={onCancelCreate} />}
+          {creating && <NameInput label={t("live.newFolderName", { name: server.name })} initial="" onSubmit={onCreate} onCancel={onCancelCreate} />}
           {server.folders.map((node) => (
             <FolderBranch
               key={node.folder.id}
@@ -545,6 +589,7 @@ function FolderBranch({
 }) {
   const { folder } = node;
   const key = `fld:${folder.id}`;
+  const t = useT();
   const { bind, actions } = useMenuCtx();
   const drop = useDropState(server.id, server.canManage, ["camera", "folder"]);
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: treeFolderId(folder.id), disabled: drop.disabled });
@@ -553,12 +598,12 @@ function FolderBranch({
     data: { kind: "folder", serverId: server.id } satisfies DragData,
   });
   const menu = bind(() => [
-    addToViewItem(actions, node.cameras.map((c) => c.id)),
+    addToViewItem(actions, node.cameras.map((c) => c.id), t),
     ...(server.canManage
       ? [
           { separator: true, id: "sep" } satisfies MenuItem,
-          { id: "rename", label: "Renombrar", icon: faPen, onSelect: () => onRenaming(folder.id) } satisfies MenuItem,
-          { id: "delete", label: "Eliminar", icon: faTrash, danger: true, onSelect: () => onDelete(folder) } satisfies MenuItem,
+          { id: "rename", label: t("live.rename"), icon: faPen, onSelect: () => onRenaming(folder.id) } satisfies MenuItem,
+          { id: "delete", label: t("live.delete"), icon: faTrash, danger: true, onSelect: () => onDelete(folder) } satisfies MenuItem,
         ]
       : []),
   ]);
@@ -568,8 +613,8 @@ function FolderBranch({
         {server.canManage && (
           <button
             type="button"
-            aria-label={`Mover carpeta ${folder.name}`}
-            title="Arrastrar para ordenar o soltar en la grilla"
+            aria-label={t("live.moveFolder", { name: folder.name })}
+            title={t("live.dragFolder")}
             className="shrink-0 cursor-grab rounded p-0.5 text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
             {...listeners}
           >
@@ -577,7 +622,7 @@ function FolderBranch({
           </button>
         )}
         {renaming ? (
-          <NameInput label={`Nuevo nombre de ${folder.name}`} initial={folder.name} onSubmit={(name) => onRename(folder.id, name)} onCancel={() => onRenaming(null)} />
+          <NameInput label={t("live.newName", { name: folder.name })} initial={folder.name} onSubmit={(name) => onRename(folder.id, name)} onCancel={() => onRenaming(null)} />
         ) : (
           <>
             <button
@@ -586,7 +631,7 @@ function FolderBranch({
               onClick={() => toggle(key)}
               onDoubleClick={server.canManage ? () => onRenaming(folder.id) : undefined}
               aria-expanded={isOpen(key)}
-              title={`${folder.name}. Arrastrá a la grilla para ver sus cámaras.`}
+              title={t("live.folderDragHint", { name: folder.name })}
               className="flex min-w-0 flex-1 cursor-grab items-center gap-1 py-0.5 text-left"
               {...attributes}
               {...listeners}
@@ -603,10 +648,10 @@ function FolderBranch({
             </button>
             {server.canManage && (
               <span className="flex shrink-0 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
-                <button type="button" aria-label={`Renombrar carpeta ${folder.name}`} title="Renombrar" onClick={() => onRenaming(folder.id)} className="rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
+                <button type="button" aria-label={t("live.renameFolder", { name: folder.name })} title={t("live.rename")} onClick={() => onRenaming(folder.id)} className="rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
                   <Icon icon={faPen} />
                 </button>
-                <button type="button" aria-label={`Eliminar carpeta ${folder.name}`} title="Eliminar" onClick={() => onDelete(folder)} className="rounded p-1 text-muted hover:bg-raised hover:text-bad focus-visible:outline-2 focus-visible:outline-accent">
+                <button type="button" aria-label={t("live.deleteFolderNamed", { name: folder.name })} title={t("live.delete")} onClick={() => onDelete(folder)} className="rounded p-1 text-muted hover:bg-raised hover:text-bad focus-visible:outline-2 focus-visible:outline-accent">
                   <Icon icon={faTrash} />
                 </button>
               </span>
@@ -644,11 +689,12 @@ function CameraRow({
   useEffect(() => () => clearTimeout(clickTimer.current), []);
   const drop = useDropState(camera.server_id, canManage, ["camera"]);
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: treeCameraDropId(camera.id), disabled: drop.disabled });
+  const t = useT();
   const { bind, actions, navigate } = useMenuCtx();
   const menu = bind(() => [
-    addToViewItem(actions, [camera.id]),
+    addToViewItem(actions, [camera.id], t),
     ...(actions.canConfigureCameras
-      ? [{ id: "cfg", label: "Configurar", icon: faGear, onSelect: () => void navigate({ to: "/cameras/$cameraId/frigate", params: { cameraId: camera.id } }) } satisfies MenuItem]
+      ? [{ id: "cfg", label: t("live.configure"), icon: faGear, onSelect: () => void navigate({ to: "/cameras/$cameraId/frigate", params: { cameraId: camera.id } }) } satisfies MenuItem]
       : []),
   ]);
   const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
@@ -671,7 +717,7 @@ function CameraRow({
           clearTimeout(clickTimer.current);
           onDoublePlace(camera.id);
         }}
-        title={`${camera.display_name}. Doble clic para agregarla a un cuadro libre.`}
+        title={t("live.cameraHint", { name: camera.display_name })}
         className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left hover:bg-raised", isDragging && "opacity-50")}
         {...attributes}
         {...listeners}
@@ -689,8 +735,8 @@ function CameraRow({
         <>
           <button
             type="button"
-            title="Ver grabaciones en vivo"
-            aria-label={`Ver grabaciones de ${camera.display_name}`}
+            title={t("live.watchLiveRecordings")}
+            aria-label={t("live.watchRecordingsOf", { name: camera.display_name })}
             onClick={() => onPlayback(camera.id)}
             className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
           >
@@ -699,8 +745,8 @@ function CameraRow({
           <Link
             to="/playback"
             search={{ camera: camera.id }}
-            title="Abrir página de grabaciones"
-            aria-label={`Grabaciones de ${camera.display_name}`}
+            title={t("live.openRecordingsPage")}
+            aria-label={t("live.recordingsOf", { name: camera.display_name })}
             className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
           >
             <Icon icon={faArrowUpRightFromSquare} />

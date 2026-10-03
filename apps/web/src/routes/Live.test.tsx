@@ -11,6 +11,7 @@ import { Live } from "./Live";
 afterEach(() => vi.unstubAllGlobals());
 beforeEach(() => {
   localStorage.clear();
+  localStorage.setItem("openvms.live.sidebar.pinned", "1");
   FakeSocket.created = 0;
 });
 
@@ -137,8 +138,9 @@ describe("Live", () => {
     renderPage(LiveWithShell);
 
     const cameraSearch = await screen.findByLabelText("Buscar en el explorador");
-    const contextSidebar = screen.getByRole("complementary", { name: "Context Sidebar" });
-    expect(contextSidebar).toContainElement(cameraSearch);
+    const edge = screen.getByTestId("live-edge");
+    expect(edge).toContainElement(cameraSearch);
+    expect(document.querySelector('[aria-label="Context Sidebar"]')).not.toContainElement(cameraSearch);
     expect(screen.getByRole("main", { name: "Main Workspace" })).not.toContainElement(cameraSearch);
 
     fireEvent.click(await screen.findByRole("button", { name: /Puerta norte/ }));
@@ -555,19 +557,29 @@ describe("Live", () => {
     expect(screen.getByRole("button", { name: /Perímetro/ })).toBeInTheDocument();
   });
 
-  it("collapses the explorer, shows a reopen button and remembers the choice", async () => {
+  it("keeps the explorer on the left edge and remembers the pin", async () => {
+    localStorage.setItem("openvms.live.sidebar.pinned", "0");
     viewsApi([]);
 
     const first = renderPage(Live);
-    fireEvent.click(await screen.findByRole("button", { name: "Ocultar explorador" }));
-    expect(screen.queryByLabelText("Buscar en el explorador")).not.toBeInTheDocument();
-    expect(localStorage.getItem("openvms.live.sidebar.collapsed")).toBe("1");
+    const edge = await screen.findByTestId("live-edge");
+    expect(edge.querySelector("aside")).toHaveAttribute("hidden");
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar explorador" }));
+    expect(edge.querySelector("aside")).not.toHaveAttribute("hidden");
+    fireEvent.click(screen.getByRole("button", { name: "Anclar explorador" }));
+    expect(localStorage.getItem("openvms.live.sidebar.pinned")).toBe("1");
+    expect(screen.queryByRole("button", { name: "Ocultar explorador" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Desanclar explorador" }));
+    expect(localStorage.getItem("openvms.live.sidebar.pinned")).toBe("0");
+    fireEvent.pointerLeave(edge);
+    await waitFor(() => expect(edge.querySelector("aside")).toHaveAttribute("hidden"));
     first.unmount();
 
+    localStorage.setItem("openvms.live.sidebar.pinned", "1");
     renderPage(Live);
-    fireEvent.click(await screen.findByRole("button", { name: "Mostrar explorador" }));
-    expect(await screen.findByLabelText("Buscar en el explorador")).toBeInTheDocument();
-    expect(localStorage.getItem("openvms.live.sidebar.collapsed")).toBe("0");
+    const again = await screen.findByTestId("live-edge");
+    expect(again.querySelector("aside")).not.toHaveAttribute("hidden");
+    expect(screen.getByLabelText("Buscar en el explorador")).toBeInTheDocument();
   });
 
   it("offers folder management only on servers the caller can manage", async () => {
@@ -788,5 +800,76 @@ describe("Live with persistent players (P0 acceptance)", () => {
       expect(await screen.findByRole("region", { name: "Controles de grabación" })).toBeInTheDocument();
       expect(await screen.findByText("Sin permiso de grabaciones")).toBeInTheDocument();
     });
+  });
+
+  it("switches the explorer to maps, detections and plates", async () => {
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": () => meResponse([
+        { permission: "live.view", effect: "allow", scope_type: "platform" },
+        { permission: "maps.view", effect: "allow", scope_type: "platform" },
+        { permission: "events.view", effect: "allow", scope_type: "platform" },
+        { permission: "lpr.view", effect: "allow", scope_type: "platform" },
+      ]),
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus", timezone: "UTC", address: "" }] }),
+      "/api/v1/servers": () => json({ items: [] }),
+      "/api/v1/views": () => json({ items: [] }),
+      "/api/v1/maps/sites/s1": () => json({
+        id: "s1", name: "Campus", buildings: [{ id: "b", site_id: "s1", name: "Planta", floors: [{ id: "f", building_id: "b", name: "PB", ordinal: 0 }] }], zones: [],
+      }),
+      "/api/v1/events": () => json({ items: [{
+        id: "e1", tenant_id: "t1", site_id: "s1", site_name: "Campus", server_id: "srv", server_name: "Frigate", camera_id: "cam-1", camera_name: "Puerta norte",
+        remote_id: "r", severity: "detection", labels: ["person"], sub_labels: [], zones: [], plates: [], start_time: "2026-10-03T12:00:00.000Z", reviewed: false,
+        has_thumbnail: true, has_snapshot: false, has_preview: false,
+      }] }),
+      "/api/v1/lpr/reads": () => json({ items: [{
+        id: "r1", site_id: "s1", site_name: "Campus", server_id: "srv", server_name: "Frigate", camera_id: "cam-1", camera_name: "Puerta norte",
+        plate: "AB123CD", plate_normalized: "AB123CD", label: "car", zones: [], seen_at: "2026-10-03T12:00:00.000Z",
+      }] }),
+    })));
+    renderPage(Live);
+    expect(await screen.findByRole("tab", { name: "Cámaras" })).toHaveAttribute("aria-selected", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Mapas" }));
+    expect(await screen.findByRole("button", { name: "Mapa Campus" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mapa Planta / PB" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mapa Campus" }));
+    expect(await screen.findByText("No se pudo abrir el mapa.")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Detección" }));
+    expect(await screen.findByRole("button", { name: "Detección de Puerta norte" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "LPR" }));
+    expect(await screen.findByRole("img", { name: "Lectura de patente AB123CD" })).toBeInTheDocument();
+  });
+
+  it("reveals the explorer from the left edge in fullscreen and keeps it pinned", async () => {
+    localStorage.setItem("openvms.live.sidebar.pinned", "0");
+    let element: Element | null = null;
+    const original = Object.getOwnPropertyDescriptor(Document.prototype, "fullscreenElement");
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => element });
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    await screen.findByLabelText("Buscar en el explorador");
+    element = document.documentElement;
+    try {
+      fireEvent(document, new Event("fullscreenchange"));
+      const edge = screen.getByTestId("live-edge");
+      expect(edge.querySelector("aside")).toHaveAttribute("hidden");
+      fireEvent.click(screen.getByRole("button", { name: "Mostrar explorador" }));
+      expect(edge.querySelector("aside")).not.toHaveAttribute("hidden");
+      expect(screen.getByLabelText("Buscar en el explorador")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Anclar explorador" }));
+      expect(localStorage.getItem("openvms.live.sidebar.pinned")).toBe("1");
+      fireEvent.pointerLeave(edge);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      expect(edge.querySelector("aside")).not.toHaveAttribute("hidden");
+    } finally {
+      if (original) Object.defineProperty(Document.prototype, "fullscreenElement", original);
+      else Reflect.deleteProperty(document, "fullscreenElement");
+    }
   });
 });

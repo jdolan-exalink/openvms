@@ -537,6 +537,44 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/provision:
+    post:
+      tags: [servers]
+      operationId: startServerProvision
+      summary: Install Frigate, NTP and the OpenVMS agent on a new host over SSH
+      description: |
+        The SSH password is used only for this install session. It is not stored and
+        is never returned. Requires servers.manage on the target site.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerProvisionRequest" }
+      responses:
+        "202":
+          description: Install started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerProvision" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/servers/provision/{jobId}:
+    parameters:
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerProvision
+      summary: Install progress for a job started by this user
+      responses:
+        "200":
+          description: Progress
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerProvision" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/servers/{serverId}:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -624,6 +662,41 @@ paths:
                 required: [success]
                 properties:
                   success: { type: boolean }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/agent:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgent
+      summary: Live agent metrics for the servers screen
+      description: Polled about once a second while the servers screen is open.
+      responses:
+        "200":
+          description: Agent reading
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgent" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/update:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: updateServerAgent
+      summary: Replace the edge agent with the current build
+      description: Requires servers.manage on the server.
+      responses:
+        "200":
+          description: Agent after the update
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgent" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -1274,6 +1347,8 @@ paths:
         - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: camera_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: camera_group_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } }, description: "Restricts to cameras belonging to any of these groups, intersected with the cameras the caller can already see." }
+        - { name: vehicle_type, in: query, style: form, explode: true, schema: { type: array, items: { type: string } }, description: "Match enriched vehicle types (car, suv, pickup, van, sedan, truck_trailer, bus, motorcycle)." }
+        - { name: vehicle_color, in: query, style: form, explode: true, schema: { type: array, items: { type: string } }, description: "Match enriched vehicle colors." }
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
         - { name: cursor, in: query, schema: { type: string } }
@@ -3315,6 +3390,73 @@ components:
         missing:
           type: integer
           description: Cameras no longer present in Frigate. They are kept and flagged, not deleted.
+    ServerProvisionRequest:
+      type: object
+      required: [site_id, ip, ssh_user, ssh_password]
+      properties:
+        site_id: { type: string, format: uuid }
+        ip: { type: string, description: Address of the new machine. example: 192.0.2.10 }
+        ssh_user: { type: string, minLength: 1, maxLength: 64 }
+        ssh_password:
+          type: string
+          format: password
+          minLength: 1
+          maxLength: 256
+          writeOnly: true
+          description: Used only for this install session. Not stored.
+    ServerProvisionStep:
+      type: object
+      required: [id, state]
+      properties:
+        id:
+          type: string
+          enum: [connecting, packages, hardware, compose, ntp, agent, register]
+        state:
+          type: string
+          enum: [pending, running, done, error]
+        detail: { type: string }
+    ServerProvision:
+      type: object
+      required: [id, status, steps]
+      properties:
+        id: { type: string, format: uuid }
+        status:
+          type: string
+          enum: [running, succeeded, failed]
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/ServerProvisionStep" }
+        warning:
+          type: string
+          description: cpu when the host has no Coral, NVIDIA, or OpenVINO.
+        variant:
+          type: string
+          enum: [coral, tensorrt, openvino, cpu]
+        server_id: { type: string, format: uuid }
+        error: { type: string }
+        host_key: { type: string, description: SHA256 fingerprint seen on first SSH contact. }
+    ServerAgent:
+      type: object
+      required: [installed, version, current_version, outdated]
+      properties:
+        installed: { type: boolean }
+        version: { type: string }
+        current_version: { type: string }
+        outdated: { type: boolean }
+        variant: { type: string }
+        ntp: { type: string }
+        cpu_percent: { type: number }
+        memory_total_bytes: { type: integer, format: int64 }
+        memory_available_bytes: { type: integer, format: int64 }
+        coral: { type: boolean }
+        gpu_present: { type: boolean }
+        gpu_vendor: { type: string }
+        gpu_name: { type: string }
+        cctv_total_bytes: { type: integer, format: int64 }
+        cctv_free_bytes: { type: integer, format: int64 }
+        database_total_bytes: { type: integer, format: int64 }
+        database_free_bytes: { type: integer, format: int64 }
+        error: { type: string }
     Camera:
       type: object
       required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, folder_id, sort_order, default_live_quality, description, location, tags, created_at, updated_at]

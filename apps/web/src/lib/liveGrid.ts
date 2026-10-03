@@ -113,6 +113,7 @@ function cameraIdFromDragId(id: string | number): string | null {
 
 export type DragResolution =
   | { type: "place"; index: number; cameraId: string }
+  | { type: "place-map"; index: number; map: LiveMapRef }
   | { type: "reorder"; from: number; to: number }
   | { type: "fill-server"; serverId: string }
   | { type: "fill-folder"; folderId: string }
@@ -123,6 +124,35 @@ export const LIVE_GRID_DROP_ID = "live-grid";
 
 const SERVER_DRAG_PREFIX = "tserver:";
 const FOLDER_DRAG_PREFIX = "tfolder:";
+const MAP_PREFIX = "tmap:";
+
+/** mapDragId identifies a site or floor map dragged from the live sidebar onto a cell. */
+export function mapDragId(map: LiveMapRef): string {
+  return MAP_PREFIX + encodeURIComponent(JSON.stringify({ site_id: map.site_id, name: map.name, floor_id: map.floor_id }));
+}
+
+/** mapFromDragId reads a map drag id. Invalid ids return null. */
+export function mapFromDragId(id: string | number): LiveMapRef | null {
+  const raw = stripPrefix(id, MAP_PREFIX);
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw)) as { site_id?: unknown; name?: unknown; floor_id?: unknown };
+    if (typeof parsed.site_id !== "string" || typeof parsed.name !== "string" || !parsed.name) return null;
+    return { site_id: parsed.site_id, name: parsed.name, floor_id: typeof parsed.floor_id === "string" ? parsed.floor_id : undefined };
+  } catch {
+    return null;
+  }
+}
+
+/** placeMapAt puts the map in one cell. The same map already on the grid swaps into that cell. */
+export function placeMapAt(tiles: Tile[], index: number, map: LiveMapRef): Tile[] {
+  if (index < 0 || index >= tiles.length) return tiles;
+  const same = (tile: Tile) => isMapTile(tile) && tile.map.site_id === map.site_id && (tile.map.floor_id ?? "") === (map.floor_id ?? "");
+  const at = tiles.findIndex(same);
+  if (at === index) return tiles;
+  if (at >= 0) return swapTiles(tiles, at, index);
+  return tiles.map((tile, i) => (i === index ? { map } : tile));
+}
 
 function stripPrefix(id: string | number, prefix: string): string | null {
   const s = String(id);
@@ -142,6 +172,11 @@ export function resolveDragEnd(activeId: string | number, overId: string | numbe
     if (serverId) return { type: "fill-server", serverId };
     const folderId = stripPrefix(activeId, FOLDER_DRAG_PREFIX);
     if (folderId) return { type: "fill-folder", folderId };
+  }
+  if (stripPrefix(activeId, MAP_PREFIX) !== null) {
+    const map = mapFromDragId(activeId);
+    if (!map || toIndex === null) return null;
+    return { type: "place-map", index: toIndex, map };
   }
   if (toIndex === null) return null;
   const cameraId = cameraIdFromDragId(activeId);

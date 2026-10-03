@@ -48,7 +48,10 @@ func ClassifyRig(img image.Image) (cab, trailer Color, ok bool) {
 		long, short = h, w
 		horizontal = false
 	}
-	if short < 12 || long*10 < short*23 {
+	// A side-on car is about two to three times as long as it is tall. An
+	// articulated truck on these road cameras is longer than that. 2.3 was
+	// marking ordinary cars as trailers.
+	if short < 18 || long*10 < short*36 {
 		return Color{}, Color{}, false
 	}
 	region := insetRect(box)

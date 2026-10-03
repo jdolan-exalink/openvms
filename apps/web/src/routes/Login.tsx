@@ -59,7 +59,7 @@ export function Login() {
       await enter();
     } catch {
       clearToken();
-      setError(new Error(t("El token no es válido o está vencido.")));
+      setError(new Error(t("auth.tokenInvalid")));
     } finally {
       setBusy(false);
     }
@@ -77,10 +77,10 @@ export function Login() {
         </div>
         {mode === "password" ? (
           <form onSubmit={submitPassword} className="flex flex-col gap-4">
-            <Field label={t("Usuario")}>
+            <Field label={t("auth.username")}>
               <TextInput required autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} disabled={needTotp} />
             </Field>
-            <Field label={t("Contraseña")}>
+            <Field label={t("auth.password")}>
               <TextInput
                 required
                 type="password"
@@ -91,7 +91,7 @@ export function Login() {
               />
             </Field>
             {needTotp && (
-              <Field label={t("Código de verificación")} hint={t("Los 6 dígitos de tu app de autenticación.")}>
+              <Field label={t("auth.verificationCode")} hint={t("auth.verificationHint")}>
                 <TextInput
                   required
                   autoFocus
@@ -105,17 +105,17 @@ export function Login() {
             )}
             <ErrorNote error={error} />
             <Button type="submit" variant="primary" disabled={busy}>
-              {busy ? t("Verificando…") : needTotp ? t("Verificar") : t("Ingresar")}
+              {busy ? t("auth.verifying") : needTotp ? t("auth.verify") : t("auth.signIn")}
             </Button>
           </form>
         ) : (
           <form onSubmit={submitToken} className="flex flex-col gap-4">
-            <Field label={t("Token de acceso")} hint={t("Lo genera un administrador con vmsctl token.")}>
+            <Field label={t("auth.accessToken")} hint={t("auth.tokenHint")}>
               <TextInput type="password" autoComplete="off" required value={token} onChange={(e) => setTokenValue(e.target.value)} placeholder="ovms_…" />
             </Field>
             <ErrorNote error={error} />
             <Button type="submit" variant="primary" disabled={busy || !token.trim()}>
-              {busy ? t("Verificando…") : t("Ingresar")}
+              {busy ? t("auth.verifying") : t("auth.signIn")}
             </Button>
           </form>
         )}
@@ -128,7 +128,7 @@ export function Login() {
             setMode(mode === "password" ? "token" : "password");
           }}
         >
-          {mode === "password" ? t("Ingresar con un token de API") : t("Ingresar con usuario y contraseña")}
+          {mode === "password" ? t("auth.signInToken") : t("auth.signInPassword")}
         </button>
       </div>
     </main>

@@ -13,6 +13,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/maps"
 	"github.com/jdolan-exalink/openvms/internal/notify"
+	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -29,6 +30,7 @@ func statusFor(err error) (int, string, string) {
 	var rve *rules.ValidationError
 	var nve *notify.ValidationError
 	var mve *maps.ValidationError
+	var pve *provision.ValidationError
 	var we *notify.WahaError
 	var fe *inventory.FrigateError
 	switch {
@@ -44,6 +46,12 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", nve.Msg
 	case errors.As(err, &mve):
 		return http.StatusBadRequest, "invalid", mve.Msg
+	case errors.As(err, &pve):
+		return http.StatusBadRequest, "invalid", pve.Msg
+	case errors.Is(err, provision.ErrBusy):
+		return http.StatusConflict, "conflict", err.Error()
+	case errors.Is(err, provision.ErrNotFound):
+		return http.StatusNotFound, "not_found", "not found"
 	case errors.Is(err, maps.ErrOptimisticLockConflict):
 		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, notify.ErrQRUnavailable):

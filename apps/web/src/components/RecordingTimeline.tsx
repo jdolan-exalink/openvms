@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useT } from "@/i18n";
 import { fmtTime, labelName, vehicleHeadline, vehiclePaint } from "@/lib/format";
 
 const DAY = 24 * 3600;
@@ -16,6 +17,7 @@ export function RecordingTimeline({
   position: number;
   onSeek: (time: number) => void;
 }) {
+  const t = useT();
   const pct = (time: number) => `${Math.min(100, Math.max(0, ((time - day) / DAY) * 100))}%`;
   const hours = useMemo(() => Array.from({ length: 25 }, (_, hour) => hour), []);
   return (
@@ -23,7 +25,7 @@ export function RecordingTimeline({
       <div
         className="relative h-12 cursor-pointer overflow-hidden rounded border border-line bg-raised"
         role="slider"
-        aria-label="Línea de tiempo del día"
+        aria-label={t("live.dayTimeline")}
         aria-valuemin={day}
         aria-valuemax={day + DAY}
         aria-valuenow={position}

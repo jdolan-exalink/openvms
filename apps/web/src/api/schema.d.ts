@@ -5511,6 +5511,10 @@ export interface operations {
                 camera_id?: string[];
                 /** @description Restricts to cameras belonging to any of these groups, intersected with the cameras the caller can already see. */
                 camera_group_id?: string[];
+                /** @description Match enriched vehicle types (car, suv, pickup, van, sedan, truck_trailer, bus, motorcycle). */
+                vehicle_type?: string[];
+                /** @description Match enriched vehicle colors. */
+                vehicle_color?: string[];
                 from?: string;
                 to?: string;
                 cursor?: string;

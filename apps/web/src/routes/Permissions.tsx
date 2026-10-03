@@ -84,7 +84,7 @@ export function Permissions() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
-      <PageHeader title={t("Permisos")} description={t("Un permiso vale en su alcance y todo lo que contiene. Una denegación siempre gana sobre un permiso.")} />
+      <PageHeader title={t("nav.permissions")} description={t("settings.permissionRule")} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <div className="sm:w-72">
           <Field label="Buscar sujeto">

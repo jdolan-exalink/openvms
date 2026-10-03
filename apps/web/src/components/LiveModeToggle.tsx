@@ -1,5 +1,5 @@
 import { Circle, Play } from "lucide-react";
-import { useT } from "@/i18n";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 
 /**
@@ -8,12 +8,12 @@ import { cn } from "@/lib/cn";
  */
 export function LiveModeToggle({ rec, onChange }: { rec: boolean; onChange: (mode: "live" | "rec") => void }) {
   const t = useT();
-  const options = [
-    { mode: "live", label: "Vivo", Icon: Play, hint: "Ver las cámaras en vivo", active: "bg-ok/15 text-ok ring-ok/40", dot: "bg-ok" },
-    { mode: "rec", label: "Grabado", Icon: Circle, hint: "Reproducir desde cinco minutos antes", active: "bg-bad/15 text-bad ring-bad/40", dot: "bg-bad" },
-  ] as const;
+  const options: { mode: "live" | "rec"; label: MessageKey; Icon: typeof Play; hint: MessageKey; active: string; dot: string }[] = [
+    { mode: "live", label: "live.live", Icon: Play, hint: "live.watchLive", active: "bg-ok/15 text-ok ring-ok/40", dot: "bg-ok" },
+    { mode: "rec", label: "live.recorded", Icon: Circle, hint: "live.playFromFive", active: "bg-bad/15 text-bad ring-bad/40", dot: "bg-bad" },
+  ];
   return (
-    <div role="group" aria-label={t("Modo de reproducción")} className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
+    <div role="group" aria-label={t("live.playbackMode")} className="flex items-center gap-0.5 rounded-lg border border-line bg-surface p-0.5">
       {options.map(({ mode, label, Icon, hint, active, dot }) => {
         const isActive = (mode === "rec") === rec;
         return (

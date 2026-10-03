@@ -81,7 +81,7 @@ export function Channels() {
   if (channels.error instanceof ApiError && channels.error.status === 403) {
     return (
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
-        <PageHeader title={t("Canales")} />
+        <PageHeader title={t("nav.channels")} />
         <Empty>No tenés permiso para administrar canales. Pedile a un administrador el permiso de gestión de notificaciones.</Empty>
       </div>
     );
@@ -90,8 +90,8 @@ export function Channels() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title={t("Canales")}
-        description={t("Destinos externos (webhook, correo, WhatsApp, Telegram) que las reglas pueden notificar.")}
+        title={t("nav.channels")}
+        description={t("settings.channels")}
         actions={
           <Button variant="primary" onClick={() => setEditing("new")}>
             <Plus className="size-4" aria-hidden /> Nuevo canal

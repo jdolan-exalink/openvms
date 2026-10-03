@@ -1,5 +1,5 @@
 import { Video, Search, BarChart3, Edit3, SlidersHorizontal, Layers, Radar } from "lucide-react";
-import { useT } from "@/i18n";
+import { useT, type MessageKey } from "@/i18n";
 import type { MapMode } from "@/lib/maps/types";
 import { cn } from "@/lib/cn";
 
@@ -17,11 +17,11 @@ export interface MapToolbarProps {
   embedded?: boolean;
 }
 
-const MODES: { id: MapMode; label: string; icon: typeof Video; requiresEdit?: boolean }[] = [
-  { id: "live", label: "En vivo", icon: Video },
-  { id: "investigate", label: "Investigar", icon: Search },
-  { id: "analytics", label: "Analítica", icon: BarChart3 },
-  { id: "edit", label: "Editor", icon: Edit3, requiresEdit: true },
+const MODES: { id: MapMode; label: MessageKey; icon: typeof Video; requiresEdit?: boolean }[] = [
+  { id: "live", label: "nav.live", icon: Video },
+  { id: "investigate", label: "maps.investigate", icon: Search },
+  { id: "analytics", label: "maps.analytics", icon: BarChart3 },
+  { id: "edit", label: "maps.editor", icon: Edit3, requiresEdit: true },
 ];
 
 export function MapToolbar({
@@ -39,7 +39,7 @@ export function MapToolbar({
   const t = useT();
   return (
     <div className={embedded ? "contents" : "flex items-center gap-2 rounded-lg border border-line bg-surface/90 p-1 shadow-sm backdrop-blur-xs"}>
-      <div className="order-1 flex items-center gap-0.5 rounded-md bg-bg/50 p-0.5" role="tablist" aria-label={t("Modo de mapa")}>
+      <div className="order-1 flex items-center gap-0.5 rounded-md bg-bg/50 p-0.5" role="tablist" aria-label={t("maps.mode")}>
         {MODES.filter((m) => !m.requiresEdit || canEdit).map((m) => {
           const Icon = m.icon;
           const active = mode === m.id;
@@ -78,7 +78,7 @@ export function MapToolbar({
             type="button"
             onClick={onToggleCoverage}
             aria-pressed={coverage}
-            title={coverage ? t("Ocultar conos FOV (Cobertura)") : t("Mostrar conos FOV (Cobertura)")}
+            title={coverage ? t("maps.hideFov") : t("maps.showFov")}
             className={cn(
               "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
               coverage && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",
@@ -93,7 +93,7 @@ export function MapToolbar({
             type="button"
             onClick={onToggleLayers}
             aria-pressed={layersActive}
-            title={t("Capas del mapa")}
+            title={t("maps.layers")}
             className={cn(
               "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
               layersActive && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",
@@ -108,7 +108,7 @@ export function MapToolbar({
             type="button"
             onClick={onToggleFilters}
             aria-pressed={filtersActive}
-            title={t("Filtros")}
+            title={t("common.filters")}
             className={cn(
               "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
               filtersActive && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",

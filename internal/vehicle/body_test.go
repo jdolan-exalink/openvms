@@ -67,6 +67,13 @@ func TestApplyBodyKeepsALongVan(t *testing.T) {
 	}
 }
 
+func TestApplyBodyKeepsAModestSedanOnALongBox(t *testing.T) {
+	typ, conf, fromModel := applyBody("car", 0.75, "sedan", 0.50, true, true, true)
+	if typ != "sedan" || conf != 0.50 || !fromModel {
+		t.Fatalf("got %s %.2f model=%v", typ, conf, fromModel)
+	}
+}
+
 func TestApplyBodyStillSplitsAnUnsureLongBox(t *testing.T) {
 	typ, conf, fromModel := applyBody("car", 0.75, "", 0, true, false, true)
 	if typ != "truck_trailer" || conf != 0.72 || fromModel {

@@ -1,0 +1,13 @@
+[Unit]
+Description=OpenVMS edge agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/openvms/agent.env
+ExecStart=/usr/local/bin/openvms-agent
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

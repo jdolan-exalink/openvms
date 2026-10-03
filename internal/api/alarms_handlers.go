@@ -44,6 +44,12 @@ func toAlarm(a alarms.Alarm) gen.Alarm {
 			Color: a.VehicleColor, ColorConfidence: a.VehicleColorConfidence,
 			ColorQuality: gen.VehicleAttributesColorQuality(a.ColorQuality),
 		}
+		if a.TrailerColor != "" {
+			color := a.TrailerColor
+			conf := a.TrailerColorConfidence
+			out.Vehicle.TrailerColor = &color
+			out.Vehicle.TrailerColorConfidence = &conf
+		}
 	}
 	if a.UpperColor != "" {
 		out.Person = &gen.PersonAttributes{

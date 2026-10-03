@@ -59,7 +59,7 @@ export function AccountMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        aria-label={signedIn ? t("Cuenta") : t("Preferencias")}
+        aria-label={signedIn ? t("common.account") : t("common.preferences")}
         onClick={() => setOpen((value) => !value)}
         className={cn(
           "flex h-9 items-center gap-1.5 rounded-full border border-line bg-surface pl-1 pr-2 text-ink shadow-sm",
@@ -76,7 +76,7 @@ export function AccountMenu({
         <div
           id={menuId}
           role="menu"
-          aria-label={signedIn ? t("Cuenta") : t("Preferencias")}
+          aria-label={signedIn ? t("common.account") : t("common.preferences")}
           className="absolute right-0 z-50 mt-2 w-60 origin-top-right rounded-2xl border border-line bg-surface/95 p-2 shadow-2xl backdrop-blur-md"
         >
           {signedIn && (
@@ -85,8 +85,8 @@ export function AccountMenu({
               {username && name && <p className="truncate text-xs text-muted">{username}</p>}
             </div>
           )}
-          <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted">{t("Idioma")}</p>
-          <div role="group" aria-label={t("Idioma")} className="mb-2 grid grid-cols-3 gap-1 rounded-xl bg-bg p-1">
+          <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted">{t("common.language")}</p>
+          <div role="group" aria-label={t("common.language")} className="mb-2 grid grid-cols-3 gap-1 rounded-xl bg-bg p-1">
             {LOCALES.map((item) => (
               <button
                 key={item.id}
@@ -103,27 +103,27 @@ export function AccountMenu({
               </button>
             ))}
           </div>
-          <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted">{t("Tema")}</p>
-          <div role="group" aria-label={t("Tema")} className="mb-1 grid grid-cols-2 gap-1 rounded-xl bg-bg p-1">
+          <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted">{t("common.theme")}</p>
+          <div role="group" aria-label={t("common.theme")} className="mb-1 grid grid-cols-2 gap-1 rounded-xl bg-bg p-1">
             <button
               type="button"
               aria-pressed={!light}
-              aria-label={t("Modo oscuro")}
+              aria-label={t("common.darkMode")}
               onClick={() => chooseTheme(false)}
               className={cn("flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs", !light ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
             >
               <Moon className="size-3.5" aria-hidden />
-              {t("Oscuro")}
+              {t("common.dark")}
             </button>
             <button
               type="button"
               aria-pressed={light}
-              aria-label={t("Modo claro")}
+              aria-label={t("common.lightMode")}
               onClick={() => chooseTheme(true)}
               className={cn("flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs", light ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
             >
               <Sun className="size-3.5" aria-hidden />
-              {t("Claro")}
+              {t("common.light")}
             </button>
           </div>
           {signedIn && (
@@ -136,7 +136,7 @@ export function AccountMenu({
                 className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-sm text-ink hover:bg-raised"
               >
                 <KeyRound className="size-3.5 text-muted" aria-hidden />
-                {t("Cambiar contraseña")}
+                {t("account.changePassword")}
               </Link>
               <button
                 type="button"
@@ -148,7 +148,7 @@ export function AccountMenu({
                 className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-bad hover:bg-bad/10"
               >
                 <LogOut className="size-3.5" aria-hidden />
-                {t("Cerrar sesión")}
+                {t("common.signOut")}
               </button>
             </>
           )}

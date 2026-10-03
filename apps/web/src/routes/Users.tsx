@@ -34,8 +34,8 @@ export function Users() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title={t("Usuarios")}
-        description={t("Cada usuario ve solo lo que sus permisos, directos o por grupo, le otorgan.")}
+        title={t("nav.users")}
+        description={t("settings.users")}
         actions={
           manage ? (
             <Button variant="primary" onClick={() => setEditing("new")}>

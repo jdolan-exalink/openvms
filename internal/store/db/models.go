@@ -72,6 +72,18 @@ type AuditLog struct {
 	Details    json.RawMessage
 }
 
+type BodyClassifyCamera struct {
+	CameraID uuid.UUID
+	TenantID uuid.UUID
+	Enabled  bool
+}
+
+type BodyClassifyServer struct {
+	ServerID uuid.UUID
+	TenantID uuid.UUID
+	Enabled  bool
+}
+
 type Camera struct {
 	ID                 uuid.UUID
 	TenantID           uuid.UUID
@@ -586,6 +598,8 @@ type VehicleAttribute struct {
 	ModelName              string
 	ModelVersion           string
 	ProcessedAt            time.Time
+	TrailerColor           string
+	TrailerColorConfidence float32
 }
 
 type VehicleAttributeJob struct {

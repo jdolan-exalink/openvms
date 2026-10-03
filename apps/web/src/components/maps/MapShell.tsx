@@ -19,6 +19,7 @@ import {
   type DraftState,
 } from "@/lib/maps/placementDraft";
 import { canvasDropPoint } from "@/lib/maps/editorInteractions";
+import { frameCameras, loadGeoView, MAP_SIDEBAR_PADDING, saveGeoView } from "@/lib/maps/mapView";
 import { savePlacements } from "@/lib/maps/placements";
 import {
   addZonePoint,
@@ -505,7 +506,7 @@ function MapShellContent({
       });
     }
     return [...rows.values()];
-  }, [cameras, draft.entries, inventoryQuery.data, servers.data, unplacedCameras]);
+  }, [cameras, draft.entries, inventoryQuery.data, servers, unplacedCameras]);
   const treeFolders = (foldersQuery.data?.items ?? []).map((folder) => ({ id: folder.id, name: folder.name, serverId: folder.server_id, sortOrder: folder.sort_order }));
   const treeServers = (servers.data ?? []).map((server) => ({ id: server.id, name: server.name }));
 
@@ -615,24 +616,49 @@ function MapShellContent({
   // --- Monitoring center (M-W11) -------------------------------------------------------
   // Default view: the selected site's monitoring center, else the platform default. All
   // hooks in this block live above the config early-returns (hook order is fixed).
-  const defaultCenter = configQuery.data?.defaultCenter ?? { lat: 0, lng: 0 };
-  const center: [number, number] = currentSite?.center
-    ? [currentSite.center.lng, currentSite.center.lat]
-    : [defaultCenter.lng, defaultCenter.lat];
+  const defaultCenter = configQuery.data?.defaultCenter;
+  const siteCenter = currentSite?.center;
+  const center = useMemo<[number, number]>(() => (
+    siteCenter ? [siteCenter.lng, siteCenter.lat] : [defaultCenter?.lng ?? 0, defaultCenter?.lat ?? 0]
+  ), [siteCenter, defaultCenter]);
   const zoom = currentSite?.defaultZoom ?? configQuery.data?.defaultZoom ?? 12;
 
-  // Entering a site — or its monitoring center changing — re-centers an already-open map:
-  // center/zoom drive only the initial view, so their changes are followed after init.
+  // The first visit frames every camera beside the sidebar. After that, the operator's
+  // last center and zoom for this site win, including when the same map opens in Live.
   const followViewRef = useRef<{ center?: [number, number]; zoom?: number } | undefined>(undefined);
+  const framedSite = useRef<string | undefined>(undefined);
+  const geoPoints = useMemo(() => cameras.flatMap((camera) => (
+    camera.siteId === currentSite?.id && camera.position.kind === "geo"
+      ? [{ lng: camera.position.lng, lat: camera.position.lat }]
+      : []
+  )), [cameras, currentSite?.id]);
+  useEffect(() => {
+    const map = mapRef.current;
+    const siteId = currentSite?.id;
+    if (!map || !siteId || !me.data || typeof map.jumpTo !== "function") return;
+    if (framedSite.current === siteId) return;
+    const saved = loadGeoView(me.data.tenant_id, me.data.id, siteId);
+    const container = typeof map.getContainer === "function" ? map.getContainer() : undefined;
+    const viewport = {
+      width: container && container.clientWidth > 64 ? container.clientWidth : 1280,
+      height: container && container.clientHeight > 64 ? container.clientHeight : 720,
+    };
+    const view = saved ?? (geoPoints.length ? frameCameras(geoPoints, viewport, sidebarOpen ? MAP_SIDEBAR_PADDING : { ...MAP_SIDEBAR_PADDING, left: 28 }) : null);
+    if (!view) return;
+    framedSite.current = siteId;
+    if (!saved) saveGeoView(me.data.tenant_id, me.data.id, siteId, view);
+    map.jumpTo({ center: view.center, zoom: view.zoom });
+  }, [center, zoom, currentSite?.id, geoPoints, me.data, readyMap, sidebarOpen]);
   useEffect(() => {
     const map = mapRef.current;
     const prev = followViewRef.current;
     followViewRef.current = { center, zoom };
     if (!map || !prev) return;
     if (prev.center?.[0] === center[0] && prev.center?.[1] === center[1] && prev.zoom === zoom) return;
+    if (typeof map.jumpTo === "function" && currentSite && (loadGeoView(me.data?.tenant_id ?? null, me.data?.id ?? "", currentSite.id) || geoPoints.length)) return;
     const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     map.easeTo({ center, zoom, duration: reduced ? 0 : 500 });
-  }, [center, zoom]);
+  }, [center, zoom, currentSite, geoPoints.length, me.data]);
 
   const [centerSaving, setCenterSaving] = useState(false);
   const [centerError, setCenterError] = useState<string>();
@@ -817,6 +843,10 @@ function MapShellContent({
           onContextMenuCamera={(id, point) => setContextMenu({ cameraId: id, ...point })}
           onSelectSite={(id) => handleSelectSite(id)}
           onMapClick={handleMapClick}
+          onMoveEnd={(view) => {
+            if (!me.data || !currentSite || framedSite.current !== currentSite.id) return;
+            saveGeoView(me.data.tenant_id, me.data.id, currentSite.id, { center: view.center, zoom: view.zoom });
+          }}
           onCameraDragStart={editActive && !(zoneDraft && !zoneDraft.closed) ? handleCameraDragStart : undefined}
           onCameraDragMove={editActive && !(zoneDraft && !zoneDraft.closed) ? handleCameraDragMove : undefined}
           onCameraDragEnd={editActive && !(zoneDraft && !zoneDraft.closed) ? handleCameraDragEnd : undefined}
@@ -859,7 +889,7 @@ function MapShellContent({
                 ]}
                 onSelectSite={handleSelectSite} onSelectCamera={handleSelectCamera}
                 onEdit={() => handleModeChange("edit")} onOpenLive={handleOpenLive}
-                onEvents={(cameraId) => void navigate({ to: "/events", search: { camera: cameraId, site: currentSite?.id } })}
+                onEvents={(cameraId) => void navigate({ to: "/events", search: { camera: cameraId } })}
                 onPlayback={(cameraId) => void navigate({ to: "/playback", search: { camera: cameraId } })}
                 onResetVisibility={() => { setFiltersOverride(EMPTY_FILTERS); setLayersOverride({ ...layers, cameras: true, sites: true }); }}
               />

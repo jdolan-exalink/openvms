@@ -104,7 +104,7 @@ describe("PlateDetailModal", () => {
       expect(screen.getAllByText(/2024-01-01/, { selector: "span" })).toHaveLength(1);
 
       fireEvent.click(screen.getByRole("tab", { name: "Clip" }));
-      expect(screen.getByRole("button", { name: "Preparar clip con marca de agua" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Descargar clip con marca de agua" })).toBeInTheDocument();
       expect(screen.getAllByText(/2024-01-01/, { selector: "span" })).toHaveLength(1);
     });
   });
@@ -118,7 +118,7 @@ describe("PlateDetailModal", () => {
   it("shows the photo download link with snapshots.download", async () => {
     renderModal("lpr.view", "snapshots.view", "snapshots.download");
     const link = await screen.findByRole("link", { name: /Descargar foto/ });
-    expect(link).toHaveAttribute("href", "/media/v1/lpr/reads/r1/snapshot.jpg?download=1");
+    expect(link).toHaveAttribute("href", "/media/v1/lpr/reads/r1/snapshot.jpg?quality=100&download=1");
   });
 
   // PDW-7: the watermark's date/time must render in the tenant's configured branding.timezone
@@ -169,7 +169,7 @@ describe("PlateDetailModal", () => {
     renderPage(() => <PlateDetailModal read={read} onClose={() => {}} />);
     fireEvent.click(await screen.findByRole("tab", { name: "Clip" }));
 
-    const startButton = await screen.findByRole("button", { name: "Preparar clip con marca de agua" });
+    const startButton = await screen.findByRole("button", { name: "Descargar clip con marca de agua" });
     fireEvent.click(startButton);
 
     await waitFor(() => {
@@ -198,7 +198,7 @@ describe("PlateDetailModal", () => {
     renderPage(() => <PlateDetailModal read={read} onClose={() => {}} />);
     fireEvent.click(await screen.findByRole("tab", { name: "Clip" }));
 
-    fireEvent.click(await screen.findByRole("button", { name: "Preparar clip con marca de agua" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Descargar clip con marca de agua" }));
 
     expect(await screen.findByText("No se pudo generar el clip.")).toBeInTheDocument();
     expect(await screen.findByText("ffmpeg: boom")).toBeInTheDocument();

@@ -200,7 +200,8 @@ func (h *Handlers) ListPlateReads(ctx context.Context, r gen.ListPlateReadsReque
 	page, err := h.Events.ListPlates(ctx, a, events.PlateFilter{
 		Plate: deref(p.Plate), Exact: deref(p.Exact), SiteIDs: uuids(p.SiteId), CameraIDs: uuids(p.CameraId),
 		CameraGroupIDs: uuids(p.CameraGroupId),
-		From:           p.From, To: p.To, Cursor: deref(p.Cursor), Limit: deref(p.Limit),
+		VehicleTypes:   deref(p.VehicleType), VehicleColors: deref(p.VehicleColor),
+		From: p.From, To: p.To, Cursor: deref(p.Cursor), Limit: deref(p.Limit),
 	})
 	if err != nil {
 		return nil, err
@@ -221,6 +222,12 @@ func (h *Handlers) ListPlateReads(ctx context.Context, r gen.ListPlateReadsReque
 				Type: pr.Vehicle.Type, TypeConfidence: pr.Vehicle.TypeConfidence,
 				Color: pr.Vehicle.Color, ColorConfidence: pr.Vehicle.ColorConfidence,
 				ColorQuality: gen.VehicleAttributesColorQuality(pr.Vehicle.ColorQuality),
+			}
+			if pr.Vehicle.TrailerColor != "" {
+				color := pr.Vehicle.TrailerColor
+				conf := pr.Vehicle.TrailerColorConfidence
+				item.Vehicle.TrailerColor = &color
+				item.Vehicle.TrailerColorConfidence = &conf
 			}
 		}
 		out.Items = append(out.Items, item)

@@ -34,8 +34,8 @@ export function Servers() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title={t("Servidores")}
-        description={t("Servidores Frigate registrados y su salud. El worker los consulta cada 30 segundos.")}
+        title={t("nav.servers")}
+        description={t("settings.servers")}
         actions={
           can(me.data, "servers.manage") && !registering ? (
             <Button variant="primary" onClick={() => setRegistering(true)}>

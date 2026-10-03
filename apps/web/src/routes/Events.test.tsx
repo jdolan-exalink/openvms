@@ -22,6 +22,7 @@ function meResponse(...permissions: string[]) {
 
 const noCatalogs = {
   "/api/v1/sites": () => json({ items: [] }),
+  "/api/v1/servers": () => json({ items: [] }),
   "/api/v1/cameras": () => json({ items: [] }),
   "/api/v1/camera-groups": () => json({ items: [] }),
 };
@@ -53,7 +54,7 @@ function makeEvent(id: string, overrides: Partial<Schemas["Event"]> = {}): Schem
 }
 
 describe("Events", () => {
-  it("sends zone and sub_label filters as query params", async () => {
+  it("sends the chosen server and asks for a page of 100", async () => {
     let lastEventsUrl: URL | undefined;
     vi.stubGlobal(
       "fetch",
@@ -66,61 +67,40 @@ describe("Events", () => {
         return stubApi({
           "/api/v1/me": () => meResponse("events.search"),
           ...noCatalogs,
-          "/api/v1/camera-groups": () =>
-            json({ items: [{ id: "g1", tenant_id: "t1", name: "Perimeter", description: "", camera_ids: [] }] }),
+          "/api/v1/servers": () => json({ items: [{ id: "srv1", name: "Casa" }] }),
         })(input);
       }),
     );
 
     renderPage(Events);
-
-    // Wait for the initial (unfiltered) events fetch before filling the form.
     expect(await screen.findByText("No hay eventos que coincidan.")).toBeInTheDocument();
-
-    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "entrada" } });
-    fireEvent.change(screen.getByLabelText("Sub-etiqueta"), { target: { value: "placa_reconocida" } });
+    await screen.findByRole("option", { name: "Casa" });
+    fireEvent.change(screen.getByLabelText("Servidor"), { target: { value: "srv1" } });
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
 
-    // The submit re-triggers the same "no results" text, so waiting for it alone does not
-    // guarantee the filtered fetch (as opposed to the initial one) has landed yet: wait for the
-    // fetch mock to actually be called with the filtered query string.
     await waitFor(() => {
-      expect(lastEventsUrl?.searchParams.getAll("zone")).toEqual(["entrada"]);
-      expect(lastEventsUrl?.searchParams.getAll("sub_label")).toEqual(["placa_reconocida"]);
+      expect(lastEventsUrl?.searchParams.getAll("server_id")).toEqual(["srv1"]);
+      expect(lastEventsUrl?.searchParams.get("limit")).toBe("100");
     });
   });
 
-  it("sends camera_group_id as a query param", async () => {
-    let lastEventsUrl: URL | undefined;
+  it("starts the day at 00:00 and ends it at 23:59", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: Request) => {
         const url = new URL(input.url);
-        if (url.pathname === "/api/v1/events") {
-          lastEventsUrl = url;
-          return json({ items: [] });
-        }
-        return stubApi({
-          "/api/v1/me": () => meResponse("events.search"),
-          ...noCatalogs,
-          "/api/v1/camera-groups": () =>
-            json({ items: [{ id: "g1", tenant_id: "t1", name: "Perimeter", description: "", camera_ids: [] }] }),
-        })(input);
+        if (url.pathname === "/api/v1/events") return json({ items: [] });
+        return stubApi({ "/api/v1/me": () => meResponse("events.search"), ...noCatalogs })(input);
       }),
     );
-
     renderPage(Events);
-
-    expect(await screen.findByText("No hay eventos que coincidan.")).toBeInTheDocument();
-    // Wait for the "Perimeter" option itself (loaded async from /api/v1/camera-groups), not
-    // just the select element, so fireEvent.change below does not race the option's render.
-    await screen.findByRole("option", { name: "Perimeter" });
-    fireEvent.change(screen.getByLabelText("Grupo de cámaras"), { target: { value: "g1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
-
-    await waitFor(() => {
-      expect(lastEventsUrl?.searchParams.getAll("camera_group_id")).toEqual(["g1"]);
-    });
+    await screen.findByText("No hay eventos que coincidan.");
+    expect((screen.getByLabelText("Desde") as HTMLInputElement).value.endsWith("T00:00")).toBe(true);
+    expect((screen.getByLabelText("Hasta") as HTMLInputElement).value.endsWith("T23:59")).toBe(true);
+    expect(screen.queryByLabelText("Zona")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Sub-etiqueta")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Grupo de cámaras")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Eventos" })).not.toBeInTheDocument();
   });
 
   it("sends every filter field as query params", async () => {
@@ -135,10 +115,8 @@ describe("Events", () => {
         }
         return stubApi({
           "/api/v1/me": () => meResponse("events.search", "lpr.search"),
-          "/api/v1/sites": () => json({ items: [{ id: "site1", name: "Site One" }] }),
-          "/api/v1/cameras": () => json({ items: [{ id: "cam1", display_name: "Camera One", site_id: "site1" }] }),
-          "/api/v1/camera-groups": () =>
-            json({ items: [{ id: "g1", tenant_id: "t1", name: "Perimeter", description: "", camera_ids: [] }] }),
+          "/api/v1/servers": () => json({ items: [{ id: "srv1", name: "Casa" }] }),
+          "/api/v1/cameras": () => json({ items: [{ id: "cam1", display_name: "Camera One", site_id: "site1", server_id: "srv1" }] }),
         })(input);
       }),
     );
@@ -146,34 +124,26 @@ describe("Events", () => {
     renderPage(Events);
 
     expect(await screen.findByText("No hay eventos que coincidan.")).toBeInTheDocument();
-    // Both options load async from their own catalog fetches; wait for both before touching the
-    // selects that depend on them, to avoid racing their render (see the camera_group_id test).
-    await screen.findByRole("option", { name: "Perimeter" });
+    await screen.findByRole("option", { name: "Casa" });
     await screen.findByRole("option", { name: "Camera One" });
 
-    fireEvent.change(screen.getByLabelText("Sitio"), { target: { value: "site1" } });
+    fireEvent.change(screen.getByLabelText("Servidor"), { target: { value: "srv1" } });
     fireEvent.change(screen.getByLabelText("Cámara"), { target: { value: "cam1" } });
-    fireEvent.change(screen.getByLabelText("Grupo de cámaras"), { target: { value: "g1" } });
     fireEvent.change(screen.getByLabelText("Objeto"), { target: { value: "car" } });
-    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "entrada" } });
-    fireEvent.change(screen.getByLabelText("Sub-etiqueta"), { target: { value: "placa_reconocida" } });
     fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "alert" } });
     fireEvent.change(screen.getByLabelText("Desde"), { target: { value: "2024-01-01T10:00" } });
     fireEvent.change(screen.getByLabelText("Hasta"), { target: { value: "2024-01-02T10:00" } });
     fireEvent.change(screen.getByLabelText("Patente"), { target: { value: "ab123cd" } });
-    fireEvent.click(screen.getByLabelText("Solo sin revisar"));
-    fireEvent.click(screen.getByLabelText("Con snapshot"));
-    fireEvent.click(screen.getByLabelText("Con preview"));
+    fireEvent.click(screen.getByRole("button", { name: "Sin revisar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Con snapshot" }));
+    fireEvent.click(screen.getByRole("button", { name: "Con preview" }));
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
 
     await waitFor(() => {
       const p = lastEventsUrl?.searchParams;
-      expect(p?.getAll("site_id")).toEqual(["site1"]);
+      expect(p?.getAll("server_id")).toEqual(["srv1"]);
       expect(p?.getAll("camera_id")).toEqual(["cam1"]);
-      expect(p?.getAll("camera_group_id")).toEqual(["g1"]);
       expect(p?.getAll("label")).toEqual(["car"]);
-      expect(p?.getAll("zone")).toEqual(["entrada"]);
-      expect(p?.getAll("sub_label")).toEqual(["placa_reconocida"]);
       expect(p?.get("severity")).toBe("alert");
       expect(p?.get("plate")).toBe("AB123CD");
       expect(p?.get("from")).toBe(new Date("2024-01-01T10:00").toISOString());
@@ -181,7 +151,7 @@ describe("Events", () => {
       expect(p?.get("reviewed")).toBe("false");
       expect(p?.get("has_snapshot")).toBe("true");
       expect(p?.get("has_preview")).toBe("true");
-      expect(p?.get("limit")).toBe("48");
+      expect(p?.get("limit")).toBe("100");
     });
   });
 
@@ -201,7 +171,7 @@ describe("Events", () => {
     expect(screen.queryByLabelText("Patente")).not.toBeInTheDocument();
   });
 
-  it('loads the next page via cursor when "Cargar más" is clicked', async () => {
+  it("loads the next page of 100 when the pager advances", async () => {
     const eventsCalls: URL[] = [];
     vi.stubGlobal(
       "fetch",
@@ -212,7 +182,7 @@ describe("Events", () => {
           if (!url.searchParams.get("cursor")) {
             return json({ items: [makeEvent("e1")], next_cursor: "page2" });
           }
-          return json({ items: [makeEvent("e2")] });
+          return json({ items: [makeEvent("e2", { camera_name: "Camera Two" })] });
         }
         return stubApi({ "/api/v1/me": () => meResponse("events.search"), ...noCatalogs })(input);
       }),
@@ -220,17 +190,18 @@ describe("Events", () => {
 
     renderPage(Events);
 
-    await screen.findByRole("button", { name: "Cargar más" });
+    await screen.findByRole("button", { name: "Página siguiente" });
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
 
-    fireEvent.click(screen.getByRole("button", { name: "Cargar más" }));
+    fireEvent.click(screen.getByRole("button", { name: "Página siguiente" }));
 
     await waitFor(() => {
       expect(eventsCalls.some((u) => u.searchParams.get("cursor") === "page2")).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getAllByRole("listitem")).toHaveLength(2);
+      expect(screen.getByRole("button", { name: /Camera Two/ })).toBeInTheDocument();
     });
+    expect(screen.queryByRole("button", { name: /Camera One/ })).not.toBeInTheDocument();
   });
 
   it("shows applied-filter chips, a result count, and removes one filter without dropping the rest", async () => {
@@ -248,29 +219,28 @@ describe("Events", () => {
     );
 
     renderPage(Events);
-    await screen.findByRole("button", { name: "Cargar más" });
-    expect(screen.getByRole("status")).toHaveTextContent("1+ eventos");
+    await screen.findByRole("button", { name: "Página siguiente" });
+    expect(screen.queryByText(/eventos$/)).not.toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
 
-    fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "entrada" } });
+    fireEvent.change(screen.getByLabelText("Objeto"), { target: { value: "person" } });
     fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "alert" } });
-    // Editing without submitting must not show a chip: chips reflect the applied search.
     expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
 
     const chips = await screen.findByRole("list", { name: "Filtros aplicados" });
-    expect(chips).toHaveTextContent("Zona: entrada");
+    expect(chips).toHaveTextContent("Objeto: Persona");
     expect(chips).toHaveTextContent("Tipo: Solo alertas");
 
-    fireEvent.click(screen.getByRole("button", { name: "Quitar filtro Zona: entrada" }));
+    fireEvent.click(screen.getByRole("button", { name: "Quitar filtro Objeto: Persona" }));
     await waitFor(() => {
-      expect(lastEventsUrl?.searchParams.getAll("zone")).toEqual([]);
+      expect(lastEventsUrl?.searchParams.getAll("label")).toEqual([]);
       expect(lastEventsUrl?.searchParams.get("severity")).toBe("alert");
     });
-    expect((screen.getByLabelText("Zona") as HTMLInputElement).value).toBe("");
-    expect(screen.getByRole("list", { name: "Filtros aplicados" })).not.toHaveTextContent("Zona");
+    expect((screen.getByLabelText("Objeto") as HTMLSelectElement).value).toBe("");
+    expect(screen.getByRole("list", { name: "Filtros aplicados" })).not.toHaveTextContent("Objeto");
 
-    fireEvent.click(screen.getByRole("button", { name: "Limpiar filtros" }));
+    fireEvent.click(screen.getByRole("button", { name: "Limpiar" }));
     await waitFor(() => expect(lastEventsUrl?.searchParams.get("severity")).toBeNull());
     expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
   });
@@ -367,25 +337,25 @@ describe("Events", () => {
 
     it("applies the filters found in the URL on load, in the form and the chips", async () => {
       const seen = stubEventsUrlApi();
-      renderPage(Events, "/?zone=entrada&pending=true&severity=alert");
+      renderPage(Events, "/?label=person&pending=true&severity=alert");
       await waitFor(() => {
-        expect(seen.url?.searchParams.getAll("zone")).toEqual(["entrada"]);
+        expect(seen.url?.searchParams.getAll("label")).toEqual(["person"]);
         expect(seen.url?.searchParams.get("reviewed")).toBe("false");
         expect(seen.url?.searchParams.get("severity")).toBe("alert");
       });
-      expect((screen.getByLabelText("Zona") as HTMLInputElement).value).toBe("entrada");
-      expect(await screen.findByRole("list", { name: "Filtros aplicados" })).toHaveTextContent("Zona: entrada");
+      expect((screen.getByLabelText("Objeto") as HTMLSelectElement).value).toBe("person");
+      expect(screen.getByRole("button", { name: "Sin revisar" })).toHaveAttribute("aria-pressed", "true");
+      expect(await screen.findByRole("list", { name: "Filtros aplicados" })).toHaveTextContent("Objeto: Persona");
     });
 
     it("writes the applied filters to the URL on submit and clears them on Limpiar", async () => {
       stubEventsUrlApi();
       const { router } = renderPage(Events);
       await screen.findByText("No hay eventos que coincidan.");
-      fireEvent.change(screen.getByLabelText("Zona"), { target: { value: "entrada" } });
-      // Draft edits alone never touch the URL.
+      fireEvent.change(screen.getByLabelText("Objeto"), { target: { value: "person" } });
       expect(router.state.location.search).toEqual({});
       fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
-      await waitFor(() => expect(router.state.location.search).toEqual({ zone: "entrada" }));
+      await waitFor(() => expect(router.state.location.search).toEqual({ label: "person" }));
       fireEvent.click(screen.getByRole("button", { name: "Limpiar" }));
       await waitFor(() => expect(router.state.location.search).toEqual({}));
     });
@@ -424,7 +394,7 @@ describe("Events", () => {
       renderPage(Events);
       fireEvent.click(await screen.findByRole("checkbox", { name: /Seleccionar evento.*Camera One/ }));
       fireEvent.click(screen.getByRole("checkbox", { name: /Seleccionar evento.*Camera Two/ }));
-      fireEvent.click(screen.getByRole("button", { name: "Marcar 2 como revisados" }));
+      fireEvent.click(screen.getByRole("button", { name: "Marcar como revisado" }));
       expect(await screen.findByRole("button", { name: "Guardando…" })).toBeDisabled();
       release(json({ items: [makeEvent("e1", { reviewed: true }), makeEvent("e2", { reviewed: true })] }));
       expect(await screen.findByText("2 eventos marcados como revisados.")).toBeInTheDocument();
@@ -433,27 +403,25 @@ describe("Events", () => {
       expect(screen.queryByRole("button", { name: /Marcar \d+ como/ })).not.toBeInTheDocument();
     });
 
-    it("can mark the selection as not reviewed", async () => {
-      let body: unknown;
-      stubBulkApi(["events.search", "events.review"], (b) => {
-        body = b;
-        return json({ items: [makeEvent("e1")] });
-      });
+    it("keeps mark-reviewed out of the bar until more than one event is selected", async () => {
+      stubBulkApi(["events.search", "events.review"]);
       renderPage(Events);
       fireEvent.click(await screen.findByRole("checkbox", { name: /Seleccionar evento.*Camera One/ }));
-      fireEvent.click(screen.getByRole("button", { name: "Marcar 1 como sin revisar" }));
-      expect(await screen.findByText("1 evento marcado como sin revisar.")).toBeInTheDocument();
-      expect(body).toEqual({ ids: ["e1"], reviewed: false });
+      expect(screen.queryByRole("button", { name: "Marcar como revisado" })).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Seleccionar todas" }));
+      expect(screen.getByRole("button", { name: "Marcar como revisado" })).toBeInTheDocument();
+      expect(screen.getByRole("checkbox", { name: /Seleccionar evento.*Camera Two/ })).toBeChecked();
     });
 
     it("keeps the selection and shows the error when the server refuses the batch", async () => {
       stubBulkApi(["events.search", "events.review"], () => json({ error: { code: "forbidden", message: "Sin permiso" } }, 403));
       renderPage(Events);
       fireEvent.click(await screen.findByRole("checkbox", { name: /Seleccionar evento.*Camera One/ }));
-      fireEvent.click(screen.getByRole("button", { name: "Marcar 1 como revisados" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Seleccionar evento.*Camera Two/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Marcar como revisado" }));
       expect(await screen.findByRole("alert")).toBeInTheDocument();
       expect(screen.getByRole("checkbox", { name: /Seleccionar evento.*Camera One/ })).toBeChecked();
-      expect(screen.getByRole("button", { name: "Marcar 1 como revisados" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Marcar como revisado" })).toBeEnabled();
     });
   });
 });

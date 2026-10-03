@@ -149,7 +149,7 @@ func (w *Worker) enrich(ctx context.Context, eventID uuid.UUID, reevaluate bool)
 		return err
 	}
 	color := ClassifyColor(img)
-	frigateType, frigateConf := TypeFromLabels(labels)
+	frigateType, frigateConf := SubjectType(labels, HasGreenBox(img))
 	if color.Name == "unknown" || color.Name == "other" {
 		if alt, ok := w.colorFromRegion(ctx, serverID, detectionIDs, frigateType); ok {
 			color = alt

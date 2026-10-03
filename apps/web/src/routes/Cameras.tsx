@@ -31,7 +31,7 @@ export function Cameras() {
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
-      <PageHeader title={t("Cámaras")} description={t("Solo aparecen las cámaras que tu usuario tiene permiso para ver.")} />
+      <PageHeader title={t("nav.cameras")} description={t("settings.camerasOnly")} />
       <div className="grid gap-3 sm:grid-cols-3">
         <TextInput aria-label="Buscar cámara" placeholder="Buscar por nombre" value={filter.q ?? ""} onChange={(e) => update("q", e.target.value)} />
         <Select aria-label="Filtrar por sitio" value={filter.site_id ?? ""} onChange={(e) => update("site_id", e.target.value)}>
@@ -106,7 +106,7 @@ export function Cameras() {
                     to="/cameras/$cameraId/frigate"
                     params={{ cameraId: c.id }}
                     aria-label={`Configuración de ${c.display_name}`}
-                    title={t("Configuración")}
+                    title={t("nav.settings")}
                     className="inline-flex items-center justify-center rounded border border-line bg-surface px-3 py-1.5 text-sm hover:bg-raised"
                   >
                     <Settings className="size-4" aria-hidden />

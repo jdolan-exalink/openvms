@@ -166,18 +166,9 @@ describe("Plates", () => {
 
     renderPage(Plates);
 
-    const plate = await screen.findByText("AB123CD");
-    expect(screen.queryByRole("img", { name: /Foto de la lectura de patente/ })).not.toBeInTheDocument();
-
-    fireEvent.mouseEnter(plate);
-
-    const img = await screen.findByRole("img", { name: "Foto de la lectura de patente AB123CD" });
-    expect(img).toHaveAttribute("src", "/media/v1/lpr/reads/r1/snapshot.jpg");
-
-    fireEvent.mouseLeave(plate);
-    await waitFor(() => {
-      expect(screen.queryByRole("img", { name: /Foto de la lectura de patente/ })).not.toBeInTheDocument();
-    });
+    await screen.findByText("AB123CD");
+    const img = screen.getByRole("img", { name: "Lectura de patente AB123CD" });
+    expect(img).toHaveAttribute("src", "/media/v1/lpr/reads/r1/snapshot.jpg?crop=1&quality=55");
   });
 
   it("does not show the plate photo preview without both snapshots.view and lpr.view", async () => {
@@ -194,10 +185,8 @@ describe("Plates", () => {
 
     renderPage(Plates);
 
-    const plate = await screen.findByText("AB123CD");
-    fireEvent.mouseEnter(plate);
-
-    expect(screen.queryByRole("img", { name: /Foto de la lectura de patente/ })).not.toBeInTheDocument();
+    await screen.findByText("AB123CD");
+    expect(screen.queryByRole("img", { name: /Lectura de patente/ })).not.toBeInTheDocument();
   });
 
   it("opens the plate detail modal with photo, clip and watermark overlay", async () => {
@@ -222,17 +211,16 @@ describe("Plates", () => {
     );
 
     renderPage(Plates);
-    await screen.findByText("AB123CD");
-
-    fireEvent.click(screen.getByRole("button", { name: "Ver detalle" }));
+    fireEvent.click(await screen.findByRole("button", { name: /AB123CD/ }));
 
     const dialog = await screen.findByRole("dialog", { name: "Patente AB123CD" });
     expect(dialog).toHaveAttribute("aria-modal", "true");
     // PDW-8: photo/clip are tabs now, photo selected by default — no <video> mounted yet.
     expect(screen.getByRole("img", { name: "Foto de la lectura de patente AB123CD" })).toHaveAttribute(
       "src",
-      "/media/v1/lpr/reads/r1/snapshot.jpg",
+      "/media/v1/lpr/reads/r1/snapshot.jpg?quality=100",
     );
+    expect(dialog).toHaveTextContent("AB 123 CD");
     expect(dialog.querySelector("video")).not.toBeInTheDocument();
     const photoOverlay = await screen.findByText(/Municipalidad de Helvecia/, { selector: "span" });
     expect(photoOverlay).toHaveTextContent("2024-01-01 07:00:00 -03:00");
@@ -262,7 +250,7 @@ describe("Plates", () => {
     expect(screen.queryByRole("button", { name: "Ver detalle" })).not.toBeInTheDocument();
   });
 
-  it('loads the next page via cursor when "Cargar más" is clicked', async () => {
+  it("loads the next page via cursor when Siguiente is clicked", async () => {
     const readsCalls: URL[] = [];
     vi.stubGlobal(
       "fetch",
@@ -281,17 +269,39 @@ describe("Plates", () => {
 
     renderPage(Plates);
 
-    await screen.findByRole("button", { name: "Cargar más" });
-    expect(screen.getAllByRole("row")).toHaveLength(2); // header row + 1 data row
+    await screen.findByText("AB123CD");
+    expect(screen.queryByText("XY987ZZ")).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Cargar más" }));
+    fireEvent.click(screen.getByRole("button", { name: "Siguiente" }));
 
     await waitFor(() => {
       expect(readsCalls.some((u) => u.searchParams.get("cursor") === "page2")).toBe(true);
     });
     await waitFor(() => {
-      expect(screen.getAllByRole("row")).toHaveLength(3); // header row + 2 data rows
+      expect(screen.getByText("XY987ZZ")).toBeInTheDocument();
     });
+    expect(screen.queryByText("AB123CD")).not.toBeInTheDocument();
+  });
+
+  it("filters the list as each plate character is typed", async () => {
+    let lastReadsUrl: URL | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/lpr/reads") {
+          lastReadsUrl = url;
+          return json({ items: [] });
+        }
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.search"), ...noCatalogs })(input);
+      }),
+    );
+    renderPage(Plates);
+    await screen.findByText("No hay lecturas que coincidan.");
+    fireEvent.change(screen.getByLabelText("Patente"), { target: { value: "ab1" } });
+    await waitFor(() => expect(lastReadsUrl?.searchParams.get("plate")).toBe("AB1"));
+    fireEvent.change(screen.getByLabelText("Patente"), { target: { value: "ab12" } });
+    await waitFor(() => expect(lastReadsUrl?.searchParams.get("plate")).toBe("AB12"));
   });
 
   it("shows applied-filter chips and a result count, and clears them", async () => {
@@ -309,7 +319,7 @@ describe("Plates", () => {
     );
 
     renderPage(Plates);
-    await screen.findByRole("table", { name: "Lecturas de patentes" });
+    await screen.findByRole("list", { name: "Lecturas LPR" });
     expect(screen.getByRole("status")).toHaveTextContent("2 lecturas");
     expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
 

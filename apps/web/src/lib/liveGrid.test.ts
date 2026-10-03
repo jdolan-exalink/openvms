@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile,
+  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile,
 } from "./liveGrid";
 
 describe("resizeTiles", () => {
@@ -84,6 +84,21 @@ describe("resolveDragEnd", () => {
 
   it("is a no-op when dropped onto something that isn't a tile", () => {
     expect(resolveDragEnd(cameraDragId("cam-1"), "not-a-tile")).toBeNull();
+  });
+
+  it("resolves dropping a map onto a tile as a placement", () => {
+    const map = { site_id: "s", name: "Planta / PB", floor_id: "f" };
+    expect(resolveDragEnd(mapDragId(map), tileDragId(1))).toEqual({ type: "place-map", index: 1, map });
+    expect(resolveDragEnd("tmap:not-json", tileDragId(0))).toBeNull();
+    expect(resolveDragEnd(mapDragId(map), LIVE_GRID_DROP_ID)).toBeNull();
+  });
+
+  it("places a map in a cell and swaps it when that map is already on the grid", () => {
+    const map = { site_id: "s", name: "Planta", floor_id: "f" };
+    const placed = placeMapAt([null, { camera_id: "cam-1", quality: "sub" }], 0, map);
+    expect(placed[0]).toEqual({ map });
+    const swapped = placeMapAt([{ map }, { camera_id: "cam-1", quality: "sub" }], 1, map);
+    expect(swapped).toEqual([{ camera_id: "cam-1", quality: "sub" }, { map }]);
   });
 
   it("resolves dropping a server or a folder onto the grid as a fill", () => {

@@ -77,6 +77,31 @@ func (s *Service) discover(ctx context.Context, info frigate.ConnInfo) (ProbeRes
 	return ProbeResult{Version: a.Version(), Adapter: a.Name(), Capabilities: caps, Cameras: cams}, nil
 }
 
+// RequireSiteManage reports whether the actor may install or change servers on the site.
+func (s *Service) RequireSiteManage(ctx context.Context, actor authz.Actor, siteID uuid.UUID) error {
+	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		_, err := requireSite(ctx, q, c, authz.ServersManage, siteID)
+		return err
+	})
+}
+
+// RequireServerManage loads a server the actor is allowed to change.
+func (s *Service) RequireServerManage(ctx context.Context, actor authz.Actor, id uuid.UUID) (ServerView, error) {
+	var out ServerView
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		srv, err := q.GetServer(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		if err := c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID)); err != nil {
+			return err
+		}
+		out = ServerView{srv}
+		return nil
+	})
+	return out, err
+}
+
 // requireSite checks that the site exists for the actor and that they hold p on it.
 func requireSite(ctx context.Context, q *db.Queries, c *access.Checker, p authz.Permission, siteID uuid.UUID) (db.GetSiteRow, error) {
 	site, err := q.GetSite(ctx, siteID)

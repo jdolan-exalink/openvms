@@ -26,8 +26,8 @@ export function Groups() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title={t("Grupos")}
-        description={t("Los permisos que le des a un grupo valen para todos sus miembros.")}
+        title={t("nav.groups")}
+        description={t("settings.groupPermissions")}
         actions={
           manage ? (
             <Button variant="primary" onClick={() => setEditing("new")}>

@@ -45,12 +45,12 @@ export function Sites() {
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-6">
       <PageHeader
-        title={t("Sitios")}
-        description={t("Ubicaciones físicas. Cada sitio agrupa uno o más servidores Frigate.")}
+        title={t("nav.sites")}
+        description={t("settings.sites")}
         actions={
           manage && !creating ? (
             <Button variant="primary" onClick={() => setCreating(true)}>
-              <Plus className="size-4" aria-hidden /> {t("Nuevo sitio")}
+              <Plus className="size-4" aria-hidden /> {t("common.newSite")}
             </Button>
           ) : null
         }
@@ -86,7 +86,7 @@ export function Sites() {
                   <div className="flex items-center gap-2 font-medium">
                     {s.name}
                     {defaults.has(s.id) && (
-                      <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent">{t("Por defecto")}</span>
+                      <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent">{t("common.default")}</span>
                     )}
                   </div>
                   {s.address && <div className="text-xs text-muted">{s.address}</div>}
@@ -104,8 +104,8 @@ export function Sites() {
                 </td>
                 {manage && (
                   <td className="text-right">
-                    <Button aria-label={`${t("Editar sitio")} ${s.name}`} onClick={() => setEditingId(s.id)}>
-                      {t("Editar sitio")}
+                    <Button aria-label={`${t("common.editSite")} ${s.name}`} onClick={() => setEditingId(s.id)}>
+                      {t("common.editSite")}
                     </Button>
                   </td>
                 )}
@@ -188,7 +188,7 @@ function SiteEditor({
   const blocked = isLast || site.server_count > 0 || pendingMove;
 
   return (
-    <Modal title={t("Editar sitio")} onClose={onClose}>
+    <Modal title={t("common.editSite")} onClose={onClose}>
       <form onSubmit={submit} className="flex flex-col gap-4">
         {isDefault && <p className="text-xs text-muted">Este es el sitio por defecto. Siempre tiene que quedar al menos uno.</p>}
         <div className="grid gap-4 sm:grid-cols-2">
@@ -233,7 +233,7 @@ function SiteEditor({
             title={isLast ? "Siempre tiene que quedar al menos un sitio" : site.server_count > 0 || pendingMove ? "Mové los servidores a otro sitio y guardá antes de eliminarlo" : undefined}
             onClick={() => setConfirming(true)}
           >
-            {t("Eliminar sitio")}
+            {t("common.deleteSite")}
           </Button>
           <div className="flex gap-2">
             <Button onClick={onClose}>Cancelar</Button>
@@ -245,9 +245,9 @@ function SiteEditor({
       </form>
       {confirming && (
         <ConfirmDialog
-          title={t("Eliminar sitio")}
+          title={t("common.deleteSite")}
           message={`¿Eliminar ${site.name}? Esta acción no se puede deshacer.`}
-          confirmLabel={t("Eliminar sitio")}
+          confirmLabel={t("common.deleteSite")}
           pending={remove.isPending}
           error={remove.error}
           onConfirm={() => remove.mutate()}
@@ -311,7 +311,7 @@ function CreateSite({ onDone, platform }: { onDone: () => void; platform: boolea
         <ErrorNote error={create.error} />
         <div className="flex gap-2">
           <Button type="submit" variant="primary" disabled={create.isPending}>
-            {t("Nuevo sitio")}
+            {t("common.newSite")}
           </Button>
           <Button onClick={onDone}>Cancelar</Button>
         </div>

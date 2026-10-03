@@ -23,7 +23,15 @@ export function MapPlateSnapshot({ target, onClose }: { target: PlateSnapshotTar
   const protectedId = `plate:${target.id}`;
   const alreadyProtected = saved.data?.some((item) => item.id === protectedId) ?? false;
   const protect = useMutation({
-    mutationFn: () => protectRemoteImage({ id: protectedId, kind: "plate", title: target.plate, detail: target.cameraName, imageUrl: target.imageUrl }),
+    mutationFn: () => protectRemoteImage({
+      id: protectedId,
+      kind: "plate",
+      title: target.plate,
+      detail: target.cameraName,
+      imageUrl: target.imageUrl,
+      fullUrl: `/media/v1/lpr/reads/${encodeURIComponent(target.id)}/snapshot.jpg`,
+      clipUrl: `/media/v1/lpr/reads/${encodeURIComponent(target.id)}/clip.mp4`,
+    }),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["protected-images"] }),
   });
   return (

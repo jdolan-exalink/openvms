@@ -156,6 +156,8 @@ export type PlateFilter = {
   site_id?: string[];
   camera_id?: string[];
   camera_group_id?: string[];
+  vehicle_type?: string[];
+  vehicle_color?: string[];
   from?: string;
   to?: string;
   limit?: number;

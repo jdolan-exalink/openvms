@@ -184,8 +184,8 @@ export function FrigateCameraConfig() {
   const ctx = { root: root ?? {}, secretsVisible, readOnly };
   const header = (
     <PageHeader
-      title={`Frigate · ${doc.data?.camera_name ?? t("Cámara")}`}
-      description={version ? t("Configuración de la cámara en Frigate {version}. Los cambios se aplican al servidor.", { version }) : undefined}
+      title={`Frigate · ${doc.data?.camera_name ?? t("common.camera")}`}
+      description={version ? t("settings.cameraConfig", { version }) : undefined}
       actions={
         <Link to="/cameras" className="inline-flex items-center gap-2 text-sm text-muted hover:text-ink">
           <FontAwesomeIcon icon={faArrowLeft} aria-hidden /> Volver a cámaras
@@ -228,7 +228,7 @@ export function FrigateCameraConfig() {
             onClick={() => setActive(GENERAL)}
             className={cn("rounded-lg px-3 py-1.5 text-xs font-medium whitespace-nowrap", activeSection === GENERAL ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
           >
-            {t("General")}
+            {t("common.general")}
           </button>
           {sections.map((s) => (
             <button
@@ -254,7 +254,7 @@ export function FrigateCameraConfig() {
           </button>
         </nav>
 
-        <section aria-label={activeSection === HISTORY ? "Historial" : activeSection === GENERAL ? t("General") : sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded border border-line bg-surface p-4">
+        <section aria-label={activeSection === HISTORY ? "Historial" : activeSection === GENERAL ? t("common.general") : sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded border border-line bg-surface p-4">
           {activeSection === GENERAL ? (
             <CameraGeneral cameraId={cameraId} canManage={can(me.data, "cameras.manage")} />
           ) : activeSection === HISTORY ? (

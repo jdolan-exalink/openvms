@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 
 export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
@@ -13,20 +14,21 @@ export function PageHeader({ title, description, actions }: { title: string; des
   );
 }
 
-type StatusStyle = { label: string; dot: string; text: string };
-const unknownStatus: StatusStyle = { label: "Sin datos", dot: "bg-muted", text: "text-muted" };
+type StatusStyle = { label: MessageKey; dot: string; text: string };
+const unknownStatus: StatusStyle = { label: "status.unknown", dot: "bg-muted", text: "text-muted" };
 const statusStyles: Record<string, StatusStyle> = {
-  online: { label: "En línea", dot: "bg-ok", text: "text-ok" },
-  degraded: { label: "Degradado", dot: "bg-warn", text: "text-warn" },
-  offline: { label: "Fuera de línea", dot: "bg-bad", text: "text-bad" },
+  online: { label: "status.online", dot: "bg-ok", text: "text-ok" },
+  degraded: { label: "status.degraded", dot: "bg-warn", text: "text-warn" },
+  offline: { label: "status.offline", dot: "bg-bad", text: "text-bad" },
 };
 
 export function StatusBadge({ status }: { status: string }) {
+  const t = useT();
   const s = statusStyles[status] ?? unknownStatus;
   return (
     <span className={cn("inline-flex items-center gap-1.5 text-xs whitespace-nowrap", s.text)}>
       <span className={cn("size-2 rounded-full", s.dot)} aria-hidden />
-      {s.label}
+      {t(s.label)}
     </span>
   );
 }

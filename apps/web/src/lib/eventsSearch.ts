@@ -1,11 +1,10 @@
+import { toLocalInput } from "@/lib/format";
+
 /** The Events filter form and its URL representation (applied filters live in the query string). */
 export type EventsForm = {
-  site: string;
+  server: string;
   camera: string;
-  cameraGroup: string;
   label: string;
-  zone: string;
-  subLabel: string;
   severity: "" | "alert" | "detection";
   plate: string;
   from: string;
@@ -18,12 +17,9 @@ export type EventsForm = {
 };
 
 export const emptyEventsForm: EventsForm = {
-  site: "",
+  server: "",
   camera: "",
-  cameraGroup: "",
   label: "",
-  zone: "",
-  subLabel: "",
   severity: "",
   plate: "",
   from: "",
@@ -35,14 +31,20 @@ export const emptyEventsForm: EventsForm = {
   vehicleColor: "",
 };
 
+/** todayEventsRange is the local calendar day, 00:00 through 23:59, in datetime-local form. */
+export function todayEventsRange(now = new Date()): { from: string; to: string } {
+  const start = new Date(now);
+  start.setHours(0, 0, 0, 0);
+  const end = new Date(now);
+  end.setHours(23, 59, 0, 0);
+  return { from: toLocalInput(start), to: toLocalInput(end) };
+}
+
 /** EventsSearch is the validated query string of /events; absent keys mean "no filter". */
 export type EventsSearch = {
-  site?: string;
+  server?: string;
   camera?: string;
-  group?: string;
   label?: string;
-  zone?: string;
-  sub?: string;
   severity?: "alert" | "detection";
   plate?: string;
   from?: string;
@@ -64,12 +66,9 @@ const flag = (v: unknown): true | undefined => (v === true || v === "true" ? tru
 
 export function parseEventsSearch(s: Record<string, unknown>): EventsSearch {
   const out: EventsSearch = {
-    site: str(s.site),
+    server: str(s.server),
     camera: str(s.camera),
-    group: str(s.group),
     label: str(s.label),
-    zone: str(s.zone),
-    sub: str(s.sub),
     severity: s.severity === "alert" || s.severity === "detection" ? s.severity : undefined,
     plate: str(s.plate),
     from: str(s.from),
@@ -84,18 +83,16 @@ export function parseEventsSearch(s: Record<string, unknown>): EventsSearch {
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined)) as EventsSearch;
 }
 
-export function searchToForm(s: EventsSearch): EventsForm {
+export function searchToForm(s: EventsSearch, now = new Date()): EventsForm {
+  const today = todayEventsRange(now);
   return {
-    site: s.site ?? "",
+    server: s.server ?? "",
     camera: s.camera ?? "",
-    cameraGroup: s.group ?? "",
     label: s.label ?? "",
-    zone: s.zone ?? "",
-    subLabel: s.sub ?? "",
     severity: s.severity ?? "",
     plate: s.plate ?? "",
-    from: s.from ?? "",
-    to: s.to ?? "",
+    from: s.from ?? today.from,
+    to: s.to ?? today.to,
     pending: !!s.pending,
     hasSnapshot: !!s.snapshot,
     hasPreview: !!s.preview,
@@ -104,18 +101,16 @@ export function searchToForm(s: EventsSearch): EventsForm {
   };
 }
 
-export function formToSearch(f: EventsForm): EventsSearch {
+export function formToSearch(f: EventsForm, now = new Date()): EventsSearch {
+  const today = todayEventsRange(now);
   return parseEventsSearch({
-    site: f.site,
+    server: f.server,
     camera: f.camera,
-    group: f.cameraGroup,
     label: f.label,
-    zone: f.zone.trim(),
-    sub: f.subLabel.trim(),
     severity: f.severity,
     plate: f.plate.trim(),
-    from: f.from,
-    to: f.to,
+    from: f.from === today.from ? "" : f.from,
+    to: f.to === today.to ? "" : f.to,
     pending: f.pending,
     snapshot: f.hasSnapshot,
     preview: f.hasPreview,

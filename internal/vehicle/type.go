@@ -31,6 +31,25 @@ func TypeFromLabels(labels []string) (string, float32) {
 	return "unknown", 0
 }
 
+// SubjectType is the vehicle inside the snapshot. Frigate's green box is the
+// car, truck or bus the photo shows. A motorcycle listed first must not take
+// that box: the rider can share the event with the car that is actually framed.
+func SubjectType(labels []string, greenBox bool) (string, float32) {
+	if greenBox {
+		for _, label := range labels {
+			switch label {
+			case "truck":
+				return "truck", 0.75
+			case "bus":
+				return "bus", 0.75
+			case "car", "car-verified":
+				return "car", 0.75
+			}
+		}
+	}
+	return TypeFromLabels(labels)
+}
+
 // IsPerson reports whether a person clothing job should be enqueued.
 func IsPerson(labels []string) bool {
 	for _, label := range labels {

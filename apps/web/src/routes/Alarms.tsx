@@ -126,8 +126,8 @@ export function Alarms() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader
-        title={t("Alarmas")}
-        description={t("Bandeja de alarmas por eventos de alerta. Reconocé, asigná y resolvé incidentes en tiempo real.")}
+        title={t("nav.alarms")}
+        description={t("settings.alarms")}
       />
 
       <ErrorNote error={alarms.error ?? mutationError} />

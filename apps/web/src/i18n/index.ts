@@ -1,8 +1,9 @@
 import { useSyncExternalStore } from "react";
-import { catalog } from "./catalog";
-import { isLocale, type Locale } from "./locale";
+import { fallbackLocale, isLocale, LOCALES, messageCatalogs, translate, type Locale } from "./load";
+import type { MessageKey } from "./modules";
 
-export { LOCALES, isLocale, type Locale } from "./locale";
+export { LOCALES, fallbackLocale, isLocale, messageCatalogs, translate, type Locale, type LocaleMeta } from "./load";
+export { sourceModules, type MessageKey } from "./modules";
 
 const STORAGE_KEY = "openvms.locale";
 
@@ -23,20 +24,20 @@ function readStored(): Locale | null {
 function fromNavigator(): Locale | null {
   if (typeof navigator === "undefined") return null;
   const lang = navigator.language.toLowerCase();
-  if (lang.startsWith("pt")) return "pt";
-  if (lang.startsWith("en")) return "en";
-  if (lang.startsWith("es")) return "es";
+  const match = (prefix: string) => Object.keys(messageCatalogs).find((id) => id === prefix || id.startsWith(`${prefix}-`)) ?? null;
+  if (lang.startsWith("pt")) return match("pt");
+  if (lang.startsWith("en")) return match("en");
+  if (lang.startsWith("es")) return match("es");
   return null;
 }
 
 function readInitial(): Locale {
-  return readStored() ?? fromNavigator() ?? "es";
+  return readStored() ?? fromNavigator() ?? fallbackLocale;
 }
 
 function apply(locale: Locale) {
   if (typeof document === "undefined") return;
-  const html = locale === "pt" ? "pt-BR" : locale;
-  document.documentElement.lang = html;
+  document.documentElement.lang = LOCALES.find((item) => item.id === locale)?.html ?? locale;
 }
 
 /** bootLocale applies the saved language before the first paint. */
@@ -50,6 +51,7 @@ export function getLocale(): Locale {
 }
 
 export function setLocale(locale: Locale) {
+  if (!isLocale(locale)) return;
   current = locale;
   try {
     localStorage.setItem(STORAGE_KEY, locale);
@@ -65,21 +67,12 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-export function translate(locale: Locale, source: string, vars?: Vars): string {
-  const table = locale === "es" ? undefined : catalog[locale];
-  let text = table?.[source] ?? source;
-  if (vars) {
-    for (const [key, value] of Object.entries(vars)) text = text.replaceAll(`{${key}}`, String(value));
-  }
-  return text;
-}
-
 /** useT returns the translator for the active language and redraws when it changes. */
 export function useT() {
-  const locale = useSyncExternalStore(subscribe, getLocale, () => "es" as Locale);
-  return (source: string, vars?: Vars) => translate(locale, source, vars);
+  const locale = useSyncExternalStore(subscribe, getLocale, () => fallbackLocale);
+  return (key: MessageKey, vars?: Vars) => translate(locale, key, vars);
 }
 
 export function useLocale(): Locale {
-  return useSyncExternalStore(subscribe, getLocale, () => "es");
+  return useSyncExternalStore(subscribe, getLocale, () => fallbackLocale);
 }
