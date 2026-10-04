@@ -35,7 +35,7 @@ import { assignRecPlayers, parseRecSearch, pickMaster, REC_ENTRY_OFFSET_S, recSe
 import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { can } from "@/lib/perm";
 import { LivePhone } from "@/components/LivePhone";
-import { useIsPhoneLayout } from "@/lib/useIsPhoneLayout";
+import { useIsPhoneDevice } from "@/lib/useIsPhoneDevice";
 import { useCameraFolders } from "@/lib/useCameraFolders";
 import { useRecData } from "@/lib/useRecData";
 import { useRecPlayback } from "@/lib/useRecPlayback";
@@ -775,7 +775,7 @@ function LiveDesktop() {
 
 /** Live renders the phone camera list below `md` and the grid otherwise. */
 export function Live() {
-  return useIsPhoneLayout() ? <LivePhone /> : <LiveDesktop />;
+  return useIsPhoneDevice() ? <LivePhone /> : <LiveDesktop />;
 }
 
 /** Overlay action on a camera tile: a 32px pill on the translucent surface so it reads over any video. */

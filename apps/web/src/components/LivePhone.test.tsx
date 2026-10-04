@@ -1,48 +1,31 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { Live } from "@/routes/Live";
 
 vi.mock("@/components/MsePlayer", () => ({
-  MsePlayer: ({ cameraId, quality }: { cameraId: string; quality?: string }) => <div data-testid="player" data-camera={cameraId} data-quality={quality} />,
+  MsePlayer: ({ cameraId, quality, persistent, suspendOffscreen }: { cameraId: string; quality?: string; persistent?: boolean; suspendOffscreen?: boolean }) => (
+    <div data-testid="player" data-camera={cameraId} data-quality={quality} data-persistent={String(!!persistent)} data-suspend-offscreen={String(suspendOffscreen ?? true)} />
+  ),
 }));
 
-/** MockIO records its targets so a test decides which cards are on screen. */
-class MockIO {
-  static instances: MockIO[] = [];
-  targets = new Set<Element>();
-  constructor(public cb: (entries: unknown[]) => void) {
-    MockIO.instances.push(this);
-  }
-  observe(el: Element) {
-    this.targets.add(el);
-  }
-  unobserve(el: Element) {
-    this.targets.delete(el);
-  }
-  disconnect() {
-    this.targets.clear();
-  }
-  takeRecords() {
-    return [];
-  }
-}
+/** A stand-in session: only what the main layer of the single view touches. */
+const sessions = vi.hoisted(() => ({ main: null as unknown }));
+vi.mock("@/lib/live/PlayerSessionProvider", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/live/PlayerSessionProvider")>()),
+  usePlayerSession: vi.fn((cameraId: string, quality: string) => (quality === "main" ? ({ ...(sessions.main as object), cameraId, quality } as never) : null)),
+}));
 
-function showCards(ids: string[]) {
-  act(() => {
-    for (const io of MockIO.instances) {
-      const entries = [...io.targets].map((el, index) => {
-        const id = (el as HTMLElement).dataset.cameraId ?? "";
-        const on = ids.includes(id);
-        return { target: el, isIntersecting: on, intersectionRatio: on ? 1 : 0, boundingClientRect: { top: index * 100, width: 320, height: 180 } };
-      });
-      io.cb(entries);
-    }
-  });
+function fakeMainSession() {
+  const video = document.createElement("video");
+  const attach = vi.fn((el: HTMLElement) => el.appendChild(video));
+  sessions.main = { video, attach, detach: vi.fn(() => video.remove()), setMuted: vi.fn(), setObjectFit: vi.fn() };
+  return { video, attach };
 }
 
 function stubPhone(phone: boolean) {
-  vi.stubGlobal("matchMedia", (query: string) => ({ matches: phone && query === "(max-width: 767px)", media: query, addEventListener() {}, removeEventListener() {} }));
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: phone && query === "(pointer: coarse)", media: query, addEventListener() {}, removeEventListener() {} }));
+  vi.stubGlobal("screen", { width: phone ? 390 : 1920, height: phone ? 844 : 1080 });
 }
 
 const camera = (id: string, name: string, site = "s1") => ({
@@ -62,9 +45,8 @@ function stubBackend(cameras: ReturnType<typeof camera>[]) {
 }
 
 beforeEach(() => {
-  MockIO.instances = [];
   localStorage.clear();
-  vi.stubGlobal("IntersectionObserver", MockIO);
+  fakeMainSession();
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -104,29 +86,29 @@ describe("Live on a phone", () => {
     expect(names()).toHaveLength(3);
   });
 
-  it("plays only visible cards and shows snapshots for the rest", async () => {
-    stubPhone(true);
-    stubBackend([camera("c1", "One"), camera("c2", "Two"), camera("c3", "Three")]);
-    renderPage(Live);
-    await screen.findByRole("button", { name: "Ver One" });
-    expect(screen.queryAllByTestId("player")).toHaveLength(0);
-    expect(document.querySelector('img[src="/media/v1/cameras/c1/snapshot.jpg?h=360"]')).not.toBeNull();
-    showCards(["c2"]);
-    const players = screen.getAllByTestId("player");
-    expect(players).toHaveLength(1);
-    expect(players[0]).toHaveAttribute("data-camera", "c2");
-    expect(players[0]).toHaveAttribute("data-quality", "sub");
-    expect(document.querySelector('img[src="/media/v1/cameras/c2/snapshot.jpg?h=360"]')).toBeNull();
-  });
-
-  it("caps simultaneous live players at four", async () => {
+  it("plays every card on the sub stream through persistent sessions that are not suspended off screen", async () => {
     stubPhone(true);
     const list = Array.from({ length: 6 }, (_, i) => camera(`c${i + 1}`, `Cam ${i + 1}`));
     stubBackend(list);
     renderPage(Live);
     await screen.findByRole("button", { name: "Ver Cam 1" });
-    showCards(list.map((c) => c.id));
-    expect(screen.getAllByTestId("player").map((p) => p.getAttribute("data-camera"))).toEqual(["c1", "c2", "c3", "c4"]);
+    const players = screen.getAllByTestId("player");
+    expect(players.map((p) => p.getAttribute("data-camera"))).toEqual(list.map((c) => c.id));
+    for (const player of players) {
+      expect(player).toHaveAttribute("data-quality", "sub");
+      expect(player).toHaveAttribute("data-persistent", "true");
+      expect(player).toHaveAttribute("data-suspend-offscreen", "false");
+    }
+  });
+
+  it("keeps the camera snapshot under every card as the poster until the first frame", async () => {
+    stubPhone(true);
+    stubBackend([camera("c1", "One"), camera("c2", "Two")]);
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver One" });
+    for (const id of ["c1", "c2"]) {
+      expect(document.querySelector(`img[src="/media/v1/cameras/${id}/snapshot.jpg?h=360"]`)).not.toBeNull();
+    }
   });
 
   it("opens a single main-quality view and returns to the list keeping filter and scroll", async () => {
@@ -143,13 +125,29 @@ describe("Live on a phone", () => {
     const single = await screen.findByTestId("live-phone-single");
     const player = within(single).getByTestId("player");
     expect(player).toHaveAttribute("data-camera", "c2");
-    expect(player).toHaveAttribute("data-quality", "main");
+    expect(player).toHaveAttribute("data-quality", "sub");
+    expect(within(single).getByTestId("phone-main-layer")).toBeInTheDocument();
     expect(within(single).getByText("East")).toBeInTheDocument();
-    expect(screen.getAllByTestId("player")).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Volver" }));
     await waitFor(() => expect(screen.queryByTestId("live-phone-single")).toBeNull());
     expect(router.state.location.search).not.toHaveProperty("camera");
     expect(screen.getByRole("button", { name: "Beta" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByTestId("live-phone-list").scrollTop).toBe(120);
+  });
+
+  it("shows the playing sub picture on open and layers main on top of it", async () => {
+    stubPhone(true);
+    const { video, attach } = fakeMainSession();
+    stubBackend([camera("c1", "North")]);
+    renderPage(Live, "/?camera=c1");
+    const single = await screen.findByTestId("live-phone-single");
+    const { usePlayerSession } = await import("@/lib/live/PlayerSessionProvider");
+    expect(usePlayerSession).toHaveBeenCalledWith("c1", "main", "srv1");
+    // Sub stays visible and main is attached on top while it has no picture yet.
+    expect(within(single).getByTestId("player")).toHaveAttribute("data-quality", "sub");
+    expect(attach).toHaveBeenCalled();
+    expect(within(single).getByTestId("phone-main-layer")).toContainElement(video);
+    // The sub session stays mounted under main so going back to the list is instant.
+    expect(within(single).getByTestId("player")).toHaveAttribute("data-camera", "c1");
   });
 });
