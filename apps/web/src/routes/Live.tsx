@@ -53,6 +53,8 @@ function copyViewName(name: string, taken: Set<string>): string {
 const unixNow = () => Math.floor(Date.now() / 1000);
 /** How often the shared REC time is written to the URL while playing. */
 const URL_SYNC_MS = 15_000;
+/** Explorer panel is w-80 (20rem) from the rail edge; main already pads 2rem, plus an 0.5rem gap. */
+const PINNED_STYLE = { "--pinned-offset": "18.5rem" } as CSSProperties;
 
 /**
  * Live is the multi-server live screen (PRD §46-49): a camera tree grouped by site and
@@ -562,7 +564,11 @@ export function Live() {
           ? mapFromDragId(activeDrag)?.name
           : undefined;
   const modeToggle = <LiveModeToggle rec={rec} onChange={setMode} />;
-  const topBarActions = canRec && !fullscreen && topBar.available && topBar.target ? createPortal(modeToggle, topBar.target) : null;
+  // The pinned explorer is a fixed panel that covers the header's left edge, so the portaled
+  // toggle starts at the panel's right edge instead of underneath it.
+  const topBarActions = canRec && !fullscreen && topBar.available && topBar.target
+    ? createPortal(<div data-testid="live-mode-toggle-slot" className={cn(sidebarPinned && "md:ml-(--pinned-offset)")} style={PINNED_STYLE}>{modeToggle}</div>, topBar.target)
+    : null;
   const canCreateView = can(me.data, "views.create_private") || can(me.data, "views.create_shared");
   const canShareView = can(me.data, "views.create_shared");
   const sidebarContent = (
@@ -599,7 +605,7 @@ export function Live() {
   const sidebar = createPortal(
     <div
       data-testid="live-edge"
-      className={cn("fixed inset-y-0 z-40", fullscreen ? "left-0" : "left-0 md:left-16", edgeVisible ? "w-80 max-w-[85vw]" : "w-3")}
+      className={cn("fixed inset-y-0 z-40", fullscreen ? "left-0" : "left-0 md:left-(--rail-w)", edgeVisible ? "w-80 max-w-[85vw]" : "w-3")}
       onPointerEnter={revealEdge}
       onPointerLeave={concealEdge}
     >
@@ -617,7 +623,7 @@ export function Live() {
   );
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col gap-2", sidebarPinned && "md:pl-80")}>
+    <div className={cn("flex min-h-0 flex-1 flex-col gap-2", sidebarPinned && "md:pl-(--pinned-offset)")} style={PINNED_STYLE}>
       <h1 className="sr-only">{tr("nav.live")}</h1>
       {topBarActions}
       <DndContext
@@ -835,8 +841,8 @@ function GridTile({
       onClick={onSelect}
       onDoubleClick={onToggleFocus}
       className={cn(
-        "group relative aspect-video overflow-hidden bg-video outline-none [transition:border-radius_var(--md-motion-spatial-fast)] focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
-        isSelected ? "rounded-m3-2xl outline-2 -outline-offset-2 outline-primary" : "rounded-m3-xl",
+        "group relative isolate aspect-video overflow-hidden [contain:paint] bg-video outline-none [transition:border-radius_var(--md-motion-spatial-fast)] focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
+        isSelected ? "rounded-m3-2xl outline-2 outline-offset-1 outline-primary" : "rounded-m3-xl",
         isDragging && "opacity-50",
         isHidden && "hidden",
       )}

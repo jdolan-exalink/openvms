@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { clearToken } from "@/api/auth";
 import { api, type Schemas } from "@/api/client";
 import { meQuery } from "@/api/queries";
@@ -58,11 +58,11 @@ export function Layout() {
       <VideoSurfaceLayer>
         <AppShell
           primaryNav={
-            <div className="flex min-h-full w-22 shrink-0 flex-col items-center bg-surface-dim py-3">
-              <Link to="/live" aria-label={t("common.brandLive")} title="OpenVMS" className="mb-5 flex size-12 items-center justify-center rounded-m3-lg bg-primary text-on-primary outline-none transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+            <div className="flex min-h-full w-(--rail-w) shrink-0 flex-col items-center bg-surface-dim py-3">
+              <Link to="/live" aria-label={t("common.brandLive")} title="OpenVMS" className="mb-5 flex size-12 shrink-0 items-center justify-center rounded-m3-lg bg-primary text-on-primary outline-none transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
                 <Brand className="size-6" aria-hidden />
               </Link>
-              <nav className="flex w-full flex-1 flex-col items-center gap-4 overflow-y-auto" aria-label={t("common.mainNav")}>
+              <nav className="flex w-full flex-1 flex-col items-center gap-3 overflow-y-auto" aria-label={t("common.mainNav")}>
                 {navGroups.map((group, i) => (
                   <NavGroupLinks key={group.title ?? i} group={group} me={me.data} pathname={pathname} features={features} />
                 ))}
@@ -121,32 +121,72 @@ export function Layout() {
   );
 }
 
+/**
+ * M3 plain tooltip for icon-only rail items. It is position: fixed because the rail scrolls
+ * (overflow clips absolute children); it opens on hover after a short delay and immediately on
+ * keyboard focus, and Escape dismisses it.
+ */
+function RailTooltipTarget({ label, children }: { label: string; children: (props: { ref: (el: HTMLElement | null) => void; describedBy: string | undefined; handlers: Record<string, unknown> }) => ReactNode }) {
+  const id = useId();
+  const el = useRef<HTMLElement | null>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  const show = () => {
+    const r = el.current?.getBoundingClientRect();
+    if (r) setPos({ top: r.top + r.height / 2, left: r.right + 8 });
+  };
+  const hide = () => {
+    window.clearTimeout(timer.current);
+    setPos(null);
+  };
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const handlers = {
+    onPointerEnter: () => {
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(show, 400);
+    },
+    onPointerLeave: hide,
+    onFocus: show,
+    onBlur: hide,
+    onKeyDown: (e: { key: string }) => { if (e.key === "Escape") hide(); },
+  };
+  return (
+    <>
+      {children({ ref: (node) => { el.current = node; }, describedBy: pos ? id : undefined, handlers })}
+      {pos && (
+        <span id={id} role="tooltip" style={{ top: pos.top, left: pos.left }} className="pointer-events-none fixed z-50 -translate-y-1/2 whitespace-nowrap rounded-m3-sm bg-surface-3 px-2 py-1 text-xs font-medium text-on-surface shadow-md animate-in fade-in duration-100 motion-reduce:animate-none">
+          {label}
+        </span>
+      )}
+    </>
+  );
+}
+
 function NavGroupLinks({ group, me, pathname, features }: { group: NavGroup; me: Schemas["Me"] | undefined; pathname: string; features: FeatureFlags }) {
   const t = useT();
   return (
     <div className="flex flex-col items-center gap-3">
       {group.items.filter((item) => isNavItemVisible(item, me, features)).map((item) => {
         const active = isNavItemActive(item, pathname);
-        const body = (
-          <>
-            <span className={cn("flex h-8 w-14 items-center justify-center rounded-full transition-colors", active ? "bg-primary-container text-on-primary-container" : "group-hover:bg-surface-2")}>
-              <Icon icon={item.icon} size="md" strokeWidth={active ? 2 : undefined} />
-            </span>
-            <span className={cn("max-w-full truncate px-1 text-xs", active ? "font-bold text-on-surface" : "text-on-surface-variant")}>{t(item.label)}</span>
-          </>
-        );
+        const label = t(item.label);
+        const body = <Icon icon={item.icon} size="md" strokeWidth={active ? 2 : undefined} />;
         const classes = cn(
-          "group flex w-20 min-h-14 flex-col items-center gap-1 rounded-m3-md outline-none focus-visible:outline-2 focus-visible:outline-primary",
+          "group flex size-12 shrink-0 items-center justify-center rounded-full outline-none transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+          active ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-surface-2",
           !item.to && "cursor-default opacity-50",
         );
-        return item.to ? (
-          <Link key={item.label} to={item.to} aria-current={active ? "page" : undefined} className={classes}>
-            {body}
-          </Link>
-        ) : (
-          <span key={item.label} aria-label={t("nav.comingSoon", { label: t(item.label) })} title={t("nav.comingIn", { label: t(item.label), milestone: item.milestone ?? "" })} className={classes}>
-            {body}
-          </span>
+        return (
+          <RailTooltipTarget key={item.label} label={item.to ? label : t("nav.comingIn", { label, milestone: item.milestone ?? "" })}>
+            {({ ref, describedBy, handlers }) => item.to ? (
+              <Link ref={ref} to={item.to} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined} className={classes} {...handlers}>
+                {body}
+              </Link>
+            ) : (
+              <span ref={ref} tabIndex={0} aria-label={t("nav.comingSoon", { label })} aria-describedby={describedBy} className={classes} {...handlers}>
+                {body}
+              </span>
+            )}
+          </RailTooltipTarget>
         );
       })}
     </div>

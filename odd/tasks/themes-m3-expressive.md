@@ -100,5 +100,7 @@ Every migrated screen follows the same rules so the language is uniform:
 - Two pre-existing MapShell test failures (URL `site` param on camera events navigation; live hover preview slot).
 - Push and PR slices per feature-branch-chain: user decision.
 
+- Visual feedback 1 (2026-10-04, user on the local stack): (1) rail icon-only with tooltips, (2) camera explorer panel overlapped the rail, (3) live/recorded toggle hidden when the explorer is pinned, (4) video corners visible through rounded tiles. Delegated writer. Causes: panel hardcoded `md:left-16` vs 88px rail; pinned panel (fixed z-40) covered the header slot holding the toggle; composited video ignores parent radius clip without isolation/paint containment, outline was drawn inside. Fix: `--rail-w: 4.5rem` defined once and used by rail and panel; rail tooltip (role tooltip, aria-describedby, 400ms hover, instant on focus, Escape closes); `--pinned-offset` applied to content and toggle slot; tiles `isolate [contain:paint]` with outline outside (also Playback and MapGrowFrame). RED: rail test (visible text, no tooltip) and toggle-slot test failed first. GREEN: Layout/AppShell/Live 49/49 (parent re-ran Layout/Live); full suite 771/773 with only the two known MapShell failures; typecheck and build OK.
+
 ## Next step
-Visual pass on the local stack once the user approves deploying it. T9, T10, then the full verification (vitest, typecheck, build). User authorized: if every check passes, start T11 right away.
+User re-checks the four items in the browser. T9, T10, then the full verification (vitest, typecheck, build). User authorized: if every check passes, start T11 right away.

@@ -51,6 +51,8 @@
 }
 
 :root {
+  /* Desktop navigation rail width (icon-only: 48px target + 12px gutters). Single source of truth. */
+  --rail-w: 4.5rem;
   /* Legacy variables alias the M3 roles so existing utilities keep working. */
   --bg-app: var(--md-surface-dim);
   --bg-nav: var(--md-surface-dim);

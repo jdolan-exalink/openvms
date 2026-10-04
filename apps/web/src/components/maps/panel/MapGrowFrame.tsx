@@ -158,7 +158,7 @@ export function MapGrowFrame({
           ref={cardRef}
           role="dialog"
           aria-label={label}
-          className="pointer-events-auto relative z-10 w-[min(56rem,100%)] origin-center overflow-hidden rounded-m3-xl bg-video shadow-2xl"
+          className="pointer-events-auto relative z-10 w-[min(56rem,100%)] origin-center isolate overflow-hidden rounded-m3-xl [contain:paint] bg-video shadow-2xl"
         >
           {children}
         </div>

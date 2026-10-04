@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { AppShell } from "@/components/AppShell";
+import { AppShell, TopBarActionsSlot } from "@/components/AppShell";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import { json, renderPage, stubApi } from "@/test-utils";
@@ -793,6 +793,24 @@ describe("Live with persistent players (P0 acceptance)", () => {
       renderPage(Live);
       await screen.findByLabelText("Cuadro 1");
       expect(screen.queryByRole("group", { name: "Modo de reproducción" })).toBeNull();
+    });
+
+    it("keeps the toggle clear of the pinned explorer and flush when unpinned", async () => {
+      setup(withRecordings);
+      const WithShell = () => (
+        <AppShell primaryNav={<nav aria-label="Primary navigation" />} contextSidebar={<div id="live-context-sidebar" />}>
+          <TopBarActionsSlot />
+          <Live />
+        </AppShell>
+      );
+      const first = renderPage(WithShell);
+      await screen.findByRole("button", { name: "Grabado" });
+      expect(screen.getByTestId("live-mode-toggle-slot")).toHaveClass("md:ml-(--pinned-offset)");
+      first.unmount();
+      localStorage.setItem("openvms.live.sidebar.pinned", "0");
+      renderPage(WithShell);
+      await screen.findByRole("button", { name: "Grabado" });
+      expect(screen.getByTestId("live-mode-toggle-slot")).not.toHaveClass("md:ml-(--pinned-offset)");
     });
 
     it("switches to REC from the toggle and back to LIVE, clearing the URL state", async () => {

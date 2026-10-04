@@ -305,7 +305,7 @@ export function Playback() {
                     startOffset={instant - winStart}
                     onTime={isPrimary ? setPosition : undefined}
                     ariaLabel={t("live.hlsPlayback", { name: cam?.display_name ?? t("live.theCamera") })}
-                    className="aspect-video w-full overflow-hidden rounded-m3-xl bg-video"
+                    className="isolate aspect-video w-full overflow-hidden rounded-m3-xl bg-video [contain:paint]"
                   />
                 </div>
               );

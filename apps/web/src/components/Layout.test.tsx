@@ -46,7 +46,17 @@ describe("primary navigation and context header", () => {
     expect(rail).toHaveClass("hidden", "md:flex");
     const eventsLink = within(rail).getByRole("link", { name: "Eventos" });
     expect(eventsLink).toHaveAttribute("aria-current", "page");
-    expect(within(rail).getByRole("link", { name: "Eventos" })).toHaveTextContent("Eventos");
+    // Icon-only rail: the label is the accessible name and a tooltip, never visible text.
+    expect(eventsLink).toHaveAttribute("aria-label", "Eventos");
+    expect(eventsLink).not.toHaveTextContent("Eventos");
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.focus(eventsLink);
+    const tip = await screen.findByRole("tooltip");
+    expect(tip).toHaveTextContent("Eventos");
+    expect(eventsLink).toHaveAttribute("aria-describedby", tip.id);
+    fireEvent.keyDown(eventsLink, { key: "Escape" });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.blur(eventsLink);
     expect(screen.getByLabelText("Encabezado de página")).toHaveTextContent(/Investigación.*Eventos/);
     fireEvent.click(screen.getByRole("button", { name: "Cuenta" }));
     expect(screen.getByRole("menuitem", { name: "Cerrar sesión" })).toBeInTheDocument();
