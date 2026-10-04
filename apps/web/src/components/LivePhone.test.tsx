@@ -4,8 +4,8 @@ import { json, renderPage, stubApi } from "@/test-utils";
 import { Live } from "@/routes/Live";
 
 vi.mock("@/components/MsePlayer", () => ({
-  MsePlayer: ({ cameraId, quality, persistent, suspendOffscreen }: { cameraId: string; quality?: string; persistent?: boolean; suspendOffscreen?: boolean }) => (
-    <div data-testid="player" data-camera={cameraId} data-quality={quality} data-persistent={String(!!persistent)} data-suspend-offscreen={String(suspendOffscreen ?? true)} />
+  MsePlayer: ({ cameraId, quality, persistent }: { cameraId: string; quality?: string; persistent?: boolean }) => (
+    <div data-testid="player" data-camera={cameraId} data-quality={quality} data-persistent={String(!!persistent)} />
   ),
 }));
 
@@ -86,19 +86,85 @@ describe("Live on a phone", () => {
     expect(names()).toHaveLength(3);
   });
 
-  it("plays every card on the sub stream through persistent sessions that are not suspended off screen", async () => {
+  it("shows 4 cards per page and plays only those 4 on the sub stream through persistent sessions", async () => {
     stubPhone(true);
     const list = Array.from({ length: 6 }, (_, i) => camera(`c${i + 1}`, `Cam ${i + 1}`));
     stubBackend(list);
     renderPage(Live);
     await screen.findByRole("button", { name: "Ver Cam 1" });
+    expect(screen.getAllByRole("button", { name: /^Ver / })).toHaveLength(4);
+    expect(screen.queryByRole("button", { name: "Ver Cam 5" })).toBeNull();
     const players = screen.getAllByTestId("player");
-    expect(players.map((p) => p.getAttribute("data-camera"))).toEqual(list.map((c) => c.id));
+    expect(players.map((p) => p.getAttribute("data-camera"))).toEqual(["c1", "c2", "c3", "c4"]);
     for (const player of players) {
       expect(player).toHaveAttribute("data-quality", "sub");
       expect(player).toHaveAttribute("data-persistent", "true");
-      expect(player).toHaveAttribute("data-suspend-offscreen", "false");
     }
+  });
+
+  it("changes page with the prev/next buttons, announces it and re-mounts the same sessions on return", async () => {
+    stubPhone(true);
+    stubBackend(Array.from({ length: 6 }, (_, i) => camera(`c${i + 1}`, `Cam ${i + 1}`)));
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver Cam 1" });
+    const ids = () => screen.getAllByTestId("player").map((p) => p.getAttribute("data-camera"));
+    const status = screen.getByTestId("phone-page-status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status).toHaveTextContent("Página 1 de 2");
+    expect(screen.getByRole("button", { name: "Página anterior" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Página siguiente" }));
+    expect(ids()).toEqual(["c5", "c6"]);
+    expect(status).toHaveTextContent("Página 2 de 2");
+    expect(screen.getByRole("button", { name: "Página siguiente" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Página anterior" }));
+    expect(ids()).toEqual(["c1", "c2", "c3", "c4"]);
+  });
+
+  it("changes page with a horizontal swipe but ignores short or vertical drags", async () => {
+    stubPhone(true);
+    stubBackend(Array.from({ length: 6 }, (_, i) => camera(`c${i + 1}`, `Cam ${i + 1}`)));
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver Cam 1" });
+    const area = screen.getByTestId("live-phone-pages");
+    const drag = (dx: number, dy: number) => {
+      fireEvent.pointerDown(area, { pointerId: 1, clientX: 200, clientY: 300 });
+      fireEvent.pointerUp(area, { pointerId: 1, clientX: 200 + dx, clientY: 300 + dy });
+    };
+    const first = () => screen.getAllByTestId("player")[0]?.getAttribute("data-camera");
+    drag(-20, 0);
+    drag(-80, 90);
+    expect(first()).toBe("c1");
+    drag(80, 0); // swipe right on the first page: nowhere to go
+    expect(first()).toBe("c1");
+    drag(-80, 5); // swipe left: next page
+    expect(first()).toBe("c5");
+    drag(80, 5); // swipe right: previous page
+    expect(first()).toBe("c1");
+  });
+
+  it("changes page with the arrow keys when the page area is focused", async () => {
+    stubPhone(true);
+    stubBackend(Array.from({ length: 6 }, (_, i) => camera(`c${i + 1}`, `Cam ${i + 1}`)));
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver Cam 1" });
+    const area = screen.getByTestId("live-phone-pages");
+    fireEvent.keyDown(area, { key: "ArrowRight" });
+    expect(screen.getAllByTestId("player")[0]).toHaveAttribute("data-camera", "c5");
+    fireEvent.keyDown(area, { key: "ArrowLeft" });
+    expect(screen.getAllByTestId("player")[0]).toHaveAttribute("data-camera", "c1");
+  });
+
+  it("resets to page 1 when the site chip changes", async () => {
+    stubPhone(true);
+    const list = [...Array.from({ length: 5 }, (_, i) => camera(`a${i + 1}`, `A${i + 1}`, "s1")), ...Array.from({ length: 5 }, (_, i) => camera(`b${i + 1}`, `B${i + 1}`, "s2"))];
+    stubBackend(list);
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver A1" });
+    fireEvent.click(screen.getByRole("button", { name: "Página siguiente" }));
+    expect(screen.getByTestId("phone-page-status")).toHaveTextContent("Página 2 de 3");
+    fireEvent.click(screen.getByRole("button", { name: "Beta" }));
+    expect(screen.getByTestId("phone-page-status")).toHaveTextContent("Página 1 de 2");
+    expect(screen.getAllByTestId("player")[0]).toHaveAttribute("data-camera", "b1");
   });
 
   it("keeps the camera snapshot under every card as the poster until the first frame", async () => {
@@ -111,28 +177,27 @@ describe("Live on a phone", () => {
     }
   });
 
-  it("opens a single main-quality view and returns to the list keeping filter and scroll", async () => {
+  it("opens a single main-quality view and returns to the same page keeping filter", async () => {
     stubPhone(true);
-    stubBackend([camera("c1", "North", "s1"), camera("c2", "East", "s2")]);
+    stubBackend([camera("c1", "North", "s1"), ...Array.from({ length: 5 }, (_, i) => camera(`e${i + 1}`, `East ${i + 1}`, "s2"))]);
     const { router } = renderPage(Live);
     await screen.findByRole("button", { name: "Ver North" });
     fireEvent.click(screen.getByRole("button", { name: "Beta" }));
-    const list = screen.getByTestId("live-phone-list");
-    list.scrollTop = 120;
-    fireEvent.scroll(list);
-    fireEvent.click(screen.getByRole("button", { name: "Ver East" }));
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ camera: "c2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Página siguiente" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ver East 5" }));
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ camera: "e5" }));
     const single = await screen.findByTestId("live-phone-single");
     const player = within(single).getByTestId("player");
-    expect(player).toHaveAttribute("data-camera", "c2");
+    expect(player).toHaveAttribute("data-camera", "e5");
     expect(player).toHaveAttribute("data-quality", "sub");
     expect(within(single).getByTestId("phone-main-layer")).toBeInTheDocument();
-    expect(within(single).getByText("East")).toBeInTheDocument();
+    expect(within(single).getByText("East 5")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Volver" }));
     await waitFor(() => expect(screen.queryByTestId("live-phone-single")).toBeNull());
     expect(router.state.location.search).not.toHaveProperty("camera");
     expect(screen.getByRole("button", { name: "Beta" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTestId("live-phone-list").scrollTop).toBe(120);
+    expect(screen.getByTestId("phone-page-status")).toHaveTextContent("Página 2 de 2");
+    expect(screen.getByRole("button", { name: "Ver East 5" })).toBeInTheDocument();
   });
 
   it("shows the playing sub picture on open and layers main on top of it", async () => {

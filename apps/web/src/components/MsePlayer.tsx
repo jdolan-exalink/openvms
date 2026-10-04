@@ -37,11 +37,6 @@ type MsePlayerProps = {
   suspended?: boolean;
   /** How the picture fills the tile. Map windows use cover so the snapshot underneath is fully hidden. */
   objectFit?: "contain" | "cover";
-  /**
-   * With `persistent`, stop the transport of a tile scrolled out of view and resume it on
-   * return (default true). The phone list turns this off so scrolling never cold-starts a stream.
-   */
-  suspendOffscreen?: boolean;
 };
 
 /**
@@ -79,7 +74,7 @@ const noSubscribe = () => () => {};
 
 /** usePersistentSession acquires the manager-owned session of a camera and mirrors its state. */
 function usePersistentSession(
-  { cameraId, quality = "sub", serverId, active = true, suspended = false, suspendOffscreen = true, onError }: Pick<MsePlayerProps, "cameraId" | "quality" | "serverId" | "active" | "suspended" | "suspendOffscreen" | "onError">,
+  { cameraId, quality = "sub", serverId, active = true, suspended = false, onError }: Pick<MsePlayerProps, "cameraId" | "quality" | "serverId" | "active" | "suspended" | "onError">,
   host: React.RefObject<HTMLElement | null>,
 ) {
   const session = usePlayerSession(cameraId, quality, serverId);
@@ -101,9 +96,9 @@ function usePersistentSession(
   // Tiles scrolled out of view stop their transport and keep the last frame; they resume on return.
   // A tile hidden by expand is not "offscreen": it stays WARM (above) instead of reconnecting later.
   useEffect(() => {
-    session?.setSuspended("offscreen", suspendOffscreen && active && !inViewport);
+    session?.setSuspended("offscreen", active && !inViewport);
     return () => session?.setSuspended("offscreen", false);
-  }, [session, active, inViewport, suspendOffscreen]);
+  }, [session, active, inViewport]);
   useEffect(() => {
     session?.setSuspended("rec", suspended);
   }, [session, suspended]);
@@ -133,11 +128,11 @@ function useInViewport(ref: React.RefObject<HTMLElement | null>): boolean {
 }
 
 /** PersistentMsePlayer shows a manager-owned session; unmounting only detaches the `<video>`. */
-function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, suspendOffscreen, className, muted = true, onError, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const frame = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const layer = useSurfaceLayer();
-  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, suspendOffscreen, onError }, frame);
+  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, frame);
   useLayoutEffect(() => {
     const el = stage.current;
     if (!session || !el) return;
@@ -156,10 +151,10 @@ function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, susp
 }
 
 /** SurfaceMsePlayer leaves the `<video>` in the VideoSurfaceLayer and only reserves its slot here. */
-function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, suspendOffscreen, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const frame = useRef<HTMLDivElement>(null);
   const layer = useSurfaceLayer();
-  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, suspendOffscreen, onError }, frame);
+  const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, frame);
   useEffect(() => {
     session?.setMuted(muted);
   }, [session, muted]);
