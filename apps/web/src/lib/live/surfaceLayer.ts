@@ -57,6 +57,8 @@ function roundedAncestor(el: HTMLElement): HTMLElement | null {
   let p: HTMLElement | null = el;
   for (let depth = 0; p && depth <= ROUNDED_LOOKUP_DEPTH; depth++, p = p.parentElement) {
     if (isRounded(p)) return p;
+    // The tile clips its own content: a square tile is square, whatever frames it.
+    if (p !== el && /(hidden|clip)/.test(getComputedStyle(p).overflowX + getComputedStyle(p).overflowY)) return null;
   }
   return null;
 }

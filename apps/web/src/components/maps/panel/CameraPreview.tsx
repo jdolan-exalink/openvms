@@ -63,7 +63,7 @@ export function CameraPreview({
       style={{ left: `${left}px`, top: `${top}px` }}
       data-map-source={camera.id}
       data-map-source-rank="2"
-      className="pointer-events-auto absolute w-72 rounded-m3-xl bg-surface-1 p-3 shadow-xl"
+      className="pointer-events-auto absolute isolate w-72 rounded-m3-xl bg-surface-1 p-3 shadow-xl"
     >
       <div className="relative z-[3] flex items-start justify-between gap-2 mb-2">
         <div className="min-w-0">
@@ -91,7 +91,7 @@ export function CameraPreview({
       </div>
 
       {stage !== "tooltip" && canPreview ? (
-        <div className="relative aspect-video w-full overflow-hidden rounded-m3-lg bg-video">
+        <div className="relative aspect-video w-full overflow-hidden bg-video">
           <img
             key={snapshotUrl}
             src={snapshotUrl}

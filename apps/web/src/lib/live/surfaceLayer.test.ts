@@ -71,6 +71,27 @@ describe("VideoSurfaceLayerController", () => {
     expect(wrapper.style.clipPath).toBe("inset(0px 0px 0px 0px round 36px 36px 36px 36px)");
   });
 
+  it("stays square when the clipping tile is square even if an outer frame is rounded", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const layer = new VideoSurfaceLayerController();
+    layer.setHost(host);
+    const { session, video } = fakeSession();
+    const frame = document.createElement("div");
+    frame.style.borderRadius = "28px";
+    const tile = document.createElement("div");
+    tile.style.overflowX = "hidden";
+    tile.style.overflowY = "hidden";
+    tile.getBoundingClientRect = () => ({ left: 10, top: 20, right: 310, bottom: 220, width: 300, height: 200, x: 10, y: 20, toJSON: () => ({}) }) as DOMRect;
+    frame.appendChild(tile);
+    document.body.appendChild(frame);
+    const slot = slotAt({ left: 10, top: 20, width: 300, height: 200 });
+    tile.appendChild(slot);
+    layer.register(session, slot);
+    const wrapper = video.parentElement?.parentElement as HTMLElement;
+    expect(wrapper.style.clipPath).toBe("none");
+  });
+
   it("keeps a plain rectangle when nothing around the slot is rounded", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

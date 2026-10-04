@@ -645,7 +645,7 @@ export function Live() {
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
               <LiveGridFrame role="group" label={tr("live.videoGrid")} mode={rec ? "rec" : "live"}
                 className={cn(
-                  "grid min-h-0 flex-1 gap-2 overflow-y-auto rounded-m3-xl p-1 ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
+                  "grid min-h-0 flex-1 gap-2 overflow-y-auto p-1 ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
                   rec ? "ring-bad/50" : "ring-ok/40",
                 )}
                 style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, "--grid-rows": focus !== null ? 1 : rows } as CSSProperties}
@@ -841,8 +841,8 @@ function GridTile({
       onClick={onSelect}
       onDoubleClick={onToggleFocus}
       className={cn(
-        "group relative isolate aspect-video overflow-hidden [contain:paint] bg-video outline-none [transition:border-radius_var(--md-motion-spatial-fast)] focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
-        isSelected ? "rounded-m3-2xl outline-2 outline-offset-1 outline-primary" : "rounded-m3-xl",
+        "group relative isolate aspect-video overflow-hidden [contain:paint] bg-video outline-none focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
+        isSelected && "outline-2 outline-offset-1 outline-primary",
         isDragging && "opacity-50",
         isHidden && "hidden",
       )}

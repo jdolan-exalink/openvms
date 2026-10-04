@@ -114,4 +114,24 @@ describe("Maps shared preview ownership", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ordenar ventanas" }));
     expect(onArrange).toHaveBeenCalledTimes(1);
   });
+
+  it("stacks the newest window above older ones, chrome and video together, and raises on focus", () => {
+    vi.spyOn(PlayerSession.prototype, "connect").mockImplementation(() => {});
+    const second = { ...camera, id: "c2", name: "East" };
+    const { container } = render(
+      <CameraPanel pinnedCameras={[camera, second]} windows={[{ id: "c1", x: 0, y: 0 }, { id: "c2", x: 20, y: 20 }]} onUnpin={() => {}} onOpenLive={() => {}} />,
+      { wrapper },
+    );
+    const cards = () => [...container.querySelectorAll<HTMLElement>("[data-map-source]")];
+    const z = (el: HTMLElement) => Number(el.style.zIndex);
+    const [a, b] = cards();
+    // Each window is its own stacking context, so a header with z-[3] cannot leak over another window.
+    expect(a!.className).toContain("isolate");
+    expect(b!.className).toContain("isolate");
+    expect(z(b!)).toBeGreaterThan(z(a!));
+    fireEvent.pointerDown(screen.getByRole("heading", { name: "North" }), { clientX: 1, clientY: 1, pointerId: 1 });
+    fireEvent.pointerUp(window, { clientX: 1, clientY: 1 });
+    const [a2, b2] = cards();
+    expect(z(a2!)).toBeGreaterThan(z(b2!));
+  });
 });

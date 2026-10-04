@@ -102,6 +102,24 @@ describe("Live", () => {
     expect(first).not.toHaveAttribute("aria-current");
   });
 
+  it("keeps video tiles square, selected or not, and marks selection with an outline", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "North")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    const first = await screen.findByLabelText("Cuadro 1");
+    const second = screen.getByLabelText("Cuadro 2");
+    for (const tile of [first, second]) {
+      expect(tile.className).not.toMatch(/rounded/);
+      expect(tile.className).not.toMatch(/border-radius/);
+    }
+    expect(first.className).toContain("outline-primary");
+    expect(first.className).toContain("outline-offset");
+  });
+
   it("consumes an authorized camera handoff while preserving the saved selection", async () => {
     stubBrowserAPIs();
     localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [

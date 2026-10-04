@@ -31,6 +31,8 @@ function SingleCameraCard({
   onArrange,
   persistent = false,
   canPreview = true,
+  zIndex,
+  onRaise,
 }: {
   camera: CameraEntity;
   siteName?: string;
@@ -42,6 +44,8 @@ function SingleCameraCard({
   onArrange?: () => void;
   persistent?: boolean;
   canPreview?: boolean;
+  zIndex: number;
+  onRaise: () => void;
 }) {
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const displayState = computeDisplayState(
@@ -80,13 +84,14 @@ function SingleCameraCard({
     <div
       data-map-source={camera.id}
       data-map-source-rank="2"
-      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-m3-xl bg-surface-1 text-xs shadow-lg"
-      style={{ left, top, width: PINNED_WINDOW_WIDTH }}
+      className="pointer-events-auto absolute isolate flex flex-col overflow-hidden bg-surface-1 text-xs shadow-lg"
+      style={{ left, top, width: PINNED_WINDOW_WIDTH, zIndex }}
+      onPointerDownCapture={onRaise}
     >
       <div
         data-map-drag
         onPointerDown={startDrag}
-        className="relative z-[3] flex h-11 cursor-grab items-center gap-1.5 bg-surface-2 pl-3 pr-1 active:cursor-grabbing"
+        className="relative flex h-11 cursor-grab items-center gap-1.5 bg-surface-2 pl-3 pr-1 active:cursor-grabbing"
         title={siteName ? `${camera.name} · ${siteName}` : camera.name}
       >
         <span className={`inline-block size-2 shrink-0 rounded-full ${STATE_DOT[displayState]}`} />
@@ -139,7 +144,12 @@ export function CameraPanel({
   persistent = false,
   canPreview = true,
 }: CameraPanelProps) {
+  // Stacking order, oldest first. A window the order does not know yet is new and goes on top.
+  const [order, setOrder] = useState<string[]>([]);
   if (pinnedCameras.length === 0) return null;
+  const present = pinnedCameras.map((camera) => camera.id);
+  const stack = [...order.filter((id) => present.includes(id)), ...present.filter((id) => !order.includes(id))];
+  const raise = (id: string) => setOrder(stack.at(-1) === id ? stack : [...stack.filter((item) => item !== id), id]);
   const siteMap = new Map(sites.map((site) => [site.id, site.name]));
   const place = new Map(windows.map((window) => [window.id, window]));
 
@@ -160,6 +170,8 @@ export function CameraPanel({
             onArrange={onArrange}
             persistent={persistent}
             canPreview={canPreview}
+            zIndex={stack.indexOf(camera.id) + 1}
+            onRaise={() => raise(camera.id)}
           />
         );
       })}
