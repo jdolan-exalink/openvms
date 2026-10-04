@@ -3392,10 +3392,13 @@ components:
           description: Cameras no longer present in Frigate. They are kept and flagged, not deleted.
     ServerProvisionRequest:
       type: object
-      required: [site_id, ip, ssh_user, ssh_password]
+      required: [site_id, ip, server_name, ssh_user, ssh_password]
       properties:
         site_id: { type: string, format: uuid }
-        ip: { type: string, description: Address of the new machine. example: 192.0.2.10 }
+        ip: { type: string, description: "Address of the new machine. Example: 192.0.2.10" }
+        server_name: { type: string, minLength: 1, maxLength: 200, description: Display name for the newly installed server. }
+        host_key: { type: string, description: Optional verified SHA256 SSH host key fingerprint. When supplied, it must match the server key. }
+        trust_on_first_use: { type: boolean, default: false, description: Explicitly accept the first SSH host key without prior verification. The initial host identity is not verified. }
         ssh_user: { type: string, minLength: 1, maxLength: 64 }
         ssh_password:
           type: string
@@ -3404,6 +3407,10 @@ components:
           maxLength: 256
           writeOnly: true
           description: Used only for this install session. Not stored.
+        allow_system_disk:
+          type: boolean
+          default: false
+          description: Explicitly allow recordings on the root filesystem when /mnt/cctv is not mounted. Demo use only; disk may fill.
     ServerProvisionStep:
       type: object
       required: [id, state]
@@ -3428,7 +3435,8 @@ components:
           items: { $ref: "#/components/schemas/ServerProvisionStep" }
         warning:
           type: string
-          description: cpu when the host has no Coral, NVIDIA, or OpenVINO.
+          enum: [cpu, system_disk, cpu_system_disk]
+          description: CPU fallback and/or explicit system-disk recording warning.
         variant:
           type: string
           enum: [coral, tensorrt, openvino, cpu]
@@ -4848,6 +4856,4 @@ components:
         geometry: { type: object }
         style: { type: object, nullable: true }
         metadata: { type: object, nullable: true }
-
-
 

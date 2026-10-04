@@ -12,6 +12,7 @@ import protectedImages from "./locales/es/protected";
 import search from "./locales/es/search";
 import settings from "./locales/es/settings";
 import status from "./locales/es/status";
+import servers from "./locales/es/servers";
 
 /** Spanish modules are the key list. A new module is added here and as a file in every language. */
 export const sourceModules = {
@@ -29,6 +30,7 @@ export const sourceModules = {
   search,
   settings,
   status,
+  servers,
 };
 
 export type MessageKey = {

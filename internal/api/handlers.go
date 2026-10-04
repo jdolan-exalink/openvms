@@ -18,6 +18,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 	"github.com/jdolan-exalink/openvms/internal/platform/config"
+	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 )
@@ -25,6 +26,7 @@ import (
 // Handlers implements gen.StrictServerInterface. Each module adds its methods in its own file.
 type Handlers struct {
 	Inv           *inventory.Service
+	Provision     *provision.Service
 	Events        *events.Service
 	Alarms        *alarms.Service
 	Identity      *identity.Service

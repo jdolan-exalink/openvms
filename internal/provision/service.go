@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -33,10 +34,14 @@ var ErrNotFound = errors.New("install job not found")
 
 // Request is the install form. Password lives only for the SSH session.
 type Request struct {
-	SiteID   uuid.UUID
-	IP       string
-	User     string
-	Password string
+	SiteID          uuid.UUID
+	IP              string
+	ServerName      string
+	User            string
+	Password        string
+	HostKey         string
+	TrustOnFirstUse bool
+	AllowSystemDisk bool
 }
 
 // Service starts installs and reads their progress.
@@ -45,12 +50,12 @@ type Service struct {
 	Store  *store.Store
 	Sealer *secrets.Sealer
 	Log    *slog.Logger
-	Dial   func(ctx context.Context, host, user, password string, onKey func(string)) (Conn, error)
+	Dial   func(ctx context.Context, host, user, password, expectedKey string, onKey func(string)) (Conn, error)
 	Binary func() ([]byte, error)
 
-	mu    sync.Mutex
-	jobs  map[uuid.UUID]*job
-	byIP  map[string]uuid.UUID
+	mu   sync.Mutex
+	jobs map[uuid.UUID]*job
+	byIP map[string]uuid.UUID
 }
 
 // New returns a provisioner that dials SSH itself.
@@ -68,6 +73,7 @@ func New(inv *inventory.Service, st *store.Store, sealer *secrets.Sealer, log *s
 // Start authorizes the site, then runs the install in the background.
 func (s *Service) Start(ctx context.Context, actor authz.Actor, in Request) (Snapshot, error) {
 	in.IP = strings.TrimSpace(in.IP)
+	in.ServerName = strings.TrimSpace(in.ServerName)
 	in.User = strings.TrimSpace(in.User)
 	if err := validate(in); err != nil {
 		return Snapshot{}, err
@@ -86,9 +92,20 @@ func (s *Service) Start(ctx context.Context, actor authz.Actor, in Request) (Sna
 	s.mu.Unlock()
 
 	password := in.Password
-	in.Password = ""
-	go s.run(context.WithoutCancel(ctx), actor, j, Request{SiteID: in.SiteID, IP: in.IP, User: in.User}, password)
+	go s.run(context.WithoutCancel(ctx), actor, j, backgroundRequest(in), password)
 	return j.snapshot(), nil
+}
+
+func backgroundRequest(in Request) Request {
+	return Request{
+		SiteID:          in.SiteID,
+		IP:              in.IP,
+		ServerName:      in.ServerName,
+		User:            in.User,
+		HostKey:         in.HostKey,
+		TrustOnFirstUse: in.TrustOnFirstUse,
+		AllowSystemDisk: in.AllowSystemDisk,
+	}
 }
 
 // Get returns progress for a job this user started.
@@ -103,6 +120,8 @@ func (s *Service) Get(actor authz.Actor, id uuid.UUID) (Snapshot, error) {
 }
 
 func (s *Service) run(ctx context.Context, actor authz.Actor, j *job, in Request, password string) {
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Minute)
+	defer cancel()
 	defer func() {
 		password = ""
 		s.mu.Lock()
@@ -115,7 +134,11 @@ func (s *Service) run(ctx context.Context, actor authz.Actor, j *job, in Request
 		j.fail(stepConnecting, "agent binary: "+err.Error(), password)
 		return
 	}
-	conn, err := s.Dial(ctx, in.IP, in.User, password, j.setHostKey)
+	if in.HostKey == "" && !in.TrustOnFirstUse {
+		j.fail(stepConnecting, "verified SSH host key fingerprint is required", password)
+		return
+	}
+	conn, err := s.Dial(ctx, in.IP, in.User, password, in.HostKey, j.setHostKey)
 	if err != nil {
 		j.fail(stepConnecting, Scrub(err.Error(), password), password)
 		s.Log.Info("provision connect failed", "job", j.snap.ID, "host", in.IP)
@@ -123,7 +146,7 @@ func (s *Service) run(ctx context.Context, actor authz.Actor, j *job, in Request
 	}
 	defer conn.Close()
 	s.Log.Info("provision started", "job", j.snap.ID, "host", in.IP)
-	Exec(ctx, j, password, conn, binary, func(ctx context.Context, token string, variant Variant) (uuid.UUID, error) {
+	Exec(ctx, j, password, conn, binary, in.AllowSystemDisk, func(ctx context.Context, token string, variant Variant) (uuid.UUID, error) {
 		return s.register(ctx, actor, in, token, variant)
 	})
 	snap := j.snapshot()
@@ -133,7 +156,7 @@ func (s *Service) run(ctx context.Context, actor authz.Actor, j *job, in Request
 func (s *Service) register(ctx context.Context, actor authz.Actor, in Request, token string, variant Variant) (uuid.UUID, error) {
 	view, err := s.Inv.CreateServer(ctx, actor, inventory.CreateServerInput{
 		SiteID:        in.SiteID,
-		Name:          serverName(in.IP),
+		Name:          in.ServerName,
 		ImportCameras: true,
 		Conn: inventory.ConnInput{
 			BaseURL:  "http://" + in.IP + ":5000",
@@ -174,18 +197,31 @@ func validate(in Request) error {
 	if in.Password == "" || len(in.Password) > 256 {
 		return &ValidationError{Msg: "ssh password is required"}
 	}
+	if strings.TrimSpace(in.ServerName) == "" || len(strings.TrimSpace(in.ServerName)) > 200 {
+		return &ValidationError{Msg: "server name is required and must be at most 200 characters"}
+	}
+	if in.HostKey == "" && !in.TrustOnFirstUse {
+		return &ValidationError{Msg: "verified SSH host key fingerprint or explicit first-contact trust is required"}
+	}
+	if in.HostKey != "" && !validFingerprint(in.HostKey) {
+		return &ValidationError{Msg: "invalid SSH host key fingerprint"}
+	}
 	if in.SiteID == uuid.Nil {
 		return &ValidationError{Msg: "site is required"}
 	}
 	return nil
 }
 
-func serverName(ip string) string {
-	name := "frigate-" + strings.NewReplacer(".", "-", ":", "-").Replace(ip)
-	if len(name) > 200 {
-		return name[:200]
+func validFingerprint(value string) bool {
+	if !strings.HasPrefix(value, "SHA256:") || len(value) != len("SHA256:")+43 {
+		return false
 	}
-	return name
+	for _, r := range value[len("SHA256:"):] {
+		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '+' || r == '/') {
+			return false
+		}
+	}
+	return true
 }
 
 // FetchMetrics reads the live agent on a host. token is not logged.

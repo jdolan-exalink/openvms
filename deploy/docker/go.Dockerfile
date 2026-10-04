@@ -41,6 +41,7 @@ RUN go mod download
 COPY apps ./apps
 COPY internal ./internal
 COPY migrations ./migrations
+COPY deploy/agent ./deploy/agent
 COPY models/vehicle-body.onnx /opt/openvms/vehicle-body.onnx
 RUN curl -fsSL -o /tmp/ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-linux-x64-1.29.0.tgz \
  && tar -xzf /tmp/ort.tgz -C /tmp \

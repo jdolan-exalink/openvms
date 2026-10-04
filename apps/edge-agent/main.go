@@ -29,8 +29,8 @@ func main() {
 		os.Exit(1)
 	}
 	sampler := agent.NewSampler(agent.Paths{
-		CCTV: env("OPENVMS_CCTV_PATH", "/opt/openvms/frigate/storage"),
-		DB:   env("OPENVMS_DB_PATH", "/"),
+		CCTV: env("OPENVMS_CCTV_PATH", "/mnt/cctv"),
+		DB:   env("OPENVMS_DB_PATH", "/opt/frigate/config"),
 	})
 	variant := env("OPENVMS_AGENT_VARIANT", "")
 	mux := http.NewServeMux()

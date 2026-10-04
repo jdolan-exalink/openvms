@@ -2,7 +2,7 @@ import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { classifyPolicyQuery, meQuery, serversQuery, sitesQuery, syncStatusQuery } from "@/api/queries";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
@@ -98,7 +98,10 @@ export function Servers() {
                   <StatusBadge status={s.status} />
                   {s.last_error && <div role="alert" className="mt-1 max-w-56 text-xs break-words text-bad">{s.last_error}</div>}
                 </td>
-                <td className="font-mono text-xs whitespace-nowrap">{s.frigate_version || "—"}</td>
+                <td className="font-mono text-xs whitespace-nowrap">
+                  <div>{s.frigate_version || "—"}</div>
+                  <AgentMonitor serverId={s.id} canUpdate={can(me.data, "servers.manage")} />
+                </td>
                 <td className="text-right tabular-nums">
                   <Link to="/cameras" search={{ server_id: s.id }} className="hover:underline">
                     {s.camera_count}
@@ -141,6 +144,37 @@ export function Servers() {
           </tbody>
         </Table>
       )}
+    </div>
+  );
+}
+
+function AgentMonitor({ serverId, canUpdate }: { serverId: string; canUpdate: boolean }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const agentStatus = useQuery({
+    queryKey: ["server-agent", serverId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId } } })),
+    refetchInterval: 5000,
+    retry: false,
+  });
+  const update = useMutation({
+    mutationFn: async () => unwrap(await api.POST("/api/v1/servers/{serverId}/agent/update", { params: { path: { serverId } } })),
+    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["server-agent", serverId] }); },
+  });
+  const metrics = agentStatus.data;
+  if (agentStatus.isPending) return <div className="mt-1 text-muted">{t("servers.agent")}…</div>;
+  if (!metrics) return <div className="mt-1 text-muted">{t("servers.agentMissing")}</div>;
+  const memory = (value?: number) => value == null ? "—" : `${(value / 1024 ** 3).toFixed(1)} GB`;
+  return (
+    <div className="mt-2 flex min-w-48 flex-col gap-1 whitespace-normal text-xs">
+      <span className="font-sans font-medium">{t("servers.agent")}: {metrics.installed ? metrics.version || "—" : t("servers.agentMissing")}</span>
+      {metrics.installed && <span className="font-sans text-muted">{t("servers.agentVersion", { version: metrics.version || "—", current: metrics.current_version })}</span>}
+      {metrics.cpu_percent != null && <span className="font-sans">{t("servers.agentCpu", { percent: metrics.cpu_percent })}</span>}
+      {metrics.memory_total_bytes != null && <span className="font-sans text-muted">{t("servers.agentMemory", { available: memory(metrics.memory_available_bytes), total: memory(metrics.memory_total_bytes) })}</span>}
+      {metrics.error && <span role="alert" className="font-sans text-bad">{t("servers.agentError", { error: metrics.error })}</span>}
+      {canUpdate && metrics.installed && metrics.outdated && <Button className="self-start text-xs px-2 py-1" disabled={update.isPending} onClick={() => update.mutate()}>{update.isPending ? t("servers.agentUpdating") : t("servers.agentUpdate")}</Button>}
+      {update.isSuccess && <span role="status" className="font-sans text-good">{t("servers.agentUpdated")}</span>}
+      <ErrorNote error={update.error} />
     </div>
   );
 }
@@ -370,20 +404,21 @@ const capLabels: [keyof Schemas["Capabilities"], string][] = [
 ];
 
 function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existing") => void; onCancel: () => void }) {
+  const t = useT();
   return (
     <section aria-label="Tipo de servidor" className="flex flex-col gap-4 rounded border border-line bg-surface p-4">
       <div>
         <h2 className="text-base font-semibold">¿Qué servidor vas a agregar?</h2>
-        <p className="mt-1 text-sm text-muted">Un Frigate nuevo se conecta por su URL. Uno que ya está en producción solo recibe el agente de OpenVMS.</p>
+        <p className="mt-1 text-sm text-muted">Elegí si vas a instalar un servidor nuevo o importar una instalación Frigate que ya existe.</p>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
         <button type="button" onClick={() => onPick("new")} className="rounded border border-line bg-bg p-4 text-left hover:border-accent hover:bg-raised">
-          <span className="block font-medium">Servidor Frigate nuevo</span>
-          <span className="mt-1 block text-sm text-muted">OpenVMS prueba la URL, registra el servidor e importa las cámaras.</span>
+          <span className="block font-medium">{t("servers.freshFrigateTitle")}</span>
+          <span className="mt-1 block text-sm text-muted">{t("servers.freshFrigateDescription")}</span>
         </button>
         <button type="button" onClick={() => onPick("existing")} className="rounded border border-line bg-bg p-4 text-left hover:border-accent hover:bg-raised">
-          <span className="block font-medium">Servidor Frigate existente</span>
-          <span className="mt-1 block text-sm text-muted">La sesión SSH solo instala el agente. Frigate, Docker, MQTT y la configuración quedan como están.</span>
+          <span className="block font-medium">{t("servers.existingFrigateTitle")}</span>
+          <span className="mt-1 block text-sm text-muted">{t("servers.existingFrigateDescription")}</span>
         </button>
       </div>
       <div>
@@ -393,38 +428,91 @@ function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existi
   );
 }
 
-function ExistingFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void }) {
-  const [form, setForm] = useState({ site_id: "", name: "", host: "", port: "22", username: "", password: "" });
+function NewFrigateHost({ sites, onBack, onDone }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void }) {
+  const t = useT();
+  const [form, setForm] = useState({ site_id: "", server_name: "", host: "", username: "", password: "" });
+  const [allowSystemDisk, setAllowSystemDisk] = useState(false);
+  const passwordRef = useRef("");
+  const [jobId, setJobId] = useState<string | null>(null);
   const set = (key: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value });
+  const start = useMutation({
+    mutationFn: async () => {
+      const password = passwordRef.current;
+      passwordRef.current = "";
+      const body: Schemas["ServerProvisionRequest"] = { site_id: form.site_id, server_name: form.server_name.trim(), ip: form.host.trim(), ssh_user: form.username.trim(), ssh_password: password, trust_on_first_use: true, allow_system_disk: allowSystemDisk };
+      return unwrap(await api.POST("/api/v1/servers/provision", { body }));
+    },
+    onSuccess: (job) => setJobId(job.id),
+  });
+  const progress = useQuery({
+    queryKey: ["server-provision", jobId],
+    enabled: jobId !== null,
+    queryFn: async () => unwrap(await api.GET("/api/v1/servers/provision/{jobId}", { params: { path: { jobId: jobId! } } })),
+    initialData: start.data,
+    refetchInterval: (query) => query.state.data?.status === "running" ? 1000 : false,
+    retry: false,
+  });
+  const selectedSite = sites.find((site) => site.id === form.site_id)?.name ?? "";
+
+  if (jobId) {
+    const snapshot = progress.data;
+    const stepKeys: Record<string, string> = {
+      connecting: "stepConnecting", packages: "stepPackages", hardware: "stepHardware", compose: "stepCompose",
+      ntp: "stepNtp", agent: "stepAgent", register: "stepRegister",
+    };
+    return (
+      <section className="flex flex-col gap-3 rounded border border-line bg-surface p-4" aria-label="Progreso de instalación de Frigate">
+        <h2 className="text-base font-semibold">{t("servers.installRunning", { site: selectedSite })}</h2>
+        {snapshot?.warning?.includes("system_disk") && <p role="alert" className="rounded border border-warning p-3 text-sm font-semibold text-warning">{t("servers.systemDiskWarning")}</p>}
+        {snapshot?.warning?.includes("cpu") && <p role="alert" className="rounded bg-warning/10 p-3 text-sm text-warning">{t("servers.cpuWarning")}</p>}
+        <ol className="space-y-2" aria-live="polite">
+          {snapshot?.steps.map((step) => (
+            <li key={step.id} className="flex items-center justify-between gap-3 text-sm">
+              <span>{t((`servers.${stepKeys[step.id] ?? "stepConnecting"}`) as Parameters<typeof t>[0])}</span>
+              <span className="text-muted">{step.state === "running" ? "…" : step.state === "done" ? "✓" : step.state}</span>
+            </li>
+          ))}
+        </ol>
+        {snapshot?.status === "failed" && <p role="alert" className="text-sm text-bad">{t("servers.installFailed", { error: snapshot.error ?? "unknown error" })}</p>}
+        {snapshot?.status === "succeeded" && <p role="status" className="text-sm text-good">{t("servers.installComplete")}</p>}
+        {progress.error && <ErrorNote error={progress.error} />}
+        <Button onClick={onDone}>{snapshot?.status === "running" ? "Cerrar" : "Listo"}</Button>
+      </section>
+    );
+  }
+
   return (
     <form
-      onSubmit={(e) => e.preventDefault()}
+      onSubmit={(e) => {
+        e.preventDefault();
+        passwordRef.current = form.password;
+        setForm((current) => ({ ...current, password: "" }));
+        start.mutate();
+      }}
       className="flex flex-col gap-4 rounded border border-line bg-surface p-4"
-      aria-label="Servidor Frigate existente"
+      aria-label="Instalación de Frigate nuevo"
     >
       <div>
-        <h2 className="text-base font-semibold">Servidor Frigate existente</h2>
-        <p className="mt-1 text-sm text-muted">OpenVMS se conecta por SSH, instala el agente y cierra la sesión. A partir de ahí habla solo con el agente.</p>
+        <h2 className="text-base font-semibold">{t("servers.newInstallHeading")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("servers.newInstallEffects")}</p>
+        <p className="mt-1 text-sm text-muted">{t("servers.newInstallRequirements")}</p>
+        <p className="mt-1 text-sm text-muted">{t("servers.newInstallNetwork")}</p>
+        <label className="flex items-start gap-2 rounded border border-warning p-3 text-sm">
+          <input type="checkbox" checked={allowSystemDisk} onChange={(event) => setAllowSystemDisk(event.target.checked)} />
+          <span>{t("servers.allowSystemDiskLabel")}</span>
+        </label>
+        {allowSystemDisk && <p role="alert" className="rounded border-2 border-warning bg-warning/10 p-3 text-sm font-semibold text-warning">{t("servers.systemDiskWarning")}</p>}
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="rounded border border-line bg-bg p-3 text-sm">
-          <p className="font-medium">La sesión SSH hace solo esto</p>
+          <p className="font-medium">{t("servers.sshTrustWarning")}</p>
           <ol className="mt-2 list-decimal space-y-1 pl-4 text-muted">
-            <li>Conectarse al servidor</li>
-            <li>Detectar arquitectura y sistema operativo</li>
-            <li>Instalar OpenVMS Edge Agent</li>
-            <li>Habilitar el servicio systemd</li>
-            <li>Registrar el agente contra OpenVMS Central</li>
-            <li>Cerrar la sesión SSH</li>
+            <li>{t("servers.sshTrustInitialStep")}</li>
+            <li>Comprobar que sea Debian/Ubuntu amd64 y que no tenga Frigate previo</li>
+            <li>Instalar Frigate nuevo y OpenVMS Edge Agent</li>
+            <li>Habilitar servicios Docker, chrony y OpenVMS Edge Agent</li>
+            <li>Registrar el servidor contra OpenVMS Central</li>
           </ol>
-        </div>
-        <div className="rounded border border-line bg-bg p-3 text-sm">
-          <p className="font-medium">OpenVMS no modifica este servidor</p>
-          <ul className="mt-2 list-disc space-y-1 pl-4 text-muted">
-            <li>No actualiza Linux, Frigate, MQTT, NTP ni Docker</li>
-            <li>No cambia docker-compose, config.yml ni el almacenamiento</li>
-            <li>No reinicia Frigate ni toca la aceleración de hardware</li>
-          </ul>
         </div>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -436,14 +524,11 @@ function ExistingFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site
             ))}
           </Select>
         </Field>
-        <Field label="Nombre">
-          <TextInput required value={form.name} onChange={set("name")} placeholder="Frigate-H01" />
+        <Field label={t("servers.serverName")}>
+          <TextInput required value={form.server_name} onChange={set("server_name")} autoComplete="off" maxLength={200} />
         </Field>
         <Field label="Host SSH">
           <TextInput required value={form.host} onChange={set("host")} placeholder="10.20.0.11" autoComplete="off" />
-        </Field>
-        <Field label="Puerto SSH">
-          <TextInput required inputMode="numeric" value={form.port} onChange={set("port")} />
         </Field>
         <Field label="Usuario SSH">
           <TextInput required value={form.username} onChange={set("username")} autoComplete="off" />
@@ -452,16 +537,14 @@ function ExistingFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site
           <TextInput required type="password" value={form.password} onChange={set("password")} autoComplete="new-password" />
         </Field>
       </div>
-      <p className="text-sm text-muted">
-        Después de instalarse, el agente lee la configuración real de Frigate (el contenedor, el config.yml que monte y el almacenamiento) y la importa sin reescribir el archivo. El servidor queda como importado: OpenVMS lo monitorea y no edita su configuración hasta que actives esa administración.
-      </p>
       <div className="flex gap-2">
-        <Button type="submit" variant="primary" disabled title="La instalación del agente por SSH es el paso que sigue en este flujo">
-          Instalar agente
+        <Button type="submit" variant="primary" disabled={start.isPending || !form.site_id || !form.server_name.trim() || !form.host || !form.username || !form.password}>
+          {t("servers.startInstall")}
         </Button>
         <Button onClick={onBack}>Volver</Button>
         <Button onClick={onDone}>Cancelar</Button>
       </div>
+      <ErrorNote error={start.error} />
     </form>
   );
 }
@@ -472,11 +555,12 @@ function ExistingFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site
 function RegisterServer({ sites, onDone }: { sites: Schemas["Site"][]; onDone: () => void }) {
   const [kind, setKind] = useState<"new" | "existing" | null>(null);
   if (kind === null) return <ServerKindPicker onPick={setKind} onCancel={onDone} />;
-  if (kind === "existing") return <ExistingFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} />;
-  return <NewFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} />;
+  if (kind === "existing") return <NewFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} />;
+  return <NewFrigateHost sites={sites} onBack={() => setKind(null)} onDone={onDone} />;
 }
 
 function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void }) {
+  const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState({
     site_id: "",
@@ -523,7 +607,11 @@ function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][];
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 rounded border border-line bg-surface p-4">
+    <form onSubmit={submit} aria-label="Importar servidor Frigate existente" className="flex flex-col gap-4 rounded border border-line bg-surface p-4">
+      <div>
+        <h2 className="text-base font-semibold">{t("servers.existingImportHeading")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("servers.existingImportDescription")}</p>
+      </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Sitio">
           <Select required value={form.site_id} onChange={edit("site_id")}>

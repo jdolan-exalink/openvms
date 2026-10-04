@@ -500,6 +500,17 @@ type RuleFiring struct {
 	FiredAt    time.Time
 }
 
+type ServerAgent struct {
+	ServerID    uuid.UUID
+	TenantID    uuid.UUID
+	Host        string
+	Port        int32
+	Variant     string
+	TokenSealed []byte
+	Version     string
+	UpdatedAt   time.Time
+}
+
 type Session struct {
 	ID         uuid.UUID
 	UserID     uuid.UUID

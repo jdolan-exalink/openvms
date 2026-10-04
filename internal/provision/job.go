@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -36,21 +37,21 @@ type StepState struct {
 
 // Snapshot is the public view of an install. It has no credential fields.
 type Snapshot struct {
-	ID        uuid.UUID  `json:"id"`
-	Status    string     `json:"status"`
-	Steps     []StepState `json:"steps"`
-	Warning   string     `json:"warning,omitempty"`
-	Variant   string     `json:"variant,omitempty"`
-	ServerID  *uuid.UUID `json:"server_id,omitempty"`
-	Error     string     `json:"error,omitempty"`
-	HostKey   string     `json:"host_key,omitempty"`
+	ID       uuid.UUID   `json:"id"`
+	Status   string      `json:"status"`
+	Steps    []StepState `json:"steps"`
+	Warning  string      `json:"warning,omitempty"`
+	Variant  string      `json:"variant,omitempty"`
+	ServerID *uuid.UUID  `json:"server_id,omitempty"`
+	Error    string      `json:"error,omitempty"`
+	HostKey  string      `json:"host_key,omitempty"`
 }
 
 type job struct {
-	mu       sync.Mutex
-	owner    uuid.UUID
-	snap     Snapshot
-	ip       string
+	mu    sync.Mutex
+	owner uuid.UUID
+	snap  Snapshot
+	ip    string
 }
 
 func newJob(owner uuid.UUID, ip string) *job {
@@ -88,10 +89,19 @@ func (j *job) setStep(id, state, detail string) {
 	}
 }
 
-func (j *job) setWarning(warning string) {
+func (j *job) addWarning(warning string) {
 	j.mu.Lock()
-	j.snap.Warning = warning
-	j.mu.Unlock()
+	defer j.mu.Unlock()
+	if j.snap.Warning == warning || strings.Contains(j.snap.Warning, warning) {
+		return
+	}
+	if j.snap.Warning == "" {
+		j.snap.Warning = warning
+		return
+	}
+	if (j.snap.Warning == "cpu" && warning == "system_disk") || (j.snap.Warning == "system_disk" && warning == "cpu") {
+		j.snap.Warning = "cpu_system_disk"
+	}
 }
 
 func (j *job) warning() string {

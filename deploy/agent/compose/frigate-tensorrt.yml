@@ -1,10 +1,11 @@
 # NVIDIA TensorRT image.
-name: openvms-frigate
+version: "3.8"
 services:
   frigate:
     container_name: frigate
     privileged: true
     restart: unless-stopped
+    depends_on: [mosquitto]
     image: ghcr.io/blakeblackshear/frigate:stable-tensorrt
     runtime: nvidia
     shm_size: "256mb"
@@ -13,10 +14,18 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ./config:/config
-      - ./storage:/media/frigate
+      - /opt/frigate/config:/config
+      - /mnt/cctv:/media/frigate
     ports:
       - "5000:5000"
       - "8554:8554"
       - "8555:8555/tcp"
       - "8555:8555/udp"
+  mosquitto:
+    container_name: mosquitto
+    restart: unless-stopped
+    image: eclipse-mosquitto:2
+    volumes:
+      - /opt/frigate/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "127.0.0.1:1883:1883"
