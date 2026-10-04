@@ -36,15 +36,16 @@ const meWith = (...permissions: string[]) => ({ id: "u1", username: "u", display
 const allFeatures = { maps: true } as never;
 
 describe("bottomNavModel", () => {
-  it("prefers Live, Maps, Events and Servers when permitted", () => {
-    const me = meWith("live.view", "maps.view", "events.view", "servers.view", "alarms.view");
-    const { primary } = bottomNavModel(me, allFeatures);
-    expect(primary.map((item) => item.to)).toEqual(["/live", "/maps", "/events", "/servers"]);
+  it("prefers Live, Maps, Events and Plates when permitted, leaving Servers under More", () => {
+    const me = meWith("live.view", "maps.view", "events.view", "lpr.view", "servers.view", "alarms.view");
+    const { primary, more } = bottomNavModel(me, allFeatures);
+    expect(primary.map((item) => item.to)).toEqual(["/live", "/maps", "/events", "/plates"]);
+    expect(more.flatMap((group) => group.items).map((item) => item.to)).toContain("/servers");
   });
 
   it("fills with the first permitted operational destinations, caps at four and keeps settings in more", () => {
     const { primary, more } = bottomNavModel(meWith("events.view", "alarms.view", "lpr.view", "recordings.view"), allFeatures);
-    expect(primary.map((item) => item.to)).toEqual(["/events", "/alarms", "/plates", "/playback"]);
+    expect(primary.map((item) => item.to)).toEqual(["/events", "/plates", "/alarms", "/playback"]);
     expect(more.flatMap((group) => group.items).map((item) => item.to)).toContain("/settings");
   });
 

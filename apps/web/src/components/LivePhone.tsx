@@ -164,9 +164,9 @@ export function LivePhone() {
             }
           }}
           onKeyDown={onKeyDown}
-          className="flex min-h-0 flex-1 touch-pan-y items-center justify-center outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          className="flex min-h-0 flex-1 touch-pan-y flex-col overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-primary"
         >
-          <ul className="grid w-full max-w-[calc((100dvh-14rem)*16/9)] grid-cols-2 gap-px">
+          <ul className="flex w-full flex-col gap-px">
             {pageCameras.map((camera) => (
               <CameraCard key={camera.id} camera={camera} playing={camera.id !== selected?.id} onOpen={() => open(camera.id)} />
             ))}

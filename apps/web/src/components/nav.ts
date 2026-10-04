@@ -86,7 +86,7 @@ export function isNavItemActive(item: NavItem, pathname: string): boolean {
   return item.to !== "/live" && pathname.startsWith(`${item.to}/`);
 }
 
-const PREFERRED_PRIMARY = ["/live", "/maps", "/events", "/servers"];
+const PREFERRED_PRIMARY = ["/live", "/maps", "/events", "/plates"];
 const MAX_PRIMARY = 4;
 
 /**
