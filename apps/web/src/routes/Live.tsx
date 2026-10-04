@@ -34,6 +34,8 @@ import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPan
 import { assignRecPlayers, parseRecSearch, pickMaster, REC_ENTRY_OFFSET_S, recSearch } from "@/lib/liveRec";
 import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { can } from "@/lib/perm";
+import { LivePhone } from "@/components/LivePhone";
+import { useIsPhoneLayout } from "@/lib/useIsPhoneLayout";
 import { useCameraFolders } from "@/lib/useCameraFolders";
 import { useRecData } from "@/lib/useRecData";
 import { useRecPlayback } from "@/lib/useRecPlayback";
@@ -60,7 +62,7 @@ const PINNED_STYLE = { "--pinned-offset": "18.5rem" } as CSSProperties;
  * Live is the multi-server live screen (PRD §46-49): a camera tree grouped by site and
  * server, a grid of live tiles from any Frigate, and saved views.
  */
-export function Live() {
+function LiveDesktop() {
   const tr = useT();
   const me = useQuery(meQuery);
   const cameras = useQuery(camerasQuery({}));
@@ -769,6 +771,11 @@ export function Live() {
       )}
     </div>
   );
+}
+
+/** Live renders the phone camera list below `md` and the grid otherwise. */
+export function Live() {
+  return useIsPhoneLayout() ? <LivePhone /> : <LiveDesktop />;
 }
 
 /** Overlay action on a camera tile: a 32px pill on the translucent surface so it reads over any video. */
