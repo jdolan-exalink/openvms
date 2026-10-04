@@ -2,6 +2,7 @@ import * as maplibregl from "maplibre-gl";
 import type { StyleSpecification } from "maplibre-gl";
 import * as pmtiles from "pmtiles";
 import type { MapProviderConfig } from "@/lib/maps/types";
+import { currentTheme, isDarkTheme, type ThemeId } from "@/lib/theme";
 
 let protocolRegistered = false;
 
@@ -28,7 +29,7 @@ export interface ThemeColors {
 }
 
 export function getThemeColors(): ThemeColors {
-  const isDark = typeof document !== "undefined" ? !document.documentElement.classList.contains("light") : true;
+  const isDark = typeof document !== "undefined" ? isDarkTheme(currentTheme()) : true;
 
   if (typeof window === "undefined") {
     return isDark ? getDarkFallbackColors() : getLightFallbackColors();
@@ -287,14 +288,14 @@ export class MapStyleController {
   private map: maplibregl.Map | null = null;
   private provider: MapProviderConfig;
   private observer: MutationObserver | null = null;
-  private currentDark: boolean;
+  private currentTheme: ThemeId;
   private onReapplyCustomLayers?: () => void;
   private styleLoadPending = false;
 
   constructor(provider: MapProviderConfig, onReapplyCustomLayers?: () => void) {
     this.provider = provider;
     this.onReapplyCustomLayers = onReapplyCustomLayers;
-    this.currentDark = typeof document !== "undefined" ? !document.documentElement.classList.contains("light") : true;
+    this.currentTheme = currentTheme();
   }
 
   public setProvider(provider: MapProviderConfig) {
@@ -312,16 +313,17 @@ export class MapStyleController {
 
     if (typeof window !== "undefined" && typeof MutationObserver !== "undefined") {
       this.observer = new MutationObserver(() => {
-        const isDark = !document.documentElement.classList.contains("light");
-        if (isDark !== this.currentDark) {
-          this.currentDark = isDark;
+        // Any palette change restyles the map: two dark themes still differ in their CSS variables.
+        const theme = currentTheme();
+        if (theme !== this.currentTheme) {
+          this.currentTheme = theme;
           this.applyCurrentStyle();
         }
       });
 
       this.observer.observe(document.documentElement, {
         attributes: true,
-        attributeFilter: ["class"],
+        attributeFilter: ["data-theme"],
       });
     }
   }

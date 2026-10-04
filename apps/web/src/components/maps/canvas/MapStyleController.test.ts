@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { buildMapStyle, MapStyleController, repairHostedStyle, type ThemeColors } from "./MapStyleController";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildMapStyle, getThemeColors, MapStyleController, repairHostedStyle, type ThemeColors } from "./MapStyleController";
 import type { StyleSpecification } from "maplibre-gl";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { MapProviderConfig } from "@/lib/maps/types";
@@ -129,6 +129,44 @@ describe("repairHostedStyle", () => {
     const towns = repaired.layers[1] as { layout: Record<string, unknown> };
     expect(towns.layout["text-font"]).toEqual(["Noto Sans Regular"]);
     expect(towns.layout["icon-image"]).toEqual(["step", ["zoom"], "circle_11", 9, ""]);
+  });
+});
+
+describe("getThemeColors active theme", () => {
+  afterEach(() => {
+    delete document.documentElement.dataset.theme;
+  });
+
+  it.each([
+    ["ristretto", true],
+    ["dracula", true],
+    ["light", false],
+  ])("reads data-theme=%s as isDark=%s", (theme, dark) => {
+    document.documentElement.dataset.theme = theme;
+    expect(getThemeColors().isDark).toBe(dark);
+  });
+
+  it("restyles when data-theme changes between two dark themes", async () => {
+    document.documentElement.dataset.theme = "ristretto";
+    const controller = new MapStyleController({
+      id: "p",
+      kind: "pmtiles",
+      tiles: ["/t.pmtiles"],
+      attribution: "x",
+      maxZoom: 18,
+      offline: true,
+    });
+    const setStyle = vi.fn();
+    const map = {
+      isStyleLoaded: () => true,
+      setStyle,
+      on: vi.fn(),
+      once: vi.fn(),
+    } as unknown as MapLibreMap;
+    controller.attach(map);
+    document.documentElement.dataset.theme = "dracula";
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(setStyle).toHaveBeenCalledTimes(1);
   });
 });
 

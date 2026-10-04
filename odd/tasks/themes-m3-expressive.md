@@ -1,0 +1,51 @@
+# Themes and Material 3 Expressive redesign
+
+## Objective
+Three themes (Ristretto, Dracula, Light), one design language inspired by Material 3 Expressive across every screen, a normalized minimalist icon system, PWA installability and a mobile layout with bottom navigation.
+
+## Problem and why
+The UI ships two themes toggled by a `.light` class, mixes FontAwesome (navigation, 19 files) with lucide-react (51 files), has one shared primitives file plus 162 raw buttons, and below `md` keeps a fixed 64px rail plus a drawer. There is no manifest or service worker, so it cannot be installed on a phone.
+
+## Design source
+Canvas https://claude.ai/artifact/VWVEfmkxMcM6Nd26kDwXAc (tokens, icons, desktop, mobile, PWA install). Theme values in this document are the implementation source of truth.
+
+## Scope and constraints
+- Authorized by the user on 2026-10-04 ("cuando termines arranca con el desarrollo").
+- Branch `feat/themes-m3`, created from `feat/maps` with the unrelated provisioning work still uncommitted; work-unit commits stage only this feature's paths.
+- Tokens: `data-theme="ristretto|dracula|light"` on `<html>`, M3 role variables (`--md-*`), existing Tailwind utilities (`bg-bg`, `text-ink`, `bg-surface`...) remain as aliases so routes migrate incrementally.
+- Default theme: stored choice, else `prefers-color-scheme` (light → Light, dark → Ristretto). Legacy `openvms.theme=light` maps to Light, anything else to Ristretto.
+- Fonts self-hosted (Caddy CSP `font-src 'self'`): Manrope for UI, IBM Plex Mono kept for data.
+- Icons: lucide-react behind one `<Icon>` wrapper (sizes 16/20/24, stroke 1.75, active stroke 2); FontAwesome removed at the end.
+- PWA: manifest, maskable icons, service worker that never caches `/api`, `/media`, `/ws`; Caddy must serve `sw.js` and the manifest with `no-cache` instead of the SPA fallback.
+- Generated technical artifacts in English; UI copy goes through i18n catalogs es/en/pt.
+- TDD: strict, enabled by session configuration. Runner: `cd apps/web && pnpm exec vitest run <files>`; typecheck `pnpm typecheck`.
+- Planning heuristic about 400 authored changed lines per task (advisory only).
+
+## Delivery
+Forecast: about 3500–5000 authored changed lines (23 routes, 11.4k lines). Over budget: strategy `ask-on-risk`, chain strategy `feature-branch-chain` (user confirmed 2026-10-04). Slices: PR1 T1–T2 (themes), PR2 T3–T4 (icons, primitives), PR3 T5–T6 (shell, PWA), PR4 T7–T8, PR5 T9–T10, PR6 T11. Push, PR creation and merge remain the user's decisions.
+
+## Tasks
+- [x] T1 Theme tokens and runtime: three `data-theme` palettes with M3 roles, shape/type/motion tokens, Manrope, `theme.ts` (read/apply/persist, legacy migration, system default), replace the class toggle in `main.tsx` and `AccountMenu.tsx`, `MapStyleController` reads dark/light from the active theme and restyles on change. Route: delegated (multiple non-trivial files).
+- [ ] T2 Theme selector: segmented control in the account menu and Account page, i18n es/en/pt.
+- [ ] T3 Icon system: `<Icon>` wrapper, nav and the 19 FontAwesome files migrated to lucide, FontAwesome dependency removed.
+- [ ] T4 M3 primitives: Button (filled, tonal, outlined, text, icon), Chip, Card, Switch, StatusBadge pill, inputs, Modal/ConfirmDialog shapes, motion utilities.
+- [ ] T5 App shell: navigation rail with pill indicator, mobile bottom navigation (4 primary + "More" sheet) below `md`, top app bar; drop the fixed mobile rail.
+- [ ] T6 PWA: manifest with per-theme `theme-color`, maskable icons, service worker, install prompt (beforeinstallprompt + iOS hint), Caddy headers and CSP.
+- [ ] T7 Migrate operation screens: Live, LiveExplorer, Playback, Events, Plates, Dashboard.
+- [ ] T8 Migrate maps surfaces: MapShell, panels, canvas palette per theme.
+- [ ] T9 Migrate inventory screens: Servers, Cameras, Sites, CameraGroups, FrigateCameraConfig, Exports.
+- [ ] T10 Migrate settings and auth: Users, Groups, Permissions, Rules, Channels, Alarms, Audit, Branding, Account, Notifications, Login.
+- [ ] T11 Hardcoded colors cleanup (DayTimeline, ZoneCanvas, ArPlate, format.ts, sprites) and final visual pass.
+
+## Acceptance criteria
+- Switching theme updates every surface without reload, persists, and maps follow it.
+- No raw hex colors in components outside token files and documented canvas fallbacks.
+- Below 768px: bottom navigation, no horizontal page scroll, touch targets at least 44px.
+- Lighthouse installability passes: manifest, icons, service worker; API and media never served from the SW cache.
+- Existing vitest suite and typecheck pass after every task.
+
+## Progress and evidence
+- T1 (delegated writer; trigger: 2+ non-trivial files). RED: `theme.test.ts` failed to load (module missing); `MapStyleController.test.ts` data-theme isDark row and "restyles between two dark themes" (expected 1 call, got 0). GREEN: theme + MapStyleController 22/22; typecheck clean; `pnpm build` OK (existing >500 kB chunk warning). Full suite 661/663: both failures in `MapShell.test.tsx` (live hover 700ms, investigation navigation) reproduce with T1 files stashed, so they come from uncommitted Maps work, not T1. Shape tokens named `--radius-m3-*` because Tailwind `--radius-xs..2xl` would resize existing `rounded-*`. Map restyles through the existing MutationObserver, now on `data-theme`, keyed by theme id.
+
+## Next step
+T2 theme selector.

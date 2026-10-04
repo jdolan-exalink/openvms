@@ -1,3 +1,4 @@
+import "@fontsource-variable/manrope";
 import "@fontsource/ibm-plex-sans/400.css";
 import "@fontsource/ibm-plex-sans/500.css";
 import "@fontsource/ibm-plex-sans/600.css";
@@ -15,17 +16,12 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { bootLocale } from "./i18n";
+import { applyTheme, resolveInitialTheme } from "./lib/theme";
 import { router } from "./router";
 
 bootLocale();
 
-try {
-  if (localStorage.getItem("openvms.theme") === "light") {
-    document.documentElement.classList.replace("dark", "light");
-  }
-} catch {
-  // no stored preference available; keep the dark default
-}
+applyTheme(resolveInitialTheme());
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },

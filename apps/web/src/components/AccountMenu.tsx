@@ -3,6 +3,7 @@ import { ChevronDown, KeyRound, LogOut, Moon, Sun } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { LOCALES, setLocale, useLocale, useT, type Locale } from "@/i18n";
 import { cn } from "@/lib/cn";
+import { isDarkTheme, useTheme, type ThemeId } from "@/lib/theme";
 
 /** AccountMenu is the compact session menu: language, theme, password, and sign-out. */
 export function AccountMenu({
@@ -18,7 +19,11 @@ export function AccountMenu({
   const t = useT();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
-  const [light, setLight] = useState(() => document.documentElement.classList.contains("light"));
+  const [theme, setTheme] = useTheme();
+  const light = !isDarkTheme(theme);
+  // Remember which dark palette to return to; T2 replaces this toggle with a full selector.
+  const lastDark = useRef<ThemeId>("ristretto");
+  if (isDarkTheme(theme)) lastDark.current = theme;
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const signedIn = Boolean(onLogout);
@@ -41,16 +46,7 @@ export function AccountMenu({
   }, [open]);
 
   const chooseLocale = (id: Locale) => setLocale(id);
-  const chooseTheme = (nextLight: boolean) => {
-    document.documentElement.classList.toggle("light", nextLight);
-    document.documentElement.classList.toggle("dark", !nextLight);
-    try {
-      localStorage.setItem("openvms.theme", nextLight ? "light" : "dark");
-    } catch {
-      // The theme still applies for this session.
-    }
-    setLight(nextLight);
-  };
+  const chooseTheme = (nextLight: boolean) => setTheme(nextLight ? "light" : lastDark.current);
 
   return (
     <div ref={rootRef} className="relative">

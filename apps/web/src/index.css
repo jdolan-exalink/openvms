@@ -1,10 +1,11 @@
 @import "tailwindcss";
 
-/* Dark is the default for the monitoring room (PRD §7); .light switches palettes. */
-@custom-variant light (&:where(.light, .light *));
+/* Themes are selected with data-theme on <html> (ristretto, dracula, light); see lib/theme.ts.
+   Ristretto is also the plain :root fallback so an unthemed document stays dark. */
+@custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
 
 @theme {
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Manrope Variable", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
 
   /* Legacy Tailwind color names stay mapped to the semantic design tokens. */
@@ -19,43 +20,140 @@
   --color-warn: var(--warning);
   --color-bad: var(--danger);
   --color-info: var(--info);
+
+  /* Material 3 role utilities (bg-primary, text-on-surface-variant, ...). */
+  --color-surface-dim: var(--md-surface-dim);
+  --color-surface-1: var(--md-surface-1);
+  --color-surface-2: var(--md-surface-2);
+  --color-surface-3: var(--md-surface-3);
+  --color-outline: var(--md-outline);
+  --color-outline-variant: var(--md-outline-variant);
+  --color-on-surface: var(--md-on-surface);
+  --color-on-surface-variant: var(--md-on-surface-variant);
+  --color-primary: var(--md-primary);
+  --color-on-primary: var(--md-on-primary);
+  --color-primary-container: var(--md-primary-container);
+  --color-on-primary-container: var(--md-on-primary-container);
+  --color-secondary: var(--md-secondary);
+  --color-secondary-container: var(--md-secondary-container);
+  --color-on-secondary-container: var(--md-on-secondary-container);
+  --color-tertiary: var(--md-tertiary);
+  --color-scrim: var(--md-scrim);
+  --color-video: var(--md-video);
+
+  /* Shape scale. Prefixed m3 because Tailwind's own --radius-xs..2xl would resize every existing rounded-* class. */
+  --radius-m3-xs: 4px;
+  --radius-m3-sm: 8px;
+  --radius-m3-md: 12px;
+  --radius-m3-lg: 16px;
+  --radius-m3-xl: 28px;
+  --radius-m3-2xl: 36px;
 }
 
 :root {
-  --bg-app: #0e1523;
-  --bg-nav: #101827;
-  --bg-panel: #151f30;
-  --bg-panel-elevated: #1b2638;
-  --bg-panel-hover: #222e42;
-  --border-default: #29364a;
-  --text-primary: #f5f7fa;
-  --text-secondary: #b5c0ce;
-  --text-muted: #7e8a9a;
-  --accent: #1683f8;
-  --accent-hover: #2794ff;
-  --success: #21b45b;
-  --warning: #f59e0b;
-  --danger: #ef3f46;
-  /* No separate info brand color exists; info remains a semantic accent alias. */
-  --info: var(--accent);
+  /* Legacy variables alias the M3 roles so existing utilities keep working. */
+  --bg-app: var(--md-surface-dim);
+  --bg-nav: var(--md-surface-dim);
+  --bg-panel: var(--md-surface);
+  --bg-panel-elevated: var(--md-surface-1);
+  --bg-panel-hover: var(--md-surface-2);
+  --border-default: var(--md-outline-variant);
+  --text-primary: var(--md-on-surface);
+  --text-secondary: var(--md-on-surface-variant);
+  --text-muted: var(--md-muted);
+  --accent: var(--md-primary);
+  --accent-hover: color-mix(in oklab, var(--md-primary) 85%, white);
+  --success: var(--md-success);
+  --warning: var(--md-warning);
+  --danger: var(--md-danger);
+  --info: var(--md-secondary);
+
+  /* Expressive motion: spring-like spatial curves, calm effects curves. */
+  --md-motion-spatial-fast: 350ms cubic-bezier(0.42, 1.67, 0.21, 0.9);
+  --md-motion-spatial: 500ms cubic-bezier(0.38, 1.21, 0.22, 1);
+  --md-motion-effects-fast: 150ms cubic-bezier(0.31, 0.94, 0.34, 1);
+  --md-motion-effects: 200ms cubic-bezier(0.34, 0.8, 0.34, 1);
+}
+
+:root,
+:root[data-theme="ristretto"] {
+  --md-surface-dim: #1f1a1a;
+  --md-surface: #2c2525;
+  --md-surface-1: #342c2c;
+  --md-surface-2: #3d3434;
+  --md-surface-3: #473d3d;
+  --md-outline: #7a6c6d;
+  --md-outline-variant: #4a4041;
+  --md-on-surface: #fff1f3;
+  --md-on-surface-variant: #c9bdbe;
+  --md-muted: #a39798;
+  --md-primary: #f38d70;
+  --md-on-primary: #2e140b;
+  --md-primary-container: #5c3326;
+  --md-on-primary-container: #ffdacd;
+  --md-secondary: #85dacc;
+  --md-secondary-container: #1f4a44;
+  --md-on-secondary-container: #c6f3ea;
+  --md-tertiary: #a8a9eb;
+  --md-success: #adda78;
+  --md-warning: #f9cc6c;
+  --md-danger: #fd6883;
+  --md-video: #171313;
+  --md-scrim: rgba(16, 12, 12, 0.6);
   color-scheme: dark;
 }
 
-:root.light {
-  --bg-app: #f4f6f5;
-  --bg-nav: #ffffff;
-  --bg-panel: #ffffff;
-  --bg-panel-elevated: #eef2f0;
-  --bg-panel-hover: #e6ece9;
-  --border-default: #d6dfdc;
-  --text-primary: #15201d;
-  --text-secondary: #586864;
-  --text-muted: #74827e;
-  --accent: #0e7565;
-  --accent-hover: #0a6255;
-  --success: #2e7d4f;
-  --warning: #9a6212;
-  --danger: #a83434;
+:root[data-theme="dracula"] {
+  --md-surface-dim: #1e1f29;
+  --md-surface: #282a36;
+  --md-surface-1: #2e3040;
+  --md-surface-2: #363849;
+  --md-surface-3: #44475a;
+  --md-outline: #6f7db0;
+  --md-outline-variant: #3f4256;
+  --md-on-surface: #f8f8f2;
+  --md-on-surface-variant: #c3c6d8;
+  --md-muted: #959bc0;
+  --md-primary: #bd93f9;
+  --md-on-primary: #1e1236;
+  --md-primary-container: #47386b;
+  --md-on-primary-container: #ebdcff;
+  --md-secondary: #8be9fd;
+  --md-secondary-container: #1d4954;
+  --md-on-secondary-container: #cdf6ff;
+  --md-tertiary: #ff79c6;
+  --md-success: #50fa7b;
+  --md-warning: #f1fa8c;
+  --md-danger: #ff5555;
+  --md-video: #16171f;
+  --md-scrim: rgba(14, 14, 20, 0.6);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --md-surface-dim: #e9eaef;
+  --md-surface: #f7f7fa;
+  --md-surface-1: #ffffff;
+  --md-surface-2: #eff0f5;
+  --md-surface-3: #e5e7ee;
+  --md-outline: #767a88;
+  --md-outline-variant: #d6d9e2;
+  --md-on-surface: #191b22;
+  --md-on-surface-variant: #444856;
+  --md-muted: #5f6371;
+  --md-primary: #3352c9;
+  --md-on-primary: #ffffff;
+  --md-primary-container: #dde3ff;
+  --md-on-primary-container: #0d1c5c;
+  --md-secondary: #006a6a;
+  --md-secondary-container: #c4ecea;
+  --md-on-secondary-container: #002020;
+  --md-tertiary: #7a4fa8;
+  --md-success: #2e7d32;
+  --md-warning: #8a5a00;
+  --md-danger: #c0262d;
+  --md-video: #d9dce5;
+  --md-scrim: rgba(20, 22, 30, 0.4);
   color-scheme: light;
 }
 
@@ -104,6 +202,11 @@ html[data-live-fullscreen] [data-shell-region="main-workspace"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  :root {
+    --md-motion-spatial-fast: var(--md-motion-effects-fast);
+    --md-motion-spatial: var(--md-motion-effects-fast);
+    --md-motion-effects: var(--md-motion-effects-fast);
+  }
   *,
   *::before,
   *::after {
