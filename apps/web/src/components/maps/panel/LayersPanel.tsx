@@ -1,4 +1,5 @@
 import { X } from "lucide-react";
+import { IconButton } from "@/components/ui";
 import type { LayerPreference } from "@/lib/maps/types";
 
 export interface LayersPanelProps {
@@ -32,32 +33,25 @@ const PENDING_GROUPS = "IA por etiqueta, LPR, caras, infraestructura, heatmap y 
 
 export function LayersPanel({ layers, onChange, onClose }: LayersPanelProps) {
   return (
-    <section aria-label="Layers" className="w-64 rounded border border-line bg-surface p-3 shadow-sm">
-      <header className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Capas</h2>
+    <section aria-label="Layers" className="w-64 rounded-m3-xl bg-surface-1/95 p-4 shadow-lg backdrop-blur">
+      <header className="mb-1 flex items-center justify-between">
+        <h2 className="text-lg font-bold">Capas</h2>
         {onClose && (
-          <button
-            type="button"
-            aria-label="Close layers panel"
-            onClick={onClose}
-            className="rounded p-1 text-muted hover:bg-raised hover:text-ink"
-          >
-            <X className="size-3.5" aria-hidden />
-          </button>
+          <IconButton icon={X} aria-label="Close layers panel" onClick={onClose} className="-mr-2" />
         )}
       </header>
 
       {GROUPS.map((group) => (
         <fieldset key={group.title} className="mb-3 last:mb-0">
-          <legend className="mb-1 text-xs font-medium text-muted">{group.title}</legend>
-          <div className="space-y-1">
+          <legend className="mb-1 text-xs font-bold text-on-surface-variant">{group.title}</legend>
+          <div className="space-y-0">
             {group.options.map(({ key, label }) => (
-              <label key={key} className="flex cursor-pointer items-center gap-2 text-sm text-ink">
+              <label key={key} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-on-surface">
                 <input
                   type="checkbox"
                   checked={layers[key]}
                   onChange={() => onChange({ ...layers, [key]: !layers[key] })}
-                  className="size-3.5 accent-accent"
+                  className="size-5 accent-primary"
                 />
                 {label}
               </label>
@@ -66,7 +60,7 @@ export function LayersPanel({ layers, onChange, onClose }: LayersPanelProps) {
         </fieldset>
       ))}
 
-      <p className="mt-3 border-t border-line pt-2 text-xs text-muted">{PENDING_GROUPS}</p>
+      <p className="mt-3 rounded-m3-lg bg-surface-2 p-3 text-xs text-on-surface-variant">{PENDING_GROUPS}</p>
     </section>
   );
 }

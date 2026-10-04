@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight, Folder, FolderOpen, Server, Video } from "lucide-react";
 import { Icon } from "@/components/Icon";
+import { Button } from "@/components/ui";
 import { GripVertical, MapPin } from "lucide-react";
 import { useMemo, useState, type DragEvent, type ReactNode } from "react";
 
@@ -56,7 +57,7 @@ function groupCameras(cameras: readonly MapTreeCamera[], folders: readonly MapTr
 }
 
 function Chevron({ open }: { open: boolean }) {
-  return <Icon icon={open ? ChevronDown : ChevronRight} size={12} className="text-muted" />;
+  return <Icon icon={open ? ChevronDown : ChevronRight} size={12} className="text-on-surface-variant" />;
 }
 
 /**
@@ -92,7 +93,7 @@ export function MapCameraTree({
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => groupCameras(cameras, folders, servers, keepEmptyFolders), [cameras, folders, servers, keepEmptyFolders]);
   const toggle = (key: string) => setClosed((current) => ({ ...current, [key]: !current[key] }));
-  if (groups.length === 0) return <p className="px-1 text-xs text-muted">No hay cámaras para este filtro.</p>;
+  if (groups.length === 0) return <p className="px-1 text-xs text-on-surface-variant">No hay cámaras para este filtro.</p>;
   return (
     <div className="space-y-1">
       {groups.map((group) => {
@@ -102,25 +103,25 @@ export function MapCameraTree({
         return (
           <section key={group.key} aria-label={group.name}>
             <h3>
-              <button type="button" aria-expanded={serverOpen} onClick={() => toggle(serverKey)} className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted hover:bg-raised">
+              <button type="button" aria-expanded={serverOpen} onClick={() => toggle(serverKey)} className="flex min-h-11 w-full items-center gap-1.5 rounded-full px-2 text-left text-[11px] font-bold uppercase tracking-wide text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary">
                 <Chevron open={serverOpen} />
                 <Icon icon={Server} size="xs" className="shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{group.name}</span>
-                <span className="rounded-full bg-raised px-1.5 text-[10px] tabular-nums">{count}</span>
+                <span className="rounded-full bg-surface-3 px-2 font-mono text-[10px] tabular-nums">{count}</span>
               </button>
             </h3>
             {serverOpen && (
-              <div className="ml-2 space-y-1 border-l border-white/10 pl-1">
+              <div className="ml-3 space-y-1 pl-1">
                 {group.folders.map((folder) => {
                   const folderKey = `fld:${folder.id}`;
                   const folderOpen = !closed[folderKey];
                   return (
                     <div key={folder.id}>
-                      <button type="button" aria-expanded={folderOpen} onClick={() => toggle(folderKey)} className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left text-xs text-ink hover:bg-raised">
+                      <button type="button" aria-expanded={folderOpen} onClick={() => toggle(folderKey)} className="flex min-h-11 w-full items-center gap-1.5 rounded-full px-2 text-left text-xs font-medium text-on-surface hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary">
                         <Chevron open={folderOpen} />
-                        <Icon icon={folderOpen ? FolderOpen : Folder} size="xs" className="shrink-0 text-muted" />
+                        <Icon icon={folderOpen ? FolderOpen : Folder} size="xs" className="shrink-0 text-on-surface-variant" />
                         <span className="min-w-0 flex-1 truncate">{folder.name}</span>
-                        <span className="text-[10px] tabular-nums text-muted">{folder.cameras.length}</span>
+                        <span className="font-mono text-[10px] tabular-nums text-on-surface-variant">{folder.cameras.length}</span>
                       </button>
                       {folderOpen && <ul className="ml-4 space-y-1">{folder.cameras.map((camera) => <CameraRow key={camera.id} camera={camera} selectedId={selectedId} armedId={armedId} onSelect={onSelect} onOpen={onOpen} draggable={draggable} draggingId={draggingId} onDragStart={onDragStart} onDragEnd={onDragEnd} />)}</ul>}
                     </div>
@@ -163,8 +164,8 @@ function CameraRow({
   let extra: ReactNode = null;
   if (camera.placed !== undefined) {
     extra = placed
-      ? <span aria-hidden className="inline-flex items-center gap-1 rounded-full bg-ok/15 px-1.5 py-0.5 text-[10px] font-semibold text-ok"><MapPin className="size-2.5" aria-hidden />En el mapa</span>
-      : <span aria-hidden className="text-[10px] text-muted">Sin ubicar</span>;
+      ? <span aria-hidden className="inline-flex items-center gap-1 rounded-full bg-ok/15 px-2 py-0.5 text-[10px] font-bold text-ok"><MapPin className="size-2.5" aria-hidden />En el mapa</span>
+      : <span aria-hidden className="text-[10px] text-on-surface-variant">Sin ubicar</span>;
   }
   return (
     <li className="flex items-stretch gap-1">
@@ -178,24 +179,24 @@ function CameraRow({
         onDragEnd={draggable ? () => onDragEnd?.() : undefined}
         className={
           draggingId === camera.id
-            ? "flex min-w-0 flex-1 cursor-grabbing items-center gap-2 rounded-lg border border-accent bg-accent/10 px-2 py-1.5 text-left opacity-60"
+            ? "m3-press flex min-h-11 min-w-0 flex-1 cursor-grabbing items-center gap-2 rounded-m3-lg bg-primary-container px-3 py-1.5 text-left opacity-60"
             : selected
-              ? `flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-2 py-1.5 text-left ${placed ? "border-ok bg-ok/15" : "border-accent bg-accent/15"} ${draggable ? "cursor-grab" : ""}`
-              : `flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-2 py-1.5 text-left hover:bg-raised ${placed ? "border-ok/70 bg-ok/10" : "border-dashed border-line"} ${draggable ? "cursor-grab" : ""}`
+              ? `m3-press flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-m3-lg px-3 py-1.5 text-left ${placed ? "bg-ok/20 ring-1 ring-ok" : "bg-primary-container text-on-primary-container"} ${draggable ? "cursor-grab" : ""}`
+              : `m3-press flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-m3-lg px-3 py-1.5 text-left hover:bg-on-surface/8 ${placed ? "bg-ok/10" : "bg-surface-2"} ${draggable ? "cursor-grab" : ""}`
         }
       >
-        <Icon icon={Video} size="xs" className="shrink-0 text-muted" />
+        <Icon icon={Video} size="xs" className="shrink-0 text-on-surface-variant" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm">{camera.name}</span>
           {extra}
         </span>
-        <span className={camera.status === "online" ? "size-1.5 rounded-full bg-ok" : camera.status === "offline" ? "size-1.5 rounded-full bg-bad" : "size-1.5 rounded-full bg-muted"} aria-hidden />
-        {draggable && <GripVertical className="size-3.5 shrink-0 text-muted" aria-hidden />}
+        <span className={camera.status === "online" ? "size-2 rounded-full bg-ok" : camera.status === "offline" ? "size-2 rounded-full bg-bad" : "size-2 rounded-full bg-muted"} aria-hidden />
+        {draggable && <GripVertical className="size-4 shrink-0 text-on-surface-variant" aria-hidden />}
       </button>
       {onOpen && (
-        <button type="button" aria-label={`Maximizar: ${camera.name}`} onClick={() => onOpen(camera.id)} className="shrink-0 rounded border border-line px-1.5 text-[10px] text-muted hover:bg-raised">
+        <Button variant="tonal" size="sm" aria-label={`Maximizar: ${camera.name}`} onClick={() => onOpen(camera.id)} className="h-auto min-h-11 shrink-0 px-3 text-[11px]">
           Abrir
-        </button>
+        </Button>
       )}
     </li>
   );

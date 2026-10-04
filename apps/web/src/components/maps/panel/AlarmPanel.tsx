@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, X } from "lucide-react";
+import { Button, IconButton, Select } from "@/components/ui";
 import { api, unwrap, type Schemas } from "@/api/client";
 import { alarmAssigneesQuery } from "@/api/queries";
 import { VehicleFacts } from "@/components/VehicleMark";
@@ -32,7 +33,7 @@ export function AlarmPanel({ alarms, canManage }: { alarms: Schemas["Alarm"][]; 
   const fresh = useFreshAlarmIds(alarms);
   return (
     <section aria-label="Alarms" className="space-y-2">
-      {!alarms.length && <p className="p-2 text-xs text-muted">No hay alarmas en este sitio</p>}
+      {!alarms.length && <p className="p-2 text-xs text-on-surface-variant">No hay alarmas en este sitio</p>}
       <ul className="space-y-2">
         {alarms.map((item) => (
           <li key={item.id} className={fresh.has(item.id) ? "alarm-card-in" : undefined}>
@@ -85,22 +86,22 @@ function AlarmCard({ alarm, onOpen }: { alarm: Schemas["Alarm"]; onOpen: (origin
         const rect = event.currentTarget.getBoundingClientRect();
         onOpen({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
       }}
-      className="block w-full overflow-hidden rounded-xl border border-bad/40 bg-bg/50 text-left shadow-sm hover:border-bad"
+      className="m3-press block w-full overflow-hidden rounded-m3-xl bg-surface-2 text-left ring-1 ring-bad/40 hover:ring-bad focus-visible:outline-2 focus-visible:outline-primary"
     >
-      <span className="relative block h-24 bg-black">
+      <span className="relative block h-24 bg-video">
         {imageFailed ? (
-          <span className="flex h-full items-center justify-center text-[11px] text-white/60">Sin imagen</span>
+          <span className="flex h-full items-center justify-center text-[11px] text-on-surface-variant">Sin imagen</span>
         ) : (
           <img src={snapshot} alt="" className="size-full object-cover" onError={() => setImageFailed(true)} />
         )}
-        <span className={`absolute left-2 top-2 rounded px-1.5 py-0.5 text-[10px] font-semibold ${seen ? "bg-black/70 text-white" : "bg-bad text-white"}`}>
+        <span className={`absolute left-2 top-2 rounded-full px-2.5 py-0.5 text-[10px] font-bold ${seen ? "bg-surface-2 text-on-surface-variant" : "bg-bad text-surface-dim light:text-white"}`}>
           {statusLabel[alarm.status] ?? alarm.status}
         </span>
       </span>
-      <span className="block space-y-1 px-2 py-1.5">
-        <span className="block truncate text-xs font-semibold text-ink">{alarm.camera_name}</span>
+      <span className="block space-y-1 px-3 py-2">
+        <span className="block truncate text-xs font-bold text-on-surface">{alarm.camera_name}</span>
         <VehicleFacts labels={alarm.event_labels} vehicle={alarm.vehicle} person={alarm.person} serverName={alarm.server_name} />
-        <span className="block text-[10px] text-muted">{fmtDateTime(alarm.created_at)}</span>
+        <span className="block font-mono text-[10px] text-on-surface-variant">{fmtDateTime(alarm.created_at)}</span>
       </span>
     </button>
   );
@@ -111,14 +112,14 @@ function AlarmPreview({ alarm, origin, canManage, onClose }: { alarm: Schemas["A
   const snapshot = `/media/v1/events/${encodeURIComponent(alarm.event_id)}/snapshot.jpg`;
   return (
     <MapGrowFrame label={`Alarma ${alarm.camera_name}`} origin={origin} onClose={onClose} fixed className="z-50">
-      <div className="relative aspect-video w-full bg-black">
+      <div className="relative aspect-video w-full bg-video">
         {failed ? (
-          <p className="flex size-full items-center justify-center text-sm text-white/70">Imagen no disponible</p>
+          <p className="flex size-full items-center justify-center text-sm text-on-surface-variant">Imagen no disponible</p>
         ) : (
           <img src={snapshot} alt={`Alarma en ${alarm.camera_name}`} className="size-full object-contain" onError={() => setFailed(true)} />
         )}
         <div data-map-drag className="absolute inset-x-0 top-0 z-[3] flex cursor-grab items-center gap-2 bg-gradient-to-b from-black/80 to-transparent px-3 py-2 text-xs text-white active:cursor-grabbing">
-          <span className="rounded bg-bad px-1.5 py-0.5 text-[10px] font-semibold">{statusLabel[alarm.status] ?? alarm.status}</span>
+          <span className="rounded-full bg-bad px-2.5 py-0.5 text-[10px] font-bold text-surface-dim light:text-white">{statusLabel[alarm.status] ?? alarm.status}</span>
           <span className="min-w-0 truncate font-medium">{alarm.camera_name}</span>
           <PreviewClose />
         </div>
@@ -134,9 +135,7 @@ function AlarmPreview({ alarm, origin, canManage, onClose }: { alarm: Schemas["A
 function PreviewClose() {
   const close = useGrowClose();
   return (
-    <button type="button" onClick={close} className="ml-auto rounded p-1 hover:bg-white/20" aria-label="Cerrar vista de alarma">
-      ×
-    </button>
+    <IconButton icon={X} onClick={close} className="ml-auto size-9 text-white hover:bg-white/20" aria-label="Cerrar vista de alarma" />
   );
 }
 
@@ -204,46 +203,41 @@ function AlarmActions({ alarm, canManage, imageUrl }: { alarm: Schemas["Alarm"];
     return next !== "assign" || !!assignee;
   };
   return (
-    <div className="space-y-2 bg-surface p-3 text-xs text-ink">
-      {history.isError && <p role="alert">{history.error.message}</p>}
-      <ul className="max-h-16 space-y-0.5 overflow-auto text-[11px] text-muted">
+    <div className="space-y-3 bg-surface-1 p-4 text-xs text-on-surface">
+      {history.isError && <p role="alert" className="text-bad">{history.error.message}</p>}
+      <ul className="max-h-16 space-y-0.5 overflow-auto font-mono text-[11px] text-on-surface-variant">
         {history.data?.map((item) => (
           <li key={item.id}>{item.at} {item.actor_name} {item.to_status} {item.comment}</li>
         ))}
       </ul>
-      <button
-        type="button"
-        disabled={alreadyProtected || protect.isPending}
-        onClick={() => protect.mutate()}
-        className="inline-flex items-center gap-1 rounded border border-line px-2 py-1 hover:bg-raised disabled:opacity-60"
-      >
-        <ShieldCheck className="size-3.5" aria-hidden />
+      <Button variant="outlined" size="sm" disabled={alreadyProtected || protect.isPending} onClick={() => protect.mutate()}>
+        <ShieldCheck className="size-4" aria-hidden />
         {alreadyProtected ? "Imagen protegida" : "Proteger imagen"}
-      </button>
-      {protectError && <p role="alert">{protectError}</p>}
+      </Button>
+      {protectError && <p role="alert" className="text-bad">{protectError}</p>}
       {protect.isSuccess && <p role="status">La copia quedó en Imágenes protegidas</p>}
       {canManage && (
         <div className="space-y-2">
           <label className="block">
             Comentario
-            <textarea aria-label="Comment" value={comment} onChange={(event) => setComment(event.target.value)} className="mt-1 w-full rounded border border-line bg-bg px-2 py-1" rows={2} />
+            <textarea aria-label="Comment" value={comment} onChange={(event) => setComment(event.target.value)} className="mt-1 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-primary" rows={2} />
           </label>
           <label className="block">
             Responsable
-            <select aria-label="Assignee" value={assignee} onChange={(event) => setAssignee(event.target.value)} className="mt-1 w-full rounded border border-line bg-bg px-2 py-1">
+            <Select aria-label="Assignee" value={assignee} onChange={(event) => setAssignee(event.target.value)} className="mt-1">
               <option value="">Elegir responsable</option>
               {assignees.data?.map((item) => <option key={item.id} value={item.id}>{item.display_name || item.username}</option>)}
-            </select>
+            </Select>
           </label>
-          {assignees.isError && <p role="alert">{assignees.error.message}</p>}
-          <div className="flex flex-wrap gap-1">
+          {assignees.isError && <p role="alert" className="text-bad">{assignees.error.message}</p>}
+          <div className="flex flex-wrap gap-2">
             {(Object.keys(labels) as Action[]).map((next) => (
-              <button key={next} type="button" disabled={action.isPending || !legal(next)} onClick={() => action.mutate(next)} className="rounded border border-line px-2 py-1 hover:bg-raised disabled:opacity-50">
+              <Button key={next} variant={next === "close" ? "outlined" : "tonal"} size="sm" disabled={action.isPending || !legal(next)} onClick={() => action.mutate(next)}>
                 {labels[next]}
-              </button>
+              </Button>
             ))}
           </div>
-          {action.isError && <p role="alert">{action.error.message}</p>}
+          {action.isError && <p role="alert" className="text-bad">{action.error.message}</p>}
           {action.isSuccess && <p role="status">Acción registrada</p>}
         </div>
       )}

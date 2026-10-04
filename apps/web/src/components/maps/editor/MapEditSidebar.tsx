@@ -1,5 +1,6 @@
 import { Search } from "lucide-react";
 import { useMemo, useState } from "react";
+import { TextInput } from "@/components/ui";
 import { MapCameraTree, type MapTreeFolder, type MapTreeServer } from "../panel/MapCameraTree";
 import { DRAG_MIME } from "./UnplacedTray";
 
@@ -44,18 +45,18 @@ export function MapEditSidebar({
       aria-label="Cámaras del mapa"
       className="pointer-events-auto flex h-full min-h-0 w-full flex-col overflow-hidden"
     >
-      <header className="px-1 py-1">
-        <h2 className="text-sm font-semibold">Cámaras</h2>
-        <p className="text-[11px] text-muted">{placedCount} en el mapa · {cameras.length - placedCount} sin ubicar</p>
+      <header className="px-1 pb-2">
+        <h2 className="text-lg font-bold">Cámaras</h2>
+        <p className="font-mono text-[11px] text-on-surface-variant">{placedCount} en el mapa · {cameras.length - placedCount} sin ubicar</p>
       </header>
       <label className="relative mb-2 block">
-        <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted" aria-hidden />
-        <input
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-on-surface-variant" aria-hidden />
+        <TextInput
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Buscar cámara"
           aria-label="Buscar cámara"
-          className="w-full rounded border border-line bg-bg py-1 pl-7 pr-2 text-xs"
+          className="h-11 pl-10 text-xs"
         />
       </label>
       <div className="min-h-0 flex-1 overflow-auto">

@@ -25,12 +25,12 @@ export function Maps() {
   if (me.data && !canView) {
     return (
       <div className="flex h-full w-full items-center justify-center p-6 bg-bg">
-        <div className="flex max-w-md flex-col items-center gap-3 text-center">
-          <div className="flex size-12 items-center justify-center rounded-full bg-bad/10 text-bad">
+        <div className="flex max-w-md flex-col items-center gap-3 rounded-m3-xl bg-surface-1 p-8 text-center">
+          <div className="flex size-14 items-center justify-center rounded-full bg-bad/15 text-bad">
             <ShieldAlert className="size-6" aria-hidden />
           </div>
-          <h2 className="text-lg font-semibold text-ink">Acceso restringido</h2>
-          <p className="text-sm text-muted">
+          <h2 className="text-2xl font-extrabold text-on-surface">Acceso restringido</h2>
+          <p className="text-sm text-on-surface-variant">
             No tienes los permisos necesarios (<code className="font-mono text-xs">maps.view</code>) para acceder a los
             mapas geoespaciales. Contacta a un administrador.
           </p>

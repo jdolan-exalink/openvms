@@ -28,77 +28,54 @@ export interface ThemeColors {
   labelsHalo: string;
 }
 
+/**
+ * Base-map palette. Values come from the active theme's role variables (--md-*), so the
+ * three themes restyle the map; the hex literals are documented fallbacks only (Ristretto
+ * and Light role values) for environments without computed styles, because MapLibre needs
+ * concrete color strings.
+ */
+const DARK_FALLBACK: Omit<ThemeColors, "isDark"> = {
+  background: "#1f1a1a", // --md-surface-dim
+  water: "#1f4a44", // --md-secondary-container
+  roadsMinor: "#473d3d", // --md-surface-3
+  roadsMajor: "#4a4041", // --md-outline-variant
+  buildings: "#342c2c", // --md-surface-1
+  labels: "#c9bdbe", // --md-on-surface-variant
+  labelsHalo: "#1f1a1a", // --md-surface-dim
+};
+
+const LIGHT_FALLBACK: Omit<ThemeColors, "isDark"> = {
+  background: "#e9eaef", // --md-surface-dim
+  water: "#c4ecea", // --md-secondary-container
+  roadsMinor: "#d6d9e2", // --md-outline-variant
+  roadsMajor: "#ffffff", // --md-surface-1
+  buildings: "#eff0f5", // --md-surface-2
+  labels: "#444856", // --md-on-surface-variant
+  labelsHalo: "#ffffff", // --md-surface-1
+};
+
 export function getThemeColors(): ThemeColors {
   const isDark = typeof document !== "undefined" ? isDarkTheme(currentTheme()) : true;
+  const fallback = isDark ? DARK_FALLBACK : LIGHT_FALLBACK;
 
-  if (typeof window === "undefined") {
-    return isDark ? getDarkFallbackColors() : getLightFallbackColors();
-  }
+  if (typeof window === "undefined") return { isDark, ...fallback };
 
   const computed = getComputedStyle(document.documentElement);
-  const getVar = (name: string, fallback: string) => computed.getPropertyValue(name).trim() || fallback;
+  const getVar = (name: string, value: string) => computed.getPropertyValue(name).trim() || value;
+  const halo = isDark ? "--md-surface-dim" : "--md-surface-1";
+  const roadsMinor = isDark ? "--md-surface-3" : "--md-outline-variant";
+  const roadsMajor = isDark ? "--md-outline-variant" : "--md-surface-1";
+  const buildings = isDark ? "--md-surface-1" : "--md-surface-2";
 
-  if (isDark) {
-    const bgApp = getVar("--bg-app", "#0e1523");
-    const bgNav = getVar("--bg-nav", "#101827");
-    const bgPanel = getVar("--bg-panel", "#151f30");
-    const bgPanelHover = getVar("--bg-panel-hover", "#222e42");
-    const borderDefault = getVar("--border-default", "#29364a");
-    const textMuted = getVar("--text-muted", "#7e8a9a");
-
-    return {
-      isDark: true,
-      background: bgApp,
-      water: bgNav, // darkened nav tone
-      roadsMinor: bgPanelHover,
-      roadsMajor: borderDefault,
-      buildings: bgPanel,
-      labels: textMuted,
-      labelsHalo: bgApp,
-    };
-  } else {
-    const bgApp = getVar("--bg-app", "#f4f6f5");
-    const bgPanel = getVar("--bg-panel", "#ffffff");
-    const bgPanelElevated = getVar("--bg-panel-elevated", "#eef2f0");
-    const borderDefault = getVar("--border-default", "#d6dfdc");
-    const textSecondary = getVar("--text-secondary", "#586864");
-
-    return {
-      isDark: false,
-      background: bgApp,
-      water: "#d8e6e2", // tinted accent / water tone
-      roadsMinor: borderDefault,
-      roadsMajor: bgPanelElevated,
-      buildings: bgPanelElevated,
-      labels: textSecondary,
-      labelsHalo: bgPanel,
-    };
-  }
-}
-
-function getDarkFallbackColors(): ThemeColors {
   return {
-    isDark: true,
-    background: "#0e1523",
-    water: "#0a101a",
-    roadsMinor: "#222e42",
-    roadsMajor: "#29364a",
-    buildings: "#151f30",
-    labels: "#7e8a9a",
-    labelsHalo: "#0e1523",
-  };
-}
-
-function getLightFallbackColors(): ThemeColors {
-  return {
-    isDark: false,
-    background: "#f4f6f5",
-    water: "#d8e6e2",
-    roadsMinor: "#d6dfdc",
-    roadsMajor: "#eef2f0",
-    buildings: "#eef2f0",
-    labels: "#586864",
-    labelsHalo: "#ffffff",
+    isDark,
+    background: getVar("--md-surface-dim", fallback.background),
+    water: getVar("--md-secondary-container", fallback.water),
+    roadsMinor: getVar(roadsMinor, fallback.roadsMinor),
+    roadsMajor: getVar(roadsMajor, fallback.roadsMajor),
+    buildings: getVar(buildings, fallback.buildings),
+    labels: getVar("--md-on-surface-variant", fallback.labels),
+    labelsHalo: getVar(halo, fallback.labelsHalo),
   };
 }
 
@@ -123,7 +100,7 @@ export function repairHostedStyle(style: StyleSpecification): StyleSpecification
     const paint = (layer as { paint?: Record<string, unknown> }).paint;
     if (paint?.["fill-pattern"] === "wood-pattern") {
       delete paint["fill-pattern"];
-      paint["fill-color"] ??= "#1c3a2a";
+      paint["fill-color"] ??= "#1c3a2a"; // documented fallback: hosted dark style repair, not a theme color
       paint["fill-opacity"] ??= 0.4;
     }
   }

@@ -6,6 +6,7 @@ import type {
 } from "maplibre-gl";
 import type { Feature, FeatureCollection, Point } from "geojson";
 import type { Site } from "@/lib/maps/types";
+import { readMapPalette } from "../palette";
 
 export const SITES_SOURCE_ID = "sites";
 
@@ -57,6 +58,7 @@ export function buildSitesSource(sites: Site[] = []): GeoJSONSourceSpecification
 }
 
 export function buildSiteLayers(): LayerSpecification[] {
+  const palette = readMapPalette();
   // 1. Health ring around site
   const siteHealthRing: CircleLayerSpecification = {
     id: "site-health-ring",
@@ -69,10 +71,10 @@ export function buildSiteLayers(): LayerSpecification[] {
       "circle-stroke-color": [
         "case",
         ["==", ["get", "severity"], "CRITICAL"],
-        "#ef3f46",
+        palette.bad,
         ["==", ["get", "severity"], "WARNING"],
-        "#f59e0b",
-        "#21b45b",
+        palette.warn,
+        palette.ok,
       ],
     },
   };
@@ -84,9 +86,9 @@ export function buildSiteLayers(): LayerSpecification[] {
     source: SITES_SOURCE_ID,
     paint: {
       "circle-radius": 14,
-      "circle-color": ["case", [">", ["get", "online"], 0], "#21b45b", [">", ["get", "offline"], 0], "#7e8a9a", "#1683f8"],
+      "circle-color": ["case", [">", ["get", "online"], 0], palette.ok, [">", ["get", "offline"], 0], palette.muted, palette.primary],
       "circle-stroke-width": 2,
-      "circle-stroke-color": "#ffffff",
+      "circle-stroke-color": palette.ring,
     },
   };
 
@@ -103,8 +105,8 @@ export function buildSiteLayers(): LayerSpecification[] {
       "text-max-width": 10,
     },
     paint: {
-      "text-color": "#ffffff",
-      "text-halo-color": "#0e1523",
+      "text-color": palette.label,
+      "text-halo-color": palette.labelHalo,
       "text-halo-width": 2,
     },
   };
@@ -112,13 +114,13 @@ export function buildSiteLayers(): LayerSpecification[] {
   const siteIcon: SymbolLayerSpecification = {
     id: "site-icon", type: "symbol", source: SITES_SOURCE_ID,
     layout: { "icon-image": "site-building", "icon-size": 0.7, "icon-allow-overlap": true },
-    paint: { "icon-color": "#ffffff" },
+    paint: { "icon-color": palette.onMarker },
   };
   const offlineBadge: SymbolLayerSpecification = {
     id: "site-offline-badge", type: "symbol", source: SITES_SOURCE_ID,
     filter: ["all", ["==", ["get", "online"], 0], [">", ["get", "offline"], 0]],
     layout: { "icon-image": "status-offline", "icon-size": 0.45, "icon-offset": [22, -22], "icon-allow-overlap": true },
-    paint: { "icon-color": "#ef3f46", "icon-halo-color": "#ffffff", "icon-halo-width": 1.5 },
+    paint: { "icon-color": palette.bad, "icon-halo-color": palette.ring, "icon-halo-width": 1.5 },
   };
   return [siteHealthRing, sitePoint, siteLabel, siteIcon, offlineBadge];
 }

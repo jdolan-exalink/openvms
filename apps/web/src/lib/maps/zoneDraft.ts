@@ -9,6 +9,9 @@ export const ZONE_KIND_COLOR: Record<ZoneKind, string> = {
   custom: "#a855f7",
 };
 
+/** Swatches offered in the zone editor; zone colors are persisted as data, not theme colors. */
+export const ZONE_COLOR_CHOICES = ["#1683f8", "#22c55e", "#f59e0b", "#ef3f46", "#a855f7", "#f8fafc"] as const;
+
 /**
  * A zone under construction: vertices accumulate on map clicks until the operator closes
  * the polygon, mirroring exactly what the backend validates (closed GeoJSON ring, at least

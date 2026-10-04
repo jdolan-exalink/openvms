@@ -9,6 +9,7 @@ import { MapShell, type MapShellProps } from "./MapShell";
 import { FloorMap } from "./FloorMap";
 import { MapHierarchyControls } from "./editor/MapHierarchyControls";
 import { MapToolbar } from "./MapToolbar";
+import { Button, Select } from "@/components/ui";
 interface Props extends MapShellProps {
   initialFloorId?: string;
   onSelectFloor?: (floorId: string | undefined) => void;
@@ -82,37 +83,37 @@ export function MapWorkspace(props: Props) {
   ) : null;
   const visibleSiteId = siteId ?? onlySite ?? "";
   return <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-  <div className="pointer-events-auto absolute left-3 top-3 z-40 flex max-w-[calc(100%-1.5rem)] items-center gap-2 overflow-x-auto rounded-xl border border-white/10 bg-surface/90 p-1 text-xs shadow-lg backdrop-blur">
+  <div className="pointer-events-auto absolute left-3 top-3 z-40 flex max-w-[calc(100%-1.5rem)] items-center gap-2 overflow-x-auto rounded-m3-xl bg-surface-1/95 p-1 text-xs shadow-lg backdrop-blur">
    <div ref={setModeSlot} className="contents">
     {floorId && <MapToolbar embedded mode={props.initialMode ?? "live"} onModeChange={props.onModeChange ?? (() => {})} canEdit={can(me.data, "maps.edit") || can(me.data, "maps.edit_device")} />}
    </div>
    <label className="order-2 flex shrink-0 items-center gap-1.5">
-    <span className="text-muted">Sitio</span>
-    <select aria-label="Seleccionar sitio" className="max-w-40 rounded-lg border border-line bg-bg px-2 py-1" value={visibleSiteId} onChange={event => change({ site: event.target.value || undefined })}>
+    <span className="font-medium text-on-surface-variant">Sitio</span>
+    <Select aria-label="Seleccionar sitio" className="h-11 max-w-40 rounded-full text-xs" value={visibleSiteId} onChange={event => change({ site: event.target.value || undefined })}>
      <option value="">Seleccionar sitio</option>{sites.data?.map(site => <option key={site.id} value={site.id}>{site.name}</option>)}
-    </select>
+    </Select>
    </label>
    <label className="order-3 flex shrink-0 items-center gap-1.5">
-    <span className="text-muted">Mapa</span>
-    <select aria-label="Mapa" title="El mapa geográfico usa coordenadas. Los demás son una imagen de fondo, sin coordenadas, para edificios o planos." className="max-w-56 rounded-lg border border-line bg-bg px-2 py-1" value={floorId ?? ""} disabled={!visibleSiteId || detail.isLoading} onChange={event => change({ site: siteId ?? onlySite, floor: event.target.value || undefined })}>
+    <span className="font-medium text-on-surface-variant">Mapa</span>
+    <Select aria-label="Mapa" title="El mapa geográfico usa coordenadas. Los demás son una imagen de fondo, sin coordenadas, para edificios o planos." className="h-11 max-w-56 rounded-full text-xs" value={floorId ?? ""} disabled={!visibleSiteId || detail.isLoading} onChange={event => change({ site: siteId ?? onlySite, floor: event.target.value || undefined })}>
      <option value="">Mapa geográfico</option>{detail.data?.buildings.map(building => building.floors.map(item => <option key={item.id} value={item.id}>{building.name} / {item.name}</option>))}
-    </select>
+    </Select>
    </label>
    <div className="order-4 flex shrink-0 items-center gap-1">
-    {siteId && <button type="button" className="rounded-lg px-2 py-1 text-muted hover:bg-raised hover:text-ink" onClick={shareMap}>Copiar enlace</button>}
-    {siteId && <button type="button" className="rounded-lg px-2 py-1 text-muted hover:bg-raised hover:text-ink" onClick={showInLive}>Ver en la grilla</button>}
+    {siteId && <Button variant="text" size="sm" onClick={shareMap}>Copiar enlace</Button>}
+    {siteId && <Button variant="text" size="sm" onClick={showInLive}>Ver en la grilla</Button>}
    </div>
   </div>
-  {notice && <p role="status" className="pointer-events-auto absolute right-3 top-3 z-40 max-w-sm rounded-lg border border-line bg-surface/95 px-3 py-2 text-xs shadow-lg">{notice}</p>}
-  {sites.isError && <div role="alert">Los sitios no están disponibles. <button onClick={() => void sites.refetch()}>Reintentar sitios</button></div>}
-  {siteId && detail.isError && <div role="alert">La lista de mapas no está disponible. <button onClick={() => void detail.refetch()}>Reintentar lista</button></div>}
-  {(switchTo || externalBlocked) && <div role="alert" className="rounded border border-warning p-2 text-sm">
+  {notice && <p role="status" className="pointer-events-auto absolute right-3 top-3 z-40 max-w-sm rounded-m3-lg bg-surface-3 px-4 py-3 text-xs shadow-lg">{notice}</p>}
+  {sites.isError && <div role="alert" className="mx-3 mt-16 flex flex-wrap items-center gap-2 rounded-m3-lg bg-bad/10 px-4 py-3 text-sm text-bad">Los sitios no están disponibles. <Button variant="tonal" size="sm" onClick={() => void sites.refetch()}>Reintentar sitios</Button></div>}
+  {siteId && detail.isError && <div role="alert" className="mx-3 mt-16 flex flex-wrap items-center gap-2 rounded-m3-lg bg-bad/10 px-4 py-3 text-sm text-bad">La lista de mapas no está disponible. <Button variant="tonal" size="sm" onClick={() => void detail.refetch()}>Reintentar lista</Button></div>}
+  {(switchTo || externalBlocked) && <div role="alert" className="mx-3 mt-16 flex flex-wrap items-center gap-2 rounded-m3-lg bg-warn/15 px-4 py-3 text-sm text-on-surface">
    Este mapa tiene cambios sin guardar. Guardá primero, o descartalos antes de cambiar.
-   <button onClick={() => change(switchTo ?? { site: props.initialSiteId, floor: props.initialFloorId }, true)}>Descartar y cambiar</button>
-   {switchTo && <button onClick={() => setSwitchTo(undefined)}>Seguir editando</button>}
+   <Button variant="tonal" size="sm" onClick={() => change(switchTo ?? { site: props.initialSiteId, floor: props.initialFloorId }, true)}>Descartar y cambiar</Button>
+   {switchTo && <Button variant="outlined" size="sm" onClick={() => setSwitchTo(undefined)}>Seguir editando</Button>}
   </div>}
-  {invalid ? <div role="alert" className="shrink-0">El mapa pedido no está en este sitio. <button onClick={() => change({ site: siteId })}>Abrir mapa geográfico</button></div>
-      : floorId ? <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{floor && siteId ? <FloorMap key={`${siteId}/${floor.id}`} siteId={siteId} floor={floor} initialMode={props.initialMode ?? "live"} onModeChange={props.onModeChange} onDirty={setDirty} onPlanSaved={refresh} onSelectCamera={props.onSelectCamera} editorMaps={mapCatalog}/> : <p role="status">Loading selected map…</p>}</div>
+  {invalid ? <div role="alert" className="mx-3 mt-16 flex shrink-0 flex-wrap items-center gap-2 rounded-m3-lg bg-bad/10 px-4 py-3 text-sm text-bad">El mapa pedido no está en este sitio. <Button variant="tonal" size="sm" onClick={() => change({ site: siteId })}>Abrir mapa geográfico</Button></div>
+      : floorId ? <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">{floor && siteId ? <FloorMap key={`${siteId}/${floor.id}`} siteId={siteId} floor={floor} initialMode={props.initialMode ?? "live"} onModeChange={props.onModeChange} onDirty={setDirty} onPlanSaved={refresh} onSelectCamera={props.onSelectCamera} editorMaps={mapCatalog}/> : <p role="status" className="p-4 text-sm text-on-surface-variant">Loading selected map…</p>}</div>
         : <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden"><MapShell {...props} initialSiteId={siteId} hostedChrome modeSlot={modeSlot} editorMaps={mapCatalog} onSelectSite={id => change({ site: id })}/></div>}
  </div>;
 }

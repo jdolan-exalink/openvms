@@ -4,6 +4,7 @@ import type {
   LayerSpecification,
   SymbolLayerSpecification,
 } from "maplibre-gl";
+import { connectivityColorExpression, readMapPalette } from "../palette";
 
 export const CAMERAS_SOURCE_ID = "cameras";
 
@@ -34,6 +35,8 @@ export function buildCamerasSource(options?: { cluster?: boolean }): GeoJSONSour
 }
 
 export function buildCameraLayers(): LayerSpecification[] {
+  const palette = readMapPalette();
+  const stateColor = connectivityColorExpression(palette);
   // 1. Cluster circles with worst-state color
   const clusterCircleLayer: CircleLayerSpecification = {
     id: "cam-cluster",
@@ -44,10 +47,10 @@ export function buildCameraLayers(): LayerSpecification[] {
       "circle-color": [
         "case",
         [">", ["get", "offline"], 0],
-        "#7e8a9a", // next: offline / unreachable
+        palette.muted, // offline / unreachable
         [">", ["get", "warnings"], 0],
-        "#f59e0b", // next: warnings / degraded
-        "#21b45b", // all online
+        palette.warn, // warnings / degraded
+        palette.ok, // all online
       ],
       "circle-radius": [
         "step",
@@ -61,7 +64,7 @@ export function buildCameraLayers(): LayerSpecification[] {
         32,
       ],
       "circle-stroke-width": 2,
-      "circle-stroke-color": "#ffffff",
+      "circle-stroke-color": palette.ring,
       "circle-stroke-opacity": 0.9,
     },
   };
@@ -79,7 +82,7 @@ export function buildCameraLayers(): LayerSpecification[] {
       "text-allow-overlap": true,
     },
     paint: {
-      "text-color": "#ffffff",
+      "text-color": palette.onMarker,
     },
   };
 
@@ -96,8 +99,8 @@ export function buildCameraLayers(): LayerSpecification[] {
       "text-allow-overlap": true,
     },
     paint: {
-      "text-color": "#ffffff",
-      "text-halo-color": "#ef3f46",
+      "text-color": palette.onMarker,
+      "text-halo-color": palette.bad,
       "text-halo-width": 4,
     },
   };
@@ -117,7 +120,12 @@ export function buildCameraLayers(): LayerSpecification[] {
         18,
         0,
       ],
-      "circle-color": ["get", "color"],
+      "circle-color": [
+        "case",
+        ["boolean", ["feature-state", "selected"], false],
+        palette.primary,
+        stateColor,
+      ],
       "circle-opacity": [
         "case",
         ["boolean", ["feature-state", "selected"], false],
@@ -132,7 +140,7 @@ export function buildCameraLayers(): LayerSpecification[] {
         2,
         0,
       ],
-      "circle-stroke-color": ["get", "color"],
+      "circle-stroke-color": palette.primary,
     },
   };
 
@@ -144,9 +152,9 @@ export function buildCameraLayers(): LayerSpecification[] {
     filter: ["!", ["has", "point_count"]],
     paint: {
       "circle-radius": 12,
-      "circle-color": ["get", "color"],
+      "circle-color": stateColor,
       "circle-stroke-width": 2,
-      "circle-stroke-color": "#ffffff",
+      "circle-stroke-color": palette.ring,
     },
   };
 
@@ -162,7 +170,7 @@ export function buildCameraLayers(): LayerSpecification[] {
       "icon-allow-overlap": true,
     },
     paint: {
-      "icon-color": "#ffffff",
+      "icon-color": palette.onMarker,
     },
   };
 
@@ -181,8 +189,8 @@ export function buildCameraLayers(): LayerSpecification[] {
       "text-max-width": 10,
     },
     paint: {
-      "text-color": "#ffffff",
-      "text-halo-color": "#0e1523",
+      "text-color": palette.label,
+      "text-halo-color": palette.labelHalo,
       "text-halo-width": 1.5,
     },
   };
@@ -191,13 +199,13 @@ export function buildCameraLayers(): LayerSpecification[] {
     id: "cam-cluster-icon", type: "symbol", source: CAMERAS_SOURCE_ID,
     filter: ["has", "point_count"],
     layout: { "icon-image": "cam-normal", "icon-size": 0.6, "icon-offset": [0, -9], "icon-allow-overlap": true },
-    paint: { "icon-color": "#ffffff" },
+    paint: { "icon-color": palette.onMarker },
   };
   const offlineBadge: SymbolLayerSpecification = {
     id: "cam-offline-badge", type: "symbol", source: CAMERAS_SOURCE_ID,
     filter: ["all", ["!", ["has", "point_count"]], ["in", ["get", "st"], ["literal", ["offline", "unreachable", "no_signal"]]]],
     layout: { "icon-image": "status-offline", "icon-size": 0.45, "icon-offset": [20, -20], "icon-allow-overlap": true },
-    paint: { "icon-color": "#ef3f46", "icon-halo-color": "#ffffff", "icon-halo-width": 1.5 },
+    paint: { "icon-color": palette.bad, "icon-halo-color": palette.ring, "icon-halo-width": 1.5 },
   };
 
   const cameraAlarmsBadge: SymbolLayerSpecification = {
@@ -207,7 +215,7 @@ export function buildCameraLayers(): LayerSpecification[] {
       "text-field": ["concat", "!", ["to-string", ["get", "alarms"]]],
       "text-size": 10, "text-offset": [-1.4, -1.4], "text-allow-overlap": true,
     },
-    paint: { "text-color": "#ffffff", "text-halo-color": "#ef3f46", "text-halo-width": 3 },
+    paint: { "text-color": palette.onMarker, "text-halo-color": palette.bad, "text-halo-width": 3 },
   };
 
   return [

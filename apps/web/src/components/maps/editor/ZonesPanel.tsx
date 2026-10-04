@@ -1,7 +1,6 @@
-import { validateZoneDraft, ZONE_KIND_COLOR, type ZoneDraft } from "@/lib/maps/zoneDraft";
+import { Button, Select, TextInput } from "@/components/ui";
+import { validateZoneDraft, ZONE_COLOR_CHOICES, ZONE_KIND_COLOR, type ZoneDraft } from "@/lib/maps/zoneDraft";
 import type { Zone, ZoneKind } from "@/lib/maps/types";
-
-const ZONE_COLORS = ["#1683f8", "#22c55e", "#f59e0b", "#ef3f46", "#a855f7", "#f8fafc"];
 
 const KIND_LABELS: Record<ZoneKind, string> = {
   security: "seguridad",
@@ -53,17 +52,13 @@ export function ZonesPanel({
   const errors = draft ? validateZoneDraft(draft) : [];
 
   return (
-    <section aria-label="Zonas" className="rounded border border-line bg-surface p-3 shadow-sm">
-      <header className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Zonas ({zones.length})</h2>
+    <section aria-label="Zonas" className="p-3">
+      <header className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="text-lg font-bold">Zonas ({zones.length})</h2>
         {canEdit && (
-          <button
-            type="button"
-            onClick={onStartCreate}
-            className="rounded bg-accent px-2 py-1 text-xs font-medium text-white"
-          >
+          <Button variant="filled" size="sm" onClick={onStartCreate}>
             Nueva zona
-          </button>
+          </Button>
         )}
       </header>
 
@@ -73,30 +68,22 @@ export function ZonesPanel({
         </p>
       )}
 
-      <ul className="mb-2 max-h-40 space-y-1 overflow-auto">
+      <ul className="mb-2 max-h-40 space-y-2 overflow-auto">
         {zones.map((zone) => (
           <li
             key={zone.id}
-            className="flex items-center justify-between gap-2 rounded border border-line px-2 py-1"
+            className="flex flex-wrap items-center justify-between gap-2 rounded-m3-lg bg-surface-1 px-3 py-2"
           >
-            <span className="truncate text-sm text-ink">{zone.name}</span>
-            <span className="text-xs text-muted">{KIND_LABELS[zone.kind]}</span>
+            <span className="min-w-0 truncate text-sm font-medium text-on-surface">{zone.name}</span>
+            <span className="text-xs text-on-surface-variant">{KIND_LABELS[zone.kind]}</span>
             {canEdit && (
               <span className="flex shrink-0 gap-1">
-                <button
-                  type="button"
-                  onClick={() => onSelectZone(zone.id)}
-                  className="rounded border border-line px-2 py-1 text-xs text-ink hover:bg-raised"
-                >
+                <Button variant="tonal" size="sm" onClick={() => onSelectZone(zone.id)}>
                   Editar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onDelete(zone.id)}
-                  className="rounded border border-bad px-2 py-1 text-xs text-bad"
-                >
+                </Button>
+                <Button variant="outlined" size="sm" className="border-bad text-bad" onClick={() => onDelete(zone.id)}>
                   Eliminar
-                </button>
+                </Button>
               </span>
             )}
           </li>
@@ -104,49 +91,47 @@ export function ZonesPanel({
       </ul>
 
       {draft && (
-        <div className="space-y-2">
-          <label htmlFor="zone-name" className="block text-xs text-muted">
+        <div className="space-y-2 rounded-m3-lg bg-surface-1 p-3">
+          <label htmlFor="zone-name" className="block text-xs text-on-surface-variant">
             Nombre de la zona
           </label>
-          <input
+          <TextInput
             id="zone-name"
             type="text"
             value={draft.name}
             onChange={(event) => onDraftChange({ name: event.target.value })}
-            className="w-full rounded border border-line bg-bg px-2 py-1 text-sm text-ink"
           />
 
-          <label htmlFor="zone-kind" className="block text-xs text-muted">
+          <label htmlFor="zone-kind" className="block text-xs text-on-surface-variant">
             Tipo de zona
           </label>
-          <select
+          <Select
             id="zone-kind"
             value={draft.kind}
             onChange={(event) => onDraftChange({ kind: event.target.value as ZoneKind })}
-            className="w-full rounded border border-line bg-bg px-2 py-1 text-sm text-ink"
           >
             {(Object.keys(KIND_LABELS) as ZoneKind[]).map((kind) => (
               <option key={kind} value={kind}>
                 {KIND_LABELS[kind]}
               </option>
             ))}
-          </select>
+          </Select>
 
-          <p className="text-xs text-muted">
+          <p className="text-xs text-on-surface-variant">
             {draft.closed ? "Polígono cerrado." : "Hacé clic en el mapa para marcar cada punto."}
           </p>
-          <p className="text-xs text-muted">Puntos: {draft.points.length}</p>
+          <p className="font-mono text-xs text-on-surface-variant">Puntos: {draft.points.length}</p>
           <div>
-            <p className="mb-1 text-xs text-muted">Color</p>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {ZONE_COLORS.map((color) => (
+            <p className="mb-1 text-xs text-on-surface-variant">Color</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {ZONE_COLOR_CHOICES.map((color) => (
                 <button
                   key={color}
                   type="button"
                   aria-label={`Color ${color}`}
                   aria-pressed={(draft.color ?? ZONE_KIND_COLOR[draft.kind]) === color}
                   onClick={() => onDraftChange({ color })}
-                  className="size-5 rounded-full border border-white/30"
+                  className="size-8 rounded-full border-2 border-transparent aria-pressed:border-on-surface focus-visible:outline-2 focus-visible:outline-primary"
                   style={{ backgroundColor: color }}
                 />
               ))}
@@ -155,7 +140,7 @@ export function ZonesPanel({
                 aria-label="Color de la zona"
                 value={draft.color ?? ZONE_KIND_COLOR[draft.kind]}
                 onChange={(event) => onDraftChange({ color: event.target.value })}
-                className="size-6 cursor-pointer rounded border border-line bg-transparent"
+                className="size-8 cursor-pointer rounded-full border border-outline-variant bg-transparent"
               />
             </div>
           </div>
@@ -167,47 +152,24 @@ export function ZonesPanel({
           ))}
 
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onUndoPoint}
-              disabled={draft.points.length === 0}
-              className="rounded border border-line px-2 py-1 text-xs text-ink disabled:opacity-50"
-            >
+            <Button variant="tonal" size="sm" onClick={onUndoPoint} disabled={draft.points.length === 0}>
               Deshacer punto
-            </button>
+            </Button>
             {draft.closed ? (
-              <button
-                type="button"
-                onClick={onReopenPolygon}
-                className="rounded border border-line px-2 py-1 text-xs text-ink"
-              >
+              <Button variant="tonal" size="sm" onClick={onReopenPolygon}>
                 Reabrir polígono
-              </button>
+              </Button>
             ) : (
-              <button
-                type="button"
-                onClick={onClosePolygon}
-                disabled={draft.points.length < 3}
-                className="rounded border border-line px-2 py-1 text-xs text-ink disabled:opacity-50"
-              >
+              <Button variant="tonal" size="sm" onClick={onClosePolygon} disabled={draft.points.length < 3}>
                 Cerrar polígono
-              </button>
+              </Button>
             )}
-            <button
-              type="button"
-              onClick={onSave}
-              disabled={errors.length > 0 || saving}
-              className="rounded bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
-            >
+            <Button variant="filled" size="sm" onClick={onSave} disabled={errors.length > 0 || saving}>
               Guardar
-            </button>
-            <button
-              type="button"
-              onClick={onCancel}
-              className="rounded border border-line px-2 py-1 text-xs text-ink"
-            >
+            </Button>
+            <Button variant="outlined" size="sm" onClick={onCancel}>
               Cancelar
-            </button>
+            </Button>
           </div>
         </div>
       )}

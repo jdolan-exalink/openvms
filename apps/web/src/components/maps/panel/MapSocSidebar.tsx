@@ -1,9 +1,9 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { faAnglesRight, faThumbtack } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { Search } from "lucide-react";
+import { ChevronsRight, Pin, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode, type FocusEvent } from "react";
 import { platesQuery } from "@/api/queries";
+import { Icon } from "@/components/Icon";
+import { Button, IconButton, Select, TextInput } from "@/components/ui";
 import { PlateReadCard, plateCropUrl } from "@/components/plates/PlateReadCard";
 import { cn } from "@/lib/cn";
 import { vehicleColorOptions, vehicleTypeOptions } from "@/lib/format";
@@ -71,9 +71,9 @@ export function MapSocSidebar({
         aria-label={t("maps.notifications")}
         aria-hidden={!open || undefined}
         hidden={!open}
-        className="flex h-full w-80 min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-surface/90 shadow-2xl backdrop-blur-md"
+        className="flex h-full w-80 min-h-0 flex-col overflow-hidden rounded-m3-xl bg-surface-1/95 shadow-2xl backdrop-blur-md"
       >
-        <div className="flex shrink-0 border-b border-line text-xs font-medium" role="tablist" aria-label={t("maps.sections")}>
+        <div className="flex shrink-0 items-center gap-1 p-2 text-xs font-medium" role="tablist" aria-label={t("maps.sections")}>
           <TabButton id="cameras" current={tab} onSelect={setTab}>{t("maps.cameras")}</TabButton>
           <TabButton id="alarms" current={tab} onSelect={setTab}>
             {t("maps.alarms")}
@@ -81,27 +81,26 @@ export function MapSocSidebar({
           </TabButton>
           <TabButton id="lpr" current={tab} onSelect={setTab}>{t("maps.lpr")}</TabButton>
           <TabButton id="saved" current={tab} onSelect={setTab}>{t("maps.saved")}</TabButton>
-          <button
-            type="button"
+          <IconButton
+            icon={Pin}
+            variant={pinned ? "tonal" : "standard"}
             onClick={onTogglePin}
             aria-pressed={pinned}
             title={pinned ? t("live.unpin") : t("live.pin")}
             aria-label={pinned ? t("live.unpin") : t("live.pin")}
-            className={cn("shrink-0 rounded p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent", pinned ? "text-accent" : "text-muted hover:text-ink")}
-          >
-            <FontAwesomeIcon icon={faThumbtack} className="text-sm" aria-hidden />
-          </button>
+            className="size-11 shrink-0"
+          />
         </div>
         <div className={cn("min-h-0 flex-1", tab === "lpr" ? "flex flex-col overflow-hidden" : "space-y-2 overflow-auto p-2")}>
           {tab === "cameras" && cameras}
-          {tab === "alarms" && (showAlarms ? alarms : <p className="p-2 text-xs text-muted">{t("maps.alarmsNeedPermission")}</p>)}
-          {tab === "lpr" && (showLpr ? <LprList siteId={siteId} onSelectCamera={onSelectCamera} onOpenRead={onOpenRead} /> : <p className="p-2 text-xs text-muted">{t("maps.platesNeedPermission")}</p>)}
+          {tab === "alarms" && (showAlarms ? alarms : <p className="p-2 text-xs text-on-surface-variant">{t("maps.alarmsNeedPermission")}</p>)}
+          {tab === "lpr" && (showLpr ? <LprList siteId={siteId} onSelectCamera={onSelectCamera} onOpenRead={onOpenRead} /> : <p className="p-2 text-xs text-on-surface-variant">{t("maps.platesNeedPermission")}</p>)}
           {tab === "saved" && <ProtectedGallery />}
         </div>
       </aside>
       {!open && (
-        <button type="button" aria-label={t("live.showExplorer")} title={t("live.showExplorer")} className="absolute inset-0 flex items-center justify-center rounded-r bg-surface/95 text-muted" onClick={reveal}>
-          <FontAwesomeIcon icon={faAnglesRight} className="text-[10px]" aria-hidden />
+        <button type="button" aria-label={t("live.showExplorer")} title={t("live.showExplorer")} className="absolute inset-0 flex items-center justify-center rounded-r-m3-md bg-surface-1/95 text-on-surface-variant hover:bg-surface-2" onClick={reveal}>
+          <Icon icon={ChevronsRight} size="xs" />
         </button>
       )}
     </div>
@@ -116,7 +115,7 @@ function TabButton({ id, current, onSelect, children }: { id: Tab; current: Tab;
       role="tab"
       aria-selected={selected}
       onClick={() => onSelect(id)}
-      className={cn("flex flex-1 items-center justify-center gap-1 whitespace-nowrap px-1 py-2.5 text-[11px]", selected ? "border-b-2 border-accent text-accent" : "text-muted hover:text-ink")}
+      className={cn("m3-press flex h-11 flex-1 items-center justify-center gap-1 whitespace-nowrap rounded-full px-1 text-[11px] font-bold focus-visible:outline-2 focus-visible:outline-primary", selected ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8")}
     >
       {children}
     </button>
@@ -125,7 +124,7 @@ function TabButton({ id, current, onSelect, children }: { id: Tab; current: Tab;
 
 function AlarmCount({ count }: { count: number }) {
   if (count <= 0) return null;
-  return <span className="rounded-full bg-bad/20 px-1 text-[10px] leading-4 text-bad">{count > 99 ? "99+" : count}</span>;
+  return <span className="rounded-full bg-bad/20 px-1.5 font-mono text-[10px] leading-4 text-bad">{count > 99 ? "99+" : count}</span>;
 }
 
 const LPR_PAGE = 8;
@@ -177,35 +176,35 @@ function LprList({ siteId, onSelectCamera, onOpenRead }: { siteId?: string; onSe
     await reads.fetchNextPage();
     setPage(page + 1);
   }
-  if (!siteId) return <p className="p-2 text-xs text-muted">{t("maps.pickSite")}</p>;
+  if (!siteId) return <p className="p-2 text-xs text-on-surface-variant">{t("maps.pickSite")}</p>;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
       <label className="relative block">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted" aria-hidden />
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-on-surface-variant" aria-hidden />
         <span className="sr-only">{t("maps.searchPlate")}</span>
-        <input
+        <TextInput
           type="search"
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           placeholder={t("maps.searchPlate")}
           aria-label={t("maps.searchPlate")}
-          className="w-full rounded-lg border border-line bg-bg py-1.5 pl-8 pr-2 text-xs"
+          className="pl-10 font-mono text-xs"
         />
       </label>
-      <div className="grid grid-cols-2 gap-1">
-        <select aria-label={t("common.object")} value={vehicleType} onChange={(event) => setVehicleType(event.target.value)} className="rounded-lg border border-line bg-bg px-2 py-1 text-xs">
+      <div className="grid grid-cols-2 gap-2">
+        <Select aria-label={t("common.object")} value={vehicleType} onChange={(event) => setVehicleType(event.target.value)} className="text-xs">
           <option value="">{t("common.object")}</option>
           {vehicleTypeOptions().map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-        <select aria-label={t("common.color")} value={vehicleColor} onChange={(event) => setVehicleColor(event.target.value)} className="rounded-lg border border-line bg-bg px-2 py-1 text-xs">
+        </Select>
+        <Select aria-label={t("common.color")} value={vehicleColor} onChange={(event) => setVehicleColor(event.target.value)} className="text-xs">
           <option value="">{t("common.color")}</option>
           {vehicleColorOptions().map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
+        </Select>
       </div>
       {reads.isError && <p role="alert" className="p-2 text-xs text-bad">{t("maps.loadFailed")}</p>}
-      {reads.isLoading && <p role="status" className="p-2 text-xs text-muted">{t("maps.loadingPlates")}</p>}
+      {reads.isLoading && <p role="status" className="p-2 text-xs text-on-surface-variant">{t("maps.loadingPlates")}</p>}
       {!reads.isLoading && !reads.isError && !items.length && (
-        <p className="p-2 text-xs text-muted">{plate ? t("maps.noSearchToday") : t("maps.noReadsToday")}</p>
+        <p className="p-2 text-xs text-on-surface-variant">{plate ? t("maps.noSearchToday") : t("maps.noReadsToday")}</p>
       )}
       {items.length > 0 && (
         <ul className="min-h-0 flex-1 space-y-2 overflow-auto" aria-label={t("maps.readings")}>
@@ -228,10 +227,10 @@ function LprList({ siteId, onSelectCamera, onOpenRead }: { siteId?: string; onSe
           ))}
         </ul>
       )}
-      <div className="mt-auto flex shrink-0 items-center justify-between gap-2 border-t border-line pt-2 text-[11px]">
-        <button type="button" className="rounded border border-line px-2 py-1 disabled:opacity-40" disabled={page === 0} onClick={() => setPage(page - 1)}>{t("common.previous")}</button>
-        <span className="text-muted">{t("maps.todayPage", { page: page + 1 })}</span>
-        <button type="button" className="rounded border border-line px-2 py-1 disabled:opacity-40" disabled={!canNext || reads.isFetchingNextPage} onClick={() => void goNext()}>{t("common.next")}</button>
+      <div className="mt-auto flex shrink-0 items-center justify-between gap-2 pt-2 text-[11px]">
+        <Button variant="outlined" size="sm" disabled={page === 0} onClick={() => setPage(page - 1)}>{t("common.previous")}</Button>
+        <span className="font-mono text-on-surface-variant">{t("maps.todayPage", { page: page + 1 })}</span>
+        <Button variant="outlined" size="sm" disabled={!canNext || reads.isFetchingNextPage} onClick={() => void goNext()}>{t("common.next")}</Button>
       </div>
     </div>
   );

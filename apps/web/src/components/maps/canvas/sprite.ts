@@ -1,5 +1,3 @@
-import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
-import { cameraIcon, siteIcon, serverIcon, offlineIcon } from "@/lib/inventoryIcons";
 import type { Map as MapLibreMap } from "maplibre-gl";
 
 export interface SdfIconDefinition {
@@ -9,14 +7,41 @@ export interface SdfIconDefinition {
   draw: (ctx: CanvasRenderingContext2D) => void;
 }
 
-function inventoryGlyph(id: string, icon: IconDefinition): SdfIconDefinition {
+/**
+ * Lucide glyphs (24px grid, stroke 2, round caps) as static SVG path data. MapLibre only
+ * reads the alpha channel of SDF sprites and recolors them with icon-color, so the white
+ * used while drawing is a mask value, not a theme color.
+ */
+const LUCIDE_PATHS = {
+  video: [
+    "m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.87a.5.5 0 0 0-.752-.432L16 10.5",
+    "M4 6h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z",
+  ],
+  building: [
+    "M12 10h.01", "M12 14h.01", "M12 6h.01", "M16 10h.01", "M16 14h.01", "M16 6h.01", "M8 10h.01", "M8 14h.01", "M8 6h.01",
+    "M9 22v-3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3",
+    "M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z",
+  ],
+  server: [
+    "M4 2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z",
+    "M4 14h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2z",
+    "M6 6h.01", "M6 18h.01",
+  ],
+  x: ["M18 6 6 18", "m6 6 12 12"],
+} as const;
+
+function lucideGlyph(id: string, paths: readonly string[]): SdfIconDefinition {
   return { id, width: 24, height: 24, draw: ctx => {
-    const [width, height, , , paths] = icon.icon;
+    // Glyph occupies 20px of the 24px sprite so the SDF keeps a margin around the stroke.
+    const scale = 20 / 24;
     ctx.save();
-    ctx.translate((24 - width * 20 / Math.max(width, height)) / 2, (24 - height * 20 / Math.max(width, height)) / 2);
-    ctx.scale(20 / Math.max(width, height), 20 / Math.max(width, height));
-    ctx.fillStyle = "#ffffff";
-    for (const path of typeof paths === "string" ? [paths] : paths) ctx.fill(new Path2D(path));
+    ctx.translate(2, 2);
+    ctx.scale(scale, scale);
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2.4;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    for (const path of paths) ctx.stroke(new Path2D(path));
     ctx.restore();
   } };
 }
@@ -31,10 +56,10 @@ export const ICONS: SdfIconDefinition[] = [
     ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(12, 10, 7, 0, Math.PI * 2); ctx.fill();
     ctx.fillRect(10, 16, 4, 4); ctx.fillRect(7, 20, 10, 2);
   } },
-  inventoryGlyph("cam-normal", cameraIcon),
-  inventoryGlyph("site-building", siteIcon),
-  inventoryGlyph("server", serverIcon),
-  inventoryGlyph("status-offline", offlineIcon),
+  lucideGlyph("cam-normal", LUCIDE_PATHS.video),
+  lucideGlyph("site-building", LUCIDE_PATHS.building),
+  lucideGlyph("server", LUCIDE_PATHS.server),
+  lucideGlyph("status-offline", LUCIDE_PATHS.x),
   {
     id: "cam-alarm",
     width: 24,

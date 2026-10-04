@@ -63,7 +63,7 @@ import { saveSiteMonitoringCenter } from "@/lib/maps/sites";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
 import { usePinnedMapWindows } from "./panel/usePinnedMapWindows";
 import { useFeatures } from "@/lib/features";
-import { ErrorNote } from "../ui";
+import { Button, ErrorNote } from "../ui";
 import { Loader2 } from "lucide-react";
 
 export interface MapShellProps {
@@ -690,8 +690,8 @@ function MapShellContent({
   if (configQuery.isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-bg" data-testid="map-loading">
-        <div className="flex flex-col items-center gap-2 text-muted">
-          <Loader2 className="size-6 animate-spin text-accent" aria-hidden />
+        <div className="flex flex-col items-center gap-2 text-on-surface-variant">
+          <Loader2 className="size-6 animate-spin text-primary" aria-hidden />
           <span className="text-sm">Cargando mapa operativo...</span>
         </div>
       </div>
@@ -701,9 +701,9 @@ function MapShellContent({
   if (configQuery.isError || !configQuery.data) {
     return (
       <div className="flex h-full w-full items-center justify-center p-6 bg-bg">
-        <div className="max-w-md">
+        <div className="flex max-w-md flex-col items-start gap-3 rounded-m3-xl bg-surface-1 p-5">
           <ErrorNote error={configQuery.error || new Error("No se pudo obtener la configuración del proveedor de mapas")} />
-          <button type="button" onClick={() => void configQuery.refetch()} className="mt-2 rounded border border-line px-3 py-1">Reintentar</button>
+          <Button variant="tonal" onClick={() => void configQuery.refetch()}>Reintentar</Button>
         </div>
       </div>
     );
@@ -731,8 +731,8 @@ function MapShellContent({
         filtersActive={filtersOpen}
       />
       {can(me.data, "live.view") && (
-        <label className="order-6 flex items-center gap-2 px-1 text-xs">
-          <input type="checkbox" checked={hoverLiveEnabled}
+        <label className="order-6 flex min-h-11 items-center gap-2 px-2 text-xs font-medium text-on-surface-variant">
+          <input type="checkbox" className="size-5 accent-primary" checked={hoverLiveEnabled}
             onChange={(event) => setHoverLiveOverride(event.target.checked)} />
           Live on hover
         </label>
@@ -810,12 +810,12 @@ function MapShellContent({
       onDragLeave={() => setDropReady(false)}
       onDragEnd={() => setDropReady(false)}
       onDrop={handleMapDrop}>
-      {dropReady && <div role="status" className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/10">
-        <span className="rounded-lg bg-surface px-4 py-2 text-sm font-medium text-accent shadow-lg">Suelta la cámara para colocarla</span>
+      {dropReady && <div role="status" className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-m3-xl border-2 border-dashed border-primary bg-primary/10">
+        <span className="rounded-full bg-primary-container px-4 py-2 text-sm font-bold text-on-primary-container shadow-lg">Suelta la cámara para colocarla</span>
       </div>}
       {modeSlot ? createPortal(modeChrome, modeSlot) : hostedChrome ? null : (
         <div className="pointer-events-none absolute left-3 top-3 z-30">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-white/10 bg-surface/90 p-1 shadow-lg backdrop-blur">{modeChrome}</div>
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-m3-xl bg-surface-1/95 p-1 shadow-lg backdrop-blur">{modeChrome}</div>
         </div>
       )}
 
@@ -920,39 +920,40 @@ function MapShellContent({
         )}
 
         {editActive && editorMaps && (
-          <div className="absolute left-3 top-16 z-30 w-72 rounded-xl border border-white/10 bg-surface/90 p-2 text-ink shadow-2xl backdrop-blur">
+          <div className="absolute left-3 top-16 z-30 w-72 max-w-[calc(100%-1.5rem)] rounded-m3-xl bg-surface-1/95 p-2 text-on-surface shadow-2xl backdrop-blur">
             {editorMaps}
           </div>
         )}
 
         {editActive && (
-          <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-30 flex w-80 min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-surface/90 text-ink shadow-2xl backdrop-blur">
-            <header className="border-b border-white/10 px-3 py-2">
-              <h2 className="text-sm font-semibold">Edición</h2>
-              <p className="text-[11px] text-muted">{pending.length} cambio(s) sin guardar</p>
+          <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-30 flex w-80 max-w-[calc(100%-1.5rem)] min-h-0 flex-col overflow-hidden rounded-m3-xl bg-surface-1/95 text-on-surface shadow-2xl backdrop-blur">
+            <header className="px-4 pb-2 pt-3">
+              <h2 className="text-lg font-bold">Edición</h2>
+              <p className="font-mono text-[11px] text-on-surface-variant">{pending.length} cambio(s) sin guardar</p>
             </header>
-            <div className="shrink-0 space-y-2 border-b border-white/10 p-2">
+            <div className="shrink-0 space-y-2 px-2 pb-2">
               {unplacedCameras === undefined && (
-                <p role="status" className="text-xs text-muted">El inventario de cámaras sin ubicar no está disponible.</p>
+                <p role="status" className="text-xs text-on-surface-variant">El inventario de cámaras sin ubicar no está disponible.</p>
               )}
               {saveError && <p role="alert" className="text-xs text-bad">{saveError}</p>}
               {draft.conflicts.length > 0 && (
-                <button type="button" onClick={() => void handleRebase()} className="rounded border border-bad px-2 py-1 text-xs font-medium text-bad">
+                <Button variant="danger" size="sm" onClick={() => void handleRebase()}>
                   Rebase
-                </button>
+                </Button>
               )}
               {can(me.data, "maps.edit") && (
                 <div>
                   {centerError && <p role="alert" className="mb-1 text-xs text-bad">{centerError}</p>}
-                  <button
-                    type="button"
+                  <Button
+                    variant="tonal"
+                    size="sm"
                     disabled={centerSaving}
                     onClick={() => void handleSetMonitoringCenter()}
-                    className="w-full rounded border border-line px-2 py-1 text-xs text-ink hover:bg-raised disabled:opacity-50"
+                    className="w-full"
                     title="Guarda la vista actual como centro del sitio: al entrar al mapa se abre aquí"
                   >
                     Fijar centro de monitoreo aquí
-                  </button>
+                  </Button>
                 </div>
               )}
               {activeDraftId && draft.entries[activeDraftId] && (
@@ -969,7 +970,7 @@ function MapShellContent({
               <div className="min-h-0 flex-1 p-2">
                 <MapEditSidebar cameras={editCameras} folders={treeFolders} servers={treeServers} armedId={armedCameraId} onArm={setArmedCameraId} />
               </div>
-              <div className="max-h-[48%] shrink-0 overflow-auto border-t border-white/10">
+              <div className="max-h-[48%] shrink-0 overflow-auto bg-surface-2">
                 <ZonesPanel
                   zones={zonesQuery.data ?? []}
                   draft={zoneDraft}
@@ -991,9 +992,10 @@ function MapShellContent({
                 />
               </div>
             </div>
-            <footer className="flex shrink-0 gap-2 border-t border-white/10 p-2">
-              <button
-                type="button"
+            <footer className="flex shrink-0 gap-2 bg-surface-2 p-3">
+              <Button
+                variant="outlined"
+                className="flex-1"
                 onClick={() => {
                   setDraft(emptyDraft());
                   setArmedCameraId(undefined);
@@ -1001,13 +1003,12 @@ function MapShellContent({
                   setSaveError(undefined);
                   handleModeChange("live");
                 }}
-                className="flex-1 rounded border border-line px-2 py-1.5 text-xs text-ink"
               >
                 Cancelar
-              </button>
-              <button type="button" onClick={() => void handleSave()} disabled={saving || pending.length === 0} className="flex-1 rounded bg-accent px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+              </Button>
+              <Button variant="filled" className="flex-1" onClick={() => void handleSave()} disabled={saving || pending.length === 0}>
                 {pending.length > 0 ? `Guardar (${pending.length})` : "Guardar ubicaciones"}
-              </button>
+              </Button>
             </footer>
           </aside>
         )}

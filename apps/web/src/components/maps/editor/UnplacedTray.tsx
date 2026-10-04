@@ -1,5 +1,6 @@
 import { Building, Server, Video, X } from "lucide-react";
 import { Icon } from "@/components/Icon";
+import { Button, IconButton } from "@/components/ui";
 import { GripVertical } from "lucide-react";
 import { useRef, useState } from "react";
 
@@ -34,27 +35,20 @@ export function UnplacedTray({ siteName, cameras, armedId, onArm, onPlaceAll, on
   const pointerDrag=useRef<{id:string;x:number;y:number;pointer:number;moved:boolean}|undefined>(undefined);
   const [draggingId, setDraggingId] = useState<string>();
   return (
-    <section aria-label="Sin ubicar" className="w-64 rounded-xl border border-line bg-surface p-3 shadow-lg">
+    <section aria-label="Sin ubicar" className="w-64 rounded-m3-xl bg-surface-1/95 p-4 shadow-lg backdrop-blur">
       <header className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Sin ubicar ({cameras.length})</h2>
+        <h2 className="text-lg font-bold">Sin ubicar ({cameras.length})</h2>
         {onClose && (
-          <button
-            type="button"
-            aria-label="Close unplaced tray"
-            onClick={onClose}
-            className="rounded p-1 text-muted hover:bg-raised hover:text-ink"
-          >
-            ×
-          </button>
+          <IconButton icon={X} aria-label="Close unplaced tray" onClick={onClose} className="-mr-2" />
         )}
       </header>
 
-      {siteName && <p className="mb-3 flex items-center gap-2 text-xs text-muted"><Icon icon={Building} size="xs" className="shrink-0" />{siteName}</p>}
+      {siteName && <p className="mb-3 flex items-center gap-2 text-xs text-on-surface-variant"><Icon icon={Building} size="xs" className="shrink-0" />{siteName}</p>}
       {cameras.length === 0 ? (
-        <p className="text-xs text-muted">Todas las cámaras del sitio están ubicadas.</p>
+        <p className="text-xs text-on-surface-variant">Todas las cámaras del sitio están ubicadas.</p>
       ) : (
         <>
-          <ul className="max-h-48 space-y-1 overflow-auto">
+          <ul className="max-h-48 space-y-2 overflow-auto">
             {cameras.map((camera) => (
               <li key={camera.id}>
                 <button
@@ -87,33 +81,29 @@ export function UnplacedTray({ siteName, cameras, armedId, onArm, onPlaceAll, on
                   aria-label={camera.name}
                   onClick={() => onArm(camera.id)}
                   className={
-                    draggingId === camera.id ? "flex w-full cursor-grabbing items-center gap-3 rounded-lg border border-accent bg-accent/10 px-3 py-2.5 opacity-60" : armedId === camera.id
-                      ? "flex w-full cursor-grab items-center gap-3 rounded-lg border border-accent bg-accent/15 px-3 py-2.5 text-left text-sm text-ink"
-                      : "flex w-full cursor-grab items-center gap-3 rounded-lg border border-line px-3 py-2.5 text-left text-sm text-ink transition-colors hover:border-accent/50 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
+                    draggingId === camera.id ? "m3-press flex min-h-11 w-full cursor-grabbing items-center gap-3 rounded-m3-lg bg-primary-container px-3 py-2.5 opacity-60" : armedId === camera.id
+                      ? "m3-press flex min-h-11 w-full cursor-grab items-center gap-3 rounded-m3-lg bg-primary-container px-3 py-2.5 text-left text-sm text-on-primary-container"
+                      : "m3-press flex min-h-11 w-full cursor-grab items-center gap-3 rounded-m3-lg bg-surface-2 px-3 py-2.5 text-left text-sm text-on-surface transition-colors hover:bg-surface-3 focus-visible:outline-2 focus-visible:outline-primary"
                   }
                 >
-                  <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-raised text-accent"><Icon icon={Video} size="xs" /></span>
+                  <span className="flex size-9 shrink-0 items-center justify-center rounded-m3-md bg-surface-3 text-primary"><Icon icon={Video} size="xs" /></span>
                   <span className="min-w-0 flex-1"><span className="block truncate">{camera.name}</span>
-                    {camera.serverName && <span className="mt-0.5 flex items-center gap-1 text-[10px] text-muted"><Icon icon={Server} size={12} className="shrink-0" />{camera.serverName}</span>}
+                    {camera.serverName && <span className="mt-0.5 flex items-center gap-1 font-mono text-[10px] text-on-surface-variant"><Icon icon={Server} size={12} className="shrink-0" />{camera.serverName}</span>}
                   </span>
                   {camera.status === "offline" ? <Icon icon={X} size="xs" className="text-bad" />
-                    : <span className={camera.status === "online" ? "size-1.5 shrink-0 rounded-full bg-ok" : "size-1.5 shrink-0 rounded-full bg-muted"} aria-hidden />}
-                  <GripVertical className="size-4 shrink-0 text-muted" aria-hidden />
+                    : <span className={camera.status === "online" ? "size-2 shrink-0 rounded-full bg-ok" : "size-2 shrink-0 rounded-full bg-muted"} aria-hidden />}
+                  <GripVertical className="size-4 shrink-0 text-on-surface-variant" aria-hidden />
                 </button>
               </li>
             ))}
           </ul>
-          {draggingId && <p role="status" className="mt-2 text-xs font-medium text-accent">Suelta la cámara sobre el mapa</p>}
+          {draggingId && <p role="status" className="mt-2 text-xs font-bold text-primary">Suelta la cámara sobre el mapa</p>}
           {onPlaceAll && (
-            <button
-              type="button"
-              onClick={onPlaceAll}
-              className="mt-3 w-full rounded border border-line px-2 py-1 text-xs text-muted hover:bg-raised"
-            >
+            <Button variant="tonal" size="sm" onClick={onPlaceAll} className="mt-3 w-full">
               Distribuir provisionalmente
-            </button>
+            </Button>
           )}
-          {onPlaceAll && <p className="mt-1 text-[10px] text-muted">Posiciones aproximadas, no ubicaciones reales.</p>}
+          {onPlaceAll && <p className="mt-1 text-[10px] text-on-surface-variant">Posiciones aproximadas, no ubicaciones reales.</p>}
         </>
       )}
     </section>
