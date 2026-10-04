@@ -5,6 +5,7 @@ import { useInfiniteQuery, useQueries } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { eventsQuery, platesQuery } from "@/api/queries";
+import { Button, TextInput } from "@/components/ui";
 import { PlateReadCard } from "@/components/plates/PlateReadCard";
 import { VehicleFacts } from "@/components/VehicleMark";
 import { fmtDateTime } from "@/lib/format";
@@ -26,10 +27,10 @@ function localDayBounds(now = new Date()) {
 function Pager({ page, canNext, pending, onPrev, onNext }: { page: number; canNext: boolean; pending: boolean; onPrev: () => void; onNext: () => void }) {
   const t = useT();
   return (
-    <div className="mt-auto flex shrink-0 items-center justify-between gap-2 border-t border-line pt-2 text-[11px]">
-      <button type="button" className="rounded border border-line px-2 py-1 disabled:opacity-40" disabled={page === 0} onClick={onPrev}>{t("common.previous")}</button>
+    <div className="mt-auto flex shrink-0 items-center justify-between gap-2 pt-2 text-xs">
+      <Button variant="outlined" size="sm" disabled={page === 0} onClick={onPrev}>{t("common.previous")}</Button>
       <span className="text-muted">{t("maps.todayPage", { page: page + 1 })}</span>
-      <button type="button" className="rounded border border-line px-2 py-1 disabled:opacity-40" disabled={!canNext || pending} onClick={onNext}>{t("common.next")}</button>
+      <Button variant="outlined" size="sm" disabled={!canNext || pending} onClick={onNext}>{t("common.next")}</Button>
     </div>
   );
 }
@@ -82,11 +83,11 @@ function MapRow({ map, hint, onPlace }: { map: LiveMapRef; hint: string; onPlace
       title={t("live.mapDragHint", { name: map.name })}
       aria-label={t("live.mapLabel", { name: map.name })}
       onClick={() => onPlace(map)}
-      className={`flex w-full min-w-0 cursor-grab items-center gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-raised ${isDragging ? "opacity-50" : ""}`}
+      className={`flex min-h-11 w-full min-w-0 cursor-grab items-center gap-2 rounded-m3-md px-2 py-1.5 text-left text-sm hover:bg-on-surface/8 ${isDragging ? "opacity-50" : ""}`}
       {...attributes}
       {...listeners}
     >
-      <Icon icon={MapIcon} size="xs" className="shrink-0 text-muted" />
+      <Icon icon={MapIcon} size="xs" className="shrink-0 text-on-surface-variant" />
       <span className="min-w-0 flex-1 truncate">{map.name}</span>
       <span className="shrink-0 text-[10px] text-muted">{hint}</span>
     </button>
@@ -128,13 +129,13 @@ export function LiveDetectionsPanel({ canEvents, onPick }: { canEvents: boolean;
               <button
                 type="button"
                 onClick={() => onPick(event.camera_id)}
-                className="flex w-full flex-col gap-1.5 rounded-xl border border-line bg-bg/40 p-2 text-left hover:border-accent/40"
+                className="flex w-full flex-col gap-1.5 rounded-m3-lg bg-surface-2 p-2 text-left hover:bg-surface-3"
                 aria-label={t("live.detectionOf", { name: event.camera_name })}
               >
                 <img
                   src={event.has_snapshot ? `/media/v1/events/${event.id}/snapshot.jpg` : `/api/v1/events/${event.id}/thumbnail`}
                   alt=""
-                  className="h-20 w-full rounded-md bg-black object-contain"
+                  className="h-20 w-full rounded-m3-sm bg-video object-contain"
                 />
                 <VehicleFacts
                   labels={event.labels}
@@ -193,13 +194,12 @@ export function LiveLprPanel({ canLpr, onPick }: { canLpr: boolean; onPick: (cam
   if (!canLpr) return <p className="p-2 text-xs text-muted">{t("maps.platesNeedPermission")}</p>;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      <input
+      <TextInput
         type="search"
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         placeholder={t("maps.searchPlate")}
         aria-label={t("maps.searchPlate")}
-        className="w-full rounded-lg border border-line bg-bg px-2 py-1.5 text-xs"
       />
       {reads.isError && <p role="alert" className="p-2 text-xs text-bad">{t("maps.loadFailed")}</p>}
       {reads.isLoading && <p role="status" className="p-2 text-xs text-muted">{t("maps.loadingPlates")}</p>}

@@ -85,6 +85,23 @@ const emptyCatalogs = {
 };
 
 describe("Live", () => {
+  it("marks the selected tile with aria-current and moves it on click", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "North")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    const first = await screen.findByLabelText("Cuadro 1");
+    const second = screen.getByLabelText("Cuadro 2");
+    expect(first).toHaveAttribute("aria-current", "true");
+    expect(second).not.toHaveAttribute("aria-current");
+    fireEvent.click(second);
+    expect(second).toHaveAttribute("aria-current", "true");
+    expect(first).not.toHaveAttribute("aria-current");
+  });
+
   it("consumes an authorized camera handoff while preserving the saved selection", async () => {
     stubBrowserAPIs();
     localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
@@ -541,8 +558,8 @@ describe("Live", () => {
 
     const shared = await screen.findByRole("button", { name: "Perímetro · Marta Gómez" });
     const privateView = screen.getByRole("button", { name: "Turno noche" });
-    expect(shared.querySelector("[data-icon='cloud']")).not.toBeNull();
-    expect(privateView.querySelector("[data-icon='cloud']")).toBeNull();
+    expect(within(shared).getByRole("img", { name: "Compartida" })).toBeInTheDocument();
+    expect(within(privateView).queryByRole("img", { name: "Compartida" })).toBeNull();
     expect(shared).toHaveAttribute("title", expect.stringContaining("Compartida por Marta Gómez"));
   });
 

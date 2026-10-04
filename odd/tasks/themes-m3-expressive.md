@@ -32,7 +32,7 @@ Forecast: about 3500–5000 authored changed lines (23 routes, 11.4k lines). Ove
 - [x] T4 M3 primitives: Button (filled, tonal, outlined, text, icon), Chip, Card, Switch, StatusBadge pill, inputs, Modal/ConfirmDialog shapes, motion utilities.
 - [x] T5 App shell: navigation rail with pill indicator, mobile bottom navigation (4 primary + "More" sheet) below `md`, top app bar; drop the fixed mobile rail.
 - [x] T6 PWA: manifest with per-theme `theme-color`, maskable icons, service worker, install prompt (beforeinstallprompt + iOS hint), Caddy headers and CSP.
-- [ ] T7 Migrate operation screens: Live, LiveExplorer, Playback, Events, Plates, Dashboard.
+- [ ] T7 Migrate operation screens (T7a done, T7b pending): Live, LiveExplorer, Playback, Events, Plates, Dashboard.
 - [ ] T8 Migrate maps surfaces: MapShell, panels, canvas palette per theme.
 - [ ] T9 Migrate inventory screens: Servers, Cameras, Sites, CameraGroups, FrigateCameraConfig, Exports.
 - [ ] T10 Migrate settings and auth: Users, Groups, Permissions, Rules, Channels, Alarms, Audit, Branding, Account, Notifications, Login.
@@ -74,5 +74,9 @@ Every migrated screen follows the same rules so the language is uniform:
 - 2026-10-04: user asked to commit the Maps and provisioning work and continue T7–T10. Committed on `feat/maps` as `5e177fb` (provisioning) and `288d1cd` (maps sidebar pin); native review assessed high (process boundary, shell source) and the user declined it for that candidate. `feat/themes-m3` was rebased onto `feat/maps` without conflicts; new hashes: T1 `19702b2`, T2 `b4cc5d8`, T3 `600594a`, T4 `289066a`, T5 `c6fccc6`, T6 `8fce364`, docs `2206572`. Rebased branch: full suite 757/759 (the two MapShell failures also fail on committed `e3e1b34`, so they predate this feature), typecheck clean. The T3 file boundary is lifted. Untracked `vms_mapas_soc.html` and modified `packages/test/test-results/.last-run.json` are left untouched on purpose.
 - T7 split for one writer at a time: T7a Live, LiveExplorer, LiveSidePanels; T7b Playback, Events, Plates, Dashboard.
 
+- 2026-10-04: user explicitly chose to commit T7–T10 without running tests per task and to run the test suite once after T10 (TDD mode for T7–T10: off by explicit user choice; per-task check is `pnpm typecheck` only). Tradeoff noted to the user: failures surface late and are harder to attribute.
+
+- T7a (delegated writer; trigger: 2+ non-trivial files). Live, LiveExplorer, LiveSidePanels, ContextMenu migrated (FontAwesome removed from LiveExplorer and ContextMenu; `MenuItem.icon` is `LucideIcon`). RED observed before the user's change: ContextMenu lucide test, Live aria-current tile test, shared-view cloud test (3/38). GREEN not run (user choice); typecheck clean (parent re-ran). Real-browser checks: selected tile outline vs corner morph, overlay pill contrast on Light `video`, pill sizes on small tiles, explorer panel vs bottom nav on phones. Phone grid keeps the chosen layout column count (changing it is a logic change, not done).
+
 ## Next step
-T7a.
+T7b, then T7b, T8, T9, T10, then the full verification.

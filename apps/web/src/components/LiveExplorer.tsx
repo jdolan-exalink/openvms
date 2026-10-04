@@ -1,17 +1,15 @@
 import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
-import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import {
-  faAnglesDown, faAnglesUp, faArrowUpRightFromSquare, faCloud, faCopy, faGear, faMap, faTableCells, faBookmark, faChevronDown, faChevronRight, faClockRotateLeft, faFolder, faFolderOpen,
-  faFolderPlus, faFolderTree, faGripVertical, faMagnifyingGlass, faPen, faThumbtack, faTrash,
-} from "@fortawesome/free-solid-svg-icons";
-import { siteIcon as faBuilding, serverIcon as faServer, cameraIcon as faVideo } from "@/lib/inventoryIcons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+  Bookmark, Building2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, Cloud, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, GripVertical, History, LayoutGrid,
+  type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, Trash2, Video,
+} from "lucide-react";
 import { createContext, type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Schemas } from "@/api/client";
+import { Icon } from "@/components/Icon";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
-import { ErrorNote, TextInput } from "@/components/ui";
+import { ErrorNote, IconButton, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { buildTree, type Camera, type Folder, type FolderNode, loadPrefs, type ServerNode, savePrefs, treeCameraDropId, treeFolderId, treeRootDropId, treeServerDragId } from "@/lib/explorer";
 import { LiveDetectionsPanel, LiveLprPanel, LiveMapsPanel } from "@/components/LiveSidePanels";
@@ -49,13 +47,13 @@ function addToViewItem(actions: ExplorerActions, ids: string[], t: ReturnType<ty
   return {
     id: "add",
     label: t("live.addToView"),
-    icon: faTableCells,
+    icon: LayoutGrid,
     disabled: empty,
     children: [
-      { id: "add-grid", label: t("live.currentGrid"), icon: faTableCells, onSelect: () => actions.addToGrid(ids) },
+      { id: "add-grid", label: t("live.currentGrid"), icon: LayoutGrid, onSelect: () => actions.addToGrid(ids) },
       { separator: true, id: "add-sep" },
       ...(actions.editableViews.length
-        ? actions.editableViews.map((v): MenuItem => ({ id: `add-view-${v.id}`, label: v.name, icon: faBookmark, onSelect: () => actions.addToView(v.id, ids) }))
+        ? actions.editableViews.map((v): MenuItem => ({ id: `add-view-${v.id}`, label: v.name, icon: Bookmark, onSelect: () => actions.addToView(v.id, ids) }))
         : [{ id: "add-none", label: t("live.noEditableViews"), disabled: true } satisfies MenuItem]),
     ],
   };
@@ -78,36 +76,31 @@ function useDropState(serverId: string, canManage: boolean, accepts: ("camera" |
 
 const dot = (status: string) => (status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-muted");
 
-/** Every explorer icon is a fixed-width Font Awesome glyph so tree rows align at any depth. */
-function Icon({ icon, className }: { icon: IconDefinition; className?: string }) {
-  return <FontAwesomeIcon icon={icon} fixedWidth className={cn("shrink-0 text-xs", className)} aria-hidden />;
-}
-
 /** Muted node-type glyph (site, server, folder, camera) shown before the name. */
-const nodeIcon = "text-muted/80";
+const nodeIcon = "shrink-0 text-on-surface-variant";
 
 function Chevron({ open }: { open: boolean }) {
-  return <Icon icon={open ? faChevronDown : faChevronRight} className="text-[10px]" />;
+  return <Icon icon={open ? ChevronDown : ChevronRight} size="xs" className="shrink-0" />;
 }
 
 function Count({ n }: { n: number }) {
-  return <span className="ml-auto shrink-0 rounded-full bg-raised px-1.5 text-[11px] tabular-nums text-muted">{n}</span>;
+  return <span className="ml-auto shrink-0 rounded-full bg-surface-3 px-2 text-[11px] font-medium tabular-nums text-on-surface-variant">{n}</span>;
 }
 
-function Section({ title, icon, open, onToggle, count, menu, children }: { title: string; icon: IconDefinition; open: boolean; onToggle: () => void; count?: number; menu?: MenuProps; children: ReactNode }) {
+function Section({ title, icon, open, onToggle, count, menu, children }: { title: string; icon: LucideIcon; open: boolean; onToggle: () => void; count?: number; menu?: MenuProps; children: ReactNode }) {
   return (
-    <section className="min-w-0 rounded-xl border border-line bg-bg" aria-label={title}>
+    <section className="min-w-0 rounded-m3-xl bg-surface-1" aria-label={title}>
       <h2>
         <button
           type="button"
           aria-expanded={open}
           onClick={onToggle}
-          className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted focus-visible:outline-2 focus-visible:outline-accent"
+          className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-on-surface-variant focus-visible:outline-2 focus-visible:outline-primary"
           {...menu}
           onKeyDown={(event) => menu?.onKeyDown(event)}
         >
           <Chevron open={open} />
-          <Icon icon={icon} />
+          <Icon icon={icon} size="xs" className="shrink-0" />
           <span className="truncate">{title}</span>
           {count !== undefined && <Count n={count} />}
         </button>
@@ -202,7 +195,7 @@ export function LiveExplorer({
   );
   const total = tree.reduce((n, s) => n + s.count, 0);
   const placedViews = useMemo(() => placeViews(views, tree, sites, query), [views, tree, sites, query]);
-  const saveViewItem = (): MenuItem[] => (canCreateView ? [{ id: "save-view", label: t("live.saveGridAsView"), icon: faTableCells, onSelect: onCreateView }] : []);
+  const saveViewItem = (): MenuItem[] => (canCreateView ? [{ id: "save-view", label: t("live.saveGridAsView"), icon: LayoutGrid, onSelect: onCreateView }] : []);
 
   const navigate = useNavigate();
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[]; opener: HTMLElement | null } | null>(null);
@@ -245,21 +238,20 @@ export function LiveExplorer({
           <SideTab id="detections" current={tab} onSelect={setTab}>{t("live.detections")}</SideTab>
           <SideTab id="lpr" current={tab} onSelect={setTab}>{t("maps.lpr")}</SideTab>
         </div>
-        <button
-          type="button"
+        <IconButton
+          icon={Pin}
+          variant={pinned ? "tonal" : "standard"}
           aria-pressed={pinned}
           onClick={onTogglePin}
           aria-label={pinned ? t("live.unpin") : t("live.pin")}
           title={pinned ? t("live.unpin") : t("live.pin")}
-          className={cn("shrink-0 rounded p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent", pinned ? "text-accent" : "text-muted hover:text-ink")}
-        >
-          <Icon icon={faThumbtack} className="text-sm" />
-        </button>
+          className="size-9"
+        />
       </div>
       {tab === "cameras" && (
         <div className="relative shrink-0">
-          <Icon icon={faMagnifyingGlass} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
-          <TextInput aria-label={t("live.searchExplorer")} placeholder={t("live.searchPlaceholder")} className="pl-8" value={q} onChange={(e) => setQ(e.target.value)} />
+          <Icon icon={Search} size="xs" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant" />
+          <TextInput aria-label={t("live.searchExplorer")} placeholder={t("live.searchPlaceholder")} className="pl-10" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
       )}
       {tab === "maps" && <LiveMapsPanel sites={sites} canMaps={canMaps} onPlace={onPlaceMap} />}
@@ -268,7 +260,7 @@ export function LiveExplorer({
       {tab === "cameras" && <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden">
         <Section
           title={t("live.cameras")}
-          icon={faFolderTree}
+          icon={FolderTree}
           open={prefs.sections.cameras}
           onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, cameras: !p.sections.cameras } }))}
           count={total}
@@ -285,18 +277,18 @@ export function LiveExplorer({
                   onClick={() => toggle(`site:${site.id}`)}
                   aria-expanded={isOpen(`site:${site.id}`)}
                   title={site.name}
-                  className="flex w-full min-w-0 items-center gap-1 py-1 text-left font-medium"
+                  className="flex w-full min-w-0 items-center gap-1 rounded-m3-sm py-1.5 text-left font-bold hover:bg-on-surface/8"
                   {...bind(() => [
                     ...saveViewItem(),
-                    ...(actions.canConfigureSites ? [{ id: "cfg", label: t("live.configure"), icon: faGear, onSelect: () => void navigate({ to: "/sites" }) } satisfies MenuItem] : []),
-                    { id: "map", label: t("live.newMap"), icon: faMap, disabled: true, hint: t("live.comingSoon") },
+                    ...(actions.canConfigureSites ? [{ id: "cfg", label: t("live.configure"), icon: Settings, onSelect: () => void navigate({ to: "/sites" }) } satisfies MenuItem] : []),
+                    { id: "map", label: t("live.newMap"), icon: MapIcon, disabled: true, hint: t("live.comingSoon") },
                     { separator: true, id: "sep" },
-                    { id: "expand", label: t("live.expandAll"), icon: faAnglesDown, onSelect: () => setSiteOpen(site, true) },
-                    { id: "collapse", label: t("live.collapseAll"), icon: faAnglesUp, onSelect: () => setSiteOpen(site, false) },
+                    { id: "expand", label: t("live.expandAll"), icon: ChevronsDown, onSelect: () => setSiteOpen(site, true) },
+                    { id: "collapse", label: t("live.collapseAll"), icon: ChevronsUp, onSelect: () => setSiteOpen(site, false) },
                   ])}
                 >
                   <Chevron open={isOpen(`site:${site.id}`)} />
-                  <Icon icon={faBuilding} className={nodeIcon} />
+                  <Icon icon={Building2} size="xs" className={nodeIcon} />
                   <span className="min-w-0 truncate">{site.name}</span>
                   <Count n={site.count} />
                 </button>
@@ -331,7 +323,7 @@ export function LiveExplorer({
             {tree.length === 0 && placedViews.orphans.length === 0 && <p className="py-2 text-xs text-muted">{query ? t("live.noResults") : t("live.noCameras")}</p>}
           </nav>
           {notice && (
-            <p role="status" className={cn("rounded border px-2 py-1 text-xs", noticeTone === "ok" ? "border-ok/40 bg-ok/10 text-ok" : "border-warn/40 bg-warn/10 text-warn")}>
+            <p role="status" className={cn("rounded-m3-md px-3 py-2 text-xs", noticeTone === "ok" ? "bg-ok/15 text-ok" : "bg-warn/15 text-warn")}>
               {notice}
             </p>
           )}
@@ -363,7 +355,7 @@ function SideTab<T extends string>({ id, current, onSelect, children }: { id: T;
       role="tab"
       aria-selected={selected}
       onClick={() => onSelect(id)}
-      className={cn("shrink-0 whitespace-nowrap px-1.5 py-2", selected ? "border-b-2 border-accent text-accent" : "text-muted hover:text-ink")}
+      className={cn("shrink-0 whitespace-nowrap px-2 py-3 font-bold transition-colors", selected ? "border-b-2 border-primary text-primary" : "text-on-surface-variant hover:text-on-surface")}
     >
       {children}
     </button>
@@ -397,7 +389,7 @@ function placeViews(views: Schemas["View"][], tree: { id: string }[], sites: Sch
 /** Avigilon's saved-view glyph: a window split into panes, not a folder or a camera. */
 function ViewIcon() {
   return (
-    <svg viewBox="0 0 16 16" aria-hidden className="size-3.5 shrink-0 text-sky-500">
+    <svg viewBox="0 0 16 16" aria-hidden className="size-4 shrink-0 text-primary">
       <rect x="1.2" y="1.2" width="13.6" height="13.6" rx="1.4" fill="none" stroke="currentColor" strokeWidth="1.3" />
       <path d="M1.2 8h13.6M8 1.2v13.6" stroke="currentColor" strokeWidth="1.3" />
     </svg>
@@ -427,9 +419,9 @@ function ViewRow({
   const { bind } = useMenuCtx();
   const detail = [view.shared ? (view.owner_name ? t("live.sharedBy", { name: view.owner_name }) : t("live.shared")) : t("live.privateView"), view.editable ? "" : t("live.readOnly")].filter(Boolean).join(" · ");
   const menu = bind(() => [
-    { id: "edit", label: t("live.editItem"), icon: faPen, disabled: !view.editable, hint: view.editable ? undefined : t("live.readOnly"), onSelect: () => onEdit(view.id) },
-    { id: "duplicate", label: t("live.duplicateItem"), icon: faCopy, disabled: !canCreateView, hint: canCreateView ? undefined : t("live.noPermission"), onSelect: () => onDuplicate(view.id) },
-    { id: "delete", label: t("live.delete"), icon: faTrash, danger: true, disabled: !view.editable, hint: view.editable ? undefined : t("live.readOnly"), onSelect: () => onDelete(view.id) },
+    { id: "edit", label: t("live.editItem"), icon: Pencil, disabled: !view.editable, hint: view.editable ? undefined : t("live.readOnly"), onSelect: () => onEdit(view.id) },
+    { id: "duplicate", label: t("live.duplicateItem"), icon: Copy, disabled: !canCreateView, hint: canCreateView ? undefined : t("live.noPermission"), onSelect: () => onDuplicate(view.id) },
+    { id: "delete", label: t("live.delete"), icon: Trash2, danger: true, disabled: !view.editable, hint: view.editable ? undefined : t("live.readOnly"), onSelect: () => onDelete(view.id) },
   ]);
   return (
     <div className={cn(indent, "flex min-w-0 items-center")}>
@@ -439,12 +431,12 @@ function ViewRow({
         aria-label={view.shared && view.owner_name ? `${view.name} · ${view.owner_name}` : view.name}
         title={t("live.openViewHint", { name: view.name, detail })}
         onClick={() => onOpen(view.id)}
-        className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left hover:bg-raised", active && "bg-raised font-medium")}
+        className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-m3-sm px-2 py-1.5 text-left hover:bg-on-surface/8", active && "bg-secondary-container font-medium text-on-secondary-container")}
         {...menu}
       >
         <ViewIcon />
         <span className="min-w-0 truncate">{view.name}</span>
-        {view.shared && <Icon icon={faCloud} className="ml-auto text-sky-400" />}
+        {view.shared && <Icon icon={Cloud} size="xs" label={t("live.shared")} className="ml-auto shrink-0 text-primary" />}
       </button>
     </div>
   );
@@ -497,18 +489,18 @@ function ServerBranch({
   const cameraIds = [...server.folders.flatMap((f) => f.cameras), ...server.rootCameras].map((c) => c.id);
   const menu = bind(() => [
     addToViewItem(actions, cameraIds, t),
-    ...(actions.canConfigureServers ? [{ id: "cfg", label: t("live.configure"), icon: faGear, onSelect: () => void navigate({ to: "/servers", search: { site_id: siteId, server_id: server.id } }) } satisfies MenuItem] : []),
+    ...(actions.canConfigureServers ? [{ id: "cfg", label: t("live.configure"), icon: Settings, onSelect: () => void navigate({ to: "/servers", search: { site_id: siteId, server_id: server.id } }) } satisfies MenuItem] : []),
   ]);
   return (
     <div className={cn("ml-3 min-w-0", drop.foreign && "opacity-40")} title={drop.foreign ? t("live.cannotMove") : undefined}>
-      <div ref={setNodeRef} className={cn("flex min-w-0 items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-accent")}>
+      <div ref={setNodeRef} className={cn("flex min-w-0 items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-primary")}>
         <button
           ref={setDragRef}
           type="button"
           onClick={() => toggle(key)}
           aria-expanded={isOpen(key)}
           title={t("live.serverDragHint", { name: server.name })}
-          className={cn("flex min-w-0 flex-1 cursor-grab items-center gap-1 py-0.5 text-left text-muted", isDragging && "opacity-50")}
+          className={cn("flex min-w-0 flex-1 cursor-grab items-center gap-1 rounded-m3-sm py-1.5 text-left text-on-surface-variant hover:bg-on-surface/8", isDragging && "opacity-50")}
           {...attributes}
           {...listeners}
           {...menu}
@@ -518,21 +510,16 @@ function ServerBranch({
           }}
         >
           <Chevron open={isOpen(key)} />
-          <Icon icon={faServer} className={nodeIcon} />
+          <Icon icon={ServerGlyph} size="xs" className={nodeIcon} />
           <span className={cn("size-1.5 shrink-0 rounded-full", dot(server.status))} aria-hidden />
           <span className="min-w-0 truncate">{server.name}</span>
           <Count n={server.count} />
         </button>
         {server.canManage && (
-          <button
-            type="button"
-            onClick={onStartCreate}
+          <IconButton icon={FolderPlus} onClick={onStartCreate}
             aria-label={t("live.newFolderIn", { name: server.name })}
             title={t("live.newFolder")}
-            className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <Icon icon={faFolderPlus} />
-          </button>
+            className="size-9" />
         )}
       </div>
       {isOpen(key) && (
@@ -606,24 +593,16 @@ function FolderBranch({
     ...(server.canManage
       ? [
           { separator: true, id: "sep" } satisfies MenuItem,
-          { id: "rename", label: t("live.rename"), icon: faPen, onSelect: () => onRenaming(folder.id) } satisfies MenuItem,
-          { id: "delete", label: t("live.delete"), icon: faTrash, danger: true, onSelect: () => onDelete(folder) } satisfies MenuItem,
+          { id: "rename", label: t("live.rename"), icon: Pencil, onSelect: () => onRenaming(folder.id) } satisfies MenuItem,
+          { id: "delete", label: t("live.delete"), icon: Trash2, danger: true, onSelect: () => onDelete(folder) } satisfies MenuItem,
         ]
       : []),
   ]);
   return (
     <div className={cn("ml-3 min-w-0", drop.foreign && "opacity-40", isDragging && "opacity-50")}>
-      <div ref={setDropRef} className={cn("group flex min-w-0 items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-accent")}>
+      <div ref={setDropRef} className={cn("group flex min-w-0 items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-primary")}>
         {server.canManage && (
-          <button
-            type="button"
-            aria-label={t("live.moveFolder", { name: folder.name })}
-            title={t("live.dragFolder")}
-            className="shrink-0 cursor-grab rounded p-0.5 text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-            {...listeners}
-          >
-            <Icon icon={faGripVertical} />
-          </button>
+          <IconButton icon={GripVertical} aria-label={t("live.moveFolder", { name: folder.name })} title={t("live.dragFolder")} className="size-8 shrink-0 cursor-grab" {...listeners} />
         )}
         {renaming ? (
           <NameInput label={t("live.newName", { name: folder.name })} initial={folder.name} onSubmit={(name) => onRename(folder.id, name)} onCancel={() => onRenaming(null)} />
@@ -636,7 +615,7 @@ function FolderBranch({
               onDoubleClick={server.canManage ? () => onRenaming(folder.id) : undefined}
               aria-expanded={isOpen(key)}
               title={t("live.folderDragHint", { name: folder.name })}
-              className="flex min-w-0 flex-1 cursor-grab items-center gap-1 py-0.5 text-left"
+              className="flex min-w-0 flex-1 cursor-grab items-center gap-1 rounded-m3-sm py-1.5 text-left hover:bg-on-surface/8"
               {...attributes}
               {...listeners}
               {...menu}
@@ -646,18 +625,14 @@ function FolderBranch({
               }}
             >
               <Chevron open={isOpen(key)} />
-              <Icon icon={isOpen(key) ? faFolderOpen : faFolder} className={nodeIcon} />
+              <Icon icon={isOpen(key) ? FolderOpen : FolderGlyph} size="xs" className={nodeIcon} />
               <span className="min-w-0 truncate">{folder.name}</span>
               <Count n={node.cameras.length} />
             </button>
             {server.canManage && (
               <span className="flex shrink-0 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
-                <button type="button" aria-label={t("live.renameFolder", { name: folder.name })} title={t("live.rename")} onClick={() => onRenaming(folder.id)} className="rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
-                  <Icon icon={faPen} />
-                </button>
-                <button type="button" aria-label={t("live.deleteFolderNamed", { name: folder.name })} title={t("live.delete")} onClick={() => onDelete(folder)} className="rounded p-1 text-muted hover:bg-raised hover:text-bad focus-visible:outline-2 focus-visible:outline-accent">
-                  <Icon icon={faTrash} />
-                </button>
+                <IconButton icon={Pencil} aria-label={t("live.renameFolder", { name: folder.name })} title={t("live.rename")} onClick={() => onRenaming(folder.id)} className="size-8" />
+                <IconButton icon={Trash2} aria-label={t("live.deleteFolderNamed", { name: folder.name })} title={t("live.delete")} onClick={() => onDelete(folder)} className="size-8 hover:text-bad" />
               </span>
             )}
           </>
@@ -698,7 +673,7 @@ function CameraRow({
   const menu = bind(() => [
     addToViewItem(actions, [camera.id], t),
     ...(actions.canConfigureCameras
-      ? [{ id: "cfg", label: t("live.configure"), icon: faGear, onSelect: () => void navigate({ to: "/cameras/$cameraId/frigate", params: { cameraId: camera.id } }) } satisfies MenuItem]
+      ? [{ id: "cfg", label: t("live.configure"), icon: Settings, onSelect: () => void navigate({ to: "/cameras/$cameraId/frigate", params: { cameraId: camera.id } }) } satisfies MenuItem]
       : []),
   ]);
   const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
@@ -708,7 +683,7 @@ function CameraRow({
   return (
     <div
       ref={setDropRef}
-      className={cn(indent, "flex min-w-0 items-center gap-1 border-t-2 border-transparent", isOver && !drop.disabled && "border-accent", drop.foreign && "opacity-40")}
+      className={cn(indent, "flex min-w-0 items-center gap-1 border-t-2 border-transparent", isOver && !drop.disabled && "border-primary", drop.foreign && "opacity-40")}
     >
       <button
         ref={setDragRef}
@@ -722,7 +697,7 @@ function CameraRow({
           onDoublePlace(camera.id);
         }}
         title={t("live.cameraHint", { name: camera.display_name })}
-        className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-0.5 text-left hover:bg-raised", isDragging && "opacity-50")}
+        className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-m3-sm px-2 py-1.5 text-left hover:bg-on-surface/8", isDragging && "opacity-50")}
         {...attributes}
         {...listeners}
         {...menu}
@@ -731,29 +706,21 @@ function CameraRow({
           if (!e.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(e);
         }}
       >
-        <Icon icon={faVideo} className={nodeIcon} />
+        <Icon icon={Video} size="xs" className={nodeIcon} />
         <span className={cn("size-1.5 shrink-0 rounded-full", dot(camera.status))} aria-hidden />
         <span className="min-w-0 truncate">{camera.display_name}</span>
       </button>
       {canViewRecordings && (
         <>
-          <button
-            type="button"
-            title={t("live.watchLiveRecordings")}
-            aria-label={t("live.watchRecordingsOf", { name: camera.display_name })}
-            onClick={() => onPlayback(camera.id)}
-            className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            <Icon icon={faClockRotateLeft} />
-          </button>
+          <IconButton icon={History} title={t("live.watchLiveRecordings")} aria-label={t("live.watchRecordingsOf", { name: camera.display_name })} onClick={() => onPlayback(camera.id)} className="size-8" />
           <Link
             to="/playback"
             search={{ camera: camera.id }}
             title={t("live.openRecordingsPage")}
             aria-label={t("live.recordingsOf", { name: camera.display_name })}
-            className="shrink-0 rounded p-1 text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
           >
-            <Icon icon={faArrowUpRightFromSquare} />
+            <Icon icon={ExternalLink} size="xs" />
           </Link>
         </>
       )}

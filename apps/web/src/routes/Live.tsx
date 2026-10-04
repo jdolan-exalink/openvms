@@ -23,7 +23,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { type ExplorerActions, LiveExplorer } from "@/components/LiveExplorer";
 import { Modal } from "@/components/Modal";
 import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/Presentations";
-import { Button, ErrorNote, TextInput } from "@/components/ui";
+import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
   cameraIdOf, duplicateTileIndexes, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
@@ -599,16 +599,16 @@ export function Live() {
   const sidebar = createPortal(
     <div
       data-testid="live-edge"
-      className={cn("fixed inset-y-0 z-40", fullscreen ? "left-0" : "left-16", edgeVisible ? "w-80 max-w-[85vw]" : "w-3")}
+      className={cn("fixed inset-y-0 z-40", fullscreen ? "left-0" : "left-0 md:left-16", edgeVisible ? "w-80 max-w-[85vw]" : "w-3")}
       onPointerEnter={revealEdge}
       onPointerLeave={concealEdge}
     >
-      <aside hidden={!edgeVisible} aria-label={tr("live.explorer")} className="flex h-full min-h-0 w-80 max-w-[85vw] flex-col border-r border-line bg-surface px-3 py-4 shadow-2xl">
-        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-0.5 bg-accent/70" />
+      <aside hidden={!edgeVisible} aria-label={tr("live.explorer")} className="flex h-full min-h-0 w-80 max-w-[85vw] flex-col rounded-r-m3-xl bg-surface-1 px-3 py-4 shadow-2xl">
+        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-0.5 bg-primary/70" />
         {sidebarContent}
       </aside>
       {!edgeVisible && (
-        <button type="button" aria-label={tr("live.showExplorer")} title={tr("live.showExplorer")} className="absolute inset-0 flex items-center justify-center bg-surface/95 text-muted" onClick={revealEdge}>
+        <button type="button" aria-label={tr("live.showExplorer")} title={tr("live.showExplorer")} className="absolute inset-0 flex items-center justify-center bg-surface-1/95 text-on-surface-variant" onClick={revealEdge}>
           <Icon icon={ChevronsRight} size={12} />
         </button>
       )}
@@ -617,7 +617,7 @@ export function Live() {
   );
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col gap-2", sidebarPinned && "pl-80")}>
+    <div className={cn("flex min-h-0 flex-1 flex-col gap-2", sidebarPinned && "md:pl-80")}>
       <h1 className="sr-only">{tr("nav.live")}</h1>
       {topBarActions}
       <DndContext
@@ -639,7 +639,7 @@ export function Live() {
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
               <LiveGridFrame role="group" label={tr("live.videoGrid")} mode={rec ? "rec" : "live"}
                 className={cn(
-                  "grid min-h-0 flex-1 gap-1 overflow-y-auto rounded-md ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
+                  "grid min-h-0 flex-1 gap-2 overflow-y-auto rounded-m3-xl p-1 ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
                   rec ? "ring-bad/50" : "ring-ok/40",
                 )}
                 style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, "--grid-rows": focus !== null ? 1 : rows } as CSSProperties}
@@ -708,7 +708,7 @@ export function Live() {
         </div>
         {sidebar}
         <DragOverlay dropAnimation={null}>
-          {dragLabel ? <div className="pointer-events-none rounded border border-accent bg-surface px-2 py-1 text-xs shadow-lg">{dragLabel}</div> : null}
+          {dragLabel ? <div className="pointer-events-none rounded-m3-md bg-surface-2 px-3 py-1.5 text-xs shadow-lg ring-2 ring-primary">{dragLabel}</div> : null}
         </DragOverlay>
       </DndContext>
       {editorOpen && (
@@ -729,17 +729,15 @@ export function Live() {
         <Modal title={tr("live.properties")} onClose={() => setViewDialog(null)} className="max-w-md">
           <TextInput aria-label={tr("live.viewName")} placeholder={tr("live.viewName")} value={dialogName} onChange={(event) => setDialogName(event.target.value)} />
           {canShareView ? (
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={dialogShared} onChange={(event) => setDialogShared(event.target.checked)} /> {tr("live.sharedOrg")}
-            </label>
+            <Switch checked={dialogShared} onChange={setDialogShared} label={tr("live.sharedOrg")} />
           ) : (
             viewDialog.mode === "edit" && dialogShared && <p className="text-sm text-muted">{tr("live.sharedOrg")}</p>
           )}
           {viewDialog.mode === "edit" && viewId === viewDialog.id && <p className="text-xs text-muted">{tr("live.saveUpdatesGrid")}</p>}
           <ErrorNote error={save.error} />
           <div className="flex justify-end gap-2">
-            <Button onClick={() => setViewDialog(null)}>{tr("common.cancel")}</Button>
-            <Button variant="primary" onClick={() => save.mutate()} disabled={!dialogName.trim() || save.isPending}>
+            <Button variant="text" onClick={() => setViewDialog(null)}>{tr("common.cancel")}</Button>
+            <Button variant="filled" onClick={() => save.mutate()} disabled={!dialogName.trim() || save.isPending}>
               {tr("live.save")}
             </Button>
           </div>
@@ -766,6 +764,9 @@ export function Live() {
     </div>
   );
 }
+
+/** Overlay action on a camera tile: a 32px pill on the translucent surface so it reads over any video. */
+const tileAction = "size-8 rounded-full bg-surface-1/80 text-on-surface backdrop-blur hover:bg-surface-1";
 
 function LiveGridFrame({ className, style, role, label, mode, children }: { className?: string; style?: CSSProperties; role?: string; label: string; mode?: string; children: ReactNode }) {
   const { setNodeRef } = useDroppable({ id: LIVE_GRID_DROP_ID });
@@ -829,11 +830,13 @@ function GridTile({
       ref={setNodeRef}
       style={style}
       aria-label={tr("live.cell", { index: index + 1 })}
+      aria-current={isSelected ? "true" : undefined}
+      data-selected={isSelected ? "true" : undefined}
       onClick={onSelect}
       onDoubleClick={onToggleFocus}
       className={cn(
-        "group relative aspect-video overflow-hidden md:aspect-auto md:min-h-0 rounded border bg-black outline-none focus-visible:ring-2 focus-visible:ring-accent",
-        isSelected ? "border-accent" : "border-line",
+        "group relative aspect-video overflow-hidden bg-video outline-none [transition:border-radius_var(--md-motion-spatial-fast)] focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
+        isSelected ? "rounded-m3-2xl outline-2 -outline-offset-2 outline-primary" : "rounded-m3-xl",
         isDragging && "opacity-50",
         isHidden && "hidden",
       )}
@@ -843,25 +846,23 @@ function GridTile({
       {tile && isMapTile(tile) ? (
         <>
           <LiveMapTile map={tile.map} />
-          <button
-            type="button"
+          <IconButton
+            icon={X}
             title={tr("live.removeMap")}
             aria-label={tr("live.removeNamed", { name: tile.map.name })}
-            className="absolute right-2 top-2 z-[3] rounded bg-black/70 p-1 text-white hover:bg-white/20"
+            className={tileAction + " absolute right-2 top-2 z-[3]"}
             onClick={(event) => {
               event.stopPropagation();
               onRemove();
             }}
-          >
-            <X className="size-3.5" aria-hidden />
-          </button>
+          />
         </>
       ) : tile && camera && "camera_id" in tile ? (
         <>
           {isDuplicate ? (
             <div className="relative size-full">
               <img src={`/media/v1/cameras/${tile.camera_id}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-contain opacity-60" />
-              <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white">{tr("live.alreadyVisible")}</span>
+              <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs"><span className="rounded-full bg-surface-1/80 px-3 py-1 text-on-surface">{tr("live.alreadyVisible")}</span></span>
             </div>
           ) : recLayer && !persistent ? null : (
             // Without persistent players a live socket would keep streaming under REC, so it is
@@ -869,49 +870,47 @@ function GridTile({
             <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} className="size-full" />
           )}
           {recLayer}
-          <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 bg-gradient-to-b from-black/80 via-black/45 to-transparent px-2 py-1.5 text-xs text-white">
-            <Camera className="size-3.5 shrink-0" aria-hidden />
-            <span className="truncate font-medium">{camera.display_name}</span>
-            <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">
-              <span className={cn("size-1.5 rounded-full ring-1 ring-white/80", status === "online" ? "bg-emerald-400" : status === "offline" ? "bg-red-400" : "bg-amber-300")} />
-              {status === "online" ? <CircleCheck className="size-3" aria-hidden /> : status === "offline" ? <CircleX className="size-3" aria-hidden /> : <CircleHelp className="size-3" aria-hidden />}
-              <span className="sr-only">{status ?? "unknown"}</span>
+          <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 p-2 text-xs">
+            <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-on-surface backdrop-blur">
+              <Icon icon={Camera} size="xs" className="shrink-0" />
+              <span className="truncate font-medium">{camera.display_name}</span>
+              <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">
+                <span className={cn("size-2 rounded-full", status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-warn")} />
+                <Icon icon={status === "online" ? CircleCheck : status === "offline" ? CircleX : CircleHelp} size={12} className={status === "offline" ? "text-bad" : undefined} />
+                <span className="sr-only">{status ?? "unknown"}</span>
+              </span>
             </span>
             <span className="ml-auto flex shrink-0 gap-1">
               {canViewRecordings && (
-                <Link to="/playback" search={{ camera: tile.camera_id }} title={tr("nav.recordings")} aria-label={tr("live.recordingsOf", { name: camera.display_name })} className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
-                  <History className="size-3.5" aria-hidden />
+                <Link to="/playback" search={{ camera: tile.camera_id }} title={tr("nav.recordings")} aria-label={tr("live.recordingsOf", { name: camera.display_name })} className={cn(tileAction, "m3-press inline-flex items-center justify-center focus-visible:outline-2 focus-visible:outline-primary")}>
+                  <Icon icon={History} size="xs" />
                 </Link>
               )}
-              <button
-                type="button"
+              <IconButton
+                icon={isFocused ? Minimize2 : Maximize2}
                 title={isFocused ? tr("live.backToGrid") : tr("live.expandTile")}
                 aria-label={isFocused ? tr("live.backToGrid") : tr("live.expandTile")}
-                className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                className={tileAction}
                 onClick={(e) => {
                   e.stopPropagation();
                   onToggleFocus();
                 }}
-              >
-                {isFocused ? <Minimize2 className="size-3.5" aria-hidden /> : <Maximize2 className="size-3.5" aria-hidden />}
-              </button>
-              <button
-                type="button"
+              />
+              <IconButton
+                icon={X}
                 title={tr("live.remove")}
                 aria-label={tr("live.removeNamed", { name: camera.display_name })}
-                className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                className={tileAction}
                 onClick={(e) => {
                   e.stopPropagation();
                   onRemove();
                 }}
-              >
-                <X className="size-3.5" aria-hidden />
-              </button>
+              />
             </span>
           </div>
         </>
       ) : (
-        <div className="flex size-full items-center justify-center text-xs text-muted">{tile && !camera ? tr("live.noAccess") : tr("live.emptyCell")}</div>
+        <div className="flex size-full items-center justify-center text-xs text-on-surface-variant">{tile && !camera ? tr("live.noAccess") : tr("live.emptyCell")}</div>
       )}
     </div>
   );
