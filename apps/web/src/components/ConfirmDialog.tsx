@@ -24,8 +24,8 @@ export function ConfirmDialog({
       <p className="text-sm">{message}</p>
       <ErrorNote error={error} />
       <div className="flex justify-end gap-2">
-        <Button onClick={onCancel}>Cancelar</Button>
-        <Button className="text-bad" disabled={pending} onClick={onConfirm}>
+        <Button variant="text" onClick={onCancel}>Cancelar</Button>
+        <Button variant="danger" disabled={pending} onClick={onConfirm}>
           {confirmLabel}
         </Button>
       </div>

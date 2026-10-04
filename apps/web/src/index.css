@@ -201,6 +201,20 @@ html[data-live-fullscreen] [data-shell-region="main-workspace"] {
   animation: alarm-card-in 0.55s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* M3 Expressive press: pills morph to a rounded square and shrink slightly while active. Reduced motion collapses the vars. */
+.m3-press {
+  transition:
+    border-radius var(--md-motion-spatial-fast),
+    scale var(--md-motion-spatial-fast),
+    background-color var(--md-motion-effects-fast),
+    color var(--md-motion-effects-fast),
+    filter var(--md-motion-effects-fast);
+}
+.m3-press:active:not(:disabled) {
+  border-radius: var(--radius-m3-md);
+  scale: 0.98;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --md-motion-spatial-fast: var(--md-motion-effects-fast);
