@@ -69,7 +69,36 @@ async function setup(alarmsEnabled = false, prefs: unknown = {}, extra: {
   await screen.findByRole("button", { name: "Marker c0" }, { timeout: 5000 });
   return { ...view, router, queryClient, fetchSpy };
 }
+function revealMapsSidebar() {
+  fireEvent.focus(screen.getByRole("button", { name: "Mostrar explorador" }));
+}
 describe("Maps camera interaction integration", () => {
+  it("replaces the sidebar collapse control with the persisted live-style pin", async () => {
+    await setup();
+    expect(screen.queryByRole("button", { name: "Contraer" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tablist", { name: "Secciones del mapa" })).not.toBeInTheDocument();
+    fireEvent.focus(screen.getByRole("button", { name: "Mostrar explorador" }));
+    expect(screen.getByRole("tablist", { name: "Secciones del mapa" })).toBeInTheDocument();
+    const pin = screen.getByRole("button", { name: "Anclar explorador" });
+    expect(pin).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(pin);
+    expect(screen.getByRole("button", { name: "Desanclar explorador" })).toHaveAttribute("aria-pressed", "true");
+    expect(localStorage.getItem("openvms.live.sidebar.pinned")).toBe("1");
+    const edge = screen.getByTestId("maps-sidebar-edge");
+    fireEvent.pointerLeave(edge);
+    expect(screen.getByRole("tablist", { name: "Secciones del mapa" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Desanclar explorador" }));
+    fireEvent.pointerLeave(edge);
+    await waitFor(() => expect(screen.queryByRole("tablist", { name: "Secciones del mapa" })).not.toBeInTheDocument(), { timeout: 1000 });
+  });
+
+  it("restores a previously pinned maps sidebar from the shared live preference", async () => {
+    localStorage.setItem("openvms.live.sidebar.pinned", "1");
+    await setup();
+    expect(screen.getByRole("tablist", { name: "Secciones del mapa" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Desanclar explorador" })).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("installs the perf overlay only with the ?perf param", async () => {
     await setup(false, {}, {}, "/maps?site=s&perf=1");
     const metrics = window.__openvmsMapMetrics;
@@ -142,6 +171,7 @@ describe("Maps camera interaction integration", () => {
   it("opts into live hover at 700ms without acquiring a second session", async () => {
     const acquire = vi.spyOn(PlayerSessionManager.prototype, "acquire");
     await setup();
+    revealMapsSidebar();
     fireEvent.click(screen.getByRole("checkbox", { name: "Live on hover" }));
     vi.useFakeTimers();
     fireEvent.mouseEnter(screen.getByRole("button", { name: "Marker c0" }));
@@ -178,6 +208,7 @@ describe("Maps camera interaction integration", () => {
 
 it("integrates authorized alarms and grouped site health with focus off by default", async () => {
   await setup(true);
+  revealMapsSidebar();
   fireEvent.click(screen.getByRole("tab", { name: /Alarmas/ }));
   expect(await screen.findByRole("region", { name: "Alarms" })).toHaveTextContent("Entrance");
   fireEvent.click(screen.getByRole("tab", { name: "Cámaras" }));
@@ -595,6 +626,7 @@ describe("Operational Maps completion", () => {
       { permission: "events.view", effect: "allow", scope_type: "platform" },
       { permission: "recordings.view", effect: "allow", scope_type: "platform" },
     ] });
+    revealMapsSidebar();
     await act(async () => { await router.navigate({ to: "/maps", search: { site: "s", mode: "investigate" } }); });
     expect(screen.getByRole("tab", { name: "Investigar" })).toHaveAttribute("aria-selected", "true");
     fireEvent.click(screen.getByRole("button", { name: "Marker c0" }));

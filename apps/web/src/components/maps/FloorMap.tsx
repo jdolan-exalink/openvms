@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { alarmsQuery, cameraFoldersQuery, camerasQuery, meQuery, serversQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
+import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { mapsOverviewQuery } from "@/lib/maps/api";
 import type { CameraEntity, MapMode } from "@/lib/maps/types";
 import { floorEntitiesQuery, floorUnplacedQuery, emptyFloorDraft, stageFloor, undoFloor, redoFloor, saveFloorPlacement, type Point } from "@/lib/maps/floorEditor";
@@ -55,7 +56,12 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
   const [planError, setPlanError] = useState<string>();
   const [selected, setSelected] = useState<string>();
   const [armed, setArmed] = useState<string>();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarPinned, setSidebarPinned] = useState(loadSidebarPinned);
+  const toggleSidebarPin = () => setSidebarPinned((current) => {
+    const next = !current;
+    saveSidebarPinned(next);
+    return next;
+  });
   const [plateSnapshot, setPlateSnapshot] = useState<PlateSnapshotTarget>();
   const [maximizedId, setMaximizedId] = useState<string>();
   const [maximizedOrigin, setMaximizedOrigin] = useState<GrowRect>();
@@ -176,8 +182,8 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
    </footer>
   </aside>}
   {liveChrome && <MapSocSidebar
-    open={sidebarOpen}
-    onToggle={() => setSidebarOpen((current) => !current)}
+    pinned={sidebarPinned}
+    onTogglePin={toggleSidebarPin}
     alarmCount={alarms.data?.length ?? 0}
     showAlarms={can(me.data, "alarms.view")}
     showLpr={can(me.data, "lpr.view")}

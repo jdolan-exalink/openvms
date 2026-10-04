@@ -60,15 +60,19 @@ function addToViewItem(actions: ExplorerActions, ids: string[], t: ReturnType<ty
     ],
   };
 }
-type DragData = { kind: "camera" | "folder" | "server"; serverId: string };
+type DragData =
+  | { kind: "camera"; serverId: string }
+  | { kind: "folder"; serverId: string }
+  | { kind: "server"; serverId: string };
 
 /** Drag state seen from one server's subtree: only same-server, manageable nodes accept a drop. */
 function useDropState(serverId: string, canManage: boolean, accepts: ("camera" | "folder")[]) {
   const { active } = useDndContext();
   const data = active?.data.current as DragData | undefined;
-  const tree = data?.kind === "camera" || data?.kind === "folder";
-  const foreign = tree && data.serverId !== serverId;
-  const valid = tree && !foreign && accepts.includes(data.kind);
+  const treeData = data?.kind === "camera" || data?.kind === "folder" ? data : undefined;
+  const tree = treeData !== undefined;
+  const foreign = treeData !== undefined && treeData.serverId !== serverId;
+  const valid = treeData !== undefined && !foreign && accepts.includes(treeData.kind);
   return { dragging: tree, foreign, disabled: !canManage || !valid };
 }
 

@@ -1,6 +1,8 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { faAnglesRight, faThumbtack } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type FocusEvent } from "react";
 import { platesQuery } from "@/api/queries";
 import { PlateReadCard, plateCropUrl } from "@/components/plates/PlateReadCard";
 import { cn } from "@/lib/cn";
@@ -11,8 +13,8 @@ import { ProtectedGallery } from "./ProtectedGallery";
 type Tab = "cameras" | "alarms" | "lpr" | "saved";
 
 export function MapSocSidebar({
-  open,
-  onToggle,
+  pinned,
+  onTogglePin,
   alarmCount,
   showAlarms,
   showLpr,
@@ -22,8 +24,8 @@ export function MapSocSidebar({
   cameras,
   alarms,
 }: {
-  open: boolean;
-  onToggle: () => void;
+  pinned: boolean;
+  onTogglePin: () => void;
   alarmCount: number;
   showAlarms: boolean;
   showLpr: boolean;
@@ -35,16 +37,41 @@ export function MapSocSidebar({
 }) {
   const t = useT();
   const [tab, setTab] = useState<Tab>("cameras");
+  const [edgeOpen, setEdgeOpen] = useState(false);
+  const edgeHover = useRef(false);
+  const hideEdge = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const open = pinned || edgeOpen;
+  const reveal = () => {
+    edgeHover.current = true;
+    clearTimeout(hideEdge.current);
+    setEdgeOpen(true);
+  };
+  const conceal = () => {
+    edgeHover.current = false;
+    clearTimeout(hideEdge.current);
+    hideEdge.current = setTimeout(() => {
+      if (!edgeHover.current && !pinned) setEdgeOpen(false);
+    }, 280);
+  };
+  const onBlur = (event: FocusEvent<HTMLDivElement>) => {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) conceal();
+  };
+  useEffect(() => () => clearTimeout(hideEdge.current), []);
   return (
-    <div className="pointer-events-none absolute bottom-3 left-3 top-16 z-20 flex">
+    <div
+      data-testid="maps-sidebar-edge"
+      onPointerEnter={reveal}
+      onPointerLeave={conceal}
+      onFocus={reveal}
+      onBlur={onBlur}
+      className={cn("pointer-events-auto absolute bottom-3 left-3 top-16 z-20 flex", open ? "w-80 max-w-[85vw]" : "w-3")}
+    >
       <aside
         id="map-soc-sidebar"
         aria-label={t("maps.notifications")}
         aria-hidden={!open || undefined}
-        className={cn(
-          "pointer-events-auto flex h-full w-80 min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-surface/90 shadow-2xl backdrop-blur-md transition-[width,opacity] duration-300",
-          !open && "w-0 border-0 opacity-0",
-        )}
+        hidden={!open}
+        className="flex h-full w-80 min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-surface/90 shadow-2xl backdrop-blur-md"
       >
         <div className="flex shrink-0 border-b border-line text-xs font-medium" role="tablist" aria-label={t("maps.sections")}>
           <TabButton id="cameras" current={tab} onSelect={setTab}>{t("maps.cameras")}</TabButton>
@@ -54,6 +81,16 @@ export function MapSocSidebar({
           </TabButton>
           <TabButton id="lpr" current={tab} onSelect={setTab}>{t("maps.lpr")}</TabButton>
           <TabButton id="saved" current={tab} onSelect={setTab}>{t("maps.saved")}</TabButton>
+          <button
+            type="button"
+            onClick={onTogglePin}
+            aria-pressed={pinned}
+            title={pinned ? t("live.unpin") : t("live.pin")}
+            aria-label={pinned ? t("live.unpin") : t("live.pin")}
+            className={cn("shrink-0 rounded p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent", pinned ? "text-accent" : "text-muted hover:text-ink")}
+          >
+            <FontAwesomeIcon icon={faThumbtack} className="text-sm" aria-hidden />
+          </button>
         </div>
         <div className={cn("min-h-0 flex-1", tab === "lpr" ? "flex flex-col overflow-hidden" : "space-y-2 overflow-auto p-2")}>
           {tab === "cameras" && cameras}
@@ -62,17 +99,11 @@ export function MapSocSidebar({
           {tab === "saved" && <ProtectedGallery />}
         </div>
       </aside>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-expanded={open}
-        aria-controls="map-soc-sidebar"
-        title={open ? t("maps.collapse") : t("maps.expand")}
-        aria-label={open ? t("maps.collapse") : t("maps.expand")}
-        className="pointer-events-auto absolute -right-3.5 top-16 flex size-7 items-center justify-center rounded-full border border-white/20 bg-raised text-muted shadow-xl hover:bg-accent hover:text-white"
-      >
-        {open ? <ChevronLeft className="size-3.5" aria-hidden /> : <ChevronRight className="size-3.5" aria-hidden />}
-      </button>
+      {!open && (
+        <button type="button" aria-label={t("live.showExplorer")} title={t("live.showExplorer")} className="absolute inset-0 flex items-center justify-center rounded-r bg-surface/95 text-muted" onClick={reveal}>
+          <FontAwesomeIcon icon={faAnglesRight} className="text-[10px]" aria-hidden />
+        </button>
+      )}
     </div>
   );
 }
@@ -205,4 +236,3 @@ function LprList({ siteId, onSelectCamera, onOpenRead }: { siteId?: string; onSe
     </div>
   );
 }
-

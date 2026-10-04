@@ -38,6 +38,7 @@ import { MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { IncidentFocus } from "@/lib/maps/incidentPolicy";
 import { MapOperationsPanel } from "./panel/MapOperationsPanel";
 import { MapSocSidebar } from "./panel/MapSocSidebar";
+import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { MapMaximizedCamera } from "./panel/MapMaximizedCamera";
 import { MapPlateSnapshot, type PlateSnapshotTarget } from "./panel/MapPlateSnapshot";
 import { captureGrowOrigin, rectFromElement, type GrowRect } from "./panel/MapGrowFrame";
@@ -229,7 +230,12 @@ function MapShellContent({
   const cameraDragMovedRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [dropReady, setDropReady] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarPinned, setSidebarPinned] = useState(loadSidebarPinned);
+  const toggleSidebarPin = () => setSidebarPinned((current) => {
+    const next = !current;
+    saveSidebarPinned(next);
+    return next;
+  });
   const [maximizedCameraId, setMaximizedCameraId] = useState<string>();
   const [maximizedOrigin, setMaximizedOrigin] = useState<GrowRect>();
   const [plateSnapshot, setPlateSnapshot] = useState<PlateSnapshotTarget>();
@@ -643,12 +649,12 @@ function MapShellContent({
       width: container && container.clientWidth > 64 ? container.clientWidth : 1280,
       height: container && container.clientHeight > 64 ? container.clientHeight : 720,
     };
-    const view = saved ?? (geoPoints.length ? frameCameras(geoPoints, viewport, sidebarOpen ? MAP_SIDEBAR_PADDING : { ...MAP_SIDEBAR_PADDING, left: 28 }) : null);
+    const view = saved ?? (geoPoints.length ? frameCameras(geoPoints, viewport, MAP_SIDEBAR_PADDING) : null);
     if (!view) return;
     framedSite.current = siteId;
     if (!saved) saveGeoView(me.data.tenant_id, me.data.id, siteId, view);
     map.jumpTo({ center: view.center, zoom: view.zoom });
-  }, [center, zoom, currentSite?.id, geoPoints, me.data, readyMap, sidebarOpen]);
+  }, [center, zoom, currentSite?.id, geoPoints, me.data, readyMap]);
   useEffect(() => {
     const map = mapRef.current;
     const prev = followViewRef.current;
@@ -862,8 +868,8 @@ function MapShellContent({
 
         {!editActive && (
           <MapSocSidebar
-            open={sidebarOpen}
-            onToggle={() => setSidebarOpen((current) => !current)}
+            pinned={sidebarPinned}
+            onTogglePin={toggleSidebarPin}
             alarmCount={alarms.data?.length ?? 0}
             showAlarms={!!currentSite && can(me.data, "alarms.view")}
             showLpr={can(me.data, "lpr.view")}

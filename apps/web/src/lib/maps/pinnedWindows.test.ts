@@ -52,9 +52,11 @@ describe("pinned map windows", () => {
     expect(moved[0]).toMatchObject({ id: "a", x: 952, y: 0 });
     expect(unpinWindow(moved, "a")).toEqual([]);
     const arranged = arrangeWindows([{ id: "a", x: 1, y: 1 }, { id: "b", x: 400, y: 400 }], stage);
-    expect(arranged[0]).toEqual({ id: "a", ...defaultPinnedOrigin(0, stage) });
-    expect(arranged[1].y).toBeGreaterThan(arranged[0].y);
-    expect(arranged[0].x).toBe(arranged[1].x);
+    const [first, second] = arranged;
+    if (!first || !second) throw new Error("arrangeWindows must preserve both windows");
+    expect(first).toEqual({ id: "a", ...defaultPinnedOrigin(0, stage) });
+    expect(second.y).toBeGreaterThan(first.y);
+    expect(first.x).toBe(second.x);
     expect(defaultPinnedOrigin(0, stage).x).toBe(1000 - 288 - 16);
     expect(clampPinnedOrigin(10, 10, { width: 0, height: 0 })).toEqual({ x: 0, y: 0 });
   });
