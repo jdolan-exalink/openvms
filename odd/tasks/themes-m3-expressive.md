@@ -38,6 +38,18 @@ Forecast: about 3500–5000 authored changed lines (23 routes, 11.4k lines). Ove
 - [ ] T10 Migrate settings and auth: Users, Groups, Permissions, Rules, Channels, Alarms, Audit, Branding, Account, Notifications, Login.
 - [ ] T11 Hardcoded colors cleanup (DayTimeline, ZoneCanvas, ArPlate, format.ts, sprites) and final visual pass.
 
+## Screen migration guide (T7–T10)
+Every migrated screen follows the same rules so the language is uniform:
+1. Controls: raw `<button>`, `<input>`, `<select>` become `Button` / `IconButton` / `Chip` / `Switch` / `TextInput` / `Select` / `Field` from `@/components/ui` when semantics match. Dense desktop tables and toolbars use `size="sm"`; touch-first surfaces use the default 44px.
+2. Surfaces: panels and grouped content use `Card` (or `rounded-m3-xl bg-surface-1`), nested blocks `rounded-m3-lg bg-surface-2`; no hard borders as the main separator, prefer tonal steps.
+3. Type: page titles through `PageHeader` (headline 30–36px, weight 800); section titles 18–22px bold; IDs, IPs, times and versions in `font-mono`.
+4. Status and filters: `StatusBadge` for states, `Chip` groups (aria-pressed) for filters.
+5. Color only through tokens (`primary`, `*-container`, `surface-*`, `ok/warn/bad`); no hex literals, no `bg-[#…]`. Legacy aliases (`bg-raised`, `text-muted`, `accent`) may stay but new code uses role names.
+6. Icons through `<Icon>`; replace any FontAwesome in touched files (advances T3b).
+7. Responsive: below `md` columns stack, toolbars wrap, wide tables scroll inside an `overflow-x-auto` box, no horizontal page scroll at 360px, touch targets ≥ 44px.
+8. Behavior, routes, API calls, permissions and i18n keys stay unchanged; tests change only where structure changed, asserting roles and names rather than classes.
+9. Use `bottomNav`/rail from T5 as is; do not change the shell.
+
 ## Acceptance criteria
 - Switching theme updates every surface without reload, persists, and maps follow it.
 - No raw hex colors in components outside token files and documented canvas fallbacks.
@@ -59,5 +71,8 @@ Forecast: about 3500–5000 authored changed lines (23 routes, 11.4k lines). Ove
 
 - T6 (delegated writer; trigger: 2+ non-trivial files). RED: pwa.config, InstallSheet, PwaUpdatePrompt tests failed to resolve their modules; AccountMenu 2 failed (install entry). `useInstallPrompt` had no natural RED (hook written first; RED reproduced by moving the file): documented strict-TDD gap. GREEN: parent re-ran PWA set 26/26; full suite 757/759 with only the two known MapShell failures; typecheck and build OK; dist has sw.js, manifest.webmanifest and icons; Caddy validate OK and a real Caddy run returned no-cache for sw/manifest/SPA, immutable for /assets, manifest content type and the new CSP. SW: registerType prompt, precache build assets only (97 entries, 4.3 MiB first load), no runtime caching, navigate fallback denylist for /api /media /ws /health /openapi.json /docs. Real-device checks pending: Android install and maskable crop, iOS sheet and status bar, update snackbar after two deploys, live video with SW active, Lighthouse. Open decision: brand ring #fff3ee on #f38d70 has low contrast (on-primary would read better). Commit `caf2f03`; assessed medium, 4329 lines (mostly lockfile), `slice_budget_reached`; user declined review for this candidate.
 
+- 2026-10-04: user asked to commit the Maps and provisioning work and continue T7–T10. Committed on `feat/maps` as `5e177fb` (provisioning) and `288d1cd` (maps sidebar pin); native review assessed high (process boundary, shell source) and the user declined it for that candidate. `feat/themes-m3` was rebased onto `feat/maps` without conflicts; new hashes: T1 `19702b2`, T2 `b4cc5d8`, T3 `600594a`, T4 `289066a`, T5 `c6fccc6`, T6 `8fce364`, docs `2206572`. Rebased branch: full suite 757/759 (the two MapShell failures also fail on committed `e3e1b34`, so they predate this feature), typecheck clean. The T3 file boundary is lifted. Untracked `vms_mapas_soc.html` and modified `packages/test/test-results/.last-run.json` are left untouched on purpose.
+- T7 split for one writer at a time: T7a Live, LiveExplorer, LiveSidePanels; T7b Playback, Events, Plates, Dashboard.
+
 ## Next step
-T7 operation screens.
+T7a.
