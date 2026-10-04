@@ -92,5 +92,13 @@ Every migrated screen follows the same rules so the language is uniform:
 
 - T11b (delegated writer; trigger: 2+ non-trivial files). `readRoleColor()` in theme.ts; DayTimeline canvas, `STATE_COLORS` (palette getters) and animationBudget defaults follow the theme; LiveExplorer icon buttons use size sm; unused keys `common.dark`, `common.lightMode`, `common.darkMode`, `common.openMenu` removed. Remaining hex all documented: vehicle paint and category series data, persisted zone colors, theme previews/meta, physical plate and road markings, video letterbox, SDF masks, canvas fallbacks. Brand mark contrast NOT changed: pending user decision (parent removed it from the brief). Visual change: lpr ripples use theme primary, detection ripples theme ok. Tests not run (user choice).
 
+- Final verification after T11 (2026-10-04): typecheck clean; `pnpm build` OK (97 precache entries, 4216 KiB); vitest 770/772 (new `ui.primitives.test.tsx` passes; only the two MapShell failures that predate the feature on `e3e1b34`). Commit `36830aa` (T11b).
+
+## Open items
+- Real-browser visual pass (all three themes, 360px, Light contrast of warn/bad pills and map markers, Live tile overlays, Servers cards, settings sub-nav) and real-device PWA checks (Android install, iOS sheet and status bar, update snackbar, live video with SW).
+- Brand mark ring contrast (#fff3ee on #f38d70): user decision pending.
+- Two pre-existing MapShell test failures (URL `site` param on camera events navigation; live hover preview slot).
+- Push and PR slices per feature-branch-chain: user decision.
+
 ## Next step
-Full verification (vitest, typecheck, build), then real-browser visual pass. T9, T10, then the full verification (vitest, typecheck, build). User authorized: if every check passes, start T11 right away.
+Visual pass on the local stack once the user approves deploying it. T9, T10, then the full verification (vitest, typecheck, build). User authorized: if every check passes, start T11 right away.
