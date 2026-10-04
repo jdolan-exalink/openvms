@@ -145,7 +145,7 @@ describe("primary navigation and context header", () => {
     const bar = screen.getByRole("navigation", { name: "Navegación móvil" });
     expect(bar.closest('[data-shell-region="bottom-nav"]')).toHaveClass("md:hidden");
     const links = within(bar).getAllByRole("link");
-    expect(links.map((link) => link.textContent)).toEqual(["En vivo", "Eventos", "Servidores", "Alarmas"]);
+    expect(links.map((link) => link.textContent)).toEqual(["En vivo", "Eventos", "Patentes", "Alarmas"]);
     expect(within(bar).getByRole("link", { name: "Eventos" })).toHaveAttribute("aria-current", "page");
     expect(within(bar).getByRole("link", { name: "En vivo" })).not.toHaveAttribute("aria-current");
     expect(within(bar).getByRole("button", { name: "Más" })).toHaveAttribute("aria-expanded", "false");
@@ -160,7 +160,7 @@ describe("primary navigation and context header", () => {
     const sheet = screen.getByRole("dialog", { name: "Más destinos" });
     expect(sheet).toHaveAttribute("aria-modal", "true");
     expect(more).toHaveAttribute("aria-expanded", "true");
-    expect(within(sheet).getByRole("link", { name: "Patentes" })).toBeInTheDocument();
+    expect(within(sheet).getByRole("link", { name: "Servidores" })).toBeInTheDocument();
     expect(within(sheet).getByRole("link", { name: "Configuración" })).toBeInTheDocument();
     // Primary destinations stay in the bar only.
     expect(within(sheet).queryByRole("link", { name: "Eventos" })).not.toBeInTheDocument();
@@ -173,10 +173,10 @@ describe("primary navigation and context header", () => {
   });
 
   it("closes the More sheet from the close button and marks the active sheet destination", async () => {
-    await renderAt("/plates", ["live.view", "events.view", "servers.view", "alarms.view", "lpr.view"]);
+    await renderAt("/servers", ["live.view", "events.view", "servers.view", "alarms.view", "lpr.view"]);
     fireEvent.click(screen.getByRole("button", { name: "Más" }));
     const sheet = screen.getByRole("dialog", { name: "Más destinos" });
-    expect(within(sheet).getByRole("link", { name: "Patentes" })).toHaveAttribute("aria-current", "page");
+    expect(within(sheet).getByRole("link", { name: "Servidores" })).toHaveAttribute("aria-current", "page");
     fireEvent.click(within(sheet).getByRole("button", { name: "Cerrar menú" }));
     expect(screen.queryByRole("dialog", { name: "Más destinos" })).not.toBeInTheDocument();
   });
