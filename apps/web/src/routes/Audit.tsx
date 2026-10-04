@@ -55,7 +55,7 @@ export function Audit() {
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader title={t("nav.audit")} description={t("settings.audit")} />
       <form
-        className="grid gap-3 rounded border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-5"
+        className="grid gap-3 rounded-m3-xl bg-surface-1 p-5 sm:grid-cols-2 lg:grid-cols-5"
         onSubmit={(e) => {
           e.preventDefault();
           setFilter({
@@ -93,7 +93,7 @@ export function Audit() {
           <TextInput type="datetime-local" value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} />
         </Field>
         <div className="flex items-end">
-          <Button type="submit" variant="primary" className="w-full sm:w-auto">
+          <Button type="submit" variant="filled" className="w-full sm:w-auto">
             Filtrar
           </Button>
         </div>
@@ -103,7 +103,7 @@ export function Audit() {
       {items.length > 0 && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-muted">Eventos registrados</span>
+            <span className="text-lg font-bold">Eventos registrados</span>
             <Summary>{items.length === 1 ? "1 registro" : `${items.length} registros`}</Summary>
           </div>
           <Table label="Auditoría">
@@ -118,8 +118,8 @@ export function Audit() {
             </thead>
             <tbody>
               {items.map((e) => (
-                <tr key={e.id} className="border-t border-line align-top">
-                  <td className="text-xs whitespace-nowrap">{fmtDateTime(e.occurred_at)}</td>
+                <tr key={e.id} className="border-t border-outline-variant align-top">
+                  <td className="font-mono text-xs whitespace-nowrap">{fmtDateTime(e.occurred_at)}</td>
                   <td className="text-sm">{e.actor_name || "—"}</td>
                   <td className="text-sm font-medium">{actions[e.action] ?? e.action}</td>
                   <td className="max-w-md break-words">
@@ -133,7 +133,7 @@ export function Audit() {
         </div>
       )}
       {audit.hasNextPage && (
-        <Button onClick={() => void audit.fetchNextPage()} disabled={audit.isFetchingNextPage} className="self-center">
+        <Button variant="tonal" onClick={() => void audit.fetchNextPage()} disabled={audit.isFetchingNextPage} className="self-center">
           Cargar más
         </Button>
       )}
@@ -146,10 +146,10 @@ function renderDetails(details: Record<string, unknown>, targetType?: string) {
   if (entries.length === 0 && !targetType) return <span className="text-xs text-muted">—</span>;
   return (
     <div className="flex flex-col gap-0.5 text-xs">
-      {targetType && <span className="font-medium text-fg/90">{targetType}</span>}
+      {targetType && <span className="font-medium text-on-surface">{targetType}</span>}
       {entries.map(([k, v]) => (
         <span key={k} className="text-muted">
-          <span className="font-medium text-fg/70">{k}:</span> {typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)}
+          <span className="font-medium text-on-surface-variant">{k}:</span> {typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)}
         </span>
       ))}
     </div>

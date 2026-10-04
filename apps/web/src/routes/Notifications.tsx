@@ -19,14 +19,14 @@ export function Notifications() {
         title={t("nav.notifications")}
         description={t("settings.notifications")}
         actions={
-          <Button disabled={unread === 0 || markAll.isPending} onClick={() => markAll.mutate()}>
+          <Button variant="tonal" disabled={unread === 0 || markAll.isPending} onClick={() => markAll.mutate()}>
             Marcar todas como leídas
           </Button>
         }
       />
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} className="rounded border-line" />
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} className="size-5 accent-primary" />
           Solo sin leer
         </label>
         {list.data && <Summary>{unread === 1 ? "1 sin leer" : `${unread} sin leer`}</Summary>}
@@ -34,7 +34,7 @@ export function Notifications() {
       <ErrorNote error={list.error ?? markRead.error ?? markAll.error} />
       {list.data?.items.length === 0 && <Empty>No hay notificaciones.</Empty>}
       {!!list.data?.items.length && (
-        <ul aria-label="Notificaciones" className="rounded border border-line bg-surface">
+        <ul aria-label="Notificaciones" className="overflow-hidden rounded-m3-xl bg-surface-1">
           {list.data.items.map((n) => (
             <NotificationRow key={n.id} item={n} onMarkRead={(id) => markRead.mutate(id)} />
           ))}

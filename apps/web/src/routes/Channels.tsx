@@ -1,13 +1,14 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { type FormEvent, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
 import { channelsQuery, deliveriesQuery, whatsappQrQuery, whatsappSessionQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { TagInput } from "@/components/TagInput";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Switch, Table, TextInput, Th } from "@/components/ui";
 
 type Channel = Schemas["NotificationChannel"];
 type ChannelType = Schemas["NotificationChannelType"];
@@ -93,14 +94,14 @@ export function Channels() {
         title={t("nav.channels")}
         description={t("settings.channels")}
         actions={
-          <Button variant="primary" onClick={() => setEditing("new")}>
-            <Plus className="size-4" aria-hidden /> Nuevo canal
+          <Button variant="filled" onClick={() => setEditing("new")}>
+            <Icon icon={Plus} size="xs" /> Nuevo canal
           </Button>
         }
       />
       <ErrorNote error={channels.error ?? toggle.error ?? test.error} />
       {outcome && (
-        <div role="status" aria-label="Resultado de la prueba" className="rounded border border-line bg-surface px-4 py-3 text-sm">
+        <div role="status" aria-label="Resultado de la prueba" className="rounded-m3-lg bg-surface-2 px-4 py-3 text-sm">
           <p className="font-medium">Prueba enviada a {outcome.name}</p>
           <ul className="mt-1 flex flex-col gap-1">
             {outcome.results.map((r, i) => (
@@ -116,60 +117,50 @@ export function Channels() {
       {!!channels.data?.length && (
         <>
           <Summary>{channels.data.length === 1 ? "1 canal" : `${channels.data.length} canales`}</Summary>
-          <Table label="Canales">
-            <thead>
-              <tr>
-                <Th>Activo</Th>
-                <Th>Nombre</Th>
-                <Th>Tipo</Th>
-                <Th>Destinos</Th>
-                <Th />
-              </tr>
-            </thead>
-            <tbody>
-              {channels.data.map((c) => (
-                <tr key={c.id} className="border-t border-line align-top">
-                  <td>
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      aria-label={`Activar ${c.name}`}
-                      checked={c.enabled}
-                      disabled={toggle.isPending}
-                      onChange={() => toggle.mutate(c)}
-                    />
-                  </td>
-                  <td className="font-medium">{c.name}</td>
-                  <td className="text-sm">{typeLabel[c.type]}</td>
-                  <td className="max-w-xs truncate text-sm text-muted">{describeDestinations(c)}</td>
-                  <td className="text-right">
-                    <span className="inline-flex flex-wrap justify-end gap-2">
-                      {c.type === "whatsapp" && (
-                        <Button aria-label={`Vincular ${c.name}`} onClick={() => setPairing(c)}>
-                          Vincular
-                        </Button>
-                      )}
-                      <Button aria-label={`Enviar prueba a ${c.name}`} disabled={test.isPending} onClick={() => test.mutate(c)}>
-                        Enviar prueba
-                      </Button>
-                      <Button aria-label={`Editar ${c.name}`} onClick={() => setEditing(c)}>
-                        Editar
-                      </Button>
-                      <Button className="text-bad" aria-label={`Eliminar ${c.name}`} onClick={() => setDeleting(c)}>
-                        Eliminar
-                      </Button>
+          <ul aria-label="Canales" className="flex flex-col gap-3">
+            {channels.data.map((c) => (
+              <li key={c.id} className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-m3-lg bg-surface-1 p-4">
+                <Switch
+                  className="shrink-0 [&>span:last-child]:sr-only"
+                  label={`Activar ${c.name}`}
+                  checked={c.enabled}
+                  disabled={toggle.isPending}
+                  onChange={() => toggle.mutate(c)}
+                />
+                <div className="flex min-w-0 flex-1 basis-56 flex-col gap-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-base font-bold break-words">{c.name}</span>
+                    <span className="inline-flex h-6 items-center rounded-full bg-secondary-container px-2.5 text-xs font-medium text-on-secondary-container">
+                      {typeLabel[c.type]}
                     </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+                  </div>
+                  <div className="truncate font-mono text-xs text-on-surface-variant">{describeDestinations(c)}</div>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {c.type === "whatsapp" && (
+                    <Button size="sm" variant="tonal" aria-label={`Vincular ${c.name}`} onClick={() => setPairing(c)}>
+                      Vincular
+                    </Button>
+                  )}
+                  <Button size="sm" variant="tonal" aria-label={`Enviar prueba a ${c.name}`} disabled={test.isPending} onClick={() => test.mutate(c)}>
+                    Enviar prueba
+                  </Button>
+                  <Button size="sm" variant="tonal" aria-label={`Editar ${c.name}`} onClick={() => setEditing(c)}>
+                    Editar
+                  </Button>
+                  <Button size="sm" variant="outlined" className="border-bad/60 text-bad" aria-label={`Eliminar ${c.name}`} onClick={() => setDeleting(c)}>
+                    Eliminar
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
         </>
       )}
 
       {!!deliveries.data?.length && (
         <section className="flex flex-col gap-2">
-          <h2 className="text-sm font-medium">Últimas entregas</h2>
+          <h2 className="text-lg font-bold">Últimas entregas</h2>
           <Table label="Últimas entregas">
             <thead>
               <tr>
@@ -182,10 +173,10 @@ export function Channels() {
             </thead>
             <tbody>
               {deliveries.data.map((d) => (
-                <tr key={d.id} className="border-t border-line align-top">
+                <tr key={d.id} className="border-t border-outline-variant align-top">
                   <td>{d.channel_name}</td>
-                  <td className="text-sm text-muted">{d.destination || "—"}</td>
-                  <td className={d.status === "failed" ? "text-bad" : d.status === "sent" ? "text-ok" : ""}>{deliveryLabel[d.status]}</td>
+                  <td className="font-mono text-xs text-muted">{d.destination || "—"}</td>
+                  <td className={d.status === "failed" ? "font-medium text-bad" : d.status === "sent" ? "font-medium text-ok" : ""}>{deliveryLabel[d.status]}</td>
                   <td className="tabular-nums">{d.attempts}</td>
                   <td className="max-w-sm text-xs break-words text-muted">{d.last_error ?? ""}</td>
                 </tr>
@@ -353,9 +344,9 @@ function ChannelForm({ channel, onDone, onCancel }: { channel?: Channel; onDone:
               onToggleClear={() => toggleClear("signing_secret")}
               clearLabel="Quitar secreto de firma"
             >
-              <span className="flex gap-2">
+              <span className="flex flex-wrap gap-2 sm:flex-nowrap">
                 <TextInput type="password" autoComplete="off" value={f.signing_secret} placeholder={isSet("signing_secret") ? "Configurado (dejá vacío para conservarlo)" : ""} onChange={(e) => set("signing_secret", e.target.value)} />
-                <Button onClick={generate}>Generar</Button>
+                <Button variant="tonal" onClick={generate}>Generar</Button>
               </span>
             </SecretField>
             <SecretField
@@ -372,7 +363,7 @@ function ChannelForm({ channel, onDone, onCancel }: { channel?: Channel; onDone:
                 value={f.headers}
                 placeholder={isSet("headers") ? "Configuradas (escribí para reemplazarlas)" : "Authorization: Bearer …"}
                 onChange={(e) => set("headers", e.target.value)}
-                className="w-full rounded border border-line bg-bg px-3 py-1.5 font-mono text-sm focus-visible:outline-2 focus-visible:outline-accent"
+                className="w-full rounded-m3-md border border-transparent bg-surface-2 px-3 py-2 font-mono text-sm focus-visible:outline-2 focus-visible:outline-primary"
               />
             </SecretField>
           </>
@@ -424,7 +415,7 @@ function ChannelForm({ channel, onDone, onCancel }: { channel?: Channel; onDone:
 
         {f.type === "whatsapp" && (
           <>
-            <p role="note" className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm">
+            <p role="note" className="rounded-m3-lg bg-warn/15 px-4 py-3 text-sm">
               WhatsApp se envía a través de WAHA, que automatiza WhatsApp Web (no oficial): WhatsApp puede bloquear el número.
               Usá un número dedicado, no uno personal ni crítico.
             </p>
@@ -469,10 +460,10 @@ function ChannelForm({ channel, onDone, onCancel }: { channel?: Channel; onDone:
 
         <ErrorNote error={save.error} />
         <div className="flex items-center gap-2 pt-2">
-          <Button type="submit" variant="primary" disabled={save.isPending}>
+          <Button type="submit" variant="filled" disabled={save.isPending}>
             {save.isPending ? "Guardando…" : "Guardar"}
           </Button>
-          <Button onClick={onCancel}>Cancelar</Button>
+          <Button variant="text" onClick={onCancel}>Cancelar</Button>
         </div>
       </form>
     </Modal>
@@ -497,8 +488,8 @@ function SecretField({
         {children}
       </Field>
       {isSet && onToggleClear && (
-        <label className="flex items-center gap-2 text-xs text-muted">
-          <input type="checkbox" checked={cleared} onChange={onToggleClear} className="rounded border-line" />
+        <label className="flex min-h-11 items-center gap-2 text-xs text-muted">
+          <input type="checkbox" checked={cleared} onChange={onToggleClear} className="size-5 accent-primary" />
           {clearLabel}
         </label>
       )}
@@ -541,7 +532,7 @@ function WhatsAppPairing({ channel, onClose }: { channel: Channel; onClose: () =
         </p>
         {canStart && (
           <div>
-            <Button variant="primary" disabled={start.isPending} onClick={() => start.mutate()}>
+            <Button variant="filled" disabled={start.isPending} onClick={() => start.mutate()}>
               Iniciar sesión
             </Button>
           </div>
@@ -552,7 +543,7 @@ function WhatsAppPairing({ channel, onClose }: { channel: Channel; onClose: () =
               <img
                 alt="Código QR para vincular WhatsApp"
                 src={`data:${qr.data.mimetype};base64,${qr.data.data}`}
-                className="size-64 rounded border border-line bg-white p-2"
+                className="size-64 rounded-m3-lg bg-white p-2"
               />
             ) : (
               <p className="text-sm text-muted">Cargando código QR…</p>
@@ -563,7 +554,7 @@ function WhatsAppPairing({ channel, onClose }: { channel: Channel; onClose: () =
           </div>
         )}
         <div className="flex justify-end">
-          <Button onClick={onClose}>Cerrar</Button>
+          <Button variant="tonal" onClick={onClose}>Cerrar</Button>
         </div>
       </div>
     </Modal>

@@ -1,13 +1,14 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { type FormEvent, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, channelsQuery, rulesQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { TagInput } from "@/components/TagInput";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Switch, TextInput } from "@/components/ui";
 import { knownLabels, vehicleTypeOptions } from "@/lib/format";
 
 type Rule = Schemas["Rule"];
@@ -62,8 +63,8 @@ export function Rules() {
         title={t("nav.rules")}
         description={t("settings.rules")}
         actions={
-          <Button variant="primary" onClick={() => setEditing("new")}>
-            <Plus className="size-4" aria-hidden /> Nueva regla
+          <Button variant="filled" onClick={() => setEditing("new")}>
+            <Icon icon={Plus} size="xs" /> Nueva regla
           </Button>
         }
       />
@@ -72,46 +73,36 @@ export function Rules() {
       {!!rules.data?.length && (
         <>
           <Summary>{rules.data.length === 1 ? "1 regla" : `${rules.data.length} reglas`}</Summary>
-          <Table label="Reglas">
-            <thead>
-              <tr>
-                <Th>Activa</Th>
-                <Th>Nombre</Th>
-                <Th>Disparador</Th>
-                <Th>Acciones</Th>
-                <Th />
-              </tr>
-            </thead>
-            <tbody>
-              {rules.data.map((r) => (
-                <tr key={r.id} className="border-t border-line align-top">
-                  <td>
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      aria-label={`Activar ${r.name}`}
-                      checked={r.enabled}
-                      disabled={toggle.isPending}
-                      onChange={() => toggle.mutate(r)}
-                    />
-                  </td>
-                  <td className="font-medium">{r.name}</td>
-                  <td className="text-sm">{triggerLabel[r.trigger_type]}</td>
-                  <td className="text-sm text-muted">{describeActions(r.actions)}</td>
-                  <td className="text-right">
-                    <span className="inline-flex gap-2">
-                      <Button aria-label={`Editar ${r.name}`} onClick={() => setEditing(r)}>
-                        Editar
-                      </Button>
-                      <Button className="text-bad" aria-label={`Eliminar ${r.name}`} onClick={() => setDeleting(r)}>
-                        Eliminar
-                      </Button>
+          <ul aria-label="Reglas" className="flex flex-col gap-3">
+            {rules.data.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-m3-lg bg-surface-1 p-4">
+                <Switch
+                  className="shrink-0 [&>span:last-child]:sr-only"
+                  label={`Activar ${r.name}`}
+                  checked={r.enabled}
+                  disabled={toggle.isPending}
+                  onChange={() => toggle.mutate(r)}
+                />
+                <div className="flex min-w-0 flex-1 basis-56 flex-col gap-1">
+                  <div className="text-base font-bold break-words">{r.name}</div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="inline-flex h-6 items-center rounded-full bg-secondary-container px-2.5 text-xs font-medium text-on-secondary-container">
+                      {triggerLabel[r.trigger_type]}
                     </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </Table>
+                    <span className="text-on-surface-variant">{describeActions(r.actions)}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="tonal" aria-label={`Editar ${r.name}`} onClick={() => setEditing(r)}>
+                    Editar
+                  </Button>
+                  <Button size="sm" variant="outlined" className="border-bad/60 text-bad" aria-label={`Eliminar ${r.name}`} onClick={() => setDeleting(r)}>
+                    Eliminar
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
         </>
       )}
       {editing && (
@@ -320,12 +311,12 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
 
         <fieldset className="flex flex-col gap-2">
           <legend className="text-sm font-medium">Acciones</legend>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={f.create_alarm} onChange={(e) => setF({ ...f, create_alarm: e.target.checked })} className="rounded border-line" />
+          <label className="flex min-h-11 items-center gap-2 text-sm">
+            <input type="checkbox" checked={f.create_alarm} onChange={(e) => setF({ ...f, create_alarm: e.target.checked })} className="size-5 accent-primary" />
             Crear alarma
           </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={f.notify_in_app} onChange={(e) => setF({ ...f, notify_in_app: e.target.checked })} className="rounded border-line" />
+          <label className="flex min-h-11 items-center gap-2 text-sm">
+            <input type="checkbox" checked={f.notify_in_app} onChange={(e) => setF({ ...f, notify_in_app: e.target.checked })} className="size-5 accent-primary" />
             Notificar en la app
           </label>
           <Field label="Severidad de la notificación">
@@ -347,10 +338,10 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
 
         <ErrorNote error={save.error} />
         <div className="flex items-center gap-2 pt-2">
-          <Button type="submit" variant="primary" disabled={save.isPending}>
+          <Button type="submit" variant="filled" disabled={save.isPending}>
             {save.isPending ? "Guardando…" : "Guardar"}
           </Button>
-          <Button onClick={onCancel}>Cancelar</Button>
+          <Button variant="text" onClick={onCancel}>Cancelar</Button>
         </div>
       </form>
     </Modal>
@@ -372,8 +363,8 @@ function CheckGroup({
       {options.length === 0 && empty && <span className="text-xs text-muted">{empty}</span>}
       <div className="grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">
         {options.map((o) => (
-          <label key={o.value} className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={selected.includes(o.value)} onChange={() => onToggle(o.value)} className="rounded border-line" />
+          <label key={o.value} className="flex min-h-11 items-center gap-2 text-sm">
+            <input type="checkbox" checked={selected.includes(o.value)} onChange={() => onToggle(o.value)} className="size-5 accent-primary" />
             <span>{o.label}</span>
           </label>
         ))}

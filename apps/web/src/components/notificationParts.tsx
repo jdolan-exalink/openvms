@@ -3,7 +3,7 @@ import { useRouter } from "@tanstack/react-router";
 import { Check } from "lucide-react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cn } from "@/lib/cn";
-import { Button } from "./ui";
+import { IconButton } from "./ui";
 
 export const severityLabel: Record<Schemas["NotificationSeverity"], string> = {
   info: "Info",
@@ -12,7 +12,7 @@ export const severityLabel: Record<Schemas["NotificationSeverity"], string> = {
 };
 
 const severityDot: Record<Schemas["NotificationSeverity"], string> = {
-  info: "bg-accent",
+  info: "bg-primary",
   warning: "bg-warn",
   critical: "bg-bad",
 };
@@ -64,18 +64,16 @@ export function NotificationRow({
     </>
   );
   return (
-    <li className="flex items-start gap-2 border-t border-line px-3 py-2 first:border-t-0">
+    <li className="flex items-start gap-2 border-t border-outline-variant px-4 py-3 first:border-t-0">
       {item.link ? (
-        <button type="button" onClick={open} className="flex min-w-0 flex-1 items-start gap-2 hover:underline focus-visible:outline-2 focus-visible:outline-accent">
+        <button type="button" onClick={open} className="flex min-w-0 flex-1 items-start gap-2 rounded-m3-sm hover:underline focus-visible:outline-2 focus-visible:outline-primary">
           {content}
         </button>
       ) : (
         <div className="flex min-w-0 flex-1 items-start gap-2">{content}</div>
       )}
       {unread && (
-        <Button aria-label={`Marcar como leída: ${item.title}`} title="Marcar como leída" onClick={() => onMarkRead(item.id)}>
-          <Check className="size-3.5" aria-hidden />
-        </Button>
+        <IconButton icon={Check} aria-label={`Marcar como leída: ${item.title}`} title="Marcar como leída" onClick={() => onMarkRead(item.id)} />
       )}
     </li>
   );
