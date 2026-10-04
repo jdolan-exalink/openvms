@@ -2,7 +2,7 @@ import { Lock, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { Icon } from "../Icon";
 import { useId, useState } from "react";
 import { TagInput } from "@/components/TagInput";
-import { Button, Select, Switch, TextInput } from "@/components/ui";
+import { Button, Select, Switch, Textarea, TextInput } from "@/components/ui";
 import { deepEqual, humanizeKey, type JSchema, isSecretPath, kindOf, resolve, sectionLabel, validateValue } from "@/lib/frigateSchema";
 
 export type FormCtx = {
@@ -89,7 +89,7 @@ function JsonField({ label, value, onChange, disabled }: { label: string; value:
   return (
     <div className="flex flex-col gap-1 text-sm">
       <label htmlFor={id} className="font-medium">{label}</label>
-      <textarea
+      <Textarea
         id={id}
         rows={4}
         disabled={disabled}
@@ -104,7 +104,7 @@ function JsonField({ label, value, onChange, disabled }: { label: string; value:
             setBad(true);
           }
         }}
-        className="rounded-m3-md border border-transparent bg-surface-2 px-3 py-2 font-mono text-xs focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad"
+        className="font-mono text-xs"
       />
       {bad && <span role="alert" className="text-xs text-bad">JSON no válido; el cambio no se aplicó.</span>}
     </div>

@@ -1,7 +1,7 @@
 import { Check, Copy } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { Icon } from "@/components/Icon";
-import { Button, Field, Switch, TextInput } from "@/components/ui";
+import { Button, Field, Switch, Textarea, TextInput } from "@/components/ui";
 import { labelName } from "@/lib/format";
 import { serializeCoordinates } from "@/lib/zoneGeometry";
 import { type EditorItem, type ItemIssues } from "./zoneDraft";
@@ -145,13 +145,13 @@ export function ZoneProperties({
             {copied ? "Copiado" : "Copiar"}
           </Button>
         </div>
-        <textarea
+        <Textarea
           id="zone-coords"
           readOnly
           rows={3}
           value={coords}
           onFocus={(e) => e.currentTarget.select()}
-          className="w-full rounded-m3-md border border-transparent bg-surface-3 px-3 py-2 font-mono text-xs focus-visible:outline-2 focus-visible:outline-primary"
+          className="min-h-0 bg-surface-3 font-mono text-xs"
         />
       </div>
       {issues.errors.map((m) => (

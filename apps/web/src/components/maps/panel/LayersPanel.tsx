@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { IconButton } from "@/components/ui";
+import { Checkbox, IconButton } from "@/components/ui";
 import type { LayerPreference } from "@/lib/maps/types";
 
 export interface LayersPanelProps {
@@ -46,15 +46,7 @@ export function LayersPanel({ layers, onChange, onClose }: LayersPanelProps) {
           <legend className="mb-1 text-xs font-bold text-on-surface-variant">{group.title}</legend>
           <div className="space-y-0">
             {group.options.map(({ key, label }) => (
-              <label key={key} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-on-surface">
-                <input
-                  type="checkbox"
-                  checked={layers[key]}
-                  onChange={() => onChange({ ...layers, [key]: !layers[key] })}
-                  className="size-5 accent-primary"
-                />
-                {label}
-              </label>
+              <Checkbox key={key} checked={layers[key]} onChange={() => onChange({ ...layers, [key]: !layers[key] })} label={label} className="text-on-surface" />
             ))}
           </div>
         </fieldset>

@@ -82,10 +82,10 @@ export function CameraPreview({
             {displayState}
           </span>
           {onPin && (
-            <IconButton icon={Pin} onClick={() => onPin(camera.id)} title="Pin preview panel" aria-label="Pin preview" className="size-9" />
+            <IconButton icon={Pin} onClick={() => onPin(camera.id)} title="Pin preview panel" aria-label="Pin preview" size="sm" />
           )}
           {onOpenLive && (
-            <IconButton icon={ExternalLink} onClick={() => onOpenLive(camera.id)} title="Maximizar en el mapa" aria-label="Maximizar" className="size-9" />
+            <IconButton icon={ExternalLink} onClick={() => onOpenLive(camera.id)} title="Maximizar en el mapa" aria-label="Maximizar" size="sm" />
           )}
         </div>
       </div>

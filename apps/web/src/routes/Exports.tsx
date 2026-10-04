@@ -4,7 +4,7 @@ import { Download, Trash2 } from "lucide-react";
 import { api, unwrap } from "@/api/client";
 import { exportsQuery } from "@/api/queries";
 import { Icon } from "@/components/Icon";
-import { Empty, ErrorNote, IconButton, PageHeader, Table, Th } from "@/components/ui";
+import { Empty, ErrorNote, IconButton, LinkButton, PageHeader, StatusBadge, Table, Th } from "@/components/ui";
 import { fmtDateTime } from "@/lib/format";
 
 const statusText: Record<string, string> = { pending: "En cola", running: "Generando", ready: "Lista", failed: "Falló" };
@@ -51,19 +51,16 @@ export function Exports() {
                   <div className="text-muted">{fmtDateTime(x.created_at)}</div>
                 </td>
                 <td className="text-sm">
-                  <span className={`inline-flex h-6 items-center rounded-full bg-surface-2 px-2.5 text-xs font-medium ${x.status === "ready" ? "text-ok" : x.status === "failed" ? "text-bad" : "text-warn"}`}>{statusText[x.status]}</span>
+                  <StatusBadge status={x.status} tone={x.status === "ready" ? "ok" : x.status === "failed" ? "bad" : "warn"} label={statusText[x.status]} />
                   {x.status === "running" && x.progress > 0 && <span className="ml-1 text-xs text-muted">{Math.round(x.progress)}%</span>}
                   {x.error && <div role="alert" className="max-w-56 text-xs text-bad">{x.error}</div>}
                 </td>
                 <td className="text-right whitespace-nowrap">
                   <div className="inline-flex items-center gap-2">
                   {x.status === "ready" && (
-                    <a
-                      href={`/media/v1/exports/${x.id}/download`}
-                      className="m3-press inline-flex h-9 items-center justify-center gap-2 rounded-full bg-primary px-4 text-sm font-bold text-on-primary hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
-                    >
+                    <LinkButton variant="filled" size="sm" href={`/media/v1/exports/${x.id}/download`}>
                       <Icon icon={Download} size="xs" /> Descargar
-                    </a>
+                    </LinkButton>
                   )}
                   <IconButton icon={Trash2} onClick={() => remove.mutate(x.id)} aria-label="Quitar de la lista" title="Quitar de la lista" />
                   </div>

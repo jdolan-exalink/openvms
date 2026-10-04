@@ -1,12 +1,11 @@
 import { SlidersHorizontal } from "lucide-react";
 import { Icon } from "./Icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraFrigateConfigQuery } from "@/api/queries";
 import { Modal } from "@/components/Modal";
-import { Button, ErrorNote, Field, Select, StatusBadge, Switch, TextInput } from "@/components/ui";
+import { Button, ErrorNote, Field, LinkButton, Select, StatusBadge, Switch, TextInput } from "@/components/ui";
 
 type Camera = Schemas["Camera"];
 
@@ -141,14 +140,15 @@ export function CameraSettingsDrawer({
             {frigateConfig.error && <p className="text-xs text-muted">Configuración de Frigate no disponible.</p>}
             {frigateConfig.data && <FrigateSummary config={frigateConfig.data} />}
             {canConfigServer && (
-              <Link
+              <LinkButton
+                variant="tonal"
                 to="/cameras/$cameraId/frigate"
                 params={{ cameraId: camera.id }}
                 onClick={onClose}
-                className="m3-press mt-3 inline-flex h-11 items-center gap-2 self-start rounded-full bg-secondary-container px-5 text-sm font-bold text-on-secondary-container hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                className="mt-3 self-start"
               >
                 <Icon icon={SlidersHorizontal} size="xs" /> Editar configuración de Frigate
-              </Link>
+              </LinkButton>
             )}
           </div>
 

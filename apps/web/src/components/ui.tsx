@@ -1,22 +1,23 @@
-import { Check, type LucideIcon } from "lucide-react";
-import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
+import { Link } from "@tanstack/react-router";
+import { Check, X, type LucideIcon } from "lucide-react";
+import { useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { Icon } from "@/components/Icon";
 import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 
 export function PageHeader({ title, description, actions }: { title: string; description?: string; actions?: ReactNode }) {
   return (
-    <header className="flex flex-wrap items-end justify-between gap-4">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description && <p className="text-sm text-muted">{description}</p>}
+    <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+      <div className="flex min-w-0 flex-col gap-1">
+        <h1 className="text-[30px] leading-9 font-extrabold tracking-tight">{title}</h1>
+        {description && <p className="text-sm text-on-surface-variant">{description}</p>}
       </div>
-      {actions}
+      {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </header>
   );
 }
 
-type Tone = "ok" | "warn" | "bad" | "info" | "neutral";
+export type Tone = "ok" | "warn" | "bad" | "info" | "neutral";
 const toneStyles: Record<Tone, { dot: string; text: string }> = {
   ok: { dot: "bg-ok", text: "text-ok" },
   warn: { dot: "bg-warn", text: "text-warn" },
@@ -32,15 +33,42 @@ const statusStyles: Record<string, StatusStyle> = {
   offline: { label: "status.offline", tone: "bad" },
 };
 
-/** Pill with a role-colored dot and label. Known statuses map to a tone; anything else is neutral. */
-export function StatusBadge({ status }: { status: string }) {
+/**
+ * Pill with a role-colored dot and label. Known statuses map to a tone and label; anything else is neutral.
+ * `tone` and `label` override the mapping so callers can express states beyond online/degraded/offline.
+ */
+export function StatusBadge({ status, tone: toneOverride, label }: { status: string; tone?: Tone; label?: string }) {
   const t = useT();
   const s = statusStyles[status] ?? unknownStatus;
-  const tone = toneStyles[s.tone];
+  const toneName = toneOverride ?? s.tone;
+  const tone = toneStyles[toneName];
   return (
-    <span data-tone={s.tone} className={cn("inline-flex h-6 items-center gap-1.5 rounded-full bg-surface-2 px-2.5 text-xs font-medium whitespace-nowrap", tone.text)}>
+    <span data-tone={toneName} className={cn("inline-flex h-6 items-center gap-1.5 rounded-full bg-surface-2 px-2.5 text-xs font-medium whitespace-nowrap", tone.text)}>
       <span className={cn("size-2 rounded-full", tone.dot)} aria-hidden />
-      {t(s.label)}
+      {label ?? t(s.label)}
+    </span>
+  );
+}
+
+export type PillTone = "neutral" | "primary" | "secondary" | "ok" | "warn" | "bad" | "info";
+export type PillSize = "sm" | "md";
+const pillTones: Record<PillTone, { box: string; dot: string }> = {
+  neutral: { box: "bg-surface-2 text-on-surface-variant", dot: "bg-on-surface-variant" },
+  primary: { box: "bg-primary-container text-on-primary-container", dot: "bg-on-primary-container" },
+  secondary: { box: "bg-secondary-container text-on-secondary-container", dot: "bg-on-secondary-container" },
+  ok: { box: "bg-ok/15 text-ok", dot: "bg-ok" },
+  warn: { box: "bg-warn/15 text-warn", dot: "bg-warn" },
+  bad: { box: "bg-bad/15 text-bad", dot: "bg-bad" },
+  info: { box: "bg-info/15 text-info", dot: "bg-info" },
+};
+
+/** Small non-interactive label for states and categories. Use `StatusBadge` for online/degraded/offline. */
+export function Pill({ tone = "neutral", size = "md", dot, className, children }: { tone?: PillTone; size?: PillSize; dot?: boolean; className?: string; children?: ReactNode }) {
+  const style = pillTones[tone];
+  return (
+    <span data-tone={tone} className={cn("inline-flex items-center gap-1.5 rounded-full font-medium whitespace-nowrap", size === "sm" ? "h-5 px-2 text-[11px]" : "h-6 px-2.5 text-xs", style.box, className)}>
+      {dot && <span className={cn("size-1.5 shrink-0 rounded-full", style.dot)} aria-hidden />}
+      {children}
     </span>
   );
 }
@@ -49,7 +77,7 @@ export function ErrorNote({ error }: { error: unknown }) {
   if (!error) return null;
   const message = error instanceof Error ? error.message : String(error);
   return (
-    <p role="alert" className="rounded border border-bad/40 bg-bad/10 px-3 py-2 text-sm break-words text-bad">
+    <p role="alert" className="rounded-m3-lg bg-bad/12 px-4 py-3 text-sm break-words text-bad">
       {message}
     </p>
   );
@@ -71,6 +99,20 @@ const buttonVariants: Record<ButtonVariant, string> = {
 
 const focusRing = "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
+type ButtonClassOptions = { variant?: ButtonVariant; size?: ButtonSize; className?: string };
+
+/** Shared Button look so links and buttons stay identical. */
+export function buttonClass({ variant = "secondary", size = "md", className }: ButtonClassOptions = {}) {
+  return cn(
+    "m3-press inline-flex items-center justify-center gap-2 rounded-full text-sm font-bold",
+    size === "sm" ? "h-9 px-4" : "h-11 px-5",
+    focusRing,
+    "disabled:cursor-not-allowed disabled:opacity-50",
+    buttonVariants[variant],
+    className,
+  );
+}
+
 /** Pill button. Legacy "primary" renders as filled and "secondary" as tonal. */
 export function Button({
   variant = "secondary",
@@ -78,19 +120,35 @@ export function Button({
   className,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: ButtonSize }) {
+  return <button type="button" {...props} className={buttonClass({ variant, size, className })} />;
+}
+
+type LinkButtonProps = ButtonClassOptions & {
+  children?: ReactNode;
+  title?: string;
+  "aria-label"?: string;
+  "aria-current"?: "page" | "true" | "false";
+  onClick?: () => void;
+} & (
+    | { to: string; search?: Record<string, unknown>; params?: Record<string, string>; href?: never }
+    | { href: string; to?: never; search?: never; params?: never }
+  );
+
+/** Link styled as a Button: a TanStack Router `Link` for `to`, a plain anchor for `href`. */
+export function LinkButton({ variant = "text", size = "md", className, to, search, params, href, children, ...rest }: LinkButtonProps) {
+  const cls = buttonClass({ variant, size, className });
+  if (to !== undefined) {
+    // Route typing is per-route; callers are checked by the router at their own call sites in practice.
+    return (
+      <Link to={to as never} search={search as never} params={params as never} className={cls} {...rest}>
+        {children}
+      </Link>
+    );
+  }
   return (
-    <button
-      type="button"
-      {...props}
-      className={cn(
-        "m3-press inline-flex items-center justify-center gap-2 rounded-full text-sm font-bold",
-        size === "sm" ? "h-9 px-4" : "h-11 px-5",
-        focusRing,
-        "disabled:cursor-not-allowed disabled:opacity-50",
-        buttonVariants[variant],
-        className,
-      )}
-    />
+    <a href={href} className={cls} {...rest}>
+      {children}
+    </a>
   );
 }
 
@@ -101,19 +159,21 @@ const iconButtonVariants: Record<IconButtonVariant, string> = {
   filled: "bg-primary text-on-primary hover:brightness-110",
 };
 
-/** 44x44 round icon button. `aria-label` is required: there is no visible text. */
+/** Round icon button: "md" is 44px; "sm" is 36px visible with a 44px hit area. `aria-label` is required: there is no visible text. */
 export function IconButton({
   icon,
   variant = "standard",
+  size = "md",
   className,
   ...props
-}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "aria-label"> & { icon: LucideIcon; "aria-label": string; variant?: IconButtonVariant }) {
+}: Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children" | "aria-label"> & { icon: LucideIcon; "aria-label": string; variant?: IconButtonVariant; size?: "md" | "sm" }) {
   return (
     <button
       type="button"
       {...props}
       className={cn(
-        "m3-press inline-flex size-11 shrink-0 items-center justify-center rounded-full",
+        "m3-press inline-flex shrink-0 items-center justify-center rounded-full",
+        size === "sm" ? "relative size-9 before:absolute before:-inset-1 before:content-['']" : "size-11",
         focusRing,
         "disabled:cursor-not-allowed disabled:opacity-50",
         iconButtonVariants[variant],
@@ -122,6 +182,44 @@ export function IconButton({
     >
       <Icon icon={icon} size="sm" />
     </button>
+  );
+}
+
+/** Removable tag (applied filter, selected camera). The remove target is 28px visible with a 44px hit area. Omit `onRemove` for a fixed chip. */
+export function RemovableChip({
+  label,
+  removeLabel,
+  onRemove,
+  tone = "secondary",
+  className,
+}: {
+  label: ReactNode;
+  removeLabel: string;
+  onRemove?: () => void;
+  tone?: "secondary" | "primary";
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex h-9 items-center gap-1 rounded-full pl-3 text-sm font-medium",
+        onRemove ? "pr-1" : "pr-3",
+        tone === "primary" ? "bg-primary-container text-on-primary-container" : "bg-secondary-container text-on-secondary-container",
+        className,
+      )}
+    >
+      <span className="min-w-0 truncate">{label}</span>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          aria-label={removeLabel}
+          className={cn("relative inline-flex size-7 shrink-0 items-center justify-center rounded-full before:absolute before:-inset-2 before:content-[''] hover:bg-on-surface/10", focusRing)}
+        >
+          <Icon icon={X} size="xs" />
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -230,8 +328,65 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return <select {...props} className={cn(fieldClass, props.className)} />;
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <p className="rounded border border-dashed border-line px-4 py-8 text-center text-sm text-muted">{children}</p>;
+export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={cn(
+        "min-h-24 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 py-3 text-sm placeholder:text-muted/70 focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad disabled:opacity-50",
+        props.className,
+      )}
+    />
+  );
+}
+
+/** Native checkbox (role=checkbox) in a 44px row. The label is the accessible name; `description` is announced as a description. */
+export function Checkbox({
+  checked,
+  onChange,
+  label,
+  description,
+  disabled,
+  className,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  label: ReactNode;
+  description?: string;
+  disabled?: boolean;
+  className?: string;
+}) {
+  const descId = useId();
+  return (
+    <div className={cn("flex flex-col text-sm", className)}>
+      <label className={cn("flex min-h-11 items-center gap-3", disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer")}>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          aria-describedby={description ? descId : undefined}
+          onChange={(e) => onChange(e.target.checked)}
+          className={cn("size-5 shrink-0 accent-primary", focusRing)}
+        />
+        <span>{label}</span>
+      </label>
+      {description && (
+        <span id={descId} className="-mt-2 pb-2 pl-8 text-xs text-on-surface-variant">
+          {description}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** Tonal empty state, optionally with an icon. */
+export function Empty({ children, icon }: { children: ReactNode; icon?: LucideIcon }) {
+  return (
+    <div className="flex flex-col items-center gap-2 rounded-m3-xl bg-surface-1 px-4 py-8 text-center text-sm text-on-surface-variant">
+      {icon && <Icon icon={icon} size="md" />}
+      <p>{children}</p>
+    </div>
+  );
 }
 
 /** Live-region line with inventory counts shown above a table. */
@@ -246,8 +401,11 @@ export function Summary({ children }: { children: ReactNode }) {
 /** Table wrapper that scrolls sideways on narrow screens instead of the page. */
 export function Table({ children, label }: { children: ReactNode; label: string }) {
   return (
-    <div className="overflow-x-auto rounded border border-line bg-surface">
-      <table aria-label={label} className="w-full text-left text-sm [&_td]:px-3 [&_td]:py-2 [&_th]:px-3 [&_th]:py-2">
+    <div className="overflow-x-auto rounded-m3-xl bg-surface-1">
+      <table
+        aria-label={label}
+        className="w-full text-left text-sm [&_td]:h-12 [&_td]:px-4 [&_th]:px-4 [&_th]:py-3 [&_tbody_tr]:border-b [&_tbody_tr]:border-outline-variant [&_tbody_tr:last-child]:border-b-0"
+      >
         {children}
       </table>
     </div>
@@ -255,5 +413,5 @@ export function Table({ children, label }: { children: ReactNode; label: string 
 }
 
 export function Th({ children, className }: { children?: ReactNode; className?: string }) {
-  return <th className={cn("border-b border-line font-mono text-[11px] font-normal tracking-wider text-muted uppercase", className)}>{children}</th>;
+  return <th className={cn("bg-surface-2 text-xs font-bold text-on-surface-variant", className)}>{children}</th>;
 }

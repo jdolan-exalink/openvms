@@ -92,12 +92,12 @@ function SingleCameraCard({
         <span className={`inline-block size-2 shrink-0 rounded-full ${STATE_DOT[displayState]}`} />
         <h4 className="min-w-0 flex-1 truncate font-bold text-on-surface">{camera.name}</h4>
         {onArrange && (
-          <IconButton icon={LayoutGrid} onClick={onArrange} title="Ordenar ventanas" aria-label="Ordenar ventanas" className="size-9" />
+          <IconButton icon={LayoutGrid} onClick={onArrange} title="Ordenar ventanas" aria-label="Ordenar ventanas" size="sm" />
         )}
         {canPreview && (
-          <IconButton icon={ExternalLink} onClick={() => onOpenLive(camera.id)} title="Maximizar en el mapa" aria-label="Maximizar" className="size-9" />
+          <IconButton icon={ExternalLink} onClick={() => onOpenLive(camera.id)} title="Maximizar en el mapa" aria-label="Maximizar" size="sm" />
         )}
-        <IconButton icon={X} onClick={() => onUnpin(camera.id)} title="Cerrar" aria-label="Close preview" className="size-9" />
+        <IconButton icon={X} onClick={() => onUnpin(camera.id)} title="Cerrar" aria-label="Close preview" size="sm" />
       </div>
 
       <div className="relative aspect-video w-full overflow-hidden bg-video">

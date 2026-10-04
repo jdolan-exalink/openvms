@@ -7,7 +7,7 @@ import { api, unwrap } from "@/api/client";
 import { camerasQuery, eventsQuery, meQuery, recordingsQuery } from "@/api/queries";
 import { HlsPlayer, type HlsPlayerHandle } from "@/components/HlsPlayer";
 import { RecordingTimeline } from "@/components/RecordingTimeline";
-import { Button, ErrorNote, Field, IconButton, PageHeader, Select, TextInput } from "@/components/ui";
+import { Button, ErrorNote, Field, IconButton, PageHeader, RemovableChip, Select, TextInput } from "@/components/ui";
 import { fmtDateTime, toLocalInput } from "@/lib/format";
 import { vodWindowForInstant } from "@/lib/recordings";
 import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
@@ -200,26 +200,13 @@ export function Playback() {
                 const cam = cameraMap.get(id);
                 const isPrimary = id === primaryCameraId;
                 return (
-                  <span
+                  <RemovableChip
                     key={id}
-                    className={`inline-flex min-h-9 items-center gap-1 rounded-full pl-3 pr-1 font-medium ${
-                      isPrimary
-                        ? "bg-primary-container text-on-primary-container"
-                        : "bg-secondary-container text-on-secondary-container"
-                    }`}
-                  >
-                    <span>{cam?.display_name ?? id}</span>
-                    {selectedCameraIds.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeCamera(id)}
-                        aria-label={t("live.removeNamed", { name: cam?.display_name ?? id })}
-                        className="inline-flex size-7 items-center justify-center rounded-full hover:bg-on-surface/10 focus-visible:outline-2 focus-visible:outline-primary"
-                      >
-                        <X className="size-4" aria-hidden />
-                      </button>
-                    )}
-                  </span>
+                    tone={isPrimary ? "primary" : "secondary"}
+                    label={cam?.display_name ?? id}
+                    removeLabel={t("live.removeNamed", { name: cam?.display_name ?? id })}
+                    onRemove={selectedCameraIds.length > 1 ? () => removeCamera(id) : undefined}
+                  />
                 );
               })}
             </div>

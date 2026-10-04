@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { notificationsQuery } from "@/api/queries";
 import { NotificationRow, useNotificationActions } from "@/components/notificationParts";
-import { Button, Empty, ErrorNote, PageHeader, Summary } from "@/components/ui";
+import { Button, Checkbox, Empty, ErrorNote, PageHeader, Summary } from "@/components/ui";
 
 /** Notificaciones: full in-app inbox fed by rules; realtime pushes invalidate this list. */
 export function Notifications() {
@@ -25,10 +25,7 @@ export function Notifications() {
         }
       />
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex min-h-11 items-center gap-2 text-sm">
-          <input type="checkbox" checked={unreadOnly} onChange={(e) => setUnreadOnly(e.target.checked)} className="size-5 accent-primary" />
-          Solo sin leer
-        </label>
+        <Checkbox checked={unreadOnly} onChange={setUnreadOnly} label="Solo sin leer" />
         {list.data && <Summary>{unread === 1 ? "1 sin leer" : `${unread} sin leer`}</Summary>}
       </div>
       <ErrorNote error={list.error ?? markRead.error ?? markAll.error} />

@@ -1,6 +1,5 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { KeyRound, Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
@@ -8,7 +7,7 @@ import { cameraGroupsQuery, camerasQuery, meQuery, tenantsQuery } from "@/api/qu
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { Icon } from "@/components/Icon";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Button, Checkbox, Empty, ErrorNote, Field, LinkButton, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
 /** Camera groups allow grouping cameras for permissions and view layouts. */
@@ -86,13 +85,9 @@ export function CameraGroups() {
                 </td>
                 <td className="text-right">
                   {can(me.data, "permissions.manage") && (
-                    <Link
-                      to="/permissions"
-                      search={{ subject: `camera_group:${g.id}` }}
-                      className="m3-press mr-2 inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-bold text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary"
-                    >
+                    <LinkButton size="sm" to="/permissions" search={{ subject: `camera_group:${g.id}` }} className="mr-2">
                       <Icon icon={KeyRound} size="xs" /> Permisos
-                    </Link>
+                    </LinkButton>
                   )}
                   {manage && (
                     <Button size="sm" aria-label={`Editar ${g.name}`} onClick={() => setEditing(g)}>
@@ -225,15 +220,7 @@ function CameraGroupForm({
           {cameras.length === 0 && <span className="text-xs text-muted">No hay cámaras disponibles.</span>}
           <div className="grid max-h-56 gap-2 overflow-y-auto sm:grid-cols-2">
             {cameras.map((c) => (
-              <label key={c.id} className="flex min-h-11 items-center gap-3 rounded-m3-md bg-surface-2 px-3 text-sm">
-                <input
-                  type="checkbox"
-                  checked={f.camera_ids.includes(c.id)}
-                  onChange={() => toggle(c.id)}
-                  className="size-5 accent-primary"
-                />
-                <span>{c.display_name}</span>
-              </label>
+              <Checkbox key={c.id} className="rounded-m3-md bg-surface-2 px-3" checked={f.camera_ids.includes(c.id)} onChange={() => toggle(c.id)} label={c.display_name} />
             ))}
           </div>
         </fieldset>

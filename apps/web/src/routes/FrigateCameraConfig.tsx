@@ -2,7 +2,7 @@ import { ArrowLeft, CircleCheck, RefreshCw, TriangleAlert } from "lucide-react";
 import { Icon } from "@/components/Icon";
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "@tanstack/react-router";
+import { useParams } from "@tanstack/react-router";
 import { type FormEvent, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraFrigateDocQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
@@ -13,7 +13,7 @@ import { LabelPicker } from "@/components/frigate/LabelPicker";
 import { SectionPanel } from "@/components/frigate/SectionPanel";
 import { Modal } from "@/components/Modal";
 import { ZoneEditorModal, type ZoneEditorValue } from "@/components/zones/ZoneEditorModal";
-import { Button, ErrorNote, Field, PageHeader, Select, Switch, TextInput } from "@/components/ui";
+import { Button, ErrorNote, Field, LinkButton, PageHeader, Select, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
   buildPatch, deepEqual, diffValues, formatValue, isLiveSection, type JSchema, kindOf, orderSections, parseVersion, pathLabel, resolve, schemaAt,
@@ -187,9 +187,9 @@ export function FrigateCameraConfig() {
       title={`Frigate · ${doc.data?.camera_name ?? t("common.camera")}`}
       description={version ? t("settings.cameraConfig", { version }) : undefined}
       actions={
-        <Link to="/cameras" className="m3-press inline-flex h-11 items-center gap-2 rounded-full px-4 text-sm font-bold text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary">
+        <LinkButton to="/cameras">
           <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
-        </Link>
+        </LinkButton>
       }
     />
   );
@@ -337,9 +337,9 @@ function CameraIdentity({ name, version, config }: { name: string; version: stri
           <h1 className="text-[22px] font-bold tracking-tight text-ink">{name}</h1>
           <p className="text-sm text-muted">Frigate {version || "—"}</p>
         </div>
-        <Link to="/cameras" className="m3-press inline-flex h-11 items-center gap-2 rounded-full px-4 text-sm font-bold text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary">
+        <LinkButton to="/cameras">
           <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
-        </Link>
+        </LinkButton>
       </div>
       <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
         <div className="rounded-m3-lg bg-surface-2 p-3"><dt className="text-muted">Versión</dt><dd className="font-mono">{version || "—"}</dd></div>

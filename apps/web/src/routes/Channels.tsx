@@ -8,7 +8,7 @@ import { channelsQuery, deliveriesQuery, whatsappQrQuery, whatsappSessionQuery }
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { TagInput } from "@/components/TagInput";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Switch, Table, TextInput, Th } from "@/components/ui";
+import { Button, Checkbox, Empty, ErrorNote, Field, PageHeader, Pill, Select, Summary, Switch, Table, Textarea, TextInput, Th } from "@/components/ui";
 
 type Channel = Schemas["NotificationChannel"];
 type ChannelType = Schemas["NotificationChannelType"];
@@ -130,9 +130,7 @@ export function Channels() {
                 <div className="flex min-w-0 flex-1 basis-56 flex-col gap-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-base font-bold break-words">{c.name}</span>
-                    <span className="inline-flex h-6 items-center rounded-full bg-secondary-container px-2.5 text-xs font-medium text-on-secondary-container">
-                      {typeLabel[c.type]}
-                    </span>
+                    <Pill tone="secondary">{typeLabel[c.type]}</Pill>
                   </div>
                   <div className="truncate font-mono text-xs text-on-surface-variant">{describeDestinations(c)}</div>
                 </div>
@@ -357,13 +355,13 @@ function ChannelForm({ channel, onDone, onCancel }: { channel?: Channel; onDone:
               onToggleClear={() => toggleClear("headers")}
               clearLabel="Quitar cabeceras"
             >
-              <textarea
+              <Textarea
                 rows={3}
                 autoComplete="off"
                 value={f.headers}
                 placeholder={isSet("headers") ? "Configuradas (escribí para reemplazarlas)" : "Authorization: Bearer …"}
                 onChange={(e) => set("headers", e.target.value)}
-                className="w-full rounded-m3-md border border-transparent bg-surface-2 px-3 py-2 font-mono text-sm focus-visible:outline-2 focus-visible:outline-primary"
+                className="font-mono"
               />
             </SecretField>
           </>
@@ -488,10 +486,7 @@ function SecretField({
         {children}
       </Field>
       {isSet && onToggleClear && (
-        <label className="flex min-h-11 items-center gap-2 text-xs text-muted">
-          <input type="checkbox" checked={cleared} onChange={onToggleClear} className="size-5 accent-primary" />
-          {clearLabel}
-        </label>
+        <Checkbox checked={cleared} onChange={() => onToggleClear()} label={clearLabel} className="text-xs text-muted" />
       )}
     </div>
   );

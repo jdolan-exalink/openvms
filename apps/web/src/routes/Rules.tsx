@@ -8,7 +8,7 @@ import { camerasQuery, channelsQuery, rulesQuery, serversQuery, sitesQuery } fro
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { TagInput } from "@/components/TagInput";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Switch, TextInput } from "@/components/ui";
+import { Button, Checkbox, Empty, ErrorNote, Field, PageHeader, Pill, Select, Summary, Switch, TextInput } from "@/components/ui";
 import { knownLabels, vehicleTypeOptions } from "@/lib/format";
 
 type Rule = Schemas["Rule"];
@@ -86,9 +86,7 @@ export function Rules() {
                 <div className="flex min-w-0 flex-1 basis-56 flex-col gap-1">
                   <div className="text-base font-bold break-words">{r.name}</div>
                   <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="inline-flex h-6 items-center rounded-full bg-secondary-container px-2.5 text-xs font-medium text-on-secondary-container">
-                      {triggerLabel[r.trigger_type]}
-                    </span>
+                    <Pill tone="secondary">{triggerLabel[r.trigger_type]}</Pill>
                     <span className="text-on-surface-variant">{describeActions(r.actions)}</span>
                   </div>
                 </div>
@@ -311,14 +309,8 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
 
         <fieldset className="flex flex-col gap-2">
           <legend className="text-sm font-medium">Acciones</legend>
-          <label className="flex min-h-11 items-center gap-2 text-sm">
-            <input type="checkbox" checked={f.create_alarm} onChange={(e) => setF({ ...f, create_alarm: e.target.checked })} className="size-5 accent-primary" />
-            Crear alarma
-          </label>
-          <label className="flex min-h-11 items-center gap-2 text-sm">
-            <input type="checkbox" checked={f.notify_in_app} onChange={(e) => setF({ ...f, notify_in_app: e.target.checked })} className="size-5 accent-primary" />
-            Notificar en la app
-          </label>
+          <Checkbox checked={f.create_alarm} onChange={(v) => setF({ ...f, create_alarm: v })} label="Crear alarma" />
+          <Checkbox checked={f.notify_in_app} onChange={(v) => setF({ ...f, notify_in_app: v })} label="Notificar en la app" />
           <Field label="Severidad de la notificación">
             <Select value={f.severity} onChange={(e) => setF({ ...f, severity: e.target.value as NotifSeverity })}>
               <option value="info">Info</option>
@@ -363,10 +355,7 @@ function CheckGroup({
       {options.length === 0 && empty && <span className="text-xs text-muted">{empty}</span>}
       <div className="grid max-h-40 gap-2 overflow-y-auto sm:grid-cols-2">
         {options.map((o) => (
-          <label key={o.value} className="flex min-h-11 items-center gap-2 text-sm">
-            <input type="checkbox" checked={selected.includes(o.value)} onChange={() => onToggle(o.value)} className="size-5 accent-primary" />
-            <span>{o.label}</span>
-          </label>
+          <Checkbox key={o.value} checked={selected.includes(o.value)} onChange={() => onToggle(o.value)} label={o.label} />
         ))}
       </div>
     </fieldset>

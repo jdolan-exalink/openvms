@@ -2,6 +2,7 @@ const messages = {
   accept: "OK",
   cancel: "Cancel",
   camera: "Camera",
+  close: "Close",
   closeMenu: "Close menu",
   account: "Account",
   preferences: "Preferences",

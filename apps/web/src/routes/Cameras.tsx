@@ -7,7 +7,7 @@ import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serversQ
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { can } from "@/lib/perm";
 import { Icon } from "@/components/Icon";
-import { Empty, ErrorNote, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Empty, ErrorNote, LinkButton, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
 function summarize(cameras: { enabled: boolean; status: string }[]) {
   const online = cameras.filter((c) => c.enabled && c.status === "online").length;
   const disabled = cameras.filter((c) => !c.enabled).length;
@@ -103,15 +103,16 @@ export function Cameras() {
                   />
                 </td>
                 <td className="text-right">
-                  <Link
+                  <LinkButton
+                    variant="tonal"
                     to="/cameras/$cameraId/frigate"
                     params={{ cameraId: c.id }}
                     aria-label={`Configuración de ${c.display_name}`}
                     title={t("nav.settings")}
-                    className="m3-press inline-flex size-11 items-center justify-center rounded-full bg-secondary-container text-on-secondary-container hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+                    className="size-11 px-0"
                   >
                     <Icon icon={Settings} size="sm" />
-                  </Link>
+                  </LinkButton>
                 </td>
               </tr>
             ))}

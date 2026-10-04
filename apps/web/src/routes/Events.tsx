@@ -1,12 +1,12 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { CheckCheck, ChevronLeft, ChevronRight, Download, History, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, type EventFilter, eventsQuery, meQuery, serversQuery } from "@/api/queries";
 import { type FilterChip } from "@/components/SearchSummary";
 import { Modal } from "@/components/Modal";
-import { Button, Chip, Empty, ErrorNote, IconButton, Select, TextInput } from "@/components/ui";
+import { Button, Chip, Empty, ErrorNote, IconButton, LinkButton, RemovableChip, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { VehicleFacts } from "@/components/VehicleMark";
 import { fmtDateTime, fmtDuration, fromLocalInput, isClassifiedVehicleType, labelName, objectFilterOptions, vehicleColorOptions, vehicleTypeOptions } from "@/lib/format";
@@ -224,9 +224,7 @@ export function Events() {
           <ul aria-label={t("common.appliedFilters")} className="flex flex-wrap gap-2">
             {chips.map((c) => (
               <li key={c.key}>
-                <button type="button" onClick={c.onRemove} aria-label={t("common.removeFilter", { label: c.label })} className="m3-press inline-flex min-h-9 items-center rounded-full bg-secondary-container px-3 text-xs font-medium text-on-secondary-container hover:brightness-110 focus-visible:outline-2 focus-visible:outline-primary">
-                  {c.label}
-                </button>
+                <RemovableChip label={c.label} removeLabel={t("common.removeFilter", { label: c.label })} onRemove={c.onRemove} />
               </li>
             ))}
           </ul>
@@ -439,9 +437,9 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
         )}
         <div className="flex flex-wrap gap-2">
           {can(me, "recordings.view") && (
-            <Link to="/playback" search={{ camera: e.camera_id, t }} className="m3-press inline-flex h-11 items-center justify-center gap-2 rounded-full bg-primary px-5 text-sm font-bold text-on-primary hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+            <LinkButton variant="filled" to="/playback" search={{ camera: e.camera_id, t }}>
               <History className="size-4" aria-hidden /> {tr("events.viewRecording")}
-            </Link>
+            </LinkButton>
           )}
           {can(me, "exports.create") && (
             <Button variant="tonal" onClick={() => exp.mutate()} disabled={exp.isPending || !!exp.data}>

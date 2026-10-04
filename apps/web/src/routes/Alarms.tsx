@@ -6,20 +6,20 @@ import { api, unwrap, type Schemas } from "@/api/client";
 import { alarmAssigneesQuery, alarmsQuery, camerasQuery, type AlarmFilter } from "@/api/queries";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
-import { Button, Chip, Empty, ErrorNote, Field, PageHeader, Select, Table, Th } from "@/components/ui";
+import { Button, Chip, Empty, ErrorNote, Field, PageHeader, Pill, type PillTone, Select, Table, Th } from "@/components/ui";
 import { VehicleFacts } from "@/components/VehicleMark";
 import { fmtDateTime } from "@/lib/format";
 
 type Alarm = Schemas["Alarm"];
 type AlarmStatus = Schemas["AlarmStatus"];
 
-const statusBadgeStyles: Record<AlarmStatus, { label: string; bg: string; text: string }> = {
-  open: { label: "Abierta", bg: "bg-bad/15", text: "text-bad" },
-  acknowledged: { label: "Reconocida", bg: "bg-warn/15", text: "text-warn" },
-  assigned: { label: "Asignada", bg: "bg-primary-container", text: "text-on-primary-container" },
-  investigating: { label: "En investigación", bg: "bg-warn/15", text: "text-warn" },
-  resolved: { label: "Resuelta", bg: "bg-ok/15", text: "text-ok" },
-  closed: { label: "Cerrada", bg: "bg-surface-2", text: "text-on-surface-variant" },
+const statusBadgeStyles: Record<AlarmStatus, { label: string; tone: PillTone }> = {
+  open: { label: "Abierta", tone: "bad" },
+  acknowledged: { label: "Reconocida", tone: "warn" },
+  assigned: { label: "Asignada", tone: "primary" },
+  investigating: { label: "En investigación", tone: "warn" },
+  resolved: { label: "Resuelta", tone: "ok" },
+  closed: { label: "Cerrada", tone: "neutral" },
 };
 
 export function Alarms() {
@@ -274,11 +274,7 @@ export function Alarms() {
                     {fmtDateTime(a.event_start_time)}
                   </td>
                   <td>
-                    <span
-                      className={`inline-flex h-6 items-center rounded-full px-2.5 text-xs font-medium ${badge.bg} ${badge.text}`}
-                    >
-                      {badge.label}
-                    </span>
+                    <Pill tone={badge.tone}>{badge.label}</Pill>
                     {a.status === "acknowledged" && a.acknowledged_by_name && (
                       <div className="text-[11px] text-muted">
                         por {a.acknowledged_by_name}

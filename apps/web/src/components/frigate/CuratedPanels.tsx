@@ -3,7 +3,7 @@ import { Icon } from "../Icon";
 import type { ReactNode } from "react";
 import { LabelPicker } from "@/components/frigate/LabelPicker";
 import type { FormCtx } from "@/components/frigate/SchemaForm";
-import { Button, Select, Switch as UiSwitch, TextInput } from "@/components/ui";
+import { Button, Checkbox, Select, Switch as UiSwitch, TextInput } from "@/components/ui";
 import { getIn, type JSchema, resolve, schemaAt, setIn } from "@/lib/frigateSchema";
 import { labelDisplay } from "@/lib/labelEmoji";
 
@@ -317,10 +317,7 @@ function ZoneChecks({ label, zones, value, onChange, disabled }: { label: string
       {zones.length === 0 && <span className="text-xs text-muted">La cámara no tiene zonas.</span>}
       <div className="flex flex-wrap gap-4">
         {zones.map((z) => (
-          <label key={z} className="flex min-h-11 items-center gap-2">
-            <input type="checkbox" className="size-5 accent-primary" disabled={disabled} checked={value.includes(z)} onChange={(e) => onChange(e.target.checked ? [...value, z] : value.filter((x) => x !== z))} />
-            {z}
-          </label>
+          <Checkbox key={z} disabled={disabled} checked={value.includes(z)} onChange={(on) => onChange(on ? [...value, z] : value.filter((x) => x !== z))} label={z} />
         ))}
       </div>
     </fieldset>

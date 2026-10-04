@@ -1,5 +1,6 @@
 import { Modal } from "@/components/Modal";
 import { Button, ErrorNote } from "@/components/ui";
+import { useT } from "@/i18n";
 
 /** ConfirmDialog replaces window.confirm with an accessible in-UI confirmation (built on Modal). */
 export function ConfirmDialog({
@@ -19,12 +20,13 @@ export function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const t = useT();
   return (
     <Modal title={title} onClose={onCancel}>
       <p className="text-sm">{message}</p>
       <ErrorNote error={error} />
       <div className="flex justify-end gap-2">
-        <Button variant="text" onClick={onCancel}>Cancelar</Button>
+        <Button variant="text" onClick={onCancel}>{t("common.cancel")}</Button>
         <Button variant="danger" disabled={pending} onClick={onConfirm}>
           {confirmLabel}
         </Button>

@@ -66,6 +66,6 @@ export function MapPlateSnapshot({ target, onClose }: { target: PlateSnapshotTar
 function PlateClose() {
   const close = useGrowClose();
   return (
-    <IconButton icon={X} onClick={close} className="ml-auto size-9 text-white hover:bg-white/20" aria-label="Cerrar detección" />
+    <IconButton icon={X} onClick={close} size="sm" className="ml-auto text-white hover:bg-white/20" aria-label="Cerrar detección" />
   );
 }

@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
@@ -11,6 +12,7 @@ import { useFocusTrap } from "@/lib/useFocusTrap";
  * are trapped inside, and focus returns to whatever triggered it on close (useFocusTrap).
  */
 export function Modal({ title, onClose, children, className }: { title: string; onClose: () => void; children: ReactNode; className?: string }) {
+  const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   useFocusTrap(containerRef, onClose);
 
@@ -24,7 +26,7 @@ export function Modal({ title, onClose, children, className }: { title: string; 
       <div ref={containerRef} role="dialog" aria-modal="true" aria-label={title} className={cn("flex max-h-[90vh] w-full max-w-3xl flex-col gap-4 overflow-auto rounded-m3-2xl bg-surface-1 p-6 shadow-lg", className)}>
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-[22px] font-bold">{title}</h2>
-          <button type="button" aria-label="Cerrar" onClick={onClose} className="m3-press inline-flex size-11 items-center justify-center rounded-full hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary">
+          <button type="button" aria-label={t("common.close")} onClick={onClose} className="m3-press inline-flex size-11 items-center justify-center rounded-full hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary">
             <X className="size-5" aria-hidden />
           </button>
         </div>

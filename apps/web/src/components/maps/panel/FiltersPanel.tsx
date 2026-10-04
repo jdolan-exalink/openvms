@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { Button, IconButton } from "@/components/ui";
+import { Button, Checkbox, IconButton } from "@/components/ui";
 import { STATE_DOT } from "../stateTone";
 import type { CameraDisplayState, MapFilters } from "@/lib/maps/types";
 
@@ -65,15 +65,13 @@ export function FiltersPanel({ filters, onChange, onClose }: FiltersPanelProps) 
         <legend className="mb-1 text-xs font-bold text-on-surface-variant">Tipo de cámara</legend>
         <div>
           {CAMERA_TYPES.map(({ value, label }) => (
-            <label key={value} className="flex min-h-11 cursor-pointer items-center gap-3 text-sm text-on-surface">
-              <input
-                type="checkbox"
-                checked={filters.camera_types?.includes(value) ?? false}
-                onChange={() => onChange({ ...filters, camera_types: toggle(filters.camera_types, value) })}
-                className="size-5 accent-primary"
-              />
-              {label}
-            </label>
+            <Checkbox
+              key={value}
+              checked={filters.camera_types?.includes(value) ?? false}
+              onChange={() => onChange({ ...filters, camera_types: toggle(filters.camera_types, value) })}
+              label={label}
+              className="text-on-surface"
+            />
           ))}
         </div>
       </fieldset>

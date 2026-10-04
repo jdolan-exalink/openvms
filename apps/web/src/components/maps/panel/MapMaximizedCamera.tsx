@@ -50,6 +50,6 @@ export function MapMaximizedCamera({
 function CloseButton() {
   const close = useGrowClose();
   return (
-    <IconButton icon={X} onClick={close} className="ml-auto size-9 text-white hover:bg-white/20" aria-label="Cerrar cámara" />
+    <IconButton icon={X} onClick={close} size="sm" className="ml-auto text-white hover:bg-white/20" aria-label="Cerrar cámara" />
   );
 }

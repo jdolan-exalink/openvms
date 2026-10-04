@@ -63,7 +63,7 @@ import { saveSiteMonitoringCenter } from "@/lib/maps/sites";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
 import { usePinnedMapWindows } from "./panel/usePinnedMapWindows";
 import { useFeatures } from "@/lib/features";
-import { Button, ErrorNote } from "../ui";
+import { Button, Checkbox, ErrorNote } from "../ui";
 import { Loader2 } from "lucide-react";
 
 export interface MapShellProps {
@@ -731,11 +731,7 @@ function MapShellContent({
         filtersActive={filtersOpen}
       />
       {can(me.data, "live.view") && (
-        <label className="order-6 flex min-h-11 items-center gap-2 px-2 text-xs font-medium text-on-surface-variant">
-          <input type="checkbox" className="size-5 accent-primary" checked={hoverLiveEnabled}
-            onChange={(event) => setHoverLiveOverride(event.target.checked)} />
-          Live on hover
-        </label>
+        <Checkbox className="order-6 px-2 text-xs font-medium text-on-surface-variant" checked={hoverLiveEnabled} onChange={setHoverLiveOverride} label="Live on hover" />
       )}
     </>
   );

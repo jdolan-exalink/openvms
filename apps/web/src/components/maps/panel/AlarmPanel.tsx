@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck, X } from "lucide-react";
-import { Button, IconButton, Select } from "@/components/ui";
+import { Button, IconButton, Select, Textarea } from "@/components/ui";
 import { api, unwrap, type Schemas } from "@/api/client";
 import { alarmAssigneesQuery } from "@/api/queries";
 import { VehicleFacts } from "@/components/VehicleMark";
@@ -135,7 +135,7 @@ function AlarmPreview({ alarm, origin, canManage, onClose }: { alarm: Schemas["A
 function PreviewClose() {
   const close = useGrowClose();
   return (
-    <IconButton icon={X} onClick={close} className="ml-auto size-9 text-white hover:bg-white/20" aria-label="Cerrar vista de alarma" />
+    <IconButton icon={X} onClick={close} size="sm" className="ml-auto text-white hover:bg-white/20" aria-label="Cerrar vista de alarma" />
   );
 }
 
@@ -220,7 +220,7 @@ function AlarmActions({ alarm, canManage, imageUrl }: { alarm: Schemas["Alarm"];
         <div className="space-y-2">
           <label className="block">
             Comentario
-            <textarea aria-label="Comment" value={comment} onChange={(event) => setComment(event.target.value)} className="mt-1 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 py-2 text-sm focus-visible:outline-2 focus-visible:outline-primary" rows={2} />
+            <Textarea aria-label="Comment" value={comment} onChange={(event) => setComment(event.target.value)} className="mt-1 min-h-0" rows={2} />
           </label>
           <label className="block">
             Responsable

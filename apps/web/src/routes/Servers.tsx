@@ -9,7 +9,7 @@ import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, StatusBadge, Summary, Switch, TextInput } from "@/components/ui";
+import { Button, Empty, ErrorNote, Field, PageHeader, Pill, Select, StatusBadge, Summary, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 
@@ -713,8 +713,8 @@ function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][];
             {capLabels
               .filter(([k]) => probe.data.capabilities[k])
               .map(([, label]) => (
-                <li key={label} className="rounded-full bg-secondary-container px-2.5 py-0.5 text-xs text-on-secondary-container">
-                  {label}
+                <li key={label}>
+                  <Pill tone="secondary" size="sm">{label}</Pill>
                 </li>
               ))}
           </ul>

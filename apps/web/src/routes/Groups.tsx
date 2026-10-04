@@ -1,6 +1,5 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { KeyRound, Plus } from "lucide-react";
 import { Icon } from "@/components/Icon";
 import { type FormEvent, useState } from "react";
@@ -8,7 +7,7 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import { groupsQuery, meQuery, tenantsQuery, usersQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Button, Checkbox, Empty, ErrorNote, Field, LinkButton, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
 /** Groups of users. Grants given to a group apply to all its members. */
@@ -67,9 +66,9 @@ export function Groups() {
                 <td className="text-right whitespace-nowrap">
                   <div className="inline-flex items-center gap-1">
                   {can(me.data, "permissions.manage") && (
-                    <Link to="/permissions" search={{ subject: `group:${g.id}` }} className="inline-flex h-9 items-center gap-1.5 rounded-full px-3 text-sm font-bold text-primary hover:bg-primary/10">
+                    <LinkButton size="sm" to="/permissions" search={{ subject: `group:${g.id}` }}>
                       <Icon icon={KeyRound} size="xs" /> Permisos
-                    </Link>
+                    </LinkButton>
                   )}
                   {manage && (
                     <Button size="sm" variant="tonal" aria-label={`Editar ${g.name}`} onClick={() => setEditing(g)}>
@@ -173,9 +172,7 @@ function GroupForm({ group, users, onDone }: { group?: Schemas["UserGroup"]; use
         <legend className="mb-1 font-medium">Miembros</legend>
         <div className="flex flex-wrap gap-3">
           {candidates.map((u) => (
-            <label key={u.id} className="flex min-h-11 items-center gap-2 rounded-full bg-surface-2 px-3">
-              <input type="checkbox" className="size-5 accent-primary" checked={f.member_ids.includes(u.id)} onChange={() => toggle(u.id)} /> {u.display_name}
-            </label>
+            <Checkbox key={u.id} className="rounded-full bg-surface-2 px-3" checked={f.member_ids.includes(u.id)} onChange={() => toggle(u.id)} label={u.display_name} />
           ))}
           {candidates.length === 0 && <span className="text-muted">No hay usuarios en esta organización.</span>}
         </div>
