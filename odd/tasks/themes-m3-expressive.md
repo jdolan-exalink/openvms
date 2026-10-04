@@ -26,7 +26,7 @@ Forecast: about 3500–5000 authored changed lines (23 routes, 11.4k lines). Ove
 
 ## Tasks
 - [x] T1 Theme tokens and runtime: three `data-theme` palettes with M3 roles, shape/type/motion tokens, Manrope, `theme.ts` (read/apply/persist, legacy migration, system default), replace the class toggle in `main.tsx` and `AccountMenu.tsx`, `MapStyleController` reads dark/light from the active theme and restyles on change. Route: delegated (multiple non-trivial files).
-- [ ] T2 Theme selector: segmented control in the account menu and Account page, i18n es/en/pt.
+- [x] T2 Theme selector: segmented control in the account menu and Account page, i18n es/en/pt.
 - [ ] T3 Icon system: `<Icon>` wrapper, nav and the 19 FontAwesome files migrated to lucide, FontAwesome dependency removed.
 - [ ] T4 M3 primitives: Button (filled, tonal, outlined, text, icon), Chip, Card, Switch, StatusBadge pill, inputs, Modal/ConfirmDialog shapes, motion utilities.
 - [ ] T5 App shell: navigation rail with pill indicator, mobile bottom navigation (4 primary + "More" sheet) below `md`, top app bar; drop the fixed mobile rail.
@@ -45,7 +45,9 @@ Forecast: about 3500–5000 authored changed lines (23 routes, 11.4k lines). Ove
 - Existing vitest suite and typecheck pass after every task.
 
 ## Progress and evidence
-- T1 (delegated writer; trigger: 2+ non-trivial files). RED: `theme.test.ts` failed to load (module missing); `MapStyleController.test.ts` data-theme isDark row and "restyles between two dark themes" (expected 1 call, got 0). GREEN: theme + MapStyleController 22/22; typecheck clean; `pnpm build` OK (existing >500 kB chunk warning). Full suite 661/663: both failures in `MapShell.test.tsx` (live hover 700ms, investigation navigation) reproduce with T1 files stashed, so they come from uncommitted Maps work, not T1. Shape tokens named `--radius-m3-*` because Tailwind `--radius-xs..2xl` would resize existing `rounded-*`. Map restyles through the existing MutationObserver, now on `data-theme`, keyed by theme id.
+- T1 (delegated writer; trigger: 2+ non-trivial files). RED: `theme.test.ts` failed to load (module missing); `MapStyleController.test.ts` data-theme isDark row and "restyles between two dark themes" (expected 1 call, got 0). GREEN: theme + MapStyleController 22/22; typecheck clean; `pnpm build` OK (existing >500 kB chunk warning). Full suite 661/663: both failures in `MapShell.test.tsx` (live hover 700ms, investigation navigation) reproduce with T1 files stashed, so they come from uncommitted Maps work, not T1. Shape tokens named `--radius-m3-*` because Tailwind `--radius-xs..2xl` would resize existing `rounded-*`. Map restyles through the existing MutationObserver, now on `data-theme`, keyed by theme id. Commit `ada0302`. Review: assessed medium (507 lines, slice budget reached); user declined review for this candidate. Note: committed-only preflight needed `--untracked-scope=exclude --expected-untracked-inventory=<digest>` because the provisioning feature's untracked files are present.
+
+- T2 (delegated writer; trigger: 2+ non-trivial files). RED: `ThemePicker.test.tsx` failed to resolve `./ThemePicker`; Account test could not find heading "Apariencia". GREEN: ThemePicker/Account/Layout/i18n 19/19 (parent re-ran); full suite 666/668 with only the two known pre-existing MapShell failures; typecheck clean. ThemePicker is a radiogroup with roving tabindex, arrows/Home/End, 44px targets; swatch hexes live in one `SWATCHES` constant. Legacy keys `common.dark`, `common.lightMode`, `common.darkMode` are now unused; prune in T11.
 
 ## Next step
-T2 theme selector.
+T3 icon system.

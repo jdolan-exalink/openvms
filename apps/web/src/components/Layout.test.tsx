@@ -52,7 +52,7 @@ describe("primary navigation and context header", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cuenta" }));
     expect(screen.getByRole("menuitem", { name: "Cerrar sesión" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Cambiar contraseña" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Modo claro" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Tema" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("menuitemradio", { name: "EN" }));
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Events" })).toBeInTheDocument();

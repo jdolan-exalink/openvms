@@ -37,6 +37,13 @@ describe("Account", () => {
     expect(await screen.findByText("Juan Perez (juan)")).toBeInTheDocument();
   });
 
+  it("renders the appearance section with the theme picker", async () => {
+    setup();
+    expect(await screen.findByRole("heading", { name: "Apariencia" })).toBeInTheDocument();
+    expect(screen.getByText("Elige cómo se ve OpenVMS en este dispositivo.")).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Tema" })).toBeInTheDocument();
+  });
+
   it("shows warning when must_change_password is true", async () => {
     setup({ id: "u-1", username: "juan", display_name: "Juan Perez", must_change_password: true, mfa_enabled: false });
     expect(await screen.findByText("Un administrador te pidió que cambies la contraseña.")).toBeInTheDocument();

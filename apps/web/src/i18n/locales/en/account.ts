@@ -1,4 +1,6 @@
 const messages = {
+  appearance: "Appearance",
+  appearanceHelp: "Choose how OpenVMS looks on this device.",
   adminAskedPassword: "An administrator asked you to change your password.",
   currentPassword: "Current password",
   newPassword: "New password",

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { meQuery } from "@/api/queries";
+import { ThemePicker } from "@/components/ThemePicker";
 import { Button, ErrorNote, Field, PageHeader, TextInput } from "@/components/ui";
 
 /** Account: change your password and set up the second factor (TOTP). */
@@ -15,9 +16,21 @@ export function Account() {
       {me.data?.must_change_password && (
         <p role="status" className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">{t("account.adminAskedPassword")}</p>
       )}
+      <AppearanceSection />
       <PasswordForm />
       <MfaSection enabled={!!me.data?.mfa_enabled} />
     </div>
+  );
+}
+
+function AppearanceSection() {
+  const t = useT();
+  return (
+    <section className="flex flex-col gap-3 rounded border border-line bg-surface p-4">
+      <h2 className="font-semibold">{t("account.appearance")}</h2>
+      <p className="text-sm text-muted">{t("account.appearanceHelp")}</p>
+      <ThemePicker />
+    </section>
   );
 }
 

@@ -1,9 +1,9 @@
 import { Link } from "@tanstack/react-router";
-import { ChevronDown, KeyRound, LogOut, Moon, Sun } from "lucide-react";
+import { ChevronDown, KeyRound, LogOut, Sun } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { LOCALES, setLocale, useLocale, useT, type Locale } from "@/i18n";
 import { cn } from "@/lib/cn";
-import { isDarkTheme, useTheme, type ThemeId } from "@/lib/theme";
+import { ThemePicker } from "@/components/ThemePicker";
 
 /** AccountMenu is the compact session menu: language, theme, password, and sign-out. */
 export function AccountMenu({
@@ -19,11 +19,6 @@ export function AccountMenu({
   const t = useT();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
-  const [theme, setTheme] = useTheme();
-  const light = !isDarkTheme(theme);
-  // Remember which dark palette to return to; T2 replaces this toggle with a full selector.
-  const lastDark = useRef<ThemeId>("ristretto");
-  if (isDarkTheme(theme)) lastDark.current = theme;
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
   const signedIn = Boolean(onLogout);
@@ -46,7 +41,6 @@ export function AccountMenu({
   }, [open]);
 
   const chooseLocale = (id: Locale) => setLocale(id);
-  const chooseTheme = (nextLight: boolean) => setTheme(nextLight ? "light" : lastDark.current);
 
   return (
     <div ref={rootRef} className="relative">
@@ -100,28 +94,7 @@ export function AccountMenu({
             ))}
           </div>
           <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted">{t("common.theme")}</p>
-          <div role="group" aria-label={t("common.theme")} className="mb-1 grid grid-cols-2 gap-1 rounded-xl bg-bg p-1">
-            <button
-              type="button"
-              aria-pressed={!light}
-              aria-label={t("common.darkMode")}
-              onClick={() => chooseTheme(false)}
-              className={cn("flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs", !light ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
-            >
-              <Moon className="size-3.5" aria-hidden />
-              {t("common.dark")}
-            </button>
-            <button
-              type="button"
-              aria-pressed={light}
-              aria-label={t("common.lightMode")}
-              onClick={() => chooseTheme(true)}
-              className={cn("flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs", light ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
-            >
-              <Sun className="size-3.5" aria-hidden />
-              {t("common.light")}
-            </button>
-          </div>
+          <ThemePicker compact className="mb-1" />
           {signedIn && (
             <>
               <div className="my-1 border-t border-line" />
