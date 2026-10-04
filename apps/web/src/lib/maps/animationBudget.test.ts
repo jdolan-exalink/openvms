@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readMapPalette } from "@/components/maps/canvas/palette";
 import {
   AnimationBudget,
   MAX_CONCURRENT_PULSES,
@@ -48,7 +49,7 @@ describe("AnimationBudget", () => {
     const geo = budget.tick(1500);
     const alarmFeature = geo.features.find((f) => f.id === "alarm-1");
     expect(alarmFeature).toBeDefined();
-    expect(alarmFeature?.properties?.color).toBe("#ef4444");
+    expect(alarmFeature?.properties?.color).toBe(readMapPalette().bad);
   });
 
   it("expires ripples after duration (2500ms)", () => {

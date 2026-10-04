@@ -2,6 +2,7 @@ import type { Polygon } from "geojson";
 import { hasSelfIntersection } from "@/lib/zoneGeometry";
 import type { Zone, ZoneKind } from "./types";
 
+/** Default colors per zone kind; persisted with the zone as user data, so they are fixed hex values. */
 export const ZONE_KIND_COLOR: Record<ZoneKind, string> = {
   security: "#1683f8",
   perimeter: "#f59e0b",

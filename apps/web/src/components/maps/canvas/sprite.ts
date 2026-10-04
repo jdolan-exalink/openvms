@@ -30,6 +30,7 @@ const LUCIDE_PATHS = {
   x: ["M18 6 6 18", "m6 6 12 12"],
 } as const;
 
+/** Sprite pixels are SDF masks: white/black only encode the alpha shape, the color is applied at paint time. */
 function lucideGlyph(id: string, paths: readonly string[]): SdfIconDefinition {
   return { id, width: 24, height: 24, draw: ctx => {
     // Glyph occupies 20px of the 24px sprite so the SDF keeps a margin around the stroke.

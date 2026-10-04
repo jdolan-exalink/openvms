@@ -1,3 +1,4 @@
+import { readMapPalette } from "@/components/maps/canvas/palette";
 import type { FeatureCollection, Point } from "geojson";
 
 export type RippleType = "detection" | "lpr" | "alarm";
@@ -51,11 +52,11 @@ const RIPPLE_PRIORITY: Record<RippleType, number> = {
   alarm: 3,
 };
 
-const RIPPLE_DEFAULT_COLORS: Record<RippleType, string> = {
-  detection: "#22c55e",
-  lpr: "#3b82f6",
-  alarm: "#ef4444",
-};
+/** Default ripple colors follow the active theme through the canvas palette. */
+function rippleDefaultColor(type: RippleType): string {
+  const palette = readMapPalette();
+  return type === "lpr" ? palette.primary : type === "alarm" ? palette.bad : palette.ok;
+}
 
 export class AnimationBudget {
   private ripples: InternalRipple[] = [];
@@ -65,7 +66,7 @@ export class AnimationBudget {
     const now = item.startTime ?? Date.now();
     const duration = item.duration ?? RIPPLE_DURATION_MS;
     const priority = RIPPLE_PRIORITY[item.type] ?? 1;
-    const color = item.color ?? RIPPLE_DEFAULT_COLORS[item.type] ?? "#22c55e";
+    const color = item.color ?? rippleDefaultColor(item.type);
 
     const internal: InternalRipple = {
       id: item.id,
@@ -123,7 +124,7 @@ export class AnimationBudget {
       lng: pulse.lng,
       lat: pulse.lat,
       acknowledged: pulse.acknowledged ?? false,
-      color: pulse.color ?? "#ef4444",
+      color: pulse.color ?? readMapPalette().bad,
       addedAt: pulse.addedAt ?? Date.now(),
     });
   }

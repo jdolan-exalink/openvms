@@ -153,7 +153,7 @@ export class VideoSurfaceLayerController {
       left: "0",
       top: "0",
       overflow: "hidden",
-      background: "#000",
+      background: "#000", // video letterbox is physically black in every theme
       pointerEvents: "none",
       willChange: "transform",
       visibility: "hidden",

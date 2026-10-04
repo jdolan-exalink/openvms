@@ -127,6 +127,7 @@ export function maskFormatOf(draft: Draft, item: EditorItem): MaskFormat {
   return item.scope ? (draft.formats.filters[item.scope] ?? draft.formats.objectGlobal) : draft.formats.objectGlobal;
 }
 
+/** Item colors are stored on persisted zone configuration (user data), so they are fixed hex values. */
 export const ITEM_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#eab308", "#a855f7", "#f97316", "#06b6d4", "#ec4899", "#84cc16", "#14b8a6"];
 export const colorOf = (it: EditorItem) => ITEM_COLORS[it.colorIndex % ITEM_COLORS.length]!;
 

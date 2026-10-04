@@ -245,7 +245,7 @@ export function LiveExplorer({
           onClick={onTogglePin}
           aria-label={pinned ? t("live.unpin") : t("live.pin")}
           title={pinned ? t("live.unpin") : t("live.pin")}
-          className="size-9"
+          size="sm"
         />
       </div>
       {tab === "cameras" && (
@@ -519,7 +519,7 @@ function ServerBranch({
           <IconButton icon={FolderPlus} onClick={onStartCreate}
             aria-label={t("live.newFolderIn", { name: server.name })}
             title={t("live.newFolder")}
-            className="size-9" />
+            size="sm" />
         )}
       </div>
       {isOpen(key) && (
@@ -602,7 +602,7 @@ function FolderBranch({
     <div className={cn("ml-3 min-w-0", drop.foreign && "opacity-40", isDragging && "opacity-50")}>
       <div ref={setDropRef} className={cn("group flex min-w-0 items-center gap-1 rounded", isOver && !drop.disabled && "ring-1 ring-primary")}>
         {server.canManage && (
-          <IconButton icon={GripVertical} aria-label={t("live.moveFolder", { name: folder.name })} title={t("live.dragFolder")} className="size-8 shrink-0 cursor-grab" {...listeners} />
+          <IconButton icon={GripVertical} aria-label={t("live.moveFolder", { name: folder.name })} title={t("live.dragFolder")} size="sm" className="shrink-0 cursor-grab" {...listeners} />
         )}
         {renaming ? (
           <NameInput label={t("live.newName", { name: folder.name })} initial={folder.name} onSubmit={(name) => onRename(folder.id, name)} onCancel={() => onRenaming(null)} />
@@ -631,8 +631,8 @@ function FolderBranch({
             </button>
             {server.canManage && (
               <span className="flex shrink-0 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
-                <IconButton icon={Pencil} aria-label={t("live.renameFolder", { name: folder.name })} title={t("live.rename")} onClick={() => onRenaming(folder.id)} className="size-8" />
-                <IconButton icon={Trash2} aria-label={t("live.deleteFolderNamed", { name: folder.name })} title={t("live.delete")} onClick={() => onDelete(folder)} className="size-8 hover:text-bad" />
+                <IconButton icon={Pencil} aria-label={t("live.renameFolder", { name: folder.name })} title={t("live.rename")} onClick={() => onRenaming(folder.id)} size="sm" />
+                <IconButton icon={Trash2} aria-label={t("live.deleteFolderNamed", { name: folder.name })} title={t("live.delete")} onClick={() => onDelete(folder)} size="sm" className="hover:text-bad" />
               </span>
             )}
           </>
@@ -712,13 +712,13 @@ function CameraRow({
       </button>
       {canViewRecordings && (
         <>
-          <IconButton icon={History} title={t("live.watchLiveRecordings")} aria-label={t("live.watchRecordingsOf", { name: camera.display_name })} onClick={() => onPlayback(camera.id)} className="size-8" />
+          <IconButton icon={History} title={t("live.watchLiveRecordings")} aria-label={t("live.watchRecordingsOf", { name: camera.display_name })} onClick={() => onPlayback(camera.id)} size="sm" />
           <Link
             to="/playback"
             search={{ camera: camera.id }}
             title={t("live.openRecordingsPage")}
             aria-label={t("live.recordingsOf", { name: camera.display_name })}
-            className="inline-flex size-8 shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
+            className="relative inline-flex size-8 shrink-0 items-center justify-center rounded-full before:absolute before:-inset-1 before:content-[''] text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
           >
             <Icon icon={ExternalLink} size="xs" />
           </Link>

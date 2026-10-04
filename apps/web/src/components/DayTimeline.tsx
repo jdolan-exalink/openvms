@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui";
 import { CATEGORY_COLOR, detectionCategory, detectionTitle, type DetectionCategory } from "@/lib/detections";
 import { labelName } from "@/lib/format";
+import { readRoleColor } from "@/lib/theme";
 import {
   centerView, clusterExtent, clusterItems, defaultView, findClusterAt, formatTick, MIN_SPAN_S, panView, rangeBounds, tickStep, ticks,
   timeToX, xToTime, zoomView, type ItemCluster, type Span, type View,
@@ -53,9 +54,14 @@ type Tip = { x: number; y: number; row: RowData; cluster: ItemCluster };
 
 const CATEGORY_ICON: Record<DetectionCategory, LucideIcon> = { person: User, vehicle: Car, plate: ScanLine, animal: PawPrint, other: Tag };
 
-function cssVar(el: HTMLElement, name: string, fallback: string): string {
-  return getComputedStyle(el).getPropertyValue(name).trim() || fallback;
-}
+/**
+ * Ink drawn on the fixed category colors (detections.ts CATEGORY_COLOR). Those colors are
+ * mid-tone in every theme, so the ink is theme-independent on purpose.
+ */
+const MARK_INK = "#111111";
+
+/** Canvas colors come from the role variables; the hex values are Ristretto fallbacks only. */
+const cssVar = (el: HTMLElement, name: string, fallback: string) => readRoleColor(name, fallback, el);
 
 const pad = (n: number) => String(n).padStart(2, "0");
 const clock = (t: number) => {
@@ -325,9 +331,9 @@ export function DayTimeline({
     if (!el || !host || width <= 0) return;
     const ctx = setupCanvas(el, RULER_H);
     if (!ctx) return;
-    const muted = cssVar(host, "--text-secondary", "#999");
-    const ink = cssVar(host, "--text-primary", "#fff");
-    const line = cssVar(host, "--border-default", "#444");
+    const muted = cssVar(host, "--md-on-surface-variant", "#c9bdbe");
+    const ink = cssVar(host, "--md-on-surface", "#fff1f3");
+    const line = cssVar(host, "--md-outline-variant", "#4a4041");
     const x = (t: number) => timeToX(t, view, width);
     const step = tickStep(view.end - view.start, width);
     ctx.font = "10px ui-monospace, monospace";
@@ -362,9 +368,9 @@ export function DayTimeline({
     if (!el || !host || width <= 0) return;
     const ctx = setupCanvas(el, rowsH);
     if (!ctx) return;
-    const accent = cssVar(host, "--accent", "#3b82f6");
-    const line = cssVar(host, "--border-default", "#444");
-    const ink = cssVar(host, "--text-primary", "#fff");
+    const accent = cssVar(host, "--md-primary", "#f38d70");
+    const line = cssVar(host, "--md-outline-variant", "#4a4041");
+    const ink = cssVar(host, "--md-on-surface", "#fff1f3");
     const x = (t: number) => timeToX(t, view, width);
 
     const step = tickStep(view.end - view.start, width);
@@ -442,13 +448,13 @@ export function DayTimeline({
           const s = 10;
           const sx = Math.round(x0);
           const sy = Math.round(y + (MARK_H - s) / 2);
-          ctx.fillStyle = "#111";
+          ctx.fillStyle = MARK_INK; // outline keeps the vehicle swatch readable on any category color
           ctx.fillRect(sx - 1, sy - 1, s + 2, s + 2);
           ctx.fillStyle = paint;
           ctx.fillRect(sx, sy, s, s);
         }
         if (c.count > 1 && x1 - x0 >= 14) {
-          ctx.fillStyle = "#000";
+          ctx.fillStyle = MARK_INK; // count ink on the category pill
           ctx.font = "bold 9px ui-monospace, monospace";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
@@ -460,7 +466,7 @@ export function DayTimeline({
     // Live edge.
     const lx = Math.round(x(liveNow)) + 0.5;
     if (lx >= 0 && lx <= width) {
-      ctx.strokeStyle = cssVar(host, "--success", "#21b45b");
+      ctx.strokeStyle = cssVar(host, "--md-success", "#adda78");
       ctx.globalAlpha = 0.7;
       ctx.beginPath();
       ctx.moveTo(lx, 0);

@@ -1,4 +1,5 @@
 import type { Feature, FeatureCollection, Point } from "geojson";
+import { readMapPalette } from "@/components/maps/canvas/palette";
 import type { CameraDisplayState, CameraEntity, MapEntity } from "./types";
 
 export interface CameraFeatureProperties {
@@ -19,14 +20,18 @@ export interface CameraFeatureProperties {
   color: string;
 }
 
+/**
+ * State colors follow the active theme through the canvas palette (read on each access, so a
+ * theme change is picked up the next time features are built).
+ */
 export const STATE_COLORS: Record<CameraDisplayState, string> = {
-  ONLINE: "#21b45b",
-  DEGRADED: "#f59e0b",
-  OFFLINE: "#7e8a9a",
-  NO_SIGNAL: "#7e8a9a",
-  RECORDING_ERROR: "#f59e0b",
-  UNREACHABLE: "#7e8a9a",
-  ALARM: "#ef3f46",
+  get ONLINE() { return readMapPalette().ok; },
+  get DEGRADED() { return readMapPalette().warn; },
+  get OFFLINE() { return readMapPalette().muted; },
+  get NO_SIGNAL() { return readMapPalette().muted; },
+  get RECORDING_ERROR() { return readMapPalette().warn; },
+  get UNREACHABLE() { return readMapPalette().muted; },
+  get ALARM() { return readMapPalette().bad; },
 };
 
 export const STATE_ICONS: Record<CameraDisplayState, string> = {

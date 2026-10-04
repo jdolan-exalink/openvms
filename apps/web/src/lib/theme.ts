@@ -6,6 +6,17 @@ export const THEME_STORAGE_KEY = "openvms.theme";
 export const THEME_CHANGE_EVENT = "openvms:themechange";
 export const THEME_IDS: readonly ThemeId[] = ["ristretto", "dracula", "light"];
 
+/**
+ * Resolves a role variable (--md-*) to a concrete color string for canvas drawing, which
+ * cannot use CSS variables. `fallback` is the documented value used when computed styles
+ * are unavailable (SSR, tests) or the variable is unset.
+ */
+export function readRoleColor(name: string, fallback: string, el?: Element | null): string {
+  if (typeof window === "undefined" || typeof document === "undefined") return fallback;
+  const target = el ?? document.documentElement;
+  return getComputedStyle(target).getPropertyValue(name).trim() || fallback;
+}
+
 /** Surface color per theme; mirrors --md-surface and feeds <meta name="theme-color">. */
 const THEME_SURFACE: Record<ThemeId, string> = {
   ristretto: "#2c2525",

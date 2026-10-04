@@ -36,7 +36,7 @@ Forecast: about 3500–5000 authored changed lines (23 routes, 11.4k lines). Ove
 - [x] T8 Migrate maps surfaces: MapShell, panels, canvas palette per theme.
 - [x] T9 Migrate inventory screens: Servers, Cameras, Sites, CameraGroups, FrigateCameraConfig, Exports.
 - [x] T10 Migrate settings and auth: Users, Groups, Permissions, Rules, Channels, Alarms, Audit, Branding, Account, Notifications, Login.
-- [ ] T11 Hardcoded colors cleanup (DayTimeline, ZoneCanvas, ArPlate, format.ts, sprites) and final visual pass.
+- [x] T11 Hardcoded colors cleanup (DayTimeline, ZoneCanvas, ArPlate, format.ts, sprites) and final visual pass.
 
 ## Screen migration guide (T7–T10)
 Every migrated screen follows the same rules so the language is uniform:
@@ -88,7 +88,9 @@ Every migrated screen follows the same rules so the language is uniform:
 
 - Final verification after T10 (2026-10-04): typecheck clean; `pnpm build` OK (98 precache entries, 4216 KiB); vitest 759/761 with only the two MapShell failures that already fail on `e3e1b34` (no new failure from T7–T10). Commit `0e49bca` (T10); assessed medium, 581 lines, `slice_budget_reached`; user declined review for this candidate. T11 started per the user's go-ahead, same testing policy (no per-task runs, full verification at the end), split into T11a (primitive gaps, adoption, Modal/ConfirmDialog i18n) and T11b (hardcoded colors, unused keys, leftovers).
 
-- T11a (delegated writer; trigger: 2+ non-trivial files). ui.tsx: Table/Th/Empty/ErrorNote/PageHeader restyled; new Pill, Checkbox, Textarea, LinkButton (shared `buttonClass`), RemovableChip (44px hit area), IconButton size sm (44px hit area); StatusBadge tone/label overrides. Adopted across Events, Playback, SearchSummary, Users, Groups, CameraGroups, Cameras, CameraSettingsDrawer, FrigateCameraConfig, Exports, Alarms, Rules, Channels, Servers, AlarmPanel, SchemaForm, ZoneProperties, Notifications, CuratedPanels, MapShell, maps panels. Modal/ConfirmDialog use `common.close`/`common.cancel`. New test file `ui.primitives.test.tsx` written, not run (user choice); typecheck clean (parent re-ran). Risk: LinkButton casts route props to never (no route type checking at call sites).
+- T11a (delegated writer; trigger: 2+ non-trivial files). ui.tsx: Table/Th/Empty/ErrorNote/PageHeader restyled; new Pill, Checkbox, Textarea, LinkButton (shared `buttonClass`), RemovableChip (44px hit area), IconButton size sm (44px hit area); StatusBadge tone/label overrides. Adopted across Events, Playback, SearchSummary, Users, Groups, CameraGroups, Cameras, CameraSettingsDrawer, FrigateCameraConfig, Exports, Alarms, Rules, Channels, Servers, AlarmPanel, SchemaForm, ZoneProperties, Notifications, CuratedPanels, MapShell, maps panels. Modal/ConfirmDialog use `common.close`/`common.cancel`. New test file `ui.primitives.test.tsx` written, not run (user choice); typecheck clean (parent re-ran). Risk: LinkButton casts route props to never (no route type checking at call sites). Commit `46d0d04`; assessed medium, 638 lines, `slice_budget_reached`; user declined review for this candidate.
+
+- T11b (delegated writer; trigger: 2+ non-trivial files). `readRoleColor()` in theme.ts; DayTimeline canvas, `STATE_COLORS` (palette getters) and animationBudget defaults follow the theme; LiveExplorer icon buttons use size sm; unused keys `common.dark`, `common.lightMode`, `common.darkMode`, `common.openMenu` removed. Remaining hex all documented: vehicle paint and category series data, persisted zone colors, theme previews/meta, physical plate and road markings, video letterbox, SDF masks, canvas fallbacks. Brand mark contrast NOT changed: pending user decision (parent removed it from the brief). Visual change: lpr ripples use theme primary, detection ripples theme ok. Tests not run (user choice).
 
 ## Next step
-T11b, then full verification. T9, T10, then the full verification (vitest, typecheck, build). User authorized: if every check passes, start T11 right away.
+Full verification (vitest, typecheck, build), then real-browser visual pass. T9, T10, then the full verification (vitest, typecheck, build). User authorized: if every check passes, start T11 right away.
