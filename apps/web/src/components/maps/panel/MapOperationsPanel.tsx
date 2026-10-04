@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { Button, TextInput } from "@/components/ui";
 import type { CameraEntity, MapMode, Site } from "@/lib/maps/types";
@@ -28,6 +28,10 @@ interface Props {
   onSelectCamera: (id: string) => void;
   onEdit: () => void;
   onOpenLive: (id: string) => void;
+  /** Closes a camera live window that is already open on the map. */
+  onCloseLive?: (id: string) => void;
+  /** Cameras whose live window is open on the map. */
+  openCameraIds?: readonly string[];
   onEvents: (id: string) => void;
   onPlayback: (id: string) => void;
   onResetVisibility: () => void;
@@ -36,6 +40,7 @@ interface Props {
 /** Inventory is not placement: missing geographic data never receives invented coordinates. */
 export function MapOperationsPanel(props: Props) {
   const [search, setSearch] = useState("");
+  const openIds = useMemo(() => new Set(props.openCameraIds ?? []), [props.openCameraIds]);
   const { currentSite: site, cameras, inventory, mode } = props;
   const placedIds = new Set(cameras.map(camera => camera.id));
   const serverName = new Map((props.servers ?? []).map((server) => [server.id, server.name]));
@@ -98,6 +103,8 @@ export function MapOperationsPanel(props: Props) {
             selectedId={props.selectedCameraId}
             onSelect={props.onSelectCamera}
             onOpen={mode === "live" && props.canLive ? props.onOpenLive : undefined}
+            onClose={props.onCloseLive}
+            openIds={openIds}
             keepEmptyFolders={!search}
           />
         </div>

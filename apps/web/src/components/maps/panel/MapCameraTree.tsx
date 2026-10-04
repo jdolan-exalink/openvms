@@ -1,8 +1,10 @@
-import { ChevronDown, ChevronRight, Folder, FolderOpen, Server, Video } from "lucide-react";
+import { Folder, FolderOpen, GripVertical, Maximize2, MapPin, Minimize2, Server, Video } from "lucide-react";
 import { Icon } from "@/components/Icon";
-import { Button } from "@/components/ui";
-import { GripVertical, MapPin } from "lucide-react";
-import { useMemo, useState, type DragEvent, type ReactNode } from "react";
+import { Chevron, Count, dot, nodeIcon, rowBase, rowSelected } from "@/components/ExplorerParts";
+import { IconButton } from "@/components/ui";
+import { cn } from "@/lib/cn";
+import { useT } from "@/i18n";
+import { useMemo, useState, type DragEvent } from "react";
 
 export type MapTreeCamera = {
   id: string;
@@ -56,12 +58,22 @@ function groupCameras(cameras: readonly MapTreeCamera[], folders: readonly MapTr
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function Chevron({ open }: { open: boolean }) {
-  return <Icon icon={open ? ChevronDown : ChevronRight} size={12} className="text-on-surface-variant" />;
-}
+type RowShared = {
+  selectedId?: string;
+  armedId?: string;
+  onSelect: (id: string) => void;
+  onOpen?: (id: string) => void;
+  onClose?: (id: string) => void;
+  openIds?: ReadonlySet<string>;
+  draggable: boolean;
+  draggingId?: string;
+  onDragStart?: (id: string, event: DragEvent<HTMLButtonElement>) => void;
+  onDragEnd?: () => void;
+};
 
 /**
- * Collapsible server → folder → camera tree. Folders are the ones created in Live.
+ * Collapsible server → folder → camera tree. Folders are the ones created in Live. Row anatomy and
+ * density mirror the Live explorer (shared pieces live in ExplorerParts).
  */
 export function MapCameraTree({
   cameras,
@@ -71,6 +83,8 @@ export function MapCameraTree({
   armedId,
   onSelect,
   onOpen,
+  onClose,
+  openIds,
   draggable = false,
   draggingId,
   onDragStart,
@@ -84,6 +98,10 @@ export function MapCameraTree({
   armedId?: string;
   onSelect: (id: string) => void;
   onOpen?: (id: string) => void;
+  /** Closes an already open live window; when omitted the toggle only opens. */
+  onClose?: (id: string) => void;
+  /** Cameras whose live window is open on the map. */
+  openIds?: ReadonlySet<string>;
   draggable?: boolean;
   draggingId?: string;
   onDragStart?: (id: string, event: DragEvent<HTMLButtonElement>) => void;
@@ -94,81 +112,60 @@ export function MapCameraTree({
   const groups = useMemo(() => groupCameras(cameras, folders, servers, keepEmptyFolders), [cameras, folders, servers, keepEmptyFolders]);
   const toggle = (key: string) => setClosed((current) => ({ ...current, [key]: !current[key] }));
   if (groups.length === 0) return <p className="px-1 text-xs text-on-surface-variant">No hay cámaras para este filtro.</p>;
+  const shared: RowShared = { selectedId, armedId, onSelect, onOpen, onClose, openIds, draggable, draggingId, onDragStart, onDragEnd };
   return (
-    <div className="space-y-1">
+    <nav aria-label="Cámaras" className="flex min-w-0 flex-col text-sm">
       {groups.map((group) => {
         const serverKey = `srv:${group.key}`;
         const serverOpen = !closed[serverKey];
         const count = group.cameras.length + group.folders.reduce((total, folder) => total + folder.cameras.length, 0);
         return (
-          <section key={group.key} aria-label={group.name}>
+          <section key={group.key} aria-label={group.name} className="min-w-0">
             <h3>
-              <button type="button" aria-expanded={serverOpen} onClick={() => toggle(serverKey)} className="flex min-h-11 w-full items-center gap-1.5 rounded-full px-2 text-left text-[11px] font-bold uppercase tracking-wide text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary">
+              <button type="button" aria-expanded={serverOpen} onClick={() => toggle(serverKey)} title={group.name} className="flex w-full min-w-0 items-center gap-1 rounded-m3-sm py-1.5 text-left font-bold hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary">
                 <Chevron open={serverOpen} />
-                <Icon icon={Server} size="xs" className="shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{group.name}</span>
-                <span className="rounded-full bg-surface-3 px-2 font-mono text-[10px] tabular-nums">{count}</span>
+                <Icon icon={Server} size="xs" className={nodeIcon} />
+                <span className="min-w-0 truncate">{group.name}</span>
+                <Count n={count} />
               </button>
             </h3>
             {serverOpen && (
-              <div className="ml-3 space-y-1 pl-1">
+              <>
                 {group.folders.map((folder) => {
                   const folderKey = `fld:${folder.id}`;
                   const folderOpen = !closed[folderKey];
                   return (
-                    <div key={folder.id}>
-                      <button type="button" aria-expanded={folderOpen} onClick={() => toggle(folderKey)} className="flex min-h-11 w-full items-center gap-1.5 rounded-full px-2 text-left text-xs font-medium text-on-surface hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary">
+                    <div key={folder.id} className="ml-3 min-w-0">
+                      <button type="button" aria-expanded={folderOpen} onClick={() => toggle(folderKey)} className="flex w-full min-w-0 items-center gap-1 rounded-m3-sm py-1.5 text-left text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary">
                         <Chevron open={folderOpen} />
-                        <Icon icon={folderOpen ? FolderOpen : Folder} size="xs" className="shrink-0 text-on-surface-variant" />
-                        <span className="min-w-0 flex-1 truncate">{folder.name}</span>
-                        <span className="font-mono text-[10px] tabular-nums text-on-surface-variant">{folder.cameras.length}</span>
+                        <Icon icon={folderOpen ? FolderOpen : Folder} size="xs" className={nodeIcon} />
+                        <span className="min-w-0 truncate">{folder.name}</span>
+                        <Count n={folder.cameras.length} />
                       </button>
-                      {folderOpen && <ul className="ml-4 space-y-1">{folder.cameras.map((camera) => <CameraRow key={camera.id} camera={camera} selectedId={selectedId} armedId={armedId} onSelect={onSelect} onOpen={onOpen} draggable={draggable} draggingId={draggingId} onDragStart={onDragStart} onDragEnd={onDragEnd} />)}</ul>}
+                      {folderOpen && folder.cameras.map((camera) => <CameraRow key={camera.id} camera={camera} indent="ml-5" shared={shared} />)}
                     </div>
                   );
                 })}
-                {group.cameras.length > 0 && <ul className="space-y-1">{group.cameras.map((camera) => <CameraRow key={camera.id} camera={camera} selectedId={selectedId} armedId={armedId} onSelect={onSelect} onOpen={onOpen} draggable={draggable} draggingId={draggingId} onDragStart={onDragStart} onDragEnd={onDragEnd} />)}</ul>}
-              </div>
+                {group.cameras.map((camera) => <CameraRow key={camera.id} camera={camera} indent="ml-4" shared={shared} />)}
+              </>
             )}
           </section>
         );
       })}
-    </div>
+    </nav>
   );
 }
 
-function CameraRow({
-  camera,
-  selectedId,
-  armedId,
-  onSelect,
-  onOpen,
-  draggable,
-  draggingId,
-  onDragStart,
-  onDragEnd,
-}: {
-  camera: MapTreeCamera;
-  selectedId?: string;
-  armedId?: string;
-  onSelect: (id: string) => void;
-  onOpen?: (id: string) => void;
-  draggable: boolean;
-  draggingId?: string;
-  onDragStart?: (id: string, event: DragEvent<HTMLButtonElement>) => void;
-  onDragEnd?: () => void;
-}) {
-  const armed = armedId === camera.id;
-  const selected = selectedId === camera.id || armed;
+function CameraRow({ camera, indent, shared }: { camera: MapTreeCamera; indent: string; shared: RowShared }) {
+  const t = useT();
+  const { selectedId, armedId, onSelect, onOpen, onClose, openIds, draggable, draggingId, onDragStart, onDragEnd } = shared;
+  const selected = selectedId === camera.id || armedId === camera.id;
   const placed = camera.placed === true;
-  let extra: ReactNode = null;
-  if (camera.placed !== undefined) {
-    extra = placed
-      ? <span aria-hidden className="inline-flex items-center gap-1 rounded-full bg-ok/15 px-2 py-0.5 text-[10px] font-bold text-ok"><MapPin className="size-2.5" aria-hidden />En el mapa</span>
-      : <span aria-hidden className="text-[10px] text-on-surface-variant">Sin ubicar</span>;
-  }
+  const windowOpen = openIds?.has(camera.id) === true;
+  const toggleLabel = t(windowOpen ? "maps.closeLiveNamed" : "maps.openLiveNamed", { name: camera.name });
+  const canToggle = onOpen && camera.placed !== false;
   return (
-    <li className="flex items-stretch gap-1">
+    <div className={cn(indent, "flex min-w-0 items-center gap-1")}>
       <button
         type="button"
         draggable={draggable}
@@ -177,27 +174,28 @@ function CameraRow({
         onClick={() => onSelect(camera.id)}
         onDragStart={draggable ? (event) => onDragStart?.(camera.id, event) : undefined}
         onDragEnd={draggable ? () => onDragEnd?.() : undefined}
-        className={
-          draggingId === camera.id
-            ? "m3-press flex min-h-11 min-w-0 flex-1 cursor-grabbing items-center gap-2 rounded-m3-lg bg-primary-container px-3 py-1.5 text-left opacity-60"
-            : selected
-              ? `m3-press flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-m3-lg px-3 py-1.5 text-left ${placed ? "bg-ok/20 ring-1 ring-ok" : "bg-primary-container text-on-primary-container"} ${draggable ? "cursor-grab" : ""}`
-              : `m3-press flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-m3-lg px-3 py-1.5 text-left hover:bg-on-surface/8 ${placed ? "bg-ok/10" : "bg-surface-2"} ${draggable ? "cursor-grab" : ""}`
-        }
+        className={cn(rowBase, selected && rowSelected, draggable && "cursor-grab", draggingId === camera.id && "cursor-grabbing opacity-50")}
       >
-        <Icon icon={Video} size="xs" className="shrink-0 text-on-surface-variant" />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm">{camera.name}</span>
-          {extra}
-        </span>
-        <span className={camera.status === "online" ? "size-2 rounded-full bg-ok" : camera.status === "offline" ? "size-2 rounded-full bg-bad" : "size-2 rounded-full bg-muted"} aria-hidden />
-        {draggable && <GripVertical className="size-4 shrink-0 text-on-surface-variant" aria-hidden />}
+        <Icon icon={Video} size="xs" className={nodeIcon} />
+        <span className={cn("size-1.5 shrink-0 rounded-full", dot(camera.status))} aria-hidden />
+        <span className="min-w-0 truncate">{camera.name}</span>
+        {placed && (
+          <span title={t("maps.onMap")} className="inline-flex shrink-0">
+            <Icon icon={MapPin} size="xs" label={t("maps.onMap")} className="text-primary" />
+          </span>
+        )}
+        {draggable && <Icon icon={GripVertical} size="xs" className="ml-auto shrink-0 text-on-surface-variant" />}
       </button>
-      {onOpen && (
-        <Button variant="tonal" size="sm" aria-label={`Maximizar: ${camera.name}`} onClick={() => onOpen(camera.id)} className="h-auto min-h-11 shrink-0 px-3 text-[11px]">
-          Abrir
-        </Button>
+      {canToggle && (
+        <IconButton
+          icon={windowOpen ? Minimize2 : Maximize2}
+          size="sm"
+          aria-label={toggleLabel}
+          title={toggleLabel}
+          aria-pressed={windowOpen}
+          onClick={() => (windowOpen && onClose ? onClose(camera.id) : onOpen(camera.id))}
+        />
       )}
-    </li>
+    </div>
   );
 }

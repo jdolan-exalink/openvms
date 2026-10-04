@@ -217,7 +217,9 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
         onSelectSite={() => undefined}
         onSelectCamera={selectCamera}
         onEdit={() => { setModeState({ initial: initialMode, value: "edit" }); onModeChange?.("edit"); }}
-        onOpenLive={openCamera}
+        onOpenLive={(id) => { if (can(me.data, "live.view")) pinned.pin(id); }}
+        onCloseLive={pinned.unpin}
+        openCameraIds={pinned.windows.map((window) => window.id)}
         onEvents={(id) => void navigate({ to: "/events", search: { camera: id } })}
         onPlayback={(id) => void navigate({ to: "/playback", search: { camera: id } })}
         onResetVisibility={() => undefined}

@@ -1,12 +1,13 @@
 import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  Bookmark, Building2, ChevronDown, ChevronRight, ChevronsDown, ChevronsUp, Cloud, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, GripVertical, History, LayoutGrid,
+  Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, GripVertical, History, LayoutGrid,
   type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, Trash2, Video,
 } from "lucide-react";
 import { createContext, type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { Icon } from "@/components/Icon";
+import { Chevron, Count, dot, nodeIcon } from "@/components/ExplorerParts";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { ErrorNote, IconButton, TextInput } from "@/components/ui";
@@ -72,19 +73,6 @@ function useDropState(serverId: string, canManage: boolean, accepts: ("camera" |
   const foreign = treeData !== undefined && treeData.serverId !== serverId;
   const valid = treeData !== undefined && !foreign && accepts.includes(treeData.kind);
   return { dragging: tree, foreign, disabled: !canManage || !valid };
-}
-
-const dot = (status: string) => (status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-muted");
-
-/** Muted node-type glyph (site, server, folder, camera) shown before the name. */
-const nodeIcon = "shrink-0 text-on-surface-variant";
-
-function Chevron({ open }: { open: boolean }) {
-  return <Icon icon={open ? ChevronDown : ChevronRight} size="xs" className="shrink-0" />;
-}
-
-function Count({ n }: { n: number }) {
-  return <span className="ml-auto shrink-0 rounded-full bg-surface-3 px-2 text-[11px] font-medium tabular-nums text-on-surface-variant">{n}</span>;
 }
 
 function Section({ title, icon, open, onToggle, count, menu, children }: { title: string; icon: LucideIcon; open: boolean; onToggle: () => void; count?: number; menu?: MenuProps; children: ReactNode }) {

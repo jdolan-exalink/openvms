@@ -890,7 +890,8 @@ function MapShellContent({
                   { label: "Saved preferences", error: prefsQuery.error, retry: () => void prefsQuery.refetch() },
                 ]}
                 onSelectSite={handleSelectSite} onSelectCamera={handleSelectCamera}
-                onEdit={() => handleModeChange("edit")} onOpenLive={handleOpenLive}
+                onEdit={() => handleModeChange("edit")} onOpenLive={handlePinCamera} onCloseLive={handleUnpinCamera}
+                openCameraIds={pinned.windows.map((window) => window.id)}
                 onEvents={(cameraId) => void navigate({ to: "/events", search: { camera: cameraId } })}
                 onPlayback={(cameraId) => void navigate({ to: "/playback", search: { camera: cameraId } })}
                 onResetVisibility={() => { setFiltersOverride(EMPTY_FILTERS); setLayersOverride({ ...layers, cameras: true, sites: true }); }}
