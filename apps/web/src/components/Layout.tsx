@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { Menu, Search, X } from "lucide-react";
+import { Search } from "lucide-react";
 import { useEffect, useState } from "react";
 import { clearToken } from "@/api/auth";
 import { api, type Schemas } from "@/api/client";
@@ -16,7 +16,8 @@ import { useT } from "@/i18n";
 import { AppShell, TopBarActionsSlot } from "./AppShell";
 import { AccountMenu } from "./AccountMenu";
 import { Icon } from "./Icon";
-import { brandIcon as Brand, navGroups, settingsNavGroups, type NavGroup } from "./nav";
+import { MobileNav } from "./MobileNav";
+import { brandIcon as Brand, isNavItemActive, isNavItemVisible, navGroups, settingsNavGroups, type NavGroup } from "./nav";
 import { NotificationBell } from "./NotificationBell";
 import { Omnibox } from "./Omnibox";
 
@@ -34,7 +35,6 @@ export function Layout() {
   const pageContextRaw = getPageContext(pathname);
   const pageContext = { section: t(pageContextRaw.section), title: t(pageContextRaw.title) };
   const pageTitle = isLive && liveRec ? t("nav.recordings") : pageContext.title;
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [omniboxOpen, setOmniboxOpen] = useState(false);
   const logout = useLogout();
 
@@ -49,28 +49,14 @@ export function Layout() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  useEffect(() => {
-    if (!mobileOpen) return;
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileOpen(false);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [mobileOpen]);
-
-  const mobileNavGroups: NavGroup[] = [
-    ...navGroups.filter((g) => !g.items.some((i) => i.to === "/settings")),
-    ...settingsNavGroups,
-  ];
-
   return (
     <PlayerSessionProvider userId={me.data?.id}>
       <VideoSurfaceLayer>
         <AppShell
           primaryNav={
-            <div className="flex min-h-full w-16 shrink-0 flex-col items-center border-r border-line bg-surface py-3">
-              <Link to="/live" aria-label={t("common.brandLive")} title="OpenVMS" className="mb-5 flex size-10 items-center justify-center rounded-xl text-accent hover:bg-raised">
-                <Brand className="size-5" aria-hidden />
+            <div className="flex min-h-full w-22 shrink-0 flex-col items-center bg-surface-dim py-3">
+              <Link to="/live" aria-label={t("common.brandLive")} title="OpenVMS" className="mb-5 flex size-12 items-center justify-center rounded-m3-lg bg-primary text-on-primary outline-none transition-opacity hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
+                <Brand className="size-6" aria-hidden />
               </Link>
               <nav className="flex w-full flex-1 flex-col items-center gap-4 overflow-y-auto" aria-label={t("common.mainNav")}>
                 {navGroups.map((group, i) => (
@@ -79,22 +65,13 @@ export function Layout() {
               </nav>
             </div>
           }
+          bottomNav={<MobileNav me={me.data} features={features} pathname={pathname} />}
           fitViewport={fitWorkspace}
           contextSidebar={isLive ? <div id="live-context-sidebar" className="flex min-h-0 flex-col gap-3" /> : undefined}
         >
           <div className={cn("min-w-0", fitWorkspace && "flex min-h-0 flex-1 flex-col")}>
             <header data-shell-region="page-header" className={cn("flex min-h-14 items-center justify-between gap-3 border-b border-line", fitWorkspace ? "mb-2 shrink-0 pb-2 md:min-h-11" : "mb-6 pb-4")} aria-label={t("common.pageHeader")}>
               <div className="flex min-w-0 items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => setMobileOpen(true)}
-                  aria-label={t("common.openMenu")}
-                  aria-expanded={mobileOpen}
-                  aria-controls="mobile-nav-drawer"
-                  className="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent md:hidden"
-                >
-                  <Menu className="size-5" aria-hidden />
-                </button>
                 {/* On /live the mode toggle replaces the breadcrumb to save space; the title stays for screen readers. */}
                 <div className={cn("min-w-0", isLive && "sr-only")}>
                   <p className="truncate text-lg font-semibold tracking-tight text-ink">
@@ -133,79 +110,6 @@ export function Layout() {
         </AppShell>
   
         <Omnibox isOpen={omniboxOpen} onClose={() => setOmniboxOpen(false)} />
-  
-        {mobileOpen && (
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Navegación móvil"
-            id="mobile-nav-drawer"
-            className="fixed inset-0 z-50 flex md:hidden"
-          >
-            <div
-              className="fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity"
-              aria-hidden
-              onClick={() => setMobileOpen(false)}
-            />
-            <div className="relative flex w-80 max-w-[85vw] flex-col border-r border-line bg-surface p-4 shadow-2xl">
-              <div className="mb-4 flex items-center justify-between border-b border-line pb-3">
-                <Link
-                  to="/live"
-                  onClick={() => setMobileOpen(false)}
-                  className="flex items-center gap-2 font-semibold text-ink hover:text-accent"
-                >
-                  <Brand className="size-5 text-accent" aria-hidden />
-                  <span>OpenVMS</span>
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => setMobileOpen(false)}
-                  aria-label={t("common.closeMenu")}
-                  className="flex size-8 items-center justify-center rounded-lg text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent"
-                >
-                  <X className="size-4" aria-hidden />
-                </button>
-              </div>
-              <nav className="flex flex-1 flex-col gap-4 overflow-y-auto pr-1" aria-label={t("common.mobileNav")}>
-                {mobileNavGroups.map((group, idx) => (
-                  <div key={group.title ?? idx} className="flex flex-col gap-0.5">
-                    {group.title && (
-                      <p className="px-2 pb-1 font-mono text-[10px] uppercase tracking-wider text-muted">{t(group.title)}</p>
-                    )}
-                    {group.items.filter((item) => (!item.permission || can(me.data, item.permission)) && (!item.feature || features[item.feature])).map((item) => {
-                      const active = item.to != null && (pathname === item.to || (item.to !== "/live" && item.to !== "/settings" && pathname.startsWith(`${item.to}/`)));
-                      return item.to ? (
-                        <Link
-                          key={item.label}
-                          to={item.to}
-                          onClick={() => setMobileOpen(false)}
-                          className={cn(
-                            "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted transition-colors hover:bg-raised hover:text-ink",
-                            active && "bg-accent/15 font-medium text-accent ring-1 ring-inset ring-accent/30",
-                          )}
-                          activeProps={{ "aria-current": "page" }}
-                        >
-                          <Icon icon={item.icon} size="xs" className="shrink-0" strokeWidth={active ? 2 : undefined} />
-                          <span>{t(item.label)}</span>
-                        </Link>
-                      ) : (
-                        <span
-                          key={item.label}
-                          className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted/50"
-                          title={t("nav.comingIn", { label: t(item.label), milestone: item.milestone ?? "" })}
-                        >
-                          <Icon icon={item.icon} size="xs" className="shrink-0" strokeWidth={active ? 2 : undefined} />
-                          <span>{t(item.label)}</span>
-                          <span className="ml-auto font-mono text-[10px]">{item.milestone}</span>
-                        </span>
-                      );
-                    })}
-                  </div>
-                ))}
-              </nav>
-            </div>
-          </div>
-        )}
       </VideoSurfaceLayer>
     </PlayerSessionProvider>
   );
@@ -214,22 +118,28 @@ export function Layout() {
 function NavGroupLinks({ group, me, pathname, features }: { group: NavGroup; me: Schemas["Me"] | undefined; pathname: string; features: FeatureFlags }) {
   const t = useT();
   return (
-    <div className="flex flex-col items-center gap-1">
-      {group.items.filter((item) => (!item.permission || can(me, item.permission)) && (!item.feature || features[item.feature])).map((item) => {
-        const settingsRouteActive = settingsNavGroups.some((settingsGroup) => settingsGroup.items.some((settingsItem) => settingsItem.to && (pathname === settingsItem.to || pathname.startsWith(`${settingsItem.to}/`))));
-        const active = item.to != null && (pathname === item.to || (item.to === "/settings" && settingsRouteActive) || (item.to !== "/settings" && item.to !== "/live" && pathname.startsWith(`${item.to}/`)));
+    <div className="flex flex-col items-center gap-3">
+      {group.items.filter((item) => isNavItemVisible(item, me, features)).map((item) => {
+        const active = isNavItemActive(item, pathname);
+        const body = (
+          <>
+            <span className={cn("flex h-8 w-14 items-center justify-center rounded-full transition-colors", active ? "bg-primary-container text-on-primary-container" : "group-hover:bg-surface-2")}>
+              <Icon icon={item.icon} size="md" strokeWidth={active ? 2 : undefined} />
+            </span>
+            <span className={cn("max-w-full truncate px-1 text-xs", active ? "font-bold text-on-surface" : "text-on-surface-variant")}>{t(item.label)}</span>
+          </>
+        );
         const classes = cn(
-          "flex size-10 items-center justify-center rounded-xl text-muted transition-colors hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent",
-          active && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30 hover:bg-accent/20 hover:text-accent",
-          !item.to && "cursor-default text-muted/50",
+          "group flex w-20 min-h-14 flex-col items-center gap-1 rounded-m3-md outline-none focus-visible:outline-2 focus-visible:outline-primary",
+          !item.to && "cursor-default opacity-50",
         );
         return item.to ? (
-          <Link key={item.label} to={item.to} aria-label={t(item.label)} aria-current={active ? "page" : undefined} title={t(item.label)} className={classes} activeProps={{ "aria-current": "page" }}>
-            <Icon icon={item.icon} strokeWidth={active ? 2 : undefined} />
+          <Link key={item.label} to={item.to} aria-current={active ? "page" : undefined} className={classes}>
+            {body}
           </Link>
         ) : (
           <span key={item.label} aria-label={t("nav.comingSoon", { label: t(item.label) })} title={t("nav.comingIn", { label: t(item.label), milestone: item.milestone ?? "" })} className={classes}>
-            <Icon icon={item.icon} strokeWidth={active ? 2 : undefined} />
+            {body}
           </span>
         );
       })}

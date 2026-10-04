@@ -12,14 +12,36 @@ describe("AppShell", () => {
       </AppShell>,
     );
 
-    expect(screen.getByLabelText("Primary Nav Rail")).toHaveClass("flex");
-    expect(screen.getByLabelText("Primary Nav Rail")).not.toHaveClass("hidden");
+    expect(screen.getByLabelText("Primary Nav Rail")).toHaveClass("hidden", "md:flex");
     expect(screen.getByRole("complementary", { name: "Primary Nav Rail" })).toHaveTextContent("Existing navigation");
     const main = screen.getByRole("main", { name: "Main Workspace" });
     expect(main).toContainElement(screen.getByRole("heading", { name: "Current route" }));
     expect(main).toHaveAttribute("id", "main-content");
     expect(screen.getByRole("link", { name: "Saltar al contenido" })).toHaveAttribute("href", "#main-content");
     expect(screen.queryByRole("complementary", { name: "Context Sidebar" })).not.toBeInTheDocument();
+  });
+
+  it("renders the bottom navigation slot and reserves room for it on mobile only", () => {
+    const { container } = render(
+      <AppShell primaryNav={<nav>Existing navigation</nav>} bottomNav={<nav data-shell-region="bottom-nav">Bottom</nav>}>
+        <h1>Current route</h1>
+      </AppShell>,
+    );
+    expect(container.querySelector('[data-shell="openvms"]')).not.toHaveClass("pl-16");
+    expect(screen.getByRole("main", { name: "Main Workspace" }).className).toMatch(/pb-\[calc\(5rem\+env\(safe-area-inset-bottom\)\)\]/);
+    expect(screen.getByRole("main", { name: "Main Workspace" })).toHaveClass("md:rounded-m3-2xl", "md:bg-surface");
+    expect(screen.getByText("Bottom")).toBeInTheDocument();
+  });
+
+  it("keeps the raised sheet look free of margins in fit-viewport mode", () => {
+    render(
+      <AppShell primaryNav={<nav>Nav</nav>} fitViewport>
+        <h1>Live</h1>
+      </AppShell>,
+    );
+    const main = screen.getByRole("main", { name: "Main Workspace" });
+    expect(main).toHaveClass("md:rounded-m3-2xl", "md:bg-surface");
+    expect(main.className).not.toMatch(/md:m[trbl]?-/);
   });
 
   it("renders the context sidebar only when the current route supplies context", () => {

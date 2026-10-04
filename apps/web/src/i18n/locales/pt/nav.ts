@@ -28,6 +28,8 @@ const messages = {
   operations: "Operações",
   brand: "OpenVMS",
   workspace: "Área de trabalho",
+  more: "Mais",
+  moreTitle: "Mais destinos",
   comingSoon: "{label}, em breve",
   comingIn: "{label} · Chega em {milestone}",
 } as const;

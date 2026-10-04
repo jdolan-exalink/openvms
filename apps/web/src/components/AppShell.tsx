@@ -157,13 +157,15 @@ export function TopBarActionsSlot({ className }: { className?: string }) {
 
 interface AppShellProps {
   primaryNav: ReactNode;
+  /** Mobile-only navigation (below md); it renders its own fixed positioning and data-shell-region. */
+  bottomNav?: ReactNode;
   contextSidebar?: ReactNode;
   /** Fit the workspace to the viewport (no page scroll) from the md breakpoint up. */
   fitViewport?: boolean;
   children: ReactNode;
 }
 
-export function AppShell({ primaryNav, contextSidebar, fitViewport = false, children }: AppShellProps) {
+export function AppShell({ primaryNav, bottomNav, contextSidebar, fitViewport = false, children }: AppShellProps) {
   const t = useT();
   const collapsed = useSyncExternalStore(subscribeSidebarCollapsed, getSidebarCollapsed, () => false);
   const width = useSyncExternalStore(subscribeSidebarWidth, getSidebarWidth, () => SIDEBAR_DEFAULT_WIDTH);
@@ -178,8 +180,8 @@ export function AppShell({ primaryNav, contextSidebar, fitViewport = false, chil
       >
         {t("common.skipToContent")}
       </a>
-      <div className={cn("flex flex-col bg-bg pl-16 md:flex-row md:pl-0", fitViewport ? "h-dvh max-h-dvh min-h-0 overflow-hidden" : "min-h-dvh")} data-shell="openvms">
-        <aside aria-label="Primary Nav Rail" className="fixed inset-y-0 left-0 z-40 flex w-16 shrink-0 overflow-y-auto md:static md:z-auto" data-shell-region="primary-nav">
+      <div className={cn("flex flex-col bg-surface-dim md:flex-row", fitViewport ? "h-dvh max-h-dvh min-h-0 overflow-hidden" : "min-h-dvh")} data-shell="openvms">
+        <aside aria-label="Primary Nav Rail" className="hidden shrink-0 overflow-y-auto md:static md:flex" data-shell-region="primary-nav">
           {primaryNav}
         </aside>
         {contextSidebar != null && (
@@ -206,9 +208,15 @@ export function AppShell({ primaryNav, contextSidebar, fitViewport = false, chil
             {!collapsed && <SidebarResizeHandle width={width} onDragChange={onDragChange} />}
           </div>
         )}
-        <main id="main-content" tabIndex={-1} aria-label="Main Workspace" className={cn("min-w-0 flex-1 px-4 outline-none md:px-8", fitViewport ? "flex min-h-0 flex-col overflow-hidden py-3" : "py-6")} data-shell-region="main-workspace">
+        <main id="main-content" tabIndex={-1} aria-label="Main Workspace" className={cn(
+          // Content sits on a raised sheet beside the rail. Fit-viewport routes (Live, Maps) keep the
+          // radius and background but no margins so their viewport maths is unchanged.
+          "min-w-0 flex-1 px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] outline-none md:rounded-m3-2xl md:bg-surface md:px-8",
+          fitViewport ? "flex min-h-0 flex-col overflow-hidden pt-3 md:pb-3" : "pt-6 md:m-3 md:ml-0 md:pb-6",
+        )} data-shell-region="main-workspace">
           {children}
         </main>
+        {bottomNav}
       </div>
       </TopBarTargetContext.Provider>
     </SidebarTargetContext.Provider>

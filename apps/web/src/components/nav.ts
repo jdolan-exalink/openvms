@@ -4,7 +4,9 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import type { MessageKey } from "@/i18n";
+import type { Schemas } from "@/api/client";
 import type { FeatureFlags } from "@/lib/features";
+import { can } from "@/lib/perm";
 
 export type NavItem = {
   label: MessageKey;
@@ -68,3 +70,50 @@ export const settingsNavGroups: NavGroup[] = [
 ];
 
 export const brandIcon = ShieldCheck;
+
+/** Permission and rollout-flag filter shared by the rail, the bottom bar and the more sheet. */
+export function isNavItemVisible(item: NavItem, me: Schemas["Me"] | undefined, features: FeatureFlags): boolean {
+  return (!item.permission || can(me, item.permission)) && (!item.feature || !!features[item.feature]);
+}
+
+/** Settings sub-routes keep the single "Settings" destination active; /live only matches exactly. */
+export function isNavItemActive(item: NavItem, pathname: string): boolean {
+  if (item.to == null) return false;
+  if (pathname === item.to) return true;
+  if (item.to === "/settings") {
+    return settingsNavGroups.some((group) => group.items.some((sub) => sub.to && (pathname === sub.to || pathname.startsWith(`${sub.to}/`))));
+  }
+  return item.to !== "/live" && pathname.startsWith(`${item.to}/`);
+}
+
+const PREFERRED_PRIMARY = ["/live", "/maps", "/events", "/servers"];
+const MAX_PRIMARY = 4;
+
+/**
+ * Mobile destinations: up to four primary entries (preferred ones first, then the first other
+ * permitted operational ones) and every remaining permitted destination, settings area included,
+ * grouped for the "More" sheet.
+ */
+export function bottomNavModel(me: Schemas["Me"] | undefined, features: FeatureFlags): { primary: NavItem[]; more: NavGroup[] } {
+  const seen = new Set<string>();
+  const groups: NavGroup[] = [];
+  for (const group of [...navGroups, ...settingsNavGroups]) {
+    const items = group.items.filter((item) => {
+      if (!isNavItemVisible(item, me, features)) return false;
+      if (!item.to) return true;
+      if (seen.has(item.to)) return false;
+      seen.add(item.to);
+      return true;
+    });
+    if (items.length) groups.push({ title: group.title, items });
+  }
+  const linkable = groups.flatMap((group) => group.items).filter((item) => item.to);
+  const preferred = PREFERRED_PRIMARY.flatMap((to) => linkable.filter((item) => item.to === to));
+  // Fill only from the operational groups so Settings and its sub-pages stay behind "More".
+  const operational = linkable.filter((item) => navGroups.some((group) => group.items.includes(item)) && item.to !== "/settings");
+  const primary = [...preferred, ...operational.filter((item) => !preferred.includes(item))].slice(0, MAX_PRIMARY);
+  const more = groups
+    .map((group) => ({ title: group.title, items: group.items.filter((item) => !primary.includes(item)) }))
+    .filter((group) => group.items.length);
+  return { primary, more };
+}

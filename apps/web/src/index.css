@@ -173,11 +173,13 @@ html[data-live-fullscreen] [data-shell="openvms"] {
 html[data-live-fullscreen] [data-shell-region="primary-nav"],
 html[data-live-fullscreen] [data-shell-region="context-sidebar-frame"],
 html[data-live-fullscreen] [data-shell-region="page-header"],
-html[data-live-fullscreen] #mobile-nav-drawer {
+html[data-live-fullscreen] [data-shell-region="bottom-nav"],
+html[data-live-fullscreen] [data-shell-region="bottom-nav-sheet"] {
   display: none;
 }
 html[data-live-fullscreen] [data-shell-region="main-workspace"] {
   padding: 0.5rem;
+  border-radius: 0;
 }
 
 @keyframes soc-popup {
