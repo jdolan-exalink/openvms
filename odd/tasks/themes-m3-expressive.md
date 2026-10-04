@@ -32,7 +32,7 @@ Forecast: about 3500–5000 authored changed lines (23 routes, 11.4k lines). Ove
 - [x] T4 M3 primitives: Button (filled, tonal, outlined, text, icon), Chip, Card, Switch, StatusBadge pill, inputs, Modal/ConfirmDialog shapes, motion utilities.
 - [x] T5 App shell: navigation rail with pill indicator, mobile bottom navigation (4 primary + "More" sheet) below `md`, top app bar; drop the fixed mobile rail.
 - [x] T6 PWA: manifest with per-theme `theme-color`, maskable icons, service worker, install prompt (beforeinstallprompt + iOS hint), Caddy headers and CSP.
-- [ ] T7 Migrate operation screens (T7a done, T7b pending): Live, LiveExplorer, Playback, Events, Plates, Dashboard.
+- [x] T7 Migrate operation screens (T7a, T7b): Live, LiveExplorer, Playback, Events, Plates, Dashboard.
 - [ ] T8 Migrate maps surfaces: MapShell, panels, canvas palette per theme.
 - [ ] T9 Migrate inventory screens: Servers, Cameras, Sites, CameraGroups, FrigateCameraConfig, Exports.
 - [ ] T10 Migrate settings and auth: Users, Groups, Permissions, Rules, Channels, Alarms, Audit, Branding, Account, Notifications, Login.
@@ -78,5 +78,7 @@ Every migrated screen follows the same rules so the language is uniform:
 
 - T7a (delegated writer; trigger: 2+ non-trivial files). Live, LiveExplorer, LiveSidePanels, ContextMenu migrated (FontAwesome removed from LiveExplorer and ContextMenu; `MenuItem.icon` is `LucideIcon`). RED observed before the user's change: ContextMenu lucide test, Live aria-current tile test, shared-view cloud test (3/38). GREEN not run (user choice); typecheck clean (parent re-ran). Real-browser checks: selected tile outline vs corner morph, overlay pill contrast on Light `video`, pill sizes on small tiles, explorer panel vs bottom nav on phones. Phone grid keeps the chosen layout column count (changing it is a logic change, not done).
 
+- T7b (delegated writer; trigger: 2+ non-trivial files). Playback, Events, Plates, Dashboard, SearchSummary, PlateReadCard, PlateDetailModal migrated; Events filters are Chip groups; Plates exact match is a Switch (`Plates.test.tsx` queries updated, not run). Tests not run (user choice); typecheck clean (parent re-ran); hex scan empty. Real-browser checks: Events filter card height on lg, Playback video clipping with rounded HlsPlayer, event card checkbox and rings, 360px Plates/Playback, warn/bad pill contrast on Light. Primitive gaps for T11: small removable chip with 44px target, link-styled Button; `Empty`/`ErrorNote` still old style. Removable chips are 28px (below the 44px rule).
+
 ## Next step
-T7b, then T7b, T8, T9, T10, then the full verification.
+T8, T9, T10, then the full verification (vitest, typecheck, build). User authorized: if every check passes, start T11 right away.

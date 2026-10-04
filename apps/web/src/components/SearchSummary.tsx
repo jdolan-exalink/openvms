@@ -34,15 +34,15 @@ export function SearchSummary({
         <>
           <ul aria-label={t("common.appliedFilters")} className="flex flex-wrap gap-2">
             {chips.map((c) => (
-              <li key={c.key} className="inline-flex items-center gap-1 rounded-full border border-line bg-raised py-0.5 pl-2.5 pr-1 text-xs">
+              <li key={c.key} className="inline-flex items-center gap-1 rounded-full bg-secondary-container py-0.5 pl-3 pr-1 text-xs font-medium text-on-secondary-container">
                 <span>{c.label}</span>
-                <button type="button" onClick={c.onRemove} aria-label={t("common.removeFilter", { label: c.label })} className="rounded-full p-0.5 hover:bg-line focus-visible:outline-2 focus-visible:outline-accent">
+                <button type="button" onClick={c.onRemove} aria-label={t("common.removeFilter", { label: c.label })} className="inline-flex size-7 items-center justify-center rounded-full hover:bg-on-surface/10 focus-visible:outline-2 focus-visible:outline-primary">
                   <X className="size-3" aria-hidden />
                 </button>
               </li>
             ))}
           </ul>
-          <Button onClick={onClear} className="px-2 py-0.5 text-xs">
+          <Button variant="text" size="sm" onClick={onClear}>
             {t("common.clearFilters")}
           </Button>
         </>

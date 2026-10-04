@@ -27,18 +27,18 @@ export function PlateReadCard({
   const imageUrl = plateCropUrl(read.id);
   const body = (
     <>
-      {showPhoto && <img src={imageUrl} alt={t("plates.readingAlt", { plate: text })} className="h-20 w-full rounded-md bg-black object-contain" />}
+      {showPhoto && <img src={imageUrl} alt={t("plates.readingAlt", { plate: text })} className="h-20 w-full rounded-m3-md bg-video object-contain" />}
       <span className="flex items-center gap-2">
         <ArPlate plate={text} />
         <span className="min-w-0">
           <span className="block truncate text-[11px] font-medium text-ink">{read.camera_name}</span>
-          <span className="block text-[10px] text-muted">{fmtDateTime(read.seen_at)}</span>
+          <span className="block font-mono text-[10px] text-muted">{fmtDateTime(read.seen_at)}</span>
         </span>
       </span>
       <VehicleFacts labels={read.label ? [read.label] : []} vehicle={read.vehicle} serverName={read.server_name} />
     </>
   );
-  const frame = "flex w-full flex-col gap-1.5 rounded-xl border border-line bg-bg/40 p-2 text-left";
+  const frame = "flex w-full flex-col gap-1.5 rounded-m3-lg bg-surface-1 p-3 text-left";
   return (
     <li
       onMouseEnter={(event) => {
@@ -55,7 +55,7 @@ export function PlateReadCard({
             const rect = event.currentTarget.getBoundingClientRect();
             onClick({ left: rect.left, top: rect.top, width: rect.width, height: rect.height });
           }}
-          className={`${frame} hover:border-accent/40`}
+          className={`${frame} m3-press min-h-11 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-primary`}
         >
           {body}
         </button>
@@ -63,7 +63,7 @@ export function PlateReadCard({
         <div className={frame}>{body}</div>
       )}
       {showPhoto && preview && createPortal(
-        <div className="pointer-events-none fixed z-50 w-48 overflow-hidden rounded-lg border border-white/15 bg-black shadow-2xl" style={{ top: preview.top, left: preview.left }}>
+        <div className="pointer-events-none fixed z-50 w-48 overflow-hidden rounded-m3-md bg-video shadow-2xl" style={{ top: preview.top, left: preview.left }}>
           <img src={imageUrl} alt={t("plates.hoverAlt", { plate: text })} className="max-h-64 w-full object-contain" />
         </div>,
         document.body,
