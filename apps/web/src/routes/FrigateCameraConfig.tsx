@@ -13,7 +13,7 @@ import { LabelPicker } from "@/components/frigate/LabelPicker";
 import { SectionPanel } from "@/components/frigate/SectionPanel";
 import { Modal } from "@/components/Modal";
 import { ZoneEditorModal, type ZoneEditorValue } from "@/components/zones/ZoneEditorModal";
-import { Button, ErrorNote, Field, PageHeader, Select, TextInput } from "@/components/ui";
+import { Button, ErrorNote, Field, PageHeader, Select, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
   buildPatch, deepEqual, diffValues, formatValue, isLiveSection, type JSchema, kindOf, orderSections, parseVersion, pathLabel, resolve, schemaAt,
@@ -187,7 +187,7 @@ export function FrigateCameraConfig() {
       title={`Frigate · ${doc.data?.camera_name ?? t("common.camera")}`}
       description={version ? t("settings.cameraConfig", { version }) : undefined}
       actions={
-        <Link to="/cameras" className="inline-flex items-center gap-2 text-sm text-muted hover:text-ink">
+        <Link to="/cameras" className="m3-press inline-flex h-11 items-center gap-2 rounded-full px-4 text-sm font-bold text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary">
           <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
         </Link>
       }
@@ -207,7 +207,7 @@ export function FrigateCameraConfig() {
         <RestartBanner serverId={doc.data.server_id} canRestart={canRestart} onDone={() => setNeedsRestart(false)} />
       )}
       {readOnly && (
-        <p role="status" className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
+        <p role="status" className="rounded-m3-lg bg-warn/10 px-4 py-3 text-sm text-warn">
           {versionOk ? "Necesitas el permiso servers.config para editar esta configuración. Solo lectura." : "Esta versión de Frigate no permite editar desde OpenVMS (requiere 0.16 o superior)."}
         </p>
       )}
@@ -221,12 +221,12 @@ export function FrigateCameraConfig() {
 
       <CameraIdentity name={doc.data.camera_name} version={version} config={config} />
       <div className="flex flex-col gap-3">
-        <nav aria-label="Secciones de configuración" className="flex flex-wrap gap-1 rounded-xl bg-bg p-1">
+        <nav aria-label="Secciones de configuración" className="flex gap-1 overflow-x-auto rounded-m3-xl bg-surface-1 p-1.5">
           <button
             type="button"
             aria-current={activeSection === GENERAL ? "page" : undefined}
             onClick={() => setActive(GENERAL)}
-            className={cn("rounded-lg px-3 py-1.5 text-xs font-medium whitespace-nowrap", activeSection === GENERAL ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
+            className={cn("min-h-11 shrink-0 rounded-full px-4 text-xs font-bold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary", activeSection === GENERAL ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8")}
           >
             {t("common.general")}
           </button>
@@ -236,10 +236,10 @@ export function FrigateCameraConfig() {
               type="button"
               aria-current={activeSection === s ? "page" : undefined}
               onClick={() => setActive(s)}
-              className={cn("rounded-lg px-3 py-1.5 text-left text-xs font-medium whitespace-nowrap", activeSection === s ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
+              className={cn("min-h-11 shrink-0 rounded-full px-4 text-xs font-bold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary", "text-left", activeSection === s ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8")}
             >
               <span className="flex flex-col">
-                <span>{sectionLabel(s)}{dirty.includes(s) && <span aria-label="con cambios" className="ml-1 text-accent">●</span>}</span>
+                <span>{sectionLabel(s)}{dirty.includes(s) && <span aria-label="con cambios" className="ml-1 text-primary">●</span>}</span>
                 <LiveBadge live={isLiveSection(s, version)} />
               </span>
             </button>
@@ -248,13 +248,13 @@ export function FrigateCameraConfig() {
             type="button"
             aria-current={activeSection === HISTORY ? "page" : undefined}
             onClick={() => setActive(HISTORY)}
-            className={cn("rounded-lg px-3 py-1.5 text-left text-xs font-medium whitespace-nowrap", activeSection === HISTORY ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
+            className={cn("min-h-11 shrink-0 rounded-full px-4 text-xs font-bold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary", "text-left", activeSection === HISTORY ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8")}
           >
             Historial
           </button>
         </nav>
 
-        <section aria-label={activeSection === HISTORY ? "Historial" : activeSection === GENERAL ? t("common.general") : sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded border border-line bg-surface p-4">
+        <section aria-label={activeSection === HISTORY ? "Historial" : activeSection === GENERAL ? t("common.general") : sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded-m3-xl bg-surface-1 p-5">
           {activeSection === GENERAL ? (
             <CameraGeneral cameraId={cameraId} canManage={can(me.data, "cameras.manage")} />
           ) : activeSection === HISTORY ? (
@@ -280,13 +280,13 @@ export function FrigateCameraConfig() {
       </div>
 
       {!readOnly && (
-        <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-2 rounded border border-line bg-surface px-4 py-3">
+        <div className="sticky bottom-0 z-10 flex flex-wrap items-center justify-between gap-2 rounded-m3-xl bg-surface-3 px-5 py-3 shadow-md">
           <span role="status" className="text-sm text-muted">
             {dirty.length ? `${dirty.length} ${dirty.length === 1 ? "sección modificada" : "secciones modificadas"}` : "Sin cambios pendientes"}
             {errorCount > 0 && <span className="text-bad"> · {errorCount} {errorCount === 1 ? "error" : "errores"}</span>}
           </span>
           <div className="flex gap-2">
-            <Button disabled={!dirty.length} onClick={() => { setEdits({}); apply.reset(); }}>Descartar</Button>
+            <Button variant="text" disabled={!dirty.length} onClick={() => { setEdits({}); apply.reset(); }}>Descartar</Button>
             <Button variant="primary" disabled={!dirty.length || errorCount > 0} onClick={() => setReviewing(true)}>Revisar cambios</Button>
           </div>
         </div>
@@ -313,7 +313,7 @@ export function FrigateCameraConfig() {
           <DiffList sections={dirty} before={config} after={edits} version={version} />
           <ErrorNote error={apply.error} />
           <div className="flex justify-end gap-2">
-            <Button onClick={() => setReviewing(false)}>Volver</Button>
+            <Button variant="text" onClick={() => setReviewing(false)}>Volver</Button>
             <Button variant="primary" disabled={apply.isPending} onClick={() => apply.mutate()}>
               {apply.isPending ? "Aplicando…" : "Aplicar"}
             </Button>
@@ -331,20 +331,20 @@ function CameraIdentity({ name, version, config }: { name: string; version: stri
   const onvif = isRec(config.onvif) ? config.onvif : undefined;
   const host = typeof onvif?.host === "string" && onvif.host && !onvif.host.includes("*") ? onvif.host : undefined;
   return (
-    <div className="flex flex-col gap-3 border-b border-line pb-4">
+    <div className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-ink">{name}</h1>
+          <h1 className="text-[22px] font-bold tracking-tight text-ink">{name}</h1>
           <p className="text-sm text-muted">Frigate {version || "—"}</p>
         </div>
-        <Link to="/cameras" className="inline-flex items-center gap-2 text-sm text-muted hover:text-ink">
+        <Link to="/cameras" className="m3-press inline-flex h-11 items-center gap-2 rounded-full px-4 text-sm font-bold text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary">
           <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
         </Link>
       </div>
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
-        <div><dt className="text-muted">Versión</dt><dd className="font-mono">{version || "—"}</dd></div>
-        <div><dt className="text-muted">Resolución</dt><dd className="font-mono">{width && height ? `${width}×${height}` : "—"}</dd></div>
-        <div><dt className="text-muted">Host</dt><dd className="font-mono">{host ?? "—"}</dd></div>
+      <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+        <div className="rounded-m3-lg bg-surface-2 p-3"><dt className="text-muted">Versión</dt><dd className="font-mono">{version || "—"}</dd></div>
+        <div className="rounded-m3-lg bg-surface-2 p-3"><dt className="text-muted">Resolución</dt><dd className="font-mono">{width && height ? `${width}×${height}` : "—"}</dd></div>
+        <div className="col-span-2 rounded-m3-lg bg-surface-2 p-3 sm:col-span-1"><dt className="text-muted">Host</dt><dd className="font-mono">{host ?? "—"}</dd></div>
       </dl>
     </div>
   );
@@ -410,10 +410,7 @@ function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; c
       <Field label="Nombre">
         <TextInput value={name} onChange={(e) => setName(e.target.value)} aria-invalid={invalid} />
       </Field>
-      <label className="flex items-center gap-2 self-end pb-2 text-sm">
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        Habilitada
-      </label>
+      <Switch className="self-end" label="Habilitada" checked={enabled} onChange={setEnabled} />
       {invalid && <p role="alert" className="text-xs text-bad sm:col-span-2">El nombre no puede estar vacío.</p>}
       <Field label="Calidad en vivo por defecto" hint="Flujo que usa la cámara al añadirla a la grilla de Vivo.">
         <Select value={quality} onChange={(e) => setQuality(e.target.value as Schemas["Camera"]["default_live_quality"])}>
@@ -430,7 +427,7 @@ function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; c
       <Field label="Etiquetas" hint="Separadas por comas (máximo 20).">
         <TextInput value={tags} onChange={(e) => setTags(e.target.value)} />
       </Field>
-      <div className="flex items-center justify-end gap-2 sm:col-span-2">
+      <div className="flex flex-wrap items-center justify-end gap-2 sm:col-span-2">
         <ErrorNote error={save.error} />
         <Button type="submit" variant="primary" disabled={save.isPending}>{save.isPending ? "Guardando…" : "Guardar"}</Button>
       </div>
@@ -456,7 +453,7 @@ function DiffList({ sections, before, after, version }: { sections: string[]; be
             {sectionLabel(s)}
             <LiveBadge live={isLiveSection(s, version)} />
           </h3>
-          <ul className="flex flex-col gap-1 rounded border border-line p-2">
+          <ul className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-3">
             {diffValues(before[s], after[s], [s]).map((c) => (
               <li key={c.path.join(".")} className="break-words">
                 <span className="font-mono text-xs text-muted">{pathLabel(c.path)}</span>{" "}
@@ -488,7 +485,7 @@ function DiffValue({ value, className }: { value: unknown; className: string }) 
 
 function ResultList({ results }: { results: SectionResult[] }) {
   return (
-    <ul aria-label="Resultado de los cambios" className="flex flex-col gap-1 rounded border border-line bg-surface px-3 py-2 text-sm">
+    <ul aria-label="Resultado de los cambios" className="flex flex-col gap-1 rounded-m3-lg bg-surface-1 px-4 py-3 text-sm">
       {results.map((r) => (
         <li key={r.section} className="flex items-center gap-2">
           <Icon icon={r.requires_restart ? RefreshCw : CircleCheck} size="xs" className={r.requires_restart ? "text-warn" : "text-ok"} />
@@ -510,12 +507,12 @@ function RestartBanner({ serverId, canRestart, onDone }: { serverId: string; can
     },
   });
   return (
-    <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
+    <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-m3-xl bg-warn/10 px-5 py-3 text-sm">
       <span className="flex items-center gap-2 text-warn">
         <Icon icon={TriangleAlert} size="xs" /> Hay cambios que requieren reiniciar el servidor.
       </span>
       {canRestart ? (
-        <Button onClick={() => setConfirming(true)}>Reiniciar servidor</Button>
+        <Button size="sm" onClick={() => setConfirming(true)}>Reiniciar servidor</Button>
       ) : (
         <span className="text-xs text-muted">Pide a un administrador con permiso servers.restart que reinicie el servidor.</span>
       )}

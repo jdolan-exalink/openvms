@@ -10,6 +10,13 @@ import {
 } from "@/lib/zoneGeometry";
 import { type EditorItem, colorOf } from "./zoneDraft";
 
+/**
+ * Canvas overlay ink. These sit on top of the camera snapshot, not on a themed surface, so they
+ * stay theme-independent named colors: white handles with a black halo read on any frame.
+ */
+const CANVAS_INK = "white";
+const CANVAS_HALO = "black";
+
 const VERTEX_TOL = 12;
 const EDGE_TOL = 8;
 
@@ -153,7 +160,7 @@ export function ZoneCanvas({
   });
 
   return (
-    <div ref={hostRef} className="flex size-full items-center justify-center overflow-hidden bg-black/80">
+    <div ref={hostRef} className="flex size-full items-center justify-center overflow-hidden bg-video">
       <div className="relative" style={{ width: fitW, height: fitH }}>
         {failed && <p className="absolute inset-0 flex items-center justify-center text-sm text-muted">No se pudo cargar la imagen de la cámara.</p>}
         <img
@@ -210,12 +217,12 @@ export function ZoneCanvas({
                     strokeWidth={isSel ? 2.5 : 1.5}
                     strokeDasharray={i.kind === "zone" ? undefined : "6 4"}
                   />
-                  <text x={c.x} y={c.y} textAnchor="middle" fontSize="12" fill="#fff" stroke="#000" strokeWidth="3" paintOrder="stroke">
+                  <text x={c.x} y={c.y} textAnchor="middle" fontSize="12" fill="white" stroke="black" strokeWidth="3" paintOrder="stroke">
                     {i.name}
                   </text>
                   {isSel &&
                     i.points.map((p, k) => (
-                      <circle key={k} cx={p.x * fitW} cy={p.y * fitH} r={k === selectedVertex ? 7 : 5} fill={k === selectedVertex ? "#fff" : color} stroke="#000" strokeWidth="1.5" />
+                      <circle key={k} cx={p.x * fitW} cy={p.y * fitH} r={k === selectedVertex ? 7 : 5} fill={k === selectedVertex ? CANVAS_INK : color} stroke={CANVAS_HALO} strokeWidth="1.5" />
                     ))}
                 </g>
               );
@@ -230,7 +237,7 @@ export function ZoneCanvas({
                 strokeWidth={2}
               />
               {drawing.points.map((p, k) => (
-                <circle key={k} cx={p.x * fitW} cy={p.y * fitH} r={k === 0 ? 8 : 4} fill={k === 0 ? "#fff" : drawing.color} stroke="#000" strokeWidth="1.5" />
+                <circle key={k} cx={p.x * fitW} cy={p.y * fitH} r={k === 0 ? 8 : 4} fill={k === 0 ? CANVAS_INK : drawing.color} stroke={CANVAS_HALO} strokeWidth="1.5" />
               ))}
             </g>
           )}

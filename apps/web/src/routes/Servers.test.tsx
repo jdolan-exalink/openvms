@@ -117,7 +117,7 @@ describe("Servers", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Registrar servidor" }));
       fireEvent.click(screen.getByRole("button", { name: /Instalar Frigate en un host nuevo/ }));
       const form = screen.getByRole("form", { name: "Instalación de Frigate nuevo" });
-      expect(within(form).getByLabelText(/Permitir temporalmente grabaciones en el disco del sistema/i)).not.toBeChecked();
+      expect(within(form).getByRole("switch", { name: /Permitir temporalmente grabaciones en el disco del sistema/i })).not.toBeChecked();
       expect(within(form).getByLabelText("Host SSH")).toBeInTheDocument();
       expect(form).toHaveTextContent(/actualiza paquetes.*Docker.*Frigate/s);
       expect(form).toHaveTextContent(/Chrony\/NTP/);
@@ -162,7 +162,7 @@ describe("Servers", () => {
       fireEvent.click(await screen.findByRole("button", { name: "Registrar servidor" }));
       fireEvent.click(screen.getByRole("button", { name: /Instalar Frigate en un host nuevo/ }));
       const form = screen.getByRole("form", { name: "Instalación de Frigate nuevo" });
-      fireEvent.click(within(form).getByLabelText(/Permitir temporalmente grabaciones en el disco del sistema/i));
+      fireEvent.click(within(form).getByRole("switch", { name: /Permitir temporalmente grabaciones en el disco del sistema/i }));
       expect(screen.getByText(/Si \/mnt\/cctv no está montado/i)).toBeInTheDocument();
       fireEvent.change(within(form).getByLabelText("Sitio"), { target: { value: "s2" } });
       fireEvent.change(within(form).getByLabelText("Nombre visible del servidor"), { target: { value: "Exalink Frigate" } });

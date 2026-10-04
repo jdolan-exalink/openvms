@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download, Trash2 } from "lucide-react";
 import { api, unwrap } from "@/api/client";
 import { exportsQuery } from "@/api/queries";
-import { Button, Empty, ErrorNote, PageHeader, Table, Th } from "@/components/ui";
+import { Icon } from "@/components/Icon";
+import { Empty, ErrorNote, IconButton, PageHeader, Table, Th } from "@/components/ui";
 import { fmtDateTime } from "@/lib/format";
 
 const statusText: Record<string, string> = { pending: "En cola", running: "Generando", ready: "Lista", failed: "Falló" };
@@ -37,10 +38,10 @@ export function Exports() {
           </thead>
           <tbody>
             {exports.data.map((x) => (
-              <tr key={x.id} className="border-t border-line align-top">
+              <tr key={x.id} className="border-t border-outline-variant align-top">
                 <td className="font-medium">{x.name}</td>
                 <td>{x.camera_name}</td>
-                <td className="text-xs whitespace-nowrap">
+                <td className="font-mono text-xs whitespace-nowrap">
                   {fmtDateTime(x.start_time)}
                   <br />
                   {fmtDateTime(x.end_time)}
@@ -50,22 +51,22 @@ export function Exports() {
                   <div className="text-muted">{fmtDateTime(x.created_at)}</div>
                 </td>
                 <td className="text-sm">
-                  <span className={x.status === "ready" ? "text-ok" : x.status === "failed" ? "text-bad" : "text-warn"}>{statusText[x.status]}</span>
+                  <span className={`inline-flex h-6 items-center rounded-full bg-surface-2 px-2.5 text-xs font-medium ${x.status === "ready" ? "text-ok" : x.status === "failed" ? "text-bad" : "text-warn"}`}>{statusText[x.status]}</span>
                   {x.status === "running" && x.progress > 0 && <span className="ml-1 text-xs text-muted">{Math.round(x.progress)}%</span>}
                   {x.error && <div role="alert" className="max-w-56 text-xs text-bad">{x.error}</div>}
                 </td>
                 <td className="text-right whitespace-nowrap">
+                  <div className="inline-flex items-center gap-2">
                   {x.status === "ready" && (
                     <a
                       href={`/media/v1/exports/${x.id}/download`}
-                      className="mr-2 inline-flex items-center gap-1 rounded bg-accent px-2 py-1 text-xs font-medium text-bg hover:bg-accent/90"
+                      className="m3-press inline-flex h-9 items-center justify-center gap-2 rounded-full bg-primary px-4 text-sm font-bold text-on-primary hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                     >
-                      <Download className="size-3.5" aria-hidden /> Descargar
+                      <Icon icon={Download} size="xs" /> Descargar
                     </a>
                   )}
-                  <Button onClick={() => remove.mutate(x.id)} aria-label="Quitar de la lista" title="Quitar de la lista">
-                    <Trash2 className="size-3.5" aria-hidden />
-                  </Button>
+                  <IconButton icon={Trash2} onClick={() => remove.mutate(x.id)} aria-label="Quitar de la lista" title="Quitar de la lista" />
+                  </div>
                 </td>
               </tr>
             ))}

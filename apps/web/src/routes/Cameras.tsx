@@ -6,6 +6,7 @@ import { useState } from "react";
 import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { can } from "@/lib/perm";
+import { Icon } from "@/components/Icon";
 import { Empty, ErrorNote, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
 function summarize(cameras: { enabled: boolean; status: string }[]) {
   const online = cameras.filter((c) => c.enabled && c.status === "online").length;
@@ -32,7 +33,7 @@ export function Cameras() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader title={t("nav.cameras")} description={t("settings.camerasOnly")} />
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 rounded-m3-xl bg-surface-1 p-4 sm:grid-cols-3">
         <TextInput aria-label="Buscar cámara" placeholder="Buscar por nombre" value={filter.q ?? ""} onChange={(e) => update("q", e.target.value)} />
         <Select aria-label="Filtrar por sitio" value={filter.site_id ?? ""} onChange={(e) => update("site_id", e.target.value)}>
           <option value="">Todos los sitios</option>
@@ -70,11 +71,11 @@ export function Cameras() {
           </thead>
           <tbody>
             {cameras.data.map((c) => (
-              <tr key={c.id} className="border-t border-line align-top">
+              <tr key={c.id} className="border-t border-outline-variant align-top">
                 <td>
                   <div className="flex items-center gap-2 font-medium">
                     {c.display_name}
-                    {c.lpr && <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-[10px] text-muted">LPR</span>}
+                    {c.lpr && <span className="rounded-m3-sm bg-secondary-container px-1.5 py-0.5 font-mono text-[10px] text-on-secondary-container">LPR</span>}
                   </div>
                   {c.display_name !== c.remote_name && <div className="font-mono text-xs text-muted">{c.remote_name}</div>}
                   {c.missing_since && <div role="status" className="text-xs text-warn">Ya no aparece en Frigate</div>}
@@ -107,9 +108,9 @@ export function Cameras() {
                     params={{ cameraId: c.id }}
                     aria-label={`Configuración de ${c.display_name}`}
                     title={t("nav.settings")}
-                    className="inline-flex items-center justify-center rounded border border-line bg-surface px-3 py-1.5 text-sm hover:bg-raised"
+                    className="m3-press inline-flex size-11 items-center justify-center rounded-full bg-secondary-container text-on-secondary-container hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
                   >
-                    <Settings className="size-4" aria-hidden />
+                    <Icon icon={Settings} size="sm" />
                   </Link>
                 </td>
               </tr>

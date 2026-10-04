@@ -2,13 +2,15 @@ import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { classifyPolicyQuery, meQuery, serversQuery, sitesQuery, syncStatusQuery } from "@/api/queries";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Button, Empty, ErrorNote, Field, PageHeader, Select, StatusBadge, Summary, Switch, TextInput } from "@/components/ui";
+import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 
 export function Servers() {
@@ -39,7 +41,7 @@ export function Servers() {
         actions={
           can(me.data, "servers.manage") && !registering ? (
             <Button variant="primary" onClick={() => setRegistering(true)}>
-              <Plus className="size-4" aria-hidden /> Registrar servidor
+              <Icon icon={Plus} size="sm" /> Registrar servidor
             </Button>
           ) : null
         }
@@ -54,7 +56,7 @@ export function Servers() {
           <div className="flex flex-wrap items-center gap-3">
             <TextInput className="sm:w-72" aria-label="Buscar servidor" placeholder="Buscar por nombre o URL" value={q} onChange={(e) => setQ(e.target.value)} />
             {siteFilter && (
-              <Link to="/servers" className="text-xs text-accent hover:underline">
+              <Link to="/servers" className="text-xs font-bold text-primary hover:underline">
                 Quitar filtro de sitio
               </Link>
             )}
@@ -64,28 +66,21 @@ export function Servers() {
       )}
       {!!servers.data?.length && visible?.length === 0 && <Empty>Ningún servidor coincide con el filtro.</Empty>}
       {!!visible?.length && (
-        <Table label="Servidores">
-          <thead>
-            <tr>
-              <Th>Servidor</Th>
-              <Th>Sitio</Th>
-              <Th>Estado</Th>
-              <Th>Frigate</Th>
-              <Th className="text-right">Cámaras</Th>
-              <Th>Almacenamiento</Th>
-              <Th>Eventos</Th>
-              <Th>Clasificación</Th>
-              <Th />
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((s) => (
-              <tr key={s.id} className="border-t border-line align-top">
-                <td>
-                  <div className="font-medium">{s.name}</div>
+        <ul aria-label="Servidores" className="flex flex-col gap-3">
+          {visible.map((s) => (
+            <li key={s.id} className="flex flex-col gap-4 rounded-m3-xl bg-surface-1 p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-lg font-bold">{s.name}</div>
                   <div className="font-mono text-xs break-all text-muted">{s.base_url}</div>
-                </td>
-                <td>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <StatusBadge status={s.status} />
+                  {s.last_error && <div role="alert" className="max-w-56 text-xs break-words text-bad">{s.last_error}</div>}
+                </div>
+              </div>
+              <dl className="grid grid-cols-2 gap-3 text-sm md:grid-cols-4">
+                <Fact label="Sitio">
                   {siteName.has(s.site_id) ? (
                     <Link to="/servers" search={{ site_id: s.site_id }} className="hover:underline">
                       {siteName.get(s.site_id)}
@@ -93,57 +88,74 @@ export function Servers() {
                   ) : (
                     "—"
                   )}
-                </td>
-                <td>
-                  <StatusBadge status={s.status} />
-                  {s.last_error && <div role="alert" className="mt-1 max-w-56 text-xs break-words text-bad">{s.last_error}</div>}
-                </td>
-                <td className="font-mono text-xs whitespace-nowrap">
-                  <div>{s.frigate_version || "—"}</div>
-                  <AgentMonitor serverId={s.id} canUpdate={can(me.data, "servers.manage")} />
-                </td>
-                <td className="text-right tabular-nums">
-                  <Link to="/cameras" search={{ server_id: s.id }} className="hover:underline">
+                </Fact>
+                <Fact label="Cámaras">
+                  <Link to="/cameras" search={{ server_id: s.id }} className="tabular-nums hover:underline">
                     {s.camera_count}
                   </Link>
-                </td>
-                <td className="min-w-36">
+                </Fact>
+                <Fact label="Almacenamiento">
                   <StorageBar storage={s.storage} />
-                </td>
-                <td className="text-xs">
-                  <SyncCell status={syncOf.get(s.id)} />
-                </td>
-                <td>
+                </Fact>
+                <Fact label="Eventos">
+                  <span className="text-xs">
+                    <SyncCell status={syncOf.get(s.id)} />
+                  </span>
+                </Fact>
+                <Fact label="Frigate" className="col-span-2 md:col-span-2">
+                  <div className="font-mono text-xs whitespace-nowrap">
+                    <div>{s.frigate_version || "—"}</div>
+                    <AgentMonitor serverId={s.id} canUpdate={can(me.data, "servers.manage")} />
+                  </div>
+                </Fact>
+                <Fact label="Clasificación" className="col-span-2 md:col-span-2">
                   <BodyClassifySwitch
                     scope="server"
                     id={s.id}
                     enabled={serverOn.get(s.id) ?? true}
                     disabled={!can(me.data, "servers.manage")}
                   />
-                </td>
-                <td className="text-right">
-                  <div className="flex flex-wrap items-start justify-end gap-2">
-                    {can(me.data, "servers.restart") && <RestartButton server={s} />}
-                    {can(me.data, "servers.manage") && <SyncButton server={s} />}
-                    {can(me.data, "servers.manage") && (
-                      <>
-                        <Button className="text-xs px-2 py-1" onClick={() => setEditing(s)} title="Editar servidor">
-                          <Pencil className="size-3.5" aria-hidden />
-                          Editar
-                        </Button>
-                        <Button className="text-xs px-2 py-1 text-bad" onClick={() => setDeleting(s)} title="Eliminar servidor">
-                          <Trash2 className="size-3.5" aria-hidden />
-                          Eliminar
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
+                </Fact>
+              </dl>
+              <div className="flex flex-wrap items-start justify-end gap-2">
+                {can(me.data, "servers.restart") && <RestartButton server={s} />}
+                {can(me.data, "servers.manage") && <SyncButton server={s} />}
+                {can(me.data, "servers.manage") && (
+                  <>
+                    <Button size="sm" onClick={() => setEditing(s)} title="Editar servidor">
+                      <Icon icon={Pencil} size="xs" />
+                      Editar
+                    </Button>
+                    <Button size="sm" variant="outlined" className="text-bad" onClick={() => setDeleting(s)} title="Eliminar servidor">
+                      <Icon icon={Trash2} size="xs" />
+                      Eliminar
+                    </Button>
+                  </>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
       )}
+    </div>
+  );
+}
+
+function Fact({ label, className, children }: { label: string; className?: string; children: ReactNode }) {
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-1 rounded-m3-lg bg-surface-2 p-3", className)}>
+      <dt className="font-mono text-[11px] tracking-wider text-muted uppercase">{label}</dt>
+      <dd>{children}</dd>
+    </div>
+  );
+}
+
+/** Compact decorative meter: the number next to it carries the information. Role color rises with load. */
+function Meter({ percent }: { percent: number }) {
+  const pct = Math.max(0, Math.min(100, percent));
+  return (
+    <div aria-hidden className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+      <div className={cn("h-full rounded-full", pct > 90 ? "bg-bad" : pct > 70 ? "bg-warn" : "bg-ok")} style={{ width: `${pct}%` }} />
     </div>
   );
 }
@@ -169,11 +181,21 @@ function AgentMonitor({ serverId, canUpdate }: { serverId: string; canUpdate: bo
     <div className="mt-2 flex min-w-48 flex-col gap-1 whitespace-normal text-xs">
       <span className="font-sans font-medium">{t("servers.agent")}: {metrics.installed ? metrics.version || "—" : t("servers.agentMissing")}</span>
       {metrics.installed && <span className="font-sans text-muted">{t("servers.agentVersion", { version: metrics.version || "—", current: metrics.current_version })}</span>}
-      {metrics.cpu_percent != null && <span className="font-sans">{t("servers.agentCpu", { percent: metrics.cpu_percent })}</span>}
-      {metrics.memory_total_bytes != null && <span className="font-sans text-muted">{t("servers.agentMemory", { available: memory(metrics.memory_available_bytes), total: memory(metrics.memory_total_bytes) })}</span>}
+      {metrics.cpu_percent != null && (
+        <>
+          <span className="font-sans">{t("servers.agentCpu", { percent: metrics.cpu_percent })}</span>
+          <Meter percent={metrics.cpu_percent} />
+        </>
+      )}
+      {metrics.memory_total_bytes != null && (
+        <>
+          <span className="font-sans text-muted">{t("servers.agentMemory", { available: memory(metrics.memory_available_bytes), total: memory(metrics.memory_total_bytes) })}</span>
+          {metrics.memory_available_bytes != null && metrics.memory_total_bytes > 0 && <Meter percent={((metrics.memory_total_bytes - metrics.memory_available_bytes) / metrics.memory_total_bytes) * 100} />}
+        </>
+      )}
       {metrics.error && <span role="alert" className="font-sans text-bad">{t("servers.agentError", { error: metrics.error })}</span>}
-      {canUpdate && metrics.installed && metrics.outdated && <Button className="self-start text-xs px-2 py-1" disabled={update.isPending} onClick={() => update.mutate()}>{update.isPending ? t("servers.agentUpdating") : t("servers.agentUpdate")}</Button>}
-      {update.isSuccess && <span role="status" className="font-sans text-good">{t("servers.agentUpdated")}</span>}
+      {canUpdate && metrics.installed && metrics.outdated && <Button size="sm" variant="tonal" className="self-start" disabled={update.isPending} onClick={() => update.mutate()}>{update.isPending ? t("servers.agentUpdating") : t("servers.agentUpdate")}</Button>}
+      {update.isSuccess && <span role="status" className="font-sans text-ok">{t("servers.agentUpdated")}</span>}
       <ErrorNote error={update.error} />
     </div>
   );
@@ -279,14 +301,11 @@ function EditServerModal({ server, sites, onDone }: { server: Schemas["Server"];
               </Field>
             </>
           )}
-          <label className="flex items-center gap-2 self-center text-sm">
-            <input type="checkbox" checked={form.tls_skip_verify} onChange={(e) => setForm({ ...form, tls_skip_verify: e.target.checked })} />
-            Aceptar certificado autofirmado
-          </label>
+          <Switch className="self-center" label="Aceptar certificado autofirmado" checked={form.tls_skip_verify} onChange={(next) => setForm({ ...form, tls_skip_verify: next })} />
         </div>
         <ErrorNote error={save.error} />
         <div className="flex justify-end gap-2">
-          <Button onClick={onDone}>Cancelar</Button>
+          <Button variant="text" onClick={onDone}>Cancelar</Button>
           <Button type="submit" variant="primary" disabled={save.isPending}>
             {save.isPending ? "Guardando…" : "Guardar"}
           </Button>
@@ -311,8 +330,8 @@ function StorageBar({ storage }: { storage?: Schemas["ServerStorage"] }) {
   const pct = Math.round((storage.used_mb / storage.total_mb) * 100);
   return (
     <div className="flex flex-col gap-1" title={`${pct}% usado`}>
-      <div className="h-1.5 overflow-hidden rounded bg-raised">
-        <div className={pct > 90 ? "h-full bg-warn" : "h-full bg-accent"} style={{ width: `${pct}%` }} />
+      <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
+        <div className={pct > 90 ? "h-full rounded-full bg-warn" : "h-full rounded-full bg-primary"} style={{ width: `${pct}%` }} />
       </div>
       <span className="font-mono text-[11px] text-muted tabular-nums">
         {(storage.used_mb / 1024).toFixed(0)} / {(storage.total_mb / 1024).toFixed(0)} GB
@@ -338,13 +357,15 @@ function RestartButton({ server }: { server: Schemas["Server"] }) {
       <div className="flex items-center gap-1.5 justify-end">
         <span className="text-xs text-muted">¿Reiniciar?</span>
         <Button
-          className="text-bad border-bad/40 hover:bg-bad/10 text-xs px-2 py-1"
+          size="sm"
+          variant="outlined"
+          className="text-bad"
           disabled={restart.isPending}
           onClick={() => restart.mutate()}
         >
           {restart.isPending ? "Reiniciando…" : "Sí, reiniciar"}
         </Button>
-        <Button className="text-xs px-2 py-1" onClick={() => setConfirming(false)}>
+        <Button size="sm" variant="text" onClick={() => setConfirming(false)}>
           Cancelar
         </Button>
       </div>
@@ -354,15 +375,15 @@ function RestartButton({ server }: { server: Schemas["Server"] }) {
   return (
     <div className="flex flex-col items-end gap-1">
       <Button
-        className="text-xs px-2 py-1"
+        size="sm"
         disabled={restart.isPending}
         onClick={() => setConfirming(true)}
         title="Reiniciar servicio Frigate"
       >
-        <RotateCcw className={restart.isPending ? "size-3.5 animate-spin" : "size-3.5"} aria-hidden />
+        <Icon icon={RotateCcw} size="xs" className={restart.isPending ? "animate-spin" : undefined} />
         Reiniciar
       </Button>
-      {restart.isSuccess && <span className="text-xs text-accent">Reinicio solicitado</span>}
+      {restart.isSuccess && <span className="text-xs text-ok">Reinicio solicitado</span>}
       {restart.error && <span role="alert" className="text-xs text-bad">{restart.error.message}</span>}
     </div>
   );
@@ -378,8 +399,8 @@ function SyncButton({ server }: { server: Schemas["Server"] }) {
   const r = sync.data;
   return (
     <div className="flex flex-col items-end gap-1">
-      <Button onClick={() => sync.mutate()} disabled={sync.isPending} title="Volver a leer las cámaras de Frigate">
-        <RefreshCw className={sync.isPending ? "size-4 animate-spin" : "size-4"} aria-hidden />
+      <Button size="sm" onClick={() => sync.mutate()} disabled={sync.isPending} title="Volver a leer las cámaras de Frigate">
+        <Icon icon={RefreshCw} size="xs" className={sync.isPending ? "animate-spin" : undefined} />
         Sincronizar
       </Button>
       {r && (
@@ -406,23 +427,23 @@ const capLabels: [keyof Schemas["Capabilities"], string][] = [
 function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existing") => void; onCancel: () => void }) {
   const t = useT();
   return (
-    <section aria-label="Tipo de servidor" className="flex flex-col gap-4 rounded border border-line bg-surface p-4">
+    <section aria-label="Tipo de servidor" className="flex flex-col gap-4">
       <div>
         <h2 className="text-base font-semibold">¿Qué servidor vas a agregar?</h2>
         <p className="mt-1 text-sm text-muted">Elegí si vas a instalar un servidor nuevo o importar una instalación Frigate que ya existe.</p>
       </div>
       <div className="grid gap-3 md:grid-cols-2">
-        <button type="button" onClick={() => onPick("new")} className="rounded border border-line bg-bg p-4 text-left hover:border-accent hover:bg-raised">
-          <span className="block font-medium">{t("servers.freshFrigateTitle")}</span>
+        <button type="button" onClick={() => onPick("new")} className="m3-press min-h-11 rounded-m3-lg bg-surface-2 p-4 text-left hover:bg-surface-3 focus-visible:outline-2 focus-visible:outline-primary">
+          <span className="block font-bold">{t("servers.freshFrigateTitle")}</span>
           <span className="mt-1 block text-sm text-muted">{t("servers.freshFrigateDescription")}</span>
         </button>
-        <button type="button" onClick={() => onPick("existing")} className="rounded border border-line bg-bg p-4 text-left hover:border-accent hover:bg-raised">
-          <span className="block font-medium">{t("servers.existingFrigateTitle")}</span>
+        <button type="button" onClick={() => onPick("existing")} className="m3-press min-h-11 rounded-m3-lg bg-surface-2 p-4 text-left hover:bg-surface-3 focus-visible:outline-2 focus-visible:outline-primary">
+          <span className="block font-bold">{t("servers.existingFrigateTitle")}</span>
           <span className="mt-1 block text-sm text-muted">{t("servers.existingFrigateDescription")}</span>
         </button>
       </div>
       <div>
-        <Button onClick={onCancel}>Cancelar</Button>
+        <Button variant="text" onClick={onCancel}>Cancelar</Button>
       </div>
     </section>
   );
@@ -461,22 +482,30 @@ function NewFrigateHost({ sites, onBack, onDone }: { sites: Schemas["Site"][]; o
       ntp: "stepNtp", agent: "stepAgent", register: "stepRegister",
     };
     return (
-      <section className="flex flex-col gap-3 rounded border border-line bg-surface p-4" aria-label="Progreso de instalación de Frigate">
-        <h2 className="text-base font-semibold">{t("servers.installRunning", { site: selectedSite })}</h2>
-        {snapshot?.warning?.includes("system_disk") && <p role="alert" className="rounded border border-warning p-3 text-sm font-semibold text-warning">{t("servers.systemDiskWarning")}</p>}
-        {snapshot?.warning?.includes("cpu") && <p role="alert" className="rounded bg-warning/10 p-3 text-sm text-warning">{t("servers.cpuWarning")}</p>}
-        <ol className="space-y-2" aria-live="polite">
+      <section className="flex flex-col gap-4" aria-label="Progreso de instalación de Frigate">
+        <h2 className="text-lg font-bold">{t("servers.installRunning", { site: selectedSite })}</h2>
+        {snapshot?.warning?.includes("system_disk") && <p role="alert" className="rounded-m3-lg bg-warn/15 p-3 text-sm font-semibold text-warn">{t("servers.systemDiskWarning")}</p>}
+        {snapshot?.warning?.includes("cpu") && <p role="alert" className="rounded-m3-lg bg-warn/10 p-3 text-sm text-warn">{t("servers.cpuWarning")}</p>}
+        <div aria-hidden className="flex gap-1">
           {snapshot?.steps.map((step) => (
-            <li key={step.id} className="flex items-center justify-between gap-3 text-sm">
+            <span
+              key={step.id}
+              className={cn("h-2 flex-1 rounded-full", step.state === "done" ? "bg-primary" : step.state === "running" ? "animate-pulse bg-primary-container" : step.state === "error" ? "bg-bad" : "bg-surface-3")}
+            />
+          ))}
+        </div>
+        <ol className="flex flex-col gap-1" aria-live="polite">
+          {snapshot?.steps.map((step) => (
+            <li key={step.id} className="flex min-h-9 items-center justify-between gap-3 rounded-m3-md bg-surface-2 px-3 text-sm">
               <span>{t((`servers.${stepKeys[step.id] ?? "stepConnecting"}`) as Parameters<typeof t>[0])}</span>
-              <span className="text-muted">{step.state === "running" ? "…" : step.state === "done" ? "✓" : step.state}</span>
+              <span className={cn("font-mono text-xs", step.state === "done" ? "text-ok" : step.state === "error" ? "text-bad" : "text-muted")}>{step.state === "running" ? "…" : step.state === "done" ? "✓" : step.state}</span>
             </li>
           ))}
         </ol>
         {snapshot?.status === "failed" && <p role="alert" className="text-sm text-bad">{t("servers.installFailed", { error: snapshot.error ?? "unknown error" })}</p>}
-        {snapshot?.status === "succeeded" && <p role="status" className="text-sm text-good">{t("servers.installComplete")}</p>}
+        {snapshot?.status === "succeeded" && <p role="status" className="text-sm text-ok">{t("servers.installComplete")}</p>}
         {progress.error && <ErrorNote error={progress.error} />}
-        <Button onClick={onDone}>{snapshot?.status === "running" ? "Cerrar" : "Listo"}</Button>
+        <Button className="self-start" onClick={onDone}>{snapshot?.status === "running" ? "Cerrar" : "Listo"}</Button>
       </section>
     );
   }
@@ -489,23 +518,22 @@ function NewFrigateHost({ sites, onBack, onDone }: { sites: Schemas["Site"][]; o
         setForm((current) => ({ ...current, password: "" }));
         start.mutate();
       }}
-      className="flex flex-col gap-4 rounded border border-line bg-surface p-4"
+      className="flex flex-col gap-4"
       aria-label="Instalación de Frigate nuevo"
     >
       <div>
-        <h2 className="text-base font-semibold">{t("servers.newInstallHeading")}</h2>
+        <h2 className="text-lg font-bold">{t("servers.newInstallHeading")}</h2>
         <p className="mt-1 text-sm text-muted">{t("servers.newInstallEffects")}</p>
         <p className="mt-1 text-sm text-muted">{t("servers.newInstallRequirements")}</p>
         <p className="mt-1 text-sm text-muted">{t("servers.newInstallNetwork")}</p>
-        <label className="flex items-start gap-2 rounded border border-warning p-3 text-sm">
-          <input type="checkbox" checked={allowSystemDisk} onChange={(event) => setAllowSystemDisk(event.target.checked)} />
-          <span>{t("servers.allowSystemDiskLabel")}</span>
-        </label>
-        {allowSystemDisk && <p role="alert" className="rounded border-2 border-warning bg-warning/10 p-3 text-sm font-semibold text-warning">{t("servers.systemDiskWarning")}</p>}
+        <div className="mt-3 rounded-m3-lg bg-warn/10 p-3 text-sm">
+          <Switch label={t("servers.allowSystemDiskLabel")} checked={allowSystemDisk} onChange={setAllowSystemDisk} />
+        </div>
+        {allowSystemDisk && <p role="alert" className="mt-2 rounded-m3-lg bg-warn/15 p-3 text-sm font-semibold text-warn">{t("servers.systemDiskWarning")}</p>}
       </div>
       <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded border border-line bg-bg p-3 text-sm">
-          <p className="font-medium">{t("servers.sshTrustWarning")}</p>
+        <div className="rounded-m3-lg bg-surface-2 p-4 text-sm">
+          <p className="font-bold">{t("servers.sshTrustWarning")}</p>
           <ol className="mt-2 list-decimal space-y-1 pl-4 text-muted">
             <li>{t("servers.sshTrustInitialStep")}</li>
             <li>Comprobar que sea Debian/Ubuntu amd64 y que no tenga Frigate previo</li>
@@ -537,12 +565,12 @@ function NewFrigateHost({ sites, onBack, onDone }: { sites: Schemas["Site"][]; o
           <TextInput required type="password" value={form.password} onChange={set("password")} autoComplete="new-password" />
         </Field>
       </div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary" disabled={start.isPending || !form.site_id || !form.server_name.trim() || !form.host || !form.username || !form.password}>
           {t("servers.startInstall")}
         </Button>
-        <Button onClick={onBack}>Volver</Button>
-        <Button onClick={onDone}>Cancelar</Button>
+        <Button variant="outlined" onClick={onBack}>Volver</Button>
+        <Button variant="text" onClick={onDone}>Cancelar</Button>
       </div>
       <ErrorNote error={start.error} />
     </form>
@@ -554,9 +582,17 @@ function NewFrigateHost({ sites, onBack, onDone }: { sites: Schemas["Site"][]; o
 // agent path and does not use this probe.
 function RegisterServer({ sites, onDone }: { sites: Schemas["Site"][]; onDone: () => void }) {
   const [kind, setKind] = useState<"new" | "existing" | null>(null);
-  if (kind === null) return <ServerKindPicker onPick={setKind} onCancel={onDone} />;
-  if (kind === "existing") return <NewFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} />;
-  return <NewFrigateHost sites={sites} onBack={() => setKind(null)} onDone={onDone} />;
+  return (
+    <Modal title="Registrar servidor" onClose={onDone}>
+      {kind === null ? (
+        <ServerKindPicker onPick={setKind} onCancel={onDone} />
+      ) : kind === "existing" ? (
+        <NewFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} />
+      ) : (
+        <NewFrigateHost sites={sites} onBack={() => setKind(null)} onDone={onDone} />
+      )}
+    </Modal>
+  );
 }
 
 function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void }) {
@@ -607,9 +643,9 @@ function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][];
   };
 
   return (
-    <form onSubmit={submit} aria-label="Importar servidor Frigate existente" className="flex flex-col gap-4 rounded border border-line bg-surface p-4">
+    <form onSubmit={submit} aria-label="Importar servidor Frigate existente" className="flex flex-col gap-4">
       <div>
-        <h2 className="text-base font-semibold">{t("servers.existingImportHeading")}</h2>
+        <h2 className="text-lg font-bold">{t("servers.existingImportHeading")}</h2>
         <p className="mt-1 text-sm text-muted">{t("servers.existingImportDescription")}</p>
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -646,17 +682,15 @@ function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][];
         >
           <TextInput required type="url" value={form.base_url} onChange={edit("base_url")} placeholder={creds ? "https://10.20.0.11:8971" : "http://10.20.0.11:5000"} />
         </Field>
-        <label className="flex items-center gap-2 self-center text-sm">
-          <input
-            type="checkbox"
-            checked={form.tls_skip_verify}
-            onChange={(e) => {
-              probe.reset();
-              setForm({ ...form, tls_skip_verify: e.target.checked });
-            }}
-          />
-          Aceptar certificado autofirmado
-        </label>
+        <Switch
+          className="self-center"
+          label="Aceptar certificado autofirmado"
+          checked={form.tls_skip_verify}
+          onChange={(next) => {
+            probe.reset();
+            setForm({ ...form, tls_skip_verify: next });
+          }}
+        />
         {creds && (
           <>
             <Field label="Usuario de Frigate">
@@ -670,7 +704,7 @@ function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][];
       </div>
 
       {probe.data && (
-        <section aria-label="Resultado de la prueba" className="flex flex-col gap-2 rounded border border-ok/40 bg-ok/5 p-3 text-sm">
+        <section aria-label="Resultado de la prueba" className="flex flex-col gap-2 rounded-m3-lg bg-surface-2 p-4 text-sm">
           <p>
             Conectado a Frigate <span className="font-mono">{probe.data.frigate_version}</span> (adaptador{" "}
             <span className="font-mono">{probe.data.adapter}</span>), {probe.data.cameras.length} cámaras.
@@ -679,26 +713,23 @@ function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][];
             {capLabels
               .filter(([k]) => probe.data.capabilities[k])
               .map(([, label]) => (
-                <li key={label} className="rounded bg-raised px-2 py-0.5 text-xs">
+                <li key={label} className="rounded-full bg-secondary-container px-2.5 py-0.5 text-xs text-on-secondary-container">
                   {label}
                 </li>
               ))}
           </ul>
           <p className="font-mono text-xs text-muted">{probe.data.cameras.map((c) => c.remote_name).join(" · ")}</p>
-          <label className="flex items-center gap-2">
-            <input type="checkbox" checked={importCameras} onChange={(e) => setImportCameras(e.target.checked)} />
-            Importar las cámaras
-          </label>
+          <Switch label="Importar las cámaras" checked={importCameras} onChange={setImportCameras} />
         </section>
       )}
 
       <ErrorNote error={probe.error ?? create.error} />
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button type="submit" variant="primary" disabled={probe.isPending || create.isPending}>
           {probe.data ? (create.isPending ? "Registrando…" : "Registrar servidor") : probe.isPending ? "Probando…" : "Probar conexión"}
         </Button>
-        <Button onClick={onBack}>Volver</Button>
-        <Button onClick={onDone}>Cancelar</Button>
+        <Button variant="outlined" onClick={onBack}>Volver</Button>
+        <Button variant="text" onClick={onDone}>Cancelar</Button>
       </div>
     </form>
   );

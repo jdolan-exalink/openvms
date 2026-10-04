@@ -7,6 +7,7 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import { meQuery, serversQuery, sitesQuery, tenantsQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
+import { Icon } from "@/components/Icon";
 import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
@@ -50,7 +51,7 @@ export function Sites() {
         actions={
           manage && !creating ? (
             <Button variant="primary" onClick={() => setCreating(true)}>
-              <Plus className="size-4" aria-hidden /> {t("common.newSite")}
+              <Icon icon={Plus} size="sm" /> {t("common.newSite")}
             </Button>
           ) : null
         }
@@ -81,12 +82,12 @@ export function Sites() {
           </thead>
           <tbody>
             {visible.map((s) => (
-              <tr key={s.id} className="border-t border-line first:border-t-0">
+              <tr key={s.id} className="border-t border-outline-variant first:border-t-0">
                 <td>
                   <div className="flex items-center gap-2 font-medium">
                     {s.name}
                     {defaults.has(s.id) && (
-                      <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent">{t("common.default")}</span>
+                      <span className="rounded-full bg-primary-container px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-on-primary-container">{t("common.default")}</span>
                     )}
                   </div>
                   {s.address && <div className="text-xs text-muted">{s.address}</div>}
@@ -104,7 +105,7 @@ export function Sites() {
                 </td>
                 {manage && (
                   <td className="text-right">
-                    <Button aria-label={`${t("common.editSite")} ${s.name}`} onClick={() => setEditingId(s.id)}>
+                    <Button size="sm" aria-label={`${t("common.editSite")} ${s.name}`} onClick={() => setEditingId(s.id)}>
                       {t("common.editSite")}
                     </Button>
                   </td>
@@ -206,8 +207,8 @@ function SiteEditor({
           <h3 className="text-sm font-medium">Servidores</h3>
           {mine.length === 0 && <p className="text-sm text-muted">Este sitio no tiene servidores.</p>}
           {mine.map((server) => (
-            <div key={server.id} className="grid items-center gap-2 sm:grid-cols-[1fr_1fr]">
-              <span className="text-sm">{server.name}</span>
+            <div key={server.id} className="grid items-center gap-2 rounded-m3-lg bg-surface-2 p-3 sm:grid-cols-[1fr_1fr]">
+              <span className="text-sm font-medium">{server.name}</span>
               <Select
                 aria-label={`Sitio de ${server.name}`}
                 disabled={!canMoveServers || others.length === 0}
@@ -228,6 +229,7 @@ function SiteEditor({
         <ErrorNote error={save.error} />
         <div className="flex flex-wrap items-center justify-between gap-2">
           <Button
+            variant="outlined"
             className="text-bad"
             disabled={blocked}
             title={isLast ? "Siempre tiene que quedar al menos un sitio" : site.server_count > 0 || pendingMove ? "Mové los servidores a otro sitio y guardá antes de eliminarlo" : undefined}
@@ -236,7 +238,7 @@ function SiteEditor({
             {t("common.deleteSite")}
           </Button>
           <div className="flex gap-2">
-            <Button onClick={onClose}>Cancelar</Button>
+            <Button variant="text" onClick={onClose}>Cancelar</Button>
             <Button type="submit" variant="primary" disabled={save.isPending || !name.trim()}>
               Guardar
             </Button>
@@ -285,7 +287,7 @@ function CreateSite({ onDone, platform }: { onDone: () => void; platform: boolea
   }
 
   return (
-    <form onSubmit={submit} className="grid gap-4 rounded border border-line bg-surface p-4 sm:grid-cols-2">
+    <form onSubmit={submit} className="grid gap-4 rounded-m3-xl bg-surface-1 p-5 sm:grid-cols-2">
       {platform && (
         <Field label="Tenant">
           <Select required value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
@@ -313,7 +315,7 @@ function CreateSite({ onDone, platform }: { onDone: () => void; platform: boolea
           <Button type="submit" variant="primary" disabled={create.isPending}>
             {t("common.newSite")}
           </Button>
-          <Button onClick={onDone}>Cancelar</Button>
+          <Button variant="text" onClick={onDone}>Cancelar</Button>
         </div>
       </div>
     </form>

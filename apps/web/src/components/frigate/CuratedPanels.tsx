@@ -3,7 +3,7 @@ import { Icon } from "../Icon";
 import type { ReactNode } from "react";
 import { LabelPicker } from "@/components/frigate/LabelPicker";
 import type { FormCtx } from "@/components/frigate/SchemaForm";
-import { Button, Select, TextInput } from "@/components/ui";
+import { Button, Select, Switch as UiSwitch, TextInput } from "@/components/ui";
 import { getIn, type JSchema, resolve, schemaAt, setIn } from "@/lib/frigateSchema";
 import { labelDisplay } from "@/lib/labelEmoji";
 
@@ -39,10 +39,7 @@ function Switch({ ed, path, label, hint }: { ed: Ed; path: Path; label: string; 
   const def = ed.meta(path)?.default;
   return (
     <div className="flex flex-col gap-1 text-sm">
-      <label className="flex items-center gap-2">
-        <input type="checkbox" role="switch" disabled={ed.ctx.readOnly} checked={(ed.get(path) ?? def) === true} onChange={(e) => ed.set(path, e.target.checked)} />
-        <span className="font-medium">{label}</span>
-      </label>
+      <UiSwitch label={label} disabled={ed.ctx.readOnly} checked={(ed.get(path) ?? def) === true} onChange={(next) => ed.set(path, next)} />
       {hint && <span className="text-xs text-muted">{hint}</span>}
     </div>
   );
@@ -101,7 +98,7 @@ const retainModes = [
 function Group({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-3">
-      <h3 className="text-sm font-semibold">{title}</h3>
+      <h3 className="text-base font-bold">{title}</h3>
       {children}
     </div>
   );
@@ -130,12 +127,12 @@ function Ffmpeg({ ed }: { ed: Ed }) {
           </p>
         )}
         {inputs.map((inp, i) => (
-          <div key={i} className="flex flex-col gap-2 rounded border border-line p-3">
+          <div key={i} className="flex flex-col gap-2 rounded-m3-lg bg-surface-2 p-4">
             <div className="flex items-end gap-2">
               <label className="flex flex-1 flex-col gap-1 text-sm">
                 <span className="font-medium">Ruta del stream {i + 1}</span>
                 {locked ? (
-                  <span title="Requiere permiso de credenciales" className="inline-flex items-center gap-2 rounded border border-line bg-raised px-3 py-1.5 text-muted">
+                  <span title="Requiere permiso de credenciales" className="inline-flex min-h-12 items-center gap-2 rounded-m3-md bg-surface-3 px-3 text-muted">
                     <Icon icon={Lock} size="xs" /> ••••••••
                   </span>
                 ) : (
@@ -143,7 +140,7 @@ function Ffmpeg({ ed }: { ed: Ed }) {
                 )}
               </label>
               {editable && inputs.length > 1 && (
-                <Button aria-label={`Quitar stream ${i + 1}`} onClick={() => setInputs(inputs.filter((_, j) => j !== i))}>
+                <Button variant="outlined" aria-label={`Quitar stream ${i + 1}`} onClick={() => setInputs(inputs.filter((_, j) => j !== i))}>
                   <Icon icon={Trash2} size="xs" />
                 </Button>
               )}
@@ -151,9 +148,10 @@ function Ffmpeg({ ed }: { ed: Ed }) {
             <fieldset className="flex flex-wrap gap-4 text-sm">
               <legend className="sr-only">Roles del stream {i + 1}</legend>
               {ROLES.map((r) => (
-                <label key={r.id} className="flex items-center gap-1.5">
+                <label key={r.id} className="flex min-h-11 items-center gap-2">
                   <input
                     type="checkbox"
+                    className="size-5 accent-primary"
                     disabled={!editable}
                     checked={inp.roles?.includes(r.id) ?? false}
                     onChange={(e) => {
@@ -267,9 +265,9 @@ function Objects({ ed }: { ed: Ed }) {
       {track.length > 0 && (
         <Group title="Filtros por objeto">
           {track.map((l) => (
-            <details key={l} className="rounded border border-line">
-              <summary className="cursor-pointer px-3 py-2 text-sm font-medium">{labelDisplay(l)}</summary>
-              <div className="border-t border-line p-3">
+            <details key={l} className="rounded-m3-lg bg-surface-2">
+              <summary className="min-h-11 cursor-pointer px-4 py-2.5 text-sm font-bold">{labelDisplay(l)}</summary>
+              <div className="border-t border-outline-variant p-4">
                 <Row>
                   {FILTER_FIELDS.map((f) => {
                     const p: Path = ["filters", l, f.key];
@@ -319,8 +317,8 @@ function ZoneChecks({ label, zones, value, onChange, disabled }: { label: string
       {zones.length === 0 && <span className="text-xs text-muted">La cámara no tiene zonas.</span>}
       <div className="flex flex-wrap gap-4">
         {zones.map((z) => (
-          <label key={z} className="flex items-center gap-1.5">
-            <input type="checkbox" disabled={disabled} checked={value.includes(z)} onChange={(e) => onChange(e.target.checked ? [...value, z] : value.filter((x) => x !== z))} />
+          <label key={z} className="flex min-h-11 items-center gap-2">
+            <input type="checkbox" className="size-5 accent-primary" disabled={disabled} checked={value.includes(z)} onChange={(e) => onChange(e.target.checked ? [...value, z] : value.filter((x) => x !== z))} />
             {z}
           </label>
         ))}

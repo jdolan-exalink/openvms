@@ -1,4 +1,6 @@
 import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { Icon } from "@/components/Icon";
+import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { type EditorItem, type ItemIssues, type ItemKind, colorOf } from "./zoneDraft";
 
@@ -55,8 +57,8 @@ export function ZoneList({
             disabled={disabled}
             onClick={() => onTab(t)}
             className={cn(
-              "rounded px-2 py-1 text-xs font-medium focus-visible:outline-2 focus-visible:outline-accent",
-              tab === t ? "bg-accent text-bg" : "border border-line hover:bg-raised",
+              "min-h-11 rounded-full px-4 text-xs font-bold focus-visible:outline-2 focus-visible:outline-primary disabled:opacity-50",
+              tab === t ? "bg-primary-container text-on-primary-container" : "bg-surface-2 text-on-surface-variant hover:bg-surface-3",
             )}
           >
             {TAB_LABELS[t]}
@@ -64,17 +66,12 @@ export function ZoneList({
         ))}
       </div>
       <div id="zone-tabpanel" role="tabpanel" aria-labelledby={`zone-tab-${tab}`} className="flex min-h-0 flex-col gap-2">
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={onNew}
-          className="inline-flex items-center justify-center gap-2 rounded border border-line px-3 py-1.5 text-sm hover:bg-raised disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-accent"
-        >
-          <Plus className="size-4" aria-hidden />
+        <Button variant="tonal" disabled={disabled} onClick={onNew}>
+          <Icon icon={Plus} size="xs" />
           {tab === "zone" ? "Nueva zona" : "Nueva máscara"}
-        </button>
+        </Button>
         {items.length === 0 ? (
-          <p className="rounded border border-dashed border-line px-3 py-4 text-center text-xs text-muted">{EMPTY[tab]}</p>
+          <p className="rounded-m3-lg bg-surface-2 px-3 py-4 text-center text-xs text-muted">{EMPTY[tab]}</p>
         ) : (
           <ul aria-label={TAB_LABELS[tab]} className="flex max-h-56 flex-col gap-1 overflow-auto">
             {items.map((it) => {
@@ -84,8 +81,8 @@ export function ZoneList({
                 <li
                   key={it.uid}
                   className={cn(
-                    "flex items-center gap-1 rounded border px-2 py-1 text-sm",
-                    it.uid === selectedUid ? "border-accent bg-raised" : "border-line",
+                    "flex items-center gap-1 rounded-m3-lg px-3 py-1 text-sm",
+                    it.uid === selectedUid ? "bg-primary-container text-on-primary-container" : "bg-surface-2",
                   )}
                 >
                   <span aria-hidden className="size-3 shrink-0 rounded-sm" style={{ backgroundColor: colorOf(it) }} />
@@ -94,30 +91,25 @@ export function ZoneList({
                     disabled={disabled}
                     aria-current={it.uid === selectedUid}
                     onClick={() => onSelect(it.uid)}
-                    className="min-w-0 flex-1 truncate text-left focus-visible:outline-2 focus-visible:outline-accent"
+                    className="min-h-11 min-w-0 flex-1 truncate text-left focus-visible:outline-2 focus-visible:outline-primary"
                   >
                     {it.name}
                     {it.kind === "object" && <span className="ml-1 text-xs text-muted">({it.scope || "global"})</span>}
                     {hasError && <span className="ml-1 text-xs text-bad">· revisar</span>}
                   </button>
-                  <button
-                    type="button"
+                  <IconButton
+                    icon={isHidden ? EyeOff : Eye}
                     aria-label={`${isHidden ? "Mostrar" : "Ocultar"} ${it.name}`}
                     aria-pressed={!isHidden}
                     onClick={() => onToggleHidden(it.uid)}
-                    className="rounded p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
-                  >
-                    {isHidden ? <EyeOff className="size-4" aria-hidden /> : <Eye className="size-4" aria-hidden />}
-                  </button>
-                  <button
-                    type="button"
+                  />
+                  <IconButton
+                    icon={Trash2}
                     aria-label={`Eliminar ${it.name}`}
                     disabled={disabled}
                     onClick={() => onDelete(it.uid)}
-                    className="rounded p-1 text-bad hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
-                  >
-                    <Trash2 className="size-4" aria-hidden />
-                  </button>
+                    className="text-bad"
+                  />
                 </li>
               );
             })}
