@@ -1,11 +1,11 @@
+import { ChevronsRight } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { DndContext, DragOverlay, type DragEndEvent, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 import { rectSortingStrategy, rectSwappingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { faAnglesRight } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Camera, CircleCheck, CircleHelp, CircleX, History, Maximize2, Minimize2, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
@@ -609,7 +609,7 @@ export function Live() {
       </aside>
       {!edgeVisible && (
         <button type="button" aria-label={tr("live.showExplorer")} title={tr("live.showExplorer")} className="absolute inset-0 flex items-center justify-center bg-surface/95 text-muted" onClick={revealEdge}>
-          <FontAwesomeIcon icon={faAnglesRight} className="text-[10px]" aria-hidden />
+          <Icon icon={ChevronsRight} size={12} />
         </button>
       )}
     </div>,

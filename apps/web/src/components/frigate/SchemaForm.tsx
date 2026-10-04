@@ -1,5 +1,5 @@
-import { faLock, faPlus, faRotateLeft, faTrash } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { Lock, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Icon } from "../Icon";
 import { useId, useState } from "react";
 import { TagInput } from "@/components/TagInput";
 import { Button, Select, TextInput } from "@/components/ui";
@@ -48,7 +48,7 @@ function LockedField({ label }: { label: string }) {
     <div className="flex flex-col gap-1 text-sm">
       <span className="font-medium">{label}</span>
       <span title="Requiere permiso de credenciales" className="inline-flex items-center gap-2 rounded border border-line bg-raised px-3 py-1.5 text-muted">
-        <FontAwesomeIcon icon={faLock} aria-hidden />
+        <Icon icon={Lock} size="xs" />
         <span aria-hidden>••••••••</span>
         <span className="sr-only">Protegido: requiere permiso de credenciales</span>
       </span>
@@ -59,7 +59,7 @@ function LockedField({ label }: { label: string }) {
 function ResetButton({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
-      <FontAwesomeIcon icon={faRotateLeft} aria-hidden /> Usar valor por defecto
+      <Icon icon={RotateCcw} size="xs" /> Usar valor por defecto
     </button>
   );
 }
@@ -67,7 +67,7 @@ function ResetButton({ onClick }: { onClick: () => void }) {
 function RemoveButton({ name, onRemove }: { name: string; onRemove: () => void }) {
   return (
     <button type="button" aria-label={`Quitar ${name}`} onClick={(e) => { e.preventDefault(); onRemove(); }} className="text-muted hover:text-bad focus-visible:outline-2 focus-visible:outline-accent">
-      <FontAwesomeIcon icon={faTrash} aria-hidden />
+      <Icon icon={Trash2} size="xs" />
     </button>
   );
 }
@@ -248,7 +248,7 @@ export function FieldNode(props: NodeProps) {
           {!disabled && (
             <div>
               <Button onClick={() => onChange([...list, emptyFor(node.items, ctx.root)])}>
-                <FontAwesomeIcon icon={faPlus} aria-hidden /> Añadir
+                <Icon icon={Plus} size="xs" /> Añadir
               </Button>
             </div>
           )}
@@ -293,7 +293,7 @@ function MapField({ name, path, ctx, label, obj, node, bare, onChange, onRemove 
             <TextInput value={newKey} onChange={(e) => setNewKey(e.target.value)} aria-invalid={duplicate} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
           </label>
           <Button disabled={!newKey.trim() || duplicate} onClick={add}>
-            <FontAwesomeIcon icon={faPlus} aria-hidden /> Añadir
+            <Icon icon={Plus} size="xs" /> Añadir
           </Button>
         </div>
       )}

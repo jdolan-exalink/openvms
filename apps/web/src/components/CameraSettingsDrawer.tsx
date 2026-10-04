@@ -1,6 +1,6 @@
+import { SlidersHorizontal } from "lucide-react";
+import { Icon } from "./Icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { faSliders } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Link } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
@@ -150,7 +150,7 @@ export function CameraSettingsDrawer({
                 onClick={onClose}
                 className="mt-3 inline-flex items-center gap-2 rounded border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:bg-raised"
               >
-                <FontAwesomeIcon icon={faSliders} aria-hidden /> Editar configuración de Frigate
+                <Icon icon={SlidersHorizontal} size="xs" /> Editar configuración de Frigate
               </Link>
             )}
           </div>

@@ -1,6 +1,6 @@
+import { ArrowLeft, CircleCheck, RefreshCw, TriangleAlert } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { useT } from "@/i18n";
-import { faArrowLeft, faArrowsRotate, faCircleCheck, faTriangleExclamation } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "@tanstack/react-router";
 import { type FormEvent, useMemo, useState } from "react";
@@ -188,7 +188,7 @@ export function FrigateCameraConfig() {
       description={version ? t("settings.cameraConfig", { version }) : undefined}
       actions={
         <Link to="/cameras" className="inline-flex items-center gap-2 text-sm text-muted hover:text-ink">
-          <FontAwesomeIcon icon={faArrowLeft} aria-hidden /> Volver a cámaras
+          <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
         </Link>
       }
     />
@@ -338,7 +338,7 @@ function CameraIdentity({ name, version, config }: { name: string; version: stri
           <p className="text-sm text-muted">Frigate {version || "—"}</p>
         </div>
         <Link to="/cameras" className="inline-flex items-center gap-2 text-sm text-muted hover:text-ink">
-          <FontAwesomeIcon icon={faArrowLeft} aria-hidden /> Volver a cámaras
+          <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
         </Link>
       </div>
       <dl className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs sm:grid-cols-3">
@@ -491,7 +491,7 @@ function ResultList({ results }: { results: SectionResult[] }) {
     <ul aria-label="Resultado de los cambios" className="flex flex-col gap-1 rounded border border-line bg-surface px-3 py-2 text-sm">
       {results.map((r) => (
         <li key={r.section} className="flex items-center gap-2">
-          <FontAwesomeIcon icon={r.requires_restart ? faArrowsRotate : faCircleCheck} className={r.requires_restart ? "text-warn" : "text-ok"} aria-hidden />
+          <Icon icon={r.requires_restart ? RefreshCw : CircleCheck} size="xs" className={r.requires_restart ? "text-warn" : "text-ok"} />
           <span className="font-medium">{sectionLabel(r.section)}</span>
           <span className="text-muted">{r.applied_live ? "aplicado en vivo" : r.requires_restart ? "guardado, requiere reinicio" : "guardado"}</span>
         </li>
@@ -512,7 +512,7 @@ function RestartBanner({ serverId, canRestart, onDone }: { serverId: string; can
   return (
     <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
       <span className="flex items-center gap-2 text-warn">
-        <FontAwesomeIcon icon={faTriangleExclamation} aria-hidden /> Hay cambios que requieren reiniciar el servidor.
+        <Icon icon={TriangleAlert} size="xs" /> Hay cambios que requieren reiniciar el servidor.
       </span>
       {canRestart ? (
         <Button onClick={() => setConfirming(true)}>Reiniciar servidor</Button>

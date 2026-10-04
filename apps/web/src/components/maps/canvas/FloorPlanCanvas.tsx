@@ -1,6 +1,6 @@
 import { useEffect, useImperativeHandle, useRef, useState, type PointerEvent, type Ref } from "react";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { cameraIcon, offlineIcon } from "@/lib/inventoryIcons";
+import { Video, X } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import type { CameraEntity } from "@/lib/maps/types";
 import { computeDisplayState } from "@/lib/maps/entityIndex";
 import { floorPoint, type Point, type PlanView } from "@/lib/maps/floorEditor";
@@ -167,8 +167,8 @@ export function FloorPlanCanvas({ ref, imageUrl, imageBlob, width, height, camer
       const connectivity = computeDisplayState(camera.status, 0, !!camera.metadata.serverOffline);
       const unavailable = connectivity === "OFFLINE" || connectivity === "NO_SIGNAL" || connectivity === "UNREACHABLE";
       return <button key={camera.id} type="button" aria-label={camera.name} title={camera.name} data-camera-id={camera.id} data-map-source={camera.id} data-map-source-rank="0" data-connection={connectivity.toLowerCase()} onClick={event => { if (event.detail === 0) onSelect(camera.id); }} onDoubleClick={() => { if (!editable) onOpen?.(camera.id); }} className={`absolute z-10 flex size-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 bg-surface shadow-lg ${unavailable ? "border-muted text-muted" : connectivity === "ONLINE" ? "border-ok text-ok" : "border-warning text-warning"}`} style={{ left: pos.x, top: pos.y, touchAction: "none", cursor: editable ? "grab" : "pointer" }}>
-     <FontAwesomeIcon icon={cameraIcon} aria-hidden/>
-     {unavailable && <FontAwesomeIcon icon={offlineIcon} aria-label="Unavailable" className="absolute -bottom-1 -right-1 rounded-full bg-surface p-1 text-xs"/>}
+     <Icon icon={Video} size="xs" />
+     {unavailable && <Icon icon={X} size={18} label="Unavailable" className="absolute -bottom-1 -right-1 rounded-full bg-surface p-1" />}
      {camera.activeAlarms > 0 && <span className="absolute -right-1 -top-2 rounded-full bg-bad px-1 text-xs text-white">{camera.activeAlarms}</span>}
      <span className="pointer-events-none absolute top-full mt-1 max-w-32 truncate rounded bg-surface/90 px-1 text-[10px] text-ink">{camera.name}</span>
     </button>;

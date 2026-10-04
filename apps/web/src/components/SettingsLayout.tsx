@@ -1,10 +1,10 @@
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useQuery } from "@tanstack/react-query";
 import { Link, Outlet } from "@tanstack/react-router";
 import { meQuery } from "@/api/queries";
 import { useT } from "@/i18n";
 import { can } from "@/lib/perm";
 import { cn } from "@/lib/cn";
+import { Icon } from "./Icon";
 import { settingsNavGroups } from "./nav";
 
 /**
@@ -31,7 +31,7 @@ export function SettingsLayout() {
                     className="flex items-center gap-2 rounded px-2 py-1.5 text-sm text-muted hover:bg-raised hover:text-ink"
                     activeProps={{ className: "bg-raised !text-ink" }}
                   >
-                    <FontAwesomeIcon icon={item.icon} fixedWidth className="text-sm" aria-hidden />
+                    <Icon icon={item.icon} size="xs" className="shrink-0" />
                     {t(item.label)}
                   </Link>
                 ) : (
@@ -40,7 +40,7 @@ export function SettingsLayout() {
                     className={cn("flex cursor-default items-center gap-2 rounded px-2 py-1.5 text-sm text-muted/60")}
                     title={t("nav.comingIn", { label: t(item.label), milestone: item.milestone ?? "" })}
                   >
-                    <FontAwesomeIcon icon={item.icon} fixedWidth className="text-sm" aria-hidden />
+                    <Icon icon={item.icon} size="xs" className="shrink-0" />
                     {t(item.label)}
                     <span className="ml-auto font-mono text-[10px]">{item.milestone}</span>
                   </span>

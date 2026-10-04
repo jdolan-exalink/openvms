@@ -1,5 +1,5 @@
-import { faLock, faPlus, faTrash } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { Lock, Plus, Trash2 } from "lucide-react";
+import { Icon } from "../Icon";
 import type { ReactNode } from "react";
 import { LabelPicker } from "@/components/frigate/LabelPicker";
 import type { FormCtx } from "@/components/frigate/SchemaForm";
@@ -126,7 +126,7 @@ function Ffmpeg({ ed }: { ed: Ed }) {
       <Group title="Streams de entrada">
         {locked && (
           <p className="flex items-center gap-2 text-xs text-muted" title="Requiere permiso de credenciales">
-            <FontAwesomeIcon icon={faLock} aria-hidden /> Las rutas y los roles de los streams requieren permiso de credenciales.
+            <Icon icon={Lock} size="xs" /> Las rutas y los roles de los streams requieren permiso de credenciales.
           </p>
         )}
         {inputs.map((inp, i) => (
@@ -136,7 +136,7 @@ function Ffmpeg({ ed }: { ed: Ed }) {
                 <span className="font-medium">Ruta del stream {i + 1}</span>
                 {locked ? (
                   <span title="Requiere permiso de credenciales" className="inline-flex items-center gap-2 rounded border border-line bg-raised px-3 py-1.5 text-muted">
-                    <FontAwesomeIcon icon={faLock} aria-hidden /> ••••••••
+                    <Icon icon={Lock} size="xs" /> ••••••••
                   </span>
                 ) : (
                   <TextInput disabled={!editable} value={inp.path ?? ""} onChange={(e) => setInputs(inputs.map((x, j) => (j === i ? { ...x, path: e.target.value } : x)))} />
@@ -144,7 +144,7 @@ function Ffmpeg({ ed }: { ed: Ed }) {
               </label>
               {editable && inputs.length > 1 && (
                 <Button aria-label={`Quitar stream ${i + 1}`} onClick={() => setInputs(inputs.filter((_, j) => j !== i))}>
-                  <FontAwesomeIcon icon={faTrash} aria-hidden />
+                  <Icon icon={Trash2} size="xs" />
                 </Button>
               )}
             </div>
@@ -170,7 +170,7 @@ function Ffmpeg({ ed }: { ed: Ed }) {
         {editable && (
           <div>
             <Button onClick={() => setInputs([...inputs, { path: "", roles: ["detect"] }])}>
-              <FontAwesomeIcon icon={faPlus} aria-hidden /> Añadir stream
+              <Icon icon={Plus} size="xs" /> Añadir stream
             </Button>
           </div>
         )}

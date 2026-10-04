@@ -1,6 +1,6 @@
+import { Map as MapIcon } from "lucide-react";
+import { Icon } from "./Icon";
 import { useDraggable } from "@dnd-kit/core";
-import { faMap } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useInfiniteQuery, useQueries } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import type { Schemas } from "@/api/client";
@@ -86,7 +86,7 @@ function MapRow({ map, hint, onPlace }: { map: LiveMapRef; hint: string; onPlace
       {...attributes}
       {...listeners}
     >
-      <FontAwesomeIcon icon={faMap} fixedWidth className="shrink-0 text-xs text-muted" aria-hidden />
+      <Icon icon={MapIcon} size="xs" className="shrink-0 text-muted" />
       <span className="min-w-0 flex-1 truncate">{map.name}</span>
       <span className="shrink-0 text-[10px] text-muted">{hint}</span>
     </button>

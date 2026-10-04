@@ -1,6 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Menu, Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { clearToken } from "@/api/auth";
@@ -16,6 +15,7 @@ import { useFeatures, type FeatureFlags } from "@/lib/features";
 import { useT } from "@/i18n";
 import { AppShell, TopBarActionsSlot } from "./AppShell";
 import { AccountMenu } from "./AccountMenu";
+import { Icon } from "./Icon";
 import { brandIcon as Brand, navGroups, settingsNavGroups, type NavGroup } from "./nav";
 import { NotificationBell } from "./NotificationBell";
 import { Omnibox } from "./Omnibox";
@@ -185,7 +185,7 @@ export function Layout() {
                           )}
                           activeProps={{ "aria-current": "page" }}
                         >
-                          <FontAwesomeIcon icon={item.icon} fixedWidth className="shrink-0 text-sm" aria-hidden />
+                          <Icon icon={item.icon} size="xs" className="shrink-0" strokeWidth={active ? 2 : undefined} />
                           <span>{t(item.label)}</span>
                         </Link>
                       ) : (
@@ -194,7 +194,7 @@ export function Layout() {
                           className="flex cursor-default items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm text-muted/50"
                           title={t("nav.comingIn", { label: t(item.label), milestone: item.milestone ?? "" })}
                         >
-                          <FontAwesomeIcon icon={item.icon} fixedWidth className="shrink-0 text-sm" aria-hidden />
+                          <Icon icon={item.icon} size="xs" className="shrink-0" strokeWidth={active ? 2 : undefined} />
                           <span>{t(item.label)}</span>
                           <span className="ml-auto font-mono text-[10px]">{item.milestone}</span>
                         </span>
@@ -225,11 +225,11 @@ function NavGroupLinks({ group, me, pathname, features }: { group: NavGroup; me:
         );
         return item.to ? (
           <Link key={item.label} to={item.to} aria-label={t(item.label)} aria-current={active ? "page" : undefined} title={t(item.label)} className={classes} activeProps={{ "aria-current": "page" }}>
-            <FontAwesomeIcon icon={item.icon} fixedWidth className="text-[17px]" aria-hidden />
+            <Icon icon={item.icon} strokeWidth={active ? 2 : undefined} />
           </Link>
         ) : (
           <span key={item.label} aria-label={t("nav.comingSoon", { label: t(item.label) })} title={t("nav.comingIn", { label: t(item.label), milestone: item.milestone ?? "" })} className={classes}>
-            <FontAwesomeIcon icon={item.icon} fixedWidth className="text-[17px]" aria-hidden />
+            <Icon icon={item.icon} strokeWidth={active ? 2 : undefined} />
           </span>
         );
       })}

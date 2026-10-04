@@ -1,6 +1,5 @@
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { faChevronDown, faChevronRight, faFolder, faFolderOpen } from "@fortawesome/free-solid-svg-icons";
-import { cameraIcon, serverIcon } from "@/lib/inventoryIcons";
+import { ChevronDown, ChevronRight, Folder, FolderOpen, Server, Video } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { GripVertical, MapPin } from "lucide-react";
 import { useMemo, useState, type DragEvent, type ReactNode } from "react";
 
@@ -57,7 +56,7 @@ function groupCameras(cameras: readonly MapTreeCamera[], folders: readonly MapTr
 }
 
 function Chevron({ open }: { open: boolean }) {
-  return <FontAwesomeIcon icon={open ? faChevronDown : faChevronRight} className="text-[10px] text-muted" aria-hidden />;
+  return <Icon icon={open ? ChevronDown : ChevronRight} size={12} className="text-muted" />;
 }
 
 /**
@@ -105,7 +104,7 @@ export function MapCameraTree({
             <h3>
               <button type="button" aria-expanded={serverOpen} onClick={() => toggle(serverKey)} className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left text-[11px] font-semibold uppercase tracking-wide text-muted hover:bg-raised">
                 <Chevron open={serverOpen} />
-                <FontAwesomeIcon icon={serverIcon} fixedWidth aria-hidden />
+                <Icon icon={Server} size="xs" className="shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{group.name}</span>
                 <span className="rounded-full bg-raised px-1.5 text-[10px] tabular-nums">{count}</span>
               </button>
@@ -119,7 +118,7 @@ export function MapCameraTree({
                     <div key={folder.id}>
                       <button type="button" aria-expanded={folderOpen} onClick={() => toggle(folderKey)} className="flex w-full items-center gap-1.5 rounded px-1 py-1 text-left text-xs text-ink hover:bg-raised">
                         <Chevron open={folderOpen} />
-                        <FontAwesomeIcon icon={folderOpen ? faFolderOpen : faFolder} fixedWidth className="text-muted" aria-hidden />
+                        <Icon icon={folderOpen ? FolderOpen : Folder} size="xs" className="shrink-0 text-muted" />
                         <span className="min-w-0 flex-1 truncate">{folder.name}</span>
                         <span className="text-[10px] tabular-nums text-muted">{folder.cameras.length}</span>
                       </button>
@@ -185,7 +184,7 @@ function CameraRow({
               : `flex min-w-0 flex-1 items-center gap-2 rounded-lg border px-2 py-1.5 text-left hover:bg-raised ${placed ? "border-ok/70 bg-ok/10" : "border-dashed border-line"} ${draggable ? "cursor-grab" : ""}`
         }
       >
-        <FontAwesomeIcon icon={cameraIcon} fixedWidth className="text-muted" aria-hidden />
+        <Icon icon={Video} size="xs" className="shrink-0 text-muted" />
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm">{camera.name}</span>
           {extra}

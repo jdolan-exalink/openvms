@@ -1,5 +1,5 @@
-import { faPlus } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { Plus } from "lucide-react";
+import { Icon } from "../Icon";
 import { useState } from "react";
 import { Button, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -66,7 +66,7 @@ export function LabelPicker({
             <TextInput value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }} />
           </label>
           <Button disabled={!custom.trim()} onClick={addCustom}>
-            <FontAwesomeIcon icon={faPlus} aria-hidden /> Añadir etiqueta
+            <Icon icon={Plus} size="xs" /> Añadir etiqueta
           </Button>
         </div>
       )}
