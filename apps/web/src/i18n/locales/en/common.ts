@@ -58,5 +58,16 @@ const messages = {
   brandLive: "OpenVMS: Live",
   exactMatch: "Exact match",
   cameraGroup: "Camera group",
+  installTitle: "Install OpenVMS",
+  installApp: "Install app",
+  installNow: "Install",
+  installLater: "Not now",
+  installBenefitFullscreen: "Full screen, without the browser bar",
+  installBenefitIcon: "An icon on your home screen",
+  installBenefitTheme: "The system bar follows your theme",
+  installIosHint: "iPhone or iPad? In Safari, tap Share and then “Add to Home Screen”.",
+  updateAvailable: "A new version is available",
+  updateAction: "Update",
+  updateDismiss: "Dismiss",
 } as const;
 export default messages;

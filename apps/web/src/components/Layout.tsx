@@ -13,8 +13,11 @@ import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { useRealtimeFeed } from "@/lib/realtime";
 import { useFeatures, type FeatureFlags } from "@/lib/features";
 import { useT } from "@/i18n";
+import { useInstallSheet } from "@/lib/pwa/useInstallSheet";
 import { AppShell, TopBarActionsSlot } from "./AppShell";
 import { AccountMenu } from "./AccountMenu";
+import { InstallSheet } from "./InstallSheet";
+import { PwaUpdatePrompt } from "./PwaUpdatePrompt";
 import { Icon } from "./Icon";
 import { MobileNav } from "./MobileNav";
 import { brandIcon as Brand, isNavItemActive, isNavItemVisible, navGroups, settingsNavGroups, type NavGroup } from "./nav";
@@ -37,6 +40,7 @@ export function Layout() {
   const pageTitle = isLive && liveRec ? t("nav.recordings") : pageContext.title;
   const [omniboxOpen, setOmniboxOpen] = useState(false);
   const logout = useLogout();
+  const install = useInstallSheet();
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -96,7 +100,7 @@ export function Layout() {
                     <span className="text-xs">⌘</span>K
                   </kbd>
                 </button>
-                <AccountMenu name={me.data?.display_name} username={me.data?.username} onLogout={() => void logout()} />
+                <AccountMenu name={me.data?.display_name} username={me.data?.username} onLogout={() => void logout()} onInstall={install.show} />
               </div>
             </header>
             {fitWorkspace ? (
@@ -110,6 +114,8 @@ export function Layout() {
         </AppShell>
   
         <Omnibox isOpen={omniboxOpen} onClose={() => setOmniboxOpen(false)} />
+        <InstallSheet open={install.open} onClose={install.dismiss} />
+        <PwaUpdatePrompt />
       </VideoSurfaceLayer>
     </PlayerSessionProvider>
   );

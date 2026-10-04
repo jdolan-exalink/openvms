@@ -1,26 +1,32 @@
 import { Link } from "@tanstack/react-router";
-import { ChevronDown, KeyRound, LogOut, Sun } from "lucide-react";
+import { ChevronDown, Download, KeyRound, LogOut, Sun } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { LOCALES, setLocale, useLocale, useT, type Locale } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { ThemePicker } from "@/components/ThemePicker";
+import { useInstallPrompt } from "@/lib/pwa/useInstallPrompt";
 
 /** AccountMenu is the compact session menu: language, theme, password, and sign-out. */
 export function AccountMenu({
   name,
   username,
   onLogout,
+  onInstall,
 }: {
   name?: string;
   username?: string;
   /** When set, the menu also offers password and sign-out. The login screen omits it. */
   onLogout?: () => void;
+  /** Opens the install sheet; the entry shows only while the app can be installed. */
+  onInstall?: () => void;
 }) {
   const t = useT();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  const { canInstall, isIOS, isStandalone } = useInstallPrompt();
+  const showInstall = Boolean(onInstall) && !isStandalone && (canInstall || isIOS);
   const signedIn = Boolean(onLogout);
   const initial = (name ?? username ?? "·").slice(0, 1).toUpperCase();
 
@@ -98,6 +104,20 @@ export function AccountMenu({
           {signedIn && (
             <>
               <div className="my-1 border-t border-line" />
+              {showInstall && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    onInstall?.();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-ink hover:bg-raised"
+                >
+                  <Download className="size-3.5 text-muted" aria-hidden />
+                  {t("common.installApp")}
+                </button>
+              )}
               <Link
                 to="/account"
                 role="menuitem"
