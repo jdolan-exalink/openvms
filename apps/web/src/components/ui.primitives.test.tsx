@@ -87,6 +87,29 @@ describe("LinkButton", () => {
   });
 });
 
+describe("LinkButton route typing", () => {
+  it("rejects invalid routes, params and search at compile time (checked by pnpm typecheck)", () => {
+    // Never rendered: a router link needs a RouterProvider, the assertions are the type errors.
+    const compileOnly = () => (
+      <>
+        <LinkButton to="/cameras/$cameraId/frigate" params={{ cameraId: "c1" }}>
+          Frigate
+        </LinkButton>
+        <LinkButton to="/permissions" search={{ subject: "user:1" }} variant="filled" size="sm" onClick={() => {}}>
+          Ok
+        </LinkButton>
+        {/* @ts-expect-error unknown route */}
+        <LinkButton to="/no-such-route">Nowhere</LinkButton>
+        {/* @ts-expect-error missing required path param */}
+        <LinkButton to="/cameras/$cameraId/frigate">NoParams</LinkButton>
+        {/* @ts-expect-error params that do not belong to the route */}
+        <LinkButton to="/cameras/$cameraId/frigate" params={{ wrong: "c1" }}>WrongParam</LinkButton>
+      </>
+    );
+    expect(typeof compileOnly).toBe("function");
+  });
+});
+
 describe("IconButton size sm", () => {
   it("keeps the aria-label and renders the compact size", () => {
     render(<IconButton icon={Trash2} size="sm" aria-label="Delete" />);

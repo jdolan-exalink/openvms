@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, type LinkComponentProps, type RegisteredRouter } from "@tanstack/react-router";
 import { Check, X, type LucideIcon } from "lucide-react";
 import { useId, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
 import { Icon } from "@/components/Icon";
@@ -123,32 +123,39 @@ export function Button({
   return <button type="button" {...props} className={buttonClass({ variant, size, className })} />;
 }
 
-type LinkButtonProps = ButtonClassOptions & {
+type LinkButtonOwnProps = ButtonClassOptions & {
   children?: ReactNode;
   title?: string;
   "aria-label"?: string;
   "aria-current"?: "page" | "true" | "false";
   onClick?: () => void;
-} & (
-    | { to: string; search?: Record<string, unknown>; params?: Record<string, string>; href?: never }
-    | { href: string; to?: never; search?: never; params?: never }
-  );
+};
 
-/** Link styled as a Button: a TanStack Router `Link` for `to`, a plain anchor for `href`. */
-export function LinkButton({ variant = "text", size = "md", className, to, search, params, href, children, ...rest }: LinkButtonProps) {
+type RouteLinkProps<TFrom extends string, TTo extends string | undefined> = LinkComponentProps<"a", RegisteredRouter, TFrom, TTo>;
+export type LinkButtonProps<TFrom extends string = string, TTo extends string | undefined = "."> =
+  | (LinkButtonOwnProps & RouteLinkProps<TFrom, TTo> & { className?: string; href?: never })
+  | (LinkButtonOwnProps & { href: string; className?: string; to?: never; search?: never; params?: never });
+
+/**
+ * Link styled as a Button: a TanStack Router link for `to` (route, params and search are checked
+ * against the registered route tree), a plain anchor for `href`.
+ */
+export function LinkButton<const TFrom extends string = string, const TTo extends string | undefined = ".">(props: LinkButtonProps<TFrom, TTo>) {
+  const { variant = "text", size = "md", className, children, ...rest } = props;
   const cls = buttonClass({ variant, size, className });
-  if (to !== undefined) {
-    // Route typing is per-route; callers are checked by the router at their own call sites in practice.
+  if ("href" in rest && typeof rest.href === "string") {
+    const { to: _to, search: _search, params: _params, ...anchor } = rest as typeof rest & { to?: never; search?: never; params?: never };
     return (
-      <Link to={to as never} search={search as never} params={params as never} className={cls} {...rest}>
+      <a className={cls} {...anchor}>
         {children}
-      </Link>
+      </a>
     );
   }
+  // The union is already narrowed by the public signature; the router link re-derives it per route.
   return (
-    <a href={href} className={cls} {...rest}>
+    <Link className={cls} {...(rest as unknown as { to: "." })}>
       {children}
-    </a>
+    </Link>
   );
 }
 
