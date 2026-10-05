@@ -48,6 +48,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", mve.Msg
 	case errors.As(err, &pve):
 		return http.StatusBadRequest, "invalid", pve.Msg
+	case errors.Is(err, provision.ErrAgentTLSNotConfigured):
+		return http.StatusNotFound, "agent_tls_not_configured", "agent TLS is not configured"
 	case errors.Is(err, provision.ErrAgentUnprovisioned):
 		return http.StatusNotFound, "agent_unprovisioned", "server has no registered agent"
 	case errors.Is(err, provision.ErrAgentDiscoveryUnsupported):

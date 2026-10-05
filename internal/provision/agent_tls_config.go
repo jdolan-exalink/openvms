@@ -82,7 +82,7 @@ func (s *Service) SetAgentTLSConfig(ctx context.Context, actor authz.Actor, serv
 		return AgentTLSConfig{}, err
 	}
 	if err := validateAgentTLSConfig(row.Host, in); err != nil {
-		return AgentTLSConfig{}, err
+		return AgentTLSConfig{}, &ValidationError{Msg: err.Error()}
 	}
 	if err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		before, err := q.GetServerAgentTLS(ctx, serverID)

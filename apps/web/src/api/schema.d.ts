@@ -515,6 +515,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/tls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read registered agent TLS trust configuration
+         * @description Requires servers.manage. Returns only the public custom CA bundle, never credentials or private keys.
+         */
+        get: operations["getServerAgentTlsConfig"];
+        /**
+         * Configure registered agent TLS trust
+         * @description Requires servers.manage. The CA bundle is public trust material; private keys and agent credentials are not accepted.
+         */
+        put: operations["setServerAgentTlsConfig"];
+        post?: never;
+        /**
+         * Disable registered agent TLS configuration
+         * @description Requires servers.manage. This only deletes trust metadata and does not issue an agent or camera request.
+         */
+        delete: operations["deleteServerAgentTlsConfig"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/onvif/discover": {
         parameters: {
             query?: never;
@@ -2545,6 +2575,13 @@ export interface components {
             error?: string;
             /** @description SHA256 fingerprint seen on first SSH contact. */
             host_key?: string;
+        };
+        ServerAgentTLSConfig: {
+            secure_port: number;
+            /** @enum {string} */
+            trust_mode: "system" | "custom";
+            /** @description Public CA certificates in PEM format; required only for custom trust mode. */
+            ca_pem?: string;
         };
         OnvifDiscoveryRequest: {
             interface_name: string;
@@ -4906,6 +4943,84 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getServerAgentTlsConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent TLS trust configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentTLSConfig"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setServerAgentTlsConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentTLSConfig"];
+            };
+        };
+        responses: {
+            /** @description Saved configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentTLSConfig"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteServerAgentTlsConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description TLS configuration deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     discoverServerOnvif: {

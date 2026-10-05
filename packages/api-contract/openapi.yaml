@@ -666,6 +666,53 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/agent/tls:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgentTlsConfig
+      summary: Read registered agent TLS trust configuration
+      description: Requires servers.manage. Returns only the public custom CA bundle, never credentials or private keys.
+      responses:
+        "200":
+          description: Agent TLS trust configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentTLSConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [servers]
+      operationId: setServerAgentTlsConfig
+      summary: Configure registered agent TLS trust
+      description: Requires servers.manage. The CA bundle is public trust material; private keys and agent credentials are not accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerAgentTLSConfig" }
+      responses:
+        "200":
+          description: Saved configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentTLSConfig" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [servers]
+      operationId: deleteServerAgentTlsConfig
+      summary: Disable registered agent TLS configuration
+      description: Requires servers.manage. This only deletes trust metadata and does not issue an agent or camera request.
+      responses:
+        "204": { description: TLS configuration deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/servers/{serverId}/onvif/discover:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3468,6 +3515,14 @@ components:
         server_id: { type: string, format: uuid }
         error: { type: string }
         host_key: { type: string, description: SHA256 fingerprint seen on first SSH contact. }
+    ServerAgentTLSConfig:
+      type: object
+      additionalProperties: false
+      required: [secure_port, trust_mode]
+      properties:
+        secure_port: { type: integer, minimum: 1, maximum: 65535 }
+        trust_mode: { type: string, enum: [system, custom] }
+        ca_pem: { type: string, maxLength: 65536, description: Public CA certificates in PEM format; required only for custom trust mode. }
     OnvifDiscoveryRequest:
       type: object
       additionalProperties: false

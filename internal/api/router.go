@@ -52,7 +52,7 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 
 	r := chi.NewRouter()
 	r.Use(httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
-	r.Use(validateOnvifDiscoveryBody)
+	r.Use(validateOnvifDiscoveryBody, validateAgentTLSConfigBody)
 	if opts.Queries != nil {
 		r.Use(Authenticate(opts.Queries, AuthOptions{IdleTimeout: opts.SessionIdle}))
 	}
@@ -134,6 +134,40 @@ func validateOnvifDiscoveryBody(next http.Handler) http.Handler {
 			}
 			r.Body = io.NopCloser(bytes.NewReader(limited))
 		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+const (
+	agentTLSPemMaxBytes     = 64 << 10
+	agentTLSRequestMaxBytes = 128 << 10
+)
+
+// validateAgentTLSConfigBody bounds and strictly decodes public trust configuration.
+func validateAgentTLSConfigBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method != http.MethodPut || len(parts) != 6 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "servers" || parts[4] != "agent" || parts[5] != "tls" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		limited, err := io.ReadAll(io.LimitReader(r.Body, agentTLSRequestMaxBytes+1))
+		if err != nil || len(limited) > agentTLSRequestMaxBytes {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "request body exceeds the agent TLS configuration limit")
+			return
+		}
+		dec := json.NewDecoder(bytes.NewReader(limited))
+		dec.DisallowUnknownFields()
+		var body gen.ServerAgentTLSConfig
+		if err := dec.Decode(&body); err != nil || dec.Decode(new(any)) != io.EOF {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent TLS configuration")
+			return
+		}
+		if _, err := provisionAgentTLSConfig(body); err != nil {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent TLS configuration")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(limited))
 		next.ServeHTTP(w, r)
 	})
 }
