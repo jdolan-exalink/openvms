@@ -260,3 +260,204 @@ describe("Cameras", () => {
     expect(screen.queryByRole("button", { name: "Ajustes de acceso" })).not.toBeInTheDocument();
   });
 });
+
+  it("probes a selected server with transient credentials and shows read-only device details", async () => {
+    const fetchMock = vi.fn(stubApi({
+      ...inventory([]),
+      "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [
+        { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "srv1" },
+        { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "srv1" },
+      ] }),
+      "POST /api/v1/servers/srv1/onvif/probe": () => json({
+        device_information: { manufacturer: "Acme", model: "M1", firmware_version: "1.2", serial_number: "S1", hardware_id: "H1" },
+        services: [{ namespace: "device", xaddrs: ["http://192.168.1.20/onvif/device_service"], version: { major: 2, minor: 0 } }],
+        system_time: { date_time_type: "NTP", utc: { time: { hour: 1, minute: 2, second: 3 }, date: { year: 2026, month: 10, day: 5 } }, local: { time: { hour: 2, minute: 2, second: 3 }, date: { year: 2026, month: 10, day: 5 } } },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras);
+    const server = await screen.findByLabelText("Servidor para probar ONVIF");
+    await within(server).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(server, { target: { value: "srv1" } });
+    await screen.findByLabelText("Usuario ONVIF");
+    fireEvent.change(screen.getByLabelText("Endpoint ONVIF"), { target: { value: "https://192.168.1.20:8443/onvif/device_service" } });
+    fireEvent.change(screen.getByLabelText("Usuario ONVIF"), { target: { value: "operator" } });
+    fireEvent.change(screen.getByLabelText("Usuario ONVIF"), { target: { value: "operator" } });
+    fireEvent.change(screen.getByLabelText("Contraseña ONVIF"), { target: { value: "secret-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Probar y detectar" }));
+    expect(await screen.findByText("Acme · M1")).toBeInTheDocument();
+    expect(screen.getByText(/todavía no se guardó/i)).toBeInTheDocument();
+    const request = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.url.includes("/onvif/probe"));
+    expect(request?.url).toContain("/api/v1/servers/srv1/onvif/probe");
+    expect(await request?.json()).toEqual({ endpoint: "https://192.168.1.20:8443/onvif/device_service", username: "operator", password: "secret-pass" });
+    expect(screen.getByLabelText("Contraseña ONVIF")).toHaveValue("");
+    expect(screen.getByLabelText("Usuario ONVIF")).toHaveValue("");
+    expect(screen.queryByText("secret-pass")).not.toBeInTheDocument();
+  });
+
+  it("does not probe without both scoped permissions or after an explicit deny", async () => {
+    const fetchMock = vi.fn(stubApi({
+      ...inventory([]),
+      "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [
+        { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "srv1" },
+        { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "srv1" },
+        { permission: "servers.config.secrets", effect: "deny", scope_type: "server", scope_id: "srv1" },
+      ] }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras);
+    const server = await screen.findByLabelText("Servidor para probar ONVIF");
+    await within(server).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(server, { target: { value: "srv1" } });
+    expect(await screen.findByText(/no tiene permiso servers\.config\.secrets/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Contraseña ONVIF")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([r]) => (r as Request).url.includes("/onvif/probe"))).toBe(false);
+  });
+
+  it("clears the password and hides hostile API error details", async () => {
+    const fetchMock = vi.fn(stubApi({
+      ...inventory([]),
+      "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [
+        { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "srv1" },
+        { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "srv1" },
+      ] }),
+      "POST /api/v1/servers/srv1/onvif/probe": () => json({ code: "agent_tls_not_configured", message: "secret-pass internal host" }, 424),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras);
+    const probeServer = await screen.findByLabelText("Servidor para probar ONVIF");
+    await within(probeServer).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(probeServer, { target: { value: "srv1" } });
+    await screen.findByLabelText("Contraseña ONVIF");
+    fireEvent.change(screen.getByLabelText("Endpoint ONVIF"), { target: { value: "http://192.168.1.20/onvif/device_service" } });
+    fireEvent.change(screen.getByLabelText("Usuario ONVIF"), { target: { value: "operator" } });
+    fireEvent.change(screen.getByLabelText("Contraseña ONVIF"), { target: { value: "secret-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Probar y detectar" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/confianza tls/i);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/secret-pass|internal host/);
+    expect(screen.getByLabelText("Contraseña ONVIF")).toHaveValue("");
+  });
+
+  it("does not probe automatically and aborts a pending probe when the endpoint changes", async () => {
+    let probeSignal: AbortSignal | undefined;
+    let probeCalls = 0;
+    const fetchMock = vi.fn(async (request: Request) => {
+      const path = new URL(request.url).pathname;
+      if (path === "/api/v1/servers") return json({ items: [{ id: "srv1", name: "frigate-h01", site_id: "s1" }] });
+      if (path === "/api/v1/sites") return json({ items: [] });
+      if (path === "/api/v1/cameras") return json({ items: [] });
+      if (path === "/api/v1/me") return json({ id: "u", tenant_id: "t", grants: [
+        { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "srv1" },
+        { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "srv1" },
+      ] });
+      if (path.endsWith("/onvif/probe")) {
+        probeCalls++;
+        probeSignal = request.signal;
+        return new Promise<Response>(() => {});
+      }
+      return json({ code: "not_found", message: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras);
+    const server = await screen.findByLabelText("Servidor para probar ONVIF");
+    await within(server).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(server, { target: { value: "srv1" } });
+    await screen.findByLabelText("Contraseña ONVIF");
+    expect(probeCalls).toBe(0);
+    fireEvent.change(screen.getByLabelText("Endpoint ONVIF"), { target: { value: "http://192.0.2.1/onvif" } });
+    fireEvent.change(screen.getByLabelText("Usuario ONVIF"), { target: { value: "operator" } });
+    fireEvent.change(screen.getByLabelText("Contraseña ONVIF"), { target: { value: "temporary" } });
+    fireEvent.click(screen.getByRole("button", { name: "Probar y detectar" }));
+    expect(await screen.findByText(/consultando el dispositivo/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Endpoint ONVIF"), { target: { value: "http://192.0.2.2/onvif" } });
+    expect(probeSignal?.aborted).toBe(true);
+    expect(screen.getByLabelText("Contraseña ONVIF")).toHaveValue("");
+  });
+
+  it("does not offer credential probing without scoped manage and secrets permissions", async () => {
+    const fetchMock = vi.fn(stubApi({ ...inventory([]), "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [] }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras);
+    const server = await screen.findByLabelText("Servidor para probar ONVIF");
+    await within(server).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(server, { target: { value: "srv1" } });
+    expect(await screen.findByText(/no tiene permiso servers\.manage/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Contraseña ONVIF")).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([r]) => (r as Request).url.includes("/onvif/probe"))).toBe(false);
+  });
+
+  it("does not let a stale probe completion clear credentials entered for a new endpoint", async () => {
+    let resolveProbe!: (response: Response) => void;
+    const fetchMock = vi.fn(async (request: Request) => {
+      const path = new URL(request.url).pathname;
+      if (path === "/api/v1/servers") return json({ items: [{ id: "srv1", name: "frigate-h01", site_id: "s1" }] });
+      if (path === "/api/v1/sites") return json({ items: [] });
+      if (path === "/api/v1/cameras") return json({ items: [] });
+      if (path === "/api/v1/me") return json({ id: "u", tenant_id: "t", grants: [
+        { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "srv1" },
+        { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "srv1" },
+      ] });
+      if (path.endsWith("/onvif/probe")) return new Promise<Response>((resolve) => { resolveProbe = resolve; });
+      return json({ code: "not_found", message: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras);
+    const server = await screen.findByLabelText("Servidor para probar ONVIF");
+    await within(server).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(server, { target: { value: "srv1" } });
+    await screen.findByLabelText("Contraseña ONVIF");
+    const endpoint = screen.getByLabelText("Endpoint ONVIF");
+    fireEvent.change(endpoint, { target: { value: "http://192.0.2.1/onvif" } });
+    fireEvent.change(screen.getByLabelText("Usuario ONVIF"), { target: { value: "old-user" } });
+    fireEvent.change(screen.getByLabelText("Contraseña ONVIF"), { target: { value: "old-pass" } });
+    fireEvent.click(screen.getByRole("button", { name: "Probar y detectar" }));
+    expect(await screen.findByText(/consultando el dispositivo/i)).toBeInTheDocument();
+
+    fireEvent.change(endpoint, { target: { value: "http://192.0.2.2/onvif" } });
+    fireEvent.change(screen.getByLabelText("Usuario ONVIF"), { target: { value: "new-user" } });
+    fireEvent.change(screen.getByLabelText("Contraseña ONVIF"), { target: { value: "new-pass" } });
+    resolveProbe(json({ device_information: { manufacturer: "Old", model: "Old", firmware_version: "", serial_number: "", hardware_id: "" }, services: [], system_time: { date_time_type: "", utc: { time: { hour: 0, minute: 0, second: 0 }, date: { year: 0, month: 0, day: 0 } }, local: { time: { hour: 0, minute: 0, second: 0 }, date: { year: 0, month: 0, day: 0 } } } }));
+    await waitFor(() => expect(screen.getByLabelText("Contraseña ONVIF")).toHaveValue("new-pass"));
+    expect(screen.getByLabelText("Usuario ONVIF")).toHaveValue("new-user");
+    expect(screen.queryByText("Old · Old")).not.toBeInTheDocument();
+  });
+
+  it("aborts a pending probe when the selected server changes or the route unmounts", async () => {
+    const probeSignals: AbortSignal[] = [];
+    const fetchMock = vi.fn(async (request: Request) => {
+      const path = new URL(request.url).pathname;
+      if (path === "/api/v1/servers") return json({ items: [{ id: "srv1", name: "frigate-h01", site_id: "s1" }, { id: "srv2", name: "frigate-r01", site_id: "s1" }] });
+      if (path === "/api/v1/sites") return json({ items: [] });
+      if (path === "/api/v1/cameras") return json({ items: [] });
+      if (path === "/api/v1/me") return json({ id: "u", tenant_id: "t", grants: [
+        { permission: "servers.manage", effect: "allow", scope_type: "tenant", scope_id: "t" },
+        { permission: "servers.config.secrets", effect: "allow", scope_type: "tenant", scope_id: "t" },
+      ] });
+      if (path.endsWith("/onvif/probe")) {
+        probeSignals.push(request.signal);
+        return new Promise<Response>(() => {});
+      }
+      return json({ code: "not_found", message: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const page = renderPage(Cameras);
+    const server = await screen.findByLabelText("Servidor para probar ONVIF");
+    await within(server).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(server, { target: { value: "srv1" } });
+    await screen.findByLabelText("Contraseña ONVIF");
+    fireEvent.change(screen.getByLabelText("Endpoint ONVIF"), { target: { value: "http://192.0.2.10/onvif" } });
+    fireEvent.change(screen.getByLabelText("Usuario ONVIF"), { target: { value: "operator" } });
+    fireEvent.change(screen.getByLabelText("Contraseña ONVIF"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Probar y detectar" }));
+    expect(await screen.findByText(/consultando el dispositivo/i)).toBeInTheDocument();
+
+    fireEvent.change(server, { target: { value: "srv2" } });
+    expect(probeSignals[0]?.aborted).toBe(true);
+    await waitFor(() => expect(screen.getByLabelText("Contraseña ONVIF")).toHaveValue(""));
+    fireEvent.change(screen.getByLabelText("Usuario ONVIF"), { target: { value: "operator" } });
+    fireEvent.change(screen.getByLabelText("Contraseña ONVIF"), { target: { value: "secret" } });
+    fireEvent.click(screen.getByRole("button", { name: "Probar y detectar" }));
+    expect(await screen.findByText(/consultando el dispositivo/i)).toBeInTheDocument();
+    page.unmount();
+    expect(probeSignals[1]?.aborted).toBe(true);
+  });
