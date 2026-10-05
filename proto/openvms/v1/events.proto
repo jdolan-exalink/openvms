@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package openvms.v1;
+
+option go_package = "github.com/jdolan-exalink/openvms/gen/go/openvms/v1;openvmsv1";
+
+enum EventType {
+  EVENT_TYPE_UNSPECIFIED = 0;
+  EVENT_TYPE_MOTION = 1;
+  EVENT_TYPE_PERSON = 2;
+  EVENT_TYPE_VEHICLE = 3;
+  EVENT_TYPE_ALARM = 4;
+  EVENT_TYPE_LPR = 5;
+  EVENT_TYPE_CAMERA_STATUS = 6;
+  EVENT_TYPE_NODE_STATUS = 7;
+  EVENT_TYPE_SYSTEM = 8;
+}
+
+message OpenVMSEvent {
+  string id = 1;
+  string site_id = 2;
+  string node_id = 3;
+  string camera_id = 4;
+  int64 timestamp_unix_nano = 5;
+  EventType type = 6;
+  int64 sequence_id = 7;
+  string payload_json = 8;
+  repeated string zones = 9;
+  string label = 10;
+  float confidence = 11;
+}
+
+message EventSubscription {
+  repeated string site_ids = 1;
+  repeated string node_ids = 2;
+  repeated string camera_ids = 3;
+  repeated EventType event_types = 4;
+  int64 last_sequence_id = 5;
+}
+
+message PublishEventResponse {
+  bool accepted = 1;
+  int64 sequence_id = 2;
+}
+
+service EventService {
+  rpc SubscribeEvents(stream EventSubscription) returns (stream OpenVMSEvent);
+  rpc PublishEvent(OpenVMSEvent) returns (PublishEventResponse);
+}

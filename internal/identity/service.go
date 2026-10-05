@@ -858,3 +858,55 @@ func (s *Service) ListAudit(ctx context.Context, actor authz.Actor, f AuditFilte
 	}
 	return out, err
 }
+
+// ResolveSession verifies a session token or API token hash and returns the Actor.
+func (s *Service) ResolveSession(ctx context.Context, tokenHash []byte) (authz.Actor, error) {
+	var actor authz.Actor
+	idle := s.IdleTimeout
+	if idle <= 0 {
+		idle = 2 * time.Hour
+	}
+
+	err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		// 1. Try session hash first
+		sessParams := db.GetActorBySessionHashParams{
+			TokenHash:   tokenHash,
+			IdleSeconds: idle.Seconds(),
+		}
+		row, err := q.GetActorBySessionHash(ctx, sessParams)
+		if err == nil {
+			_ = q.TouchSession(ctx, row.SessionID)
+			sid := row.SessionID
+			actor = authz.Actor{
+				UserID:    row.ID,
+				Username:  row.Username,
+				TenantID:  row.TenantID,
+				SessionID: &sid,
+			}
+			return nil
+		}
+
+		// 2. Try API token hash next
+		apiRow, apiErr := q.GetActorByTokenHash(ctx, tokenHash)
+		if apiErr == nil {
+			_ = q.TouchAPIToken(ctx, apiRow.TokenID)
+			actor = authz.Actor{
+				UserID:   apiRow.ID,
+				Username: apiRow.Username,
+				TenantID: apiRow.TenantID,
+			}
+			return nil
+		}
+
+		return store.ErrNotFound
+	})
+
+	return actor, err
+}
+
+// RevokeSession revokes a session by its token hash.
+func (s *Service) RevokeSession(ctx context.Context, tokenHash []byte) error {
+	return s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		return q.RevokeSession(ctx, tokenHash)
+	})
+}

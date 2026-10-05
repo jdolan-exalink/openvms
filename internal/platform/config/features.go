@@ -35,3 +35,27 @@ func ParseFeatures(raw string) Features {
 	}
 	return f
 }
+
+// EnabledList returns a slice of enabled feature names for protocol negotiation.
+func (f Features) EnabledList() []string {
+	var list []string
+	if f.PersistentPlayers {
+		list = append(list, "persistent_players")
+	}
+	if f.VideoSurfaceLayer {
+		list = append(list, "video_surface_layer")
+	}
+	if f.AdaptiveStreaming {
+		list = append(list, "adaptive_streaming")
+	}
+	if f.StreamPrewarming {
+		list = append(list, "stream_prewarming")
+	}
+	if f.SeamlessQualitySwitch {
+		list = append(list, "seamless_quality_switch")
+	}
+	if f.Maps {
+		list = append(list, "maps")
+	}
+	return list
+}

@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package openvms.v1;
+
+option go_package = "github.com/jdolan-exalink/openvms/gen/go/openvms/v1;openvmsv1";
+
+import "proto/openvms/v1/common.proto";
+
+message StreamProfile {
+  string name = 1;      // main, sub, mobile
+  int32 width = 2;
+  int32 height = 3;
+  int32 fps = 4;
+  int64 bitrate = 5;
+  string codec = 6;     // h264, h265, av1
+}
+
+message CameraCapabilities {
+  bool ptz = 1;
+  bool audio_in = 2;
+  bool audio_out = 3;
+  int32 profiles_count = 4;
+  string main_codec = 5;
+  string sub_codec = 6;
+  bool lpr = 7;
+  bool analytics = 8;
+  bool fisheye = 9;
+}
+
+message Camera {
+  string id = 1;
+  string site_id = 2;
+  string node_id = 3;
+  string name = 4;
+  OperationalStatus status = 5;
+  repeated StreamProfile profiles = 6;
+  CameraCapabilities capabilities = 7;
+  string location = 8;
+  int64 created_at = 9;
+}
+
+message ListCamerasRequest {
+  string site_id = 1;
+  string node_id = 2;
+  Pagination pagination = 3;
+}
+
+message ListCamerasResponse {
+  repeated Camera cameras = 1;
+  Pagination pagination = 2;
+}
+
+message GetCameraRequest {
+  string camera_id = 1;
+}
+
+message GetCameraResponse {
+  Camera camera = 1;
+}
+
+message GetCameraSnapshotRequest {
+  string camera_id = 1;
+  int32 height = 2;
+}
+
+message GetCameraSnapshotResponse {
+  bytes image_data = 1;
+  string content_type = 2;
+  int64 timestamp = 3;
+}
+
+service CameraService {
+  rpc ListCameras(ListCamerasRequest) returns (ListCamerasResponse);
+  rpc GetCamera(GetCameraRequest) returns (GetCameraResponse);
+  rpc GetCameraSnapshot(GetCameraSnapshotRequest) returns (GetCameraSnapshotResponse);
+}

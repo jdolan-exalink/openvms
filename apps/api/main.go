@@ -31,6 +31,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
+	"github.com/jdolan-exalink/openvms/internal/control"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/health"
 	"github.com/jdolan-exalink/openvms/internal/identity"
@@ -200,6 +201,20 @@ func run() error {
 		return err
 	}
 
+	grpcCtrl := control.NewServer(control.Config{
+		Addr:      cfg.GRPCAddr,
+		Identity:  handlers.Identity,
+		Inventory: inv,
+		Realtime:  rtHub,
+		Log:       log,
+		Features:  cfg.Features.EnabledList(),
+	})
+	go func() {
+		if err := grpcCtrl.Start(cfg.GRPCAddr); err != nil {
+			log.Warn("grpc control server stopped", "error", err)
+		}
+	}()
+
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
 		Handler:           router,
@@ -216,10 +231,12 @@ func run() error {
 
 	select {
 	case err := <-errCh:
+		grpcCtrl.GracefulStop()
 		return err
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
+	grpcCtrl.GracefulStop()
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	return srv.Shutdown(sctx)
