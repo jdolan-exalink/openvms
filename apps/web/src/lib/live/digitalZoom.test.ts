@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IDENTITY_ZOOM, clampZoom, panBy, wheelPixels, zoomAtPoint, zoomTransform } from "./digitalZoom";
+import { IDENTITY_ZOOM, clampZoom, panBy, pinchZoom, wheelPixels, zoomAtPoint, zoomTransform } from "./digitalZoom";
 
 describe("digitalZoom", () => {
   it("zooms toward the cursor and keeps that point still", () => {
@@ -44,5 +44,21 @@ describe("digitalZoom", () => {
     expect(zoomTransform(IDENTITY_ZOOM)).toBe("");
     expect(zoomTransform({ scale: 2, x: -10, y: -4 })).toBe("translate(-10px, -4px) scale(2)");
     expect(clampZoom({ scale: 1, x: -5, y: 3 }, 100, 80)).toEqual(IDENTITY_ZOOM);
+  });
+
+  it("pinches around the midpoint and follows the fingers while panning", () => {
+    const mid = { x: 100, y: 50 };
+    const next = pinchZoom(IDENTITY_ZOOM, 200, 100, mid, mid, 40, 80);
+    expect(next.scale).toBeCloseTo(2);
+    expect((mid.x - next.x) / next.scale).toBeCloseTo(100);
+    expect((mid.y - next.y) / next.scale).toBeCloseTo(50);
+    const moved = pinchZoom(next, 200, 100, mid, { x: 110, y: 50 }, 80, 80);
+    expect(moved.x).toBeCloseTo(Math.min(0, next.x + 10));
+  });
+
+  it("clamps a pinch to the zoom limits", () => {
+    const mid = { x: 100, y: 50 };
+    expect(pinchZoom(IDENTITY_ZOOM, 200, 100, mid, mid, 10, 1000).scale).toBe(8);
+    expect(pinchZoom({ scale: 2, x: -100, y: -50 }, 200, 100, mid, mid, 100, 1)).toEqual(IDENTITY_ZOOM);
   });
 });

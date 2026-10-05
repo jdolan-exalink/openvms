@@ -163,6 +163,13 @@ body {
   @apply bg-bg text-ink font-sans antialiased;
 }
 
+/* Rows that open a context menu on touch long press: no text selection or native callout while holding. */
+[data-longpress] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 /* Live fullscreen covers the document so the video surface layer stays inside it.
    Fullscreening only the grid hides those videos and the tiles go black. */
 html[data-live-fullscreen],

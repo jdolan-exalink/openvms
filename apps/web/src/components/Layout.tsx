@@ -140,15 +140,25 @@ function RailTooltipTarget({ label, children }: { label: string; children: (prop
     setPos(null);
   };
   useEffect(() => () => window.clearTimeout(timer.current), []);
+  // Touch has no hover: the emulated enter and the focus a tap gives would leave the tooltip stuck.
+  const touch = useRef(false);
   const handlers = {
-    onPointerEnter: () => {
+    onPointerEnter: (e: { pointerType: string }) => {
       window.clearTimeout(timer.current);
+      if (e.pointerType === "touch") return;
       timer.current = window.setTimeout(show, 400);
     },
+    onPointerDown: (e: { pointerType: string }) => {
+      touch.current = e.pointerType === "touch";
+      if (touch.current) hide();
+    },
     onPointerLeave: hide,
-    onFocus: show,
+    onFocus: () => { if (!touch.current) show(); },
     onBlur: hide,
-    onKeyDown: (e: { key: string }) => { if (e.key === "Escape") hide(); },
+    onKeyDown: (e: { key: string }) => {
+      touch.current = false;
+      if (e.key === "Escape") hide();
+    },
   };
   return (
     <>

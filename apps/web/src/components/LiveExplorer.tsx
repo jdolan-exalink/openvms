@@ -4,7 +4,7 @@ import {
   Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, GripVertical, History, LayoutGrid,
   type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, Trash2, Video,
 } from "lucide-react";
-import { createContext, type KeyboardEvent, type MouseEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { Icon } from "@/components/Icon";
 import { Chevron, Count, dot, nodeIcon } from "@/components/ExplorerParts";
@@ -17,6 +17,8 @@ import { LiveDetectionsPanel, LiveLprPanel, LiveMapsPanel } from "@/components/L
 import { cameraDragId, type LiveMapRef } from "@/lib/liveGrid";
 import { useT } from "@/i18n";
 import type { useCameraFolders } from "@/lib/useCameraFolders";
+import { LongPressTracker } from "@/lib/touch";
+import { useTouchDoubleTap } from "@/lib/useTouchDoubleTap";
 
 type FolderApi = ReturnType<typeof useCameraFolders>;
 
@@ -32,7 +34,19 @@ export type ExplorerActions = {
   canConfigureCameras: boolean;
 };
 
-type MenuProps = { onContextMenu: (e: MouseEvent<HTMLElement>) => void; onKeyDown: (e: KeyboardEvent<HTMLElement>) => void; "aria-haspopup": "menu" };
+type MenuProps = {
+  onContextMenu: (e: MouseEvent<HTMLElement>) => void;
+  onKeyDown: (e: KeyboardEvent<HTMLElement>) => void;
+  "aria-haspopup": "menu";
+  /** Touch long press opens the same menu; see bind(). */
+  onPointerDown: (e: PointerEvent<HTMLElement>) => void;
+  onPointerMove: (e: PointerEvent<HTMLElement>) => void;
+  onPointerUp: (e: PointerEvent<HTMLElement>) => void;
+  onPointerCancel: (e: PointerEvent<HTMLElement>) => void;
+  onClickCapture: (e: MouseEvent<HTMLElement>) => void;
+  /** Hooks the CSS that disables text selection and the native callout on long press. */
+  "data-longpress": "";
+};
 type Bind = (build: () => MenuItem[]) => MenuProps;
 type MenuCtxValue = { bind: Bind; actions: ExplorerActions; navigate: ReturnType<typeof useNavigate> };
 const MenuCtx = createContext<MenuCtxValue | null>(null);
@@ -188,8 +202,34 @@ export function LiveExplorer({
   const navigate = useNavigate();
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[]; opener: HTMLElement | null } | null>(null);
   // Pointer: open at the cursor. Keyboard (ContextMenu key / Shift+F10): open beside the focused row.
+  // Touch long press (500 ms, cancelled by moving more than 8 px) opens the menu at the touch point.
+  const [longPress] = useState(() => new LongPressTracker());
+  useEffect(() => () => longPress.cancel(), [longPress]);
+  const dndActive = useDndContext().active !== null;
+  const dndActiveRef = useRef(dndActive);
+  useEffect(() => {
+    dndActiveRef.current = dndActive;
+  }, [dndActive]);
   const bind: Bind = (build) => ({
     "aria-haspopup": "menu",
+    "data-longpress": "",
+    onPointerDown: (e) => {
+      if (e.pointerType !== "touch" || !e.isPrimary) return;
+      const { clientX: x, clientY: y } = e;
+      longPress.begin(e.pointerId, x, y, () => {
+        // A still press also lifts a draggable row (220 ms); the menu wins, so drop that drag first.
+        if (dndActiveRef.current) document.dispatchEvent(new KeyboardEvent("keydown", { code: "Escape", key: "Escape", bubbles: true }));
+        setMenu({ x, y, items: build(), opener: null });
+      });
+    },
+    onPointerMove: (e) => longPress.move(e.pointerId, e.clientX, e.clientY),
+    onPointerUp: (e) => longPress.end(e.pointerId),
+    onPointerCancel: (e) => longPress.end(e.pointerId),
+    onClickCapture: (e) => {
+      if (!longPress.consumeFired()) return;
+      e.preventDefault();
+      e.stopPropagation();
+    },
     onContextMenu: (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -576,6 +616,9 @@ function FolderBranch({
     id: treeFolderId(folder.id),
     data: { kind: "folder", serverId: server.id } satisfies DragData,
   });
+  const touchTap = useTouchDoubleTap(() => {
+    if (server.canManage) onRenaming(folder.id);
+  });
   const menu = bind(() => [
     addToViewItem(actions, node.cameras.map((c) => c.id), t),
     ...(server.canManage
@@ -599,14 +642,28 @@ function FolderBranch({
             <button
               ref={setDragRef}
               type="button"
-              onClick={() => toggle(key)}
-              onDoubleClick={server.canManage ? () => onRenaming(folder.id) : undefined}
+              onClick={() => {
+                if (!touchTap.justHandled()) toggle(key);
+              }}
+              onDoubleClick={server.canManage ? () => { if (!touchTap.justHandled()) onRenaming(folder.id); } : undefined}
               aria-expanded={isOpen(key)}
               title={t("live.folderDragHint", { name: folder.name })}
               className="flex min-w-0 flex-1 cursor-grab items-center gap-1 rounded-m3-sm py-1.5 text-left hover:bg-on-surface/8"
               {...attributes}
               {...listeners}
               {...menu}
+              onPointerDown={(e) => {
+                menu.onPointerDown(e);
+                touchTap.handlers.onPointerDown(e);
+              }}
+              onPointerUp={(e) => {
+                menu.onPointerUp(e);
+                touchTap.handlers.onPointerUp(e);
+              }}
+              onPointerCancel={(e) => {
+                menu.onPointerCancel(e);
+                touchTap.handlers.onPointerCancel(e);
+              }}
               onKeyDown={(event) => {
                 menu.onKeyDown(event);
                 if (!event.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(event);
@@ -618,7 +675,7 @@ function FolderBranch({
               <Count n={node.cameras.length} />
             </button>
             {server.canManage && (
-              <span className="flex shrink-0 opacity-0 focus-within:opacity-100 group-hover:opacity-100">
+              <span className="flex shrink-0 opacity-0 focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
                 <IconButton icon={Pencil} aria-label={t("live.renameFolder", { name: folder.name })} title={t("live.rename")} onClick={() => onRenaming(folder.id)} size="sm" />
                 <IconButton icon={Trash2} aria-label={t("live.deleteFolderNamed", { name: folder.name })} title={t("live.delete")} onClick={() => onDelete(folder)} size="sm" className="hover:text-bad" />
               </span>
@@ -664,6 +721,11 @@ function CameraRow({
       ? [{ id: "cfg", label: t("live.configure"), icon: Settings, onSelect: () => void navigate({ to: "/cameras/$cameraId/frigate", params: { cameraId: camera.id } }) } satisfies MenuItem]
       : []),
   ]);
+  // Touch double tap places the camera like a double click; the single-tap pick is skipped after it.
+  const touchTap = useTouchDoubleTap(() => {
+    clearTimeout(clickTimer.current);
+    onDoublePlace(camera.id);
+  });
   const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
     id: cameraDragId(camera.id),
     data: { kind: "camera", serverId: camera.server_id } satisfies DragData,
@@ -678,10 +740,12 @@ function CameraRow({
         type="button"
         onClick={() => {
           clearTimeout(clickTimer.current);
+          if (touchTap.justHandled()) return;
           clickTimer.current = setTimeout(() => onPick(camera.id), 220);
         }}
         onDoubleClick={() => {
           clearTimeout(clickTimer.current);
+          if (touchTap.justHandled()) return;
           onDoublePlace(camera.id);
         }}
         title={t("live.cameraHint", { name: camera.display_name })}
@@ -689,6 +753,18 @@ function CameraRow({
         {...attributes}
         {...listeners}
         {...menu}
+        onPointerDown={(e) => {
+          menu.onPointerDown(e);
+          touchTap.handlers.onPointerDown(e);
+        }}
+        onPointerUp={(e) => {
+          menu.onPointerUp(e);
+          touchTap.handlers.onPointerUp(e);
+        }}
+        onPointerCancel={(e) => {
+          menu.onPointerCancel(e);
+          touchTap.handlers.onPointerCancel(e);
+        }}
         onKeyDown={(e) => {
           menu.onKeyDown(e);
           if (!e.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(e);

@@ -1,6 +1,6 @@
 import { ChevronsRight } from "lucide-react";
 import { Icon } from "@/components/Icon";
-import { DndContext, DragOverlay, type DragEndEvent, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
+import { DndContext, DragOverlay, type DragEndEvent, useDroppable } from "@dnd-kit/core";
 import { rectSortingStrategy, rectSwappingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -36,6 +36,8 @@ import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { can } from "@/lib/perm";
 import { LivePhone } from "@/components/LivePhone";
 import { useIsPhoneDevice } from "@/lib/useIsPhoneDevice";
+import { useLiveDragSensors } from "@/lib/dndSensors";
+import { useTouchDoubleTap } from "@/lib/useTouchDoubleTap";
 import { useCameraFolders } from "@/lib/useCameraFolders";
 import { useRecData } from "@/lib/useRecData";
 import { useRecPlayback } from "@/lib/useRecPlayback";
@@ -128,6 +130,18 @@ function LiveDesktop() {
     }, 280);
   };
   useEffect(() => () => clearTimeout(hideEdge.current), []);
+  // Touch has no hover to leave: an unpinned edge explorer closes on a tap outside it (menus and dialogs it opened excluded).
+  useEffect(() => {
+    if (!edgeOpen || sidebarPinned) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") return;
+      if ((event.target as Element | null)?.closest?.('[data-testid="live-edge"], [data-context-menu], [role="dialog"]')) return;
+      edgeHover.current = false;
+      setEdgeOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [edgeOpen, sidebarPinned]);
   // The explorer is the same edge panel in the page and in fullscreen, so the shell column stays shut.
   useEffect(() => {
     setContextSidebarCollapsed(true);
@@ -272,10 +286,7 @@ function LiveDesktop() {
   // Swapping (not shifting) keeps every other tile in its cell, so only the two swapped cameras move.
   const reorder = (from: number, to: number) => setTiles((t) => (persistentPlayers ? swapTiles(t, from, to) : reorderTiles(t, from, to)));
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useLiveDragSensors(sortableKeyboardCoordinates);
 
   const placeMap = (map: { site_id: string; floor_id?: string; name: string }, index?: number) => {
     const at = index ?? selectedRef.current;
@@ -607,9 +618,13 @@ function LiveDesktop() {
   const sidebar = createPortal(
     <div
       data-testid="live-edge"
-      className={cn("fixed inset-y-0 z-40", fullscreen ? "left-0" : "left-0 md:left-(--rail-w)", edgeVisible ? "w-80 max-w-[85vw]" : "w-3")}
-      onPointerEnter={revealEdge}
-      onPointerLeave={concealEdge}
+      className={cn("fixed inset-y-0 z-40", fullscreen ? "left-0" : "left-0 md:left-(--rail-w)", edgeVisible ? "w-80 max-w-[85vw]" : "w-3 [@media(pointer:coarse)]:w-11")}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "touch") revealEdge();
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType !== "touch") concealEdge();
+      }}
     >
       <aside hidden={!edgeVisible} aria-label={tr("live.explorer")} className="flex h-full min-h-0 w-80 max-w-[85vw] flex-col rounded-r-m3-xl bg-surface-1 px-3 py-4 shadow-2xl">
         <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-0.5 bg-primary/70" />
@@ -779,7 +794,7 @@ export function Live() {
 }
 
 /** Overlay action on a camera tile: a 32px pill on the translucent surface so it reads over any video. */
-const tileAction = "size-8 rounded-full bg-surface-1/80 text-on-surface backdrop-blur hover:bg-surface-1";
+const tileAction = "size-8 [@media(pointer:coarse)]:size-11 rounded-full bg-surface-1/80 text-on-surface backdrop-blur hover:bg-surface-1";
 
 function LiveGridFrame({ className, style, role, label, mode, children }: { className?: string; style?: CSSProperties; role?: string; label: string; mode?: string; children: ReactNode }) {
   const { setNodeRef } = useDroppable({ id: LIVE_GRID_DROP_ID });
@@ -838,6 +853,8 @@ function GridTile({
   const tr = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...placement };
+  // Touch: two quick taps expand the tile like a double click. The dblclick some browsers synthesize after it is ignored.
+  const touchTap = useTouchDoubleTap(onToggleFocus);
   return (
     <div
       ref={setNodeRef}
@@ -846,9 +863,13 @@ function GridTile({
       aria-current={isSelected ? "true" : undefined}
       data-selected={isSelected ? "true" : undefined}
       onClick={onSelect}
-      onDoubleClick={onToggleFocus}
+      onDoubleClick={() => {
+        if (touchTap.justHandled()) return;
+        onToggleFocus();
+      }}
+      {...touchTap.handlers}
       className={cn(
-        "group relative isolate aspect-video overflow-hidden [contain:paint] bg-video outline-none focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
+        "group relative isolate select-none touch-manipulation [-webkit-touch-callout:none] aspect-video overflow-hidden [contain:paint] bg-video outline-none focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
         isSelected && "outline-2 outline-offset-1 outline-primary",
         isDragging && "opacity-50",
         isHidden && "hidden",

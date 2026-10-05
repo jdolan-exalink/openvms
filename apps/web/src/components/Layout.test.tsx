@@ -67,6 +67,38 @@ describe("primary navigation and context header", () => {
     expect(within(rail).getByRole("link", { name: "Events" })).toBeInTheDocument();
   });
 
+  it("does not show or stick rail tooltips for touch pointers, but still shows them for the mouse and keyboard", async () => {
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": () => json({
+        id: "u1", username: "operator", display_name: "Operator", tenant_id: "t1",
+        mfa_enabled: false, must_change_password: false, auth_method: "session",
+        grants: [{ permission: "events.view", effect: "allow", scope_type: "platform" }],
+      }),
+    })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/events"] }), context: { queryClient: client } });
+    render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+
+    await screen.findByRole("navigation", { name: "Navegación principal" });
+    const rail = screen.getByRole("complementary", { name: "Primary Nav Rail" });
+    const eventsLink = within(rail).getByRole("link", { name: "Eventos" });
+    // A finger: emulated hover and the focus a tap gives must not leave a tooltip behind.
+    fireEvent.pointerEnter(eventsLink, { pointerType: "touch" });
+    fireEvent.pointerDown(eventsLink, { pointerType: "touch" });
+    fireEvent.focus(eventsLink);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.blur(eventsLink);
+    // Keyboard focus after a touch still shows it.
+    fireEvent.keyDown(eventsLink, { key: "Tab" });
+    fireEvent.focus(eventsLink);
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Eventos");
+    fireEvent.blur(eventsLink);
+    // And a mouse still shows it after the hover delay.
+    fireEvent.pointerEnter(eventsLink, { pointerType: "mouse" });
+    expect(await screen.findByRole("tooltip")).toHaveTextContent("Eventos");
+  });
+
   it("marks the settings destination active on an unprefixed settings route", async () => {
     vi.stubGlobal("fetch", vi.fn(stubApi({
       "/api/v1/me": () => json({
