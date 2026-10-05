@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { alarmsQuery, cameraFoldersQuery, serversQuery, meQuery, camerasQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
-import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery, siteZonesQuery, unplacedCamerasQuery } from "@/lib/maps/api";
+import { mapsConfigQuery, mapsOverviewQuery, siteEntitiesQuery, siteZonesQuery, unplacedCamerasQuery, mapAnalyticsQuery } from "@/lib/maps/api";
 import { applyFilters, mapUserPrefsQuery, mergeLayers, saveMapUserPrefs } from "@/lib/maps/prefs";
 import {
   DEFAULT_PLACEMENT,
@@ -240,6 +240,39 @@ function MapShellContent({
   const [maximizedOrigin, setMaximizedOrigin] = useState<GrowRect>();
   const [plateSnapshot, setPlateSnapshot] = useState<PlateSnapshotTarget>();
   const [saveError, setSaveError] = useState<string>();
+  const [analyticsMetric, setAnalyticsMetric] = useState<"object" | "person" | "vehicle" | "motion" | "alarm" | "lpr">("person");
+  const [analyticsTimeframe, setAnalyticsTimeframe] = useState<"1h" | "24h" | "7d" | "30d">("24h");
+  const analyticsDates = useMemo(() => {
+    const end = new Date();
+    const start = new Date();
+    switch (analyticsTimeframe) {
+      case "1h":
+        start.setHours(start.getHours() - 1);
+        break;
+      case "24h":
+        start.setDate(start.getDate() - 1);
+        break;
+      case "7d":
+        start.setDate(start.getDate() - 7);
+        break;
+      case "30d":
+        start.setDate(start.getDate() - 30);
+        break;
+    }
+    return { start: start.toISOString(), end: end.toISOString() };
+  }, [analyticsTimeframe]);
+
+  const analyticsQuery = useQuery({
+    ...mapAnalyticsQuery({
+      site_id: currentSite?.id,
+      metric: analyticsMetric,
+      start: analyticsDates.start,
+      end: analyticsDates.end,
+      coverage,
+    }),
+    enabled: mode === "analytics" && !!currentSite,
+  });
+
   const pending = pendingPlacements(draft);
   const knownRevision = (entityId: string): number | undefined =>
     draft.revisions[entityId] ?? entitiesQuery.data?.entities.find((e) => e.id === entityId)?.revision;
@@ -729,6 +762,10 @@ function MapShellContent({
         onToggleFilters={() => setFiltersOpen(!filtersOpen)}
         layersActive={layersOpen}
         filtersActive={filtersOpen}
+        analyticsMetric={analyticsMetric}
+        onAnalyticsMetricChange={setAnalyticsMetric}
+        analyticsTimeframe={analyticsTimeframe}
+        onAnalyticsTimeframeChange={setAnalyticsTimeframe}
       />
       {can(me.data, "live.view") && (
         <Checkbox className="order-6 px-2 text-xs font-medium text-on-surface-variant" checked={hoverLiveEnabled} onChange={setHoverLiveOverride} label="Live on hover" />
@@ -818,6 +855,8 @@ function MapShellContent({
       {/* Map Canvas */}
       <div data-map-stage className="relative min-h-0 w-full flex-1 overflow-hidden">
         <MapCanvas
+          heatmapPoints={mode === "analytics" ? analyticsQuery.data?.points : undefined}
+          analyticsMode={mode === "analytics"}
           realtimeStore={realtimeStore}
           onMapReady={map => {
             mapRef.current = map;

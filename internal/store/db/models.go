@@ -188,6 +188,15 @@ type Event struct {
 	Lpr           bool
 }
 
+type EventCountsHourly struct {
+	TenantID uuid.UUID
+	CameraID uuid.UUID
+	Hour     time.Time
+	Label    string
+	Severity string
+	N        int32
+}
+
 type EventSyncState struct {
 	ServerID        uuid.UUID
 	TenantID        uuid.UUID

@@ -1909,6 +1909,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/maps/analytics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Activity heatmaps and analytics
+         * @description Returns aggregated and normalized activity heatmap points for cameras on a site.
+         */
+        get: operations["getMapAnalytics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/maps/config": {
         parameters: {
             query?: never;
@@ -3891,6 +3911,25 @@ export interface components {
             geometry?: Record<string, never>;
             style?: Record<string, never> | null;
             metadata?: Record<string, never> | null;
+        };
+        MapAnalyticsPoint: {
+            /** Format: uuid */
+            camera_id?: string | null;
+            /** Format: double */
+            lat: number;
+            /** Format: double */
+            lng: number;
+            /** Format: double */
+            weight: number;
+            /** Format: int64 */
+            count: number;
+        };
+        MapAnalyticsResponse: {
+            points: components["schemas"]["MapAnalyticsPoint"][];
+            /** Format: int64 */
+            total: number;
+            /** Format: int64 */
+            max_count: number;
         };
     };
     responses: {
@@ -7398,6 +7437,39 @@ export interface operations {
                     };
                 };
             };
+        };
+    };
+    getMapAnalytics: {
+        parameters: {
+            query?: {
+                site_id?: string;
+                camera_id?: string;
+                zone_id?: string;
+                metric?: "object" | "person" | "vehicle" | "motion" | "alarm" | "lpr";
+                object_type?: string;
+                start?: string;
+                end?: string;
+                coverage?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Analytics heatmap data */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapAnalyticsResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getMapConfig: {

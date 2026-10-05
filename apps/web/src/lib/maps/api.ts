@@ -227,3 +227,30 @@ export const siteZonesQuery = (siteId: string) =>
     },
     enabled: !!siteId,
   });
+
+export interface MapAnalyticsParams {
+  site_id?: string;
+  camera_id?: string;
+  zone_id?: string;
+  metric?: "object" | "person" | "vehicle" | "motion" | "alarm" | "lpr";
+  object_type?: string;
+  start?: string;
+  end?: string;
+  coverage?: boolean;
+}
+
+export const mapAnalyticsQuery = (params: MapAnalyticsParams) =>
+  queryOptions({
+    queryKey: ["maps", "analytics", params],
+    queryFn: async () => {
+      const res = unwrap(
+        await api.GET("/api/v1/maps/analytics", {
+          params: { query: params },
+        }),
+      );
+      return res;
+    },
+    enabled: !!params.site_id || !!params.camera_id,
+    staleTime: 60_000,
+  });
+

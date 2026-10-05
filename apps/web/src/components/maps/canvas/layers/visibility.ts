@@ -2,6 +2,7 @@ import type { Map as MapLibreMap } from "maplibre-gl";
 import { buildCameraLayers } from "./cameraLayers";
 import { buildFovLayers } from "./fovLayer";
 import { buildFxLayers } from "./fxLayers";
+import { buildHeatmapLayers } from "./heatmapLayer";
 import { buildSiteLayers } from "./sitesLayer";
 import { buildZonesLayers } from "./zonesLayer";
 
@@ -17,6 +18,7 @@ export const LAYER_GROUPS = {
   sites: ["site-health-ring", "site-point", "site-label", "site-icon", "site-offline-badge"],
   zones: ["zone-fill", "zone-outline", "zone-label"],
   coverage: ["fov-fill", "fov-outline"],
+  heatmap: ["analytics-heatmap-layer", "analytics-heatmap-circles"],
   alarmFx: ["fx-alarm-pulse"],
   detectionFx: ["fx-ripple"],
 } as const;
@@ -33,6 +35,7 @@ export function builtLayerIds(): string[] {
   return [
     ...buildCameraLayers().map((l) => l.id),
     ...buildFovLayers().map((l) => l.id),
+    ...buildHeatmapLayers().map((l) => l.id),
     ...buildSiteLayers().map((l) => l.id),
     ...buildZonesLayers().map((l) => l.id),
     ...buildFxLayers().map((l) => l.id),
@@ -64,7 +67,7 @@ export function reconcileOwnedLayers(
   coverage = true,
 ): void {
   const ordered = [
-    ...buildZonesLayers(), ...buildFovLayers(coverage), ...buildSiteLayers(),
+    ...buildZonesLayers(), ...buildHeatmapLayers(), ...buildFovLayers(coverage), ...buildSiteLayers(),
     ...buildCameraLayers(), ...buildFxLayers(),
   ];
   for (const layer of ordered) {
@@ -72,3 +75,4 @@ export function reconcileOwnedLayers(
     map.moveLayer(layer.id);
   }
 }
+

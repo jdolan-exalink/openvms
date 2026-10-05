@@ -654,3 +654,56 @@ func (h *Handlers) PutMapUserPrefs(ctx context.Context, req gen.PutMapUserPrefsR
 	}
 	return gen.PutMapUserPrefs200JSONResponse(*req.Body), nil
 }
+
+// GetMapAnalytics returns heatmap activity points and aggregate totals.
+func (h *Handlers) GetMapAnalytics(ctx context.Context, req gen.GetMapAnalyticsRequestObject) (gen.GetMapAnalyticsResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !h.Features.Maps || h.Maps == nil {
+		return gen.GetMapAnalytics404JSONResponse{NotFoundJSONResponse: gen.NotFoundJSONResponse{Code: "not_found", Message: "maps feature is disabled"}}, nil
+	}
+
+	q := maps.AnalyticsQuery{
+		SiteID:     req.Params.SiteId,
+		CameraID:   req.Params.CameraId,
+		ZoneID:     req.Params.ZoneId,
+		ObjectType: req.Params.ObjectType,
+	}
+	if req.Params.Metric != nil {
+		q.Metric = maps.AnalyticsMetric(*req.Params.Metric)
+	}
+	if req.Params.Start != nil {
+		q.Start = *req.Params.Start
+	}
+	if req.Params.End != nil {
+		q.End = *req.Params.End
+	}
+	if req.Params.Coverage != nil {
+		q.Coverage = *req.Params.Coverage
+	}
+
+	res, err := h.Maps.GetAnalytics(ctx, a, q)
+	if err != nil {
+		return nil, err
+	}
+
+	points := make([]gen.MapAnalyticsPoint, 0, len(res.Points))
+	for _, p := range res.Points {
+		points = append(points, gen.MapAnalyticsPoint{
+			CameraId: p.CameraID,
+			Lat:      p.Lat,
+			Lng:      p.Lng,
+			Weight:   p.Weight,
+			Count:    p.Count,
+		})
+	}
+
+	return gen.GetMapAnalytics200JSONResponse{
+		Points:   points,
+		Total:    res.Total,
+		MaxCount: res.MaxCount,
+	}, nil
+}
+
