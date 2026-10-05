@@ -24,11 +24,16 @@ const (
 
 var ErrDiscoveryTimeout = errors.New("ONVIF discovery timed out")
 
-// DatagramTransport is an interface-scoped boundary. Implementations send and
-// receive datagrams only on the requested local interface; tests inject fakes.
+// DatagramSession owns one interface-bound socket for a single probe.
+type DatagramSession interface {
+	Send(ctx context.Context, payload []byte) error
+	Receive(ctx context.Context) ([]byte, error)
+	Close() error
+}
+
+// DatagramTransport opens an isolated session; sessions never share sockets.
 type DatagramTransport interface {
-	Send(ctx context.Context, interfaceName string, payload []byte) error
-	Receive(ctx context.Context, interfaceName string) ([]byte, error)
+	Open(ctx context.Context, interfaceName string) (DatagramSession, error)
 }
 
 type DiscoveryConfig struct {
@@ -80,7 +85,12 @@ func (d *Discovery) Probe(ctx context.Context, interfaceName string) ([]Discover
 	payload := buildProbe(messageID)
 	probeCtx, cancel := context.WithTimeout(ctx, d.config.Timeout)
 	defer cancel()
-	if err := d.transport.Send(probeCtx, interfaceName, payload); err != nil {
+	session, err := d.transport.Open(probeCtx, interfaceName)
+	if err != nil {
+		return nil, fmt.Errorf("open ONVIF discovery session: %w", err)
+	}
+	defer session.Close()
+	if err := session.Send(probeCtx, payload); err != nil {
 		return nil, fmt.Errorf("send ONVIF discovery probe: %w", err)
 	}
 
@@ -94,7 +104,7 @@ func (d *Discovery) Probe(ctx context.Context, interfaceName string) ([]Discover
 		if probeCtx.Err() != nil {
 			return result, nil
 		}
-		packet, err := d.transport.Receive(probeCtx, interfaceName)
+		packet, err := session.Receive(probeCtx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return result, ctx.Err()

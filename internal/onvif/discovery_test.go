@@ -18,12 +18,32 @@ type fakeDatagrams struct {
 	receive func(context.Context) ([]byte, error)
 }
 
+type fakeDatagramSession struct{ transport *fakeDatagrams }
+
+func (f *fakeDatagrams) Open(_ context.Context, _ string) (DatagramSession, error) {
+	return fakeDatagramSession{f}, nil
+}
+func (s fakeDatagramSession) Send(ctx context.Context, p []byte) error {
+	return s.transport.Send(ctx, "", p)
+}
+func (s fakeDatagramSession) Receive(ctx context.Context) ([]byte, error) {
+	return s.transport.Receive(ctx, "")
+}
+func (s fakeDatagramSession) Close() error { return nil }
+
 func (f *fakeDatagrams) Send(_ context.Context, _ string, p []byte) error {
 	f.sent = append(f.sent, append([]byte(nil), p...))
 	if f.onSend != nil {
 		f.onSend(p)
 	}
 	return nil
+}
+
+func TestUDPTransportRequiresBoundedInterfaceSession(t *testing.T) {
+	tr := NewUDPTransport()
+	if _, err := tr.Open(context.Background(), ""); err == nil {
+		t.Fatal("empty interface accepted")
+	}
 }
 func (f *fakeDatagrams) Receive(ctx context.Context, _ string) ([]byte, error) {
 	if f.receive != nil {
