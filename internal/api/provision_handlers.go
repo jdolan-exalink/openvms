@@ -138,3 +138,42 @@ func (h *Handlers) DiscoverServerOnvif(ctx context.Context, r gen.DiscoverServer
 	}
 	return gen.DiscoverServerOnvif200JSONResponse(out), nil
 }
+
+func (h *Handlers) ProbeServerOnvif(ctx context.Context, r gen.ProbeServerOnvifRequestObject) (gen.ProbeServerOnvifResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil {
+		return nil, &provision.ValidationError{Msg: "ONVIF probe request is required"}
+	}
+	input := provision.OnvifProbeRequest{Endpoint: r.Body.Endpoint}
+	if r.Body.Username != nil {
+		input.Username = *r.Body.Username
+	}
+	if r.Body.Password != nil {
+		input.Password = *r.Body.Password
+	}
+	result, err := h.Provision.ProbeOnvif(ctx, a, uuid.UUID(r.ServerId), input)
+	if err != nil {
+		return nil, err
+	}
+	return gen.ProbeServerOnvif200JSONResponse(onvifProbeResult(result)), nil
+}
+
+func onvifProbeResult(in provision.OnvifProbeResult) gen.OnvifProbeResult {
+	out := gen.OnvifProbeResult{
+		DeviceInformation: gen.OnvifProbeDeviceInformation{
+			Manufacturer: in.Information.Manufacturer, Model: in.Information.Model,
+			FirmwareVersion: in.Information.FirmwareVersion, SerialNumber: in.Information.SerialNumber, HardwareId: in.Information.HardwareID,
+		},
+		Services: make([]gen.OnvifProbeService, 0, len(in.Services)),
+		SystemTime: gen.OnvifProbeClock{DateTimeType: in.Clock.DateTimeType,
+			Utc:   gen.OnvifProbeDateTime{Time: gen.OnvifProbeTime{Hour: in.Clock.UTC.Time.Hour, Minute: in.Clock.UTC.Time.Minute, Second: in.Clock.UTC.Time.Second}, Date: gen.OnvifProbeDate{Year: in.Clock.UTC.Date.Year, Month: in.Clock.UTC.Date.Month, Day: in.Clock.UTC.Date.Day}},
+			Local: gen.OnvifProbeDateTime{Time: gen.OnvifProbeTime{Hour: in.Clock.Local.Time.Hour, Minute: in.Clock.Local.Time.Minute, Second: in.Clock.Local.Time.Second}, Date: gen.OnvifProbeDate{Year: in.Clock.Local.Date.Year, Month: in.Clock.Local.Date.Month, Day: in.Clock.Local.Date.Day}}},
+	}
+	for _, service := range in.Services {
+		out.Services = append(out.Services, gen.OnvifProbeService{Namespace: service.Namespace, Xaddrs: service.XAddrs, Version: gen.OnvifProbeVersion{Major: service.Version.Major, Minor: service.Version.Minor}})
+	}
+	return out
+}

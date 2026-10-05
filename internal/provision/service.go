@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -53,8 +54,11 @@ type Service struct {
 	Dial   func(ctx context.Context, host, user, password, expectedKey string, onKey func(string)) (Conn, error)
 	Binary func() ([]byte, error)
 
-	// requireServerManage is an internal seam for proving discovery denies before secret use.
-	requireServerManage func(context.Context, authz.Actor, uuid.UUID) error
+	// Authorization and transport seams prove probe denial before secret access or outbound calls.
+	requireServerManage        func(context.Context, authz.Actor, uuid.UUID) error
+	requireServerConfigSecrets func(context.Context, authz.Actor, uuid.UUID) error
+	loadProbeAgent             func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error)
+	probeRoundTripper          http.RoundTripper
 
 	mu   sync.Mutex
 	jobs map[uuid.UUID]*job

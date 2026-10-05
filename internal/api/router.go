@@ -52,7 +52,7 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 
 	r := chi.NewRouter()
 	r.Use(httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
-	r.Use(validateOnvifDiscoveryBody, validateAgentTLSConfigBody)
+	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody)
 	if opts.Queries != nil {
 		r.Use(Authenticate(opts.Queries, AuthOptions{IdleTimeout: opts.SessionIdle}))
 	}
@@ -138,9 +138,35 @@ func validateOnvifDiscoveryBody(next http.Handler) http.Handler {
 	})
 }
 
+// validateOnvifProbeBody bounds transient credentials and rejects unknown or trailing JSON.
+func validateOnvifProbeBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method != http.MethodPost || len(parts) != 6 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "servers" || parts[4] != "onvif" || parts[5] != "probe" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		limited, err := io.ReadAll(io.LimitReader(r.Body, onvifProbeRequestMaxBytes+1))
+		if err != nil || len(limited) > onvifProbeRequestMaxBytes {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "ONVIF probe request exceeds the size limit")
+			return
+		}
+		dec := json.NewDecoder(bytes.NewReader(limited))
+		dec.DisallowUnknownFields()
+		var body gen.OnvifProbeRequest
+		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid ONVIF probe request")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(limited))
+		next.ServeHTTP(w, r)
+	})
+}
+
 const (
-	agentTLSPemMaxBytes     = 64 << 10
-	agentTLSRequestMaxBytes = 128 << 10
+	agentTLSPemMaxBytes       = 64 << 10
+	agentTLSRequestMaxBytes   = 128 << 10
+	onvifProbeRequestMaxBytes = 4096
 )
 
 // validateAgentTLSConfigBody bounds and strictly decodes public trust configuration.

@@ -567,6 +567,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/onvif/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read ONVIF device information through a registered agent
+         * @description Requires servers.manage and servers.config.secrets. Credentials are transient, sent only over verified agent HTTPS, and are never stored or returned.
+         */
+        post: operations["probeServerOnvif"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/agent": {
         parameters: {
             query?: never;
@@ -2591,6 +2613,52 @@ export interface components {
         };
         OnvifDiscoveryResult: {
             devices: components["schemas"]["OnvifDiscoveryDevice"][];
+        };
+        OnvifProbeRequest: {
+            /** @description HTTP(S) ONVIF device endpoint on an IPv4 literal. */
+            endpoint: string;
+            username?: string;
+            password?: string;
+        };
+        OnvifProbeResult: {
+            device_information: components["schemas"]["OnvifProbeDeviceInformation"];
+            services: components["schemas"]["OnvifProbeService"][];
+            system_time: components["schemas"]["OnvifProbeClock"];
+        };
+        OnvifProbeDeviceInformation: {
+            manufacturer: string;
+            model: string;
+            firmware_version: string;
+            serial_number: string;
+            hardware_id: string;
+        };
+        OnvifProbeService: {
+            namespace: string;
+            xaddrs: string[];
+            version: components["schemas"]["OnvifProbeVersion"];
+        };
+        OnvifProbeVersion: {
+            major: number;
+            minor: number;
+        };
+        OnvifProbeClock: {
+            date_time_type: string;
+            utc: components["schemas"]["OnvifProbeDateTime"];
+            local: components["schemas"]["OnvifProbeDateTime"];
+        };
+        OnvifProbeDateTime: {
+            time: components["schemas"]["OnvifProbeTime"];
+            date: components["schemas"]["OnvifProbeDate"];
+        };
+        OnvifProbeTime: {
+            hour: number;
+            minute: number;
+            second: number;
+        };
+        OnvifProbeDate: {
+            year: number;
+            month: number;
+            day: number;
         };
         ServerAgent: {
             installed: boolean;
@@ -5052,6 +5120,37 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    probeServerOnvif: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnvifProbeRequest"];
+            };
+        };
+        responses: {
+            /** @description Bounded, sanitized read-only ONVIF device information */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnvifProbeResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };
