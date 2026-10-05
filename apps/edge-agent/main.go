@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agent"
+	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
+	"github.com/jdolan-exalink/openvms/internal/onvif"
 )
 
 func main() {
@@ -33,6 +35,31 @@ func main() {
 		DB:   env("OPENVMS_DB_PATH", "/opt/frigate/config"),
 	})
 	variant := env("OPENVMS_AGENT_VARIANT", "")
+	discoveryConfig, enabled, err := onvifdiscover.LoadConfig(os.Getenv("ONVIF_DISCOVERY_INTERFACES"), os.Getenv("ONVIF_ALLOWED_CIDRS"))
+	if err != nil {
+		log.Error("invalid ONVIF discovery configuration", "error", err)
+		os.Exit(1)
+	}
+	var discoveryHandler http.Handler
+	if enabled {
+		var handlerErr error
+		discoveryHandler, handlerErr = onvifdiscover.NewHandler(secret, onvif.NewDiscovery(onvif.NewUDPTransport(), onvif.DiscoveryConfig{}), discoveryConfig)
+		if handlerErr != nil {
+			log.Error("invalid ONVIF discovery configuration", "error", handlerErr)
+			os.Exit(1)
+		}
+	}
+	mux := buildMux(secret, variant, sampler, discoveryHandler, replaceBinary, func() { go restart() })
+	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
+	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	log.Info("listening", "addr", addr, "version", agent.Version)
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Error("listen", "error", err)
+		os.Exit(1)
+	}
+}
+
+func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler http.Handler, replace func(*http.Request) error, restartUpdate func()) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/metrics", func(w http.ResponseWriter, r *http.Request) {
 		if !bearer(r, secret) {
@@ -46,20 +73,17 @@ func main() {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if err := replaceBinary(r); err != nil {
+		if err := replace(r); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		w.WriteHeader(http.StatusAccepted)
-		go restart()
+		restartUpdate()
 	})
-	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
-	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
-	log.Info("listening", "addr", addr, "version", agent.Version)
-	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Error("listen", "error", err)
-		os.Exit(1)
+	if discoveryHandler != nil {
+		mux.Handle("POST /v1/onvif/discover", discoveryHandler)
 	}
+	return mux
 }
 
 func bearer(r *http.Request, secret string) bool {

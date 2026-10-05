@@ -27,6 +27,9 @@ var (
 // Endpoint is a validated, credential-free HTTP(S) service URL.
 type Endpoint struct{ value string }
 
+// String returns the validated credential-free endpoint URL.
+func (e Endpoint) String() string { return e.value }
+
 func ParseEndpoint(raw string) (Endpoint, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u == nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(raw, "\\\r\n\t") {
