@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -132,5 +133,47 @@ func TestWebsocketRouteRequiresAuthenticationBeforeUpgrade(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized || called {
 		t.Fatalf("want 401 without invoking the handler, got %d (called=%v)", resp.StatusCode, called)
+	}
+}
+
+func TestValidateOnvifDiscoveryBody(t *testing.T) {
+	for _, tt := range []struct {
+		name, body string
+		want       int
+	}{
+		{"allowed request", `{"interface_name":"eth0"}`, 204},
+		{"unknown credential field", `{"interface_name":"eth0","agent_token":"secret"}`, 400},
+		{"multiple values", `{"interface_name":"eth0"}{}`, 400},
+		{"oversized", `{"interface_name":"` + strings.Repeat("x", 1024) + `"}`, 400},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := validateOnvifDiscoveryBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/v1/servers/11111111-1111-1111-1111-111111111111/onvif/discover" {
+					t.Fatal("unexpected route")
+				}
+				w.WriteHeader(204)
+			}))
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/11111111-1111-1111-1111-111111111111/onvif/discover", strings.NewReader(tt.body))
+			rw := httptest.NewRecorder()
+			h.ServeHTTP(rw, req)
+			if rw.Code != tt.want {
+				t.Fatalf("status = %d body %s", rw.Code, rw.Body.String())
+			}
+		})
+	}
+}
+
+func TestOnvifDiscoveryRouteRejectsUnknownRequestFields(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	router, err := NewRouter(&Handlers{Log: log}, log, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/servers/11111111-1111-1111-1111-111111111111/onvif/discover", strings.NewReader(`{"interface_name":"eth0","camera_url":"http://192.0.2.1"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rw := httptest.NewRecorder()
+	router.ServeHTTP(rw, req)
+	if rw.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", rw.Code, rw.Body.String())
 	}
 }

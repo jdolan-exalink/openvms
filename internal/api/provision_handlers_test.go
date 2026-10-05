@@ -1,11 +1,14 @@
 package api
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/runtime/types"
 
+	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
 
@@ -46,3 +49,14 @@ func TestServerAgentProjectsMetricsAndVersion(t *testing.T) {
 }
 
 const genServerProvisionRunning = "running"
+
+func TestOnvifDiscoveryProjectionHasNoCredentialFields(t *testing.T) {
+	got := gen.OnvifDiscoveryResult{Devices: []gen.OnvifDiscoveryDevice{{Xaddrs: []string{"http://192.0.2.4/onvif/device_service"}}}}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "token") || strings.Contains(string(encoded), "password") || !strings.Contains(string(encoded), `"xaddrs"`) {
+		t.Fatalf("unexpected discovery projection: %s", encoded)
+	}
+}

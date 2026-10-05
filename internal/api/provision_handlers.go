@@ -119,3 +119,22 @@ func serverAgent(s provision.AgentView) gen.ServerAgent {
 func int64ptr(v int64) *int64       { return &v }
 func float32ptr(v float32) *float32 { return &v }
 func boolptr(v bool) *bool          { return &v }
+
+func (h *Handlers) DiscoverServerOnvif(ctx context.Context, r gen.DiscoverServerOnvifRequestObject) (gen.DiscoverServerOnvifResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || len(r.Body.InterfaceName) == 0 || len(r.Body.InterfaceName) > 64 {
+		return nil, &provision.ValidationError{Msg: "interface_name is required and must be at most 64 characters"}
+	}
+	result, err := h.Provision.Discover(ctx, a, uuid.UUID(r.ServerId), r.Body.InterfaceName)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.OnvifDiscoveryResult{Devices: make([]gen.OnvifDiscoveryDevice, 0, len(result.Devices))}
+	for _, device := range result.Devices {
+		out.Devices = append(out.Devices, gen.OnvifDiscoveryDevice{Xaddrs: device.XAddrs})
+	}
+	return gen.DiscoverServerOnvif200JSONResponse(out), nil
+}

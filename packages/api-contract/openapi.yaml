@@ -666,6 +666,31 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/onvif/discover:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: discoverServerOnvif
+      summary: Discover ONVIF devices from a registered edge agent
+      description: Requires servers.manage. Accepts only a local interface name; agent credentials and camera URLs or credentials are never accepted. Discovery uses the agent's local CIDR policy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OnvifDiscoveryRequest" }
+      responses:
+        "200":
+          description: Credential-free discovered device endpoints
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnvifDiscoveryResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/servers/{serverId}/agent:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3443,6 +3468,24 @@ components:
         server_id: { type: string, format: uuid }
         error: { type: string }
         host_key: { type: string, description: SHA256 fingerprint seen on first SSH contact. }
+    OnvifDiscoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [interface_name]
+      properties:
+        interface_name: { type: string, minLength: 1, maxLength: 64 }
+    OnvifDiscoveryDevice:
+      type: object
+      additionalProperties: false
+      required: [xaddrs]
+      properties:
+        xaddrs: { type: array, items: { type: string, format: uri } }
+    OnvifDiscoveryResult:
+      type: object
+      additionalProperties: false
+      required: [devices]
+      properties:
+        devices: { type: array, items: { $ref: "#/components/schemas/OnvifDiscoveryDevice" } }
     ServerAgent:
       type: object
       required: [installed, version, current_version, outdated]

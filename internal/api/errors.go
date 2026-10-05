@@ -48,6 +48,14 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", mve.Msg
 	case errors.As(err, &pve):
 		return http.StatusBadRequest, "invalid", pve.Msg
+	case errors.Is(err, provision.ErrAgentUnprovisioned):
+		return http.StatusNotFound, "agent_unprovisioned", "server has no registered agent"
+	case errors.Is(err, provision.ErrAgentDiscoveryUnsupported):
+		return http.StatusConflict, "discovery_unsupported", "agent discovery is unsupported or the interface is not allowed"
+	case errors.Is(err, provision.ErrAgentDiscoveryUnknown):
+		return http.StatusBadGateway, "discovery_failed", "agent discovery failed"
+	case errors.Is(err, provision.ErrAgentUnavailable):
+		return http.StatusBadGateway, "agent_unavailable", "registered agent is unavailable for discovery"
 	case errors.Is(err, provision.ErrBusy):
 		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, provision.ErrNotFound):

@@ -53,6 +53,9 @@ type Service struct {
 	Dial   func(ctx context.Context, host, user, password, expectedKey string, onKey func(string)) (Conn, error)
 	Binary func() ([]byte, error)
 
+	// requireServerManage is an internal seam for proving discovery denies before secret use.
+	requireServerManage func(context.Context, authz.Actor, uuid.UUID) error
+
 	mu   sync.Mutex
 	jobs map[uuid.UUID]*job
 	byIP map[string]uuid.UUID

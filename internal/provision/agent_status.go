@@ -139,3 +139,26 @@ func applySnapshot(out *AgentView, snap agent.Snapshot) {
 	out.DatabaseFree = int64(snap.DatabaseFree)
 	out.Error = ""
 }
+
+// Discover runs credential-free ONVIF discovery on a managed server's registered agent.
+func (s *Service) Discover(ctx context.Context, actor authz.Actor, serverID uuid.UUID, interfaceName string) (DiscoveryResult, error) {
+	if s.requireServerManage != nil {
+		if err := s.requireServerManage(ctx, actor, serverID); err != nil {
+			return DiscoveryResult{}, err
+		}
+	} else if _, err := s.Inv.RequireServerManage(ctx, actor, serverID); err != nil {
+		return DiscoveryResult{}, err
+	}
+	row, err := s.agentRow(ctx, actor, serverID)
+	if errors.Is(err, store.ErrNotFound) {
+		return DiscoveryResult{}, ErrAgentUnprovisioned
+	}
+	if err != nil {
+		return DiscoveryResult{}, err
+	}
+	token, err := s.Sealer.Open(row.TokenSealed, row.ServerID[:])
+	if err != nil {
+		return DiscoveryResult{}, ErrAgentDiscoveryUnknown
+	}
+	return discoverAgent(ctx, nil, row.Host, row.Port, string(token), interfaceName)
+}

@@ -515,6 +515,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/onvif/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discover ONVIF devices from a registered edge agent
+         * @description Requires servers.manage. Accepts only a local interface name; agent credentials and camera URLs or credentials are never accepted. Discovery uses the agent's local CIDR policy.
+         */
+        post: operations["discoverServerOnvif"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/agent": {
         parameters: {
             query?: never;
@@ -2523,6 +2545,15 @@ export interface components {
             error?: string;
             /** @description SHA256 fingerprint seen on first SSH contact. */
             host_key?: string;
+        };
+        OnvifDiscoveryRequest: {
+            interface_name: string;
+        };
+        OnvifDiscoveryDevice: {
+            xaddrs: string[];
+        };
+        OnvifDiscoveryResult: {
+            devices: components["schemas"]["OnvifDiscoveryDevice"][];
         };
         ServerAgent: {
             installed: boolean;
@@ -4874,6 +4905,38 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    discoverServerOnvif: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnvifDiscoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description Credential-free discovered device endpoints */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnvifDiscoveryResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };
