@@ -15,6 +15,7 @@ import (
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
 	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/mediasession"
 	"github.com/jdolan-exalink/openvms/internal/realtime"
 )
 
@@ -26,6 +27,7 @@ type Config struct {
 	Identity  *identity.Service
 	Inventory *inventory.Service
 	Realtime  *realtime.Hub
+	Sessions  *mediasession.Manager
 	Log       *slog.Logger
 	Features  []string
 }
@@ -41,6 +43,9 @@ type Server struct {
 func NewServer(cfg Config) *Server {
 	if cfg.Log == nil {
 		cfg.Log = slog.Default()
+	}
+	if cfg.Sessions == nil {
+		cfg.Sessions = mediasession.NewManager(15 * time.Minute)
 	}
 
 	opts := []grpc.ServerOption{
@@ -82,6 +87,7 @@ func NewServer(cfg Config) *Server {
 	connSrv := &ConnectionServer{
 		Inv:       cfg.Inventory,
 		Identity:  cfg.Identity,
+		Sessions:  cfg.Sessions,
 		RelayHost: cfg.RelayHost,
 		RelayPort: cfg.RelayPort,
 		Log:       cfg.Log,

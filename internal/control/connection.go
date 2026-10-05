@@ -13,6 +13,7 @@ import (
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
 	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/mediasession"
 )
 
 // ConnectionServer implements openvmsv1.ConnectionServiceServer.
@@ -20,6 +21,7 @@ type ConnectionServer struct {
 	openvmsv1.UnimplementedConnectionServiceServer
 	Inv       *inventory.Service
 	Identity  *identity.Service
+	Sessions  *mediasession.Manager
 	RelayHost string
 	RelayPort int32
 	Log       *slog.Logger
@@ -117,6 +119,18 @@ func (s *ConnectionServer) GetConnectionCandidates(ctx context.Context, req *ope
 		AuthToken: streamToken,
 	})
 
+	if s.Sessions != nil {
+		s.Sessions.CreateSession(mediasession.CreateSessionInput{
+			SessionID:      sessionID,
+			CameraID:       req.CameraId,
+			NodeID:         nodeID.String(),
+			ClientDeviceID: req.ClientDeviceId,
+			Profile:        mediasession.ProfileMain,
+			Transport:      mediasession.TransportRTPUDP,
+			Path:           mediasession.PathDirectLAN,
+		})
+	}
+
 	return &openvmsv1.GetConnectionCandidatesResponse{
 		NodeId:     nodeID.String(),
 		CameraId:   req.CameraId,
@@ -136,6 +150,10 @@ func (s *ConnectionServer) ReportNetworkTelemetry(ctx context.Context, req *open
 			"packet_loss_pct", req.PacketLossPct,
 			"throughput_kbps", req.ThroughputKbps,
 		)
+	}
+
+	if s.Sessions != nil && req.SessionId != "" {
+		_ = s.Sessions.RecordTelemetry(req.SessionId, req.ThroughputKbps*1024/8, int64(req.PacketLossPct), req.RttMs)
 	}
 
 	return &openvmsv1.ReportNetworkTelemetryResponse{
