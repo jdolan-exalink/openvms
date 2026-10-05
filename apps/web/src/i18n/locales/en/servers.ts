@@ -35,4 +35,8 @@ export default {
   agentError: "Could not query the agent: {error}",
   installFailed: "Installation failed: {error}",
   installComplete: "Installation complete",
+  discardTitle: "Discard the data you entered?",
+  discardMessage: "Nothing has been submitted yet. Closing now loses what you typed in this wizard.",
+  discardConfirm: "Discard",
+  discardKeep: "Keep editing",
 } as const;

@@ -7,6 +7,7 @@ export function ConfirmDialog({
   title,
   message,
   confirmLabel,
+  cancelLabel,
   pending,
   error,
   onConfirm,
@@ -15,6 +16,8 @@ export function ConfirmDialog({
   title: string;
   message: string;
   confirmLabel: string;
+  /** Defaults to "Cancel"; use a task-specific label when cancel means "keep going". */
+  cancelLabel?: string;
   pending?: boolean;
   error?: unknown;
   onConfirm: () => void;
@@ -26,7 +29,7 @@ export function ConfirmDialog({
       <p className="text-sm">{message}</p>
       <ErrorNote error={error} />
       <div className="flex justify-end gap-2">
-        <Button variant="text" onClick={onCancel}>{t("common.cancel")}</Button>
+        <Button variant="text" onClick={onCancel}>{cancelLabel ?? t("common.cancel")}</Button>
         <Button variant="danger" disabled={pending} onClick={onConfirm}>
           {confirmLabel}
         </Button>

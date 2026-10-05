@@ -35,4 +35,8 @@ export default {
   agentError: "No se pudo consultar el agente: {error}",
   installFailed: "La instalación falló: {error}",
   installComplete: "Instalación completada",
+  discardTitle: "¿Descartar los datos cargados?",
+  discardMessage: "Todavía no se envió nada. Si cerrás ahora se pierde lo que escribiste en este asistente.",
+  discardConfirm: "Descartar",
+  discardKeep: "Seguir editando",
 } as const;

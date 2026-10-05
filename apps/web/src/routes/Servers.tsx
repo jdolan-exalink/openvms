@@ -2,7 +2,7 @@ import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { classifyPolicyQuery, meQuery, serversQuery, sitesQuery, syncStatusQuery } from "@/api/queries";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
@@ -424,6 +424,14 @@ const capLabels: [keyof Schemas["Capabilities"], string][] = [
   ["ptz", "PTZ"],
 ];
 
+/** Reports "has typed data" to the wizard shell and clears it when the form unmounts. */
+function useDirtyReport(dirty: boolean, report: (dirty: boolean) => void) {
+  useEffect(() => {
+    report(dirty);
+  }, [dirty, report]);
+  useEffect(() => () => report(false), [report]);
+}
+
 function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existing") => void; onCancel: () => void }) {
   const t = useT();
   return (
@@ -449,7 +457,7 @@ function ServerKindPicker({ onPick, onCancel }: { onPick: (kind: "new" | "existi
   );
 }
 
-function NewFrigateHost({ sites, onBack, onDone }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void }) {
+function NewFrigateHost({ sites, onBack, onDone, onCancel, onDirtyChange }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void; onCancel: () => void; onDirtyChange: (dirty: boolean) => void }) {
   const t = useT();
   const [form, setForm] = useState({ site_id: "", server_name: "", host: "", username: "", password: "" });
   const [allowSystemDisk, setAllowSystemDisk] = useState(false);
@@ -474,6 +482,8 @@ function NewFrigateHost({ sites, onBack, onDone }: { sites: Schemas["Site"][]; o
     retry: false,
   });
   const selectedSite = sites.find((site) => site.id === form.site_id)?.name ?? "";
+  const dirty = jobId === null && (allowSystemDisk || Object.values(form).some((value) => value !== ""));
+  useDirtyReport(dirty, onDirtyChange);
 
   if (jobId) {
     const snapshot = progress.data;
@@ -570,7 +580,7 @@ function NewFrigateHost({ sites, onBack, onDone }: { sites: Schemas["Site"][]; o
           {t("servers.startInstall")}
         </Button>
         <Button variant="outlined" onClick={onBack}>Volver</Button>
-        <Button variant="text" onClick={onDone}>Cancelar</Button>
+        <Button variant="text" onClick={onCancel}>Cancelar</Button>
       </div>
       <ErrorNote error={start.error} />
     </form>
@@ -581,21 +591,45 @@ function NewFrigateHost({ sites, onBack, onDone }: { sites: Schemas["Site"][]; o
 // Frigate reports, then register it and import its cameras. An existing Frigate takes the
 // agent path and does not use this probe.
 function RegisterServer({ sites, onDone }: { sites: Schemas["Site"][]; onDone: () => void }) {
+  const t = useT();
   const [kind, setKind] = useState<"new" | "existing" | null>(null);
+  // The active form reports whether it holds typed data; closing then needs a confirmation so a
+  // stray Escape or backdrop click does not lose it. The values stay in the form component (the
+  // SSH password never leaves it) and only this boolean is lifted.
+  const [dirty, setDirty] = useState(false);
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const requestClose = () => {
+    // Both modals listen for Escape: while the confirmation is open it owns the key.
+    if (confirmingDiscard) return;
+    if (dirty) setConfirmingDiscard(true);
+    else onDone();
+  };
   return (
-    <Modal title="Registrar servidor" onClose={onDone}>
-      {kind === null ? (
-        <ServerKindPicker onPick={setKind} onCancel={onDone} />
-      ) : kind === "existing" ? (
-        <NewFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} />
-      ) : (
-        <NewFrigateHost sites={sites} onBack={() => setKind(null)} onDone={onDone} />
+    <>
+      <Modal title="Registrar servidor" onClose={requestClose}>
+        {kind === null ? (
+          <ServerKindPicker onPick={setKind} onCancel={onDone} />
+        ) : kind === "existing" ? (
+          <NewFrigateServer sites={sites} onBack={() => setKind(null)} onDone={onDone} onCancel={requestClose} onDirtyChange={setDirty} />
+        ) : (
+          <NewFrigateHost sites={sites} onBack={() => setKind(null)} onDone={onDone} onCancel={requestClose} onDirtyChange={setDirty} />
+        )}
+      </Modal>
+      {confirmingDiscard && (
+        <ConfirmDialog
+          title={t("servers.discardTitle")}
+          message={t("servers.discardMessage")}
+          confirmLabel={t("servers.discardConfirm")}
+          cancelLabel={t("servers.discardKeep")}
+          onConfirm={onDone}
+          onCancel={() => setConfirmingDiscard(false)}
+        />
       )}
-    </Modal>
+    </>
   );
 }
 
-function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void }) {
+function NewFrigateServer({ sites, onBack, onDone, onCancel, onDirtyChange }: { sites: Schemas["Site"][]; onBack: () => void; onDone: () => void; onCancel: () => void; onDirtyChange: (dirty: boolean) => void }) {
   const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState({
@@ -617,6 +651,7 @@ function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][];
     tls_skip_verify: form.tls_skip_verify,
   });
   const [importCameras, setImportCameras] = useState(true);
+  useDirtyReport(form.site_id !== "" || form.name !== "" || form.username !== "" || form.password !== "" || form.base_url !== "https://" || form.auth_mode !== "credentials" || form.tls_skip_verify, onDirtyChange);
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
 
   const probe = useMutation({
@@ -729,7 +764,7 @@ function NewFrigateServer({ sites, onBack, onDone }: { sites: Schemas["Site"][];
           {probe.data ? (create.isPending ? "Registrando…" : "Registrar servidor") : probe.isPending ? "Probando…" : "Probar conexión"}
         </Button>
         <Button variant="outlined" onClick={onBack}>Volver</Button>
-        <Button variant="text" onClick={onDone}>Cancelar</Button>
+        <Button variant="text" onClick={onCancel}>Cancelar</Button>
       </div>
     </form>
   );

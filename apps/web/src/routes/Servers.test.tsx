@@ -124,6 +124,68 @@ describe("Servers", () => {
       expect(within(form).queryByLabelText("URL de Frigate")).not.toBeInTheDocument();
     });
 
+    describe("register wizard keeps typed data", () => {
+      async function openHostForm() {
+        setup(manager);
+        renderPage(Servers);
+        fireEvent.click(await screen.findByRole("button", { name: "Registrar servidor" }));
+        fireEvent.click(screen.getByRole("button", { name: /Instalar Frigate en un host nuevo/ }));
+        return screen.getByRole("form", { name: "Instalación de Frigate nuevo" });
+      }
+
+      it("closes on Escape without asking when nothing was typed", async () => {
+        await openHostForm();
+        fireEvent.keyDown(document, { key: "Escape" });
+        expect(screen.queryByRole("dialog", { name: "Registrar servidor" })).not.toBeInTheDocument();
+        expect(screen.queryByRole("dialog", { name: "¿Descartar los datos cargados?" })).not.toBeInTheDocument();
+      });
+
+      it("asks before discarding typed data on Escape and keeps the form when told to keep editing", async () => {
+        const form = await openHostForm();
+        fireEvent.change(within(form).getByLabelText("Host SSH"), { target: { value: "10.1.1.144" } });
+        fireEvent.keyDown(document, { key: "Escape" });
+        const confirm = screen.getByRole("dialog", { name: "¿Descartar los datos cargados?" });
+        expect(screen.getByRole("dialog", { name: "Registrar servidor" })).toBeInTheDocument();
+        fireEvent.click(within(confirm).getByRole("button", { name: "Seguir editando" }));
+        expect(screen.queryByRole("dialog", { name: "¿Descartar los datos cargados?" })).not.toBeInTheDocument();
+        expect(within(screen.getByRole("form", { name: "Instalación de Frigate nuevo" })).getByLabelText("Host SSH")).toHaveValue("10.1.1.144");
+      });
+
+      it("asks on backdrop click and the close button, and closes only after confirming", async () => {
+        const form = await openHostForm();
+        fireEvent.change(within(form).getByLabelText("Nombre visible del servidor"), { target: { value: "Exalink" } });
+        const dialog = screen.getByRole("dialog", { name: "Registrar servidor" });
+        fireEvent.mouseDown(dialog.parentElement!);
+        expect(screen.getByRole("dialog", { name: "¿Descartar los datos cargados?" })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole("button", { name: "Seguir editando" }));
+        fireEvent.click(within(dialog).getAllByRole("button", { name: "Cerrar" })[0]!);
+        fireEvent.click(within(screen.getByRole("dialog", { name: "¿Descartar los datos cargados?" })).getByRole("button", { name: "Descartar" }));
+        expect(screen.queryByRole("dialog", { name: "Registrar servidor" })).not.toBeInTheDocument();
+      });
+
+      it("never keeps the SSH password after discarding", async () => {
+        const form = await openHostForm();
+        fireEvent.change(within(form).getByLabelText(/^Contraseña SSH/), { target: { value: "one-time-secret" } });
+        fireEvent.keyDown(document, { key: "Escape" });
+        fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+        expect(screen.queryByText("one-time-secret")).not.toBeInTheDocument();
+        expect(screen.queryByDisplayValue("one-time-secret")).not.toBeInTheDocument();
+        fireEvent.click(await screen.findByRole("button", { name: "Registrar servidor" }));
+        fireEvent.click(screen.getByRole("button", { name: /Instalar Frigate en un host nuevo/ }));
+        expect(screen.getByLabelText(/^Contraseña SSH/)).toHaveValue("");
+      });
+
+      it("asks when the existing-Frigate import form has typed data", async () => {
+        setup(manager);
+        renderPage(Servers);
+        fireEvent.click(await screen.findByRole("button", { name: "Registrar servidor" }));
+        fireEvent.click(screen.getByRole("button", { name: /Registrar un Frigate existente/ }));
+        fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Frigate-H01" } });
+        fireEvent.keyDown(document, { key: "Escape" });
+        expect(screen.getByRole("dialog", { name: "¿Descartar los datos cargados?" })).toBeInTheDocument();
+      });
+    });
+
     it("imports an existing Frigate through probe/create and never starts the new-host installer", async () => {
       const fetchMock = vi.fn(stubApi({
         "/api/v1/servers": () => json({ items: [] }),
