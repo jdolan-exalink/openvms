@@ -511,6 +511,14 @@ type ServerAgent struct {
 	UpdatedAt   time.Time
 }
 
+type ServerAgentTl struct {
+	ServerID   uuid.UUID
+	TenantID   uuid.UUID
+	SecurePort int32
+	TrustMode  string
+	CaPem      *string
+}
+
 type Session struct {
 	ID         uuid.UUID
 	UserID     uuid.UUID
