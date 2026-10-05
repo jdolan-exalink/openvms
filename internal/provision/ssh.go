@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"strings"
@@ -86,9 +87,11 @@ func (c *sshConn) Run(ctx context.Context, cmd string) (string, error) {
 		return "", err
 	}
 	defer session.Close()
-	var buf syncBuffer
+	// buf keeps both streams for the caller; errBuf keeps stderr alone because the failure
+	// reason is usually there and stdout written later would push it out of the error tail.
+	var buf, errBuf syncBuffer
 	session.Stdout = &buf
-	session.Stderr = &buf
+	session.Stderr = io.MultiWriter(&buf, &errBuf)
 	errCh := make(chan error, 1)
 	go func() { errCh <- session.Run(cmd) }()
 	select {
@@ -98,7 +101,11 @@ func (c *sshConn) Run(ctx context.Context, cmd string) (string, error) {
 	case err := <-errCh:
 		out := Scrub(buf.String(), c.secret)
 		if err != nil {
-			return out, fmt.Errorf("%w: %s", err, tail(out, 400))
+			reason := Scrub(errBuf.String(), c.secret)
+			if strings.TrimSpace(reason) == "" {
+				reason = out
+			}
+			return out, fmt.Errorf("%w: %s", err, tail(reason, 400))
 		}
 		return out, nil
 	}

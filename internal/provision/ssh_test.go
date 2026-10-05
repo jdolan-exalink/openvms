@@ -125,6 +125,35 @@ func TestClientConfigVerifiesOpenSSHPreferredHostKey(t *testing.T) {
 	}
 }
 
+// The failure reason is usually on stderr and can be buried under later stdout; the error
+// must still carry it, and fall back to stdout when stderr is empty.
+func TestRunErrorPrefersStderrTail(t *testing.T) {
+	addr := startSSHServer(t, []ssh.Signer{newEd25519Signer(t)}, func(cmd string, ch ssh.Channel) uint32 {
+		if cmd == "stdout-only" {
+			_, _ = ch.Write([]byte("only stdout explains it\n"))
+			return 2
+		}
+		_, _ = ch.Stderr().Write([]byte("Job for chrony.service failed\n"))
+		for i := 0; i < 200; i++ {
+			_, _ = ch.Write([]byte("progress line\n"))
+		}
+		return 1
+	})
+	client, err := dialTest(t, addr, clientConfig("root", "pw", "", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn := &sshConn{client: client, secret: "pw"}
+	defer conn.Close()
+
+	if _, err := conn.Run(context.Background(), "bash install.sh ntp"); err == nil || !strings.Contains(err.Error(), "Job for chrony.service failed") {
+		t.Fatalf("error must carry the stderr reason, got %v", err)
+	}
+	if _, err := conn.Run(context.Background(), "stdout-only"); err == nil || !strings.Contains(err.Error(), "only stdout explains it") {
+		t.Fatalf("error must fall back to stdout when stderr is empty, got %v", err)
+	}
+}
+
 // Installer failures are only diagnosable if both streams reach the operator intact.
 func TestRunKeepsStdoutAndStderr(t *testing.T) {
 	const lines = 200
