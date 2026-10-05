@@ -1,8 +1,14 @@
 package onvif
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha1"
+	"encoding/base64"
+	"encoding/json"
+	"encoding/xml"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -180,3 +186,114 @@ func TestMutatingHTTP5xxIsNotRetried(t *testing.T) {
 		t.Fatalf("mutating operation attempts=%d want 1", calls)
 	}
 }
+
+func TestUsernameTokenPasswordDigest(t *testing.T) {
+	ep, _ := ParseEndpoint("http://camera.local/service")
+	nonces := bytes.NewReader([]byte("0123456789abcdefghij"))
+	credentials := NewCredentials(`a&<"`, "s3cret")
+	c := NewClient(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		var envelope struct {
+			Header struct {
+				Security struct {
+					MustUnderstand string `xml:"http://www.w3.org/2003/05/soap-envelope mustUnderstand,attr"`
+					Token          struct {
+						Username string `xml:"Username"`
+						Password string `xml:"Password"`
+						Nonce    string `xml:"Nonce"`
+						Created  string `xml:"Created"`
+					} `xml:"UsernameToken"`
+				} `xml:"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd Security"`
+			} `xml:"http://www.w3.org/2003/05/soap-envelope Header"`
+		}
+		if err := xml.Unmarshal(body, &envelope); err != nil {
+			t.Errorf("invalid SOAP XML: %v", err)
+		}
+		token := envelope.Header.Security.Token
+		if envelope.Header.Security.MustUnderstand != "true" {
+			t.Errorf("SOAP mustUnderstand=%q", envelope.Header.Security.MustUnderstand)
+		}
+		if token.Username != `a&<"` {
+			t.Errorf("username=%q", token.Username)
+		}
+		nonce, err := base64.StdEncoding.DecodeString(token.Nonce)
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := sha1.New()
+		_, _ = h.Write(nonce)
+		_, _ = io.WriteString(h, token.Created)
+		_, _ = io.WriteString(h, "s3cret")
+		if want := base64.StdEncoding.EncodeToString(h.Sum(nil)); token.Password != want {
+			t.Errorf("digest=%q want %q", token.Password, want)
+		}
+		if token.Password != "q6z3GbD2mvnDoJT8REeNS4zba3E=" {
+			t.Errorf("digest did not match fixed UsernameToken vector: %q", token.Password)
+		}
+		if strings.Contains(string(body), "s3cret") {
+			t.Error("plaintext password leaked in SOAP")
+		}
+		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), nil
+	}), Config{Timeout: time.Second, Credentials: credentials, nonceSource: nonces, now: func() time.Time { return time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC) }})
+	if _, err := c.Call(context.Background(), ep, "urn:test:Read", `<x:Read xmlns:x="urn:test"/>`, ReadOnly); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUsernameTokenUsesFreshNonceOnRetry(t *testing.T) {
+	ep, _ := ParseEndpoint("http://camera.local/service")
+	nonces := bytes.NewReader([]byte("0123456789abcdefghijFEDCBA9876543210klmn"))
+	var seen []string
+	c := NewClient(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		var token struct {
+			Nonce string `xml:"Header>Security>UsernameToken>Nonce"`
+		}
+		if err := xml.Unmarshal(body, &token); err != nil {
+			t.Fatal(err)
+		}
+		seen = append(seen, token.Nonce)
+		if len(seen) == 1 {
+			return response(503, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), nil
+		}
+		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), nil
+	}), Config{Timeout: time.Second, MaxAttempts: 2, Credentials: NewCredentials("user", "secret"), nonceSource: nonces, now: func() time.Time { return time.Now() }})
+	if _, err := c.Call(context.Background(), ep, "urn:test:Read", `<x:Read xmlns:x="urn:test"/>`, ReadOnly); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || seen[0] == seen[1] {
+		t.Fatalf("nonces=%v", seen)
+	}
+}
+
+func TestUsernameTokenRandomFailureFailsClosed(t *testing.T) {
+	ep, _ := ParseEndpoint("http://camera.local/service")
+	c := NewClient(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("request sent without secure nonce")
+		return nil, nil
+	}), Config{Timeout: time.Second, Credentials: NewCredentials("user", "secret"), nonceSource: errorReader{}})
+	_, err := c.Call(context.Background(), ep, "urn:test:Read", `<x:Read xmlns:x="urn:test"/>`, ReadOnly)
+	if err == nil || strings.Contains(err.Error(), "secret") {
+		t.Fatalf("unsafe or missing error: %v", err)
+	}
+}
+
+func TestCredentialsDoNotFormatOrSerializeSecrets(t *testing.T) {
+	credentials := NewCredentials("user-secret", "password-secret")
+	for _, value := range []string{fmt.Sprint(credentials), fmt.Sprintf("%#v", credentials)} {
+		if strings.Contains(value, "user-secret") || strings.Contains(value, "password-secret") {
+			t.Fatalf("credentials leaked through formatting: %q", value)
+		}
+	}
+	encoded, err := json.Marshal(Config{Credentials: credentials})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "user-secret") || strings.Contains(string(encoded), "password-secret") {
+		t.Fatalf("credentials leaked through JSON: %s", encoded)
+	}
+}
+
+type errorReader struct{}
+
+func (errorReader) Read([]byte) (int, error) { return 0, errors.New("random source unavailable") }

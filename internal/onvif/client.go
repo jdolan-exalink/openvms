@@ -4,6 +4,9 @@ package onvif
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -68,11 +71,27 @@ type Config struct {
 	MaxBodyBytes int64
 	MaxAttempts  int
 	RetryDelay   time.Duration
+	Credentials  *Credentials
+	nonceSource  io.Reader
+	now          func() time.Time
 }
 
+// Credentials holds an ONVIF UsernameToken identity without exposing the password
+// through formatting or JSON serialization. Keep the original password in memory only.
+type Credentials struct{ username, password string }
+
+func NewCredentials(username, password string) *Credentials {
+	return &Credentials{username: username, password: password}
+}
+
+func (*Credentials) String() string   { return "ONVIF credentials" }
+func (*Credentials) GoString() string { return "onvif.Credentials{REDACTED}" }
+
 type Client struct {
-	transport http.RoundTripper
-	config    Config
+	transport   http.RoundTripper
+	config      Config
+	nonceSource io.Reader
+	now         func() time.Time
 }
 
 func NewClient(transport http.RoundTripper, config Config) *Client {
@@ -94,7 +113,78 @@ func NewClient(transport http.RoundTripper, config Config) *Client {
 	if config.RetryDelay < 0 {
 		config.RetryDelay = 0
 	}
-	return &Client{transport: transport, config: config}
+	nonceSource := config.nonceSource
+	if nonceSource == nil {
+		nonceSource = rand.Reader
+	}
+	now := config.now
+	if now == nil {
+		now = time.Now
+	}
+	return &Client{transport: transport, config: config, nonceSource: nonceSource, now: now}
+}
+
+const (
+	wsseNamespace      = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
+	wsuNamespace       = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
+	passwordDigestType = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest"
+	base64BinaryType   = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary"
+)
+
+type securityHeader struct {
+	XMLName        xml.Name      `xml:"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd Security"`
+	MustUnderstand string        `xml:"http://www.w3.org/2003/05/soap-envelope mustUnderstand,attr"`
+	Token          usernameToken `xml:"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd UsernameToken"`
+}
+type usernameToken struct {
+	Username string          `xml:"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd Username"`
+	Password passwordElement `xml:"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd Password"`
+	Nonce    nonceElement    `xml:"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd Nonce"`
+	Created  createdElement  `xml:"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd Created"`
+}
+type passwordElement struct {
+	Type  string `xml:"Type,attr"`
+	Value string `xml:",chardata"`
+}
+type nonceElement struct {
+	EncodingType string `xml:"EncodingType,attr"`
+	Value        string `xml:",chardata"`
+}
+type createdElement struct {
+	Value string `xml:",chardata"`
+}
+
+func (c *Client) requestBody(operationXML string) ([]byte, error) {
+	body := []byte(`<s:Envelope xmlns:s="` + soapNamespace + `"><s:Body>` + operationXML + `</s:Body></s:Envelope>`)
+	if c.config.Credentials == nil {
+		return body, nil
+	}
+	creds := c.config.Credentials
+	if creds.username == "" || creds.password == "" {
+		return nil, errors.New("invalid ONVIF credentials")
+	}
+	var nonce [20]byte
+	if _, err := io.ReadFull(c.nonceSource, nonce[:]); err != nil {
+		return nil, errors.New("ONVIF authentication nonce unavailable")
+	}
+	created := c.now().UTC().Format("2006-01-02T15:04:05Z")
+	hash := sha1.New()
+	_, _ = hash.Write(nonce[:])
+	_, _ = io.WriteString(hash, created)
+	_, _ = io.WriteString(hash, creds.password)
+	security := securityHeader{MustUnderstand: "true", Token: usernameToken{
+		Username: creds.username,
+		Password: passwordElement{Type: passwordDigestType, Value: base64.StdEncoding.EncodeToString(hash.Sum(nil))},
+		Nonce:    nonceElement{EncodingType: base64BinaryType, Value: base64.StdEncoding.EncodeToString(nonce[:])},
+		Created:  createdElement{Value: created},
+	}}
+	securityXML, err := xml.Marshal(security)
+	if err != nil {
+		return nil, errors.New("ONVIF authentication header failed")
+	}
+	// XML marshaling handles username special characters and assigns valid namespace prefixes.
+	header := `<s:Header>` + string(securityXML) + `</s:Header>`
+	return bytes.Replace(body, []byte(`<s:Body>`), []byte(header+`<s:Body>`), 1), nil
 }
 
 type soapEnvelope struct {
@@ -127,9 +217,7 @@ func (c *Client) Call(ctx context.Context, endpoint Endpoint, action, operationX
 	if _, err := ParseEndpoint(endpoint.value); err != nil {
 		return nil, err
 	}
-	body := []byte(`<s:Envelope xmlns:s="` + soapNamespace + `"><s:Body>` + operationXML + `</s:Body></s:Envelope>`)
-	var requestEnvelope soapEnvelope
-	if err := xml.Unmarshal(body, &requestEnvelope); err != nil {
+	if _, err := xml.Marshal(soapBody{Inner: operationXML}); err != nil {
 		return nil, &CallError{Status: StatusFailed, Code: "invalid_request_xml"}
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.config.Timeout)
@@ -142,6 +230,14 @@ func (c *Client) Call(ctx context.Context, endpoint Endpoint, action, operationX
 	for i := 0; i < attempts; i++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		body, bodyErr := c.requestBody(operationXML)
+		if bodyErr != nil {
+			return nil, &CallError{Status: StatusFailed, Code: "authentication_failed"}
+		}
+		var requestEnvelope soapEnvelope
+		if err := xml.Unmarshal(body, &requestEnvelope); err != nil {
+			return nil, &CallError{Status: StatusFailed, Code: "invalid_request_xml"}
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.value, bytes.NewReader(body))
 		if err != nil {
