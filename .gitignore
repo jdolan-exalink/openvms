@@ -29,3 +29,5 @@ dist/
 deploy/tiles/
 # Local compose overrides (e.g. mounting deploy/tiles into the web container).
 docker-compose.override.yml
+# Locally bootstrapped optional ONVIF agent cert, private key, and bearer token.
+/deploy/agent/compose/local/

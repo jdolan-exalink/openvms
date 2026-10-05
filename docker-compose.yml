@@ -116,6 +116,35 @@ services:
       valkey: { condition: service_healthy }
       nats: { condition: service_healthy }
       seaweedfs: { condition: service_healthy }
+    networks:
+      default: {}
+      onvif-agent:
+        ipv4_address: ${OPENVMS_AGENT_API_IPV4:-172.29.240.2}
+    restart: unless-stopped
+
+  # Optional local agent runtime. Credentials are accepted only on its verified HTTPS
+  # listener; HTTP remains available for legacy metrics/update/discovery only.
+  edge-agent:
+    profiles: [onvif-agent]
+    image: openvms-api
+    entrypoint: ["/opt/openvms/edge-agent"]
+    user: "${OPENVMS_AGENT_UID:-1000}:${OPENVMS_AGENT_GID:-1000}"
+    environment:
+      OPENVMS_AGENT_LISTEN: "0.0.0.0:7419"
+      OPENVMS_AGENT_ONVIF_TLS_LISTEN: "0.0.0.0:${OPENVMS_AGENT_TLS_PORT:-7443}"
+      TLS_CERT_FILE: /etc/openvms/onvif/tls.crt
+      TLS_KEY_FILE: /etc/openvms/onvif/tls.key
+      OPENVMS_AGENT_TOKEN_FILE: /etc/openvms/agent.token
+      ONVIF_DISCOVERY_INTERFACES: ${ONVIF_DISCOVERY_INTERFACES:-eth0}
+      ONVIF_ALLOWED_CIDRS: ${ONVIF_ALLOWED_CIDRS:-192.0.2.0/24}
+    volumes:
+      - ${OPENVMS_AGENT_TOKEN_HOST_FILE:-./deploy/agent/compose/local/agent.token}:/etc/openvms/agent.token:ro
+      - ${OPENVMS_AGENT_TLS_CERT_HOST_FILE:-./deploy/agent/compose/local/tls.crt}:/etc/openvms/onvif/tls.crt:ro
+      - ${OPENVMS_AGENT_TLS_KEY_HOST_FILE:-./deploy/agent/compose/local/tls.key}:/etc/openvms/onvif/tls.key:ro
+    networks:
+      onvif-agent:
+        ipv4_address: ${OPENVMS_AGENT_IPV4:-172.29.240.3}
+    depends_on: [api]
     restart: unless-stopped
 
   worker:
@@ -165,6 +194,12 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes: [./deploy/grafana/provisioning:/etc/grafana/provisioning:ro]
     ports: ["127.0.0.1:3000:3000"]
+
+networks:
+  onvif-agent:
+    ipam:
+      config:
+        - subnet: ${OPENVMS_AGENT_SUBNET:-172.29.240.0/24}
 
 volumes:
   postgres:
