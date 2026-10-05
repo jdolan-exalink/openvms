@@ -110,12 +110,19 @@ services:
       - /proc:/host/proc:ro
       - /sys/class/drm:/host/drm:ro
       - /:/hostfs:ro
-    ports: ["127.0.0.1:8080:8080"]
+    ports: ["127.0.0.1:8080:8080", "0.0.0.0:9090:9090"]
     depends_on:
       postgres: { condition: service_healthy }
       valkey: { condition: service_healthy }
       nats: { condition: service_healthy }
       seaweedfs: { condition: service_healthy }
+    restart: unless-stopped
+
+  relay:
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: relay, VERSION: "${VERSION:-dev}" } }
+    environment:
+      OPENVMS_RELAY_ADDR: ":8554"
+    ports: ["0.0.0.0:8554:8554"]
     restart: unless-stopped
 
   worker:
