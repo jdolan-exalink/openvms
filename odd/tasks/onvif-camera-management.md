@@ -74,3 +74,14 @@ Implement in dependency order. Each task is a delegated direct work unit with a 
 - Estimate: complete scope is multi-phase and likely many thousands of authored changed lines across slices; avoid a false precise forecast before implementation. Keep cohesive independently reviewable work units, count authored additions plus deletions, and apply the approved stacked-to-main slicing before a delivery boundary exceeds the applicable budget. Never shrink or omit required behavior/tests to satisfy a line count.
 - Per-task evidence to append: task ID; RED/GREEN/REFACTOR commands and observed results; additional checks; harness result or justified `N/A`; rollback boundary; Conventional Commit and commit ID; authored line count; risk assessment/review due reason and review outcome; PR slice boundary if/when user later authorizes PR work.
 - Next step: delegate implementation of ONVIF-01 only after this task document and its Engram mirror have been read back and reconciled. Keep all device/camera operations mocked unless the user separately authorizes a destination and operation.
+
+### ONVIF-01 implementation evidence (in progress; commit/review pending)
+
+- Implemented isolated `internal/onvif` endpoint validation, bounded SOAP 1.2 client, response size limit, typed redacted failures, SOAP fault classification, and read-only-only retries. Transport is injected as `http.RoundTripper`; tests use only a deterministic mock and make no network calls.
+- **RED:** `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/onvif` failed before implementation because the new tests referenced the not-yet-implemented ONVIF API (undefined `ParseEndpoint`, `NewClient`, `Config`, and related symbols). After the first implementation pass, the same test also exposed SOAP action assertion and SOAP Fault/HTTP 500 handling gaps; both were fixed before GREEN.
+- **GREEN:** `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/onvif` — PASS.
+- **REFACTOR:** `gofmt -w internal/onvif/client.go internal/onvif/client_test.go`, then `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/onvif` — PASS; `GOCACHE=/tmp/openvms-go-build-cache go test -race ./internal/onvif` — PASS.
+- **Broader check:** `GOCACHE=/tmp/openvms-go-build-cache go test ./...` — PASS (all packages).
+- **Runtime harness:** N/A; this unit has no runtime or physical-device boundary and all transport behavior is mocked.
+- **Rollback boundary:** remove `internal/onvif/client.go` and `internal/onvif/client_test.go`; no integrations or external dependencies were added.
+- **Commit / authored line count / review boundary:** pending parent handling; this task remains unchecked until commit and review-boundary evidence are recorded. No real camera, LAN, or credential use occurred.
