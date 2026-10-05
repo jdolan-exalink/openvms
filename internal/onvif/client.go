@@ -193,20 +193,26 @@ func (c *Client) Call(ctx context.Context, endpoint Endpoint, action, operationX
 				status = StatusUnsupported
 			} else if strings.Contains(strings.ToLower(fault.Code.Value), "receiver") {
 				status = StatusDegraded
+				if operation == ReadOnly && resp.StatusCode >= 500 && i+1 < attempts && wait(ctx, c.config.RetryDelay) {
+					continue
+				}
 			}
 			return nil, &CallError{Status: status, Code: "soap_fault"}
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			if resp.StatusCode >= 500 && operation == ReadOnly && i+1 < attempts && wait(ctx, c.config.RetryDelay) {
+				continue
+			}
 			status := StatusFailed
 			if resp.StatusCode >= 500 {
 				status = StatusDegraded
 			}
 			return nil, &CallError{Status: status, Code: "http_error"}
 		}
-		// Keep the response wrapper: ONVIF peers commonly declare operation
-		// namespaces on it, and stripping it makes prefixed child elements
-		// impossible to decode reliably.
-		return bytes.Clone([]byte(envelope.Body.Inner)), nil
+		// Return the complete SOAP document. Namespace declarations on Envelope
+		// or Body are in scope for operation elements and must remain available
+		// to encoding/xml decoders.
+		return bytes.Clone(data), nil
 	}
 	return nil, &CallError{Status: StatusDegraded, Code: "transport_error", cause: last}
 }

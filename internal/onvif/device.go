@@ -1,9 +1,11 @@
 package onvif
 
 import (
+	"bytes"
 	"context"
 	"encoding/xml"
 	"fmt"
+	"io"
 )
 
 const (
@@ -78,12 +80,8 @@ func (d *DeviceClient) GetDeviceInformation(ctx context.Context) (DeviceInformat
 	if err != nil {
 		return DeviceInformation{}, err
 	}
-	var response struct{ XMLName xml.Name }
 	var info DeviceInformation
-	if err := xml.Unmarshal(data, &response); err != nil || response.XMLName.Local != "GetDeviceInformationResponse" {
-		return DeviceInformation{}, &CallError{Status: StatusFailed, Code: "invalid_device_information"}
-	}
-	if err := xml.Unmarshal(data, &info); err != nil {
+	if err := decodeOperation(data, "GetDeviceInformationResponse", &info); err != nil {
 		return DeviceInformation{}, &CallError{Status: StatusFailed, Code: "invalid_device_information"}
 	}
 	return info, nil
@@ -95,10 +93,9 @@ func (d *DeviceClient) GetServices(ctx context.Context) ([]Service, error) {
 		return nil, err
 	}
 	var response struct {
-		XMLName  xml.Name
 		Services []Service `xml:"http://www.onvif.org/ver10/device/wsdl Service"`
 	}
-	if err := xml.Unmarshal(data, &response); err != nil || response.XMLName.Local != "GetServicesResponse" {
+	if err := decodeOperation(data, "GetServicesResponse", &response); err != nil {
 		return nil, &CallError{Status: StatusFailed, Code: "invalid_services"}
 	}
 	return response.Services, nil
@@ -110,13 +107,30 @@ func (d *DeviceClient) GetSystemDateAndTime(ctx context.Context) (DeviceClock, e
 		return DeviceClock{}, err
 	}
 	var response struct {
-		XMLName xml.Name
-		Clock   DeviceClock `xml:"http://www.onvif.org/ver10/device/wsdl SystemDateAndTime"`
+		Clock DeviceClock `xml:"http://www.onvif.org/ver10/device/wsdl SystemDateAndTime"`
 	}
-	if err := xml.Unmarshal(data, &response); err != nil || response.XMLName.Local != "GetSystemDateAndTimeResponse" {
+	if err := decodeOperation(data, "GetSystemDateAndTimeResponse", &response); err != nil {
 		return DeviceClock{}, &CallError{Status: StatusFailed, Code: "invalid_system_time"}
 	}
 	return response.Clock, nil
+}
+
+func decodeOperation(data []byte, name string, target any) error {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			if err == io.EOF {
+				return fmt.Errorf("missing SOAP operation %s", name)
+			}
+			return err
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Space != deviceNamespace || start.Name.Local != name {
+			continue
+		}
+		return decoder.DecodeElement(target, &start)
+	}
 }
 
 func (d *DeviceClient) call(ctx context.Context, action, content string) ([]byte, error) {

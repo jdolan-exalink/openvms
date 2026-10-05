@@ -72,3 +72,31 @@ func mustEndpoint(t *testing.T, raw string) Endpoint {
 	}
 	return ep
 }
+
+func TestDeviceInformationUsesNamespacesInheritedFromSOAPEnvelope(t *testing.T) {
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><s:Body><tds:GetDeviceInformationResponse><tds:Manufacturer>Inherited Acme</tds:Manufacturer><tds:Model>InheritedCam</tds:Model></tds:GetDeviceInformationResponse></s:Body></s:Envelope>`), nil
+	})
+	client := NewDeviceClient(NewClient(transport, Config{Timeout: time.Second}), mustEndpoint(t, "http://camera.local/onvif/device_service"))
+	info, err := client.GetDeviceInformation(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Manufacturer != "Inherited Acme" || info.Model != "InheritedCam" {
+		t.Fatalf("inherited namespace fields not decoded: %+v", info)
+	}
+}
+
+func TestDeviceInformationUsesNamespacesInheritedFromSOAPBody(t *testing.T) {
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:GetDeviceInformationResponse><tds:Manufacturer>Body Acme</tds:Manufacturer><tds:Model>BodyCam</tds:Model></tds:GetDeviceInformationResponse></s:Body></s:Envelope>`), nil
+	})
+	client := NewDeviceClient(NewClient(transport, Config{Timeout: time.Second}), mustEndpoint(t, "http://camera.local/onvif/device_service"))
+	info, err := client.GetDeviceInformation(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Manufacturer != "Body Acme" || info.Model != "BodyCam" {
+		t.Fatalf("Body-inherited namespace fields not decoded: %+v", info)
+	}
+}

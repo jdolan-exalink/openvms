@@ -122,3 +122,61 @@ func TestRetryPolicyAndCancellation(t *testing.T) {
 		}
 	})
 }
+
+func TestReadOnlyRetriesTransientHTTPAndReceiverFaults(t *testing.T) {
+	ep, _ := ParseEndpoint("http://camera.local/service")
+	receiverFault := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><s:Fault><s:Code><s:Value>s:Receiver</s:Value></s:Code><s:Reason><s:Text>temporary</s:Text></s:Reason></s:Fault></s:Body></s:Envelope>`
+	for _, tc := range []struct {
+		name      string
+		first     *http.Response
+		wantCalls int
+	}{
+		{name: "http 503 with valid soap body", first: response(503, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), wantCalls: 2},
+		{name: "transient receiver fault", first: response(500, receiverFault), wantCalls: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			c := NewClient(roundTripFunc(func(*http.Request) (*http.Response, error) {
+				calls++
+				if calls == 1 {
+					return tc.first, nil
+				}
+				return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), nil
+			}), Config{Timeout: time.Second, MaxAttempts: 2})
+			if _, err := c.Call(context.Background(), ep, "urn:test:Read", `<x:Read/>`, ReadOnly); err != nil {
+				t.Fatal(err)
+			}
+			if calls != tc.wantCalls {
+				t.Fatalf("calls=%d want %d", calls, tc.wantCalls)
+			}
+		})
+	}
+}
+
+func TestSenderFaultIsNotRetried(t *testing.T) {
+	ep, _ := ParseEndpoint("http://camera.local/service")
+	fault := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><s:Fault><s:Code><s:Value>s:Sender</s:Value><s:Subcode><s:Value>ter:ActionNotSupported</s:Value></s:Subcode></s:Code></s:Fault></s:Body></s:Envelope>`
+	calls := 0
+	c := NewClient(roundTripFunc(func(*http.Request) (*http.Response, error) { calls++; return response(500, fault), nil }), Config{Timeout: time.Second, MaxAttempts: 3})
+	_, err := c.Call(context.Background(), ep, "urn:test:Read", `<x:Read/>`, ReadOnly)
+	var callErr *CallError
+	if !errors.As(err, &callErr) || callErr.Status != StatusUnsupported {
+		t.Fatalf("got %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("calls=%d want 1", calls)
+	}
+}
+
+func TestMutatingHTTP5xxIsNotRetried(t *testing.T) {
+	ep, _ := ParseEndpoint("http://camera.local/service")
+	calls := 0
+	c := NewClient(roundTripFunc(func(*http.Request) (*http.Response, error) {
+		calls++
+		return response(503, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:WriteResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), nil
+	}), Config{Timeout: time.Second, MaxAttempts: 3})
+	_, _ = c.Call(context.Background(), ep, "urn:test:Write", `<x:Write/>`, Mutating)
+	if calls != 1 {
+		t.Fatalf("mutating operation attempts=%d want 1", calls)
+	}
+}
