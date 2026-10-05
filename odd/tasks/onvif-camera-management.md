@@ -2,6 +2,13 @@
 
 Deliver capability-driven ONVIF camera management through the node agent and web API, with safe Frigate synchronization and explicit auditability. This is the complete five-phase feature; the first implementation unit is only the mocked, tested ONVIF foundation, not CRUD-only scope.
 
+## Current implementation status — 2026-10-05
+
+- Parent commits `712b56d` (central HTTPS probe relay) and `daafa0d` (Cameras UI) connect the authenticated read-only agent probe to the server-scoped API and selected-server UI. The UI reports device information, services, and time; a successful probe explicitly does not save a camera.
+- The current verified read-only path is implemented locally, but **not deployed** and **not tested against a real camera or production database**. Prior evidence is mocked/fake transport and UI tests only. No production certificate was generated or deployed.
+- Observed proof for these commits: `pnpm exec vitest run src/routes/Cameras.test.tsx` — 19 passed; `pnpm typecheck` — PASS; `pnpm test` — 120 files / 856 tests passed. These are local checks, not deployment/device acceptance.
+- Product promise: 100% support of the explicitly declared capability/profile matrix, not every vendor's proprietary extension or every ONVIF function on every device. Unsupported capabilities must remain unavailable in the UI.
+
 ## Goal and boundaries
 
 - **Outcome:** discover and manage camera capabilities and operations, configure imaging/network/time, PTZ and audio, and ingest advanced ONVIF events/analytics while retaining stable VMS identity and safe Frigate lifecycle behavior.
@@ -14,9 +21,9 @@ Deliver capability-driven ONVIF camera management through the node agent and web
 ## Baseline and current state
 
 - Feature branch: `feat/onvif-camera-management`, created from local `main` at `3d44726ff04f61775115e9cd37dc0c2db8cb5c0a` (`chore: ignore local soc map mockup reference`). At task creation `HEAD` and `main` resolve to the same commit; do not copy unrelated future changes from `feat/maps-phase2`.
-- Prior exploration found ONVIF credentials/config represented in Frigate configuration but no native ONVIF discovery/control in the node agent. Per-camera PATCH edits an existing Frigate camera section; adding/removing sections currently needs raw config PUT or a new safe agent capability. Secrets require `servers.config.secrets` and are masked otherwise; Frigate below 0.16 cannot edit config. Recording reads exist but no recording DELETE endpoint. Existing camera sync identity is `(server_id, remote_name)`; import upsert can resurrect a soft-deleted same-name camera, so deletion tombstones/suppression are required. Prefer display-name changes over renaming remote keys to preserve VMS/event identity.
+- Historical baseline exploration found ONVIF credentials/config represented in Frigate configuration but no native ONVIF discovery/control in the node agent. Per-camera PATCH edits an existing Frigate camera section; adding/removing sections currently needs raw config PUT or a new safe agent capability. Secrets require `servers.config.secrets` and are masked otherwise; Frigate below 0.16 cannot edit config. Recording reads exist but no recording DELETE endpoint. Existing camera sync identity is `(server_id, remote_name)`; import upsert can resurrect a soft-deleted same-name camera, so deletion tombstones/suppression are required. Prefer display-name changes over renaming remote keys to preserve VMS/event identity.
 - Exact project verification runners from the baseline: `go test -race ./...`, `pnpm test`, and `pnpm typecheck`; focused tests should use the relevant `go test` package or `pnpm exec vitest run <test-file>`. `make test` combines the Go and web unit suites. Do not run tests as part of this planning-only document task.
-- No source code changes, tests, commits, LAN access, camera operation, or physical operation have been performed for this plan.
+- At initial planning, no source code changes, tests, commits, LAN access, camera operation, or physical operation had been performed. Later implementation evidence is listed below.
 
 ## Work units
 
@@ -60,7 +67,7 @@ Implement in dependency order. Each task is a delegated direct work unit with a 
 ## Acceptance criteria
 
 - [ ] All five phases above are complete; partial CRUD is not feature completion.
-- [ ] Device capabilities/operations determine available API operations, UI states, and option lists; unsupported operations are not offered.
+- [ ] Device capabilities/operations determine available API operations, UI states, and option lists; unsupported operations are not offered. “100%” refers to the declared supported capability/profile matrix, not all vendors' proprietary behavior.
 - [ ] Secrets are encrypted at rest and write-only through APIs/UI; logs, errors, audit, and stream metadata redact credentials.
 - [ ] Every physical mutation is bounded, authorized, audited, and verified by readback; failures report uncertainty honestly and do not claim success.
 - [ ] Frigate config follows the device/VMS lifecycle without changing stable identity; deleted cameras remain suppressed from import until explicitly restored.
@@ -71,12 +78,38 @@ Implement in dependency order. Each task is a delegated direct work unit with a 
 ## Delivery and progress record
 
 - Strategy: `ask-on-risk`; chain strategy: `stacked-to-main` (user-approved). No push, PR creation, or merge is authorized.
-- Current slice: ONVIF-02 remains partial. Device reads, WSSE, scoped discovery, agent/API relay, discovery UI, optional TLS listener/client foundations, and server-scoped TLS trust API exist. The authenticated HTTPS agent probe and central relay now exist; camera persistence remains absent. The selected-server probe UI is mocked/tested only. Planning commit: `134a319`; reviewed boundary: `19315be`; later candidate reviews were individually declined. No PR exists.
+- Current slice: ONVIF-02 remains partial. Read-only device reads, WSSE, scoped discovery, optional TLS listener, verified HTTPS transport, TLS trust configuration, HTTPS agent probe, authenticated central relay, and Cameras probe UI are implemented locally. Camera persistence, stable VMS mapping, and all real-device/deployment/database validation remain absent. Parent commits: `712b56d`, `daafa0d`; no PR or deployment exists. Planning commit: `134a319`; reviewed boundary: `19315be`; later candidate reviews were individually declined.
 - Estimate: complete scope is multi-phase and likely many thousands of authored changed lines across slices; avoid a false precise forecast before implementation. Keep cohesive independently reviewable work units, count authored additions plus deletions, and apply the approved stacked-to-main slicing before a delivery boundary exceeds the applicable budget. Never shrink or omit required behavior/tests to satisfy a line count.
 - Per-task evidence to append: task ID; RED/GREEN/REFACTOR commands and observed results; additional checks; harness result or justified `N/A`; rollback boundary; Conventional Commit and commit ID; authored line count; risk assessment/review due reason and review outcome; PR slice boundary if/when user later authorizes PR work.
-- Next step: expose the agent probe through a narrowly authenticated central server operation that loads server-scoped TLS trust and keeps caller scope bound; do not add camera persistence yet. ONVIF-02 remains partial. Keep all tests mocked unless the user separately authorizes a destination and operation.
+- Next step: complete the deployment-readiness checklist below, then request the missing explicit remote destination, deployment operation, and credential/session authorization before any deployment or camera access. Keep ONVIF-02 partial until read-only real-device verification and stable VMS mapping are addressed. Do not treat a probe as camera persistence.
+
+## Immediate deployment-test readiness checklist
+
+Local implementation is ready for a controlled **read-only** test only after these operator and authorization prerequisites are satisfied. Do not inspect ambient SSH, secrets, sessions, or remote hosts to fill gaps.
+
+| Gate | Required evidence before a deployment/device test |
+|---|---|
+| Database/schema | Apply and verify the TLS metadata migration on the specifically authorized test database; confirm the test server is registered to the intended tenant and agent. Prior schema tests did not execute a real migration. |
+| Agent TLS | Provision operator-owned certificate/key outside this application; certificate IP SAN must match the registered agent IPv4. Set all three optional-listener settings, select the secure port, and install the matching system/custom CA trust through the server-scoped TLS configuration API. Verify no HTTP fallback. |
+| Camera policy | Configure the intended agent interface and `ONVIF_ALLOWED_CIDRS`; ensure the explicitly selected camera IPv4 is inside policy. Use only an operator-approved test camera and temporary test credentials. |
+| Authorization | Confirm the acting user has both scoped `servers.manage` and `servers.config.secrets`; exercise a deny/missing-permission case without sending credentials. |
+| Remote authorization | Before deployment or camera access, obtain explicit user authorization naming destination, operation, and credential/session. Until all are supplied, remain local; do not probe hosts or discover/reuse remote sessions. |
+| Read-only acceptance | After authorization, verify only `GetDeviceInformation`, `GetServices`, and `GetSystemDateAndTime`; confirm safe UI projection, no save/persistence, no secret in logs/errors, and no following returned service URLs. Test missing TLS trust, unknown CA/wrong IP SAN, out-of-CIDR endpoint, denied permission, timeout, and unavailable agent. No settings, PTZ, audio, I/O, network, or time mutation. |
+
+Record exact destination, authorized operation/session scope, software versions, observed outcomes, and rollback/revocation. If any gate fails, stop and report; do not fall back to plaintext or broaden trust.
+
+## Remaining feature phases
+
+- **ONVIF-02:** stable VMS identity mapping, authorized deployment and read-only real-camera validation. It remains partial despite the connected local probe path.
+- **ONVIF-03–05:** Media2/Media1 profiles; safe snapshots and stream URIs; encrypted camera credential persistence; camera CRUD/manifest, stable IDs, Frigate synchronization, tombstones, health, and recording-preserving deletion with explicit fail-closed discard.
+- **ONVIF-06–09:** capability-driven imaging/video controls; audited time/NTP; guarded network configuration; mutation audit and bounded recovery/readback.
+- **ONVIF-10–13:** PTZ operations, presets/tours, focus/auxiliary controls, and fisheye/dewarp.
+- **ONVIF-14–16:** audio, backchannel, and device I/O with explicit capability and actuation safety.
+- **ONVIF-17–19:** event subscriptions/Profile M, rules and detection fusion/event bus, then resilience/security/operator acceptance across partial devices and lifecycle cases.
 
 ## Compact implementation evidence ledger
+
+**Historical work-unit snapshots:** each row and following subsection records its state at that unit's completion. Headings/phrases such as “not wired,” “no central API,” and “next bounded slice” are historical, not current readiness claims. Use the current-status and readiness sections above for the present state; preserve old test/rollback/commit facts below as evidence.
 
 Conventions: exact Go runner is `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 <packages>`; Go formatting uses `gofmt -w <changed Go files>`. Every HTTP/SOAP/UDP test described here used injected fakes/recorders; no real camera, LAN, remote operation, credential, or production listener was used. Commit/review statements are per the worker who performed that unit; parent-owned commits and review decisions are never inferred. Review boundary remains `19315be` unless noted.
 
@@ -94,15 +127,15 @@ Conventions: exact Go runner is `GOCACHE=/tmp/openvms-go-build-cache go test -co
 | Central deny + redirect regression — complete subunit | RED: focused provision compile failed for absent auth seam. GREEN and final focused provision/API/app-api, race provision/API, full Go, `pnpm typecheck`, `git diff --check` PASS. | Revert seam and denial/redirect tests in provision service/tests; redirect defense remains unconditional. No DB/network/commit/review. |
 | Cameras discovery UI — partial | RED: 3 new `Cameras.test.tsx` cases failed. GREEN 9 tests; typecheck and full web suite PASS (120 files/846 tests; jsdom media-load diagnostics nonfatal). | Revert Cameras route/test. API mocked; no camera requests or credentials. Parent commit `ebc7f41`, 298 authored lines, not a worker commit. |
 | UI lifecycle hardening — partial | RED: 3 server/interface abort + deny-control cases failed; standalone unmount abort also failed. GREEN after fix: eslint, focused 12 tests, typecheck, web suite 120 files/849 tests, diff check PASS; media-load diagnostics nonfatal. | Abort on server/interface change/unmount; deny suppresses controls. No live requests. Earlier `8a10e48` candidate was declined (no approval); no new review/commit by worker. |
-| Current ONVIF state | Parent reports prior UI verification 12/12, typecheck, web suite 120/849 PASS; scope stays partial. Device credentials must not traverse the existing plaintext central-to-agent channel. | The verified-agent HTTPS helper and TLS-only probe route exist but are not wired to each other or to the server-scoped TLS configuration API; stable VMS mapping, central probe relay, credential persistence, complete ONVIF-02 and later phases remain outstanding. |
+| Current ONVIF state — historical snapshot | At this earlier point, probe transport and TLS trust API were not connected; do not use this row as the current status. | Superseded by the connected relay/UI commits `712b56d` and `daafa0d`; stable identity, persistence, real-device validation and later phases still remain. |
 
-### Next bounded security slice: opt-in agent HTTPS listener
+### Historical plan snapshot: opt-in agent HTTPS listener
 
 The optional listener is independent from agent port 7419 and is disabled unless all three operator settings are provided: `OPENVMS_AGENT_ONVIF_TLS_LISTEN`, `TLS_CERT_FILE`, and `TLS_KEY_FILE`. Partial/invalid settings must fail startup; no plaintext fallback or implicit/default listen. The TLS mux exposes credential-free discovery and the authenticated read-only device probe; it must not reuse the metrics/update mux. Existing HTTP metrics/update/discovery behavior stays unchanged. TLS requires at least 1.2. Operators provision and install the server certificate/key and trust materials; application code must not generate/deploy production certificates. The central-to-agent verified-client transport and encrypted credential API are separate future work; do not send credentials until both ends are verified and operator trust/SAN provisioning is in place. Never use TOFU or `InsecureSkipVerify`.
 
 This listener foundation does not enable credentials, does not contact devices, and does not verify a network socket in tests. Tests should generate a temporary self-signed pair, validate config fail-closed behavior and TLS-only route exposure, and use injected serve/shutdown seams rather than sockets. Reference: Go `crypto/tls` `LoadX509KeyPair` / `Config.MinVersion` and `net/http.Server.ListenAndServeTLS` official documentation: https://pkg.go.dev/crypto/tls and https://pkg.go.dev/net/http.
 
-### Optional agent HTTPS listener foundation (ONVIF-02 security prerequisite; partial)
+### Historical implementation snapshot: optional agent HTTPS listener foundation
 
 - Added an independent, opt-in TLS listener controlled only by the complete setting triplet `OPENVMS_AGENT_ONVIF_TLS_LISTEN`, `TLS_CERT_FILE`, and `TLS_KEY_FILE`. All-absent disables it; any partial, malformed, unreadable, or mismatched setting fails closed. No implicit address, plaintext fallback, certificate generation, or credential route was introduced.
 - HTTPS uses a separate mux with only the existing credential-free discovery handler (when enabled); `/v1/metrics` and `/v1/update` are not mounted. Existing HTTP listener and all existing routes are unchanged. TLS minimum is 1.2. Both listeners run independently; an unexpected listener exit coordinates bounded shutdown of its peer.
@@ -112,7 +145,7 @@ This listener foundation does not enable credentials, does not contact devices, 
 - Operators must provision and install the server certificate/key and central trust material; the server certificate must identify the node's registered IPv4 address in its IP SAN for the future verified central client. This code does not generate or deploy production certificates. The central verified TLS transport (default roots or explicit CA PEM, registered IPv4 host/secure port, redirect refusal, timeout, and no HTTP fallback) is intentionally not implemented in this unit; do not wire camera credentials until both sides and certificate trust are ready.
 - **Rollback boundary:** remove `apps/edge-agent/tls_listener.go` and `tls_listener_test.go`; revert TLS config/startup coordination in `apps/edge-agent/main.go`; remove this evidence subsection. Plain HTTP behavior remains as before. No commit/review performed; preserve approved boundary `19315be`. Authored change count and current branch diff are reported by the parent after its review/commit flow.
 
-### Central verified-agent HTTPS client foundation (not wired; no camera credentials)
+### Historical implementation snapshot: central verified-agent HTTPS client foundation
 
 - Added `internal/provision/agent_tls.go` with the narrow `VerifiedAgentHTTPClient`: construction binds one registered IPv4 literal and explicit secure port; requests accept only a relative query-free path, never a caller URL, and construct `https://<registered-IP>:<port>` themselves. No existing relay, endpoint, camera API, or agent operation was changed or wired to use it.
 - Trust is an explicit choice: either the host system root pool (`useSystemRoots=true`, no CA bytes) or a non-empty PEM CA bundle (`useSystemRoots=false`). Empty, malformed, non-CA, trailing garbage, or ambiguous trust settings fail closed. TLS has minimum 1.2, IP `ServerName`, default certificate verification enabled (`InsecureSkipVerify=false`), and an additional `x509.Verify` callback with the registered IP, trusted roots, intermediates, and ServerAuth usage. The HTTP transport has no proxy, timeout bounds, and the client overrides redirects on a copied client; no HTTP fallback exists.
@@ -122,7 +155,7 @@ This listener foundation does not enable credentials, does not contact devices, 
 - **Limit:** the helper is not wired to the existing HTTP discovery relay; caller-owned DB/registered-agent lookup and an operator-configured secure port/trust source remain prerequisites. It is not an API claim and does not authorize or implement camera credentials. `TLS_CERT_FILE`/`TLS_KEY_FILE` stay agent-listener inputs; central trust is separately configured by caller choice.
 - **Rollback boundary:** remove `internal/provision/agent_tls.go` and `internal/provision/agent_tls_test.go`; listener foundation remains independent. No commit/review performed; preserve boundary `19315be`.
 
-### Server-scoped agent TLS trust configuration (partial)
+### Historical implementation snapshot: server-scoped agent TLS trust configuration
 
 - Added `server_agent_tls` metadata keyed to a provisioned `server_agents` row, with tenant RLS, secure-port range checks, and mutually exclusive `system` / `custom` CA trust constraints. The schema stores only public CA PEM; there is no private-key or password field. sqlc generates the store methods.
 - Added internal service `SetAgentTLSConfig`, `GetAgentTLSConfig`, and `DeleteAgentTLSConfig`. Each checks server-manage authorization before DB access, then requires a registered agent; setting validates the registered IPv4 and chosen trust bundle using the existing TLS-root parser. Set/delete write audit before/after metadata in the same transaction as the mutation, using only a SHA-256 CA-bundle fingerprint rather than PEM. Missing trust is `ErrAgentTLSNotConfigured`; this does not implement any HTTP fallback or credential request.
@@ -131,7 +164,7 @@ This listener foundation does not enable credentials, does not contact devices, 
 - Tests cover system/custom trust validation, bad ports/modes/bundles, and authorization denial before store access. No real DB integration or migration execution was run; DB constraints and transaction/audit rollback are verified by schema/query inspection only. No HTTPS client wiring, API route/OpenAPI/client operation, device request, credential request, external network, or server certificate was added; expose the configuration in a separate API slice before operator use.
 - **Rollback boundary:** remove `migrations/00032_server_agent_tls.sql`, `internal/store/queries/server_agent_tls.sql`, generated `internal/store/db/server_agent_tls.sql.go` and model additions, and `internal/provision/agent_tls_config.go` + tests; rerun `make generate`. Existing TLS listener/client remain independent. No commit/review performed; parent-owned worktree commit and review decision pending.
 
-### Tenant-integrity correction for agent TLS metadata (partial)
+### Historical implementation snapshot: tenant-integrity correction for agent TLS metadata
 
 - Tightened migration `00032_server_agent_tls.sql`: the TLS row now has a composite `(server_id, tenant_id)` foreign key to the corresponding `server_agents` row. Added the minimal parent composite UNIQUE constraint in this migration (the parent columns are both non-null UUIDs); Down drops the child table before dropping only that named constraint.
 - Added deterministic embedded-migration schema assertions for parent key types, composite FK relationship, and Down ordering. This is a static schema regression check, not proof from a running PostgreSQL instance. Tenant RLS remains in place; the FK now independently prevents a mismatched child tenant.
@@ -140,7 +173,7 @@ This listener foundation does not enable credentials, does not contact devices, 
 - No Docker/database startup or migration execution; actual FK enforcement/integration remains pending. No commit/review performed.
 
 
-### Server-scoped agent TLS API exposure (partial)
+### Historical implementation snapshot: server-scoped agent TLS API exposure
 
 - Added authenticated server routes `GET`, `PUT`, and `DELETE /api/v1/servers/{serverId}/agent/tls`, generated from the OpenAPI contract into the Go server and TypeScript schema. The operations call the existing server-manage-gated provision service; they do not contact the agent. Missing config maps to 404.
 - The public `ca_pem` is a JSON string, not a base64-encoded Go byte slice. Requests accept only `secure_port`, `trust_mode`, and optional `ca_pem`; unknown keys (including `private_key`), trailing JSON, oversized bodies (>128 KiB), PEM over 64 KiB, invalid ports/modes, and system/custom trust-shape conflicts fail with 400. Custom CA semantic validation remains in the service using the registered agent IPv4. No agent bearer token or private key is accepted or returned.
@@ -150,7 +183,7 @@ This listener foundation does not enable credentials, does not contact devices, 
 - **Runtime harness:** N/A — this work exposes metadata operations only; no agent/device request is part of this boundary, and database integration remains pending. **Authored change count:** approximately 328 lines (generated Go/TypeScript excluded).
 - **Rollback boundary:** revert `packages/api-contract/openapi.yaml`, run `make generate`, and remove `internal/api/agent_tls_config_handlers.go`, its tests, `internal/api/errors.go` TLS mapping, and the TLS body middleware in `internal/api/router.go`; retain server TLS DB/service configuration. No commit/review performed; no source behavior outside this API contract changed.
 
-### Authenticated read-only ONVIF device probe on agent TLS mux (partial; no central API)
+### Historical implementation snapshot: authenticated ONVIF device probe on agent TLS mux
 
 - Added `POST /v1/onvif/probe` only to the optional HTTPS `buildTLSMux`; `buildMux` and the existing HTTP port 7419 do not register it. Reuses constant-time agent bearer authorization and the configured `ONVIF_ALLOWED_CIDRS`; endpoint input is bounded HTTP(S) with IPv4-literal host only, no userinfo/query/fragment, and must fall in an allowed IPv4 CIDR. Username/password are optional as a pair and remain request-memory only; they never enter a URL, logs, or response. Strict JSON rejects unknown/trailing fields and oversized bodies.
 - The probe issues only read-only `GetDeviceInformation`, `GetServices`, and `GetSystemDateAndTime` calls through the existing WSSE/device client. It uses one attempt per operation, 4-second operation timeout, 10-second overall request timeout, 64 KiB SOAP response bound, and no-proxy HTTP transport with TLS 1.2+ for explicit HTTPS camera endpoints. HTTP camera URLs are only used when explicitly supplied; the central-to-agent request reaches this handler over HTTPS only. RoundTrip is used directly, so redirects are not followed.
@@ -160,7 +193,7 @@ This listener foundation does not enable credentials, does not contact devices, 
 - Tests cover denial before probe callback, bounded strict JSON/method/credentials, invalid endpoint forms and CIDR, secret-free bounded success/error projections, sanitized service origins/no follow-up requests, explicit camera HTTP vs HTTPS scheme, all three read-only SOAP operations, one-request redirect refusal, context timeout, no plaintext password in SOAP, and probe path absent from plaintext mux. Recorder/fake RoundTripper only; no sockets, LAN, camera, agent runtime, certificate deployment, or central API call. Authored source changes: 669 lines (additions plus deletions; task-document compaction excluded), above advisory 400-line heuristic because of the complete credential, policy, and protocol regression matrix; no security coverage was trimmed.
 - **Rollback boundary:** remove `internal/agent/onvifdiscover/probe.go` and `probe_test.go`; remove probe-handler setup from `apps/edge-agent/main.go`; remove probe registration and parameter from `apps/edge-agent/tls_listener.go` and corresponding mux tests. Existing discovery and TLS listener/client work remains independent. No commit/review performed.
 
-### Central authenticated HTTPS ONVIF probe relay (partial; UI/persistence absent)
+### Historical implementation snapshot: central authenticated HTTPS ONVIF probe relay
 
 - Added `POST /api/v1/servers/{serverId}/onvif/probe` with generated Go and TypeScript contracts. The request accepts only endpoint and optional paired username/password, with strict JSON, 4 KiB total request limit and per-field limits; no credential values are stored, logged, or returned.
 - The provision service validates an HTTP(S) IPv4-literal device endpoint, then requires `servers.manage` and the scoped `servers.config.secrets` permission before loading registered-agent/TLS rows, decrypting the agent bearer token, or outbound relay. It uses only the stored secure port and configured system/custom trust to construct the existing verified HTTPS client. No reuse of the existing plaintext discovery helper or fallback exists.
@@ -173,7 +206,7 @@ This listener foundation does not enable credentials, does not contact devices, 
 - **Rollback boundary:** remove `internal/provision/agent_onvif_probe.go` and its test; remove the scoped permission wrapper from `internal/inventory/frigate_config.go`; remove the probe handler/middleware/tests and error mapping from `internal/api`; revert `packages/api-contract/openapi.yaml` then run `make generate`. Existing TLS foundation, TLS config API, and agent-side probe remain independent. No commit/review performed.
 
 
-### Central ONVIF probe UI (partial; no camera persistence)
+### Historical implementation snapshot: central ONVIF probe UI
 
 - Added Cameras form “Probar y detectar” using generated same-origin `POST /api/v1/servers/{serverId}/onvif/probe`; requires scoped `servers.manage` and `servers.config.secrets` with deny precedence. Validates HTTP(S) IPv4 endpoints, never contacts devices directly, and shows only read-only device/service/time information; success explicitly says the camera was not saved. TLS-trust-not-configured has a safe operator hint; other backend details are suppressed.
 - Credentials are transient component state, submitted only to the API, password/username cleared after request and on endpoint/server change; unmount/endpoint changes abort and stale responses are ignored. No auto-probe or browser storage. Username/password must be paired.
