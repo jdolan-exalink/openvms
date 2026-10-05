@@ -39,18 +39,21 @@ func loadAgentTLSConfig(listen, certFile, keyFile string) (*agentTLSConfig, bool
 	return &agentTLSConfig{Addr: listen, Certificates: []tls.Certificate{cert}}, true, nil
 }
 
-func buildTLSMux(discoveryHandler http.Handler) *http.ServeMux {
+func buildTLSMux(discoveryHandler, probeHandler http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	if discoveryHandler != nil {
 		mux.Handle("POST /v1/onvif/discover", discoveryHandler)
 	}
+	if probeHandler != nil {
+		mux.Handle("POST /v1/onvif/probe", probeHandler)
+	}
 	return mux
 }
 
-func newAgentTLSServer(cfg *agentTLSConfig, discoveryHandler http.Handler) *http.Server {
+func newAgentTLSServer(cfg *agentTLSConfig, discoveryHandler, probeHandler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           buildTLSMux(discoveryHandler),
+		Handler:           buildTLSMux(discoveryHandler, probeHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, Certificates: cfg.Certificates},
 	}

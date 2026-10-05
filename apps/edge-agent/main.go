@@ -42,11 +42,17 @@ func main() {
 		os.Exit(1)
 	}
 	var discoveryHandler http.Handler
+	var probeHandler http.Handler
 	if enabled {
 		var handlerErr error
 		discoveryHandler, handlerErr = onvifdiscover.NewHandler(secret, onvif.NewDiscovery(onvif.NewUDPTransport(), onvif.DiscoveryConfig{}), discoveryConfig)
 		if handlerErr != nil {
 			log.Error("invalid ONVIF discovery configuration", "error", handlerErr)
+			os.Exit(1)
+		}
+		probeHandler, handlerErr = onvifdiscover.NewProbeHandler(secret, discoveryConfig, onvifdiscover.NewDeviceProbe(nil))
+		if handlerErr != nil {
+			log.Error("invalid ONVIF probe configuration", "error", handlerErr)
 			os.Exit(1)
 		}
 	}
@@ -60,7 +66,7 @@ func main() {
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Info("listening", "addr", addr, "version", agent.Version)
 	if tlsEnabled {
-		tlsServer := newAgentTLSServer(tlsConfig, discoveryHandler)
+		tlsServer := newAgentTLSServer(tlsConfig, discoveryHandler, probeHandler)
 		log.Info("ONVIF TLS listener enabled", "addr", tlsServer.Addr)
 		if err := serveAgentServers(log, srv, tlsServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("agent listener stopped", "error", err)

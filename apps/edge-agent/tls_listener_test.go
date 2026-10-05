@@ -62,9 +62,10 @@ func TestLoadAgentTLSConfig(t *testing.T) {
 	}
 }
 
-func TestAgentTLSMuxDoesNotExposeHTTPRoutes(t *testing.T) {
+func TestAgentTLSMuxExposesProbeWithoutChangingHTTPMux(t *testing.T) {
 	discovery := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	mux := buildTLSMux(discovery)
+	probe := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusAccepted) })
+	mux := buildTLSMux(discovery, probe)
 	for _, path := range []string{"/v1/metrics", "/v1/update"} {
 		r := httptest.NewRequest("POST", path, nil)
 		w := httptest.NewRecorder()
@@ -79,6 +80,20 @@ func TestAgentTLSMuxDoesNotExposeHTTPRoutes(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("discovery status = %d, want 204", w.Code)
 	}
+	r = httptest.NewRequest("POST", "/v1/onvif/probe", nil)
+	w = httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("TLS probe status = %d, want 202", w.Code)
+	}
+
+	plainMux := buildMux("agent-secret", "", nil, discovery, func(*http.Request) error { return nil }, func() {})
+	r = httptest.NewRequest("POST", "/v1/onvif/probe", nil)
+	w = httptest.NewRecorder()
+	plainMux.ServeHTTP(w, r)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("plain HTTP probe status = %d, want 404", w.Code)
+	}
 }
 
 func TestAgentTLSServerRequiresTLS12(t *testing.T) {
@@ -87,7 +102,7 @@ func TestAgentTLSServerRequiresTLS12(t *testing.T) {
 	if err != nil || !enabled {
 		t.Fatalf("load config: enabled=%v err=%v", enabled, err)
 	}
-	server := newAgentTLSServer(cfg, nil)
+	server := newAgentTLSServer(cfg, nil, nil)
 	if server.TLSConfig.MinVersion != tls.VersionTLS12 {
 		t.Fatalf("MinVersion = %x, want TLS 1.2", server.TLSConfig.MinVersion)
 	}
