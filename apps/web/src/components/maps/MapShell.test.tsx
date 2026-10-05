@@ -178,7 +178,10 @@ describe("Maps camera interaction integration", () => {
     act(() => vi.advanceTimersByTime(400));
     expect(acquire).toHaveBeenCalledTimes(1);
     act(() => vi.advanceTimersByTime(300));
-    expect(document.querySelector("[data-surface-slot='c0']")).not.toBeNull();
+    // Map previews attach the shared session's <video> inside the preview card (no SurfaceSlot:
+    // the shared surface layer is Live-only), so the live picture reuses the prewarmed session.
+    expect(document.querySelector("[data-testid='camera-hover-preview'] video")).not.toBeNull();
+    expect(document.querySelector("[data-surface-slot='c0']")).toBeNull();
     expect(acquire).toHaveBeenCalledTimes(1);
   });
 
@@ -634,7 +637,9 @@ describe("Operational Maps completion", () => {
     expect(screen.queryByLabelText("Close preview")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Open camera events" }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/events"));
-    expect(router.state.location.search).toMatchObject({ camera: "c0", site: "s" });
+    expect(router.state.location.search).toMatchObject({ camera: "c0" });
+    // /events no longer has a site filter (e3e1b34 replaced it with `server`), so none is sent.
+    expect(router.state.location.search).not.toHaveProperty("site");
   });
 
   it("offers coordinate-less sites from global multi-site navigation", async () => {

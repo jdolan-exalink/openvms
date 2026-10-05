@@ -828,7 +828,13 @@ describe("Live with persistent players (P0 acceptance)", () => {
     renderPage(LiveWithSessions);
     fireEvent.click(await screen.findByRole("button", { name: /Puerta norte/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Porton sur/ }));
-    await waitFor(() => expect(screen.getByLabelText("Cuadro 1").querySelector("video")).not.toBeNull());
+    // Both sessions open asynchronously: wait for both pictures and both sockets, or the
+    // connection counts below race the second camera's connect.
+    await waitFor(() => {
+      expect(screen.getByLabelText("Cuadro 1").querySelector("video")).not.toBeNull();
+      expect(screen.getByLabelText("Cuadro 2").querySelector("video")).not.toBeNull();
+      expect(FakeSocket.created).toBe(2);
+    });
   }
 
   it("moving a camera from cell 1 to cell 8 keeps the same session and does not reconnect", async () => {
