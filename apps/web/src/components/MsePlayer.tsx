@@ -35,8 +35,8 @@ type MsePlayerProps = {
    * stays alive with its last frame and reconnects when this turns false again. Persistent only.
    */
   suspended?: boolean;
-  /** How the picture fills the tile. Map windows use cover so the snapshot underneath is fully hidden. */
-  objectFit?: "contain" | "cover";
+  /** How the picture fills the tile. Map windows use cover; live views use fill. Default fill. */
+  objectFit?: "contain" | "cover" | "fill";
 };
 
 /**
@@ -44,9 +44,9 @@ type MsePlayerProps = {
  * go2rtc MSE websocket. It is a thin view over a PlayerSession (lib/live), which owns the
  * `<video>`, the websocket and the reconnect policy; this component only renders it.
  */
-export function MsePlayer({ persistent = false, surface = false, objectFit, ...props }: MsePlayerProps) {
+export function MsePlayer({ persistent = false, surface = false, objectFit = "fill", ...props }: MsePlayerProps) {
   const layer = useSurfaceLayer();
-  if (persistent && surface && layer) return <SurfaceMsePlayer {...props} />;
+  if (persistent && surface && layer) return <SurfaceMsePlayer {...props} objectFit={objectFit} />;
   return persistent ? <PersistentMsePlayer {...props} objectFit={objectFit} /> : <PrivateMsePlayer {...props} objectFit={objectFit} />;
 }
 
@@ -151,13 +151,16 @@ function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, susp
 }
 
 /** SurfaceMsePlayer leaves the `<video>` in the VideoSurfaceLayer and only reserves its slot here. */
-function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const frame = useRef<HTMLDivElement>(null);
   const layer = useSurfaceLayer();
   const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, frame);
   useEffect(() => {
     session?.setMuted(muted);
   }, [session, muted]);
+  useEffect(() => {
+    session?.setObjectFit(objectFit);
+  }, [session, objectFit]);
   const onZoom = useCallback(
     (zoom: DigitalZoom) => {
       if (session) layer?.setPictureZoom(session, zoom);

@@ -71,6 +71,7 @@ export function RecTile({
           posterFallback={posterHere ? `/api/v1/events/${posterHere.eventId}/thumbnail` : undefined}
           posterKey={posterHere?.key}
           posterChip={!!posterHere}
+          objectFit="fill"
         />
       ) : (
         <>
@@ -83,10 +84,10 @@ export function RecTile({
               }}
               alt=""
               draggable={false}
-              className="size-full object-contain"
+              className="size-full object-fill"
             />
           )}
-          {(state === "limited" || state === "duplicate") && <img src={`/media/v1/cameras/${cameraId}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-contain opacity-50" />}
+          {(state === "limited" || state === "duplicate") && <img src={`/media/v1/cameras/${cameraId}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-fill opacity-50" />}
           <span role="status" className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white/85">
             {message}
           </span>

@@ -35,7 +35,7 @@ export function PlayerStatusOverlay({
           src={image}
           alt=""
           draggable={false}
-          className="absolute inset-0 size-full object-contain"
+          className="absolute inset-0 size-full object-fill"
           onLoad={() => setColdState("ready")}
           onError={() => snapshot.poster === null && setColdState("failed")}
         />
