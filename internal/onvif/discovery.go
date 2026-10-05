@@ -13,10 +13,12 @@ import (
 )
 
 const (
-	discoveryNamespace     = "http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01"
-	addressingNamespace    = "http://www.w3.org/2005/08/addressing"
+	discoveryNamespace     = "http://schemas.xmlsoap.org/ws/2005/04/discovery"
+	addressingNamespace    = "http://schemas.xmlsoap.org/ws/2004/08/addressing"
 	discoveryProbeAction   = discoveryNamespace + "/Probe"
 	discoveryMatchesAction = discoveryNamespace + "/ProbeMatches"
+	discoveryTo            = "urn:schemas-xmlsoap-org:ws:2005:04:discovery"
+	discoveryAnonymous     = "http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous"
 	maxDiscoveryPacket     = 64 << 10
 )
 
@@ -68,6 +70,9 @@ func (d *Discovery) Probe(ctx context.Context, interfaceName string) ([]Discover
 	if d == nil || d.transport == nil || strings.TrimSpace(interfaceName) == "" {
 		return nil, fmt.Errorf("invalid ONVIF discovery configuration")
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	messageID, err := newMessageID()
 	if err != nil {
 		return nil, fmt.Errorf("create discovery message identity: %w", err)
@@ -83,9 +88,18 @@ func (d *Discovery) Probe(ctx context.Context, interfaceName string) ([]Discover
 	deviceIndex := make(map[string]int)
 	seenAddresses := make(map[string]bool)
 	for len(result) < d.config.MaxResults {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		if probeCtx.Err() != nil {
+			return result, nil
+		}
 		packet, err := d.transport.Receive(probeCtx, interfaceName)
 		if err != nil {
-			if errors.Is(err, ErrDiscoveryTimeout) || errors.Is(err, context.DeadlineExceeded) {
+			if ctx.Err() != nil {
+				return result, ctx.Err()
+			}
+			if errors.Is(err, ErrDiscoveryTimeout) || (errors.Is(err, context.DeadlineExceeded) && probeCtx.Err() != nil) {
 				return result, nil
 			}
 			if errors.Is(err, context.Canceled) {
@@ -137,28 +151,28 @@ func newMessageID() (string, error) {
 }
 
 func buildProbe(messageID string) []byte {
-	return []byte(`<s:Envelope xmlns:s="` + soapNamespace + `" xmlns:a="` + addressingNamespace + `" xmlns:d="` + discoveryNamespace + `" xmlns:dn="http://www.onvif.org/ver10/network/wsdl"><s:Header><a:Action>` + discoveryProbeAction + `</a:Action><a:MessageID>` + messageID + `</a:MessageID><a:To>urn:docs-oasis-open-org:ws-dd:ns:discovery:2009:01</a:To><a:ReplyTo><a:Address>http://www.w3.org/2005/08/addressing/anonymous</a:Address></a:ReplyTo></s:Header><s:Body><d:Probe><d:Types>dn:NetworkVideoTransmitter</d:Types></d:Probe></s:Body></s:Envelope>`)
+	return []byte(`<s:Envelope xmlns:s="` + soapNamespace + `" xmlns:wsadis="` + addressingNamespace + `" xmlns:d="` + discoveryNamespace + `" xmlns:tds="` + deviceNamespace + `"><s:Header><wsadis:Action>` + discoveryProbeAction + `</wsadis:Action><wsadis:MessageID>` + messageID + `</wsadis:MessageID><wsadis:To>` + discoveryTo + `</wsadis:To><wsadis:ReplyTo><wsadis:Address>` + discoveryAnonymous + `</wsadis:Address></wsadis:ReplyTo></s:Header><s:Body><d:Probe><d:Types>tds:Device</d:Types></d:Probe></s:Body></s:Envelope>`)
 }
 
 type probeEnvelope struct {
 	XMLName xml.Name `xml:"http://www.w3.org/2003/05/soap-envelope Envelope"`
 	Header  struct {
-		Action    string `xml:"http://www.w3.org/2005/08/addressing Action"`
-		RelatesTo string `xml:"http://www.w3.org/2005/08/addressing RelatesTo"`
+		Action    string `xml:"http://schemas.xmlsoap.org/ws/2004/08/addressing Action"`
+		RelatesTo string `xml:"http://schemas.xmlsoap.org/ws/2004/08/addressing RelatesTo"`
 	} `xml:"http://www.w3.org/2003/05/soap-envelope Header"`
 	Body struct {
 		Matches struct {
-			Items []probeMatchEntry `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 ProbeMatch"`
-		} `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 ProbeMatches"`
+			Items []probeMatchEntry `xml:"http://schemas.xmlsoap.org/ws/2005/04/discovery ProbeMatch"`
+		} `xml:"http://schemas.xmlsoap.org/ws/2005/04/discovery ProbeMatches"`
 	} `xml:"http://www.w3.org/2003/05/soap-envelope Body"`
 }
 type probeMatchEntry struct {
 	EPR struct {
-		Address string `xml:"http://www.w3.org/2005/08/addressing Address"`
-	} `xml:"http://www.w3.org/2005/08/addressing EndpointReference"`
-	Types  string `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 Types"`
-	Scopes string `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 Scopes"`
-	XAddrs string `xml:"http://docs.oasis-open.org/ws-dd/ns/discovery/2009/01 XAddrs"`
+		Address string `xml:"http://schemas.xmlsoap.org/ws/2004/08/addressing Address"`
+	} `xml:"http://schemas.xmlsoap.org/ws/2004/08/addressing EndpointReference"`
+	Types  string `xml:"http://schemas.xmlsoap.org/ws/2005/04/discovery Types"`
+	Scopes string `xml:"http://schemas.xmlsoap.org/ws/2005/04/discovery Scopes"`
+	XAddrs string `xml:"http://schemas.xmlsoap.org/ws/2005/04/discovery XAddrs"`
 }
 
 type parsedProbeMatch struct {
