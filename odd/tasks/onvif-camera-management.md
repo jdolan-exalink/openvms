@@ -24,7 +24,7 @@ Implement in dependency order. Each task is a delegated direct work unit with a 
 
 ### Phase 1 — Discovery, device/media, lifecycle, and health
 
-- [ ] **ONVIF-01 — Mocked ONVIF foundation and bounded transport.** Establish protocol/client abstractions, device endpoint discovery inputs, bounded connection/read/write timeouts and retries, structured errors, and deterministic mocks. No physical camera access. RED/GREEN/REFACTOR evidence required. Rollback: remove the isolated foundation and its tests.
+- [x] **ONVIF-01 — Mocked ONVIF foundation and bounded transport.** Establish protocol/client abstractions, device endpoint discovery inputs, bounded connection/read/write timeouts and retries, structured errors, and deterministic mocks. No physical camera access. RED/GREEN/REFACTOR evidence required. Rollback: remove the isolated foundation and its tests.
 - [ ] **ONVIF-02 — Core discovery and device information.** Discover devices/services and read device information through the agent; expose API results without leaking credentials; map discovered devices to stable VMS identity.
 - [ ] **ONVIF-03 — Media2 with Media1 fallback and profiles.** Discover Media2 first where supported, fall back to Media1, enumerate streams/profiles and preserve profile identity/capability metadata.
 - [ ] **ONVIF-04 — Snapshot and stream source management.** Retrieve snapshots and represent stream URIs/options safely; redact credential-bearing URIs and avoid persisting derived secrets in logs or browser state.
@@ -70,12 +70,12 @@ Implement in dependency order. Each task is a delegated direct work unit with a 
 ## Delivery and progress record
 
 - Strategy: `ask-on-risk`; chain strategy: `stacked-to-main` (user-approved). No push, PR creation, or merge is authorized.
-- Current slice: planning document only; no implementation commit exists. First code slice is ONVIF-01, mocked foundation, with tests in the same work unit.
+- Current slice: ONVIF-01, mocked foundation and tests, committed as `19cbca2` (375 authored changed lines). Planning commit: `134a319` (76 lines). Slice base: `134a319`; no PR created.
 - Estimate: complete scope is multi-phase and likely many thousands of authored changed lines across slices; avoid a false precise forecast before implementation. Keep cohesive independently reviewable work units, count authored additions plus deletions, and apply the approved stacked-to-main slicing before a delivery boundary exceeds the applicable budget. Never shrink or omit required behavior/tests to satisfy a line count.
 - Per-task evidence to append: task ID; RED/GREEN/REFACTOR commands and observed results; additional checks; harness result or justified `N/A`; rollback boundary; Conventional Commit and commit ID; authored line count; risk assessment/review due reason and review outcome; PR slice boundary if/when user later authorizes PR work.
-- Next step: delegate implementation of ONVIF-01 only after this task document and its Engram mirror have been read back and reconciled. Keep all device/camera operations mocked unless the user separately authorizes a destination and operation.
+- Next step: ONVIF-02, core device discovery and agent integration. Keep all device/camera operations mocked unless the user separately authorizes a destination and operation. The first implementation slice has no API/UI, authentication, discovery, or agent wiring yet.
 
-### ONVIF-01 implementation evidence (in progress; commit/review pending)
+### ONVIF-01 implementation evidence (completed; native review under budget)
 
 - Implemented isolated `internal/onvif` endpoint validation, bounded SOAP 1.2 client, response size limit, typed redacted failures, SOAP fault classification, and read-only-only retries. Transport is injected as `http.RoundTripper`; tests use only a deterministic mock and make no network calls.
 - **RED:** `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/onvif` failed before implementation because the new tests referenced the not-yet-implemented ONVIF API (undefined `ParseEndpoint`, `NewClient`, `Config`, and related symbols). After the first implementation pass, the same test also exposed SOAP action assertion and SOAP Fault/HTTP 500 handling gaps; both were fixed before GREEN.
@@ -84,4 +84,4 @@ Implement in dependency order. Each task is a delegated direct work unit with a 
 - **Broader check:** `GOCACHE=/tmp/openvms-go-build-cache go test ./...` — PASS (all packages).
 - **Runtime harness:** N/A; this unit has no runtime or physical-device boundary and all transport behavior is mocked.
 - **Rollback boundary:** remove `internal/onvif/client.go` and `internal/onvif/client_test.go`; no integrations or external dependencies were added.
-- **Commit / authored line count / review boundary:** pending parent handling; this task remains unchecked until commit and review-boundary evidence are recorded. No real camera, LAN, or credential use occurred.
+- **Commit / authored line count / review boundary:** `19cbca2`; 375 authored changed lines. Native assessment against `134a319`: `medium`, `review_due=false`, `under_budget`. Review remains pending for the accumulating slice; no approval or receipt is claimed. Parent re-ran the focused test: PASS. No real camera, LAN, or credential use occurred.
