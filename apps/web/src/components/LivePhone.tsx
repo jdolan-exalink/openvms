@@ -1,15 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
-import { camerasQuery, sitesQuery } from "@/api/queries";
+import { cameraFoldersQuery, camerasQuery, meQuery, serversQuery, sitesQuery } from "@/api/queries";
 import type { Schemas } from "@/api/client";
 import { setContextSidebarCollapsed } from "@/components/AppShell";
 import { MsePlayer } from "@/components/MsePlayer";
-import { Chip, IconButton } from "@/components/ui";
+import { LiveModeToggle } from "@/components/LiveModeToggle";
+import { LiveRecDock } from "@/components/LiveRecDock";
+import { PhoneCameraSheet } from "@/components/PhoneCameraSheet";
+import { RecTile, type RecTileState } from "@/components/RecTile";
+import { IconButton } from "@/components/ui";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { usePlayerSession } from "@/lib/live/PlayerSessionProvider";
+import { can } from "@/lib/perm";
+import type { RecTransport } from "@/lib/useRecPlayback";
+import { useRecSession } from "@/lib/useRecSession";
 
 type Camera = Schemas["Camera"];
 
@@ -23,13 +30,16 @@ const statusDot = (status?: string) => (status === "online" ? "bg-ok" : status =
 /** Where the gateway serves the latest frame; it sits under the player so a card is never a black box. */
 const snapshotUrl = (id: string) => `/media/v1/cameras/${id}/snapshot.jpg?h=360`;
 
-function CameraCard({ camera, playing, onOpen }: { camera: Camera; playing: boolean; onOpen: () => void }) {
+/** What a card shows in GRABADO: the recorded tile of the shared transport instead of the live player. */
+type RecView = { state: RecTileState; transport: RecTransport; isMaster: boolean };
+
+function CameraCard({ camera, playing, rec, onOpen }: { camera: Camera; playing: boolean; rec?: RecView; onOpen: () => void }) {
   const tr = useT();
   return (
     <li className="min-w-0">
       <div className="relative aspect-video w-full overflow-hidden bg-video">
         <img src={snapshotUrl(camera.id)} alt="" draggable={false} className="absolute inset-0 size-full object-contain" />
-        {playing && <MsePlayer persistent cameraId={camera.id} quality="sub" serverId={camera.server_id} className="absolute inset-0 size-full" />}
+        {rec ? <RecTile cameraId={camera.id} name={camera.display_name} state={rec.state} transport={rec.transport} isMaster={rec.isMaster} /> : playing && <MsePlayer persistent cameraId={camera.id} quality="sub" serverId={camera.server_id} className="absolute inset-0 size-full" />}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-[3] flex items-center gap-1.5 p-2 text-xs">
           <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface-1/80 px-2 py-0.5 text-on-surface backdrop-blur">
             <span className={cn("size-2 shrink-0 rounded-full", statusDot(camera.status))} aria-hidden />
@@ -68,6 +78,16 @@ function SingleCamera({ camera }: { camera: Camera }) {
   );
 }
 
+/** SingleRecording is the single view in GRABADO: that camera's recording on the shared transport. */
+function SingleRecording({ camera, rec }: { camera: Camera; rec: RecView }) {
+  return (
+    <div className="relative aspect-video w-full overflow-hidden bg-video">
+      <img src={snapshotUrl(camera.id)} alt="" draggable={false} className="absolute inset-0 size-full object-contain" />
+      <RecTile cameraId={camera.id} name={camera.display_name} state={rec.state} transport={rec.transport} isMaster />
+    </div>
+  );
+}
+
 /**
  * LivePhone is Live below the `md` breakpoint: pages of 4 camera cards (2x2, only the current
  * page streams, on the sub stream over its snapshot) and a single-camera view that swaps sub to main.
@@ -79,10 +99,15 @@ export function LivePhone() {
   const tr = useT();
   const cameras = useQuery(camerasQuery({}));
   const sites = useQuery(sitesQuery);
+  const servers = useQuery(serversQuery);
+  const folders = useQuery(cameraFoldersQuery);
+  const me = useQuery(meQuery);
   const navigate = useNavigate();
   const search = useSearch({ strict: false }) as Record<string, unknown>;
   const [siteId, setSiteId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const scopeButton = useRef<HTMLButtonElement>(null);
   const gesture = useRef<{ x: number; y: number } | null>(null);
   const swiped = useRef(false);
 
@@ -99,10 +124,6 @@ export function LivePhone() {
         .sort((a, b) => (siteName.get(a.site_id) ?? "").localeCompare(siteName.get(b.site_id) ?? "") || a.display_name.localeCompare(b.display_name)),
     [cameras.data, siteName],
   );
-  const siteChips = useMemo(() => {
-    const ids = [...new Set(all.map((camera) => camera.site_id))];
-    return ids.map((id) => ({ id, name: siteName.get(id) ?? id }));
-  }, [all, siteName]);
   const shown = useMemo(() => (siteId ? all.filter((camera) => camera.site_id === siteId) : all), [all, siteId]);
 
   const pageCount = Math.max(1, Math.ceil(shown.length / PHONE_PAGE_SIZE));
@@ -113,6 +134,7 @@ export function LivePhone() {
     setSiteId(id);
     setPage(0);
   };
+  const scopeName = siteId ? (siteName.get(siteId) ?? tr("live.phoneAllSites")) : tr("live.phoneAllSites");
 
   const onPointerDown = (event: PointerEvent) => {
     swiped.current = false;
@@ -139,15 +161,45 @@ export function LivePhone() {
   const open = (id: string) => void navigate({ to: ".", search: ((previous: Record<string, unknown>) => ({ ...previous, camera: id })) as never });
   const close = () => void navigate({ to: ".", replace: true, search: ((previous: Record<string, unknown>) => ({ ...previous, camera: undefined })) as never });
 
+  // GRABADO: the same session as the desktop grid (transport, coverage, master, URL time), fed with
+  // the cameras on screen: the 4 of the current page, or only the open one in the single view.
+  const cameraById = useMemo(() => new Map((cameras.data ?? []).map((camera) => [camera.id, camera])), [cameras.data]);
+  const visibleIds = useMemo(() => (selected ? [selected.id] : pageCameras.map((camera) => camera.id)), [selected, pageCameras]);
+  const session = useRecSession({ canRec: can(me.data, "recordings.view"), cameraIds: visibleIds, focusedId: selected?.id, selectedId: selected?.id, cameraById });
+  const { rec, transport, recData, denied, recLimited, hasCoverage, masterId } = session;
+  // Tiles that mount for a new page or the single view start from the window offset, so they
+  // reopen the window at the current shared time instead of where it was first opened.
+  const visibleKey = visibleIds.join("|");
+  const [anchoredKey, setAnchoredKey] = useState(visibleKey);
+  if (anchoredKey !== visibleKey) {
+    setAnchoredKey(visibleKey);
+    if (rec) transport.reanchor();
+  }
+  const recView = (id: string): RecView | undefined => {
+    if (!rec) return undefined;
+    const state: RecTileState = denied.has(id) ? "denied" : recLimited.has(id) ? "limited" : recData.loaded.includes(id) && !hasCoverage(id) ? "empty" : "player";
+    return { state, transport, isMaster: id === masterId };
+  };
+  const modeToggle = session.canRec ? <LiveModeToggle rec={rec} onChange={session.setMode} touch /> : null;
+
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       <h1 className="sr-only">{tr("live.phoneCameras")}</h1>
       <div hidden={!!selected} className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-        <div role="group" aria-label={tr("live.phoneSites")} className="flex shrink-0 gap-2 overflow-x-auto pb-1">
-          <Chip selected={siteId === null} onChange={() => pickSite(null)} className="shrink-0">{tr("live.phoneAllSites")}</Chip>
-          {siteChips.map((site) => (
-            <Chip key={site.id} selected={siteId === site.id} onChange={(next) => pickSite(next ? site.id : null)} className="shrink-0">{site.name}</Chip>
-          ))}
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            ref={scopeButton}
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={sheetOpen}
+            aria-label={`${tr("live.phoneSites")}: ${scopeName}`}
+            onClick={() => setSheetOpen(true)}
+            className="m3-press inline-flex h-11 min-w-0 flex-1 items-center justify-between gap-2 rounded-full bg-surface-1 px-4 text-sm font-semibold text-on-surface focus-visible:outline-2 focus-visible:outline-primary"
+          >
+            <span className="truncate">{scopeName}</span>
+            <ChevronDown className="size-4 shrink-0 text-on-surface-variant" aria-hidden />
+          </button>
+          {modeToggle}
         </div>
         <div
           data-testid="live-phone-pages"
@@ -168,7 +220,7 @@ export function LivePhone() {
         >
           <ul className="flex w-full flex-col gap-px">
             {pageCameras.map((camera) => (
-              <CameraCard key={camera.id} camera={camera} playing={camera.id !== selected?.id} onOpen={() => open(camera.id)} />
+              <CameraCard key={camera.id} camera={camera} playing={camera.id !== selected?.id} rec={recView(camera.id)} onOpen={() => open(camera.id)} />
             ))}
           </ul>
         </div>
@@ -190,9 +242,28 @@ export function LivePhone() {
               <span className={cn("size-2 rounded-full", statusDot(selected.status))} aria-hidden />
               {selected.status}
             </span>
+            {modeToggle}
           </div>
-          <SingleCamera camera={selected} />
+          {rec ? <SingleRecording camera={selected} rec={recView(selected.id)!} /> : <SingleCamera camera={selected} />}
         </section>
+      )}
+      {rec && (
+        <LiveRecDock compact transport={transport} cameras={session.timelineCameras} events={recData.events} now={session.now} selectedId={selected?.id} />
+      )}
+      {sheetOpen && (
+        <PhoneCameraSheet
+          cameras={cameras.data ?? []}
+          sites={sites.data ?? []}
+          servers={servers.data ?? []}
+          folders={folders.data?.items ?? []}
+          siteId={siteId}
+          currentCameraId={selected?.id}
+          returnFocusTo={scopeButton}
+          onAll={() => { pickSite(null); setSheetOpen(false); }}
+          onSite={(id) => { pickSite(id); setSheetOpen(false); }}
+          onCamera={(id) => { open(id); setSheetOpen(false); }}
+          onClose={() => setSheetOpen(false)}
+        />
       )}
     </div>
   );

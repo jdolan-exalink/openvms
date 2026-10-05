@@ -31,7 +31,6 @@ import {
   type Tile,
 } from "@/lib/liveGrid";
 import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
-import { assignRecPlayers, parseRecSearch, pickMaster, REC_ENTRY_OFFSET_S, recSearch } from "@/lib/liveRec";
 import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { can } from "@/lib/perm";
 import { LivePhone } from "@/components/LivePhone";
@@ -39,9 +38,7 @@ import { useIsPhoneDevice } from "@/lib/useIsPhoneDevice";
 import { useLiveDragSensors } from "@/lib/dndSensors";
 import { useTouchDoubleTap } from "@/lib/useTouchDoubleTap";
 import { useCameraFolders } from "@/lib/useCameraFolders";
-import { useRecData } from "@/lib/useRecData";
-import { useRecPlayback } from "@/lib/useRecPlayback";
-import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
+import { useRecSession } from "@/lib/useRecSession";
 
 /** copyViewName picks «Nombre (copia)» or «Nombre (copia 2)» so a duplicate stays unique. */
 function copyViewName(name: string, taken: Set<string>): string {
@@ -54,9 +51,6 @@ function copyViewName(name: string, taken: Set<string>): string {
   return `${base} ${taken.size + 1}`;
 }
 
-const unixNow = () => Math.floor(Date.now() / 1000);
-/** How often the shared REC time is written to the URL while playing. */
-const URL_SYNC_MS = 15_000;
 /** Explorer panel is w-80 (20rem) from the rail edge; main already pads 2rem, plus an 0.5rem gap. */
 const PINNED_STYLE = { "--pinned-offset": "18.5rem" } as CSSProperties;
 
@@ -175,14 +169,6 @@ function LiveDesktop() {
   const search = useSearch({ strict: false }) as Record<string, unknown>;
   const navigate = useNavigate();
   const canRec = can(me.data, "recordings.view");
-  const { rec: urlRec, t: urlT } = parseRecSearch(search);
-  const rec = urlRec && canRec;
-  const [now, setNow] = useState(unixNow);
-  useEffect(() => {
-    if (!rec) return;
-    const id = setInterval(() => setNow(unixNow()), 30_000);
-    return () => clearInterval(id);
-  }, [rec]);
 
   // Restore the last grid selection for this user+tenant once both are known, dropping any
   // camera the user can no longer see. This adjusts state during render (React's documented
@@ -513,60 +499,15 @@ function LiveDesktop() {
   const gridCols = focus !== null ? 1 : columns;
   const duplicates = useMemo(() => (persistentPlayers ? duplicateTileIndexes(tiles) : new Set<number>()), [persistentPlayers, tiles]);
 
-  const transport = useRecPlayback({ active: rec, seedT: urlT ?? now - REC_ENTRY_OFFSET_S, now });
   const gridCameraIds = useMemo(() => [...new Set(tiles.flatMap((t) => { const id = cameraIdOf(t); return id && camById.has(id) ? [id] : []; }))], [tiles, camById]);
-  const recData = useRecData(gridCameraIds, transport.day, rec);
-  const denied = useMemo(() => new Set(recData.denied), [recData.denied]);
   const focusedCameraId = focus !== null ? cameraIdOf(tiles[focus] ?? null) : undefined;
-  const { players: recPlayers, limited: recLimited } = useMemo(
-    () => assignRecPlayers(focusedCameraId ? [focusedCameraId] : gridCameraIds, (id) => !denied.has(id)),
-    [focusedCameraId, gridCameraIds, denied],
-  );
-  const hasCoverage = (id: string) => (recData.spans[id]?.length ?? 0) > 0;
-  const syncIds = useMemo(() => recPlayers.filter((id) => !recData.loaded.includes(id) || (recData.spans[id]?.length ?? 0) > 0), [recPlayers, recData.loaded, recData.spans]);
-  const masterId = pickMaster(syncIds, cameraIdOf(tiles[selected] ?? null), hasCoverage);
-  useSyncedPlayback(rec ? masterId : "", syncIds, (id) => transport.players.current.get(id)?.video);
-  const timelineCameras = useMemo(
-    () => gridCameraIds.filter((id) => !denied.has(id)).map((id) => ({ id, name: camById.get(id)?.display_name ?? id, spans: recData.spans[id] ?? [], live: camById.get(id)?.status === "online" })),
-    [gridCameraIds, denied, camById, recData.spans],
-  );
-
-  // Entering GRABADO starts five minutes before now and plays. If the cameras stopped earlier, it starts at the end of the last recording.
-  const entryPending = useRef(false);
-  const setMode = (next: "live" | "rec") => {
-    entryPending.current = next === "rec";
-    void navigate({ to: ".", search: ((prev: Record<string, unknown>) => ({ ...prev, ...recSearch(next === "rec", unixNow() - REC_ENTRY_OFFSET_S) })) as never });
-  };
-  const { seek } = transport;
-  useEffect(() => {
-    if (!rec) entryPending.current = false;
-  }, [rec]);
-  useEffect(() => {
-    if (!rec || !entryPending.current || recData.loaded.length < gridCameraIds.length - recData.denied.length || recData.loaded.length === 0) return;
-    entryPending.current = false;
-    const ends = recData.loaded.flatMap((id) => (recData.spans[id] ?? []).map((s) => s.end));
-    const latest = ends.length ? Math.max(...ends) : undefined;
-    if (latest !== undefined && latest < now - REC_ENTRY_OFFSET_S - 60) seek(latest - 5);
-  }, [rec, recData, gridCameraIds.length, now, seek]);
-  // Keep ?t= in step with the shared clock so reload and copied links land where the user is:
-  // every URL_SYNC_MS while playing, and shortly after the last seek or pause.
-  const { win, playing, getPosition, subscribePosition } = transport;
-  useEffect(() => {
-    if (!rec) return;
-    const write = () =>
-      void navigate({ to: ".", replace: true, search: ((prev: Record<string, unknown>) => ({ ...prev, ...recSearch(true, Math.floor(getPosition())) })) as never });
-    let debounce: ReturnType<typeof setTimeout> | undefined;
-    const unsubscribe = subscribePosition(() => {
-      clearTimeout(debounce);
-      debounce = setTimeout(write, 1500);
-    });
-    const interval = playing ? setInterval(write, URL_SYNC_MS) : undefined;
-    return () => {
-      unsubscribe();
-      clearTimeout(debounce);
-      clearInterval(interval);
-    };
-  }, [rec, win, playing, getPosition, subscribePosition, navigate]);
+  const { rec, now, transport, recData, denied, recLimited, hasCoverage, masterId, timelineCameras, setMode } = useRecSession({
+    canRec,
+    cameraIds: gridCameraIds,
+    focusedId: focusedCameraId,
+    selectedId: cameraIdOf(tiles[selected] ?? null),
+    cameraById: camById,
+  });
   const dragLabel = activeDrag?.startsWith("camera:")
     ? camById.get(activeDrag.slice("camera:".length))?.display_name
     : activeDrag?.startsWith("tfolder:")

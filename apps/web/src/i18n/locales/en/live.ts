@@ -46,6 +46,8 @@ const messages = {
   phonePrevPage: "Previous page",
   phoneNextPage: "Next page",
   phonePageOf: "Page {page} of {total}",
+  phoneCamerasSheet: "Cameras",
+  phoneCloseCameras: "Close cameras",
   expandTile: "Expand",
   remove: "Remove",
   noAccess: "Camera without access",

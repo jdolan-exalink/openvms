@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { Live } from "@/routes/Live";
@@ -8,6 +8,22 @@ vi.mock("@/components/MsePlayer", () => ({
     <div data-testid="player" data-camera={cameraId} data-quality={quality} data-persistent={String(!!persistent)} />
   ),
 }));
+
+/** Recorded players: expose the window props and the master clock callback the transport drives. */
+const hls = vi.hoisted(() => ({ onTime: new Map<string, (unix: number) => void>() }));
+vi.mock("@/components/HlsPlayer", async () => {
+  const React = await import("react");
+  return {
+    HlsPlayer: React.forwardRef(function FakeHls({ cameraId, start, startOffset, onTime }: { cameraId: string; start: number; startOffset?: number; onTime?: (unix: number) => void }, ref: React.Ref<{ video: null }>) {
+      React.useImperativeHandle(ref, () => ({ video: null }));
+      React.useEffect(() => {
+        if (onTime) hls.onTime.set(cameraId, onTime);
+        return () => void hls.onTime.delete(cameraId);
+      });
+      return <div data-testid="rec-player" data-camera={cameraId} data-at={start + (startOffset ?? 0)} />;
+    }),
+  };
+});
 
 /** A stand-in session: only what the main layer of the single view touches. */
 const sessions = vi.hoisted(() => ({ main: null as unknown }));
@@ -29,14 +45,24 @@ function stubPhone(phone: boolean) {
 }
 
 const camera = (id: string, name: string, site = "s1") => ({
-  id, tenant_id: "t1", site_id: site, server_id: "srv1", remote_name: name, display_name: name, enabled: true, zones: [], lpr: false,
+  id, tenant_id: "t1", site_id: site, server_id: site === "s1" ? "srv1" : `srv-${site}`, remote_name: name, display_name: name, enabled: true, zones: [], lpr: false,
   status: "online", fps: 5, group_ids: [], folder_id: null, sort_order: 0, default_live_quality: "sub", description: "", location: "", tags: [],
   created_at: "", updated_at: "",
 });
 
-function stubBackend(cameras: ReturnType<typeof camera>[]) {
+const REC_T = Date.parse("2026-09-30T12:00:00.000Z") / 1000;
+const REC_URL = "/?mode=rec&t=2026-09-30T12:00:00.000Z";
+const at = () => screen.getAllByTestId("rec-player").map((p) => [p.getAttribute("data-camera"), Number(p.getAttribute("data-at"))]);
+
+function stubBackend(cameras: ReturnType<typeof camera>[], opts: { recordings?: boolean; recordingsStatus?: number } = {}) {
+  const grants = [{ permission: "live.view", effect: "allow", scope_type: "platform" }, ...(opts.recordings ? [{ permission: "recordings.view", effect: "allow", scope_type: "platform" }] : [])];
+  const recordingRoutes = Object.fromEntries(
+    cameras.map((c) => [`/api/v1/cameras/${c.id}/recordings`, () => opts.recordingsStatus ? json({ code: "forbidden", message: "forbidden" }, opts.recordingsStatus) : json({ items: [{ start_time: "2026-09-30T00:00:00.000Z", end_time: "2026-10-01T00:00:00.000Z" }] })]),
+  );
   vi.stubGlobal("fetch", vi.fn(stubApi({
-    "/api/v1/me": () => json({ id: "u1", username: "op", display_name: "Op", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1", grants: [{ permission: "live.view", effect: "allow", scope_type: "platform" }] }),
+    ...recordingRoutes,
+    "/api/v1/events": () => json({ items: [] }),
+    "/api/v1/me": () => json({ id: "u1", username: "op", display_name: "Op", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1", grants }),
     "/api/v1/cameras": () => json({ items: cameras }),
     "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Alpha" }, { id: "s2", tenant_id: "t1", name: "Beta" }] }),
     "/api/v1/servers": () => json({ items: [] }),
@@ -44,7 +70,17 @@ function stubBackend(cameras: ReturnType<typeof camera>[]) {
   })));
 }
 
+const scopeButton = () => screen.getByRole("button", { name: /^Filtrar por sitio/ });
+const sheet = () => screen.getByRole("dialog", { name: "Cámaras" });
+const openSheet = () => fireEvent.click(scopeButton());
+/** Opens the scope sheet and picks a row by its accessible name. */
+const pickScope = (name: string) => {
+  openSheet();
+  fireEvent.click(within(sheet()).getByRole("button", { name }));
+};
+
 beforeEach(() => {
+  hls.onTime.clear();
   localStorage.clear();
   fakeMainSession();
 });
@@ -70,19 +106,18 @@ describe("Live on a phone", () => {
     expect(screen.queryByRole("button", { name: "Ver North" })).toBeNull();
   });
 
-  it("orders by site then name and filters by site chip", async () => {
+  it("orders by site then name and filters by site from the scope sheet", async () => {
     stubPhone(true);
     stubBackend([camera("c1", "Zed", "s1"), camera("c2", "Beta cam", "s2"), camera("c3", "Able", "s1")]);
     renderPage(Live);
     await screen.findByRole("button", { name: "Ver Zed" });
     const names = () => screen.getAllByRole("button", { name: /^Ver / }).map((b) => b.getAttribute("aria-label"));
     expect(names()).toEqual(["Ver Able", "Ver Zed", "Ver Beta cam"]);
-    const all = screen.getByRole("button", { name: "Todas" });
-    expect(all).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Beta" }));
+    expect(scopeButton()).toHaveTextContent("Todas");
+    pickScope("Beta");
     expect(names()).toEqual(["Ver Beta cam"]);
-    expect(screen.getByRole("button", { name: "Beta" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(all);
+    expect(scopeButton()).toHaveTextContent("Beta");
+    pickScope("Todas");
     expect(names()).toHaveLength(3);
   });
 
@@ -154,7 +189,7 @@ describe("Live on a phone", () => {
     expect(screen.getAllByTestId("player")[0]).toHaveAttribute("data-camera", "c1");
   });
 
-  it("resets to page 1 when the site chip changes", async () => {
+  it("resets to page 1 when the scope site changes", async () => {
     stubPhone(true);
     const list = [...Array.from({ length: 5 }, (_, i) => camera(`a${i + 1}`, `A${i + 1}`, "s1")), ...Array.from({ length: 5 }, (_, i) => camera(`b${i + 1}`, `B${i + 1}`, "s2"))];
     stubBackend(list);
@@ -162,7 +197,7 @@ describe("Live on a phone", () => {
     await screen.findByRole("button", { name: "Ver A1" });
     fireEvent.click(screen.getByRole("button", { name: "Página siguiente" }));
     expect(screen.getByTestId("phone-page-status")).toHaveTextContent("Página 2 de 3");
-    fireEvent.click(screen.getByRole("button", { name: "Beta" }));
+    pickScope("Beta");
     expect(screen.getByTestId("phone-page-status")).toHaveTextContent("Página 1 de 2");
     expect(screen.getAllByTestId("player")[0]).toHaveAttribute("data-camera", "b1");
   });
@@ -182,7 +217,7 @@ describe("Live on a phone", () => {
     stubBackend([camera("c1", "North", "s1"), ...Array.from({ length: 5 }, (_, i) => camera(`e${i + 1}`, `East ${i + 1}`, "s2"))]);
     const { router } = renderPage(Live);
     await screen.findByRole("button", { name: "Ver North" });
-    fireEvent.click(screen.getByRole("button", { name: "Beta" }));
+    pickScope("Beta");
     fireEvent.click(screen.getByRole("button", { name: "Página siguiente" }));
     fireEvent.click(screen.getByRole("button", { name: "Ver East 5" }));
     await waitFor(() => expect(router.state.location.search).toMatchObject({ camera: "e5" }));
@@ -195,7 +230,7 @@ describe("Live on a phone", () => {
     fireEvent.click(screen.getByRole("button", { name: "Volver" }));
     await waitFor(() => expect(screen.queryByTestId("live-phone-single")).toBeNull());
     expect(router.state.location.search).not.toHaveProperty("camera");
-    expect(screen.getByRole("button", { name: "Beta" })).toHaveAttribute("aria-pressed", "true");
+    expect(scopeButton()).toHaveTextContent("Beta");
     expect(screen.getByTestId("phone-page-status")).toHaveTextContent("Página 2 de 2");
     expect(screen.getByRole("button", { name: "Ver East 5" })).toBeInTheDocument();
   });
@@ -214,5 +249,162 @@ describe("Live on a phone", () => {
     expect(within(single).getByTestId("phone-main-layer")).toContainElement(video);
     // The sub session stays mounted under main so going back to the list is instant.
     expect(within(single).getByTestId("player")).toHaveAttribute("data-camera", "c1");
+  });
+});
+
+describe("Live phone scope sheet", () => {
+  const five = () => [camera("c1", "North", "s1"), camera("c2", "Zed", "s1"), camera("c3", "Beta cam", "s2")];
+
+  it("replaces the site chips with one scope control that opens a modal sheet with search and the tree", async () => {
+    stubPhone(true);
+    stubBackend(five());
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver North" });
+    expect(screen.queryByRole("group", { name: "Filtrar por sitio" })).toBeNull();
+    expect(scopeButton()).toHaveAttribute("aria-haspopup", "dialog");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    openSheet();
+    const dialog = sheet();
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(within(dialog).getByRole("searchbox", { name: "Buscar en el explorador" })).toBeInTheDocument();
+    for (const name of ["Todas", "Alpha", "Beta", "North", "Zed", "Beta cam"]) expect(within(dialog).getByRole("button", { name })).toBeInTheDocument();
+  });
+
+  it("filters the tree with the search box", async () => {
+    stubPhone(true);
+    stubBackend(five());
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver North" });
+    openSheet();
+    fireEvent.change(within(sheet()).getByRole("searchbox"), { target: { value: "zed" } });
+    expect(within(sheet()).getByRole("button", { name: "Zed" })).toBeInTheDocument();
+    expect(within(sheet()).queryByRole("button", { name: "North" })).toBeNull();
+  });
+
+  it("closes after choosing a site and the pages show only that site from page 1", async () => {
+    stubPhone(true);
+    stubBackend(five());
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver North" });
+    pickScope("Beta");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getAllByRole("button", { name: /^Ver / }).map((b) => b.getAttribute("aria-label"))).toEqual(["Ver Beta cam"]);
+  });
+
+  it("opens the single view of a camera picked in the tree and closes the sheet", async () => {
+    stubPhone(true);
+    stubBackend(five());
+    const { router } = renderPage(Live);
+    await screen.findByRole("button", { name: "Ver North" });
+    pickScope("Beta cam");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ camera: "c3" }));
+    expect(await screen.findByTestId("live-phone-single")).toBeInTheDocument();
+  });
+
+  it("closes with Escape and returns focus to the scope control", async () => {
+    stubPhone(true);
+    stubBackend(five());
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver North" });
+    scopeButton().focus();
+    openSheet();
+    expect(sheet().contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(scopeButton()).toHaveFocus();
+  });
+
+  it("closes from the scrim", async () => {
+    stubPhone(true);
+    stubBackend(five());
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver North" });
+    openSheet();
+    fireEvent.mouseDown(screen.getByTestId("phone-sheet-scrim"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("Live phone GRABADO", () => {
+  const cams = (n: number) => Array.from({ length: n }, (_, i) => camera(`c${i + 1}`, `Cam ${i + 1}`));
+
+  it("hides the mode toggle without the recordings permission", async () => {
+    stubPhone(true);
+    stubBackend(cams(2));
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver Cam 1" });
+    expect(screen.queryByRole("group", { name: "Modo de reproducción" })).toBeNull();
+  });
+
+  it("switches the page cards to recorded tiles at a shared time and back to live", async () => {
+    stubPhone(true);
+    stubBackend(cams(6), { recordings: true });
+    const { router } = renderPage(Live);
+    await screen.findByRole("button", { name: "Ver Cam 1" });
+    expect(screen.getAllByTestId("player")).toHaveLength(4);
+    fireEvent.click(screen.getByRole("button", { name: "Grabado" }));
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ mode: "rec" }));
+    expect(await screen.findByRole("region", { name: "Controles de grabación" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getAllByTestId("rec-player")).toHaveLength(4));
+    expect(screen.queryAllByTestId("player")).toHaveLength(0);
+    const times = new Set(at().map(([, t]) => t));
+    expect(times.size).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: "Vivo" }));
+    await waitFor(() => expect(screen.getAllByTestId("player")).toHaveLength(4));
+    expect(screen.queryAllByTestId("rec-player")).toHaveLength(0);
+    expect(router.state.location.search).not.toHaveProperty("mode");
+  });
+
+  it("keeps the playback time when the page changes", async () => {
+    stubPhone(true);
+    stubBackend(cams(6), { recordings: true });
+    renderPage(Live, REC_URL);
+    await waitFor(() => expect(screen.getAllByTestId("rec-player")).toHaveLength(4));
+    expect(at()[0]![1]).toBe(REC_T);
+    act(() => hls.onTime.get("c1")!(REC_T + 300));
+    fireEvent.click(screen.getByRole("button", { name: "Página siguiente" }));
+    await waitFor(() => expect(at().map(([id]) => id)).toEqual(["c5", "c6"]));
+    expect(at().map(([, t]) => t)).toEqual([REC_T + 300, REC_T + 300]);
+  });
+
+  it("shows the recording of one camera in the single view at the same time and keeps time and page on back", async () => {
+    stubPhone(true);
+    stubBackend(cams(6), { recordings: true });
+    renderPage(Live, REC_URL);
+    await waitFor(() => expect(screen.getAllByTestId("rec-player")).toHaveLength(4));
+    fireEvent.click(screen.getByRole("button", { name: "Página siguiente" }));
+    await waitFor(() => expect(at().map(([id]) => id)).toEqual(["c5", "c6"]));
+    act(() => hls.onTime.get("c5")!(REC_T + 120));
+    fireEvent.click(screen.getByRole("button", { name: "Ver Cam 6" }));
+    const single = await screen.findByTestId("live-phone-single");
+    await waitFor(() => expect(within(single).getAllByTestId("rec-player")).toHaveLength(1));
+    expect(within(single).getByTestId("rec-player")).toHaveAttribute("data-camera", "c6");
+    expect(within(single).getByTestId("rec-player")).toHaveAttribute("data-at", String(REC_T + 120));
+    expect(within(single).queryByTestId("phone-main-layer")).toBeNull();
+    expect(screen.getByRole("region", { name: "Controles de grabación" })).toBeInTheDocument();
+    act(() => hls.onTime.get("c6")!(REC_T + 200));
+    fireEvent.click(screen.getByRole("button", { name: "Volver" }));
+    await waitFor(() => expect(screen.queryByTestId("live-phone-single")).toBeNull());
+    await waitFor(() => expect(at().map(([id]) => id)).toEqual(["c5", "c6"]));
+    expect(at().map(([, t]) => t)).toEqual([REC_T + 200, REC_T + 200]);
+    expect(screen.getByTestId("phone-page-status")).toHaveTextContent("Página 2 de 2");
+  });
+
+  it("shows the desktop notices for cameras without permission", async () => {
+    stubPhone(true);
+    stubBackend(cams(2), { recordings: true, recordingsStatus: 403 });
+    renderPage(Live, REC_URL);
+    expect(await screen.findAllByText("Sin permiso de grabaciones")).toHaveLength(2);
+  });
+
+  it("opens a camera picked in the sheet in the current mode (GRABADO)", async () => {
+    stubPhone(true);
+    stubBackend(cams(2), { recordings: true });
+    renderPage(Live, REC_URL);
+    await waitFor(() => expect(screen.getAllByTestId("rec-player")).toHaveLength(2));
+    pickScope("Cam 2");
+    const single = await screen.findByTestId("live-phone-single");
+    await waitFor(() => expect(within(single).getByTestId("rec-player")).toHaveAttribute("data-camera", "c2"));
   });
 });

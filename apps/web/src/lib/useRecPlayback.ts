@@ -110,6 +110,13 @@ export function useRecPlayback({ active, seedT, now }: { active: boolean; seedT:
     [each, store],
   );
 
+  /**
+   * reanchor opens a fresh window at the current shared time. Tiles that mount later (another
+   * phone page, the single view) start from `win.offset`, so without it they would restart at
+   * the time the window was opened instead of where playback is now. Position and play state stay.
+   */
+  const reanchor = useCallback(() => setWin(makeWin(store.get(), unixNow())), [store]);
+
   const play = useCallback(() => {
     setPlaying(true);
     each((v) => void v.play().catch(() => {}));
@@ -139,5 +146,5 @@ export function useRecPlayback({ active, seedT, now }: { active: boolean; seedT:
     [seek, store],
   );
 
-  return { win, day, poster, playing, speed, players, bindPlayer, seek, play, pause, setSpeed, onMasterTime, getPosition: store.get, subscribePosition: store.subscribe };
+  return { win, day, poster, playing, speed, players, bindPlayer, seek, reanchor, play, pause, setSpeed, onMasterTime, getPosition: store.get, subscribePosition: store.subscribe };
 }

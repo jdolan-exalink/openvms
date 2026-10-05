@@ -4,9 +4,9 @@ import { cn } from "@/lib/cn";
 
 /**
  * LiveModeToggle is the LIVE/REC segmented control shown in the top bar of the Live screen.
- * VIVO carries a green accent with a pulsing dot when active; GRABADO carries a red one.
+ * `touch` gives each option a 44px target for the phone header. VIVO carries a green accent with a pulsing dot when active; GRABADO carries a red one.
  */
-export function LiveModeToggle({ rec, onChange }: { rec: boolean; onChange: (mode: "live" | "rec") => void }) {
+export function LiveModeToggle({ rec, onChange, touch = false }: { rec: boolean; onChange: (mode: "live" | "rec") => void; touch?: boolean }) {
   const t = useT();
   const options: { mode: "live" | "rec"; label: MessageKey; Icon: typeof Play; hint: MessageKey; active: string; dot: string }[] = [
     { mode: "live", label: "live.live", Icon: Play, hint: "live.watchLive", active: "bg-ok/15 text-ok ring-ok/40", dot: "bg-ok" },
@@ -24,7 +24,8 @@ export function LiveModeToggle({ rec, onChange }: { rec: boolean; onChange: (mod
             title={t(hint)}
             onClick={() => !isActive && onChange(mode)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold uppercase tracking-wide transition-colors",
+              touch ? "min-h-11 px-3" : "px-2.5 py-1",
+              "inline-flex items-center gap-1.5 rounded-md text-xs font-semibold uppercase tracking-wide transition-colors",
               "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent",
               isActive ? cn("ring-1 ring-inset", active) : "text-muted hover:bg-raised hover:text-ink",
             )}

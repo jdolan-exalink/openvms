@@ -33,6 +33,7 @@ export function LiveRecDock({
   now,
   selectedId,
   onSelectCamera,
+  compact = false,
 }: {
   transport: RecTransport;
   cameras: TimelineCamera[];
@@ -40,6 +41,8 @@ export function LiveRecDock({
   now: number;
   selectedId?: string;
   onSelectCamera?: (cameraId: string) => void;
+  /** Phone variant: play, ±10 s, speed, "Ahora", day and clock only, scrollable, no keyboard help. */
+  compact?: boolean;
 }) {
   const { seek, play, pause, playing, speed, setSpeed, day, getPosition, subscribePosition } = transport;
   const position = useSyncExternalStore(subscribePosition, getPosition);
@@ -79,23 +82,23 @@ export function LiveRecDock({
   });
 
   return (
-    <section aria-label="Controles de grabación" className="flex flex-col gap-2 max-h-[40vh] rounded-xl border border-line bg-surface p-2">
+    <section aria-label="Controles de grabación" className={compact ? "flex max-h-[42dvh] shrink-0 flex-col gap-2 overflow-y-auto rounded-m3-xl bg-surface-1 p-2" : "flex flex-col gap-2 max-h-[40vh] rounded-xl border border-line bg-surface p-2"}>
       <div className="flex flex-wrap items-center gap-1.5">
         <Button variant="primary" aria-label={playing ? "Pausar" : "Reproducir"} title={playing ? "Pausar (Espacio)" : "Reproducir (Espacio)"} onClick={() => (playing ? pause() : play())}>
           {playing ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
         </Button>
-        {STEPS.map(({ label, seconds, Icon }) => (
+        {(compact ? STEPS.filter((s) => Math.abs(s.seconds) === 10) : STEPS).map(({ label, seconds, Icon }) => (
           <Button key={label} aria-label={label} title={label} className="px-2" onClick={() => step(seconds)}>
             <Icon className="size-4" aria-hidden />
           </Button>
         ))}
-        <Button aria-label="Evento anterior" title="Evento anterior" className="px-2" onClick={() => toEvent(-1)} disabled={stepEvent(eventTimes, position, -1) === undefined}>
+        {!compact && <Button aria-label="Evento anterior" title="Evento anterior" className="px-2" onClick={() => toEvent(-1)} disabled={stepEvent(eventTimes, position, -1) === undefined}>
           <SkipBack className="size-4" aria-hidden />
-        </Button>
-        <Button aria-label="Evento siguiente" title="Evento siguiente" className="px-2" onClick={() => toEvent(1)} disabled={stepEvent(eventTimes, position, 1) === undefined}>
+        </Button>}
+        {!compact && <Button aria-label="Evento siguiente" title="Evento siguiente" className="px-2" onClick={() => toEvent(1)} disabled={stepEvent(eventTimes, position, 1) === undefined}>
           <SkipForward className="size-4" aria-hidden />
-        </Button>
-        <Select aria-label="Velocidad" className="w-auto py-1 text-xs" value={String(speed)} onChange={(e) => setSpeed(Number(e.target.value))}>
+        </Button>}
+        <Select aria-label="Velocidad" className={compact ? "min-h-11 w-auto text-xs" : "w-auto py-1 text-xs"} value={String(speed)} onChange={(e) => setSpeed(Number(e.target.value))}>
           {REC_SPEEDS.map((s) => (
             <option key={s} value={s}>
               {s}×
@@ -109,7 +112,7 @@ export function LiveRecDock({
         <span className="ml-auto font-mono text-xs" aria-live="off" data-testid="rec-clock">
           {fmtDateTime(new Date(position * 1000))}
         </span>
-        <details className="relative">
+        {!compact && <details className="relative">
           <summary className="flex cursor-pointer list-none items-center rounded p-1 text-muted hover:text-ink" aria-label="Atajos de teclado" title="Atajos de teclado">
             <CircleHelp className="size-4" aria-hidden />
           </summary>
@@ -124,7 +127,7 @@ export function LiveRecDock({
               <li>Mayús + arrastrar (o el cabezal): buscar</li>
             </ul>
           </div>
-        </details>
+        </details>}
       </div>
       <DayTimeline day={day} cameras={cameras} events={events} position={position} now={now} onSeek={(t, detection) => seek(Math.min(t, liveEdge), detection?.id ? { poster: { cameraId: detection.cameraId, eventId: detection.id } } : undefined)} selectedId={selectedId} onSelectCamera={onSelectCamera} />
     </section>
