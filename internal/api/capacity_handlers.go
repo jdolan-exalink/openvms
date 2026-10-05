@@ -10,6 +10,7 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
+	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/platform/hoststat"
 )
@@ -176,3 +177,75 @@ func (h *Handlers) SetCameraBodyClassify(ctx context.Context, r gen.SetCameraBod
 	}
 	return gen.SetCameraBodyClassify200JSONResponse{Enabled: r.Body.Enabled}, nil
 }
+
+// SystemConnectionsResponse reports active connected remote clients.
+type SystemConnectionsResponse struct {
+	Web     int                      `json:"web"`
+	API     int                      `json:"api"`
+	Total   int                      `json:"total"`
+	Details SystemConnectionsDetails `json:"details"`
+}
+
+type SystemConnectionsDetails struct {
+	WebSockets      int `json:"web_sockets"`
+	WebSessions     int `json:"web_sessions"`
+	GRPC            int `json:"grpc"`
+	MediaSessions   int `json:"media_sessions"`
+	APITokensRecent int `json:"api_tokens_recent"`
+	DesktopSessions int `json:"desktop_sessions"`
+}
+
+// GetSystemConnectionsHandler serves GET /api/v1/system/connections.
+func (h *Handlers) GetSystemConnectionsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	var (
+		liveWebSockets int
+		liveGRPC       int
+		liveMedia      int
+		dbCounts       identity.RemoteClientCounts
+	)
+
+	if h.RealtimeTracker != nil {
+		liveWebSockets = h.RealtimeTracker.Connections()
+	}
+	if h.GRPCTracker != nil {
+		liveGRPC = h.GRPCTracker.ActiveConnections()
+	}
+	if h.SessionsTracker != nil {
+		liveMedia = h.SessionsTracker.ActiveCount()
+	}
+	if h.Identity != nil {
+		dbCounts, _ = h.Identity.CountActiveClients(ctx, 5*time.Minute)
+	}
+
+	webClients := liveWebSockets
+	if dbCounts.WebSessions > webClients {
+		webClients = dbCounts.WebSessions
+	}
+	if webClients < 1 {
+		webClients = 1
+	}
+
+	apiClients := liveGRPC + liveMedia
+	if dbCounts.APITokens+dbCounts.DesktopSessions > apiClients {
+		apiClients = dbCounts.APITokens + dbCounts.DesktopSessions
+	}
+
+	resp := SystemConnectionsResponse{
+		Web:   webClients,
+		API:   apiClients,
+		Total: webClients + apiClients,
+		Details: SystemConnectionsDetails{
+			WebSockets:      liveWebSockets,
+			WebSessions:     dbCounts.WebSessions,
+			GRPC:            liveGRPC,
+			MediaSessions:   liveMedia,
+			APITokensRecent: dbCounts.APITokens,
+			DesktopSessions: dbCounts.DesktopSessions,
+		},
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
+}
+

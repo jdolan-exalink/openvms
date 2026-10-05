@@ -910,3 +910,43 @@ func (s *Service) RevokeSession(ctx context.Context, tokenHash []byte) error {
 		return q.RevokeSession(ctx, tokenHash)
 	})
 }
+
+// RemoteClientCounts holds recent active client counts from database sessions and API tokens.
+type RemoteClientCounts struct {
+	WebSessions     int
+	DesktopSessions int
+	APITokens       int
+}
+
+// CountActiveClients returns active distinct users across web sessions, desktop sessions, and API tokens.
+func (s *Service) CountActiveClients(ctx context.Context, window time.Duration) (RemoteClientCounts, error) {
+	if s == nil || s.Store == nil || s.Store.Pool == nil {
+		return RemoteClientCounts{}, nil
+	}
+	if window <= 0 {
+		window = 5 * time.Minute
+	}
+	since := time.Now().Add(-window)
+
+	var counts RemoteClientCounts
+	_ = s.Store.Pool.QueryRow(ctx, `
+		SELECT
+			COALESCE(COUNT(DISTINCT CASE WHEN user_agent IS NULL OR user_agent NOT LIKE 'OpenVMS-Desktop/%' THEN user_id END), 0) AS web_count,
+			COALESCE(COUNT(DISTINCT CASE WHEN user_agent LIKE 'OpenVMS-Desktop/%' THEN user_id END), 0) AS desktop_count
+		FROM sessions
+		WHERE revoked_at IS NULL
+		  AND expires_at > now()
+		  AND last_seen_at >= $1
+	`, since).Scan(&counts.WebSessions, &counts.DesktopSessions)
+
+	_ = s.Store.Pool.QueryRow(ctx, `
+		SELECT COALESCE(COUNT(DISTINCT user_id), 0)
+		FROM api_tokens
+		WHERE revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > now())
+		  AND last_used_at >= $1
+	`, since).Scan(&counts.APITokens)
+
+	return counts, nil
+}
+

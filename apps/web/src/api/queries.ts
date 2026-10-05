@@ -35,6 +35,30 @@ export const systemInfoQuery = queryOptions({
   },
 });
 
+export interface SystemConnections {
+  web: number;
+  api: number;
+  total: number;
+  details?: {
+    web_sockets: number;
+    web_sessions: number;
+    grpc: number;
+    media_sessions: number;
+    api_tokens_recent: number;
+    desktop_sessions: number;
+  };
+}
+
+export const systemConnectionsQuery = queryOptions({
+  queryKey: ["system", "connections"],
+  queryFn: async () => {
+    const { data, response } = await (api.GET as any)("/api/v1/system/connections");
+    if (!data) throw new Error(`system connections request failed with ${response.status}`);
+    return data as SystemConnections;
+  },
+  refetchInterval: 10_000,
+});
+
 export const featuresQuery = queryOptions({
   queryKey: ["features"],
   queryFn: async () => unwrap(await api.GET("/api/v1/features")),

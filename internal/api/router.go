@@ -67,6 +67,8 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 		r.Method(http.MethodGet, "/ws", opts.Realtime)
 	}
 
+	r.Get("/api/v1/system/connections", h.GetSystemConnectionsHandler)
+
 	strict := gen.NewStrictHandlerWithOptions(h, nil, gen.StrictHTTPServerOptions{
 		RequestErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
 			writeError(w, r, http.StatusBadRequest, "bad_request", err.Error())

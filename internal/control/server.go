@@ -4,12 +4,14 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/stats"
 	"google.golang.org/grpc/status"
 
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
@@ -18,6 +20,29 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/mediasession"
 	"github.com/jdolan-exalink/openvms/internal/realtime"
 )
+
+type connStatsHandler struct {
+	activeConns *atomic.Int64
+}
+
+func (h *connStatsHandler) TagRPC(ctx context.Context, _ *stats.RPCTagInfo) context.Context {
+	return ctx
+}
+
+func (h *connStatsHandler) HandleRPC(context.Context, stats.RPCStats) {}
+
+func (h *connStatsHandler) TagConn(ctx context.Context, _ *stats.ConnTagInfo) context.Context {
+	return ctx
+}
+
+func (h *connStatsHandler) HandleConn(ctx context.Context, s stats.ConnStats) {
+	switch s.(type) {
+	case *stats.ConnBegin:
+		h.activeConns.Add(1)
+	case *stats.ConnEnd:
+		h.activeConns.Add(-1)
+	}
+}
 
 // Config configures the unified gRPC control server.
 type Config struct {
@@ -34,9 +59,10 @@ type Config struct {
 
 // Server coordinates all OpenVMS gRPC services.
 type Server struct {
-	cfg        Config
-	grpcServer *grpc.Server
-	listener   net.Listener
+	cfg         Config
+	grpcServer  *grpc.Server
+	listener    net.Listener
+	activeConns atomic.Int64
 }
 
 // NewServer instantiates and registers all Control Plane and Event Plane services.
@@ -48,7 +74,12 @@ func NewServer(cfg Config) *Server {
 		cfg.Sessions = mediasession.NewManager(15 * time.Minute)
 	}
 
+	server := &Server{
+		cfg: cfg,
+	}
+
 	opts := []grpc.ServerOption{
+		grpc.StatsHandler(&connStatsHandler{activeConns: &server.activeConns}),
 		grpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionIdle:     15 * time.Minute,
 			MaxConnectionAge:      2 * time.Hour,
@@ -103,10 +134,17 @@ func NewServer(cfg Config) *Server {
 
 	reflection.Register(s)
 
-	return &Server{
-		cfg:        cfg,
-		grpcServer: s,
+	server.grpcServer = s
+	return server
+}
+
+// ActiveConnections returns the number of active gRPC TCP connections.
+func (s *Server) ActiveConnections() int {
+	n := s.activeConns.Load()
+	if n < 0 {
+		return 0
 	}
+	return int(n)
 }
 
 // Start listens on the given address and serves gRPC requests.

@@ -313,6 +313,16 @@ func (m *Manager) ListActiveSessions() []SessionView {
 	return out
 }
 
+// ActiveCount returns the number of currently tracked media sessions.
+func (m *Manager) ActiveCount() int {
+	if m == nil {
+		return 0
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.sessions)
+}
+
 func (m *Manager) cleanupLoop() {
 	ticker := time.NewTicker(m.ttl / 2)
 	defer ticker.Stop()
