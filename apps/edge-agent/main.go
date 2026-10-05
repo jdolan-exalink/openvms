@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -49,14 +50,74 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	tlsConfig, tlsEnabled, err := loadAgentTLSConfig(os.Getenv("OPENVMS_AGENT_ONVIF_TLS_LISTEN"), os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"))
+	if err != nil {
+		log.Error("invalid ONVIF TLS configuration", "error", err)
+		os.Exit(1)
+	}
 	mux := buildMux(secret, variant, sampler, discoveryHandler, replaceBinary, func() { go restart() })
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Info("listening", "addr", addr, "version", agent.Version)
+	if tlsEnabled {
+		tlsServer := newAgentTLSServer(tlsConfig, discoveryHandler)
+		log.Info("ONVIF TLS listener enabled", "addr", tlsServer.Addr)
+		if err := serveAgentServers(log, srv, tlsServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("agent listener stopped", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Error("listen", "error", err)
 		os.Exit(1)
 	}
+}
+
+func serveAgentServers(log *slog.Logger, servers ...*http.Server) error {
+	return serveAgentServersWith(log, func(s *http.Server) error {
+		if s.TLSConfig != nil {
+			return s.ListenAndServeTLS("", "")
+		}
+		return s.ListenAndServe()
+	}, func(ctx context.Context, s *http.Server) error {
+		return s.Shutdown(ctx)
+	}, servers...)
+}
+
+func serveAgentServersWith(log *slog.Logger, serve func(*http.Server) error, shutdown func(context.Context, *http.Server) error, servers ...*http.Server) error {
+	type result struct {
+		server *http.Server
+		err    error
+	}
+	results := make(chan result, len(servers))
+	for _, server := range servers {
+		go func(s *http.Server) {
+			results <- result{server: s, err: serve(s)}
+		}(server)
+	}
+	first := <-results
+	if first.err != nil && !errors.Is(first.err, http.ErrServerClosed) {
+		log.Error("listener stopped", "addr", first.server.Addr, "error", first.err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for _, server := range servers {
+		if err := shutdown(ctx, server); err != nil {
+			log.Error("listener shutdown", "addr", server.Addr, "error", err)
+		}
+	}
+	listenerErr := first.err
+	if errors.Is(listenerErr, http.ErrServerClosed) || listenerErr == nil {
+		listenerErr = nil
+	}
+	for range servers[1:] {
+		result := <-results
+		if listenerErr == nil && result.err != nil && !errors.Is(result.err, http.ErrServerClosed) {
+			listenerErr = result.err
+		}
+	}
+	return listenerErr
 }
 
 func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler http.Handler, replace func(*http.Request) error, restartUpdate func()) *http.ServeMux {
