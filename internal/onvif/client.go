@@ -203,13 +203,10 @@ func (c *Client) Call(ctx context.Context, endpoint Endpoint, action, operationX
 			}
 			return nil, &CallError{Status: status, Code: "http_error"}
 		}
-		var operationResponse struct {
-			Inner string `xml:",innerxml"`
-		}
-		if err := xml.Unmarshal([]byte(envelope.Body.Inner), &operationResponse); err != nil {
-			return nil, &CallError{Status: StatusFailed, Code: "invalid_soap_response"}
-		}
-		return bytes.Clone([]byte(operationResponse.Inner)), nil
+		// Keep the response wrapper: ONVIF peers commonly declare operation
+		// namespaces on it, and stripping it makes prefixed child elements
+		// impossible to decode reliably.
+		return bytes.Clone([]byte(envelope.Body.Inner)), nil
 	}
 	return nil, &CallError{Status: StatusDegraded, Code: "transport_error", cause: last}
 }

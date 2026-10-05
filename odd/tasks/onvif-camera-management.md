@@ -85,3 +85,16 @@ Implement in dependency order. Each task is a delegated direct work unit with a 
 - **Runtime harness:** N/A; this unit has no runtime or physical-device boundary and all transport behavior is mocked.
 - **Rollback boundary:** remove `internal/onvif/client.go` and `internal/onvif/client_test.go`; no integrations or external dependencies were added.
 - **Commit / authored line count / review boundary:** `19cbca2`; 375 authored changed lines. Native assessment against `134a319`: `medium`, `review_due=false`, `under_budget`. Review remains pending for the accumulating slice; no approval or receipt is claimed. Parent re-ran the focused test: PASS. No real camera, LAN, or credential use occurred.
+
+### ONVIF-02 partial implementation evidence (device protocol slice only; parent task remains open)
+
+- Added read-only Device service client operations for `GetDeviceInformation`, `GetServices`, and `GetSystemDateAndTime`, with deterministic injected transport tests. Service XAddr values remain untrusted and must be validated via `Service.ValidatedEndpoint()` before any follow-up request. No returned service URL is followed automatically.
+- Fixed SOAP response extraction to retain the operation wrapper and its namespace declarations. ONVIF devices commonly declare operation namespaces on that wrapper; removing it produced prefixed XML with undeclared prefixes and silently empty parsed fields.
+- **RED:** `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/onvif` — FAIL before implementation (`NewDeviceClient` and `Service` undefined); after first implementation, this test exposed a decode-shape mismatch (all device-information fields empty), fixed by decoding the response fields from the namespaced response wrapper.
+- **GREEN:** `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/onvif` — PASS.
+- **REFACTOR:** `gofmt -w internal/onvif/client.go internal/onvif/device.go internal/onvif/device_test.go`; focused test rerun — PASS.
+- **Additional checks:** `GOCACHE=/tmp/openvms-go-build-cache go test -race ./internal/onvif` — PASS; `GOCACHE=/tmp/openvms-go-build-cache go test ./...` — PASS.
+- **Runtime harness:** N/A; all SOAP exchanges use an injected fake `http.RoundTripper`; no network or camera operations.
+- **Rollback boundary:** remove `internal/onvif/device.go`, `internal/onvif/device_test.go`, revert the SOAP response wrapper-preservation change in `internal/onvif/client.go`, and remove this evidence subsection.
+- **Commit / authored line count / review:** no commit created by this worker (parent handles native review and commit). Current slice has not been natively assessed. Do not claim ONVIF-02 complete: WS-Discovery, WSSE UsernameToken PasswordDigest authentication, stable identity mapping, and node-agent/API wiring remain open; camera communication stays mocked and unauthenticated device-operation behavior must not be described as production-ready.
+- **Next step:** continue ONVIF-02 with the smallest coherent WS-Discovery/authentication and agent/API integration tasks; preserve credential redaction and validate any device-provided service endpoint before use. Public ONVIF protocol references: https://www.onvif.org/ver10/device/wsdl/devicemgmt.wsdl and https://www.onvif.org/profiles/specifications/.
