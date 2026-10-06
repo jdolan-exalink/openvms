@@ -33,6 +33,39 @@ func (q *Queries) GetServerAgent(ctx context.Context, serverID uuid.UUID) (Serve
 	return i, err
 }
 
+const registerServerAgentIfAbsent = `-- name: RegisterServerAgentIfAbsent :execrows
+INSERT INTO server_agents (server_id, tenant_id, host, port, variant, token_sealed, version)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (server_id) DO NOTHING
+`
+
+type RegisterServerAgentIfAbsentParams struct {
+	ServerID    uuid.UUID
+	TenantID    uuid.UUID
+	Host        string
+	Port        int32
+	Variant     string
+	TokenSealed []byte
+	Version     string
+}
+
+// Local Compose registration must not replace a previously provisioned agent token.
+func (q *Queries) RegisterServerAgentIfAbsent(ctx context.Context, arg RegisterServerAgentIfAbsentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, registerServerAgentIfAbsent,
+		arg.ServerID,
+		arg.TenantID,
+		arg.Host,
+		arg.Port,
+		arg.Variant,
+		arg.TokenSealed,
+		arg.Version,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateServerAgentVersion = `-- name: UpdateServerAgentVersion :exec
 UPDATE server_agents SET version = $1, updated_at = now()
 WHERE server_id = $2

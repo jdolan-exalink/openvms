@@ -37,6 +37,7 @@ const usage = `usage: vmsctl <command> [flags]
 
 commands:
   migrate      apply database migrations
+  agent-register  register the local Compose agent with an authenticated operator session
   bootstrap    create the platform administrator and print its API token
   sync-admin-permissions  add missing catalog permissions to an existing platform user
   token        issue a new API token for an existing user
@@ -65,6 +66,8 @@ func run(ctx context.Context, cmd string, args []string, out io.Writer) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
 
 	switch cmd {
+	case "agent-register":
+		return runLocalAgentRegister(ctx, args, dbURL, out)
 	case "migrate":
 		v, err := postgres.Migrate(ctx, dbURL, migrations.FS, log)
 		if err != nil {

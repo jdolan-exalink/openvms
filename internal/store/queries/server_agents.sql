@@ -18,3 +18,9 @@ WHERE server_id = @server_id;
 -- name: UpdateServerAgentVersion :exec
 UPDATE server_agents SET version = @version, updated_at = now()
 WHERE server_id = @server_id;
+
+-- name: RegisterServerAgentIfAbsent :execrows
+-- Local Compose registration must not replace a previously provisioned agent token.
+INSERT INTO server_agents (server_id, tenant_id, host, port, variant, token_sealed, version)
+VALUES (@server_id, @tenant_id, @host, @port, @variant, @token_sealed, @version)
+ON CONFLICT (server_id) DO NOTHING;

@@ -55,10 +55,12 @@ type Service struct {
 	Binary func() ([]byte, error)
 
 	// Authorization and transport seams prove probe denial before secret access or outbound calls.
-	requireServerManage        func(context.Context, authz.Actor, uuid.UUID) error
-	requireServerConfigSecrets func(context.Context, authz.Actor, uuid.UUID) error
-	loadProbeAgent             func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error)
-	probeRoundTripper          http.RoundTripper
+	requireServerManage          func(context.Context, authz.Actor, uuid.UUID) error
+	requireServerConfigSecrets   func(context.Context, authz.Actor, uuid.UUID) error
+	requireLocalAgentPermissions func(context.Context, authz.Actor, uuid.UUID) error
+	localAgentTx                 localAgentTx
+	loadProbeAgent               func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error)
+	probeRoundTripper            http.RoundTripper
 
 	mu   sync.Mutex
 	jobs map[uuid.UUID]*job
