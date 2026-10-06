@@ -91,6 +91,7 @@ describe("Servers", () => {
       grants = installGrants,
       installHandler?: (request: Request) => Promise<Response>,
       pollHandler?: (request: Request) => Promise<Response>,
+      httpsPortHandler?: (request: Request) => Promise<Response>,
     ) => {
       const calls: Request[] = [];
       const fetchMock = vi.fn(async (request: Request) => {
@@ -105,6 +106,7 @@ describe("Servers", () => {
         if (url.pathname === "/api/v1/sync/status") return json({ items: [] });
         if (url.pathname === "/api/v1/servers/a/agent/install" && request.method === "POST" && installHandler) return installHandler(request);
         if (url.pathname === "/api/v1/servers/a/agent/install/job-1") return pollHandler?.(request) ?? json({ id: "job-1", status: "succeeded", stage: "complete" });
+        if (url.pathname === "/.well-known/openvms-https-port") return httpsPortHandler?.(request) ?? new Response("8443", { status: 200 });
         return json({ code: "not_found", message: "not found" }, 404);
       });
       vi.stubGlobal("fetch", fetchMock);
@@ -156,6 +158,116 @@ describe("Servers", () => {
       expect(document.body).not.toHaveTextContent("secret-root-password");
     });
 
+    it("redirects only on explicit click using configured port and same path without URL credentials", async () => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://operator:secret@openvms.example:8000/servers?token=query-secret#private", assign });
+      const { calls } = setupAgentInstall(installGrants, undefined, undefined, async (request) => {
+        expect(request.method).toBe("GET");
+        expect(new URL(request.url).origin).toBe("http://openvms.example:8000");
+        expect(request.credentials).toBe("omit");
+        expect(request.redirect).toBe("error");
+        return new Response("9443", { status: 200, headers: { "Content-Type": "text/plain" } });
+      });
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      const redirect = within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i });
+      expect(assign).not.toHaveBeenCalled();
+      fireEvent.click(redirect);
+      await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+      const target = new URL(assign.mock.calls[0]![0] as string);
+      expect(target.origin).toBe("https://openvms.example:9443");
+      expect(target.pathname).toBe("/servers");
+      expect(target.search).toBe("");
+      expect(target.hash).toBe("");
+      expect(target.username).toBe("");
+      expect(target.password).toBe("");
+      expect(within(dialog).getByLabelText("Contraseña SSH root")).toHaveValue("");
+      expect(document.body).not.toHaveTextContent("secret-root-password");
+      expect(calls.some((request) => request.method === "POST" && new URL(request.url).pathname.includes("/agent/install"))).toBe(false);
+    });
+
+    it("does not navigate on an invalid runtime port", async () => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://openvms.example:8000/servers", assign });
+      setupAgentInstall(installGrants, undefined, undefined, async () => new Response("65536", { status: 200, headers: { "Content-Type": "text/plain" } }));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
+      expect(await within(dialog).findByText(/No se pudo leer el puerto HTTPS/i)).toHaveAttribute("role", "alert");
+      expect(assign).not.toHaveBeenCalled();
+    });
+
+    it("does not guess a port when the runtime hint is unavailable", async () => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://openvms.example:8000/servers", assign });
+      setupAgentInstall(installGrants, undefined, undefined, async () => new Response("unavailable", { status: 503, headers: { "Content-Type": "text/plain" } }));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
+      expect(await within(dialog).findByText(/No se pudo leer el puerto HTTPS/i)).toHaveAttribute("role", "alert");
+      expect(assign).not.toHaveBeenCalled();
+    });
+
+    it("rejects an oversized runtime port response without navigation", async () => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://openvms.example:8000/servers", assign });
+      setupAgentInstall(installGrants, undefined, undefined, async () => new Response("9".repeat(64 * 1024), { status: 200, headers: { "Content-Type": "text/plain" } }));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
+      expect(await within(dialog).findByText(/No se pudo leer el puerto HTTPS/i)).toHaveAttribute("role", "alert");
+      expect(assign).not.toHaveBeenCalled();
+    });
+
+    it("aborts the port lookup at its request deadline", async () => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://openvms.example:8000/servers", assign });
+      const scheduled: Array<() => void> = [];
+      const setTimeout = window.setTimeout.bind(window);
+      vi.spyOn(window, "setTimeout").mockImplementation(((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+        if (timeout === 5000 && typeof handler === "function") scheduled.push(handler as () => void);
+        return setTimeout(handler, timeout, ...args);
+      }) as typeof window.setTimeout);
+      let configRequest: Request | undefined;
+      setupAgentInstall(installGrants, undefined, undefined, async (request) => {
+        configRequest = request;
+        return new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
+      });
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
+      await waitFor(() => expect(configRequest).toBeDefined());
+      expect(scheduled).toHaveLength(1);
+      await act(async () => scheduled[0]!());
+      expect(configRequest!.signal.aborted).toBe(true);
+      expect(await within(dialog).findByText(/No se pudo leer el puerto HTTPS/i)).toHaveAttribute("role", "alert");
+      expect(assign).not.toHaveBeenCalled();
+    });
+
+    it("aborts the HTTPS-port lookup when the dialog closes and never redirects late", async () => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://openvms.example:8000/servers", assign });
+      let configRequest: Request | undefined;
+      setupAgentInstall(installGrants, undefined, undefined, async (request) => {
+        configRequest = request;
+        return new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
+      });
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
+      await waitFor(() => expect(configRequest).toBeDefined());
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+      await waitFor(() => expect(configRequest!.signal.aborted).toBe(true));
+      expect(assign).not.toHaveBeenCalled();
+    });
+
     it("sends the explicit pinned target once, clears the password, polls metadata, and does not claim health", async () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       const { calls } = setupAgentInstall(undefined, async (request) => {
@@ -166,6 +278,7 @@ describe("Servers", () => {
       renderPage(Servers);
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      expect(within(dialog).queryByRole("button", { name: /Abrir OpenVMS por HTTPS/i })).not.toBeInTheDocument();
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
       fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "2222" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
@@ -249,7 +362,7 @@ describe("Servers", () => {
       { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "a" },
       { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "a" },
     ];
-    function setup(updateHandler?: (request: Request) => Promise<Response>, pollHandler?: (request: Request) => Promise<Response>, meGrants = grants) {
+    function setup(updateHandler?: (request: Request) => Promise<Response>, pollHandler?: (request: Request) => Promise<Response>, meGrants = grants, httpsPortHandler?: (request: Request) => Promise<Response>) {
       const calls: Request[] = [];
       const fetchMock = vi.fn(async (request: Request) => {
         calls.push(request);
@@ -262,6 +375,7 @@ describe("Servers", () => {
         if (url.pathname === "/api/v1/sync/status") return json({ items: [] });
         if (url.pathname === "/api/v1/servers/a/agent/update-ssh" && request.method === "POST" && updateHandler) return updateHandler(request);
         if (url.pathname === "/api/v1/servers/a/agent/update-ssh/job-1") return pollHandler?.(request) ?? json({ id: "job-1", status: "succeeded", stage: "complete" });
+        if (url.pathname === "/.well-known/openvms-https-port") return httpsPortHandler?.(request) ?? new Response("8443", { status: 200 });
         return json({ code: "not_found", message: "not found" }, 404);
       });
       vi.stubGlobal("fetch", fetchMock);
@@ -298,6 +412,29 @@ describe("Servers", () => {
       expect(document.body).not.toHaveTextContent("secret-root-password");
     });
 
+    it("redirects the existing-agent dialog only after an explicit click and drops query and fragment", async () => {
+      const assign = vi.fn();
+      vi.stubGlobal("location", { protocol: "http:", origin: "http://openvms.example:8000", href: "http://openvms.example:8000/servers?token=query-secret#private", assign });
+      const { calls } = setup(undefined, undefined, grants, async (request) => {
+        expect(request.credentials).toBe("omit");
+        expect(request.redirect).toBe("error");
+        return new Response("9555", { status: 200, headers: { "Content-Type": "text/plain" } });
+      });
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: /Abrir OpenVMS por HTTPS/i }));
+      await waitFor(() => expect(assign).toHaveBeenCalledTimes(1));
+      const target = new URL(assign.mock.calls[0]![0] as string);
+      expect(target.origin).toBe("https://openvms.example:9555");
+      expect(target.pathname).toBe("/servers");
+      expect(target.search).toBe("");
+      expect(target.hash).toBe("");
+      expect(within(dialog).getByLabelText("Contraseña SSH root")).toHaveValue("");
+      expect(calls.some((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/update-ssh"))).toBe(false);
+    });
+
     it("posts only the SSH port, transient password and verified pin, then reports TLS-health success", async () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       const { calls } = setup(async (request) => {
@@ -308,6 +445,7 @@ describe("Servers", () => {
       renderPage(Servers);
       fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
       const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
+      expect(within(dialog).queryByRole("button", { name: /Abrir OpenVMS por HTTPS/i })).not.toBeInTheDocument();
       fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "2222" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));

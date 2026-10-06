@@ -249,6 +249,7 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
   const lastSafeJobRef = useRef<Schemas["ServerAgentInstallJob"] | null>(null);
   const [pollTimedOut, setPollTimedOut] = useState(false);
   const secureBrowser = location.protocol === "https:";
+  const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
   const updateJob = useCallback((next: Schemas["ServerAgentInstallJob"]) => {
     if (next.status !== "queued" && next.status !== "running" && deadlineTimerRef.current != null) {
       window.clearTimeout(deadlineTimerRef.current);
@@ -328,6 +329,7 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
   const submitted = !!job?.id || start.isPending;
   const close = () => {
     if (start.isPending) return;
+    httpsRedirect.cancel();
     pendingPasswordRef.current = "";
     if (passwordInputRef.current) passwordInputRef.current.value = "";
     onClose();
@@ -359,7 +361,13 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
       start.mutate();
     }}>
       <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentUpdateSSHScope")}</p>
-      {!secureBrowser && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>}
+      {!secureBrowser && <div className="flex flex-col gap-2">
+        <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>
+        <Button type="button" variant="outlined" disabled={httpsRedirect.pending} onClick={() => { void httpsRedirect.redirect(); }}>
+          {httpsRedirect.pending ? t("servers.agentHttpsRedirectChecking") : t("servers.agentHttpsRedirectAction")}
+        </Button>
+        {httpsRedirect.failed && <p role="alert" className="text-sm text-bad">{t("servers.agentHttpsRedirectFailed")}</p>}
+      </div>}
       <p className="text-sm text-muted">{t("servers.agentUpdateSSHHostFixed")}</p>
       <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentSSHHostKeyTOFU")}</p>
       <div className="grid gap-4 sm:grid-cols-2">
@@ -413,6 +421,7 @@ function AgentInstallDialog({
   const pollStartedAt = useRef(0);
   const [pollTimedOut, setPollTimedOut] = useState(false);
   const secureBrowser = location.protocol === "https:";
+  const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
   const start = useMutation({
     mutationFn: async () => {
       const password = pendingPasswordRef.current;
@@ -462,6 +471,7 @@ function AgentInstallDialog({
   const polling = job?.status === "queued" || job?.status === "running";
   const close = () => {
     if (start.isPending) return;
+    httpsRedirect.cancel();
     pendingPasswordRef.current = "";
     if (passwordInputRef.current) passwordInputRef.current.value = "";
     onClose();
@@ -497,7 +507,13 @@ function AgentInstallDialog({
           }}
         >
           <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentInstallScopeNotice")}</p>
-          {!secureBrowser && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>}
+          {!secureBrowser && <div className="flex flex-col gap-2">
+            <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>
+            <Button type="button" variant="outlined" disabled={httpsRedirect.pending} onClick={() => { void httpsRedirect.redirect(); }}>
+              {httpsRedirect.pending ? t("servers.agentHttpsRedirectChecking") : t("servers.agentHttpsRedirectAction")}
+            </Button>
+            {httpsRedirect.failed && <p role="alert" className="text-sm text-bad">{t("servers.agentHttpsRedirectFailed")}</p>}
+          </div>}
           <p className="text-sm text-muted">{t("servers.agentInstallRootOnly")}</p>
           <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentSSHHostKeyTOFU")}</p>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -541,6 +557,113 @@ function AgentInstallDialog({
 function isCanonicalIPv4(value: string) {
   const octets = value.split(".");
   return octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && String(Number(octet)) === octet && Number(octet) <= 255);
+}
+
+function useHTTPSRedirect(passwordInputRef: { current: HTMLInputElement | null }, pendingPasswordRef: { current: string }) {
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const controllerRef = useRef<AbortController | null>(null);
+
+  const cancel = useCallback(() => {
+    const controller = controllerRef.current;
+    controllerRef.current = null;
+    controller?.abort();
+    pendingPasswordRef.current = "";
+    if (passwordInputRef.current) passwordInputRef.current.value = "";
+    setPending(false);
+  }, [passwordInputRef, pendingPasswordRef]);
+
+  const redirect = useCallback(async () => {
+    if (controllerRef.current) return;
+    const controller = new AbortController();
+    controllerRef.current = controller;
+    setPending(true);
+    setFailed(false);
+    pendingPasswordRef.current = "";
+    if (passwordInputRef.current) passwordInputRef.current.value = "";
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    const aborted = new Promise<never>((_resolve, reject) => {
+      const rejectAbort = () => reject(new DOMException("aborted", "AbortError"));
+      if (controller.signal.aborted) rejectAbort();
+      else controller.signal.addEventListener("abort", rejectAbort, { once: true });
+    });
+
+    try {
+      const request = new Request(new URL("/.well-known/openvms-https-port", location.origin), {
+        method: "GET",
+        credentials: "omit",
+        redirect: "error",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      const response = await Promise.race([fetch(request), aborted]);
+      if (!response.ok) throw new Error("HTTPS port unavailable");
+      const port = await Promise.race([readConfiguredHTTPSPort(response), aborted]);
+      if (controller.signal.aborted || controllerRef.current !== controller) return;
+
+      const target = new URL(location.href);
+      target.protocol = "https:";
+      target.port = String(port);
+      target.username = "";
+      target.password = "";
+      target.search = "";
+      target.hash = "";
+      location.assign(target.toString());
+    } catch {
+      if (controllerRef.current === controller) setFailed(true);
+    } finally {
+      window.clearTimeout(timeout);
+      if (controllerRef.current === controller) {
+        controllerRef.current = null;
+        setPending(false);
+      }
+    }
+  }, [passwordInputRef, pendingPasswordRef]);
+
+  useEffect(() => () => {
+    controllerRef.current?.abort();
+    controllerRef.current = null;
+    pendingPasswordRef.current = "";
+    if (passwordInputRef.current) passwordInputRef.current.value = "";
+  }, [passwordInputRef, pendingPasswordRef]);
+
+  return { cancel, failed, pending, redirect };
+}
+
+async function readConfiguredHTTPSPort(response: Response): Promise<number> {
+  if (!response.ok || !/^text\/plain(?:\s*;|$)/i.test(response.headers.get("content-type") ?? "")) {
+    throw new Error("Invalid HTTPS port response");
+  }
+  const declaredLength = response.headers.get("content-length");
+  if (declaredLength && (!/^\d+$/.test(declaredLength) || Number(declaredLength) > 5)) {
+    throw new Error("Invalid HTTPS port response");
+  }
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("Missing HTTPS port response body");
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let size = 0;
+  let value = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) {
+        value += decoder.decode();
+        break;
+      }
+      size += chunk.value.byteLength;
+      if (size > 5) throw new Error("HTTPS port response too large");
+      value += decoder.decode(chunk.value, { stream: true });
+    }
+  } catch (error) {
+    await reader.cancel().catch(() => undefined);
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+  if (!/^[1-9]\d{0,4}$/.test(value)) throw new Error("Invalid HTTPS port response");
+  const port = Number(value);
+  if (port > 65535) throw new Error("Invalid HTTPS port response");
+  return port;
 }
 
 function isValidSSHPort(value: string) {

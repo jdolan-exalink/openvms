@@ -286,6 +286,9 @@ func TestWebComposeAddsPinnedHTTPSIngressWithoutBreakingHTTPOrProxyTrust(t *test
 	if webEnv["API_UPSTREAM"] != "${OPENVMS_AGENT_API_IPV4:-172.29.240.2}:8080" {
 		t.Fatalf("Caddy API upstream must use the API's fixed private IPv4, got %#v", webEnv["API_UPSTREAM"])
 	}
+	if webEnv["OPENVMS_WEB_HTTPS_PORT"] != "${WEB_HTTPS_PORT:-8443}" {
+		t.Fatalf("Caddy must receive the effective published HTTPS port for the same-origin redirect hint, got %#v", webEnv["OPENVMS_WEB_HTTPS_PORT"])
+	}
 	webVolumes := asList(t, web["volumes"])
 	for _, suffix := range []string{":/etc/caddy/tls.crt:ro", ":/etc/caddy/tls.key:ro"} {
 		target := strings.TrimSuffix(strings.TrimPrefix(suffix, ":"), ":ro")
@@ -320,6 +323,16 @@ func TestWebComposeAddsPinnedHTTPSIngressWithoutBreakingHTTPOrProxyTrust(t *test
 		t.Fatal(err)
 	}
 	configuration := string(caddyfile)
+	for _, required := range []string{"/.well-known/openvms-https-port", "{$OPENVMS_WEB_HTTPS_PORT:8443}", "Cache-Control no-store", "text/plain"} {
+		if !strings.Contains(configuration, required) {
+			t.Errorf("Caddy must expose a same-origin no-store HTTPS port hint, missing %q", required)
+		}
+	}
+	portHintPosition := strings.Index(configuration, "@https_port_hint path /.well-known/openvms-https-port")
+	spaFallbackPosition := strings.Index(configuration, "\n\thandle {\n")
+	if portHintPosition < 0 || spaFallbackPosition < 0 || portHintPosition > spaFallbackPosition {
+		t.Fatal("Caddy HTTPS port hint must be handled before the SPA catch-all")
+	}
 	for _, required := range []string{"auto_https disable_redirects", "default_sni {$HTTPS_SITE_ADDRESS:10.1.1.24}", "{$SITE_ADDRESS::80} {", "{$HTTPS_SITE_ADDRESS:10.1.1.24}:443 {", "tls /etc/caddy/tls.crt /etc/caddy/tls.key", "protocols tls1.2 tls1.3", "import openvms_site_routes"} {
 		if !strings.Contains(configuration, required) {
 			t.Errorf("Caddy configuration must include %q", required)

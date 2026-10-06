@@ -27,6 +27,13 @@
 		reverse_proxy {$API_UPSTREAM:api:8080}
 	}
 
+	@https_port_hint path /.well-known/openvms-https-port
+	handle @https_port_hint {
+		header Cache-Control no-store
+		header Content-Type text/plain
+		respond {$OPENVMS_WEB_HTTPS_PORT:8443} 200
+	}
+
 	handle {
 		root * /srv
 
