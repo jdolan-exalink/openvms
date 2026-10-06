@@ -62,6 +62,12 @@ SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count
 FROM frigate_servers fs WHERE fs.id = @id AND fs.deleted_at IS NULL;
 
+-- name: GetServerForUpdate :one
+SELECT fs.*,
+    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count
+FROM frigate_servers fs WHERE fs.id = @id AND fs.deleted_at IS NULL
+FOR UPDATE OF fs;
+
 -- name: CreateServer :exec
 INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, auth_mode, username, password_sealed, tls_skip_verify, frigate_version, capabilities)
 VALUES (@id, @tenant_id, @site_id, @name, @base_url, @auth_mode, @username, @password_sealed, @tls_skip_verify, @frigate_version, @capabilities);

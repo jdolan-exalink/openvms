@@ -33,6 +33,29 @@ func (q *Queries) GetServerAgent(ctx context.Context, serverID uuid.UUID) (Serve
 	return i, err
 }
 
+const getServerAgentForUpdate = `-- name: GetServerAgentForUpdate :one
+SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at
+FROM server_agents
+WHERE server_id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetServerAgentForUpdate(ctx context.Context, serverID uuid.UUID) (ServerAgent, error) {
+	row := q.db.QueryRow(ctx, getServerAgentForUpdate, serverID)
+	var i ServerAgent
+	err := row.Scan(
+		&i.ServerID,
+		&i.TenantID,
+		&i.Host,
+		&i.Port,
+		&i.Variant,
+		&i.TokenSealed,
+		&i.Version,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const registerServerAgentIfAbsent = `-- name: RegisterServerAgentIfAbsent :execrows
 INSERT INTO server_agents (server_id, tenant_id, host, port, variant, token_sealed, version)
 VALUES ($1, $2, $3, $4, $5, $6, $7)

@@ -590,6 +590,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/update-ssh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update an existing registered agent and configure HTTPS
+         * @description Requires servers.manage and servers.config.secrets. The registered agent IPv4 and existing bearer are fixed by server registration. The root SSH password and out-of-band SHA-256 pin are transient; HTTPS health is verified before public trust metadata is recorded. Existing TLS-enabled agents are not replaced by this operation.
+         */
+        post: operations["updateServerAgentOverSsh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/update-ssh/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read transient existing-agent update progress
+         * @description Requires both server-scoped permissions. Update jobs live only in API memory; progress contains no credentials or remote command output.
+         */
+        get: operations["getServerAgentUpdateJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/onvif/discover": {
         parameters: {
             query?: never;
@@ -2649,6 +2694,13 @@ export interface components {
              * @description Explicit SSH target IPv4 literal; never inferred from Frigate URL.
              */
             ssh_host: string;
+            ssh_port: number;
+            /** @description Transient root SSH password; never persisted or echoed. */
+            ssh_password: string;
+            /** @description Required out-of-band verified SHA-256 pin; no trust-on-first-use. */
+            ssh_host_key_fingerprint: string;
+        };
+        ServerAgentUpdateRequest: {
             ssh_port: number;
             /** @description Transient root SSH password; never persisted or echoed. */
             ssh_password: string;
@@ -5201,6 +5253,63 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Install status without credentials or remote output */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateServerAgentOverSsh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Ephemeral in-memory update job accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getServerAgentUpdateJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Update progress without credentials */
             200: {
                 headers: {
                     [name: string]: unknown;

@@ -56,7 +56,7 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 
 	r := chi.NewRouter()
 	r.Use(credentialInstallHTTPS(opts.CredentialTrustedProxyCIDRs), httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
-	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody)
+	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody, validateAgentUpdateBody)
 	if opts.Queries != nil {
 		r.Use(Authenticate(opts.Queries, AuthOptions{IdleTimeout: opts.SessionIdle}))
 	}
@@ -123,7 +123,7 @@ func credentialInstallHTTPS(trusted []netip.Prefix) func(http.Handler) http.Hand
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-			targeted := r.Method == http.MethodPost && len(parts) == 6 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "servers" && parts[4] == "agent" && parts[5] == "install"
+			targeted := r.Method == http.MethodPost && len(parts) == 6 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "servers" && parts[4] == "agent" && (parts[5] == "install" || parts[5] == "update-ssh")
 			if targeted && !credentialInstallHTTPSAllowed(r, trusted) {
 				writeError(w, r, http.StatusForbidden, "secure_transport_required", "agent installation requires HTTPS")
 				return
@@ -216,6 +216,30 @@ const (
 )
 
 const agentInstallRequestMaxBytes = 8192
+
+func validateAgentUpdateBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method != http.MethodPost || len(parts) != 6 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "servers" || parts[4] != "agent" || parts[5] != "update-ssh" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		limited, err := io.ReadAll(io.LimitReader(r.Body, agentInstallRequestMaxBytes+1))
+		if err != nil || len(limited) > agentInstallRequestMaxBytes {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "agent update request exceeds the size limit")
+			return
+		}
+		dec := json.NewDecoder(bytes.NewReader(limited))
+		dec.DisallowUnknownFields()
+		var body gen.ServerAgentUpdateRequest
+		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF || body.SshPassword == nil || body.SshPort < 1 || body.SshPort > 65535 || body.SshHostKeyFingerprint == "" {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent update request")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(limited))
+		next.ServeHTTP(w, r)
+	})
+}
 
 // validateAgentInstallBody enforces strict bounded JSON. It does not log or retain the body.
 func validateAgentInstallBody(next http.Handler) http.Handler {

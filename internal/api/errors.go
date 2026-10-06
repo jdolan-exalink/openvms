@@ -54,6 +54,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusNotFound, "not_found", "agent install job not found"
 	case errors.Is(err, provision.ErrAgentInstallBusy), errors.Is(err, provision.ErrAgentAlreadyProvisioned):
 		return http.StatusConflict, "conflict", "agent is already registered or an install is active"
+	case errors.Is(err, provision.ErrAgentUpdateTLSAlreadyConfigured):
+		return http.StatusConflict, "conflict", "secure agent update is not supported for this registration"
 	case errors.Is(err, provision.ErrAgentUnprovisioned):
 		return http.StatusNotFound, "agent_unprovisioned", "server has no registered agent"
 	case errors.Is(err, provision.ErrAgentDiscoveryUnsupported):

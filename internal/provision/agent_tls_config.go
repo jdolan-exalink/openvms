@@ -188,7 +188,9 @@ func cloneAgentTLSConfig(in AgentTLSConfig) AgentTLSConfig {
 	return in
 }
 
-func auditAgentTLS(ctx context.Context, q *db.Queries, actor authz.Actor, tenantID, serverID uuid.UUID, action string, before, after *AgentTLSConfig) error {
+func auditAgentTLS(ctx context.Context, q interface {
+	InsertAudit(context.Context, db.InsertAuditParams) error
+}, actor authz.Actor, tenantID, serverID uuid.UUID, action string, before, after *AgentTLSConfig) error {
 	metadata := func(in *AgentTLSConfig) any {
 		if in == nil {
 			return nil

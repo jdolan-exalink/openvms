@@ -76,6 +76,38 @@ func (h *Handlers) GetServerAgentInstallJob(ctx context.Context, r gen.GetServer
 	return gen.GetServerAgentInstallJob200JSONResponse(serverAgentInstallJob(job)), nil
 }
 
+func (h *Handlers) UpdateServerAgentOverSsh(ctx context.Context, r gen.UpdateServerAgentOverSshRequestObject) (gen.UpdateServerAgentOverSshResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || r.Body.SshPassword == nil {
+		return nil, &provision.ValidationError{Msg: "agent update request is required"}
+	}
+	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
+		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
+	}
+	job, err := h.Provision.StartServerAgentUpdate(ctx, a, uuid.UUID(r.ServerId), provision.AgentUpdateStartRequest{
+		SSHPort: uint16(r.Body.SshPort), Password: *r.Body.SshPassword, HostKey: r.Body.SshHostKeyFingerprint,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gen.UpdateServerAgentOverSsh202JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func (h *Handlers) GetServerAgentUpdateJob(ctx context.Context, r gen.GetServerAgentUpdateJobRequestObject) (gen.GetServerAgentUpdateJobResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, uuid.UUID(r.ServerId), uuid.UUID(r.JobId))
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetServerAgentUpdateJob200JSONResponse(serverAgentInstallJob(job)), nil
+}
+
 func serverAgentInstallJob(in provision.AgentInstallJob) gen.ServerAgentInstallJob {
 	out := gen.ServerAgentInstallJob{Id: types.UUID(in.ID), Status: gen.ServerAgentInstallJobStatus(in.Status), Stage: gen.ServerAgentInstallJobStage(in.Stage)}
 	if in.Message != "" {

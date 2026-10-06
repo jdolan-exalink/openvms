@@ -97,3 +97,39 @@ func TestAgentInstallBodyRejectsUnknownTrailingAndOversizedJSON(t *testing.T) {
 		})
 	}
 }
+
+func TestAgentUpdateHTTPSIngressAndBodyBounds(t *testing.T) {
+	trusted := []netip.Prefix{netip.MustParsePrefix("10.20.0.7/32")}
+	calls := 0
+	handler := credentialInstallHTTPS(trusted)(validateAgentUpdateBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusNoContent)
+	})))
+	for _, tc := range []struct {
+		name, remote, proto, body string
+		want                      int
+	}{
+		{"spoofed forwarded TLS", "127.0.0.1:8080", "https", `{"ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"}`, http.StatusForbidden},
+		{"trusted forwarded TLS", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"}`, http.StatusNoContent},
+		{"unknown field", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `","host":"192.0.2.5"}`, http.StatusBadRequest},
+		{"trailing JSON", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"} {}`, http.StatusBadRequest},
+		{"oversized body", "10.20.0.7:8080", "https", `{"ssh_password":"` + strings.Repeat("x", agentInstallRequestMaxBytes) + `"}`, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/servers/11111111-1111-1111-1111-111111111111/agent/update-ssh", strings.NewReader(tc.body))
+			r.RemoteAddr = tc.remote
+			r.Header.Set("X-Forwarded-Proto", tc.proto)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != tc.want {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if tc.want != http.StatusNoContent && strings.Contains(w.Body.String(), "secret") {
+				t.Fatalf("error echoed secret: %s", w.Body.String())
+			}
+		})
+	}
+	if calls != 1 {
+		t.Fatalf("handler calls=%d, want only authenticated request", calls)
+	}
+}

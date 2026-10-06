@@ -429,6 +429,66 @@ func (q *Queries) GetServer(ctx context.Context, id uuid.UUID) (GetServerRow, er
 	return i, err
 }
 
+const getServerForUpdate = `-- name: GetServerForUpdate :one
+SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode,
+    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count
+FROM frigate_servers fs WHERE fs.id = $1 AND fs.deleted_at IS NULL
+FOR UPDATE OF fs
+`
+
+type GetServerForUpdateRow struct {
+	ID             uuid.UUID
+	TenantID       uuid.UUID
+	SiteID         uuid.UUID
+	Name           string
+	BaseUrl        string
+	Username       string
+	PasswordSealed []byte
+	TlsSkipVerify  bool
+	FrigateVersion string
+	Capabilities   json.RawMessage
+	Status         string
+	LastSeenAt     *time.Time
+	LastCheckedAt  *time.Time
+	LastError      string
+	Stats          json.RawMessage
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	DeletedAt      *time.Time
+	DeletedBy      *uuid.UUID
+	AuthMode       string
+	CameraCount    int32
+}
+
+func (q *Queries) GetServerForUpdate(ctx context.Context, id uuid.UUID) (GetServerForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getServerForUpdate, id)
+	var i GetServerForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.SiteID,
+		&i.Name,
+		&i.BaseUrl,
+		&i.Username,
+		&i.PasswordSealed,
+		&i.TlsSkipVerify,
+		&i.FrigateVersion,
+		&i.Capabilities,
+		&i.Status,
+		&i.LastSeenAt,
+		&i.LastCheckedAt,
+		&i.LastError,
+		&i.Stats,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.DeletedBy,
+		&i.AuthMode,
+		&i.CameraCount,
+	)
+	return i, err
+}
+
 const getServerRow = `-- name: GetServerRow :one
 SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode FROM frigate_servers WHERE id = $1 AND deleted_at IS NULL
 `

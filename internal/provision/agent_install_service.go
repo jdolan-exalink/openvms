@@ -364,36 +364,44 @@ func verifyTrustedAgentBinary(binary []byte, expectedHash, expectedArch string) 
 }
 
 func newAgentInstallCredentials(host string) (token string, certificate, privateKey []byte, err error) {
-	if net.ParseIP(host) == nil || net.ParseIP(host).To4() == nil {
-		return "", nil, nil, errors.New("invalid agent IPv4")
-	}
 	tokenBytes := make([]byte, 32)
 	if _, err = rand.Read(tokenBytes); err != nil {
 		return "", nil, nil, err
 	}
 	token = base64.RawURLEncoding.EncodeToString(tokenBytes)
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	certificate, privateKey, err = newAgentInstallTLSCredentials(host)
 	if err != nil {
 		return "", nil, nil, err
+	}
+	return token, certificate, privateKey, nil
+}
+
+func newAgentInstallTLSCredentials(host string) (certificate, privateKey []byte, err error) {
+	if net.ParseIP(host) == nil || net.ParseIP(host).To4() == nil {
+		return nil, nil, errors.New("invalid agent IPv4")
+	}
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, nil, err
 	}
 	now := time.Now()
 	serial, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		return "", nil, nil, err
+		return nil, nil, err
 	}
 	ip := net.ParseIP(host).To4()
 	template := &x509.Certificate{SerialNumber: serial, Subject: pkix.Name{CommonName: "OpenVMS edge agent"}, NotBefore: now.Add(-5 * time.Minute), NotAfter: now.Add(365 * 24 * time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}, IPAddresses: []net.IP{ip}}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
-		return "", nil, nil, err
+		return nil, nil, err
 	}
 	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		return "", nil, nil, err
+		return nil, nil, err
 	}
 	certificate = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	privateKey = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-	return token, certificate, privateKey, nil
+	return certificate, privateKey, nil
 }
 
 func (s *Service) registerInstalledAgent(ctx context.Context, actor authz.Actor, serverID uuid.UUID, host string, securePort uint16, token string, caPEM []byte) error {
