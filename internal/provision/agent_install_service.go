@@ -53,11 +53,10 @@ type AgentInstallStartRequest struct {
 	Host     string
 	Port     uint16
 	Password string
-	HostKey  string
 }
 
 func (request AgentInstallStartRequest) String() string {
-	return fmt.Sprintf("AgentInstallStartRequest{host:%q port:%d host_key_fingerprint:%q password:[redacted]}", request.Host, request.Port, request.HostKey)
+	return fmt.Sprintf("AgentInstallStartRequest{host:%q port:%d password:[redacted]}", request.Host, request.Port)
 }
 func (request AgentInstallStartRequest) GoString() string { return request.String() }
 func (request AgentInstallStartRequest) MarshalJSON() ([]byte, error) {
@@ -103,7 +102,7 @@ func (job *agentInstallJob) read() AgentInstallJob {
 
 func validateAgentInstallStartRequest(in AgentInstallStartRequest) error {
 	ip, err := netip.ParseAddr(in.Host)
-	if err != nil || !ip.Is4() || ip.String() != in.Host || in.Port == 0 || len(in.Password) == 0 || len(in.Password) > 4096 || !validFingerprint(in.HostKey) {
+	if err != nil || !ip.Is4() || ip.String() != in.Host || in.Port == 0 || len(in.Password) == 0 || len(in.Password) > 4096 {
 		return &ValidationError{Msg: "invalid agent install request"}
 	}
 	return nil
@@ -164,7 +163,10 @@ func (s *Service) StartServerAgentInstall(ctx context.Context, actor authz.Actor
 		return AgentInstallJob{}, errors.New("could not prepare agent TLS trust")
 	}
 
-	request := AgentInstallRequest{Host: in.Host, Port: in.Port, User: "root", Password: in.Password, ExpectedHostKey: in.HostKey, Binary: binary, Token: token, TLSListen: net.JoinHostPort("0.0.0.0", fmt.Sprint(agentInstallHTTPSPort)), TLSCertificate: certificate, TLSPrivateKey: privateKey}
+	request := AgentInstallRequest{Host: in.Host, Port: in.Port, User: "root", Password: in.Password, Binary: binary, Token: token, TLSListen: net.JoinHostPort("0.0.0.0", fmt.Sprint(agentInstallHTTPSPort)), TLSCertificate: certificate, TLSPrivateKey: privateKey}
+	request.hostKeyTrust = func(ctx context.Context, fingerprint string) error {
+		return s.trustAgentSSHHostKey(ctx, actor, serverID, in.Host, in.Port, fingerprint)
+	}
 	go s.runServerAgentInstall(context.Background(), actor, job, request, token, certificate)
 	reservationOwned = false
 	return job.read(), nil
@@ -255,11 +257,11 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		request.Binary = nil
 		s.releaseAgentInstallJob(job, false)
 	}()
-	job.update("running", "connecting", "Connecting to the pinned SSH host")
+	job.update("running", "connecting", "Connecting to the SSH host with remembered first-use trust")
 	run := s.agentInstallRun
 	if run == nil {
 		run = func(ctx context.Context, request AgentInstallRequest, update func(string)) error {
-			return runAgentInstallWithProgress(ctx, request, dialAgentSSH, update)
+			return runAgentInstallWithProgress(ctx, request, agentInstallDialer(request), update)
 		}
 	}
 	if err := run(ctx, request, func(stage string) { job.update("running", stage, installStageMessage(stage)) }); err != nil {
@@ -283,7 +285,7 @@ func installStageMessage(stage string) string {
 	case "validating":
 		return "Validating agent installer"
 	case "connecting":
-		return "Connecting to the pinned SSH host"
+		return "Connecting to the SSH host using stored first-contact key trust"
 	case "transferring":
 		return "Transferring agent files over SFTP"
 	case "activating":

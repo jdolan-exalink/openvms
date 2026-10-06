@@ -35,11 +35,20 @@ func dialSSH(ctx context.Context, host, user, password, expectedKey string, onKe
 }
 
 func dialSSHAtPort(ctx context.Context, host string, port uint16, user, password, expectedKey string, onKey func(fingerprint string)) (Conn, error) {
+	return dialSSHAtPortWithConfig(ctx, host, port, password, clientConfig(user, password, expectedKey, onKey))
+}
+
+func dialSSHAtPortWithHostKeyTrust(ctx context.Context, host string, port uint16, user, password string, trust func(context.Context, string) error) (Conn, error) {
+	return dialSSHAtPortWithConfig(ctx, host, port, password, clientConfigWithHostKeyTrust(user, password, func(fingerprint string) error {
+		return trust(ctx, fingerprint)
+	}))
+}
+
+func dialSSHAtPortWithConfig(ctx context.Context, host string, port uint16, password string, cfg *ssh.ClientConfig) (Conn, error) {
 	if port == 0 || ctx.Err() != nil {
 		return nil, errors.New("invalid SSH target")
 	}
 	address := net.JoinHostPort(host, strconv.Itoa(int(port)))
-	cfg := clientConfig(user, password, expectedKey, onKey)
 	d := net.Dialer{Timeout: 20 * time.Second}
 	netConn, err := d.DialContext(ctx, "tcp", address)
 	if err != nil {
@@ -88,7 +97,39 @@ func dialAgentSSH(ctx context.Context, host string, port uint16, user, password,
 	return installConn, nil
 }
 
+func dialAgentSSHWithHostKeyTrust(ctx context.Context, host string, port uint16, user, password string, trust func(context.Context, string) error) (AgentInstallConn, error) {
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() == nil || ip.String() != host || port == 0 || user != "root" || password == "" || trust == nil || ctx.Err() != nil {
+		return nil, errors.New("invalid SSH host-key trust target")
+	}
+	conn, err := dialSSHAtPortWithHostKeyTrust(ctx, host, port, user, password, trust)
+	if err != nil {
+		return nil, err
+	}
+	installConn, ok := conn.(AgentInstallConn)
+	if !ok {
+		_ = conn.Close()
+		return nil, errors.New("SSH connection does not support SFTP")
+	}
+	return installConn, nil
+}
+
 func clientConfig(user, password, expectedKey string, onKey func(fingerprint string)) *ssh.ClientConfig {
+	return clientConfigWithHostKeyTrust(user, password, func(fingerprint string) error {
+		if expectedKey != "" && fingerprint != expectedKey {
+			return fmt.Errorf("SSH host key fingerprint mismatch")
+		}
+		if expectedKey == "" && onKey == nil {
+			return fmt.Errorf("SSH host key trust is required")
+		}
+		if onKey != nil {
+			onKey(fingerprint)
+		}
+		return nil
+	})
+}
+
+func clientConfigWithHostKeyTrust(user, password string, trust func(fingerprint string) error) *ssh.ClientConfig {
 	return &ssh.ClientConfig{
 		User: user,
 		Auth: []ssh.AuthMethod{
@@ -100,20 +141,17 @@ func clientConfig(user, password, expectedKey string, onKey func(fingerprint str
 				return []string{password}, nil
 			}),
 		},
-		// A non-empty fingerprint is checked before password authentication. An empty
-		// fingerprint is permitted only after Service validation of explicit opt-in.
+		// Host-key trust is resolved before SSH user authentication, so a failed or
+		// mismatched first-contact store cannot send the password.
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			fingerprint := ssh.FingerprintSHA256(key)
-			if expectedKey != "" && fingerprint != expectedKey {
-				return fmt.Errorf("SSH host key fingerprint mismatch")
+			if trust == nil {
+				return fmt.Errorf("SSH host key trust is required")
 			}
-			if onKey != nil {
-				onKey(fingerprint)
-			}
-			return nil
+			return trust(fingerprint)
 		},
-		// Operators verify the fingerprint OpenSSH shows them, so negotiate host keys in
-		// OpenSSH order. x/crypto prefers RSA and would compare against a different key.
+		// Preserve OpenSSH host-key preference order: x/crypto can otherwise select an
+		// RSA key before the server's preferred key and establish a different trust anchor.
 		HostKeyAlgorithms: []string{
 			ssh.KeyAlgoED25519,
 			ssh.KeyAlgoECDSA256,

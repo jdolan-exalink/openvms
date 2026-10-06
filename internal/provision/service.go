@@ -67,6 +67,7 @@ type Service struct {
 	agentInstallCredentials        func(string) (string, []byte, []byte, error)
 	agentInstallRun                func(context.Context, AgentInstallRequest, func(string)) error
 	agentInstallRegister           func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error
+	agentSSHHostKeyPersist         func(context.Context, authz.Actor, uuid.UUID, string, uint16, string) error
 	agentInstallJobs               map[uuid.UUID]*agentInstallJob
 	agentInstallByServer           map[uuid.UUID]uuid.UUID
 	requireAgentUpdatePermissions  func(context.Context, authz.Actor, uuid.UUID) error

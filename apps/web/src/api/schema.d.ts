@@ -557,8 +557,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Install the OpenVMS edge agent over pinned SSH
-         * @description Requires servers.manage and servers.config.secrets. The API accepts this password only over direct HTTPS or HTTPS asserted by an explicitly allowlisted immediate proxy. The SSH target, password and fingerprint are transient and never stored or returned; host-key pin verification happens before password authentication. Existing agent registrations cannot be replaced.
+         * Install the OpenVMS edge agent over SSH
+         * @description Requires servers.manage and servers.config.secrets. The API accepts this password only over direct HTTPS or HTTPS asserted by an explicitly allowlisted immediate proxy. The SSH target and password are transient and never stored or returned. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. Existing agent registrations cannot be replaced.
          */
         post: operations["installServerAgent"];
         delete?: never;
@@ -603,7 +603,7 @@ export interface paths {
         put?: never;
         /**
          * Update an existing registered agent and configure HTTPS
-         * @description Requires servers.manage and servers.config.secrets. The registered agent IPv4 and existing bearer are fixed by server registration. The root SSH password and out-of-band SHA-256 pin are transient; HTTPS health is verified before public trust metadata is recorded. Existing TLS-enabled agents are not replaced by this operation.
+         * @description Requires servers.manage and servers.config.secrets. The registered agent IPv4 and existing bearer are fixed by server registration. The root SSH password is transient. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. HTTPS health is verified before public trust metadata is recorded. Existing TLS-enabled agents are not replaced by this operation.
          */
         post: operations["updateServerAgentOverSsh"];
         delete?: never;
@@ -2688,6 +2688,7 @@ export interface components {
             /** @description SHA256 fingerprint seen on first SSH contact. */
             host_key?: string;
         };
+        /** @description The first observed SSH host key is stored for this server, IPv4 and port before password authentication; future changes are rejected. First-use trust-on-first-use does not independently verify server identity. */
         ServerAgentInstallRequest: {
             /**
              * Format: ipv4
@@ -2697,15 +2698,12 @@ export interface components {
             ssh_port: number;
             /** @description Transient root SSH password; never persisted or echoed. */
             ssh_password: string;
-            /** @description Required out-of-band verified SHA-256 pin; no trust-on-first-use. */
-            ssh_host_key_fingerprint: string;
         };
+        /** @description The first observed SSH host key is stored for this registered server IPv4 and port before password authentication; future changes are rejected. First-use trust-on-first-use does not independently verify server identity. */
         ServerAgentUpdateRequest: {
             ssh_port: number;
             /** @description Transient root SSH password; never persisted or echoed. */
             ssh_password: string;
-            /** @description Required out-of-band verified SHA-256 pin; no trust-on-first-use. */
-            ssh_host_key_fingerprint: string;
         };
         ServerAgentInstallJob: {
             /** Format: uuid */

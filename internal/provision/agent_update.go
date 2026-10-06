@@ -31,6 +31,7 @@ type AgentUpdateRequest struct {
 	Username        string `json:"-"`
 	Password        string `json:"-"`
 	ExpectedHostKey string `json:"-"`
+	hostKeyTrust    func(context.Context, string) error
 	Binary          []byte `json:"-"`
 	AgentToken      string `json:"-"`
 	SecurePort      uint16 `json:"-"`
@@ -58,7 +59,7 @@ func (request AgentUpdateRequest) MarshalJSON() ([]byte, error) {
 type AgentUpdateHealthCheck func(context.Context, string, uint16, string, []byte) error
 
 // RunAgentUpdate safely updates only an existing OpenVMS agent installation.
-// It preserves the existing bearer file and refuses unless pinned SSH preflight
+// It preserves the existing bearer file and refuses unless SSH host-key trust
 // confirms a compatible host before any staged file is written.
 func RunAgentUpdate(ctx context.Context, request AgentUpdateRequest, dial AgentInstallDialer, checkHealth AgentUpdateHealthCheck) (resultErr error) {
 	if err := validateAgentUpdateRequest(request); err != nil {
@@ -142,7 +143,9 @@ func RunAgentUpdate(ctx context.Context, request AgentUpdateRequest, dial AgentI
 
 func validateAgentUpdateRequest(request AgentUpdateRequest) error {
 	ip, err := netip.ParseAddr(request.Host)
-	if err != nil || !ip.Is4() || ip.String() != request.Host || request.SSHPort == 0 || request.Username != "root" || request.Password == "" || len(request.Password) > 4096 || !validFingerprint(request.ExpectedHostKey) || len(request.Binary) == 0 || len(request.Binary) > agentInstallMaxBinary || len(request.AgentToken) < 32 || len(request.AgentToken) > 128 || request.SecurePort == 0 || request.SecurePort == 7419 {
+	validPinnedKey := validFingerprint(request.ExpectedHostKey) && request.hostKeyTrust == nil
+	validPersistedTrust := request.ExpectedHostKey == "" && request.hostKeyTrust != nil
+	if err != nil || !ip.Is4() || ip.String() != request.Host || request.SSHPort == 0 || request.Username != "root" || request.Password == "" || len(request.Password) > 4096 || (!validPinnedKey && !validPersistedTrust) || len(request.Binary) == 0 || len(request.Binary) > agentInstallMaxBinary || len(request.AgentToken) < 32 || len(request.AgentToken) > 128 || request.SecurePort == 0 || request.SecurePort == 7419 {
 		return errInvalidAgentInstall
 	}
 	for _, char := range request.AgentToken {
@@ -151,7 +154,7 @@ func validateAgentUpdateRequest(request AgentUpdateRequest) error {
 		}
 	}
 	listen := net.JoinHostPort("0.0.0.0", fmt.Sprint(request.SecurePort))
-	installRequest := AgentInstallRequest{Host: request.Host, Port: request.SSHPort, User: request.Username, Password: request.Password, ExpectedHostKey: request.ExpectedHostKey, Binary: request.Binary, Token: request.AgentToken, TLSListen: listen, TLSCertificate: request.TLSCertificate, TLSPrivateKey: request.TLSPrivateKey}
+	installRequest := AgentInstallRequest{Host: request.Host, Port: request.SSHPort, User: request.Username, Password: request.Password, ExpectedHostKey: request.ExpectedHostKey, hostKeyTrust: request.hostKeyTrust, Binary: request.Binary, Token: request.AgentToken, TLSListen: listen, TLSCertificate: request.TLSCertificate, TLSPrivateKey: request.TLSPrivateKey}
 	if err := validateAgentInstallRequest(installRequest); err != nil {
 		return err
 	}

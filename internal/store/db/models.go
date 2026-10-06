@@ -511,6 +511,15 @@ type ServerAgent struct {
 	UpdatedAt   time.Time
 }
 
+type ServerAgentSshHostKey struct {
+	ServerID    uuid.UUID
+	TenantID    uuid.UUID
+	Host        string
+	SshPort     int32
+	Fingerprint string
+	CreatedAt   time.Time
+}
+
 type ServerAgentTl struct {
 	ServerID   uuid.UUID
 	TenantID   uuid.UUID

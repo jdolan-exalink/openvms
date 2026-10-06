@@ -240,7 +240,6 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
   const t = useT();
   const [job, setJob] = useState<Schemas["ServerAgentInstallJob"] | null>(null);
   const [port, setPort] = useState("22");
-  const [fingerprint, setFingerprint] = useState("");
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const pendingPasswordRef = useRef("");
   const pollStartedAt = useRef(0);
@@ -264,7 +263,7 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
       pendingPasswordRef.current = "";
       return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/update-ssh", {
         params: { path: { serverId: server.id } },
-        body: { ssh_port: Number(port), ssh_password: password, ssh_host_key_fingerprint: fingerprint.trim() },
+        body: { ssh_port: Number(port), ssh_password: password },
       }));
     },
     onSuccess: (next) => {
@@ -362,19 +361,17 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
       <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentUpdateSSHScope")}</p>
       {!secureBrowser && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>}
       <p className="text-sm text-muted">{t("servers.agentUpdateSSHHostFixed")}</p>
+      <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentSSHHostKeyTOFU")}</p>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={t("servers.agentInstallPortLabel")}><TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={port} onChange={(event) => setPort(event.target.value)} autoComplete="off" /></Field>
         <Field label={t("servers.agentInstallPasswordLabel")} hint={t("servers.agentInstallPasswordHint")}>
           <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary" autoComplete="off" maxLength={4096} />
         </Field>
-        <Field label={t("servers.agentInstallFingerprintLabel")} hint={t("servers.agentInstallFingerprintHint")}>
-          <TextInput required aria-label={t("servers.agentInstallFingerprintLabel")} value={fingerprint} onChange={(event) => setFingerprint(event.target.value)} autoComplete="off" placeholder={`SHA256:${"…".repeat(8)}`} pattern="SHA256:[A-Za-z0-9+/]{43}" />
-        </Field>
       </div>
       {start.error && <p role="alert" className="text-sm text-bad">{agentUpdateStartError(start.error, t)}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="text" onClick={close}>{t("common.cancel")}</Button>
-        <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !isValidSSHPort(port) || !isValidFingerprint(fingerprint.trim()) || !secureBrowser}>{t("servers.agentUpdateSSHSubmit")}</Button>
+        <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !isValidSSHPort(port) || !secureBrowser}>{t("servers.agentUpdateSSHSubmit")}</Button>
       </div>
     </form> : <section aria-label={t("servers.agentUpdateSSHProgress")} className="flex flex-col gap-4">
       <p aria-live="polite">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>
@@ -410,7 +407,7 @@ function AgentInstallDialog({
   const maxPollingDurationMs = 11 * 60_000;
   const pollRequestTimeoutMs = 15_000;
   const t = useT();
-  const [form, setForm] = useState({ host: "", port: "22", fingerprint: "", confirmed: false });
+  const [form, setForm] = useState({ host: "", port: "22", confirmed: false });
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const pendingPasswordRef = useRef("");
   const pollStartedAt = useRef(0);
@@ -424,7 +421,6 @@ function AgentInstallDialog({
         ssh_host: form.host.trim(),
         ssh_port: Number(form.port),
         ssh_password: password,
-        ssh_host_key_fingerprint: form.fingerprint.trim(),
       };
       return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/install", { params: { path: { serverId: server.id } }, body }));
     },
@@ -503,6 +499,7 @@ function AgentInstallDialog({
           <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentInstallScopeNotice")}</p>
           {!secureBrowser && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>}
           <p className="text-sm text-muted">{t("servers.agentInstallRootOnly")}</p>
+          <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentSSHHostKeyTOFU")}</p>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("servers.agentInstallHostLabel")} hint={t("servers.agentInstallHostHint")}>
               <TextInput required aria-label={t("servers.agentInstallHostLabel")} value={form.host} onChange={(event) => setForm({ ...form, host: event.target.value })} autoComplete="off" inputMode="decimal" placeholder="10.20.0.11" />
@@ -513,9 +510,6 @@ function AgentInstallDialog({
             <Field label={t("servers.agentInstallPasswordLabel")} hint={t("servers.agentInstallPasswordHint")}>
               <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad" autoComplete="off" maxLength={4096} />
             </Field>
-            <Field label={t("servers.agentInstallFingerprintLabel")} hint={t("servers.agentInstallFingerprintHint")}>
-              <TextInput required aria-label={t("servers.agentInstallFingerprintLabel")} value={form.fingerprint} onChange={(event) => setForm({ ...form, fingerprint: event.target.value })} autoComplete="off" placeholder={`SHA256:${"…".repeat(8)}`} pattern="SHA256:[A-Za-z0-9+/]{43}" />
-            </Field>
           </div>
           <label className="flex items-start gap-3 rounded-m3-lg bg-surface-2 p-3 text-sm">
             <input type="checkbox" checked={form.confirmed} onChange={(event) => setForm({ ...form, confirmed: event.target.checked })} />
@@ -524,7 +518,7 @@ function AgentInstallDialog({
           {start.error && <p role="alert" className="text-sm text-bad">{agentInstallStartError(start.error, t)}</p>}
           <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" variant="text" onClick={close}>{t("common.cancel")}</Button>
-            <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !form.confirmed || !isCanonicalIPv4(form.host.trim()) || !isValidSSHPort(form.port) || !isValidFingerprint(form.fingerprint.trim()) || !secureBrowser}>
+            <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !form.confirmed || !isCanonicalIPv4(form.host.trim()) || !isValidSSHPort(form.port) || !secureBrowser}>
               {start.isPending ? t("servers.agentInstallSubmitting") : t("servers.agentInstallSubmit")}
             </Button>
           </div>
@@ -554,9 +548,6 @@ function isValidSSHPort(value: string) {
   return /^\d+$/.test(value) && Number.isInteger(port) && port >= 1 && port <= 65535;
 }
 
-function isValidFingerprint(value: string) {
-  return /^SHA256:[A-Za-z0-9+/]{43}$/.test(value);
-}
 
 function installJobStatusText(status: string | undefined, stage: string | undefined, t: ReturnType<typeof useT>) {
   if (status === "succeeded") return t("servers.agentInstallRegistered");

@@ -21,11 +21,10 @@ const agentUpdateJobTimeout = 10 * time.Minute
 type AgentUpdateStartRequest struct {
 	SSHPort  uint16
 	Password string
-	HostKey  string
 }
 
 func (request AgentUpdateStartRequest) String() string {
-	return "AgentUpdateStartRequest{ssh_port:" + strconv.Itoa(int(request.SSHPort)) + " host_key_fingerprint:" + request.HostKey + " password:[redacted]}"
+	return "AgentUpdateStartRequest{ssh_port:" + strconv.Itoa(int(request.SSHPort)) + " password:[redacted]}"
 }
 
 func (request AgentUpdateStartRequest) GoString() string { return request.String() }
@@ -33,13 +32,12 @@ func (request AgentUpdateStartRequest) GoString() string { return request.String
 func (request AgentUpdateStartRequest) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		SSHPort  uint16 `json:"ssh_port"`
-		HostKey  string `json:"ssh_host_key_fingerprint"`
 		Password string `json:"ssh_password"`
-	}{request.SSHPort, request.HostKey, "[redacted]"})
+	}{request.SSHPort, "[redacted]"})
 }
 
 func validateAgentUpdateStartRequest(in AgentUpdateStartRequest) error {
-	if in.SSHPort == 0 || in.Password == "" || len(in.Password) > 4096 || !validFingerprint(in.HostKey) {
+	if in.SSHPort == 0 || in.Password == "" || len(in.Password) > 4096 {
 		return &ValidationError{Msg: "invalid agent update request"}
 	}
 	return nil
@@ -174,8 +172,11 @@ func (s *Service) StartServerAgentUpdate(ctx context.Context, actor authz.Actor,
 	}
 	request := AgentUpdateRequest{
 		Host: row.Host, SSHPort: in.SSHPort, Username: "root", Password: in.Password,
-		ExpectedHostKey: in.HostKey, Binary: binary, AgentToken: token, SecurePort: agentInstallHTTPSPort,
+		Binary: binary, AgentToken: token, SecurePort: agentInstallHTTPSPort,
 		TLSCertificate: certificate, TLSPrivateKey: privateKey,
+	}
+	request.hostKeyTrust = func(ctx context.Context, fingerprint string) error {
+		return s.trustAgentSSHHostKey(ctx, actor, serverID, row.Host, in.SSHPort, fingerprint)
 	}
 	go s.runServerAgentUpdate(actor, job, row, request)
 	reservationOwned = false
@@ -229,12 +230,16 @@ func (s *Service) runServerAgentUpdate(actor authz.Actor, job *agentInstallJob, 
 		request.TLSPrivateKey, request.TLSCertificate, request.Binary = nil, nil, nil
 		s.releaseAgentInstallJob(job, false)
 	}()
-	job.update("running", "connecting", "Connecting to the pinned SSH host")
+	job.update("running", "connecting", "Connecting to the SSH host with remembered first-use trust")
 	run := s.agentUpdateRun
 	if run == nil {
 		run = func(ctx context.Context, request AgentUpdateRequest, progress func(string)) error {
 			progress("transferring")
-			return RunAgentUpdate(ctx, request, dialAgentSSH, nil)
+			installRequest := AgentInstallRequest{
+				Host: request.Host, Port: request.SSHPort, User: request.Username, Password: request.Password,
+				ExpectedHostKey: request.ExpectedHostKey, hostKeyTrust: request.hostKeyTrust,
+			}
+			return RunAgentUpdate(ctx, request, agentInstallDialer(installRequest), nil)
 		}
 	}
 	if err := run(ctx, request, func(stage string) { job.update("running", stage, agentUpdateStageMessage(stage)) }); err != nil {

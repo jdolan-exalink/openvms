@@ -78,9 +78,10 @@ func TestCredentialInstallHTTPSMiddlewareChecksPeerBeforeForwardedHeaders(t *tes
 
 func TestAgentInstallBodyRejectsUnknownTrailingAndOversizedJSON(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown fields": `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `","binary":"not-allowed"}`,
-		"trailing JSON":  `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"} {}`,
-		"oversized":      `{"ssh_password":"` + strings.Repeat("x", agentInstallRequestMaxBytes) + `"}`,
+		"unknown fields":            `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `","binary":"not-allowed"}`,
+		"removed fingerprint field": `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"}`,
+		"trailing JSON":             `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret"} {}`,
+		"oversized":                 `{"ssh_password":"` + strings.Repeat("x", agentInstallRequestMaxBytes) + `"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			called := false
@@ -109,10 +110,11 @@ func TestAgentUpdateHTTPSIngressAndBodyBounds(t *testing.T) {
 		name, remote, proto, body string
 		want                      int
 	}{
-		{"spoofed forwarded TLS", "127.0.0.1:8080", "https", `{"ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"}`, http.StatusForbidden},
-		{"trusted forwarded TLS", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"}`, http.StatusNoContent},
-		{"unknown field", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `","host":"192.0.2.5"}`, http.StatusBadRequest},
-		{"trailing JSON", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"} {}`, http.StatusBadRequest},
+		{"spoofed forwarded TLS", "127.0.0.1:8080", "https", `{"ssh_port":22,"ssh_password":"secret"}`, http.StatusForbidden},
+		{"trusted forwarded TLS", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret"}`, http.StatusNoContent},
+		{"unknown field", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret","host":"192.0.2.5"}`, http.StatusBadRequest},
+		{"removed fingerprint field", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"}`, http.StatusBadRequest},
+		{"trailing JSON", "10.20.0.7:8080", "https", `{"ssh_port":22,"ssh_password":"secret"} {}`, http.StatusBadRequest},
 		{"oversized body", "10.20.0.7:8080", "https", `{"ssh_password":"` + strings.Repeat("x", agentInstallRequestMaxBytes) + `"}`, http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

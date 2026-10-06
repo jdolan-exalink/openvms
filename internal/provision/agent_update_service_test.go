@@ -16,7 +16,7 @@ import (
 )
 
 func validAgentUpdateStartRequest() AgentUpdateStartRequest {
-	return AgentUpdateStartRequest{SSHPort: 2222, Password: "transient-root-password", HostKey: agentInstallTestPin}
+	return AgentUpdateStartRequest{SSHPort: 2222, Password: "transient-root-password"}
 }
 
 func TestStartAgentUpdateDeniesBeforeAgentSecretArtifactOrSSH(t *testing.T) {
@@ -48,6 +48,7 @@ func TestStartAgentUpdateUsesRegisteredHostAndPersistsTrustOnlyAfterVerifiedRunn
 	const token = "existing-sealed-agent-bearer-token-value"
 	ca, key := newAgentInstallTLS(t, "192.0.2.44")
 	var runRequest AgentUpdateRequest
+	var trustStored int
 	var persisted int
 	svc := &Service{
 		requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
@@ -66,8 +67,21 @@ func TestStartAgentUpdateUsesRegisteredHostAndPersistsTrustOnlyAfterVerifiedRunn
 			}
 			return ca, key, nil
 		},
-		agentUpdateRun: func(_ context.Context, request AgentUpdateRequest, progress func(string)) error {
+		agentSSHHostKeyPersist: func(_ context.Context, gotActor authz.Actor, gotServer uuid.UUID, host string, port uint16, fingerprint string) error {
+			trustStored++
+			if gotActor.UserID != actor.UserID || gotServer != serverID || host != "192.0.2.44" || port != 2222 || fingerprint != agentInstallTestPin {
+				t.Fatal("host-key trust callback was not bound to registered update target")
+			}
+			return nil
+		},
+		agentUpdateRun: func(ctx context.Context, request AgentUpdateRequest, progress func(string)) error {
 			runRequest = request
+			if request.hostKeyTrust == nil {
+				return errors.New("missing first-contact trust callback")
+			}
+			if err := request.hostKeyTrust(ctx, agentInstallTestPin); err != nil {
+				return err
+			}
 			progress("activating")
 			return nil
 		},
@@ -87,7 +101,7 @@ func TestStartAgentUpdateUsesRegisteredHostAndPersistsTrustOnlyAfterVerifiedRunn
 	if final.Status != "succeeded" || persisted != 1 {
 		t.Fatalf("job=%+v persisted=%d", final, persisted)
 	}
-	if runRequest.Host != "192.0.2.44" || runRequest.AgentToken != token || runRequest.Username != "root" || runRequest.SSHPort != 2222 {
+	if runRequest.Host != "192.0.2.44" || runRequest.AgentToken != token || runRequest.Username != "root" || runRequest.SSHPort != 2222 || runRequest.ExpectedHostKey != "" || runRequest.hostKeyTrust == nil || trustStored != 1 {
 		t.Fatalf("runner request did not use stored host/token: %+v", runRequest)
 	}
 	if strings.Contains(fmt.Sprintf("%+v", runRequest), validAgentUpdateStartRequest().Password) {

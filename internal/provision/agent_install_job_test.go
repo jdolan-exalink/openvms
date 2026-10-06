@@ -24,7 +24,7 @@ import (
 )
 
 func validAgentInstallStartRequest() AgentInstallStartRequest {
-	return AgentInstallStartRequest{Host: "192.0.2.44", Port: 2202, Password: "never-persist-ssh-password", HostKey: agentInstallTestPin}
+	return AgentInstallStartRequest{Host: "192.0.2.44", Port: 2202, Password: "never-persist-ssh-password"}
 }
 
 func TestStartAgentInstallDeniesBeforeRegistrationLookupArtifactOrRunner(t *testing.T) {
@@ -117,12 +117,26 @@ func TestStartAgentInstallRegistersOnlyAfterRunnerSuccess(t *testing.T) {
 	var registeredToken string
 	var registeredCA []byte
 	var requested AgentInstallRequest
+	var trustStored int
 	svc := &Service{
 		requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
 		agentInstallExists:             func(context.Context, authz.Actor, uuid.UUID) (bool, error) { return false, nil },
 		agentInstallBinary:             func() ([]byte, error) { return []byte("trusted fake binary"), nil },
-		agentInstallRun: func(_ context.Context, in AgentInstallRequest, update func(string)) error {
+		agentSSHHostKeyPersist: func(_ context.Context, gotActor authz.Actor, gotServer uuid.UUID, host string, port uint16, fingerprint string) error {
+			trustStored++
+			if gotActor.UserID != actor.UserID || gotServer != serverID || host != "192.0.2.44" || port != 2202 || fingerprint != agentInstallTestPin {
+				t.Fatal("host-key trust callback was not bound to the requested server target")
+			}
+			return nil
+		},
+		agentInstallRun: func(ctx context.Context, in AgentInstallRequest, update func(string)) error {
 			requested = in
+			if in.hostKeyTrust == nil {
+				return errors.New("missing first-contact trust callback")
+			}
+			if err := in.hostKeyTrust(ctx, agentInstallTestPin); err != nil {
+				return err
+			}
 			update("transferring")
 			update("activating")
 			return nil
@@ -141,7 +155,7 @@ func TestStartAgentInstallRegistersOnlyAfterRunnerSuccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if job.Status != "queued" {
+	if job.Status != "queued" && job.Status != "running" && job.Status != "succeeded" {
 		t.Fatalf("initial job = %#v", job)
 	}
 	final := waitAgentInstallJob(t, svc, actor, serverID, job)
@@ -151,8 +165,8 @@ func TestStartAgentInstallRegistersOnlyAfterRunnerSuccess(t *testing.T) {
 	if !registered || registeredToken == "" || len(registeredCA) == 0 {
 		t.Fatal("agent credentials/trust were not registered")
 	}
-	if requested.Password != password || requested.User != "root" || requested.ExpectedHostKey != request.HostKey {
-		t.Fatal("runner did not receive exact pinned root credentials")
+	if requested.Password != password || requested.User != "root" || requested.ExpectedHostKey != "" || requested.hostKeyTrust == nil || trustStored != 1 {
+		t.Fatal("runner did not receive transient root credentials and persisted first-contact trust")
 	}
 	if got := requested.String(); strings.Contains(got, password) {
 		t.Fatalf("runner request leaked password: %q", got)

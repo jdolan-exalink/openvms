@@ -139,7 +139,7 @@ func TestRunErrorPrefersStderrTail(t *testing.T) {
 		}
 		return 1
 	})
-	client, err := dialTest(t, addr, clientConfig("root", "pw", "", nil))
+	client, err := dialTest(t, addr, clientConfig("root", "pw", "", func(string) {}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestRunKeepsStdoutAndStderr(t *testing.T) {
 		}
 		return 1
 	})
-	client, err := dialTest(t, addr, clientConfig("root", "pw", "", nil))
+	client, err := dialTest(t, addr, clientConfig("root", "pw", "", func(string) {}))
 	if err != nil {
 		t.Fatal(err)
 	}

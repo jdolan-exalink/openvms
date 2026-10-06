@@ -33,6 +33,7 @@ type AgentInstallRequest struct {
 	User            string `json:"-"`
 	Password        string `json:"-"`
 	ExpectedHostKey string `json:"-"`
+	hostKeyTrust    func(context.Context, string) error
 	Binary          []byte `json:"-"`
 	Token           string `json:"-"`
 	TLSListen       string `json:"-"`
@@ -84,7 +85,9 @@ type agentInstallFile struct {
 
 func validateAgentInstallRequest(request AgentInstallRequest) error {
 	ip := net.ParseIP(request.Host)
-	if ip == nil || ip.To4() == nil || ip.String() != request.Host || request.Port == 0 || request.User != "root" || request.Password == "" || len(request.Password) > 4096 || !validFingerprint(request.ExpectedHostKey) || len(request.Binary) == 0 || len(request.Binary) > agentInstallMaxBinary || len(request.Token) < 32 || len(request.Token) > 128 {
+	validPinnedKey := validFingerprint(request.ExpectedHostKey) && request.hostKeyTrust == nil
+	validPersistedTrust := request.ExpectedHostKey == "" && request.hostKeyTrust != nil
+	if ip == nil || ip.To4() == nil || ip.String() != request.Host || request.Port == 0 || request.User != "root" || request.Password == "" || len(request.Password) > 4096 || (!validPinnedKey && !validPersistedTrust) || len(request.Binary) == 0 || len(request.Binary) > agentInstallMaxBinary || len(request.Token) < 32 || len(request.Token) > 128 {
 		return errInvalidAgentInstall
 	}
 	for _, r := range request.Token {
@@ -125,6 +128,15 @@ func validateAgentInstallRequest(request AgentInstallRequest) error {
 		return errInvalidAgentInstall
 	}
 	return nil
+}
+
+func agentInstallDialer(request AgentInstallRequest) AgentInstallDialer {
+	if request.hostKeyTrust == nil {
+		return dialAgentSSH
+	}
+	return func(ctx context.Context, host string, port uint16, user, password, _ string) (AgentInstallConn, error) {
+		return dialAgentSSHWithHostKeyTrust(ctx, host, port, user, password, request.hostKeyTrust)
+	}
 }
 
 func agentInstallFiles(request AgentInstallRequest) ([]agentInstallFile, error) {

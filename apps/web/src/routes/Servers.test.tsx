@@ -111,6 +111,15 @@ describe("Servers", () => {
       return { calls, fetchMock };
     };
 
+    it("does not request a manual SSH fingerprint", async () => {
+      setupAgentInstall();
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      expect(within(dialog).queryByLabelText(/Huella SHA-256 SSH verificada/i)).not.toBeInTheDocument();
+      expect(within(dialog).getByText(/primer contacto/i)).toBeInTheDocument();
+    });
+
     it("requires both matching scoped grants and respects an explicit deny", async () => {
       setupAgentInstall([installGrants[0]!]);
       renderPage(Servers);
@@ -134,7 +143,6 @@ describe("Servers", () => {
       expect(within(dialog).getByLabelText("Host SSH IPv4")).toHaveValue("");
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.0.0.44" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"A".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
       expect(await screen.findByRole("alert")).toHaveTextContent(/HTTPS antes de enviar credenciales/i);
@@ -152,7 +160,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       const { calls } = setupAgentInstall(undefined, async (request) => {
         const body = await request.clone().json();
-        expect(body).toEqual({ ssh_host: "10.20.30.44", ssh_port: 2222, ssh_password: "secret-root-password", ssh_host_key_fingerprint: `SHA256:${"B".repeat(43)}` });
+        expect(body).toEqual({ ssh_host: "10.20.30.44", ssh_port: 2222, ssh_password: "secret-root-password" });
         return json({ id: "job-1", status: "queued", stage: "validating" }, 202);
       });
       renderPage(Servers);
@@ -161,7 +169,6 @@ describe("Servers", () => {
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
       fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "2222" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"B".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
       expect(await screen.findByText(/HTTPS aún no está verificada/i)).toBeInTheDocument();
@@ -184,7 +191,6 @@ describe("Servers", () => {
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"C".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
       expect(screen.queryByDisplayValue("secret-root-password")).not.toBeInTheDocument();
@@ -207,7 +213,6 @@ describe("Servers", () => {
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"D".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
       expect(await screen.findByText(/Instalación en cola/i)).toBeInTheDocument();
@@ -232,7 +237,6 @@ describe("Servers", () => {
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"E".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
       expect((await screen.findAllByText(/No se puede confirmar el resultado/i)).length).toBeGreaterThan(0);
@@ -264,6 +268,15 @@ describe("Servers", () => {
       return { calls, fetchMock };
     }
 
+    it("does not request a manual SSH fingerprint", async () => {
+      setup();
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
+      expect(within(dialog).queryByLabelText(/Huella SHA-256 SSH verificada/i)).not.toBeInTheDocument();
+      expect(within(dialog).getByText(/primer contacto/i)).toBeInTheDocument();
+    });
+
     it("requires both matching server-scoped permissions", async () => {
       setup(undefined, undefined, [grants[0]!]);
       renderPage(Servers);
@@ -279,7 +292,6 @@ describe("Servers", () => {
       expect(within(dialog).queryByLabelText(/Host SSH/i)).not.toBeInTheDocument();
       fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "2222" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"A".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
       expect(await screen.findByRole("alert")).toHaveTextContent(/HTTPS antes de enviar credenciales/i);
       expect(calls.some((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/update-ssh"))).toBe(false);
@@ -290,7 +302,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       const { calls } = setup(async (request) => {
         expect(new URL(request.url).pathname).toBe("/api/v1/servers/a/agent/update-ssh");
-        expect(await request.clone().json()).toEqual({ ssh_port: 2222, ssh_password: "secret-root-password", ssh_host_key_fingerprint: `SHA256:${"B".repeat(43)}` });
+        expect(await request.clone().json()).toEqual({ ssh_port: 2222, ssh_password: "secret-root-password" });
         return json({ id: "job-1", status: "queued", stage: "validating" }, 202);
       });
       renderPage(Servers);
@@ -298,7 +310,6 @@ describe("Servers", () => {
       const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
       fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "2222" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"B".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
       expect(await screen.findByText(/agente existente se autenticó correctamente/i)).toBeInTheDocument();
       expect(screen.queryByDisplayValue("secret-root-password")).not.toBeInTheDocument();
@@ -341,7 +352,6 @@ describe("Servers", () => {
       fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
       const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"D".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
       await waitFor(() => expect(pollRequest).toBeDefined());
       expect(scheduled).toHaveLength(1);
@@ -368,7 +378,6 @@ describe("Servers", () => {
       fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
       const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"E".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
       await waitFor(() => expect(pollRequest).toBeDefined());
       await act(async () => { for (const callback of scheduled) callback(); });
@@ -387,7 +396,6 @@ describe("Servers", () => {
       fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
       const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"F".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
       expect(await screen.findByRole("alert")).toHaveTextContent(/otra activa o esta configuración no admite/i);
       expect(document.body).not.toHaveTextContent("secret-root-password");
@@ -401,7 +409,6 @@ describe("Servers", () => {
       fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
       const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
-      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"C".repeat(43)}` } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
       expect((await screen.findAllByText(/No se puede confirmar el resultado/i)).length).toBeGreaterThan(0);
       expect(document.body).not.toHaveTextContent("secret-root-password");
