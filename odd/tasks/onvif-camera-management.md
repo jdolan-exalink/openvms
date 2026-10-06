@@ -4,13 +4,13 @@ Deliver capability-driven ONVIF agent/API management, safe Frigate sync and audi
 
 ## Current implementation status — 2026-10-06
 
-- User authorized readonly check of registered `opevms-mimo` (`10.1.1.144:7419`, server `c420319a-7c77-4489-b644-3e212673dd80`); not contacted.
+- Authorized unauthenticated GET `/v1/metrics` on `opevms-mimo` (`10.1.1.144:7419`; server `c420319a-7c77-4489-b644-3e212673dd80`): HTTP 401, no `WWW-Authenticate`; body discarded. Reachability only; identity/metrics unverified.
 
 - `712b56d` (relay) and `daafa0d` (UI) connect selected-server read-only probing; success is device/services/time, not saved cameras.
-- Probe, registration and SSH install exist; local HTTPS is verified. Agent registration, remote SSH and device acceptance remain pending; no production DB/device test.
-- Local steps 1–3 done; no SSH destination/session authorized; Casa/camera acceptance pending.
+- Probe, registration and SSH install exist; local HTTPS and TLS schema v33 are deployed. Agent registration, remote SSH and device acceptance remain pending; no camera test.
+- SSH/Casa acceptance pending.
 - UI proof: Cameras 19; Servers 26; typecheck and web 120 files/863 tests PASS; not device acceptance.
-- “100%” means the declared capability/profile matrix; unsupported and vendor-specific operations stay unavailable.
+- “100%” means declared profiles; unsupported operations remain unavailable.
 
 ## Goal and boundaries
 
@@ -80,7 +80,7 @@ Implement in dependency order. Each delegated work unit closes with checks, Conv
 - Delivery is `ask-on-risk` / user-approved `stacked-to-main`; no push/PR/merge authorized.
 - ONVIF-02 remains partial: device reads/WSSE/discovery, TLS, probe relay/UI exist; persistence, stable VMS identity and live validation remain. Parent commits `712b56d`, `daafa0d`; planning `134a319`; review boundary `19315be`; later candidates declined.
 - Per unit record RED/GREEN/REFACTOR, checks/harness, rollback, commit/lines and review boundary; no behavior/tests omitted to hit advisory 400 lines.
-- Next: confirm HTTPS/schema/proxy/permissions; probe is not persistence.
+- Next: register agent with an authenticated actor; probe is not persistence.
 
 ### Existing-server SSH agent installation (local implementation; deployment partial)
 
@@ -143,23 +143,25 @@ Unrun template: `vmsctl agent-register --server-id "$SERVER_UUID" --session-file
 
 **HTTPS ingress source proof (2026-10-06):** Initial RED: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./deploy/agent/compose -run 'TestWeb(Compose|TLS)'` failed for missing port/bootstrap; second focused RED caught unsafe short mounts. HTTPS regression RED: added `default_sni` contract assertion failed on the existing Caddyfile. GREEN: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./deploy/agent/compose`; `GOCACHE=/tmp/openvms-go-build-cache go test -race ./deploy/agent/compose`; `GOCACHE=/tmp/openvms-go-build-cache go test ./...`; `sh -n deploy/docker/bootstrap-local-tls.sh`; `docker compose config --quiet`; `git diff --check` PASS. Isolated candidate Caddy validation and IP-URL curl with `--cacert` completed TLS (HTTP 502 without API network). RFC 6066 disallows IP literals in SNI; Caddy `default_sni` selects the IP-SAN cert for no-SNI clients without disabling verification ([Caddy docs](https://caddyserver.com/docs/caddyfile/options), [RFC 6066](https://www.rfc-editor.org/rfc/rfc6066.html)). Active image/service changed only in the later web-only redeploy recorded below.
 
-**Local deployment (2026-10-06; web redeploy complete, agent setup pending):** Protected DB backup `.atl/onvif-deploy/openvms-https-5c8ed21.dump` (dir/file `0700/0600`, 20,317,434 bytes, SHA-256 `5c943ed3ae2dd628cd503f71a386c51fdda4e446ca5357f540f9eb0ac501a5ab`), `pg_restore --list` PASS. Retained rollback tags: API `openvms-api:rollback-5c8ed21` (`1765af31de0b`), web `openvms-web:rollback-5c8ed21` (`2c99d40807b9`). Generated ignored self-signed IP-SAN cert/key (`0600`). Initial API/web build, isolated Caddy validation, schema migration 32, and API+web restart PASS; then at `f64a51a`, `docker compose build --pull=false web` + isolated Caddy validation + `docker compose up -d --no-deps web` PASS; API container ID/start time unchanged. Active web image `sha256:220021578833aca6b167c5e3fb1284579bba12d13099cb12ffe093e656a99350`. HTTPS `https://10.1.1.24:8443` (health/root) and HTTP `http://10.1.1.24:8000` (health/root) return 200. Anonymous install POST with `{}` returns HTTPS 401 and HTTP 403; no job/credentials. Proxy `.4`→API `.2`. Cert subject/issuer `OpenVMS local HTTPS 10.1.1.24`, SAN IP `10.1.1.24`, valid 2026-10-06–2027-10-06, SHA-256 `EA:CB:77:41:5A:A2:12:57:E7:49:84:14:DF:4A:DD:E9:44:1A:53:CC:60:AD:51:AD:47:97:E7:D6:B1:60:0C:AD`; self-signed browser trust is expected—install/trust this cert explicitly, never bypass TLS errors. No agent registration, SSH, or camera. Keep rollback tags/backup; no volume deletion or DB restore.
+**Local deployment (2026-10-06; web active, agent pending):** Backup `.atl/onvif-deploy/openvms-https-5c8ed21.dump` (`0700/0600`, 20,317,434 bytes; SHA-256 `5c943ed3ae2dd628cd503f71a386c51fdda4e446ca5357f540f9eb0ac501a5ab`) verified by `pg_restore --list`. Rollbacks: API `openvms-api:rollback-5c8ed21` (`1765af31de0b`), web `openvms-web:rollback-5c8ed21` (`2c99d40807b9`). Local self-signed cert/key are ignored (`0600`), IP SAN `10.1.1.24`, SHA-256 `EA:CB:77:41:5A:A2:12:57:E7:49:84:14:DF:4A:DD:E9:44:1A:53:CC:60:AD:51:AD:47:97:E7:D6:B1:60:0C:AD`; explicitly trust cert, never bypass TLS. HTTPS `8443` and HTTP `8000` health/root return 200; anonymous install `{}` HTTPS 401/HTTP 403. Web `.4` → API `.2`. Web active image `sha256:220021578833aca6b167c5e3fb1284579bba12d13099cb12ffe093e656a99350`; no volume deletion/DB restore.
+
+**Schema v33 local deployment (2026-10-06; HEAD `dc21d1a`):** Backup `.atl/onvif-deploy/migration33-pre/postgres-schema32.dump` (`0700/0600`, 20,722,647 bytes; TOC verified). Prior API rollback tag `openvms-api:rollback-pre-schema33-dc21d1a` → `sha256:552c6675b90ee95ffe7514bdf6b5e689ba3a8a97f2adad01ead2ad8b60283ad5`. Built only API (`docker compose build --pull=false api`). One-off initially collided on API static IP before migration; an ephemeral `!reset` override removed only that IP and kept API running. `vmsctl migrate` and no-op rerun PASS, version 33. Catalog: TLS columns/table, parent composite UNIQUE, validated composite FK/constraints, valid+ready indexes, RLS enabled+forced, `tenant_isolation` ALL policy using/check `app_tenant_visible(tenant_id)`. Restarted API only; active API image `sha256:498e8882085aa5ca755e16ecfaca1f2dddacf244afa248b5f13e215dc581f562`, web image unchanged; `.2`/`.4` preserved. Health HTTPS (verified with `--cacert`) and HTTP 200; anonymous install HTTPS 401/HTTP 403. No session, agent registration, SSH or camera. Keep rollback artifacts; do not restore DB.
 
 ## Immediate deployment-test readiness checklist
 
 Read-only test gates; do not inspect ambient SSH, secrets, sessions or remote hosts.
 
-| Gate | Required evidence before a deployment/device test |
+| Gate | Required evidence |
 |---|---|
-| Browser HTTPS / proxy | IP health/UI verified with `--cacert`; explicitly trust self-signed cert. Anonymous install: HTTPS 401 / HTTP 403. Keep Caddy `.4` → API `.2` and exact `/32`; never bypass TLS. |
-| Database/schema | Goose v32 marker predates TLS DDL; table/key absent. v33 repair source-only; v32 is not schema proof. |
-| Agent TLS | Cert IP SAN must match registered IP; configure all three listener settings, secure port and matching CA trust. No HTTP fallback. |
-| Camera policy | Configure interface/`ONVIF_ALLOWED_CIDRS`; only approved camera/IP and temporary credentials. |
-| Permissions | Check scoped `servers.manage` + `servers.config.secrets`; test denial without credentials. |
-| Remote authorization | Explicit destination, operation and credential/session required; never probe or reuse ambient sessions. |
-| Read-only acceptance | Device info/services/time only; validate safe projection, no saves/secret leak/XAddr follow, trust/IP-SAN/CIDR/denial/timeouts. No physical writes. |
+| Browser/proxy | HTTPS 8443 with `--cacert`; explicitly trust cert; HTTPS 401 / HTTP 403; keep web `.4` → API `.2` exact `/32`. |
+| Schema | v33 deployed and catalog checked above. |
+| Agent TLS | Register matching IP-SAN, HTTPS port and CA; no plaintext fallback. |
+| Camera | Approved target/CIDR/interface only; temporary creds; device info/services/time only. |
+| Permissions | Both scoped permissions; denial before credentials/outbound. |
+| Remote | Explicit destination, operation and credential/session; no ambient access. |
+| Acceptance | Redaction, bounds, no saves/XAddr following/physical writes. |
 
-Record destination, operation/session scope, versions, outcome, rollback. On any failed gate, stop; no plaintext fallback or broader trust.
+Record scope, outcome and rollback. On any failed gate, stop; no plaintext fallback or broader trust.
 
 ## Compact implementation evidence ledger
 
