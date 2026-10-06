@@ -31,3 +31,5 @@ deploy/tiles/
 docker-compose.override.yml
 # Locally bootstrapped optional ONVIF agent cert, private key, and bearer token.
 /deploy/agent/compose/local/
+# Locally bootstrapped HTTPS certificate and private key for the web listener.
+/deploy/docker/local-tls/

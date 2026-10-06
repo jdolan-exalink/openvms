@@ -102,7 +102,7 @@ services:
     environment:
       <<: *go-env
       TRUST_FORWARDED_FOR: "true"
-      CREDENTIAL_TRUSTED_PROXY_CIDRS: ${CREDENTIAL_TRUSTED_PROXY_CIDRS:-}
+      CREDENTIAL_TRUSTED_PROXY_CIDRS: ${CREDENTIAL_TRUSTED_PROXY_CIDRS:-${OPENVMS_AGENT_WEB_IPV4:-172.29.240.4}/32}
       HOST_PROC: /host/proc
       HOST_DRM: /host/drm
       HOST_DISK: /hostfs
@@ -177,9 +177,28 @@ services:
     build: { context: ., dockerfile: deploy/docker/web.Dockerfile }
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
-    ports: ["${WEB_PORT:-8000}:80"]
+      HTTPS_SITE_ADDRESS: ${OPENVMS_HTTPS_SITE_IPV4:-10.1.1.24}
+      API_UPSTREAM: ${OPENVMS_AGENT_API_IPV4:-172.29.240.2}:8080
+    ports: ["${WEB_PORT:-8000}:80", "${WEB_HTTPS_PORT:-8443}:443"]
     depends_on: [api]
-    volumes: [caddy:/data]
+    volumes:
+      - caddy:/data
+      - type: bind
+        source: ${OPENVMS_WEB_TLS_CERT_HOST_FILE:-./deploy/docker/local-tls/tls.crt}
+        target: /etc/caddy/tls.crt
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${OPENVMS_WEB_TLS_KEY_HOST_FILE:-./deploy/docker/local-tls/tls.key}
+        target: /etc/caddy/tls.key
+        read_only: true
+        bind:
+          create_host_path: false
+    networks:
+      default: {}
+      onvif-agent:
+        ipv4_address: ${OPENVMS_AGENT_WEB_IPV4:-172.29.240.4}
 
   prometheus:
     profiles: [observability]

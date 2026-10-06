@@ -1,30 +1,29 @@
 # ONVIF Camera Management
 
-Deliver capability-driven ONVIF camera management via agent/API, with safe Frigate synchronization and auditable operations. This five-phase feature is broader than CRUD.
+Deliver capability-driven ONVIF agent/API management, safe Frigate synchronization, and auditable operations. The five phases extend beyond CRUD.
 
 ## Current implementation status — 2026-10-06
 
-- Commits `712b56d` (HTTPS relay) and `daafa0d` (UI) connect selected-server read-only probing; success shows device/services/time, not saved cameras.
-- The read-only path and secure registration command are implemented locally, but **not deployed** or tested against a real camera/production database. Evidence is fake-transport/UI tests; no production certificate exists.
-- The user authorized a selected-server “Install agent via SSH” action. SSH-01a runner, SSH-01b API/job plus route-specific trusted HTTPS ingress, and SSH-02 UI are implemented locally. No destination/session is authorized for actual SSH, deployment, or camera tests; Casa remains pending.
-- Proof: focused Cameras test — 19 passed; typecheck — PASS; web suite — 120 files / 856 tests. Local checks are not device acceptance.
+- `712b56d` (relay) and `daafa0d` (UI) connect selected-server read-only probing; success is device/services/time, not saved cameras.
+- Read-only flow, secure registration, SSH install, and local HTTPS source/config are implemented but **not deployed**. Tests use fakes/mocks; no production cert, real camera, or production DB test exists.
+- Local steps 1–3 are authorized, not executed. No destination/session is authorized for SSH; Casa and camera acceptance remain pending.
+- Proof: Cameras 19 tests; Servers 26; typecheck PASS; web 120 files/863 tests. Not device acceptance.
 - Product promise: 100% support of the explicitly declared capability/profile matrix, not every vendor's proprietary extension or every ONVIF function on every device. Unsupported capabilities must remain unavailable in the UI.
 
 ## Goal and boundaries
 
-- **Outcome:** discover and manage camera capabilities and operations, configure imaging/network/time, PTZ and audio, and ingest advanced ONVIF events/analytics while retaining stable VMS identity and safe Frigate lifecycle behavior.
-- **Authorized implementation:** camera/agent and API/UI code, including the SSH-install workflow below; use fakes for development. No actual SSH, deployment, LAN camera, or physical operation without separate destination/session authorization.
-- **Frigate:** OpenVMS must modify/synchronize Frigate configuration. Camera deletion preserves recordings by default; any discard must be explicit and fail closed. No factory reset.
-- **Security and reliability:** stable VMS IDs; tombstones suppress reimport of deleted cameras; encrypted, write-only secrets; capability/operation-driven UI states and options; bounded retries/timeouts; readback plus audit for mutations.
-- **Delivery:** `ask-on-risk`, user-approved `stacked-to-main`; no push/PR/merge. Keep tests/docs in Conventional Commits on the feature branch. 400 lines is guidance, not a cap; the full feature spans many work units.
+- **Outcome:** capability/operation discovery and management, imaging/video/network/time, PTZ/audio, advanced events/analytics, stable VMS identity and safe Frigate lifecycle.
+- **Scope:** agent/API/UI code and SSH-install workflow; use fakes. Remote SSH requires separate destination/operation/credential authorization. Camera/physical operations likewise need explicit authorization.
+- **Frigate:** synchronize configuration; preserve recordings on deletion; discard requires explicit confirmation and fails closed; no factory reset.
+- **Reliability:** stable IDs, deletion tombstones, encrypted write-only secrets, capability-driven UI, bounded operations, audited/read-back mutations.
+- **Delivery:** `ask-on-risk`, user-approved `stacked-to-main`; no push/PR/merge. Keep tests/docs with Conventional Commits; 400 lines is guidance, not a cap.
 - **TDD:** Strict TDD is enabled. Record observed RED/GREEN/REFACTOR per implementation task; never infer results.
 
 ## Baseline and current state
 
 - Feature branch: `feat/onvif-camera-management`, created from local `main` at `3d44726ff04f61775115e9cd37dc0c2db8cb5c0a` (`chore: ignore local soc map mockup reference`). At task creation `HEAD` and `main` resolve to the same commit; do not copy unrelated future changes from `feat/maps-phase2`.
-- Historical baseline exploration found ONVIF credentials/config represented in Frigate configuration but no native ONVIF discovery/control in the node agent. Per-camera PATCH edits an existing Frigate camera section; adding/removing sections currently needs raw config PUT or a new safe agent capability. Secrets require `servers.config.secrets` and are masked otherwise; Frigate below 0.16 cannot edit config. Recording reads exist but no recording DELETE endpoint. Existing camera sync identity is `(server_id, remote_name)`; import upsert can resurrect a soft-deleted same-name camera, so deletion tombstones/suppression are required. Prefer display-name changes over renaming remote keys to preserve VMS/event identity.
-- Baseline runners: `go test -race ./...`, `pnpm test`, `pnpm typecheck`; focus Go by package and web via `pnpm exec vitest run <test-file>`.
-- Initial planning made no source/test/commit or physical-device changes; later evidence is listed below.
+- Baseline: ONVIF config lived in Frigate, not native agent control. Per-camera PATCH edits existing sections; add/remove needs raw config PUT or safe agent capability. Secrets require `servers.config.secrets`; Frigate <0.16 cannot edit config. Recording reads exist, no DELETE. Sync key `(server_id, remote_name)` can resurrect deleted cameras; tombstones are required. Preserve remote keys for identity; change display names.
+- Runners: `go test -race ./...`, `pnpm test`, `pnpm typecheck`; focused Go package and `pnpm exec vitest run <test-file>`. Initial planning made no source/test/device changes; evidence follows.
 
 ## Work units
 
@@ -78,21 +77,21 @@ Implement in dependency order. Each delegated work unit closes with checks, Conv
 
 ## Delivery and progress record
 
-- Strategy: `ask-on-risk`; chain strategy: `stacked-to-main` (user-approved). No push, PR creation, or merge is authorized.
-- Current slice: ONVIF-02 remains partial. Device reads, WSSE, scoped discovery, optional TLS listener, verified HTTPS, TLS config, HTTPS probe, relay and Cameras UI are local. Camera persistence, stable VMS mapping and real-device/deployment/database validation remain absent. Parent commits: `712b56d`, `daafa0d`; no PR/deployment. Planning commit `134a319`; reviewed boundary `19315be`; later candidates declined.
-- Estimate: many thousands of authored lines across phases. Keep cohesive work units and count authored additions/deletions; apply approved stacked-to-main slicing at delivery boundaries. Never omit behavior/tests to meet a line count.
-- Per-task evidence to append: task ID; RED/GREEN/REFACTOR commands and observed results; additional checks; harness result or justified `N/A`; rollback boundary; Conventional Commit and commit ID; authored line count; risk assessment/review due reason and review outcome; PR slice boundary if/when user later authorizes PR work.
-- Next implementation slice: ONVIF-DEPLOY-SSH-01/02 using fakes only. Local Casa deployment separately still needs selected addresses, authorized migrations, protected active session, and verified TLS trust. Keep ONVIF-02 partial; a probe is not persistence.
+- Strategy `ask-on-risk`; user-approved `stacked-to-main`. No push, PR, or merge authorized.
+- ONVIF-02 partial: device reads/WSSE/discovery, TLS listener/client/config, probe relay and Cameras UI are local. Persistence, stable VMS mapping, deployment and device/database validation remain absent. Parent commits `712b56d`, `daafa0d`; no PR/deployment. Planning `134a319`; review boundary `19315be`; later candidates declined.
+- Thousands of authored lines expected. Keep cohesive units and count additions/deletions; use approved stacking. Do not omit behavior/tests for line budget.
+- Per unit record ID, observed RED/GREEN/REFACTOR, checks, runtime harness or justified N/A, rollback, commit/lines, risk/review status, and later PR boundary.
+- Next: parent review/authorize HTTPS ingress deployment; verify HTTPS, exact proxy peer trust, schema and permissions before separately authorized remote SSH. ONVIF-02 remains partial; probe is not persistence.
 
 ### Existing-server SSH agent installation (local implementation; not deployed)
 
-Only local implementation is authorized; Frigate URL does not prove the SSH target. Collect explicit SSH host/port, username/password, and pinned fingerprint (no TOFU). Check both scoped permissions before dial; bind a bounded memory job to the existing server.
+Local steps 1–3 are authorized only on this machine; remote SSH execution is not yet authorized. Frigate URL does not prove the SSH target. The UI collects explicit SSH host/port, root password, and pinned fingerprint (no TOFU). Check both scoped permissions before dial; bind a bounded memory job to the existing server.
 
 | ID | Unit | Security/scope |
 |---|---|---|
 | ONVIF-DEPLOY-SSH-01 | Backend/API + dedicated agent-only runner | Verify fingerprint before password auth. SSH username/password never enter DB, job snapshots, logs, files, or audit; Go strings do not guarantee zeroization. A separately sealed server-bound agent bearer token is distinct. No new server or broad provisioning. |
 | ONVIF-DEPLOY-SSH-01a | Pinned SSH runner foundation (implemented locally; not callable from API) | Explicit IPv4/port, root user, password, required SHA-256 pin; fake dial/SSH. SFTP payload only. Bounded preflight/install; no overwrite; allowlisted agent files, optional supplied cert/key 0600 with matching IP SAN. Safe `String`/`GoString`/JSON projection excludes secrets and payload bytes. No API/job store, HTTP fallback, or actual remote connection. |
-| ONVIF-DEPLOY-SSH-01b | Existing-server API install + ephemeral progress (implemented locally; not deployed) | POST/poll; scoped permissions before agent/binary access; strict request; trusted artifact; generated token/TLS; insert-only registration; transient credentials. Direct TLS or single forwarded HTTPS from immediate peer in explicit `CREDENTIAL_TRUSTED_PROXY_CIDRS`; empty default denies proxy trust. Worker gets a fresh bounded context; early reservation precedes artifact/token work; artifact reads are bounded and reject symlinks. |
+| ONVIF-DEPLOY-SSH-01b | Existing-server API install + ephemeral progress (implemented locally; not deployed) | POST/poll; scoped permissions before agent/binary access; strict request; trusted artifact; generated token/TLS; insert-only registration; transient credentials. Direct TLS or single forwarded HTTPS from explicit immediate-peer `CREDENTIAL_TRUSTED_PROXY_CIDRS`; API's unset default denies, Compose now supplies only web `/32`. Worker gets a fresh bounded context; early reservation precedes artifact/token work; bounded artifact reads reject symlinks. |
 | ONVIF-DEPLOY-SSH-02 | Selected-server Servers UI (implemented locally; mocked API only) | Credentials stay in an uncontrolled password input/ref only until submission, then clear immediately; never browser storage, URL, logs, response echo, or audit. HTTPS guard, dual scoped permission gate, safe bounded progress/errors. Closing active jobs does not cancel remote work; unmount/filtering loses local job tracking, and a lost job is unknown, not success. |
 
 Runner changes only OpenVMS agent files/systemd and optional supplied TLS material; no packages, Docker/Compose, Frigate, NTP, or network. It checks OS/architecture, bounds steps, refuses overwrites/retries. Probe readiness requires verified HTTPS/trust, sealed token, and health. Fake tests only; actual SSH needs separate destination/session authorization.
@@ -101,7 +100,7 @@ Failures may leave partial files; no remote retry/cleanup; manual remediation re
 
 **01a proof (2026-10-06):** RED: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/provision -run TestRunAgentInstall` failed: runner undefined. GREEN: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/provision`; `GOCACHE=/tmp/openvms-go-build-cache go test -race ./internal/provision`; `GOCACHE=/tmp/openvms-go-build-cache go test ./...`; `git diff --check` — all PASS. Fake-only tests cover validation, pin mismatch, modes/SAN, cancellation, redaction, scope. `github.com/pkg/sftp` 1.13.11. No live calls. Rollback: remove `agent_install.go` + tests and SFTP/pinned-port additions in `ssh.go`; revert SFTP dependency. No commit/review.
 
-**SSH-01b ingress design (2026-10-06):** Existing `secureRequest` and `TRUST_FORWARDED_FOR` do not authenticate the proxy peer. Parent authorized a narrow `CREDENTIAL_TRUSTED_PROXY_CIDRS` config, disabled by default and fail-closed on malformed CIDRs. Only the SSH-install route will accept exactly one forwarded `https` value from a matching immediate peer; direct TLS is accepted. Existing global cookie/security behavior stays unchanged.
+**SSH-01b ingress design (2026-10-06):** Existing `secureRequest` and `TRUST_FORWARDED_FOR` do not authenticate the proxy peer. `CREDENTIAL_TRUSTED_PROXY_CIDRS` config is fail-closed on malformed values; only the SSH-install route accepts one forwarded `https` value from an allowed immediate peer, or direct TLS. Compose supplies the stable Caddy `/32`; app unset default denies. Existing global cookie/security behavior stays unchanged.
 
 **SSH-01b proof (2026-10-06):** RED: contract/service tests observed absent routes/service. GREEN: `make generate`; focused, race and full Go suites PASS. Coverage: proxy spoof/multi-value/CIDR, bounds, permission-before-row/artifact, existing-agent conflict, redaction, fake runner success/failure, artifact integrity, generated cert trust. No live operations. Pending: proxy deployment config, live DB/SSH, agent HTTPS health and camera acceptance. Rollback: remove SSH-01b service/routes/schema/query and trusted-proxy code.
 
@@ -113,15 +112,15 @@ Failures may leave partial files; no remote retry/cleanup; manual remediation re
 
 ### Local Compose agent configuration slice (pre-deployment)
 
-The optional local agent configuration is implemented, but intentionally remains undeployed. It is a configuration/bootstrap slice only; it does not register the generated bearer token with the API, apply migrations, start containers, or test camera reachability.
+Optional local agent config/bootstrap only; it does not register the token, apply migrations, start containers, or test camera reachability.
 
 | Action | Local-only instructions / guardrail |
 |---|---|
-| Select addresses | Before any deployment, an operator must choose a non-overlapping Compose subnet and fixed API/agent IPv4 addresses. Defaults are examples only (`172.29.240.0/24`, API `.2`, agent `.3`); no host route/subnet scan was performed. Set `OPENVMS_AGENT_SUBNET`, `OPENVMS_AGENT_API_IPV4`, and `OPENVMS_AGENT_IPV4` in the ignored `.env`. The registered agent IPv4, certificate SAN, and API TLS trust/port must later agree exactly. |
-| Bootstrap local material | `deploy/agent/compose/bootstrap-local.sh <agent-ipv4> deploy/agent/compose/local` creates a self-signed IP-SAN TLS certificate, private key, and random bearer token only when the output directory does not already exist. Files are ignored by Git; the directory/key/token are mode `0700`/`0600`, certificate `0644`. Never commit or print them. The certificate is local development material, not production PKI. |
-| Provisioning gate | **Do not enable the profile yet.** A secure local registration command is implemented below, but it has not been run; no token is registered/sealed. Do not copy/retrieve the token from an existing SSH-provisioned agent. |
-| Configure allowlist/runtime | Set `ONVIF_ALLOWED_CIDRS`, `ONVIF_DISCOVERY_INTERFACES`, and `OPENVMS_AGENT_UID`/`OPENVMS_AGENT_GID` to operator-verified values. Because bootstrap creates a `0700` directory and `0600` key/token owned by the invoking host user, set the container UID/GID to that owner (`id -u`/`id -g`) or run bootstrap as the intended UID; never weaken these file modes to fix access. The agent is an optional `onvif-agent` profile on a private fixed-IP bridge; only the API also joins that bridge. No host ports are published. A bridge may not pass camera discovery multicast; do not assume a successful discovery path. |
-| Enable only after prerequisites | The agent image uses the API runtime image and exposes its HTTP metrics/update listener plus the separately configured HTTPS ONVIF listener only to the Compose network. Credentials must use the existing verified-HTTPS probe route; this config does not add plaintext fallback. Apply/verify the TLS metadata migration and run the secure registration command below before considering profile startup. |
+| Select addresses | Choose non-overlapping subnet/API/agent IPs (examples: `172.29.240.0/24`, `.2`, `.3`); no host route scan. Set `OPENVMS_AGENT_SUBNET`, `OPENVMS_AGENT_API_IPV4`, `OPENVMS_AGENT_IPV4` in ignored `.env`; registered IP, SAN and API trust/port must agree. |
+| Bootstrap local material | `deploy/agent/compose/bootstrap-local.sh <agent-ipv4> deploy/agent/compose/local` atomically creates a self-signed IP-SAN cert/key and random token only for a new directory. Ignored; modes dir/key/token `0700/0600`, cert `0644`. Never commit/print; development only, not production PKI. |
+| Registration gate | Do not enable yet: registration is unrun and token unregistered/unsealed. Never retrieve token from an SSH-installed agent. |
+| Configure runtime | Set `ONVIF_ALLOWED_CIDRS`, `ONVIF_DISCOVERY_INTERFACES`, UID/GID to verified values. Container UID/GID must own `0700/0600` files; don't weaken modes. Agent profile uses a fixed-IP private bridge; API joins; no host ports. Multicast discovery may not pass the bridge. |
+| Start only when ready | Agent shares API image; HTTP metrics/update and HTTPS ONVIF listener stay on Compose network. Credential probe is verified HTTPS only. Verify TLS metadata migration/registration before profile startup; no plaintext fallback. |
 
 **Observed config proof (2026-10-05):** RED because the edge-agent service/network were absent. PASS: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./deploy/agent/compose`, same-cache race test, `go test ./...`, bootstrap `sh -n`, both `docker compose config --quiet` profiles, and `git diff --check`. Tests verify generated IP-SAN certificate trust, modes, invalid IP, no-overwrite, atomic destination claim (RED exposed `mv -T` replacing a competing empty directory), and safe cleanup. Bootstrap now atomically claims output with `mkdir`. No container, migration, DB, network, or camera was accessed; registration remains unrun. Rollback: remove Compose `edge-agent`/`onvif-agent` service/network config and `.gitignore` entry; existing API/agent listeners stay unchanged.
 
@@ -135,18 +134,28 @@ Unrun template: `vmsctl agent-register --server-id "$SERVER_UUID" --session-file
 
 **Session revalidation follow-up (2026-10-06):** RED: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./apps/vmsctl -run TestLocalAgentSessionQueryUsesConfiguredIdleLimit` failed for the missing idle-query helper; `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/provision -run TestRegisterLocalAgentRejectsSessionChangedBeforeWrites` accepted mismatched session state. Added short/long idle-bound cases and write-transaction hash/idle forwarding plus actor/session-ID checks; the focused, race, and full commands above pass. No live session/DB test; concurrent revocation after lookup may race because no session row lock is taken.
 
+### Local web HTTPS ingress prerequisite (source/config only; not deployed)
+
+| Unit | Current behavior and limit |
+|---|---|
+| ONVIF-DEPLOY-HTTPS-01 | Preserve HTTP host `8000` → Caddy `80` unchanged; add HTTPS host `8443` → Caddy `443` with explicit cert/key read-only mounts and TLS 1.2/1.3. Caddy uses a manual self-signed IP-SAN certificate, so it does not auto-create certs or globally redirect HTTP. Bootstrap creates only ignored local files, atomically refuses an existing output directory, and sets directory/cert/key `0700/0600`. No local cert has been generated or deployed. |
+| Proxy binding | Web is assigned stable `172.29.240.4` on the existing private bridge, keeps the default network, and explicitly targets API `172.29.240.2:8080`; API credential-route trust defaults to the web peer `/32`, never the whole bridge. Keep API `.2` and agent `.3` aligned with the configured subnet. |
+
+**HTTPS ingress proof (2026-10-06):** RED: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./deploy/agent/compose -run 'TestWeb(Compose|TLS)'` failed with missing HTTPS port/bootstrap; added bind guard then focused test failed because short mounts could create absent host paths. GREEN: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./deploy/agent/compose`, `GOCACHE=/tmp/openvms-go-build-cache go test -race ./deploy/agent/compose`, `GOCACHE=/tmp/openvms-go-build-cache go test ./...`, `sh -n deploy/docker/bootstrap-local-tls.sh`, `docker compose config --quiet`, and `git diff --check` PASS. Tests validate both listeners, stable network/peer/upstream/trust, read-only no-create mounts, IP SAN via Go x509, modes, invalid IP, overwrite refusal/atomic claim. Caddy binary unavailable for `caddy validate`; no containers built/started, no cert generated outside test temp, no DB/migration/SSH/camera. Rollback: Compose/Caddy/ignore/bootstrap/tests only; no running service changed.
+
 ## Immediate deployment-test readiness checklist
 
-Local implementation is ready for a controlled **read-only** test only after these operator and authorization prerequisites are satisfied. Do not inspect ambient SSH, secrets, sessions, or remote hosts to fill gaps.
+Controlled **read-only** testing requires these gates. Do not inspect ambient SSH, secrets, sessions, or remote hosts to fill gaps.
 
 | Gate | Required evidence before a deployment/device test |
 |---|---|
-| Database/schema | Apply and verify the TLS metadata migration on the specifically authorized test database; confirm the test server is registered to the intended tenant and agent. Prior schema tests did not execute a real migration. |
-| Agent TLS | Provision operator-owned certificate/key outside this application; certificate IP SAN must match the registered agent IPv4. Set all three optional-listener settings, select the secure port, and install the matching system/custom CA trust through the server-scoped TLS configuration API. Verify no HTTP fallback. |
-| Camera policy | Configure the intended agent interface and `ONVIF_ALLOWED_CIDRS`; ensure the explicitly selected camera IPv4 is inside policy. Use only an operator-approved test camera and temporary test credentials. |
-| Authorization | Confirm the acting user has both scoped `servers.manage` and `servers.config.secrets`; exercise a deny/missing-permission case without sending credentials. |
-| Remote authorization | Before deployment or camera access, obtain explicit user authorization naming destination, operation, and credential/session. Until all are supplied, remain local; do not probe hosts or discover/reuse remote sessions. |
-| Read-only acceptance | After authorization, verify only `GetDeviceInformation`, `GetServices`, and `GetSystemDateAndTime`; confirm safe UI projection, no save/persistence, no secret in logs/errors, and no following returned service URLs. Test missing TLS trust, unknown CA/wrong IP SAN, out-of-CIDR endpoint, denied permission, timeout, and unavailable agent. No settings, PTZ, audio, I/O, network, or time mutation. |
+| Browser HTTPS / proxy | Use `https://10.1.1.24:8443` only with matching self-signed IP-SAN cert and explicit browser trust; never bypass errors. HTTP `:8000` stays, but credentials are blocked. Keep Caddy `.4` → API `.2`, trust only `/32`; deploy/verify first. |
+| Database/schema | Apply/verify TLS metadata migration on authorized DB; confirm server's intended tenant/agent. No real migration tested. |
+| Agent TLS | Operator cert IP SAN must match registered agent IP; configure three listener settings, secure port, matching system/custom CA trust; verify no HTTP fallback. |
+| Camera policy | Configure interface and `ONVIF_ALLOWED_CIDRS`; test only approved camera/IP and temporary credentials. |
+| Permissions | Verify scoped `servers.manage` and `servers.config.secrets`; test denial without sending credentials. |
+| Remote authorization | Name destination, operation, and credential/session before remote work. Until then stay local; don't probe or reuse sessions. |
+| Read-only acceptance | Only device info/services/system time; verify safe projection, no save/secret leak/XAddr follow. Test trust, IP SAN, CIDR, deny, timeout, unavailable-agent failures. No setting/PTZ/audio/I/O/network/time mutations. |
 
 Record exact destination, authorized operation/session scope, software versions, observed outcomes, and rollback/revocation. If any gate fails, stop and report; do not fall back to plaintext or broaden trust.
 
