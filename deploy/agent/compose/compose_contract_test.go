@@ -320,7 +320,7 @@ func TestWebComposeAddsPinnedHTTPSIngressWithoutBreakingHTTPOrProxyTrust(t *test
 		t.Fatal(err)
 	}
 	configuration := string(caddyfile)
-	for _, required := range []string{"auto_https disable_redirects", "{$SITE_ADDRESS::80} {", "{$HTTPS_SITE_ADDRESS:10.1.1.24}:443 {", "tls /etc/caddy/tls.crt /etc/caddy/tls.key", "protocols tls1.2 tls1.3", "import openvms_site_routes"} {
+	for _, required := range []string{"auto_https disable_redirects", "default_sni {$HTTPS_SITE_ADDRESS:10.1.1.24}", "{$SITE_ADDRESS::80} {", "{$HTTPS_SITE_ADDRESS:10.1.1.24}:443 {", "tls /etc/caddy/tls.crt /etc/caddy/tls.key", "protocols tls1.2 tls1.3", "import openvms_site_routes"} {
 		if !strings.Contains(configuration, required) {
 			t.Errorf("Caddy configuration must include %q", required)
 		}

@@ -3,6 +3,9 @@
 # uses the operator-bootstrapped certificate for HTTPS_SITE_ADDRESS.
 {
 	auto_https disable_redirects
+	# IP-literal HTTPS clients omit SNI. Select the configured IP-SAN certificate
+	# for those handshakes without weakening certificate verification.
+	default_sni {$HTTPS_SITE_ADDRESS:10.1.1.24}
 }
 
 (openvms_site_routes) {
