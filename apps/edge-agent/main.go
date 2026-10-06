@@ -17,6 +17,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/onvif"
+	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 )
 
 func main() {
@@ -61,12 +62,13 @@ func main() {
 		log.Error("invalid ONVIF TLS configuration", "error", err)
 		os.Exit(1)
 	}
+	healthHandler := newAgentHealthHandler(secret, currentAgentHealthInfo(variant))
 	mux := buildMux(secret, variant, sampler, discoveryHandler, replaceBinary, func() { go restart() })
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Info("listening", "addr", addr, "version", agent.Version)
 	if tlsEnabled {
-		tlsServer := newAgentTLSServer(tlsConfig, discoveryHandler, probeHandler)
+		tlsServer := newAgentTLSServer(tlsConfig, healthHandler, discoveryHandler, probeHandler)
 		log.Info("ONVIF TLS listener enabled", "addr", tlsServer.Addr)
 		if err := serveAgentServers(log, srv, tlsServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("agent listener stopped", "error", err)
@@ -78,6 +80,59 @@ func main() {
 		log.Error("listen", "error", err)
 		os.Exit(1)
 	}
+}
+
+func currentAgentHealthInfo(variant string) agentHealthInfo {
+	return agentHealthInfo{
+		Status:  "ok",
+		Version: agent.Version,
+		Build: agentBuildMetadata{
+			Version:   buildinfo.Version,
+			Commit:    buildinfo.Commit,
+			BuildTime: buildinfo.BuildTime,
+			GoVersion: buildinfo.GoVersion(),
+		},
+		Variant: variant,
+	}
+}
+
+type agentBuildMetadata struct {
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	BuildTime string `json:"build_time"`
+	GoVersion string `json:"go_version"`
+}
+
+type agentHealthInfo struct {
+	Status  string             `json:"status"`
+	Version string             `json:"version"`
+	Build   agentBuildMetadata `json:"build"`
+	Variant string             `json:"variant"`
+}
+
+const agentHealthMaxResponseBytes = 1024
+
+func newAgentHealthHandler(secret string, info agentHealthInfo) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !bearer(r, secret) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		payload, err := json.Marshal(info)
+		if err != nil {
+			http.Error(w, "health metadata unavailable", http.StatusInternalServerError)
+			return
+		}
+		payload = append(payload, '\n')
+		if len(payload) > agentHealthMaxResponseBytes {
+			http.Error(w, "health metadata unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(payload)
+	})
 }
 
 func serveAgentServers(log *slog.Logger, servers ...*http.Server) error {

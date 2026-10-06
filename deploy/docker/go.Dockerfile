@@ -26,7 +26,12 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Commit=${COMMIT} \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
     -o /out/app ./apps/${APP} \
- && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/edge-agent ./apps/edge-agent \
+ && CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Version=${VERSION} \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Commit=${COMMIT} \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
+    -o /out/edge-agent ./apps/edge-agent \
  && sha256sum /out/edge-agent | awk '{print $1}' > /out/edge-agent.sha256 \
  && go env GOARCH > /out/edge-agent.goarch \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/vmsctl ./apps/vmsctl
