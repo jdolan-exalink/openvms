@@ -4,19 +4,20 @@ Deliver capability-driven ONVIF agent/API management, safe Frigate sync and audi
 
 ## Current implementation status — 2026-10-06
 
+- User authorized readonly check of registered `opevms-mimo` (`10.1.1.144:7419`, server `c420319a-7c77-4489-b644-3e212673dd80`); not contacted.
+
 - `712b56d` (relay) and `daafa0d` (UI) connect selected-server read-only probing; success is device/services/time, not saved cameras.
-- Read-only probe, secure registration and SSH install are implemented. Local web/API HTTPS is deployed and verified with explicit trust for its self-signed IP-SAN cert; agent registration, remote SSH and camera acceptance remain pending. No production DB/device test.
+- Probe, registration and SSH install exist; local HTTPS is verified. Agent registration, remote SSH and device acceptance remain pending; no production DB/device test.
 - Local steps 1–3 done; no SSH destination/session authorized; Casa/camera acceptance pending.
 - UI proof: Cameras 19; Servers 26; typecheck and web 120 files/863 tests PASS; not device acceptance.
-- Product scope: 100% of the declared capability/profile matrix, not every vendor extension; unsupported capabilities stay unavailable.
+- “100%” means the declared capability/profile matrix; unsupported and vendor-specific operations stay unavailable.
 
 ## Goal and boundaries
 
-- **Outcome:** capability/operation discovery, camera configuration and safe Frigate lifecycle across media, imaging, time/network, PTZ/audio and events.
-- **Scope:** agent/API/UI; use fakes. Remote SSH and physical operations require separate destination/operation/credential authorization.
-- **Safety:** stable IDs/tombstones, encrypted write-only secrets, bounded audited/read-back mutations; preserve recordings, confirm discard, never factory-reset.
-- **Delivery:** `ask-on-risk`, approved `stacked-to-main`; no push/PR/merge. Tests/docs accompany Conventional Commits; 400 lines advisory only.
-- **TDD:** Strict TDD; record observed RED/GREEN/REFACTOR, never infer.
+- **Outcome:** capability-driven ONVIF discovery/configuration and safe Frigate lifecycle across media, imaging, time/network, PTZ/audio and events.
+- **Scope:** agent/API/UI with fakes; SSH/physical operations need separate destination, operation and credential authorization.
+- **Safety:** stable IDs/tombstones; encrypted write-only secrets; bounded audited/read-back mutations; preserve recordings, confirm discard, no factory reset.
+- **Delivery/TDD:** `ask-on-risk`, approved `stacked-to-main`; no push/PR/merge. Conventional commits include tests/docs. Strict RED/GREEN/REFACTOR must be observed; 400 lines advisory only.
 
 ## Baseline and current state
 
@@ -65,21 +66,21 @@ Implement in dependency order. Each delegated work unit closes with checks, Conv
 
 ## Acceptance criteria
 
-- [ ] All five phases above are complete; partial CRUD is not feature completion.
-- [ ] Device capabilities/operations determine available API operations, UI states, and option lists; unsupported operations are not offered. “100%” refers to the declared supported capability/profile matrix, not all vendors' proprietary behavior.
-- [ ] Secrets are encrypted at rest and write-only through APIs/UI; logs, errors, audit, and stream metadata redact credentials.
-- [ ] Every physical mutation is bounded, authorized, audited, and verified by readback; failures report uncertainty honestly and do not claim success.
-- [ ] Frigate config follows the device/VMS lifecycle without changing stable identity; deleted cameras remain suppressed from import until explicitly restored.
-- [ ] Recording preservation is the default; discard is an explicit, confirmed, fail-closed path. No factory reset is introduced.
-- [ ] Unit and applicable integration checks pass; physical/LAN validation remains pending unless separately authorized by the user.
-- [ ] Each work unit records tests, any runtime harness scenario (or `N/A` with reason), rollback boundary, commit ID, and review due/outcome against the preceding reviewed boundary. Do not start a review or change the user-owned review switch from this plan.
+- [ ] All five phases complete; partial CRUD is not feature completion.
+- [ ] Capabilities drive API/UI/options; unsupported operations stay unavailable. “100%” means the declared capability/profile matrix, not all vendor extensions.
+- [ ] Secrets are encrypted/write-only and redacted from logs, errors, audit and stream metadata.
+- [ ] Physical mutations are bounded, authorized, audited and read-back verified; failures never claim success.
+- [ ] Frigate follows device/VMS lifecycle with stable identity and tombstones preventing reimport.
+- [ ] Preserve recordings by default; discard requires explicit fail-closed confirmation. Never factory-reset.
+- [ ] Applicable tests pass; physical/LAN checks require separate authorization.
+- [ ] Record tests/harness (`N/A` reason), rollback, commit and review due/outcome per work unit. Do not change the review switch here.
 
 ## Delivery and progress record
 
-- Strategy `ask-on-risk`; user-approved `stacked-to-main`. No push, PR, or merge authorized.
-- ONVIF-02 remains partial: device reads/WSSE/discovery, TLS foundation, probe relay/UI local; persistence, stable VMS mapping and device/database validation remain. Parent commits `712b56d`, `daafa0d`; planning `134a319`; review boundary `19315be`; later candidates declined; no PR.
-- Record each unit's ID, observed RED/GREEN/REFACTOR, checks/runtime harness (or N/A), rollback, commit/lines and review boundary. Keep coherent; 400-line guidance never omits behavior/tests.
-- Next: resolve HTTPS handshake and verify IP access/trust before any remote SSH. Confirm exact proxy peer, schema and scoped permissions; ONVIF-02 remains partial, and probe is not persistence.
+- Delivery is `ask-on-risk` / user-approved `stacked-to-main`; no push/PR/merge authorized.
+- ONVIF-02 remains partial: device reads/WSSE/discovery, TLS, probe relay/UI exist; persistence, stable VMS identity and live validation remain. Parent commits `712b56d`, `daafa0d`; planning `134a319`; review boundary `19315be`; later candidates declined.
+- Per unit record RED/GREEN/REFACTOR, checks/harness, rollback, commit/lines and review boundary; no behavior/tests omitted to hit advisory 400 lines.
+- Next: confirm HTTPS/schema/proxy/permissions; probe is not persistence.
 
 ### Existing-server SSH agent installation (local implementation; deployment partial)
 
@@ -150,13 +151,13 @@ Read-only test gates; do not inspect ambient SSH, secrets, sessions or remote ho
 
 | Gate | Required evidence before a deployment/device test |
 |---|---|
-| Browser HTTPS / proxy | HTTPS IP health/UI now 200 with `--cacert`; self-signed cert requires explicit browser trust. Anonymous install is HTTPS 401 / HTTP 403. Keep Caddy `.4` → API `.2` and exact `/32`; never bypass TLS. |
-| Database/schema | Local `vmsctl migrate` reported schema 32; no production DB or agent registration validation. |
-| Agent TLS | Operator cert IP SAN must match registered agent IP; configure three listener settings, secure port, matching system/custom CA trust; verify no HTTP fallback. |
-| Camera policy | Configure interface and `ONVIF_ALLOWED_CIDRS`; test only approved camera/IP and temporary credentials. |
-| Permissions | Verify scoped `servers.manage` and `servers.config.secrets`; test denial without sending credentials. |
-| Remote authorization | Name destination, operation, and credential/session before remote work. Until then stay local; don't probe or reuse sessions. |
-| Read-only acceptance | Only device info/services/system time; verify safe projection, no save/secret leak/XAddr follow. Test trust, IP SAN, CIDR, deny, timeout, unavailable-agent failures. No setting/PTZ/audio/I/O/network/time mutations. |
+| Browser HTTPS / proxy | IP health/UI verified with `--cacert`; explicitly trust self-signed cert. Anonymous install: HTTPS 401 / HTTP 403. Keep Caddy `.4` → API `.2` and exact `/32`; never bypass TLS. |
+| Database/schema | Goose v32 marker predates TLS DDL; table/key absent. v33 repair source-only; v32 is not schema proof. |
+| Agent TLS | Cert IP SAN must match registered IP; configure all three listener settings, secure port and matching CA trust. No HTTP fallback. |
+| Camera policy | Configure interface/`ONVIF_ALLOWED_CIDRS`; only approved camera/IP and temporary credentials. |
+| Permissions | Check scoped `servers.manage` + `servers.config.secrets`; test denial without credentials. |
+| Remote authorization | Explicit destination, operation and credential/session required; never probe or reuse ambient sessions. |
+| Read-only acceptance | Device info/services/time only; validate safe projection, no saves/secret leak/XAddr follow, trust/IP-SAN/CIDR/denial/timeouts. No physical writes. |
 
 Record destination, operation/session scope, versions, outcome, rollback. On any failed gate, stop; no plaintext fallback or broader trust.
 
@@ -221,3 +222,7 @@ Conventions: exact Go runner is `GOCACHE=/tmp/openvms-go-build-cache go test -co
 - Cameras UI uses generated same-origin API, never direct device connection or persistence; dual permissions, strict IPv4 endpoint, safe results/errors. Credentials transient and cleared; abort/version guards reject stale completions and preserve newer inputs. No autoprobe or browser storage.
 - **RED:** 3 focused tests failed before controls; stale-completion regression caught old cleanup clearing new credentials. **GREEN:** focused tests final 19 PASS; typecheck PASS; full web 120 files/856 tests PASS; diff check PASS. Initial unrelated-suite failures did not reproduce; causality unknown. API mocks only.
 - Rollback only `Cameras.tsx` and tests. No commit/review.
+
+### Forward repair for stale TLS schema marker (source only)
+
+Read-only catalog: Goose v32 predates its TLS DDL; table/key absent. **RED:** missing-v33 test failed; Goose v3.28 parser test exposed 37 Up / 3 Down splits of the dollar-quoted blocks; weakened FK/validation/index guards also failed regression tests. **GREEN:** StatementBegin/End and a fake-driver `Migration.Up/Down` test confirm one DO block each. `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./migrations ./internal/store ./internal/provision`; `GOCACHE=/tmp/openvms-go-build-cache go test -race ./migrations ./internal/provision`; `make generate`; `GOCACHE=/tmp/openvms-go-build-cache go test ./...`; `git diff --check` — PASS. v33 creates missing schema, validates exact columns/constraints, tenant RLS/policy and backing indexes; incompatible objects fail. Down raises to preserve data. No DB migration/integration. Rollback removes v33 and tests; v32 stays immutable.
