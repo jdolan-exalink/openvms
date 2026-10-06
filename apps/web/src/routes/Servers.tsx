@@ -2,8 +2,8 @@ import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
-import { api, type Schemas, unwrap } from "@/api/client";
+import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { ApiError, api, type Schemas, unwrap } from "@/api/client";
 import { classifyPolicyQuery, meQuery, serversQuery, sitesQuery, syncStatusQuery } from "@/api/queries";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -118,6 +118,10 @@ export function Servers() {
                 </Fact>
               </dl>
               <div className="flex flex-wrap items-start justify-end gap-2">
+                {canInstallAgent(me.data, s) && <AgentInstallControl key={s.id} server={s} />}
+                {hasServerInstallPermission(me.data, "servers.manage", s) && !hasServerInstallPermission(me.data, "servers.config.secrets", s) && (
+                  <span role="note" className="text-xs text-muted">{t("servers.agentInstallPermissionRequired")}</span>
+                )}
                 {can(me.data, "servers.restart") && <RestartButton server={s} />}
                 {can(me.data, "servers.manage") && <SyncButton server={s} />}
                 {can(me.data, "servers.manage") && (
@@ -139,6 +143,234 @@ export function Servers() {
       )}
     </div>
   );
+}
+
+function canInstallAgent(me: Schemas["Me"] | undefined, server: Schemas["Server"]) {
+  return hasServerInstallPermission(me, "servers.manage", server) && hasServerInstallPermission(me, "servers.config.secrets", server);
+}
+
+function hasServerInstallPermission(me: Schemas["Me"] | undefined, permission: string, server: Schemas["Server"]) {
+  if (!me) return false;
+  const matching = me.grants.filter((grant) => {
+    if (grant.permission !== permission) return false;
+    if (grant.scope_type === "platform") return true;
+    if (grant.scope_type === "tenant") return grant.scope_id === me.tenant_id;
+    if (grant.scope_type === "site") return grant.scope_id === server.site_id;
+    if (grant.scope_type === "server") return grant.scope_id === server.id;
+    return false;
+  });
+  return matching.some((grant) => grant.effect === "allow") && !matching.some((grant) => grant.effect === "deny");
+}
+
+function AgentInstallControl({ server }: { server: Schemas["Server"] }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [job, setJob] = useState<Schemas["ServerAgentInstallJob"] | null>(null);
+  const updateJob = useCallback((next: Schemas["ServerAgentInstallJob"]) => {
+    setJob(next);
+    if (next.status === "succeeded") void qc.invalidateQueries({ queryKey: ["server-agent", server.id] });
+  }, [qc, server.id]);
+  const active = job?.status === "queued" || job?.status === "running";
+  return (
+    <>
+      <Button size="sm" variant="outlined" onClick={() => setOpen(true)} disabled={job?.status === "succeeded"}>
+        {active ? t("servers.agentInstallViewProgress") : t("servers.agentInstallAction")}
+      </Button>
+      {active && !open && <span role="status" className="text-xs text-muted">{t("servers.agentInstallContinues")}</span>}
+      {job?.status === "succeeded" && <span role="status" className="text-xs text-ok">{t("servers.agentInstallSuccessUnverified")}</span>}
+      {job?.status === "failed" && <span role="alert" className="text-xs text-bad">{t("servers.agentInstallFailedCheckHost")}</span>}
+      <AgentInstallDialog server={server} open={open} onClose={() => setOpen(false)} job={job} onJob={updateJob} />
+    </>
+  );
+}
+
+function AgentInstallDialog({
+  server,
+  open,
+  onClose,
+  job,
+  onJob,
+}: {
+  server: Schemas["Server"];
+  open: boolean;
+  onClose: () => void;
+  job: Schemas["ServerAgentInstallJob"] | null;
+  onJob: (job: Schemas["ServerAgentInstallJob"]) => void;
+}) {
+  const maxPollingDurationMs = 11 * 60_000;
+  const pollRequestTimeoutMs = 15_000;
+  const t = useT();
+  const [form, setForm] = useState({ host: "", port: "22", fingerprint: "", confirmed: false });
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+  const pendingPasswordRef = useRef("");
+  const pollStartedAt = useRef(0);
+  const [pollTimedOut, setPollTimedOut] = useState(false);
+  const secureBrowser = location.protocol === "https:";
+  const start = useMutation({
+    mutationFn: async () => {
+      const password = pendingPasswordRef.current;
+      pendingPasswordRef.current = "";
+      const body: Schemas["ServerAgentInstallRequest"] = {
+        ssh_host: form.host.trim(),
+        ssh_port: Number(form.port),
+        ssh_password: password,
+        ssh_host_key_fingerprint: form.fingerprint.trim(),
+      };
+      return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/install", { params: { path: { serverId: server.id } }, body }));
+    },
+    onSuccess: (next) => {
+      pollStartedAt.current = Date.now();
+      setPollTimedOut(false);
+      onJob(next);
+    },
+    onError: () => { pendingPasswordRef.current = ""; },
+  });
+  const progress = useQuery({
+    queryKey: ["server-agent-install", server.id, job?.id],
+    enabled: !!job?.id && (job.status === "queued" || job.status === "running"),
+    queryFn: async ({ signal }) => {
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      const timeout = window.setTimeout(abort, pollRequestTimeoutMs);
+      signal.addEventListener("abort", abort, { once: true });
+      try {
+        return unwrap(await api.GET("/api/v1/servers/{serverId}/agent/install/{jobId}", {
+          params: { path: { serverId: server.id, jobId: job!.id } }, signal: controller.signal,
+        }));
+      } finally {
+        window.clearTimeout(timeout);
+        signal.removeEventListener("abort", abort);
+      }
+    },
+    initialData: job ?? undefined,
+    refetchInterval: (query) => {
+      const current = query.state.data?.status;
+      if (query.state.error || (current !== "queued" && current !== "running")) return false;
+      if (pollStartedAt.current && Date.now() - pollStartedAt.current >= maxPollingDurationMs) return false;
+      return 1000;
+    },
+    retry: false,
+  });
+  const snapshot = progress.data ?? job;
+  const hasSubmitted = !!job?.id || start.isPending;
+  const polling = job?.status === "queued" || job?.status === "running";
+  const close = () => {
+    if (start.isPending) return;
+    pendingPasswordRef.current = "";
+    if (passwordInputRef.current) passwordInputRef.current.value = "";
+    onClose();
+  };
+  useEffect(() => () => {
+    pendingPasswordRef.current = "";
+    if (passwordInputRef.current) passwordInputRef.current.value = "";
+  }, []);
+  useEffect(() => {
+    if (progress.data) onJob(progress.data);
+  }, [progress.data, onJob]);
+  useEffect(() => {
+    if (!polling || !pollStartedAt.current || pollTimedOut) return;
+    const remaining = Math.max(0, pollStartedAt.current + maxPollingDurationMs - Date.now());
+    const timeout = window.setTimeout(() => setPollTimedOut(true), remaining);
+    return () => window.clearTimeout(timeout);
+  }, [maxPollingDurationMs, pollTimedOut, polling]);
+
+  if (!open) return null;
+  return (
+    <Modal title={t("servers.agentInstallTitle", { server: server.name })} onClose={close}>
+      {!hasSubmitted ? (
+        <form
+          className="flex flex-col gap-4"
+          aria-label={t("servers.agentInstallForm")}
+          onSubmit={(event: FormEvent) => {
+            event.preventDefault();
+            if (!secureBrowser) return;
+            pendingPasswordRef.current = passwordInputRef.current?.value ?? "";
+            if (passwordInputRef.current) passwordInputRef.current.value = "";
+            start.mutate();
+          }}
+        >
+          <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentInstallScopeNotice")}</p>
+          {!secureBrowser && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>}
+          <p className="text-sm text-muted">{t("servers.agentInstallRootOnly")}</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t("servers.agentInstallHostLabel")} hint={t("servers.agentInstallHostHint")}>
+              <TextInput required aria-label={t("servers.agentInstallHostLabel")} value={form.host} onChange={(event) => setForm({ ...form, host: event.target.value })} autoComplete="off" inputMode="decimal" placeholder="10.20.0.11" />
+            </Field>
+            <Field label={t("servers.agentInstallPortLabel")}>
+              <TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={form.port} onChange={(event) => setForm({ ...form, port: event.target.value })} autoComplete="off" />
+            </Field>
+            <Field label={t("servers.agentInstallPasswordLabel")} hint={t("servers.agentInstallPasswordHint")}>
+              <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad" autoComplete="off" maxLength={4096} />
+            </Field>
+            <Field label={t("servers.agentInstallFingerprintLabel")} hint={t("servers.agentInstallFingerprintHint")}>
+              <TextInput required aria-label={t("servers.agentInstallFingerprintLabel")} value={form.fingerprint} onChange={(event) => setForm({ ...form, fingerprint: event.target.value })} autoComplete="off" placeholder={`SHA256:${"…".repeat(8)}`} pattern="SHA256:[A-Za-z0-9+/]{43}" />
+            </Field>
+          </div>
+          <label className="flex items-start gap-3 rounded-m3-lg bg-surface-2 p-3 text-sm">
+            <input type="checkbox" checked={form.confirmed} onChange={(event) => setForm({ ...form, confirmed: event.target.checked })} />
+            <span>{t("servers.agentInstallConfirmScope")}</span>
+          </label>
+          {start.error && <p role="alert" className="text-sm text-bad">{agentInstallStartError(start.error, t)}</p>}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="text" onClick={close}>{t("common.cancel")}</Button>
+            <Button type="submit" variant="primary" disabled={start.isPending || !form.confirmed || !isCanonicalIPv4(form.host.trim()) || !isValidSSHPort(form.port) || !isValidFingerprint(form.fingerprint.trim()) || !secureBrowser}>
+              {start.isPending ? t("servers.agentInstallSubmitting") : t("servers.agentInstallSubmit")}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <section aria-label={t("servers.agentInstallProgress")} className="flex flex-col gap-4">
+          <p aria-live="polite" className="text-sm">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>
+          {snapshot?.status === "succeeded" && <p role="status" className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentInstallSuccessUnverified")}</p>}
+          {snapshot?.status === "failed" && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallFailedCheckHost")}</p>}
+          {progress.error && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
+          {pollTimedOut && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
+          {(snapshot?.status === "queued" || snapshot?.status === "running") && <p className="text-sm text-muted">{t("servers.agentInstallCloseDoesNotCancel")}</p>}
+          <Button className="self-end" onClick={close}>{t("common.close")}</Button>
+        </section>
+      )}
+    </Modal>
+  );
+}
+
+function isCanonicalIPv4(value: string) {
+  const octets = value.split(".");
+  return octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && String(Number(octet)) === octet && Number(octet) <= 255);
+}
+
+function isValidSSHPort(value: string) {
+  const port = Number(value);
+  return /^\d+$/.test(value) && Number.isInteger(port) && port >= 1 && port <= 65535;
+}
+
+function isValidFingerprint(value: string) {
+  return /^SHA256:[A-Za-z0-9+/]{43}$/.test(value);
+}
+
+function installJobStatusText(status: string | undefined, stage: string | undefined, t: ReturnType<typeof useT>) {
+  if (status === "succeeded") return t("servers.agentInstallRegistered");
+  if (status === "failed") return t("servers.agentInstallFailedCheckHost");
+  if (status === "queued") return t("servers.agentInstallQueued");
+  if (status === "running") {
+    const stages: Record<string, string> = {
+      connecting: "servers.agentInstallConnecting",
+      transferring: "servers.agentInstallTransferring",
+      activating: "servers.agentInstallActivating",
+      registering: "servers.agentInstallRegistering",
+    };
+    return t((stages[stage ?? ""] ?? "servers.agentInstallRunning") as Parameters<typeof t>[0]);
+  }
+  return t("servers.agentInstallOutcomeUnknown");
+}
+
+function agentInstallStartError(error: unknown, t: ReturnType<typeof useT>) {
+  if (error instanceof ApiError) {
+    if (error.code === "conflict") return t("servers.agentInstallConflict");
+    if (error.code === "secure_transport_required") return t("servers.agentInstallHttpsRequired");
+    if (error.code === "forbidden") return t("servers.agentInstallPermissionRequired");
+  }
+  return t("servers.agentInstallStartError");
 }
 
 function Fact({ label, className, children }: { label: string; className?: string; children: ReactNode }) {

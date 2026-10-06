@@ -82,6 +82,164 @@ describe("Servers", () => {
     expect(screen.queryByRole("button", { name: /Reiniciar/i })).not.toBeInTheDocument();
   });
 
+  describe("agent-only SSH installation", () => {
+    const installGrants = [
+      { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "a" },
+      { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "a" },
+    ];
+    const setupAgentInstall = (
+      grants = installGrants,
+      installHandler?: (request: Request) => Promise<Response>,
+      pollHandler?: (request: Request) => Promise<Response>,
+    ) => {
+      const calls: Request[] = [];
+      const fetchMock = vi.fn(async (request: Request) => {
+        calls.push(request);
+        const url = new URL(request.url);
+        if (url.pathname === "/api/v1/servers") return json({ items: [server("a", "frigate-h01", "s1"), server("b", "frigate-r01", "s2")] });
+        if (url.pathname === "/api/v1/sites") return json({ items: [{ id: "s1", name: "Helvecia" }, { id: "s2", name: "Rosario" }] });
+        if (url.pathname === "/api/v1/me") return json({ id: "u", tenant_id: "t", grants });
+        if (url.pathname === "/api/v1/servers/a/agent") return json({ installed: false });
+        if (url.pathname === "/api/v1/servers/b/agent") return json({ installed: false });
+        if (url.pathname === "/api/v1/classify/policy") return json({ servers: [] });
+        if (url.pathname === "/api/v1/sync/status") return json({ items: [] });
+        if (url.pathname === "/api/v1/servers/a/agent/install" && request.method === "POST" && installHandler) return installHandler(request);
+        if (url.pathname === "/api/v1/servers/a/agent/install/job-1") return pollHandler?.(request) ?? json({ id: "job-1", status: "succeeded", stage: "complete" });
+        return json({ code: "not_found", message: "not found" }, 404);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return { calls, fetchMock };
+    };
+
+    it("requires both matching scoped grants and respects an explicit deny", async () => {
+      setupAgentInstall([installGrants[0]!]);
+      renderPage(Servers);
+      await screen.findByText("frigate-h01");
+      expect(screen.queryByRole("button", { name: /Instalar agente vía SSH/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("note")).toHaveTextContent(/servers\.manage y servers\.config\.secrets/i);
+    });
+
+    it("does not offer installation when a matching server deny overrides both allows", async () => {
+      setupAgentInstall([...installGrants, { permission: "servers.manage", effect: "deny", scope_type: "server", scope_id: "a" }]);
+      renderPage(Servers);
+      await screen.findByText("frigate-h01");
+      expect(screen.queryByRole("button", { name: /Instalar agente vía SSH/i })).not.toBeInTheDocument();
+    });
+
+    it("does not submit root credentials from an HTTP browser", async () => {
+      setupAgentInstall();
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      expect(within(dialog).getByLabelText("Host SSH IPv4")).toHaveValue("");
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.0.0.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"A".repeat(43)}` } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/HTTPS antes de enviar credenciales/i);
+      const posts = (await screen.findAllByRole("dialog")).flatMap((element) => element.querySelectorAll("form")).length;
+      expect(posts).toBeGreaterThan(0);
+      expect(Array.from({ length: localStorage.length }, (_, index) => localStorage.getItem(localStorage.key(index) ?? "") ?? "").join(" ")).not.toContain("secret-root-password");
+      expect(Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.getItem(sessionStorage.key(index) ?? "") ?? "").join(" ")).not.toContain("secret-root-password");
+      expect((globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.some(([request]) => (request as Request).method === "POST" && new URL((request as Request).url).pathname.includes("/agent/install"))).toBe(false);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(document.body).not.toHaveTextContent("secret-root-password");
+    });
+
+    it("sends the explicit pinned target once, clears the password, polls metadata, and does not claim health", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      const { calls } = setupAgentInstall(undefined, async (request) => {
+        const body = await request.clone().json();
+        expect(body).toEqual({ ssh_host: "10.20.30.44", ssh_port: 2222, ssh_password: "secret-root-password", ssh_host_key_fingerprint: `SHA256:${"B".repeat(43)}` });
+        return json({ id: "job-1", status: "queued", stage: "validating" }, 202);
+      });
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "2222" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"B".repeat(43)}` } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+      expect(await screen.findByText(/HTTPS aún no está verificada/i)).toBeInTheDocument();
+      expect(screen.queryByDisplayValue("secret-root-password")).not.toBeInTheDocument();
+      const post = calls.find((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/agent/install"));
+      expect(post).toBeDefined();
+      expect(new URL(post!.url).search).toBe("");
+      await waitFor(() => expect(calls.some((request) => request.method === "GET" && new URL(request.url).pathname.endsWith("/install/job-1"))).toBe(true));
+      const polls = calls.filter((request) => request.method === "GET" && new URL(request.url).pathname.endsWith("/install/job-1"));
+      expect(polls.every((request) => request.body === null)).toBe(true);
+      expect(document.body).not.toHaveTextContent("secret-root-password");
+    });
+
+    it("clears the password on a start error and hides hostile API details", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      let respond: ((response: Response) => void) | undefined;
+      setupAgentInstall(undefined, async () => new Promise((resolve) => { respond = resolve; }));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"C".repeat(43)}` } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+      expect(screen.queryByDisplayValue("secret-root-password")).not.toBeInTheDocument();
+      await waitFor(() => expect(respond).toBeDefined());
+      respond!(json({ code: "conflict", message: "secret-root-password from target 10.20.30.44" }, 409));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/no se reemplaza automáticamente/i);
+      expect(screen.queryByDisplayValue("secret-root-password")).not.toBeInTheDocument();
+      expect(document.body).not.toHaveTextContent("secret-root-password");
+    });
+
+    it("keeps polling memory-only job state, aborts stale polls when the server is filtered out", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      let pollRequest: Request | undefined;
+      const { calls } = setupAgentInstall(undefined, async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202), async (request) => {
+        pollRequest = request;
+        return new Promise((_resolve, reject) => request.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
+      });
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"D".repeat(43)}` } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+      expect(await screen.findByText(/Instalación en cola/i)).toBeInTheDocument();
+      await waitFor(() => expect(pollRequest).toBeDefined());
+      expect((await pollRequest!.clone().json().catch(() => null))).toBeNull();
+      fireEvent.click(within(dialog).getAllByRole("button", { name: "Cerrar" }).at(-1)!);
+      expect(await screen.findByText(/La instalación continúa en segundo plano/i)).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole("button", { name: /Ver progreso de instalación/i }));
+      const reopened = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      expect(within(reopened).getByText(/Cerrar esta ventana no cancela/i)).toBeInTheDocument();
+      fireEvent.change(screen.getByLabelText("Buscar servidor"), { target: { value: "frigate-r01" } });
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      await waitFor(() => expect(pollRequest?.signal.aborted).toBe(true));
+      expect(calls.some((request) => request.method === "GET" && new URL(request.url).searchParams.has("ssh_password"))).toBe(false);
+    });
+
+    it("reports an unknown outcome safely when an in-memory job is lost", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      setupAgentInstall(undefined, async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202), async () => json({ code: "not_found", message: "secret-root-password" }, 404));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.change(within(dialog).getByLabelText("Huella SHA-256 SSH verificada"), { target: { value: `SHA256:${"E".repeat(43)}` } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+      expect(await screen.findByText(/No se puede confirmar el resultado/i)).toBeInTheDocument();
+      expect(document.body).not.toHaveTextContent("secret-root-password");
+    });
+  });
+
   describe("edit and delete", () => {
     const manager = { id: "u", tenant_id: "t", grants: [{ permission: "servers.manage", effect: "allow" }] };
     function setup(me: object) {
