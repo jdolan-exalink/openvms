@@ -73,48 +73,7 @@ type AgentInstallDialer func(context.Context, string, uint16, string, string, st
 // RunAgentInstall installs only the OpenVMS agent into a verified, previously unprovisioned host.
 // It does not create a server record, register the token, or claim probe readiness.
 func RunAgentInstall(ctx context.Context, request AgentInstallRequest, dial AgentInstallDialer) error {
-	if err := validateAgentInstallRequest(request); err != nil {
-		return err
-	}
-	if dial == nil {
-		return errInvalidAgentInstall
-	}
-	if err := ctx.Err(); err != nil {
-		return errors.New("agent install cancelled")
-	}
-	installCtx, cancel := context.WithTimeout(ctx, agentInstallDeadline)
-	defer cancel()
-
-	conn, err := dial(installCtx, request.Host, request.Port, request.User, request.Password, request.ExpectedHostKey)
-	if err != nil {
-		return errors.New("agent install SSH connection failed")
-	}
-	defer conn.Close()
-
-	preflight, err := runAgentInstallStep(installCtx, conn, agentInstallPreflight())
-	if err != nil || !validAgentInstallPreflight(preflight) {
-		return errors.New("agent install preflight failed")
-	}
-	files, err := agentInstallFiles(request)
-	if err != nil {
-		return errors.New("agent install payload is invalid")
-	}
-	for _, file := range files {
-		if installCtx.Err() != nil {
-			return errors.New("agent install deadline exceeded")
-		}
-		fileCtx, fileCancel := context.WithTimeout(installCtx, 2*time.Minute)
-		err = conn.WriteSFTPFile(fileCtx, file.path, file.mode, file.data)
-		fileCancel()
-		if err != nil {
-			return errors.New("agent install file transfer failed")
-		}
-	}
-	activation, err := runAgentInstallStep(installCtx, conn, agentInstallActivate)
-	if err != nil || strings.TrimSpace(activation) != "openvms_agent_install=active" {
-		return errors.New("agent install activation failed")
-	}
-	return nil
+	return runAgentInstallWithProgress(ctx, request, dial, nil)
 }
 
 type agentInstallFile struct {

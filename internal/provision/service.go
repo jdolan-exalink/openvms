@@ -55,12 +55,20 @@ type Service struct {
 	Binary func() ([]byte, error)
 
 	// Authorization and transport seams prove probe denial before secret access or outbound calls.
-	requireServerManage          func(context.Context, authz.Actor, uuid.UUID) error
-	requireServerConfigSecrets   func(context.Context, authz.Actor, uuid.UUID) error
-	requireLocalAgentPermissions func(context.Context, authz.Actor, uuid.UUID) error
-	localAgentTx                 localAgentTx
-	loadProbeAgent               func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error)
-	probeRoundTripper            http.RoundTripper
+	requireServerManage            func(context.Context, authz.Actor, uuid.UUID) error
+	requireServerConfigSecrets     func(context.Context, authz.Actor, uuid.UUID) error
+	requireLocalAgentPermissions   func(context.Context, authz.Actor, uuid.UUID) error
+	localAgentTx                   localAgentTx
+	loadProbeAgent                 func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error)
+	probeRoundTripper              http.RoundTripper
+	requireAgentInstallPermissions func(context.Context, authz.Actor, uuid.UUID) error
+	agentInstallExists             func(context.Context, authz.Actor, uuid.UUID) (bool, error)
+	agentInstallBinary             func() ([]byte, error)
+	agentInstallCredentials        func(string) (string, []byte, []byte, error)
+	agentInstallRun                func(context.Context, AgentInstallRequest, func(string)) error
+	agentInstallRegister           func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error
+	agentInstallJobs               map[uuid.UUID]*agentInstallJob
+	agentInstallByServer           map[uuid.UUID]uuid.UUID
 
 	mu   sync.Mutex
 	jobs map[uuid.UUID]*job
@@ -76,6 +84,7 @@ func New(inv *inventory.Service, st *store.Store, sealer *secrets.Sealer, log *s
 		Inv: inv, Store: st, Sealer: sealer, Log: log,
 		Dial: dialSSH, Binary: LoadBinary,
 		jobs: map[uuid.UUID]*job{}, byIP: map[string]uuid.UUID{},
+		agentInstallJobs: map[uuid.UUID]*agentInstallJob{}, agentInstallByServer: map[uuid.UUID]uuid.UUID{},
 	}
 }
 

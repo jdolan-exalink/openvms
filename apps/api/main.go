@@ -184,9 +184,10 @@ func run() error {
 	defer rtHub.Close()
 	go (&realtime.Feed{Source: realtime.JetStreamSource{JS: js}, Hub: rtHub, Routes: rtRoutes, Log: log}).Run(ctx)
 	router, err := api.NewRouter(handlers, log, api.Options{
-		Queries:           db.New(pool),
-		TrustForwardedFor: cfg.TrustForwardedFor,
-		SessionIdle:       cfg.SessionIdle,
+		Queries:                     db.New(pool),
+		TrustForwardedFor:           cfg.TrustForwardedFor,
+		CredentialTrustedProxyCIDRs: cfg.CredentialTrustedProxyCIDRs,
+		SessionIdle:                 cfg.SessionIdle,
 		Media: (&media.Gateway{
 			Svc: mediaSvc, Actor: api.ActorFrom, Branding: brandingSvc, Session: api.RevalidatorFrom,
 			Live: media.LiveConfig{

@@ -713,6 +713,48 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/install:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: installServerAgent
+      summary: Install the OpenVMS edge agent over pinned SSH
+      description: Requires servers.manage and servers.config.secrets. The API accepts this password only over direct HTTPS or HTTPS asserted by an explicitly allowlisted immediate proxy. The SSH target, password and fingerprint are transient and never stored or returned; host-key pin verification happens before password authentication. Existing agent registrations cannot be replaced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerAgentInstallRequest" }
+      responses:
+        "202":
+          description: Ephemeral in-memory install job accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/servers/{serverId}/agent/install/{jobId}:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgentInstallJob
+      summary: Read transient agent install progress
+      description: Requires both server-scoped permissions. Jobs live only in API memory; missing jobs after process restart have an unknown outcome and are never treated as success.
+      responses:
+        "200":
+          description: Install status without credentials or remote output
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/servers/{serverId}/onvif/discover:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3539,6 +3581,24 @@ components:
         server_id: { type: string, format: uuid }
         error: { type: string }
         host_key: { type: string, description: SHA256 fingerprint seen on first SSH contact. }
+    ServerAgentInstallRequest:
+      type: object
+      additionalProperties: false
+      required: [ssh_host, ssh_port, ssh_password, ssh_host_key_fingerprint]
+      properties:
+        ssh_host: { type: string, format: ipv4, maxLength: 15, description: Explicit SSH target IPv4 literal; never inferred from Frigate URL. }
+        ssh_port: { type: integer, minimum: 1, maximum: 65535 }
+        ssh_password: { type: string, minLength: 1, maxLength: 4096, writeOnly: true, description: Transient root SSH password; never persisted or echoed. }
+        ssh_host_key_fingerprint: { type: string, pattern: '^SHA256:[A-Za-z0-9+/]{43}$', description: Required out-of-band verified SHA-256 pin; no trust-on-first-use. }
+    ServerAgentInstallJob:
+      type: object
+      additionalProperties: false
+      required: [id, status, stage]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, succeeded, failed] }
+        stage: { type: string, enum: [validating, connecting, transferring, activating, registering, complete, failed] }
+        message: { type: string, maxLength: 200 }
     ServerAgentTLSConfig:
       type: object
       additionalProperties: false

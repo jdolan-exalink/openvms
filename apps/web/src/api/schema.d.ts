@@ -545,6 +545,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install the OpenVMS edge agent over pinned SSH
+         * @description Requires servers.manage and servers.config.secrets. The API accepts this password only over direct HTTPS or HTTPS asserted by an explicitly allowlisted immediate proxy. The SSH target, password and fingerprint are transient and never stored or returned; host-key pin verification happens before password authentication. Existing agent registrations cannot be replaced.
+         */
+        post: operations["installServerAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/install/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read transient agent install progress
+         * @description Requires both server-scoped permissions. Jobs live only in API memory; missing jobs after process restart have an unknown outcome and are never treated as success.
+         */
+        get: operations["getServerAgentInstallJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/onvif/discover": {
         parameters: {
             query?: never;
@@ -2597,6 +2642,27 @@ export interface components {
             error?: string;
             /** @description SHA256 fingerprint seen on first SSH contact. */
             host_key?: string;
+        };
+        ServerAgentInstallRequest: {
+            /**
+             * Format: ipv4
+             * @description Explicit SSH target IPv4 literal; never inferred from Frigate URL.
+             */
+            ssh_host: string;
+            ssh_port: number;
+            /** @description Transient root SSH password; never persisted or echoed. */
+            ssh_password: string;
+            /** @description Required out-of-band verified SHA-256 pin; no trust-on-first-use. */
+            ssh_host_key_fingerprint: string;
+        };
+        ServerAgentInstallJob: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed";
+            /** @enum {string} */
+            stage: "validating" | "connecting" | "transferring" | "activating" | "registering" | "complete" | "failed";
+            message?: string;
         };
         ServerAgentTLSConfig: {
             secure_port: number;
@@ -5085,6 +5151,63 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    installServerAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentInstallRequest"];
+            };
+        };
+        responses: {
+            /** @description Ephemeral in-memory install job accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getServerAgentInstallJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Install status without credentials or remote output */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

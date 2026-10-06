@@ -43,6 +43,48 @@ func (h *Handlers) GetServerProvision(ctx context.Context, r gen.GetServerProvis
 	return gen.GetServerProvision200JSONResponse(serverProvision(snap)), nil
 }
 
+func (h *Handlers) InstallServerAgent(ctx context.Context, r gen.InstallServerAgentRequestObject) (gen.InstallServerAgentResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || r.Body.SshPassword == nil {
+		return nil, &provision.ValidationError{Msg: "agent install request is required"}
+	}
+	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
+		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
+	}
+	job, err := h.Provision.StartServerAgentInstall(ctx, a, uuid.UUID(r.ServerId), provision.AgentInstallStartRequest{
+		Host: r.Body.SshHost, Port: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
+		HostKey: r.Body.SshHostKeyFingerprint,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gen.InstallServerAgent202JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func (h *Handlers) GetServerAgentInstallJob(ctx context.Context, r gen.GetServerAgentInstallJobRequestObject) (gen.GetServerAgentInstallJobResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, uuid.UUID(r.ServerId), uuid.UUID(r.JobId))
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetServerAgentInstallJob200JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func serverAgentInstallJob(in provision.AgentInstallJob) gen.ServerAgentInstallJob {
+	out := gen.ServerAgentInstallJob{Id: types.UUID(in.ID), Status: gen.ServerAgentInstallJobStatus(in.Status), Stage: gen.ServerAgentInstallJobStage(in.Stage)}
+	if in.Message != "" {
+		message := in.Message
+		out.Message = &message
+	}
+	return out
+}
+
 func (h *Handlers) GetServerAgent(ctx context.Context, r gen.GetServerAgentRequestObject) (gen.GetServerAgentResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {

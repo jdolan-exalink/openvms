@@ -2,12 +2,12 @@
 
 Deliver capability-driven ONVIF camera management via agent/API, with safe Frigate synchronization and auditable operations. This five-phase feature is broader than CRUD.
 
-## Current implementation status — 2026-10-05
+## Current implementation status — 2026-10-06
 
 - Commits `712b56d` (HTTPS relay) and `daafa0d` (UI) connect selected-server read-only probing; success shows device/services/time, not saved cameras.
-- The read-only path and secure registration command are implemented locally, but **not deployed** or tested against a real camera/production database. Evidence is fake-transport/UI tests; no production certificate was generated or deployed.
-- The user authorized a selected-server “Install agent via SSH” action. The local runner foundation is implemented; API/job and UI wiring remain unimplemented. No destination/session is authorized for actual SSH, deployment, or camera tests; Casa remains pending.
-- Proof: `pnpm exec vitest run src/routes/Cameras.test.tsx` — 19 passed; `pnpm typecheck` — PASS; `pnpm test` — 120 files / 856 tests. Local checks are not device acceptance.
+- The read-only path and secure registration command are implemented locally, but **not deployed** or tested against a real camera/production database. Evidence is fake-transport/UI tests; no production certificate exists.
+- The user authorized a selected-server “Install agent via SSH” action. SSH-01a runner and SSH-01b API/job plus route-specific trusted HTTPS ingress are implemented locally. SSH-02 Servers UI remains unimplemented. No destination/session is authorized for actual SSH, deployment, or camera tests; Casa remains pending.
+- Proof: focused Cameras test — 19 passed; typecheck — PASS; web suite — 120 files / 856 tests. Local checks are not device acceptance.
 - Product promise: 100% support of the explicitly declared capability/profile matrix, not every vendor's proprietary extension or every ONVIF function on every device. Unsupported capabilities must remain unavailable in the UI.
 
 ## Goal and boundaries
@@ -16,15 +16,15 @@ Deliver capability-driven ONVIF camera management via agent/API, with safe Friga
 - **Authorized implementation:** camera/agent and API/UI code, including the SSH-install workflow below; use fakes for development. No actual SSH, deployment, LAN camera, or physical operation without separate destination/session authorization.
 - **Frigate:** OpenVMS must modify/synchronize Frigate configuration. Camera deletion preserves recordings by default; any discard must be explicit and fail closed. No factory reset.
 - **Security and reliability:** stable VMS IDs; tombstones suppress reimport of deleted cameras; encrypted, write-only secrets; capability/operation-driven UI states and options; bounded retries/timeouts; readback plus audit for mutations.
-- **Delivery:** `ask-on-risk`, with user-approved `stacked-to-main` strategy. Do not push, create PRs, or merge. Keep each coherent work unit with its tests/docs and a Conventional Commit on this feature branch. The 400 authored changed-line guidance is a slicing aid, never code-golf; this complete feature is expected to span many work units and may total many thousands of lines.
-- **TDD:** Strict TDD is enabled by the user instructions. For each implementation task, record observed RED, GREEN, and REFACTOR using the exact focused runner; do not infer test results.
+- **Delivery:** `ask-on-risk`, user-approved `stacked-to-main`; no push/PR/merge. Keep tests/docs in Conventional Commits on the feature branch. 400 lines is guidance, not a cap; the full feature spans many work units.
+- **TDD:** Strict TDD is enabled. Record observed RED/GREEN/REFACTOR per implementation task; never infer results.
 
 ## Baseline and current state
 
 - Feature branch: `feat/onvif-camera-management`, created from local `main` at `3d44726ff04f61775115e9cd37dc0c2db8cb5c0a` (`chore: ignore local soc map mockup reference`). At task creation `HEAD` and `main` resolve to the same commit; do not copy unrelated future changes from `feat/maps-phase2`.
 - Historical baseline exploration found ONVIF credentials/config represented in Frigate configuration but no native ONVIF discovery/control in the node agent. Per-camera PATCH edits an existing Frigate camera section; adding/removing sections currently needs raw config PUT or a new safe agent capability. Secrets require `servers.config.secrets` and are masked otherwise; Frigate below 0.16 cannot edit config. Recording reads exist but no recording DELETE endpoint. Existing camera sync identity is `(server_id, remote_name)`; import upsert can resurrect a soft-deleted same-name camera, so deletion tombstones/suppression are required. Prefer display-name changes over renaming remote keys to preserve VMS/event identity.
-- Baseline runners: `go test -race ./...`, `pnpm test`, `pnpm typecheck`; focus Go by package and web via `pnpm exec vitest run <test-file>`. `make test` combines Go/web suites.
-- At initial planning, no source code changes, tests, commits, LAN access, camera operation, or physical operation had been performed. Later implementation evidence is listed below.
+- Baseline runners: `go test -race ./...`, `pnpm test`, `pnpm typecheck`; focus Go by package and web via `pnpm exec vitest run <test-file>`.
+- Initial planning made no source/test/commit or physical-device changes; later evidence is listed below.
 
 ## Work units
 
@@ -91,7 +91,8 @@ Only local implementation is authorized; Frigate URL does not prove the SSH targ
 | ID | Unit | Security/scope |
 |---|---|---|
 | ONVIF-DEPLOY-SSH-01 | Backend/API + dedicated agent-only runner | Verify fingerprint before password auth. SSH username/password never enter DB, job snapshots, logs, files, or audit; Go strings do not guarantee zeroization. A separately sealed server-bound agent bearer token is distinct. No new server or broad provisioning. |
-| ONVIF-DEPLOY-SSH-01a | Pinned SSH runner foundation (implemented locally; not callable from API) | Explicit IPv4/port, root user, password, required SHA-256 pin; fake dial/SSH. SFTP payload only. Bounded preflight/install; no overwrite; allowlisted agent files, optional supplied cert/key 0600 with matching IP SAN. No API/job store, HTTP fallback, or actual remote connection. |
+| ONVIF-DEPLOY-SSH-01a | Pinned SSH runner foundation (implemented locally; not callable from API) | Explicit IPv4/port, root user, password, required SHA-256 pin; fake dial/SSH. SFTP payload only. Bounded preflight/install; no overwrite; allowlisted agent files, optional supplied cert/key 0600 with matching IP SAN. Safe `String`/`GoString`/JSON projection excludes secrets and payload bytes. No API/job store, HTTP fallback, or actual remote connection. |
+| ONVIF-DEPLOY-SSH-01b | Existing-server API install + ephemeral progress (implemented locally; UI pending) | POST/poll; scoped permissions before agent/binary access; strict request; trusted artifact; generated token/TLS; insert-only registration; transient credentials. Direct TLS or single forwarded HTTPS from immediate peer in explicit `CREDENTIAL_TRUSTED_PROXY_CIDRS`; empty default denies proxy trust. Worker gets a fresh bounded context; early reservation precedes artifact/token work; artifact reads are bounded and reject symlinks. |
 | ONVIF-DEPLOY-SSH-02 | Selected-server Servers UI | Credentials transient only; clear on completion/navigation/server change; no browser storage, URL, logs, response echo, or audit. Safe bounded progress/errors. |
 
 Runner changes only OpenVMS agent files/systemd and optional supplied TLS material; no packages, Docker/Compose, Frigate, NTP, or network. It checks OS/architecture, bounds steps, refuses overwrites/retries. Probe readiness requires verified HTTPS/trust, sealed token, and health. Fake tests only; actual SSH needs separate destination/session authorization.
@@ -99,6 +100,12 @@ Runner changes only OpenVMS agent files/systemd and optional supplied TLS materi
 Failures may leave partial files; no remote retry/cleanup; manual remediation required.
 
 **01a proof (2026-10-06):** RED: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/provision -run TestRunAgentInstall` failed: runner undefined. GREEN: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/provision`; `GOCACHE=/tmp/openvms-go-build-cache go test -race ./internal/provision`; `GOCACHE=/tmp/openvms-go-build-cache go test ./...`; `git diff --check` — all PASS. Fake-only tests cover validation, pin mismatch, modes/SAN, cancellation, redaction, scope. `github.com/pkg/sftp` 1.13.11. No live calls. Rollback: remove `agent_install.go` + tests and SFTP/pinned-port additions in `ssh.go`; revert SFTP dependency. No commit/review.
+
+**SSH-01b ingress design (2026-10-06):** Existing `secureRequest` and `TRUST_FORWARDED_FOR` do not authenticate the proxy peer. Parent authorized a narrow `CREDENTIAL_TRUSTED_PROXY_CIDRS` config, disabled by default and fail-closed on malformed CIDRs. Only the SSH-install route will accept exactly one forwarded `https` value from a matching immediate peer; direct TLS is accepted. Existing global cookie/security behavior stays unchanged.
+
+**SSH-01b proof (2026-10-06):** RED: contract/service tests observed absent routes/service. GREEN: `make generate`; focused `go test -count=1 ./internal/provision ./internal/api ./apps/api`; `go test -race ./internal/provision ./internal/api`; `go test ./...` — PASS with `/tmp/openvms-go-build-cache`. Coverage: proxy spoof/multi-value/CIDR, bounded body, permission-before-row/artifact, existing-agent conflict, redaction, fake runner success/failure, artifact hash/architecture, generated cert trust. No live operations. Pending: UI, proxy deployment config, live DB/SSH, agent HTTPS health and camera acceptance. Rollback: remove SSH-01b service/routes/schema/query and trusted-proxy code.
+
+**SSH-01b post-review hardening (2026-10-06):** RED: focused regressions first failed to compile due to the missing credential seam. GREEN: isolate request context values, reserve/release job slots before preparation, bound/no-follow regular artifact reads; tests cover context isolation, duplicate/capacity rejection, failure release, bounds and symlinks. `make generate`, focused/race/full Go suites, web typecheck and diff check PASS. No remote/live operations.
 
 **01a serialization hardening (2026-10-06):** RED: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/provision -run TestAgentInstallRequestSerializationRedactsSecrets` exposed password/token and TLS payloads in default struct formatting. GREEN: custom safe `String`/`GoString`/JSON projection and `json:"-"` field tags now exclude password, token, binary, certificate, and private-key payloads. Focused serialization test, provision package, provision race test, full Go suite, and `git diff --check` PASS. The runner still accepts explicit binary/token/payload arguments at the internal boundary; a future authenticated API wrapper must source/validate artifacts and enforce permissions before calling it. No API/job persistence or remote connection.
 
