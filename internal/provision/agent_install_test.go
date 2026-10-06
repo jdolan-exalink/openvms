@@ -79,21 +79,25 @@ func newAgentInstallTLS(t *testing.T, ip string) ([]byte, []byte) {
 	}
 	now := time.Now()
 	certDER, err := x509.CreateCertificate(rand.Reader, &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: ip},
-		NotBefore:    now.Add(-time.Minute),
-		NotAfter:     now.Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:  []net.IP{net.ParseIP(ip)},
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: ip},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{net.ParseIP(ip)},
 	}, &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject:      pkix.Name{CommonName: ip},
-		NotBefore:    now.Add(-time.Minute),
-		NotAfter:     now.Add(time.Hour),
-		KeyUsage:     x509.KeyUsageDigitalSignature,
-		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		IPAddresses:  []net.IP{net.ParseIP(ip)},
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: ip},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		IPAddresses:           []net.IP{net.ParseIP(ip)},
 	}, pub, priv)
 	if err != nil {
 		t.Fatal(err)
