@@ -6,7 +6,7 @@ Provide an explicit way for an operator on HTTP to reopen the Servers screen ove
 
 The install and update dialogs currently show only an HTTPS-required notice when `location.protocol` is HTTP. Compose maps `WEB_HTTPS_PORT` to the web container's port 443, but does not pass the published port into Caddy or the browser. A hard-coded default would fail when an operator configures another port.
 
-Keep this independent from the near-limit ONVIF ledger. No API endpoint, password submission over HTTP, external host, automatic navigation, TLS bypass, query/hash preservation, or credential preservation is in scope. Migration 34 remains deployed and forward-only; no deployment is part of this task.
+Keep this independent from the near-limit ONVIF ledger. No API endpoint, password submission over HTTP, external host, automatic navigation, TLS bypass, query/hash preservation, or credential preservation is in scope. Migration 34 remains deployed and forward-only. The feature implementation itself did not deploy; a separately authorized local web-only rollout is recorded below.
 
 ## Accepted design
 
@@ -41,7 +41,16 @@ Both HTTP dialogs show a localized button, not an automatic redirect. Only an ex
 - GREEN: `docker compose config --quiet` passed; with `WEB_HTTPS_PORT=9443`, compose JSON checks confirmed host port `9443` and `OPENVMS_WEB_HTTPS_PORT=9443`.
 - GREEN: isolated check-only Caddy validation with `OPENVMS_WEB_HTTPS_PORT=9443` returned `Valid configuration`; no service was started or restarted.
 - GREEN: `(cd apps/web && pnpm exec vitest run src/routes/Servers.test.tsx)` passed (43 tests); `(cd apps/web && pnpm typecheck)` passed; `(cd apps/web && pnpm test)` passed (120 files, 880 tests); scoped ESLint on the five changed web files and `git diff --check` passed.
-- No deployment, browser credential submission, SSH, database, camera, or live listener test was performed. HTTPS still depends on the operator's normal browser trust of the configured certificate.
+- During implementation verification, no deployment, browser credential submission, SSH, database, camera, or live listener test was performed. The later separately authorized listener checks are recorded below. HTTPS still depends on normal browser trust of the configured certificate.
+
+### Separately authorized local web rollout
+
+- User authorization covered only the local web container. No API, PostgreSQL, agent, SSH, or camera service was rebuilt, restarted, or queried.
+- Pre-deploy `docker compose config --quiet` passed. The web container used image `sha256:0b2206de60245b84f45e6487b04fffdd788dbe277e12b3eaac11931b008027ac`; it was preserved as `openvms-web:rollback-pre-https-redirect-1a48309`. API and PostgreSQL container IDs before/after remained `79005e5bfa87...` and `6209555b37bf...` respectively.
+- `docker compose build --pull=false web` succeeded; `docker compose up -d --no-deps web` recreated only `openvms-web-1`. Active web image is `sha256:62845cd9016c56f248e8f5af0b437c4bf684532a6916fc248bee66dff65204e0`; runtime `OPENVMS_WEB_HTTPS_PORT=8443`.
+- With `curl --noproxy '*'` and without `-k`, HTTP `http://10.1.1.24:8000/health/live` and HTTPS `https://10.1.1.24:8443/health/live` both returned 200. The port endpoint returned body `8443`, `text/plain`, and `Cache-Control: no-store` on both listeners; HTTPS used `--cacert deploy/docker/local-tls/tls.crt` and also validated successfully.
+- Served `Servers-D4TBPMId.js` contained the redirect action and runtime endpoint strings. No authenticated browser interaction or SSH credential submission was performed.
+- Rollback boundary: restore the web service to `openvms-web:rollback-pre-https-redirect-1a48309` and recreate only `web`; retain API/PostgreSQL and data as-is. No rollback was needed.
 
 ## Rollback
 
