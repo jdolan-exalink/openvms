@@ -102,6 +102,7 @@ services:
     environment:
       <<: *go-env
       TRUST_FORWARDED_FOR: "true"
+      CREDENTIAL_TRUSTED_PROXY_CIDRS: ${CREDENTIAL_TRUSTED_PROXY_CIDRS:-}
       HOST_PROC: /host/proc
       HOST_DRM: /host/drm
       HOST_DISK: /hostfs

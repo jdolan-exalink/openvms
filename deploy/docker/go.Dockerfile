@@ -27,6 +27,8 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
     -o /out/app ./apps/${APP} \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/edge-agent ./apps/edge-agent \
+ && sha256sum /out/edge-agent | awk '{print $1}' > /out/edge-agent.sha256 \
+ && go env GOARCH > /out/edge-agent.goarch \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/vmsctl ./apps/vmsctl
 
 # The worker links onnxruntime and ships the vehicle-body model. The API stays
@@ -71,5 +73,7 @@ FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 COPY --from=build /out/app /app
 COPY --from=build /out/vmsctl /vmsctl
 COPY --from=build /out/edge-agent /opt/openvms/edge-agent
+COPY --from=build /out/edge-agent.sha256 /opt/openvms/edge-agent.sha256
+COPY --from=build /out/edge-agent.goarch /opt/openvms/edge-agent.goarch
 USER nonroot:nonroot
 ENTRYPOINT ["/app"]
