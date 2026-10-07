@@ -444,6 +444,28 @@ describe("Servers", () => {
       expect((await screen.findAllByText(/No se puede confirmar el resultado/i)).length).toBeGreaterThan(0);
       expect(document.body).not.toHaveTextContent("secret-root-password");
     });
+
+    it("displays progress bar and event log console during SSH installation", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      setupAgentInstall(undefined, async () => json({ id: "job-101", status: "running", stage: "transferring", message: "Transferring agent files over SFTP" }, 202));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+
+      const progressbar = await within(dialog).findByRole("progressbar");
+      expect(progressbar).toBeInTheDocument();
+      expect(progressbar).toHaveAttribute("aria-valuenow", "65");
+      expect(within(dialog).getByText("65%")).toBeInTheDocument();
+
+      const logConsole = within(dialog).getByRole("log");
+      expect(logConsole).toBeInTheDocument();
+      expect(within(dialog).getByText("Consola de eventos")).toBeInTheDocument();
+      expect(await within(dialog).findByText(/Transfiriendo archivos y binario/i)).toBeInTheDocument();
+    });
   });
 
   describe("existing-agent SSH update", () => {
@@ -806,6 +828,27 @@ describe("Servers", () => {
       expect(document.body).not.toHaveTextContent("password-secret");
       expect(document.body).not.toHaveTextContent("raw-ssh-output");
       expect(document.body).not.toHaveTextContent("secret-root-password");
+    });
+
+    it("displays progress bar and event log console during SSH update", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      setup(async () => json({ id: "job-202", status: "running", stage: "activating", message: "Activating the agent service" }, 202));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
+      fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "22" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
+
+      const progressbar = await within(dialog).findByRole("progressbar");
+      expect(progressbar).toBeInTheDocument();
+      expect(progressbar).toHaveAttribute("aria-valuenow", "85");
+      expect(within(dialog).getByText("85%")).toBeInTheDocument();
+
+      const logConsole = within(dialog).getByRole("log");
+      expect(logConsole).toBeInTheDocument();
+      expect(within(dialog).getByText("Consola de eventos")).toBeInTheDocument();
+      expect(await within(dialog).findByText(/Activando runtime y servicio systemd/i)).toBeInTheDocument();
     });
   });
 

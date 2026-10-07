@@ -1,6 +1,6 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Pencil, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react";
+import { Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
@@ -284,6 +284,366 @@ function AgentUpdateControl({ server, busy, ownActive, onJob, onStart, onFailure
   </>;
 }
 
+interface AgentJobLogEntry {
+  id: string;
+  timestamp: string;
+  level: "info" | "stage" | "success" | "error" | "warn";
+  message: string;
+}
+
+function computeAgentJobProgress(status?: string, stage?: string, isPending?: boolean): number {
+  if (status === "succeeded" || status === "failed") return 100;
+  if (isPending) return 5;
+  if (!status || status === "queued") return 10;
+  switch (stage) {
+    case "validating":
+      return 20;
+    case "connecting":
+      return 40;
+    case "transferring":
+      return 65;
+    case "activating":
+      return 85;
+    case "registering":
+      return 95;
+    case "complete":
+      return 100;
+    default:
+      return 50;
+  }
+}
+
+function getAgentJobStageLabel(status: string | undefined, stage: string | undefined, isPending: boolean, t: ReturnType<typeof useT>): string {
+  if (isPending) return t("servers.agentInstallSubmitting");
+  if (status === "succeeded") return t("servers.agentJobStageComplete");
+  if (status === "failed") return t("servers.agentJobStageFailed");
+  if (status === "queued") return t("servers.agentJobStageQueued");
+  switch (stage) {
+    case "validating":
+      return t("servers.agentJobStageValidating");
+    case "connecting":
+      return t("servers.agentJobStageConnecting");
+    case "transferring":
+      return t("servers.agentJobStageTransferring");
+    case "activating":
+      return t("servers.agentJobStageActivating");
+    case "registering":
+      return t("servers.agentJobStageRegistering");
+    case "complete":
+      return t("servers.agentJobStageComplete");
+    default:
+      return t("servers.agentInstallRunning");
+  }
+}
+
+function AgentJobProgressBar({
+  status,
+  stage,
+  isPending,
+}: {
+  status?: string;
+  stage?: string;
+  isPending: boolean;
+}) {
+  const t = useT();
+  const percent = computeAgentJobProgress(status, stage, isPending);
+  const stageLabel = getAgentJobStageLabel(status, stage, isPending, t);
+  const isRunning = isPending || status === "queued" || status === "running";
+
+  return (
+    <div
+      role="progressbar"
+      aria-valuenow={percent}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-label={t("servers.agentProgressBarLabel")}
+      className="flex flex-col gap-1.5"
+    >
+      <div className="flex items-center justify-between text-xs font-medium">
+        <span className="text-muted">{stageLabel}</span>
+        <span className="font-mono text-muted tabular-nums">{percent}%</span>
+      </div>
+      <div className="h-2 w-full overflow-hidden rounded-full bg-surface-3">
+        <div
+          className={cn(
+            "h-full rounded-full transition-all duration-500 ease-out",
+            status === "succeeded"
+              ? "bg-ok"
+              : status === "failed"
+              ? "bg-bad"
+              : "bg-primary",
+            isRunning && "animate-pulse",
+          )}
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function useAgentJobLogs({
+  job,
+  isPending,
+  kind,
+  outcomeUnknown,
+  t,
+}: {
+  job: Schemas["ServerAgentInstallJob"] | null | undefined;
+  isPending: boolean;
+  kind: "install" | "update";
+  outcomeUnknown?: boolean;
+  t: ReturnType<typeof useT>;
+}) {
+  const [logs, setLogs] = useState<AgentJobLogEntry[]>([]);
+  const seenStagesRef = useRef<Set<string>>(new Set());
+  const seenStatusesRef = useRef<Set<string>>(new Set());
+  const pendingLoggedRef = useRef(false);
+  const unknownLoggedRef = useRef(false);
+  const lastMessageRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!job && !isPending) {
+      setLogs([]);
+      seenStagesRef.current.clear();
+      seenStatusesRef.current.clear();
+      pendingLoggedRef.current = false;
+      unknownLoggedRef.current = false;
+      lastMessageRef.current = null;
+    }
+  }, [job, isPending]);
+
+  useEffect(() => {
+    if (isPending && !pendingLoggedRef.current) {
+      pendingLoggedRef.current = true;
+      const now = new Date().toLocaleTimeString("en-GB", { hour12: false });
+      setLogs((prev) => [
+        ...prev,
+        {
+          id: `start-${Date.now()}`,
+          timestamp: now,
+          level: "info",
+          message: kind === "update" ? t("servers.agentLogStartingUpdate") : t("servers.agentLogStartingInstall"),
+        },
+      ]);
+    }
+  }, [isPending, kind, t]);
+
+  useEffect(() => {
+    if (!job) return;
+    const now = new Date().toLocaleTimeString("en-GB", { hour12: false });
+    const newEntries: AgentJobLogEntry[] = [];
+
+    if (job.status === "queued" && !seenStatusesRef.current.has("queued")) {
+      seenStatusesRef.current.add("queued");
+      newEntries.push({
+        id: `queued-${job.id}`,
+        timestamp: now,
+        level: "info",
+        message: t("servers.agentLogJobQueued", { id: job.id }),
+      });
+    }
+
+    const stageOrder = ["validating", "connecting", "transferring", "activating", "registering", "complete"];
+    const stageMessages: Record<string, () => string> = {
+      validating: () => t("servers.agentLogStageValidating"),
+      connecting: () => t("servers.agentLogStageConnecting"),
+      transferring: () => t("servers.agentLogStageTransferring"),
+      activating: () => t("servers.agentLogStageActivating"),
+      registering: () => t("servers.agentLogStageRegistering"),
+    };
+
+    if (job.stage && job.stage !== "failed") {
+      const targetIdx = stageOrder.indexOf(job.stage);
+      if (targetIdx >= 0) {
+        for (let i = 0; i <= targetIdx; i++) {
+          const s = stageOrder[i]!;
+          if (!seenStagesRef.current.has(s) && stageMessages[s]) {
+            seenStagesRef.current.add(s);
+            newEntries.push({
+              id: `stage-${s}-${job.id}`,
+              timestamp: now,
+              level: "stage",
+              message: stageMessages[s](),
+            });
+          }
+        }
+      }
+    }
+
+    if (job.message && job.message !== lastMessageRef.current && job.status !== "failed") {
+      lastMessageRef.current = job.message;
+      newEntries.push({
+        id: `msg-${Date.now()}`,
+        timestamp: now,
+        level: "info",
+        message: job.message,
+      });
+    }
+
+    if (job.status === "succeeded" && !seenStatusesRef.current.has("succeeded")) {
+      seenStatusesRef.current.add("succeeded");
+      newEntries.push({
+        id: `success-${job.id}`,
+        timestamp: now,
+        level: "success",
+        message: kind === "update" ? t("servers.agentLogUpdateSucceeded") : t("servers.agentLogInstallSucceeded"),
+      });
+    }
+
+    if (job.status === "failed" && !seenStatusesRef.current.has("failed")) {
+      seenStatusesRef.current.add("failed");
+      const failMsg = job.message
+        ? kind === "update"
+          ? agentUpdateFailureMessage(job.message, t)
+          : job.message
+        : t("servers.agentLogFailed");
+      newEntries.push({
+        id: `failed-${job.id}`,
+        timestamp: now,
+        level: "error",
+        message: failMsg,
+      });
+    }
+
+    if (newEntries.length > 0) {
+      setLogs((prev) => [...prev, ...newEntries]);
+    }
+  }, [job, kind, t]);
+
+  useEffect(() => {
+    if (outcomeUnknown && !unknownLoggedRef.current) {
+      unknownLoggedRef.current = true;
+      const now = new Date().toLocaleTimeString("en-GB", { hour12: false });
+      setLogs((prev) => [
+        ...prev,
+        {
+          id: `unknown-${Date.now()}`,
+          timestamp: now,
+          level: "warn",
+          message: t("servers.agentLogOutcomeUnknown"),
+        },
+      ]);
+    }
+  }, [outcomeUnknown, t]);
+
+  return logs;
+}
+
+function AgentJobLogConsole({
+  logs,
+  isRunning,
+  status,
+}: {
+  logs: AgentJobLogEntry[];
+  isRunning: boolean;
+  status?: string;
+}) {
+  const t = useT();
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [logs]);
+
+  const copyLogs = useCallback(() => {
+    const text = logs
+      .map((entry) => `[${entry.timestamp}] [${entry.level.toUpperCase()}] ${entry.message}`)
+      .join("\n");
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 2000);
+      }).catch(() => undefined);
+    }
+  }, [logs]);
+
+  return (
+    <div className="flex flex-col overflow-hidden rounded-m3-lg border border-surface-3 bg-surface-base font-mono text-xs">
+      <div className="flex items-center justify-between border-b border-surface-3 bg-surface-2/60 px-3 py-1.5 text-muted">
+        <div className="flex items-center gap-2">
+          <Icon icon={Terminal} size="xs" />
+          <span className="font-sans font-medium text-surface-on">{t("servers.agentLogConsoleTitle")}</span>
+          <span
+            aria-hidden
+            className={cn(
+              "size-2 rounded-full",
+              status === "succeeded"
+                ? "bg-ok"
+                : status === "failed"
+                ? "bg-bad"
+                : isRunning
+                ? "animate-pulse bg-primary"
+                : "bg-surface-3",
+            )}
+          />
+        </div>
+        {logs.length > 0 && (
+          <button
+            type="button"
+            onClick={copyLogs}
+            className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-sans hover:bg-surface-3 hover:text-surface-on"
+            title={t("servers.agentLogCopy")}
+          >
+            {copied ? (
+              <>
+                <Icon icon={Check} size="xs" className="text-ok" />
+                <span className="text-ok">{t("servers.agentLogCopied")}</span>
+              </>
+            ) : (
+              <>
+                <Icon icon={Copy} size="xs" />
+                <span>{t("servers.agentLogCopy")}</span>
+              </>
+            )}
+          </button>
+        )}
+      </div>
+      <div
+        ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        className="max-h-40 min-h-24 overflow-y-auto p-3 space-y-1.5 text-surface-on select-text"
+      >
+        {logs.length === 0 ? (
+          <span className="text-muted/60">{t("servers.agentLogConsoleEmpty")}</span>
+        ) : (
+          logs.map((entry) => (
+            <div key={entry.id} className="flex items-start gap-2 leading-relaxed break-all">
+              <span className="text-muted/70 tabular-nums shrink-0">[{entry.timestamp}]</span>
+              <span
+                className={cn(
+                  "font-semibold shrink-0 uppercase text-[10px] px-1 py-0.5 rounded leading-none",
+                  entry.level === "stage" && "bg-primary/15 text-primary",
+                  entry.level === "success" && "bg-ok/15 text-ok",
+                  entry.level === "error" && "bg-bad/15 text-bad",
+                  entry.level === "warn" && "bg-warn/15 text-warn",
+                  entry.level === "info" && "bg-surface-3/50 text-muted",
+                )}
+              >
+                {entry.level}
+              </span>
+              <span
+                className={cn(
+                  entry.level === "error"
+                    ? "text-bad font-medium"
+                    : entry.level === "success"
+                    ? "text-ok font-medium"
+                    : "text-surface-on",
+                )}
+              >
+                {entry.message}
+              </span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive, onStart, onFailure, initialJob }: {
   server: Schemas["Server"];
   open: boolean;
@@ -329,6 +689,7 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
   const submitted = !!job?.id || start.isPending;
   const timerActive = (snapshot?.status === "queued" || snapshot?.status === "running") && !pollBudgetExpired;
   const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
+  const logs = useAgentJobLogs({ job: snapshot, isPending: start.isPending, kind: "update", outcomeUnknown: pollBudgetExpired, t });
   const close = () => {
     if (start.isPending) return;
     httpsRedirect.cancel();
@@ -374,7 +735,9 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
       </div>
     </form> : <section aria-label={t("servers.agentUpdateSSHProgress")} className="flex flex-col gap-4">
       {start.isPending ? <JobBusyState label={t("servers.agentStarting")} /> : <p aria-live="polite">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>}
+      <AgentJobProgressBar status={snapshot?.status} stage={snapshot?.stage} isPending={start.isPending} />
       {acceptedAt != null && <JobBusyState busy={timerActive} elapsed={elapsedSeconds} label={t("servers.agentElapsed", { elapsed: formatElapsed(elapsedSeconds) })} />}
+      <AgentJobLogConsole logs={logs} isRunning={start.isPending || timerActive} status={snapshot?.status} />
       {snapshot?.status === "succeeded" && !pollBudgetExpired && <p role="status" className="rounded-m3-lg bg-ok/10 p-3 text-sm">{t("servers.agentUpdateSSHSuccess")}</p>}
       {snapshot?.status === "failed" && <p role="alert" className="text-sm text-bad">{agentUpdateFailureMessage(snapshot.message, t)}</p>}
       {isRetryableAgentUpdateFailure(snapshot) && <Button className="self-end" variant="outlined" onClick={() => {
@@ -441,6 +804,7 @@ function AgentInstallDialog({
   const polling = snapshot?.status === "queued" || snapshot?.status === "running";
   const timerActive = polling && !outcomeUnknown;
   const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
+  const logs = useAgentJobLogs({ job: snapshot, isPending: start.isPending, kind: "install", outcomeUnknown, t });
   const close = () => {
     if (start.isPending) return;
     httpsRedirect.cancel();
@@ -505,7 +869,9 @@ function AgentInstallDialog({
       ) : (
         <section aria-label={t("servers.agentInstallProgress")} className="flex flex-col gap-4">
           {start.isPending ? <JobBusyState label={t("servers.agentStarting")} /> : <p aria-live="polite" className="text-sm">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>}
+          <AgentJobProgressBar status={snapshot?.status} stage={snapshot?.stage} isPending={start.isPending} />
           {acceptedAt != null && <JobBusyState busy={timerActive} elapsed={elapsedSeconds} label={t("servers.agentElapsed", { elapsed: formatElapsed(elapsedSeconds) })} />}
+          <AgentJobLogConsole logs={logs} isRunning={start.isPending || timerActive} status={snapshot?.status} />
           {snapshot?.status === "succeeded" && <p role="status" className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentInstallSuccessUnverified")}</p>}
           {snapshot?.status === "failed" && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallFailedCheckHost")}</p>}
           {outcomeUnknown && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
