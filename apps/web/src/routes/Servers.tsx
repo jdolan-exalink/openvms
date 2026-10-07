@@ -384,7 +384,7 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
     </form> : <section aria-label={t("servers.agentUpdateSSHProgress")} className="flex flex-col gap-4">
       <p aria-live="polite">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>
       {snapshot?.status === "succeeded" && !pollBudgetExpired && <p role="status" className="rounded-m3-lg bg-ok/10 p-3 text-sm">{t("servers.agentUpdateSSHSuccess")}</p>}
-      {snapshot?.status === "failed" && <p role="alert" className="text-sm text-bad">{t("servers.agentUpdateSSHFailed")}</p>}
+      {snapshot?.status === "failed" && <p role="alert" className="text-sm text-bad">{agentUpdateFailureMessage(snapshot.message, t)}</p>}
       {progress.error && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
       {pollBudgetExpired && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
       {(snapshot?.status === "queued" || snapshot?.status === "running") && <p className="text-sm text-muted">{t("servers.agentInstallCloseDoesNotCancel")}</p>}
@@ -704,6 +704,23 @@ function agentUpdateStartError(error: unknown, t: ReturnType<typeof useT>) {
     if (error.code === "conflict") return t("servers.agentUpdateSSHConflict");
   }
   return t("servers.agentUpdateSSHFailed");
+}
+
+function agentUpdateFailureMessage(message: string | undefined, t: ReturnType<typeof useT>) {
+  const safeMessages: Record<string, string> = {
+    "SSH host key changed since first use; verify the server identity before retrying.": "servers.agentUpdateDiagSSHHostKeyMismatch",
+    "Could not establish SSH. Verify reachability and root SSH access, then inspect the target before retrying.": "servers.agentUpdateDiagSSHConnectionFailed",
+    "The target failed agent-update preflight; inspect OS, architecture, and service state before retrying.": "servers.agentUpdateDiagPreflightFailed",
+    "Staging ownership could not be confirmed; inspect the target before retrying.": "servers.agentUpdateDiagStagingUncertain",
+    "Agent files could not be transferred; inspect the target before retrying.": "servers.agentUpdateDiagTransferFailed",
+    "Agent activation failed; the previous files were restored.": "servers.agentUpdateDiagActivationRestored",
+    "Agent activation failed and rollback could not be confirmed; inspect the target before retrying.": "servers.agentUpdateDiagActivationUncertain",
+    "HTTPS health verification failed; the previous agent files were restored.": "servers.agentUpdateDiagHealthRestored",
+    "HTTPS health verification failed and rollback could not be confirmed; inspect the target before retrying.": "servers.agentUpdateDiagHealthUncertain",
+    "Agent health was verified, but update staging cleanup failed; inspect the target before retrying.": "servers.agentUpdateDiagCleanupFailed",
+    "Agent HTTPS health succeeded, but trust registration failed; inspect server configuration before retrying.": "servers.agentUpdateDiagTLSRegistrationFailed",
+  };
+  return t((safeMessages[message ?? ""] ?? "servers.agentUpdateSSHFailed") as Parameters<typeof t>[0]);
 }
 
 function Fact({ label, className, children }: { label: string; className?: string; children: ReactNode }) {

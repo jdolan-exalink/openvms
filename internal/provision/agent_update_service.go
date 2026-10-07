@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net"
 	"strconv"
 	"strings"
@@ -223,8 +224,8 @@ func (s *Service) runServerAgentUpdate(actor authz.Actor, job *agentInstallJob, 
 	ctx, cancel := context.WithTimeout(context.Background(), agentUpdateJobTimeout)
 	defer cancel()
 	defer func() {
-		if recover() != nil {
-			job.update("failed", "failed", "Agent update failed; remote output was not retained")
+		if recovered := recover(); recovered != nil {
+			s.failServerAgentUpdate(job, original.ServerID, nil)
 		}
 		request.Password, request.AgentToken = "", ""
 		request.TLSPrivateKey, request.TLSCertificate, request.Binary = nil, nil, nil
@@ -243,7 +244,7 @@ func (s *Service) runServerAgentUpdate(actor authz.Actor, job *agentInstallJob, 
 		}
 	}
 	if err := run(ctx, request, func(stage string) { job.update("running", stage, agentUpdateStageMessage(stage)) }); err != nil {
-		job.update("failed", "failed", "Agent update failed; rollback may require target inspection")
+		s.failServerAgentUpdate(job, original.ServerID, err)
 		return
 	}
 	job.update("running", "registering", "Recording verified agent HTTPS trust")
@@ -252,10 +253,95 @@ func (s *Service) runServerAgentUpdate(actor authz.Actor, job *agentInstallJob, 
 		persist = s.persistUpdatedAgentTLS
 	}
 	if err := persist(ctx, actor, original, request.SecurePort, request.TLSCertificate); err != nil {
-		job.update("failed", "failed", "Agent is healthy but TLS trust registration failed; inspect the target before retrying")
+		s.failServerAgentUpdate(job, original.ServerID, newAgentUpdateFailure(agentUpdateStageRegistration, agentUpdateCodeTLSRegistrationFailed, agentUpdateRollbackNotAttempted))
 		return
 	}
 	job.update("succeeded", "complete", "Agent update and authenticated HTTPS health verified")
+}
+
+func (s *Service) failServerAgentUpdate(job *agentInstallJob, serverID uuid.UUID, err error) {
+	failure := safeAgentUpdateFailure(err)
+	logger := s.Log
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Warn("existing agent update failed",
+		"server_id", serverID,
+		"job_id", job.read().ID,
+		"stage", failure.stage,
+		"code", failure.code,
+		"rollback", failure.rollback,
+	)
+	job.update("failed", "failed", safeAgentUpdateFailureMessage(failure))
+}
+
+func safeAgentUpdateFailure(err error) *agentUpdateFailure {
+	var failure *agentUpdateFailure
+	if !errors.As(err, &failure) || failure == nil || !validAgentUpdateFailureEnum(failure.stage, failure.code, failure.rollback) {
+		return newAgentUpdateFailure(agentUpdateStageUnknown, agentUpdateCodeUnknown, agentUpdateRollbackUnknown)
+	}
+	return newAgentUpdateFailure(failure.stage, failure.code, failure.rollback)
+}
+
+func validAgentUpdateFailureEnum(stage, code, rollback string) bool {
+	switch stage {
+	case agentUpdateStageValidating:
+		return code == agentUpdateCodeInvalidRequest && rollback == agentUpdateRollbackNotAttempted
+	case agentUpdateStageConnecting:
+		return (code == agentUpdateCodeUnavailable || code == agentUpdateCodeSSHHostKeyMismatch || code == agentUpdateCodeSSHConnectionFailed) && rollback == agentUpdateRollbackNotAttempted
+	case agentUpdateStagePreflight:
+		return (code == agentUpdateCodePreflightFailed || code == agentUpdateCodeServiceUnavailable) && rollback == agentUpdateRollbackNotAttempted
+	case agentUpdateStageStaging:
+		return code == agentUpdateCodeStagingUnavailable && rollback == agentUpdateRollbackNotAttempted || code == agentUpdateCodeStagingUncertain && rollback == agentUpdateRollbackUncertain
+	case agentUpdateStageTransferring:
+		return (code == agentUpdateCodeCancelled || code == agentUpdateCodeTransferFailed) && rollback == agentUpdateRollbackNotAttempted
+	case agentUpdateStageActivating:
+		return code == agentUpdateCodeActivationFailed && (rollback == agentUpdateRollbackRestored || rollback == agentUpdateRollbackUncertain)
+	case agentUpdateStageVerifyingHealth:
+		return code == agentUpdateCodeHealthCheckFailed && (rollback == agentUpdateRollbackRestored || rollback == agentUpdateRollbackUncertain)
+	case agentUpdateStageRegistration:
+		return code == agentUpdateCodeTLSRegistrationFailed && rollback == agentUpdateRollbackNotAttempted
+	case agentUpdateStageCleanup:
+		return code == agentUpdateCodeCleanupFailed && rollback == agentUpdateRollbackNotAttempted
+	case agentUpdateStageUnknown:
+		return code == agentUpdateCodeUnknown && rollback == agentUpdateRollbackUnknown
+	default:
+		return false
+	}
+}
+
+func safeAgentUpdateFailureMessage(failure *agentUpdateFailure) string {
+	if failure == nil {
+		return "Agent update failed; inspect the target before retrying."
+	}
+	switch failure.code {
+	case agentUpdateCodeSSHHostKeyMismatch:
+		return "SSH host key changed since first use; verify the server identity before retrying."
+	case agentUpdateCodeSSHConnectionFailed, agentUpdateCodeUnavailable:
+		return "Could not establish SSH. Verify reachability and root SSH access, then inspect the target before retrying."
+	case agentUpdateCodePreflightFailed:
+		return "The target failed agent-update preflight; inspect OS, architecture, and service state before retrying."
+	case agentUpdateCodeStagingUncertain:
+		return "Staging ownership could not be confirmed; inspect the target before retrying."
+	case agentUpdateCodeTransferFailed, agentUpdateCodeCancelled:
+		return "Agent files could not be transferred; inspect the target before retrying."
+	case agentUpdateCodeActivationFailed:
+		if failure.rollback == agentUpdateRollbackRestored {
+			return "Agent activation failed; the previous files were restored."
+		}
+		return "Agent activation failed and rollback could not be confirmed; inspect the target before retrying."
+	case agentUpdateCodeHealthCheckFailed:
+		if failure.rollback == agentUpdateRollbackRestored {
+			return "HTTPS health verification failed; the previous agent files were restored."
+		}
+		return "HTTPS health verification failed and rollback could not be confirmed; inspect the target before retrying."
+	case agentUpdateCodeCleanupFailed:
+		return "Agent health was verified, but update staging cleanup failed; inspect the target before retrying."
+	case agentUpdateCodeTLSRegistrationFailed:
+		return "Agent HTTPS health succeeded, but trust registration failed; inspect server configuration before retrying."
+	default:
+		return "Agent update failed; inspect the target before retrying."
+	}
 }
 
 func newAgentUpdateTLSCredentials(host string) ([]byte, []byte, error) {

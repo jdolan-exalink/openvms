@@ -23,6 +23,78 @@ import (
 
 const agentUpdateMaxHealthBytes = 8 << 10
 
+const (
+	agentUpdateStageValidating      = "validating"
+	agentUpdateStageConnecting      = "connecting"
+	agentUpdateStagePreflight       = "preflight"
+	agentUpdateStageStaging         = "staging"
+	agentUpdateStageTransferring    = "transferring"
+	agentUpdateStageActivating      = "activating"
+	agentUpdateStageVerifyingHealth = "verifying_health"
+	agentUpdateStageRegistration    = "registration"
+	agentUpdateStageCleanup         = "cleanup"
+	agentUpdateStageUnknown         = "unknown"
+
+	agentUpdateCodeInvalidRequest        = "invalid_request"
+	agentUpdateCodeUnavailable           = "update_unavailable"
+	agentUpdateCodeSSHHostKeyMismatch    = "ssh_host_key_mismatch"
+	agentUpdateCodeSSHConnectionFailed   = "ssh_connection_failed"
+	agentUpdateCodePreflightFailed       = "preflight_failed"
+	agentUpdateCodeServiceUnavailable    = "service_definition_unavailable"
+	agentUpdateCodeStagingUnavailable    = "staging_unavailable"
+	agentUpdateCodeStagingUncertain      = "staging_uncertain"
+	agentUpdateCodeCancelled             = "cancelled"
+	agentUpdateCodeTransferFailed        = "transfer_failed"
+	agentUpdateCodeActivationFailed      = "activation_failed"
+	agentUpdateCodeHealthCheckFailed     = "health_check_failed"
+	agentUpdateCodeCleanupFailed         = "cleanup_failed"
+	agentUpdateCodeTLSRegistrationFailed = "tls_trust_registration_failed"
+	agentUpdateCodeUnknown               = "update_failed"
+
+	agentUpdateRollbackNotAttempted = "not_attempted"
+	agentUpdateRollbackRestored     = "restored"
+	agentUpdateRollbackUncertain    = "uncertain"
+	agentUpdateRollbackUnknown      = "unknown"
+)
+
+// agentUpdateFailure carries only fixed diagnostic enums. It intentionally does
+// not retain, unwrap, or stringify the underlying SSH/remote error.
+type agentUpdateFailure struct {
+	stage    string
+	code     string
+	rollback string
+}
+
+func newAgentUpdateFailure(stage, code, rollback string) *agentUpdateFailure {
+	return &agentUpdateFailure{stage: stage, code: code, rollback: rollback}
+}
+
+func (failure *agentUpdateFailure) Error() string { return "agent update failed" }
+
+func (failure *agentUpdateFailure) String() string {
+	if failure == nil {
+		return "agentUpdateFailure{stage:unknown code:update_failed rollback:unknown}"
+	}
+	return fmt.Sprintf("agentUpdateFailure{stage:%s code:%s rollback:%s}", failure.stage, failure.code, failure.rollback)
+}
+
+func (failure *agentUpdateFailure) GoString() string { return failure.String() }
+
+func (failure *agentUpdateFailure) MarshalJSON() ([]byte, error) {
+	if failure == nil {
+		return json.Marshal(struct {
+			Stage    string `json:"stage"`
+			Code     string `json:"code"`
+			Rollback string `json:"rollback"`
+		}{agentUpdateStageUnknown, agentUpdateCodeUnknown, agentUpdateRollbackUnknown})
+	}
+	return json.Marshal(struct {
+		Stage    string `json:"stage"`
+		Code     string `json:"code"`
+		Rollback string `json:"rollback"`
+	}{failure.stage, failure.code, failure.rollback})
+}
+
 // AgentUpdateRequest contains transient SSH credentials and update payloads.
 // It must not be persisted or logged; Go does not guarantee string zeroization.
 type AgentUpdateRequest struct {
@@ -63,10 +135,10 @@ type AgentUpdateHealthCheck func(context.Context, string, uint16, string, []byte
 // confirms a compatible host before any staged file is written.
 func RunAgentUpdate(ctx context.Context, request AgentUpdateRequest, dial AgentInstallDialer, checkHealth AgentUpdateHealthCheck) (resultErr error) {
 	if err := validateAgentUpdateRequest(request); err != nil {
-		return errors.New("invalid agent update request")
+		return newAgentUpdateFailure(agentUpdateStageValidating, agentUpdateCodeInvalidRequest, agentUpdateRollbackNotAttempted)
 	}
 	if dial == nil || ctx.Err() != nil {
-		return errors.New("agent update unavailable")
+		return newAgentUpdateFailure(agentUpdateStageConnecting, agentUpdateCodeUnavailable, agentUpdateRollbackNotAttempted)
 	}
 	if checkHealth == nil {
 		checkHealth = checkAgentUpdateHealth
@@ -75,34 +147,39 @@ func RunAgentUpdate(ctx context.Context, request AgentUpdateRequest, dial AgentI
 	defer cancel()
 	conn, err := dial(updateCtx, request.Host, request.SSHPort, request.Username, request.Password, request.ExpectedHostKey)
 	if err != nil {
-		return errors.New("agent update SSH connection failed")
+		if errors.Is(err, ErrAgentSSHHostKeyMismatch) {
+			return newAgentUpdateFailure(agentUpdateStageConnecting, agentUpdateCodeSSHHostKeyMismatch, agentUpdateRollbackNotAttempted)
+		}
+		return newAgentUpdateFailure(agentUpdateStageConnecting, agentUpdateCodeSSHConnectionFailed, agentUpdateRollbackNotAttempted)
 	}
 	defer conn.Close()
 	preflight, err := runAgentInstallStep(updateCtx, conn, agentUpdatePreflight())
 	if err != nil || !validAgentUpdatePreflight(preflight) {
-		return errors.New("agent update preflight failed")
+		return newAgentUpdateFailure(agentUpdateStagePreflight, agentUpdateCodePreflightFailed, agentUpdateRollbackNotAttempted)
 	}
 	unit, err := agentbundle.FS.ReadFile("openvms-agent.service")
 	if err != nil {
-		return errors.New("agent update service definition unavailable")
+		return newAgentUpdateFailure(agentUpdateStagePreflight, agentUpdateCodeServiceUnavailable, agentUpdateRollbackNotAttempted)
 	}
 	id, err := newAgentUpdateID()
 	if err != nil {
-		return errors.New("agent update staging unavailable")
+		return newAgentUpdateFailure(agentUpdateStageStaging, agentUpdateCodeStagingUnavailable, agentUpdateRollbackNotAttempted)
 	}
 	root := "/var/lib/openvms-agent-update/" + id
 	retainStage := false
 	prepared, err := runAgentInstallStep(updateCtx, conn, agentUpdatePrepare(root, request.SecurePort))
 	if err != nil || strings.TrimSpace(prepared) != "openvms_agent_update_staged=ready" {
-		return errors.New("agent update staging failed; stage ownership is uncertain and was retained")
+		return newAgentUpdateFailure(agentUpdateStageStaging, agentUpdateCodeStagingUncertain, agentUpdateRollbackUncertain)
 	}
 	defer func() {
 		if !retainStage {
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cleanupCancel()
 			finalized, err := runAgentInstallStep(cleanupCtx, conn, agentUpdateFinalize(root))
-			if (err != nil || strings.TrimSpace(finalized) != "openvms_agent_update_finalized=ok") && resultErr == nil {
-				resultErr = errors.New("agent is healthy but secure update staging cleanup failed")
+			if err != nil || strings.TrimSpace(finalized) != "openvms_agent_update_finalized=ok" {
+				if resultErr == nil {
+					resultErr = newAgentUpdateFailure(agentUpdateStageCleanup, agentUpdateCodeCleanupFailed, agentUpdateRollbackNotAttempted)
+				}
 			}
 		}
 	}()
@@ -114,29 +191,29 @@ func RunAgentUpdate(ctx context.Context, request AgentUpdateRequest, dial AgentI
 	}
 	for _, file := range files {
 		if err := updateCtx.Err(); err != nil {
-			return errors.New("agent update cancelled before activation")
+			return newAgentUpdateFailure(agentUpdateStageTransferring, agentUpdateCodeCancelled, agentUpdateRollbackNotAttempted)
 		}
 		writeCtx, writeCancel := context.WithTimeout(updateCtx, 2*time.Minute)
 		err = conn.WriteSFTPFile(writeCtx, file.path, file.mode, file.data)
 		writeCancel()
 		if err != nil {
-			return errors.New("agent update staging transfer failed")
+			return newAgentUpdateFailure(agentUpdateStageTransferring, agentUpdateCodeTransferFailed, agentUpdateRollbackNotAttempted)
 		}
 	}
 	activated, err := runAgentInstallStep(updateCtx, conn, agentUpdateActivate(root))
 	if err != nil || strings.TrimSpace(activated) != "openvms_agent_update=active" {
-		rollbackErr := rollbackAgentUpdate(conn, root)
-		if strings.Contains(rollbackErr.Error(), "uncertain") {
+		rollback := rollbackAgentUpdate(conn, root)
+		if rollback == agentUpdateRollbackUncertain {
 			retainStage = true
 		}
-		return rollbackErr
+		return newAgentUpdateFailure(agentUpdateStageActivating, agentUpdateCodeActivationFailed, rollback)
 	}
 	if err := checkHealth(updateCtx, request.Host, request.SecurePort, request.AgentToken, request.TLSCertificate); err != nil {
-		rollbackErr := rollbackAgentUpdate(conn, root)
-		if strings.Contains(rollbackErr.Error(), "uncertain") {
+		rollback := rollbackAgentUpdate(conn, root)
+		if rollback == agentUpdateRollbackUncertain {
 			retainStage = true
 		}
-		return rollbackErr
+		return newAgentUpdateFailure(agentUpdateStageVerifyingHealth, agentUpdateCodeHealthCheckFailed, rollback)
 	}
 	return nil
 }
@@ -291,14 +368,14 @@ rm -rf -- "$base"
 printf 'openvms_agent_update_finalized=ok\n'`, shellWord(root))
 }
 
-func rollbackAgentUpdate(conn AgentInstallConn, root string) error {
+func rollbackAgentUpdate(conn AgentInstallConn, root string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	output, err := runAgentInstallStep(ctx, conn, agentUpdateRollback(root))
 	if err != nil || strings.TrimSpace(output) != "openvms_agent_update_rollback=ok" {
-		return errors.New("agent update failed and rollback status is uncertain")
+		return agentUpdateRollbackUncertain
 	}
-	return errors.New("agent update failed; previous agent files were restored")
+	return agentUpdateRollbackRestored
 }
 
 func checkAgentUpdateHealth(ctx context.Context, host string, securePort uint16, token string, caPEM []byte) error {

@@ -12,16 +12,20 @@ import (
 )
 
 type fakeAgentUpdateConn struct {
-	commands  []string
-	writes    map[string][]byte
-	modes     map[string]os.FileMode
-	errAt     string
-	writeErr  error
-	preflight string
+	commands   []string
+	writes     map[string][]byte
+	modes      map[string]os.FileMode
+	errAt      string
+	writeErr   error
+	cleanupErr bool
+	preflight  string
 }
 
 func (f *fakeAgentUpdateConn) Run(_ context.Context, command string) (string, error) {
 	f.commands = append(f.commands, command)
+	if f.cleanupErr && strings.Contains(command, "openvms_agent_update_finalized=ok") {
+		return "", errors.New("fake cleanup failure")
+	}
 	if f.errAt != "" && strings.Contains(command, f.errAt) {
 		return "remote output containing a secret", errors.New("fake remote failure")
 	}
@@ -219,7 +223,8 @@ func TestRunAgentUpdateKeepsBackupWhenRollbackIsUncertain(t *testing.T) {
 			return conn, nil
 		},
 		func(context.Context, string, uint16, string, []byte) error { return errors.New("health unavailable") })
-	if err == nil || !strings.Contains(err.Error(), "uncertain") {
+	var failure *agentUpdateFailure
+	if err == nil || !errors.As(err, &failure) || failure.rollback != "uncertain" {
 		t.Fatalf("rollback uncertainty error = %v", err)
 	}
 	if strings.Contains(strings.Join(conn.commands, "\n"), "openvms_agent_update_finalized") {
@@ -258,8 +263,73 @@ func TestRunAgentUpdateDoesNotCleanupUnclaimedOrAmbiguousStage(t *testing.T) {
 	if strings.Contains(strings.Join(conn.commands, "\n"), "openvms_agent_update_finalized=ok") {
 		t.Fatal("cleanup was attempted without proof the generated stage path was claimed")
 	}
-	if err == nil || !strings.Contains(err.Error(), "uncertain") {
+	var failure *agentUpdateFailure
+	if err == nil || !errors.As(err, &failure) || failure.code != agentUpdateCodeStagingUncertain || failure.rollback != agentUpdateRollbackUncertain {
 		t.Fatalf("prepare failure = %v, want explicit uncertain staging result", err)
+	}
+}
+
+func TestRunAgentUpdateReturnsSafeTypedFailureDiagnostics(t *testing.T) {
+	const marker = "sensitive-ssh-password remote-stderr 203.0.113.77"
+	tests := []struct {
+		name         string
+		conn         *fakeAgentUpdateConn
+		dialErr      error
+		healthErr    error
+		invalid      bool
+		wantStage    string
+		wantCode     string
+		wantRollback string
+	}{
+		{name: "invalid request", invalid: true, wantStage: "validating", wantCode: "invalid_request", wantRollback: "not_attempted"},
+		{name: "known host key mismatch", dialErr: fmt.Errorf("%s: %w", marker, ErrAgentSSHHostKeyMismatch), wantStage: "connecting", wantCode: "ssh_host_key_mismatch", wantRollback: "not_attempted"},
+		{name: "unknown nested ssh error", dialErr: errors.New(marker), wantStage: "connecting", wantCode: "ssh_connection_failed", wantRollback: "not_attempted"},
+		{name: "preflight error", conn: &fakeAgentUpdateConn{errAt: "openvms_agent_update_preflight"}, wantStage: "preflight", wantCode: "preflight_failed", wantRollback: "not_attempted"},
+		{name: "stage claim uncertainty", conn: &fakeAgentUpdateConn{errAt: "openvms_agent_update_staged=ready"}, wantStage: "staging", wantCode: "staging_uncertain", wantRollback: "uncertain"},
+		{name: "file transfer failure", conn: &fakeAgentUpdateConn{writeErr: errors.New(marker)}, wantStage: "transferring", wantCode: "transfer_failed", wantRollback: "not_attempted"},
+		{name: "transfer failure remains primary when cleanup also fails", conn: &fakeAgentUpdateConn{writeErr: errors.New(marker), cleanupErr: true}, wantStage: "transferring", wantCode: "transfer_failed", wantRollback: "not_attempted"},
+		{name: "activation rollback restored", conn: &fakeAgentUpdateConn{errAt: "openvms_agent_update=active"}, wantStage: "activating", wantCode: "activation_failed", wantRollback: "restored"},
+		{name: "health rollback uncertain", conn: &fakeAgentUpdateConn{errAt: "openvms_agent_update_rollback=ok"}, healthErr: errors.New(marker), wantStage: "verifying_health", wantCode: "health_check_failed", wantRollback: "uncertain"},
+		{name: "health failure remains primary after restored rollback when cleanup also fails", conn: &fakeAgentUpdateConn{cleanupErr: true}, healthErr: errors.New(marker), wantStage: "verifying_health", wantCode: "health_check_failed", wantRollback: "restored"},
+		{name: "healthy but staging cleanup failed", conn: &fakeAgentUpdateConn{errAt: "openvms_agent_update_finalized=ok"}, wantStage: "cleanup", wantCode: "cleanup_failed", wantRollback: "not_attempted"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := validAgentUpdateRequest(t)
+			if test.invalid {
+				request.Host = "not-an-ip"
+			}
+			err := RunAgentUpdate(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+				if test.dialErr != nil {
+					return nil, test.dialErr
+				}
+				return test.conn, nil
+			}, func(context.Context, string, uint16, string, []byte) error { return test.healthErr })
+			if err == nil {
+				t.Fatal("expected update failure")
+			}
+			var failure *agentUpdateFailure
+			if !errors.As(err, &failure) {
+				t.Fatalf("failure type = %T, want typed safe failure", err)
+			}
+			if failure.stage != test.wantStage || failure.code != test.wantCode || failure.rollback != test.wantRollback {
+				t.Fatalf("diagnostic = (%q, %q, %q), want (%q, %q, %q)", failure.stage, failure.code, failure.rollback, test.wantStage, test.wantCode, test.wantRollback)
+			}
+			secrets := []string{marker, request.Password, request.AgentToken, request.ExpectedHostKey, string(request.Binary), string(request.TLSCertificate), string(request.TLSPrivateKey)}
+			for _, rendered := range []string{err.Error(), fmt.Sprint(err), fmt.Sprintf("%+v", err), fmt.Sprintf("%#v", err)} {
+				for _, secret := range secrets {
+					if secret != "" && strings.Contains(rendered, secret) {
+						t.Fatalf("typed error representation leaked nested error or credentials: %q", rendered)
+					}
+				}
+			}
+			encoded, marshalErr := json.Marshal(err)
+			for _, secret := range secrets {
+				if marshalErr != nil || secret != "" && strings.Contains(string(encoded), secret) {
+					t.Fatalf("typed error JSON leaked nested error or credentials: %s (err=%v)", encoded, marshalErr)
+				}
+			}
+		})
 	}
 }
 

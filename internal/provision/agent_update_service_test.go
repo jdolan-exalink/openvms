@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -209,6 +210,88 @@ func TestAgentUpdateStartRequestFormattingRedactsPassword(t *testing.T) {
 		if strings.Contains(rendered, request.Password) {
 			t.Fatalf("request serialization leaked password: %s", rendered)
 		}
+	}
+}
+
+func TestRunServerAgentUpdateLogsOnlySafeFailureDiagnostics(t *testing.T) {
+	const marker = "root-password-secret remote-stderr token-secret 203.0.113.77 private-key-secret"
+	tests := []struct {
+		name         string
+		run          func() error
+		persistErr   error
+		wantStage    string
+		wantCode     string
+		wantRollback string
+		wantMessage  string
+	}{
+		{
+			name: "typed runner error",
+			run: func() error {
+				return &agentUpdateFailure{stage: "verifying_health", code: "health_check_failed", rollback: "restored"}
+			},
+			wantStage: "verifying_health", wantCode: "health_check_failed", wantRollback: "restored", wantMessage: "HTTPS health verification failed; the previous agent files were restored.",
+		},
+		{
+			name:      "unknown nested error",
+			run:       func() error { return errors.New(marker) },
+			wantStage: "unknown", wantCode: "update_failed", wantRollback: "unknown", wantMessage: "Agent update failed; inspect the target before retrying.",
+		},
+		{
+			name: "invalid diagnostic enum",
+			run: func() error {
+				return &agentUpdateFailure{stage: marker, code: marker, rollback: marker}
+			},
+			wantStage: "unknown", wantCode: "update_failed", wantRollback: "unknown", wantMessage: "Agent update failed; inspect the target before retrying.",
+		},
+		{
+			name:      "panic",
+			run:       func() error { panic(marker) },
+			wantStage: "unknown", wantCode: "update_failed", wantRollback: "unknown", wantMessage: "Agent update failed; inspect the target before retrying.",
+		},
+		{
+			name: "TLS registration persistence failure",
+			run:  func() error { return nil }, persistErr: errors.New(marker),
+			wantStage: "registration", wantCode: "tls_trust_registration_failed", wantRollback: "not_attempted", wantMessage: "Agent HTTPS health succeeded, but trust registration failed; inspect server configuration before retrying.",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var output bytes.Buffer
+			serverID, jobID := uuid.New(), uuid.New()
+			password := "request-password-secret"
+			token := "registered-agent-token-secret"
+			service := &Service{
+				Log:                   slog.New(slog.NewTextHandler(&output, nil)),
+				agentUpdateRun:        func(context.Context, AgentUpdateRequest, func(string)) error { return test.run() },
+				agentUpdatePersistTLS: func(context.Context, authz.Actor, db.ServerAgent, uint16, []byte) error { return test.persistErr },
+			}
+			job := &agentInstallJob{snapshot: AgentInstallJob{ID: jobID}}
+			original := db.ServerAgent{ServerID: serverID, Host: "192.0.2.55", TokenSealed: []byte("sealed-token")}
+			fingerprint := "SHA256:diagnostic-fingerprint-secret"
+			request := AgentUpdateRequest{Host: original.Host, SSHPort: 2222, Username: "root", Password: password, ExpectedHostKey: fingerprint, AgentToken: token, SecurePort: 7443, TLSCertificate: []byte("public-cert"), TLSPrivateKey: []byte("private-key-secret"), Binary: []byte("trusted-binary")}
+			service.runServerAgentUpdate(authz.Actor{UserID: uuid.New()}, job, original, request)
+
+			logOutput := output.String()
+			for _, want := range []string{serverID.String(), jobID.String(), "server_id", "job_id", "stage=" + test.wantStage, "code=" + test.wantCode, "rollback=" + test.wantRollback} {
+				if !strings.Contains(logOutput, want) {
+					t.Errorf("safe log missing %q: %s", want, logOutput)
+				}
+			}
+			for _, secret := range []string{marker, password, token, original.Host, "root", fingerprint, "public-cert", "private-key-secret", "trusted-binary", "sealed-token"} {
+				if strings.Contains(logOutput, secret) {
+					t.Errorf("log contains private value %q: %s", secret, logOutput)
+				}
+			}
+			final := job.read()
+			if final.Status != "failed" || !strings.Contains(final.Message, test.wantMessage) {
+				t.Fatalf("job = %+v, want failed safe message containing %q", final, test.wantMessage)
+			}
+			for _, secret := range []string{marker, password, token, original.Host, "root", fingerprint, "public-cert", "private-key-secret", "trusted-binary", "sealed-token"} {
+				if strings.Contains(final.Message, secret) {
+					t.Errorf("job message contains private value %q: %s", secret, final.Message)
+				}
+			}
+		})
 	}
 }
 

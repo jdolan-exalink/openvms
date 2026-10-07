@@ -551,6 +551,40 @@ describe("Servers", () => {
       expect((await screen.findAllByText(/No se puede confirmar el resultado/i)).length).toBeGreaterThan(0);
       expect(document.body).not.toHaveTextContent("secret-root-password");
     });
+
+    it("maps an allowlisted diagnostic message to localized safe failure copy", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      setup(
+        async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202),
+        async () => json({ id: "job-1", status: "failed", stage: "failed", message: "HTTPS health verification failed; the previous agent files were restored." }),
+      );
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
+      fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "2222" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/falló la verificación de salud HTTPS.*se restauraron los archivos anteriores/i);
+      expect(document.body).not.toHaveTextContent("secret-root-password");
+    });
+
+    it("uses generic safe copy for an unrecognized server failure message", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      setup(
+        async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202),
+        async () => json({ id: "job-1", status: "failed", stage: "failed", message: "password-secret raw-ssh-output" }),
+      );
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
+      fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "2222" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/La actualización no se completó o no se pudo confirmar el resultado/i);
+      expect(document.body).not.toHaveTextContent("password-secret");
+      expect(document.body).not.toHaveTextContent("raw-ssh-output");
+      expect(document.body).not.toHaveTextContent("secret-root-password");
+    });
   });
 
   describe("edit and delete", () => {
