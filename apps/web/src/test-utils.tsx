@@ -2,6 +2,7 @@ import type React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { render } from "@testing-library/react";
+import { AgentJobProvider } from "@/lib/agentJobs/AgentJobProvider";
 
 
 /** renderPage mounts a screen at "/" inside a router and a fresh query client. */
@@ -18,7 +19,9 @@ export function renderPage(Page: () => React.ReactNode, entry = "/") {
   });
   const result = render(
     <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
+      <AgentJobProvider>
+        <RouterProvider router={router} />
+      </AgentJobProvider>
     </QueryClientProvider>,
   );
   return { ...result, router };

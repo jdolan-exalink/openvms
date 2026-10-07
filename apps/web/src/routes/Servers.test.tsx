@@ -403,7 +403,7 @@ describe("Servers", () => {
       expect(document.body).not.toHaveTextContent("secret-root-password");
     });
 
-    it("keeps polling memory-only job state, aborts stale polls when the server is filtered out", async () => {
+    it("keeps polling memory-only job state after its server is filtered out", async () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       let pollRequest: Request | undefined;
       const { calls } = setupAgentInstall(undefined, async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202), async (request) => {
@@ -427,7 +427,7 @@ describe("Servers", () => {
       expect(within(reopened).getByText(/Cerrar esta ventana no cancela/i)).toBeInTheDocument();
       fireEvent.change(screen.getByLabelText("Buscar servidor"), { target: { value: "frigate-r01" } });
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
-      await waitFor(() => expect(pollRequest?.signal.aborted).toBe(true));
+      expect(pollRequest!.signal.aborted).toBe(false);
       expect(calls.some((request) => request.method === "GET" && new URL(request.url).searchParams.has("ssh_password"))).toBe(false);
     });
 
@@ -671,7 +671,7 @@ describe("Servers", () => {
       const scheduled: Array<() => void> = [];
       const setTimeout = window.setTimeout.bind(window);
       vi.spyOn(window, "setTimeout").mockImplementation(((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
-        if (timeout === 11 * 60_000 && typeof handler === "function") scheduled.push(handler as () => void);
+        if (typeof timeout === "number" && timeout >= 10 * 60_000 && typeof handler === "function") scheduled.push(handler as () => void);
         return setTimeout(handler, timeout, ...args);
       }) as typeof window.setTimeout);
       let pollRequest: Request | undefined;
@@ -686,6 +686,7 @@ describe("Servers", () => {
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
       await waitFor(() => expect(pollRequest).toBeDefined());
+      expect(scheduled.length).toBeGreaterThan(0);
       await act(async () => { for (const callback of scheduled) callback(); });
       expect(pollRequest!.signal.aborted).toBe(true);
       expect((await screen.findAllByText(/No se puede confirmar el resultado/i)).length).toBeGreaterThan(0);

@@ -12,6 +12,7 @@ import { Modal } from "@/components/Modal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Pill, Select, StatusBadge, Summary, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
+import { useAgentJobs } from "@/lib/agentJobs/AgentJobProvider";
 
 export function Servers() {
   const t = useT();
@@ -164,6 +165,7 @@ function hasServerInstallPermission(me: Schemas["Me"] | undefined, permission: s
 
 function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
   const t = useT();
+  const { jobs } = useAgentJobs();
   const status = useQuery({
     queryKey: ["server-agent", server.id],
     queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId: server.id } } })),
@@ -172,6 +174,13 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
   });
   const refreshAgentStatus = status.refetch;
   const [deployment, setDeployment] = useState<{ kind: "install" | "update"; job?: Schemas["ServerAgentInstallJob"] } | null>(null);
+  const refreshedTerminalJob = useRef<string | null>(null);
+  const tracked = jobs.filter((entry) => entry.serverId === server.id).sort((a, b) => a.changedAt - b.changedAt).at(-1);
+  useEffect(() => {
+    if (!tracked || tracked.job.status !== "succeeded" || refreshedTerminalJob.current === tracked.job.id) return;
+    refreshedTerminalJob.current = tracked.job.id;
+    void refreshAgentStatus();
+  }, [refreshAgentStatus, tracked]);
   const onInstallJob = useCallback((job: Schemas["ServerAgentInstallJob"]) => {
     if (job.status === "succeeded") {
       setDeployment(null);
@@ -192,9 +201,15 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
   const onUpdateStart = useCallback(() => setDeployment({ kind: "update" }), []);
   const onInstallFailure = useCallback(() => setDeployment((current) => current?.kind === "install" && !current.job ? null : current), []);
   const onUpdateFailure = useCallback(() => setDeployment((current) => current?.kind === "update" && current.job?.status === "failed" ? null : current), []);
-  const active = !!deployment?.job && (deployment.job.status === "queued" || deployment.job.status === "running");
-  if (deployment?.kind === "install") return <div className="flex flex-wrap items-center gap-2"><AgentInstallControl server={server} otherOperationActive={false} onJob={onInstallJob} onStart={onInstallStart} onFailure={onInstallFailure} /></div>;
-  if (deployment?.kind === "update") return <div className="flex flex-wrap items-center gap-2"><AgentUpdateControl server={server} busy={false} ownActive={active} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} /></div>;
+  const trackedNeedsAttention = tracked && (
+    tracked.outcome === "unknown" || tracked.job.status === "queued" || tracked.job.status === "running" || tracked.job.status === "failed"
+  );
+  const visibleDeployment = tracked?.job.status === "succeeded"
+    ? null
+    : trackedNeedsAttention ? { kind: tracked.kind, job: tracked.job } : deployment;
+  const active = !!visibleDeployment?.job && (visibleDeployment.job.status === "queued" || visibleDeployment.job.status === "running");
+  if (visibleDeployment?.kind === "install") return <div className="flex flex-wrap items-center gap-2"><AgentInstallControl server={server} otherOperationActive={false} onJob={onInstallJob} onStart={onInstallStart} onFailure={onInstallFailure} /></div>;
+  if (visibleDeployment?.kind === "update") return <div className="flex flex-wrap items-center gap-2"><AgentUpdateControl server={server} busy={false} ownActive={active} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} /></div>;
   const agent = status.data;
   if (status.isPending) return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleChecking")}</Button>;
   if (status.isError || !agent) return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
@@ -222,24 +237,27 @@ function AgentInstallControl({ server, otherOperationActive, onJob, onStart, onF
 }) {
   const t = useT();
   const qc = useQueryClient();
+  const { jobs } = useAgentJobs();
   const [open, setOpen] = useState(false);
   const [job, setJob] = useState<Schemas["ServerAgentInstallJob"] | null>(null);
+  const tracked = jobs.filter((entry) => entry.kind === "install" && entry.serverId === server.id).sort((a, b) => a.changedAt - b.changedAt).at(-1);
+  const visibleJob = tracked?.job ?? job;
   const updateJob = useCallback((next: Schemas["ServerAgentInstallJob"]) => {
     setJob(next);
     onJob(next);
     if (next.status === "succeeded") void qc.invalidateQueries({ queryKey: ["server-agent", server.id] });
   }, [onJob, qc, server.id]);
-  const active = job?.status === "queued" || job?.status === "running";
+  const active = visibleJob?.status === "queued" || visibleJob?.status === "running";
   return (
     <>
-      <Button size="sm" variant="outlined" onClick={() => setOpen(true)} disabled={job?.status === "succeeded" || (otherOperationActive && !active)}>
+      <Button size="sm" variant="outlined" onClick={() => setOpen(true)} disabled={visibleJob?.status === "succeeded" || (otherOperationActive && !active)}>
         {active ? t("servers.agentInstallViewProgress") : t("servers.agentInstallAction")}
       </Button>
       {active && !open && <span role="status" className="text-xs text-muted">{t("servers.agentInstallContinues")}</span>}
-      {job?.status === "succeeded" && <span role="status" className="text-xs text-ok">{t("servers.agentInstallSuccessUnverified")}</span>}
-      {job?.status === "failed" && <span role="alert" className="text-xs text-bad">{t("servers.agentInstallFailedCheckHost")}</span>}
+      {visibleJob?.status === "succeeded" && <span role="status" className="text-xs text-ok">{t("servers.agentInstallSuccessUnverified")}</span>}
+      {visibleJob?.status === "failed" && <span role="alert" className="text-xs text-bad">{t("servers.agentInstallFailedCheckHost")}</span>}
       {otherOperationActive && <span role="status" className="text-xs text-muted">{t("servers.agentUpdateSSHBusy")}</span>}
-      <AgentInstallDialog server={server} open={open} onClose={() => setOpen(false)} job={job} onJob={updateJob} otherOperationActive={otherOperationActive} onStart={onStart} onFailure={onFailure} />
+      <AgentInstallDialog server={server} open={open} onClose={() => setOpen(false)} job={visibleJob} onJob={updateJob} otherOperationActive={otherOperationActive} onStart={onStart} onFailure={onFailure} />
     </>
   );
 }
@@ -254,16 +272,19 @@ function AgentUpdateControl({ server, busy, ownActive, onJob, onStart, onFailure
 }) {
   const t = useT();
   const [open, setOpen] = useState(false);
+  const { jobs } = useAgentJobs();
+  const tracked = jobs.filter((entry) => entry.kind === "update" && entry.serverId === server.id).sort((a, b) => a.changedAt - b.changedAt).at(-1);
+  const active = ownActive || tracked?.job.status === "queued" || tracked?.job.status === "running";
   return <>
     <Button size="sm" variant="outlined" onClick={() => setOpen(true)} disabled={busy}>
-      {ownActive ? t("servers.agentUpdateSSHViewProgress") : t("servers.agentUpdateSSHAction")}
+      {active ? t("servers.agentUpdateSSHViewProgress") : t("servers.agentUpdateSSHAction")}
     </Button>
     {busy && <span role="status" className="text-xs text-muted">{t("servers.agentUpdateSSHBusy")}</span>}
-    <AgentUpdateDialog server={server} open={open} onClose={() => setOpen(false)} onJob={onJob} otherOperationActive={busy} onStart={onStart} onFailure={onFailure} />
+    <AgentUpdateDialog server={server} open={open} onClose={() => setOpen(false)} onJob={onJob} otherOperationActive={busy} onStart={onStart} onFailure={onFailure} initialJob={tracked?.job ?? null} />
   </>;
 }
 
-function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive, onStart, onFailure }: {
+function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive, onStart, onFailure, initialJob }: {
   server: Schemas["Server"];
   open: boolean;
   onClose: () => void;
@@ -271,27 +292,20 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
   otherOperationActive: boolean;
   onStart: () => void;
   onFailure: () => void;
+  initialJob: Schemas["ServerAgentInstallJob"] | null;
 }) {
-  const maxPollingDurationMs = 11 * 60_000;
   const t = useT();
-  const [job, setJob] = useState<Schemas["ServerAgentInstallJob"] | null>(null);
+  const { jobs, registerJob } = useAgentJobs();
+  const [job, setJob] = useState<Schemas["ServerAgentInstallJob"] | null>(initialJob);
+  const tracked = jobs.find((entry) => entry.kind === "update" && entry.serverId === server.id && entry.job.id === job?.id);
+  const snapshot = tracked?.job ?? job;
   const [port, setPort] = useState("22");
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const pendingPasswordRef = useRef("");
-  const pollStartedAt = useRef(0);
-  const activePollAbortRef = useRef<(() => void) | null>(null);
-  const deadlineTimerRef = useRef<number | null>(null);
-  const pollExpiredRef = useRef(false);
-  const lastSafeJobRef = useRef<Schemas["ServerAgentInstallJob"] | null>(null);
-  const [pollTimedOut, setPollTimedOut] = useState(false);
   const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
   const secureBrowser = location.protocol === "https:";
   const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
   const updateJob = useCallback((next: Schemas["ServerAgentInstallJob"]) => {
-    if (next.status !== "queued" && next.status !== "running" && deadlineTimerRef.current != null) {
-      window.clearTimeout(deadlineTimerRef.current);
-      deadlineTimerRef.current = null;
-    }
     setJob(next);
     onJob(next);
   }, [onJob]);
@@ -305,67 +319,15 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
       }));
     },
     onSuccess: (next) => {
-      pollStartedAt.current = Date.now();
       setAcceptedAt(next.status === "queued" || next.status === "running" ? performance.now() : null);
-      pollExpiredRef.current = false;
-      lastSafeJobRef.current = next;
-      setPollTimedOut(false);
-      if (next.status === "queued" || next.status === "running") {
-        deadlineTimerRef.current = window.setTimeout(() => {
-          if (pollExpiredRef.current || (lastSafeJobRef.current && lastSafeJobRef.current.status !== "queued" && lastSafeJobRef.current.status !== "running")) return;
-          pollExpiredRef.current = true;
-          setPollTimedOut(true);
-          activePollAbortRef.current?.();
-          if (lastSafeJobRef.current) onJob(lastSafeJobRef.current);
-        }, maxPollingDurationMs);
-      }
       updateJob(next);
+      registerJob({ kind: "update", serverId: server.id, serverName: server.name, job: next });
     },
     onError: () => { pendingPasswordRef.current = ""; onFailure(); },
   });
-  const progress = useQuery({
-    queryKey: ["server-agent-update-ssh", server.id, job?.id],
-    enabled: !!job?.id && (job.status === "queued" || job.status === "running"),
-    queryFn: async ({ signal }) => {
-      const controller = new AbortController();
-      const deadline = pollStartedAt.current + maxPollingDurationMs;
-      const remaining = Math.max(0, deadline - Date.now());
-      const abort = () => controller.abort();
-      const timeout = window.setTimeout(abort, Math.min(15_000, remaining));
-      activePollAbortRef.current = abort;
-      signal.addEventListener("abort", abort, { once: true });
-      const aborted = new Promise<never>((_resolve, reject) => {
-        if (controller.signal.aborted) reject(new DOMException("aborted", "AbortError"));
-        else controller.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
-      });
-      try {
-        const response = await Promise.race([
-          api.GET("/api/v1/servers/{serverId}/agent/update-ssh/{jobId}", {
-            params: { path: { serverId: server.id, jobId: job!.id } }, signal: controller.signal,
-          }),
-          aborted,
-        ]);
-        if (controller.signal.aborted || Date.now() >= deadline) throw new DOMException("aborted", "AbortError");
-        return unwrap(response);
-      } finally {
-        window.clearTimeout(timeout);
-        signal.removeEventListener("abort", abort);
-        if (activePollAbortRef.current === abort) activePollAbortRef.current = null;
-      }
-    },
-    initialData: job ?? undefined,
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (query.state.error || (status !== "queued" && status !== "running")) return false;
-      if (pollStartedAt.current && Date.now() - pollStartedAt.current >= maxPollingDurationMs) return false;
-      return 1000;
-    },
-    retry: false,
-  });
-  const pollBudgetExpired = pollTimedOut;
-  const snapshot = pollBudgetExpired ? job : progress.data ?? job;
+  const pollBudgetExpired = tracked?.outcome === "unknown";
   const submitted = !!job?.id || start.isPending;
-  const timerActive = (snapshot?.status === "queued" || snapshot?.status === "running") && !progress.error && !pollBudgetExpired;
+  const timerActive = (snapshot?.status === "queued" || snapshot?.status === "running") && !pollBudgetExpired;
   const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
   const close = () => {
     if (start.isPending) return;
@@ -377,18 +339,7 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
   useEffect(() => () => {
     pendingPasswordRef.current = "";
     if (passwordInputRef.current) passwordInputRef.current.value = "";
-    if (deadlineTimerRef.current != null) window.clearTimeout(deadlineTimerRef.current);
-    activePollAbortRef.current?.();
   }, []);
-  useEffect(() => {
-    if (!progress.data || pollBudgetExpired) return;
-    lastSafeJobRef.current = progress.data;
-    if (progress.data.status !== "queued" && progress.data.status !== "running" && deadlineTimerRef.current != null) {
-      window.clearTimeout(deadlineTimerRef.current);
-      deadlineTimerRef.current = null;
-    }
-    onJob(progress.data);
-  }, [onJob, pollBudgetExpired, progress.data]);
 
   if (!open) return null;
   return <Modal title={t("servers.agentUpdateSSHTitle", { server: server.name })} onClose={close}>
@@ -429,11 +380,8 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
       {isRetryableAgentUpdateFailure(snapshot) && <Button className="self-end" variant="outlined" onClick={() => {
         setJob(null);
         setAcceptedAt(null);
-        lastSafeJobRef.current = null;
-        setPollTimedOut(false);
         onStart();
       }}>{t("servers.agentUpdateSSHFreshPasswordRetry")}</Button>}
-      {progress.error && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
       {pollBudgetExpired && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
       {(snapshot?.status === "queued" || snapshot?.status === "running") && <p className="text-sm text-muted">{t("servers.agentInstallCloseDoesNotCancel")}</p>}
       <Button className="self-end" onClick={close}>{t("common.close")}</Button>
@@ -460,14 +408,14 @@ function AgentInstallDialog({
   onStart: () => void;
   onFailure: () => void;
 }) {
-  const maxPollingDurationMs = 11 * 60_000;
-  const pollRequestTimeoutMs = 15_000;
   const t = useT();
+  const { jobs, registerJob } = useAgentJobs();
+  const tracked = jobs.find((entry) => entry.kind === "install" && entry.serverId === server.id && entry.job.id === job?.id);
+  const snapshot = tracked?.job ?? job;
+  const outcomeUnknown = tracked?.outcome === "unknown";
   const [form, setForm] = useState({ host: "", port: "22", confirmed: false });
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const pendingPasswordRef = useRef("");
-  const pollStartedAt = useRef(0);
-  const [pollTimedOut, setPollTimedOut] = useState(false);
   const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
   const secureBrowser = location.protocol === "https:";
   const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
@@ -483,43 +431,15 @@ function AgentInstallDialog({
       return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/install", { params: { path: { serverId: server.id } }, body }));
     },
     onSuccess: (next) => {
-      pollStartedAt.current = Date.now();
       setAcceptedAt(next.status === "queued" || next.status === "running" ? performance.now() : null);
-      setPollTimedOut(false);
       onJob(next);
+      registerJob({ kind: "install", serverId: server.id, serverName: server.name, job: next });
     },
     onError: () => { pendingPasswordRef.current = ""; onFailure(); },
   });
-  const progress = useQuery({
-    queryKey: ["server-agent-install", server.id, job?.id],
-    enabled: !!job?.id && (job.status === "queued" || job.status === "running"),
-    queryFn: async ({ signal }) => {
-      const controller = new AbortController();
-      const abort = () => controller.abort();
-      const timeout = window.setTimeout(abort, pollRequestTimeoutMs);
-      signal.addEventListener("abort", abort, { once: true });
-      try {
-        return unwrap(await api.GET("/api/v1/servers/{serverId}/agent/install/{jobId}", {
-          params: { path: { serverId: server.id, jobId: job!.id } }, signal: controller.signal,
-        }));
-      } finally {
-        window.clearTimeout(timeout);
-        signal.removeEventListener("abort", abort);
-      }
-    },
-    initialData: job ?? undefined,
-    refetchInterval: (query) => {
-      const current = query.state.data?.status;
-      if (query.state.error || (current !== "queued" && current !== "running")) return false;
-      if (pollStartedAt.current && Date.now() - pollStartedAt.current >= maxPollingDurationMs) return false;
-      return 1000;
-    },
-    retry: false,
-  });
-  const snapshot = progress.data ?? job;
   const hasSubmitted = !!job?.id || start.isPending;
-  const polling = job?.status === "queued" || job?.status === "running";
-  const timerActive = polling && !progress.error && !pollTimedOut;
+  const polling = snapshot?.status === "queued" || snapshot?.status === "running";
+  const timerActive = polling && !outcomeUnknown;
   const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
   const close = () => {
     if (start.isPending) return;
@@ -532,15 +452,6 @@ function AgentInstallDialog({
     pendingPasswordRef.current = "";
     if (passwordInputRef.current) passwordInputRef.current.value = "";
   }, []);
-  useEffect(() => {
-    if (progress.data) onJob(progress.data);
-  }, [progress.data, onJob]);
-  useEffect(() => {
-    if (!polling || !pollStartedAt.current || pollTimedOut) return;
-    const remaining = Math.max(0, pollStartedAt.current + maxPollingDurationMs - Date.now());
-    const timeout = window.setTimeout(() => setPollTimedOut(true), remaining);
-    return () => window.clearTimeout(timeout);
-  }, [maxPollingDurationMs, pollTimedOut, polling]);
 
   if (!open) return null;
   return (
@@ -597,8 +508,7 @@ function AgentInstallDialog({
           {acceptedAt != null && <JobBusyState busy={timerActive} elapsed={elapsedSeconds} label={t("servers.agentElapsed", { elapsed: formatElapsed(elapsedSeconds) })} />}
           {snapshot?.status === "succeeded" && <p role="status" className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentInstallSuccessUnverified")}</p>}
           {snapshot?.status === "failed" && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallFailedCheckHost")}</p>}
-          {progress.error && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
-          {pollTimedOut && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
+          {outcomeUnknown && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
           {(snapshot?.status === "queued" || snapshot?.status === "running") && <p className="text-sm text-muted">{t("servers.agentInstallCloseDoesNotCancel")}</p>}
           <Button className="self-end" onClick={close}>{t("common.close")}</Button>
         </section>

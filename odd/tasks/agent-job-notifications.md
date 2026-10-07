@@ -1,0 +1,52 @@
+# Agent install/update visibility and notifications
+
+Keep an accepted edge-agent install or update visible while the operator navigates within the authenticated OpenVMS app. Show a useful active stage and notify exactly once when the server reports a terminal success or failure. Do not convert an unreachable, missing, expired, or unauthorized job into a false success/failure.
+
+## Scope and constraints
+
+- **Scope**: frontend-only tracking and notification for the existing authenticated server-scoped install/update jobs. The app shell remains mounted across authenticated route changes and is the notification surface.
+- **No credential retention**: retain only safe job metadata (kind, server/job IDs, server display name, safe status/stage/message). Never retain SSH password, API session material, host key, bearer token, private key, or request body in the global state.
+- **Existing API**: use the current install/update POST and job GET routes. Keep actor/server authorization and existing two-permission checks unchanged. Do not add job listing, database persistence, durable browser storage, or a new backend notification system.
+- **Terminal truth**: only a confirmed server `succeeded` or `failed` snapshot can produce a success/failure notification. Network errors, 401/403, 404, job expiration, timeout, or malformed response are unknown; show an explicit outcome-unknown state and do not announce success or failure.
+- **Operation semantics**: install success means files were installed and registration completed; HTTPS health is not verified by that install job. Update success requires verified authenticated HTTPS health and the intended binary identity. Neither result establishes ONVIF or camera readiness.
+- **Progress safety**: display only known status/stage labels and allowlisted safe server messages; never render raw remote output or arbitrary error text. Keep host, credentials, tokens, and private key material out of toast text, URLs, logs, and copyable content.
+- **Lifetime limit**: tracking survives SPA route navigation only. Provision jobs are process-memory-only, bounded to 128 total records (active or retained), with terminal retention up to one hour, and have no listing/recovery endpoint; API restart, page reload, logout, or lost job identity may make the outcome unobservable. Report unknown rather than inventing a result. Durable recovery is out of scope.
+- **Source only**: no deployment, SSH execution, remote agent update, DB write/migration, authenticated session reuse, or camera request.
+
+## Work units
+
+| ID | Acceptance | Verification |
+|---|---|---|
+| `AGENT-JOBS-01` — app-lifetime job coordinator | Add an authenticated app-lifetime coordinator mounted under the persistent `Layout`. Install/update dialogs register only an accepted job's safe metadata; the coordinator owns one polling stream per job and exposes active snapshots/terminal outcomes to the Servers route and shell. Avoid duplicate route/global polling. Stop and clear tracking on logout/session teardown. | Strict RED/GREEN tests prove accepted jobs continue polling across route unmount/remount, server/job/kind association is preserved, duplicate registration does not create duplicate polls, and no sensitive request data enters coordinator state. |
+| `AGENT-JOBS-02` — persistent status and terminal notices | Show active operation, server label, and known stage in an accessible app-shell status region while it runs. On each job ID, emit one localized success or failure notice only after an authoritative terminal snapshot; deduplicate repeated poll results/renders. Show unknown separately for missing, expired, unauthorized, timed-out, or unreachable status and never upgrade unknown from stale cached data. Respect install-vs-update health semantics above. | Tests cover the active stage after leaving Servers, exactly-one success/failure notice under repeated snapshots, no terminal notice for unknown outcomes, safe allowlisted messages, install/update semantics, and English/Spanish/Portuguese strings. |
+| `AGENT-JOBS-03` — route and failure regressions | Integrate global tracking with existing install/update controls without changing transport, authorization, polling deadlines, fresh-password behavior, or backend job lifecycle. Closing a modal is not cancellation; navigation must not hide accepted work. | Strict RED/GREEN UI tests cover route changes during queued/running jobs, dialog close, terminal completion while elsewhere, API 404/401/403/restart-like failure as unknown, duplicate notification suppression, actor/session teardown, and no credential in rendered text/storage/URL. Run focused Servers/layout tests, typecheck, full web suite, and scoped lint. |
+
+## Route, TDD, and checks
+
+- **Route**: delegated direct; app root/layout, the Servers route, a coordinator, localization, and tests are non-trivial cross-file changes. One writer at a time.
+- **Strict TDD**: enabled by `AGENTS.md`; demonstrate the failing UI tests before implementation, then GREEN and REFACTOR. Use mocked API responses only.
+- **No backend migration**: existing GET job endpoints are permission-gated and return the safe status/stage/message projection. Do not alter their authorization or store job data durably in this feature.
+- **Checks**: `(cd apps/web && pnpm exec vitest run src/routes/Servers.test.tsx src/components/Layout.test.tsx)`, `(cd apps/web && pnpm typecheck)`, `(cd apps/web && pnpm test)`, scoped ESLint for changed paths, and `git diff --check`.
+- **Forecast / delivery**: likely 400–600 authored lines because state ownership, app-shell UI, translations, and navigation/unknown regressions are all needed. Advisory only; do not omit safety tests or compress code. Strategy `ask-on-risk`, chain strategy `stacked-to-main`; no deployment, SSH, push, PR, or merge is authorized.
+
+## Progress
+
+- [x] `AGENT-JOBS-01` — app-lifetime coordinator and accepted-job registration. Implemented in `apps/web/src/lib/agentJobs/AgentJobProvider.tsx`, mounted in the authenticated `Layout`, and consumed by install/update controls. Poll identity is `(kind, serverId, jobId)` so coincident IDs cannot cross-associate; snapshots retain only known status/stage and allowlisted messages. Query cancellation at the 11-minute observation deadline prevents a late response from turning unknown into terminal. Session identity keying clears provider memory when the authenticated user changes. Verification evidence below; work-unit commit and RDD assessment pending parent mirror handoff.
+- [ ] `AGENT-JOBS-02` — accessible active status and deduplicated terminal/unknown notices.
+- [ ] `AGENT-JOBS-03` — route-navigation, lost-job, and secrecy regressions.
+
+### AGENT-JOBS-01 evidence
+
+- **TDD**: observed RED when the new provider test could not resolve `./AgentJobProvider`; later RED regression for duplicate job IDs showed only one `(kind, server, id)` registration was retained. GREEN coverage proves navigation survives, duplicate registration is idempotent, and equal IDs with different operation/server identities remain separate.
+- **Behavior**: one query poller per accepted composite identity; status errors and malformed responses become unknown; the fixed deadline cancels the query before setting unknown. Dialog polling was removed so accepted jobs are not polled once locally and again globally. Existing close-modal behavior does not cancel the job.
+- **Checks**: `(cd apps/web && pnpm exec vitest run src/routes/Servers.test.tsx src/components/Layout.test.tsx src/lib/agentJobs/AgentJobProvider.test.tsx)` — PASS, 75 tests; `(cd apps/web && pnpm typecheck)` — PASS; `(cd apps/web && pnpm test)` — PASS, 121 files / 902 tests; scoped ESLint on changed implementation/test files excluding `Layout.tsx` — PASS. Including `Layout.tsx` reports its pre-existing `react-hooks/refs` violation at the unchanged tooltip callback (`Layout.tsx:168`); this task only adds the provider wrapper. `git diff --check` pending final normalization.
+- **Runtime harness**: N/A — mocked API/UI tests exercise the React Query boundary; no live runtime/SSH job is authorized.
+- **Rollback boundary**: revert the AGENT-JOBS-01 work-unit files (`AgentJobProvider.tsx` and its test, `Layout.tsx`, `Servers.tsx`, `Servers.test.tsx`, `test-utils.tsx`) to restore route-local observation; no backend or persisted data changed.
+- **Commit / RDD**: pending parent mirror synchronization and work-unit close.
+
+## Initial read-only evidence
+
+- At `dafd6da`, `AgentSSHControls` and its install/update dialogs own job state and React Query polling inside the Servers route. Navigating away unmounts the state and stops observation. The install control can show terminal status while the route remains mounted; update terminal status is dialog-local and may be hidden if closed.
+- Backend jobs expose status/stage and static safe messages through actor/server-scoped GETs; install/update polling is not backed by a list or durable store. A process restart or page reload can therefore only be reported as unknown.
+- `Layout` persists across authenticated SPA route changes and has no existing toast/snackbar library or global transient notification component. Its notification bell is unrelated tenant notification functionality.
+- At planning time, only this task document existed and no source changes had been made. That historical boundary ended when the parent refreshed/read back the task mirror; AGENT-JOBS-01 implementation and proof are recorded below.

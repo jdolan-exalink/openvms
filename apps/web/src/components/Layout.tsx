@@ -13,6 +13,7 @@ import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { useRealtimeFeed } from "@/lib/realtime";
 import { useFeatures, type FeatureFlags } from "@/lib/features";
 import { useT } from "@/i18n";
+import { AgentJobProvider } from "@/lib/agentJobs/AgentJobProvider";
 import { useInstallSheet } from "@/lib/pwa/useInstallSheet";
 import { AppShell, TopBarActionsSlot } from "./AppShell";
 import { AccountMenu } from "./AccountMenu";
@@ -54,6 +55,7 @@ export function Layout() {
   }, []);
 
   return (
+    <AgentJobProvider key={me.data?.id ?? "pending-session"}>
     <PlayerSessionProvider userId={me.data?.id}>
       <VideoSurfaceLayer>
         <AppShell
@@ -118,6 +120,7 @@ export function Layout() {
         <PwaUpdatePrompt />
       </VideoSurfaceLayer>
     </PlayerSessionProvider>
+    </AgentJobProvider>
   );
 }
 
@@ -226,4 +229,3 @@ function useLogout() {
     void navigate({ to: "/login" });
   };
 }
-
