@@ -4,7 +4,7 @@ Add useful operational feedback to the existing Servers screen without changing 
 
 ## Scope and constraints
 
-- **Source only**: implement and test local code. No deployment, SSH operation, agent update, DB mutation, authenticated session reuse, or camera contact in this feature.
+- **Authorized scope**: implement/test local code and perform the explicitly authorized local API/web deployment. No remote SSH operation, remote agent update, authenticated session reuse, or camera contact.
 - **Release identity**: the user explicitly wants to test edge-agent release `0.1.1`; retain that release and protocol `0.1.0`. Do not silently bump to `0.1.2`. If code changes alter the artifact while retaining `0.1.1`, exact digest comparison still detects the new binary; UI identity should include a short commit/digest when present rather than presenting the release label as a unique build ID.
 - **Current status**: “outdated” styling is based only on the verified lifecycle result (`binary_outdated === true`), never on version-string comparison or an offline state. A match requires exact digest plus supported matching architecture, as already implemented.
 - **No fake zero**: first samples, stale samples, unavailable counters, counter resets, malformed proc data, and legacy agents without the new fields display as unavailable/unknown, not `0` or “up to date.”
@@ -58,4 +58,20 @@ Add useful operational feedback to the existing Servers screen without changing 
 - `(cd apps/web && pnpm test)` — PASS, 120 files / 899 tests.
 - `git diff --check` — PASS.
 
-No deployment, runtime changes, remote SSH, database mutation, authenticated session reuse, or camera contact occurred. The existing one-second agent metrics cache is retained; therefore clients see one valid network interval after startup before rates become available. Parent owns the Engram mirror refresh for this document.
+## Authorized local deployment (2026-10-07)
+
+The user authorized deploying this AGMON build to the local OpenVMS API/web services only. No schema migration was needed or run. The remote `opevms-mimo` agent was not updated, and no SSH, authenticated browser session, or camera operation occurred; legacy remote agents will not report the new network fields until separately updated.
+
+| Check | Observed result |
+|---|---|
+| Candidate | `f9d2730`, clean `feat/onvif-camera-management` before deployment; `docker compose config --quiet` passed. |
+| Protected backup | `.atl/onvif-deploy/monitoring-f9d2730/postgres.dump`, directory mode `0700`, archive mode `0600`, 23,807,057 bytes, SHA-256 `c1323517cfb730d852e8b906bbae390e64e1b8aef7d24ecf792e704cba859706`; `pg_restore --list` in local Postgres 17 container passed without printing TOC contents. |
+| Rollback images | Created without overwriting existing tags: `openvms-api:rollback-pre-monitoring-f9d2730` → prior image `sha256:8cd193c6e83b1ab157301237d5757a0e06b917d70fda3f680e27a86737d97c0d`; `openvms-web:rollback-pre-monitoring-f9d2730` → prior image `sha256:7022c37098d36b47174468857b66041d42c442c4ac1e6ea4c2e4bed718601e1a`. |
+| Build and artifact | `AGENT_VERSION=0.1.1 docker compose build --pull=false api web` passed. Bundled agent metadata was version `0.1.1`, architecture `amd64`; the artifact SHA-256 matched its packaged manifest (`6adbd3fad3452bb9f0dd4ead40b45cde35793a76ace57732e7d9b2f3088ca690`). Protocol remains `0.1.0`. |
+| Deployment | Recreated only `api` and `web` via `docker compose up -d --no-deps api web`; PostgreSQL and worker container IDs were unchanged. API/web restart count remained `0` after a 30-second stability interval. |
+| Availability | HTTP `:8000` live health `200`; HTTPS `:8443` live and ready health `200` using the local CA; HTTPS-port discovery endpoint returned `8443` on both listeners. Served Servers JavaScript bundle included network, `B/s`, and elapsed-progress strings. |
+| Auth boundary | Anonymous schema-valid update/install POSTs over HTTPS returned `401`; HTTP update POST returned `403`; anonymous update-job GET returned `401`. The update POST used only a non-secret placeholder, not an SSH password. No job was created. |
+
+Rollback is the recorded API/web image tags; restore of the protected database archive is not part of this deployment because no DB writes or migration occurred. The same worker container remained running; its observed restart count after deployment was `28` (a pre-deployment count was not captured).
+
+The existing one-second agent metrics cache is retained; clients need one valid network interval before rates appear. Parent owns the Engram mirror refresh for this document.
