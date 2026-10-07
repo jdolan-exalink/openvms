@@ -68,15 +68,23 @@ type Service struct {
 	agentInstallRun                func(context.Context, AgentInstallRequest, func(string)) error
 	agentInstallRegister           func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error
 	agentSSHHostKeyPersist         func(context.Context, authz.Actor, uuid.UUID, string, uint16, string) error
+	agentStatusArtifactLoader      func() (AgentArtifact, error)
+	agentStatusRoundTripper        http.RoundTripper
+	agentStatusArtifactOnce        sync.Once
+	cachedAgentArtifact            AgentArtifact
+	cachedAgentArtifactErr         error
 	agentInstallJobs               map[uuid.UUID]*agentInstallJob
 	agentInstallByServer           map[uuid.UUID]uuid.UUID
 	requireAgentUpdatePermissions  func(context.Context, authz.Actor, uuid.UUID) error
 	loadAgentUpdateRegistration    func(context.Context, authz.Actor, uuid.UUID) (db.ServerAgent, string, error)
 	agentUpdateTLSExists           func(context.Context, authz.Actor, uuid.UUID) (bool, error)
+	agentUpdateTLSConfig           func(context.Context, authz.Actor, uuid.UUID) (AgentTLSConfig, error)
 	agentUpdateBinary              func() ([]byte, error)
 	agentUpdateCredentials         func(string) ([]byte, []byte, error)
 	agentUpdateRun                 func(context.Context, AgentUpdateRequest, func(string)) error
 	agentUpdatePersistTLS          func(context.Context, authz.Actor, db.ServerAgent, uint16, []byte) error
+	agentUpdateVerifyTLS           func(context.Context, authz.Actor, db.ServerAgent, AgentTLSConfig) error
+	agentUpdatePreflightHealth     func(context.Context, string, uint16, string, AgentTLSConfig) error
 
 	mu   sync.Mutex
 	jobs map[uuid.UUID]*job

@@ -2781,6 +2781,13 @@ export interface components {
             version: string;
             current_version: string;
             outdated: boolean;
+            binary_status: components["schemas"]["ServerAgentBinaryStatus"];
+            binary_available?: components["schemas"]["ServerAgentBinaryIdentity"];
+            binary_observed?: components["schemas"]["ServerAgentBinaryIdentity"];
+            /** @description Present only when both exact binary digests were verified. */
+            binary_outdated?: boolean;
+            /** @description A user-triggered install or upgrade path is available; this does not imply a known binary mismatch. */
+            binary_upgrade_available: boolean;
             variant?: string;
             ntp?: string;
             cpu_percent?: number;
@@ -2801,6 +2808,19 @@ export interface components {
             /** Format: int64 */
             database_free_bytes?: number;
             error?: string;
+        };
+        /**
+         * @description Binary lifecycle state; separate from protocol version and the legacy protocol outdated flag.
+         * @enum {string}
+         */
+        ServerAgentBinaryStatus: "not_installed" | "current" | "update_available" | "unknown" | "unreachable";
+        ServerAgentBinaryIdentity: {
+            sha256: string;
+            architecture: string;
+            /** @description Go binary release label; omitted when development or unavailable. */
+            version?: string;
+            /** @description Go VCS revision embedded in these exact binary bytes, when available. */
+            commit?: string;
         };
         Camera: {
             /** Format: uuid */

@@ -83,7 +83,7 @@ func main() {
 }
 
 func currentAgentHealthInfo(variant string) agentHealthInfo {
-	return agentHealthInfo{
+	info := agentHealthInfo{
 		Status:  "ok",
 		Version: agent.Version,
 		Build: agentBuildMetadata{
@@ -94,6 +94,10 @@ func currentAgentHealthInfo(variant string) agentHealthInfo {
 		},
 		Variant: variant,
 	}
+	if identity, err := agent.RunningBinaryIdentity(); err == nil {
+		info.BinaryIdentity = identity
+	}
+	return info
 }
 
 type agentBuildMetadata struct {
@@ -104,13 +108,14 @@ type agentBuildMetadata struct {
 }
 
 type agentHealthInfo struct {
-	Status  string             `json:"status"`
-	Version string             `json:"version"`
-	Build   agentBuildMetadata `json:"build"`
-	Variant string             `json:"variant"`
+	Status         string               `json:"status"`
+	Version        string               `json:"version"`
+	Build          agentBuildMetadata   `json:"build"`
+	Variant        string               `json:"variant"`
+	BinaryIdentity agent.BinaryIdentity `json:"binary_identity,omitempty"`
 }
 
-const agentHealthMaxResponseBytes = 1024
+const agentHealthMaxResponseBytes = agent.MaxHealthResponseBytes
 
 func newAgentHealthHandler(secret string, info agentHealthInfo) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

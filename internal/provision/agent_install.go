@@ -15,11 +15,12 @@ import (
 	"time"
 
 	agentbundle "github.com/jdolan-exalink/openvms/deploy/agent"
+	"github.com/jdolan-exalink/openvms/internal/agent"
 )
 
 const (
 	agentInstallDeadline  = 10 * time.Minute
-	agentInstallMaxBinary = 128 << 20
+	agentInstallMaxBinary = int(agent.MaxBinarySize)
 	agentInstallMaxTLSPEM = 64 << 10
 )
 

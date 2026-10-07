@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/runtime/types"
 
+	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
@@ -171,7 +172,18 @@ func serverProvision(s provision.Snapshot) gen.ServerProvision {
 }
 
 func serverAgent(s provision.AgentView) gen.ServerAgent {
-	out := gen.ServerAgent{Installed: s.Installed, Version: s.Version, CurrentVersion: s.Current, Outdated: s.Outdated, CpuPercent: float32ptr(float32(s.CPUPercent)), MemoryTotalBytes: int64ptr(s.MemoryTotal), MemoryAvailableBytes: int64ptr(s.MemoryAvailable), CctvTotalBytes: int64ptr(s.CCTVTotal), CctvFreeBytes: int64ptr(s.CCTVFree), DatabaseTotalBytes: int64ptr(s.DatabaseTotal), DatabaseFreeBytes: int64ptr(s.DatabaseFree), Coral: boolptr(s.Coral), GpuPresent: boolptr(s.GPUPresent)}
+	out := gen.ServerAgent{Installed: s.Installed, Version: s.Version, CurrentVersion: s.Current, Outdated: s.Outdated, BinaryStatus: gen.ServerAgentBinaryStatus(s.BinaryStatus), BinaryUpgradeAvailable: s.BinaryUpgradeAvailable, CpuPercent: float32ptr(float32(s.CPUPercent)), MemoryTotalBytes: int64ptr(s.MemoryTotal), MemoryAvailableBytes: int64ptr(s.MemoryAvailable), CctvTotalBytes: int64ptr(s.CCTVTotal), CctvFreeBytes: int64ptr(s.CCTVFree), DatabaseTotalBytes: int64ptr(s.DatabaseTotal), DatabaseFreeBytes: int64ptr(s.DatabaseFree), Coral: boolptr(s.Coral), GpuPresent: boolptr(s.GPUPresent)}
+	if s.BinaryAvailable != nil {
+		identity := serverAgentBinaryIdentity(*s.BinaryAvailable)
+		out.BinaryAvailable = &identity
+	}
+	if s.BinaryObserved != nil {
+		identity := serverAgentBinaryIdentity(*s.BinaryObserved)
+		out.BinaryObserved = &identity
+	}
+	if s.BinaryOutdated != nil {
+		out.BinaryOutdated = s.BinaryOutdated
+	}
 	if s.Variant != "" {
 		out.Variant = &s.Variant
 	}
@@ -186,6 +198,17 @@ func serverAgent(s provision.AgentView) gen.ServerAgent {
 	}
 	if s.Error != "" {
 		out.Error = &s.Error
+	}
+	return out
+}
+
+func serverAgentBinaryIdentity(in agent.BinaryIdentity) gen.ServerAgentBinaryIdentity {
+	out := gen.ServerAgentBinaryIdentity{Sha256: in.SHA256, Architecture: in.Architecture}
+	if in.Version != "" {
+		out.Version = &in.Version
+	}
+	if in.Commit != "" {
+		out.Commit = &in.Commit
 	}
 	return out
 }

@@ -105,7 +105,7 @@ export function Servers() {
                 <Fact label="Frigate" className="col-span-2 md:col-span-2">
                   <div className="font-mono text-xs whitespace-nowrap">
                     <div>{s.frigate_version || "—"}</div>
-                    <AgentMonitor serverId={s.id} canUpdate={can(me.data, "servers.manage")} />
+                    <AgentMonitor serverId={s.id} />
                   </div>
                 </Fact>
                 <Fact label="Clasificación" className="col-span-2 md:col-span-2">
@@ -163,18 +163,54 @@ function hasServerInstallPermission(me: Schemas["Me"] | undefined, permission: s
 }
 
 function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
+  const t = useT();
+  const status = useQuery({
+    queryKey: ["server-agent", server.id],
+    queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId: server.id } } })),
+    refetchInterval: 5000,
+    retry: false,
+  });
+  const refreshAgentStatus = status.refetch;
   const [deployment, setDeployment] = useState<{ kind: "install" | "update"; job?: Schemas["ServerAgentInstallJob"] } | null>(null);
-  const onInstallJob = useCallback((job: Schemas["ServerAgentInstallJob"]) => setDeployment({ kind: "install", job }), []);
-  const onUpdateJob = useCallback((job: Schemas["ServerAgentInstallJob"]) => setDeployment({ kind: "update", job }), []);
+  const onInstallJob = useCallback((job: Schemas["ServerAgentInstallJob"]) => {
+    if (job.status === "succeeded") {
+      setDeployment(null);
+      void refreshAgentStatus();
+      return;
+    }
+    setDeployment({ kind: "install", job });
+  }, [refreshAgentStatus]);
+  const onUpdateJob = useCallback((job: Schemas["ServerAgentInstallJob"]) => {
+    if (job.status === "succeeded") {
+      setDeployment(null);
+      void refreshAgentStatus();
+      return;
+    }
+    setDeployment({ kind: "update", job });
+  }, [refreshAgentStatus]);
   const onInstallStart = useCallback(() => setDeployment({ kind: "install" }), []);
   const onUpdateStart = useCallback(() => setDeployment({ kind: "update" }), []);
   const onInstallFailure = useCallback(() => setDeployment((current) => current?.kind === "install" && !current.job ? null : current), []);
-  const onUpdateFailure = useCallback(() => setDeployment((current) => current?.kind === "update" && !current.job ? null : current), []);
-  const active = !!deployment && (!deployment.job || deployment.job.status === "queued" || deployment.job.status === "running");
-  return <>
-    <AgentInstallControl server={server} otherOperationActive={!!active && deployment?.kind !== "install"} onJob={onInstallJob} onStart={onInstallStart} onFailure={onInstallFailure} />
-    <AgentUpdateControl server={server} busy={!!active && deployment?.kind !== "update"} ownActive={!!active && deployment?.kind === "update"} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} />
-  </>;
+  const onUpdateFailure = useCallback(() => setDeployment((current) => current?.kind === "update" && current.job?.status === "failed" ? null : current), []);
+  const active = !!deployment?.job && (deployment.job.status === "queued" || deployment.job.status === "running");
+  if (deployment?.kind === "install") return <div className="flex flex-wrap items-center gap-2"><AgentInstallControl server={server} otherOperationActive={false} onJob={onInstallJob} onStart={onInstallStart} onFailure={onInstallFailure} /></div>;
+  if (deployment?.kind === "update") return <div className="flex flex-wrap items-center gap-2"><AgentUpdateControl server={server} busy={false} ownActive={active} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} /></div>;
+  const agent = status.data;
+  if (status.isPending) return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleChecking")}</Button>;
+  if (status.isError || !agent) return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
+  if (isAgentBinaryCurrent(agent)) {
+    return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleCurrent")}</Button>;
+  }
+  if (agent.installed && agent.binary_upgrade_available) {
+    return <div className="flex flex-wrap items-center gap-2">
+      {agent.binary_status !== "update_available" && <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUpgradeUnverified")}</span>}
+      <AgentUpdateControl server={server} busy={false} ownActive={false} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} />
+    </div>;
+  }
+  if (!agent.installed && agent.binary_status === "not_installed") {
+    return <div className="flex flex-wrap items-center gap-2"><AgentInstallControl server={server} otherOperationActive={false} onJob={onInstallJob} onStart={onInstallStart} onFailure={onInstallFailure} /></div>;
+  }
+  return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
 }
 
 function AgentInstallControl({ server, otherOperationActive, onJob, onStart, onFailure }: {
@@ -385,6 +421,12 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
       <p aria-live="polite">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>
       {snapshot?.status === "succeeded" && !pollBudgetExpired && <p role="status" className="rounded-m3-lg bg-ok/10 p-3 text-sm">{t("servers.agentUpdateSSHSuccess")}</p>}
       {snapshot?.status === "failed" && <p role="alert" className="text-sm text-bad">{agentUpdateFailureMessage(snapshot.message, t)}</p>}
+      {isRetryableAgentUpdateFailure(snapshot) && <Button className="self-end" variant="outlined" onClick={() => {
+        setJob(null);
+        lastSafeJobRef.current = null;
+        setPollTimedOut(false);
+        onStart();
+      }}>{t("servers.agentUpdateSSHFreshPasswordRetry")}</Button>}
       {progress.error && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
       {pollBudgetExpired && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
       {(snapshot?.status === "queued" || snapshot?.status === "running") && <p className="text-sm text-muted">{t("servers.agentInstallCloseDoesNotCancel")}</p>}
@@ -742,27 +784,24 @@ function Meter({ percent }: { percent: number }) {
   );
 }
 
-function AgentMonitor({ serverId, canUpdate }: { serverId: string; canUpdate: boolean }) {
+function AgentMonitor({ serverId }: { serverId: string }) {
   const t = useT();
-  const qc = useQueryClient();
   const agentStatus = useQuery({
     queryKey: ["server-agent", serverId],
     queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId } } })),
     refetchInterval: 5000,
     retry: false,
   });
-  const update = useMutation({
-    mutationFn: async () => unwrap(await api.POST("/api/v1/servers/{serverId}/agent/update", { params: { path: { serverId } } })),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["server-agent", serverId] }); },
-  });
   const metrics = agentStatus.data;
   if (agentStatus.isPending) return <div className="mt-1 text-muted">{t("servers.agent")}…</div>;
-  if (!metrics) return <div className="mt-1 text-muted">{t("servers.agentMissing")}</div>;
+  if (!metrics) return <div className="mt-1 text-muted">{t("servers.agentLifecycleUnknown")}</div>;
   const memory = (value?: number) => value == null ? "—" : `${(value / 1024 ** 3).toFixed(1)} GB`;
   return (
     <div className="mt-2 flex min-w-48 flex-col gap-1 whitespace-normal text-xs">
       <span className="font-sans font-medium">{t("servers.agent")}: {metrics.installed ? metrics.version || "—" : t("servers.agentMissing")}</span>
-      {metrics.installed && <span className="font-sans text-muted">{t("servers.agentVersion", { version: metrics.version || "—", current: metrics.current_version })}</span>}
+      {metrics.installed && <span className="font-sans text-muted">{t("servers.agentProtocolVersion", { version: metrics.version || "—" })}</span>}
+      {metrics.installed && metrics.binary_observed && <span className="font-sans text-muted">{t("servers.agentBinaryObserved", { identity: formatBinaryIdentity(metrics.binary_observed) })}</span>}
+      {metrics.binary_available && <span className="font-sans text-muted">{t("servers.agentBinaryAvailable", { identity: formatBinaryIdentity(metrics.binary_available) })}</span>}
       {metrics.cpu_percent != null && (
         <>
           <span className="font-sans">{t("servers.agentCpu", { percent: metrics.cpu_percent })}</span>
@@ -776,11 +815,30 @@ function AgentMonitor({ serverId, canUpdate }: { serverId: string; canUpdate: bo
         </>
       )}
       {metrics.error && <span role="alert" className="font-sans text-bad">{t("servers.agentError", { error: metrics.error })}</span>}
-      {canUpdate && metrics.installed && metrics.outdated && <Button size="sm" variant="tonal" className="self-start" disabled={update.isPending} onClick={() => update.mutate()}>{update.isPending ? t("servers.agentUpdating") : t("servers.agentUpdate")}</Button>}
-      {update.isSuccess && <span role="status" className="font-sans text-ok">{t("servers.agentUpdated")}</span>}
-      <ErrorNote error={update.error} />
     </div>
   );
+}
+
+function formatBinaryIdentity(identity: Schemas["ServerAgentBinaryIdentity"]) {
+  if (identity.version && identity.commit) return `${identity.version} (${identity.commit.slice(0, 12)})`;
+  if (identity.version) return identity.version;
+  if (identity.commit) return identity.commit.slice(0, 12);
+  return `SHA-256 ${identity.sha256.slice(0, 12)}`;
+}
+
+function isAgentBinaryCurrent(agent: Schemas["ServerAgent"]) {
+  const observed = agent.binary_observed?.sha256;
+  const available = agent.binary_available?.sha256;
+  const observedArchitecture = agent.binary_observed?.architecture;
+  const availableArchitecture = agent.binary_available?.architecture;
+  const supportedArchitecture = (architecture: string | undefined) => architecture === "amd64" || architecture === "arm64";
+  return agent.installed && agent.binary_status === "current" && agent.binary_outdated === false &&
+    !!observed && !!available && /^[a-f0-9]{64}$/i.test(observed) && observed.toLowerCase() === available.toLowerCase() &&
+    supportedArchitecture(observedArchitecture) && supportedArchitecture(availableArchitecture) && observedArchitecture === availableArchitecture;
+}
+
+function isRetryableAgentUpdateFailure(job: Schemas["ServerAgentInstallJob"] | null | undefined) {
+  return job?.status === "failed" && job.message === "Could not establish SSH. Verify reachability and root SSH access, then inspect the target before retrying.";
 }
 
 function DeleteServerDialog({ server, onDone }: { server: Schemas["Server"]; onDone: () => void }) {

@@ -181,6 +181,110 @@ func TestStartAgentUpdateRefusesExistingTLSAndSharesInstallReservation(t *testin
 	}
 }
 
+func TestStartAgentUpdatePreservesRegisteredTLSAndTrust(t *testing.T) {
+	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+	ca, _ := newAgentInstallTLS(t, "192.0.2.44")
+	registeredTLS := AgentTLSConfig{SecurePort: 7443, TrustMode: AgentTLSTrustCustom, CAPEM: ca}
+	var generatedTLS, persistedTLS int
+	var runRequest AgentUpdateRequest
+	svc := &Service{
+		requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		requireAgentUpdatePermissions:  func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		loadAgentUpdateRegistration: func(context.Context, authz.Actor, uuid.UUID) (db.ServerAgent, string, error) {
+			return db.ServerAgent{ServerID: serverID, TenantID: uuid.New(), Host: "192.0.2.44", Port: 7419, TokenSealed: []byte("sealed-agent-token")}, "existing-token-value-0123456789", nil
+		},
+		agentUpdateTLSConfig: func(context.Context, authz.Actor, uuid.UUID) (AgentTLSConfig, error) {
+			return cloneAgentTLSConfig(registeredTLS), nil
+		},
+		agentUpdatePreflightHealth: func(_ context.Context, host string, port uint16, token string, got AgentTLSConfig) error {
+			if host != "192.0.2.44" || port != uint16(registeredTLS.SecurePort) || token != "existing-token-value-0123456789" || !sameAgentTLSConfig(got, registeredTLS) {
+				t.Fatal("pre-update health check did not use registered HTTPS trust, port, and token")
+			}
+			return nil
+		},
+		agentUpdateBinary: func() ([]byte, error) { return []byte("trusted-binary"), nil },
+		agentUpdateCredentials: func(string) ([]byte, []byte, error) {
+			generatedTLS++
+			return nil, nil, errors.New("must not rotate existing TLS credentials")
+		},
+		agentUpdateRun: func(_ context.Context, request AgentUpdateRequest, _ func(string)) error {
+			runRequest = request
+			return nil
+		},
+		agentUpdateVerifyTLS: func(_ context.Context, _ authz.Actor, _ db.ServerAgent, got AgentTLSConfig) error {
+			persistedTLS++
+			if got.SecurePort != registeredTLS.SecurePort || got.TrustMode != registeredTLS.TrustMode || !bytes.Equal(got.CAPEM, registeredTLS.CAPEM) {
+				t.Fatal("registered trust changed before verification")
+			}
+			return nil
+		},
+		agentUpdatePersistTLS: func(context.Context, authz.Actor, db.ServerAgent, uint16, []byte) error {
+			t.Fatal("TLS-preserving update must not replace trust")
+			return nil
+		},
+	}
+	job, err := svc.StartServerAgentUpdate(context.Background(), actor, serverID, validAgentUpdateStartRequest())
+	if err != nil {
+		t.Fatalf("StartServerAgentUpdate: %v", err)
+	}
+	final := waitAgentUpdateJob(t, svc, actor, serverID, job)
+	if final.Status != "succeeded" || generatedTLS != 0 || persistedTLS != 1 {
+		t.Fatalf("job=%+v generated_tls=%d checked_trust=%d", final, generatedTLS, persistedTLS)
+	}
+	if !runRequest.PreserveTLS || runRequest.TLSMode != registeredTLS.TrustMode || runRequest.SecurePort != uint16(registeredTLS.SecurePort) || !bytes.Equal(runRequest.TLSCertificate, ca) || len(runRequest.TLSPrivateKey) != 0 || runRequest.AgentToken != "existing-token-value-0123456789" {
+		t.Fatal("runner did not receive existing public trust, endpoint, and bearer without private key")
+	}
+}
+
+func TestStartAgentUpdateStopsBeforeArtifactWhenExistingTLSHealthIsUnverified(t *testing.T) {
+	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+	ca, _ := newAgentInstallTLS(t, "192.0.2.44")
+	artifactReads, runnerCalls := 0, 0
+	svc := &Service{
+		requireAgentUpdatePermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		loadAgentUpdateRegistration: func(context.Context, authz.Actor, uuid.UUID) (db.ServerAgent, string, error) {
+			return db.ServerAgent{ServerID: serverID, TenantID: uuid.New(), Host: "192.0.2.44", Port: 7419}, "existing-token-value-0123456789", nil
+		},
+		agentUpdateTLSConfig: func(context.Context, authz.Actor, uuid.UUID) (AgentTLSConfig, error) {
+			return AgentTLSConfig{SecurePort: 7443, TrustMode: AgentTLSTrustCustom, CAPEM: ca}, nil
+		},
+		agentUpdatePreflightHealth: func(context.Context, string, uint16, string, AgentTLSConfig) error {
+			return errors.New("untrusted health detail")
+		},
+		agentUpdateBinary: func() ([]byte, error) { artifactReads++; return []byte("binary"), nil },
+		agentUpdateRun:    func(context.Context, AgentUpdateRequest, func(string)) error { runnerCalls++; return nil },
+	}
+	if _, err := svc.StartServerAgentUpdate(context.Background(), actor, serverID, validAgentUpdateStartRequest()); !errors.Is(err, ErrAgentUpdateUnavailable) {
+		t.Fatalf("unverified registered TLS endpoint error = %v", err)
+	}
+	if artifactReads != 0 || runnerCalls != 0 {
+		t.Fatalf("unverified TLS health did not stop update: artifact_reads=%d runner_calls=%d", artifactReads, runnerCalls)
+	}
+}
+
+func TestStartAgentUpdateFailsClosedWhenPreservedTLSHealthCheckerIsUnavailable(t *testing.T) {
+	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+	ca, _ := newAgentInstallTLS(t, "192.0.2.44")
+	artifactReads, runnerCalls := 0, 0
+	svc := &Service{
+		requireAgentUpdatePermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		loadAgentUpdateRegistration: func(context.Context, authz.Actor, uuid.UUID) (db.ServerAgent, string, error) {
+			return db.ServerAgent{ServerID: serverID, TenantID: uuid.New(), Host: "192.0.2.44", Port: 7419}, "existing-token-value-0123456789", nil
+		},
+		agentUpdateTLSConfig: func(context.Context, authz.Actor, uuid.UUID) (AgentTLSConfig, error) {
+			return AgentTLSConfig{SecurePort: 7443, TrustMode: AgentTLSTrustCustom, CAPEM: ca}, nil
+		},
+		agentUpdateBinary: func() ([]byte, error) { artifactReads++; return []byte("binary"), nil },
+		agentUpdateRun:    func(context.Context, AgentUpdateRequest, func(string)) error { runnerCalls++; return nil },
+	}
+	if _, err := svc.StartServerAgentUpdate(context.Background(), actor, serverID, validAgentUpdateStartRequest()); !errors.Is(err, ErrAgentUpdateUnavailable) {
+		t.Fatalf("missing preflight health checker error = %v", err)
+	}
+	if artifactReads != 0 || runnerCalls != 0 {
+		t.Fatalf("missing health checker did not stop before work: artifact_reads=%d runner_calls=%d", artifactReads, runnerCalls)
+	}
+}
+
 func TestStartAgentUpdateRejectsRegistrationForDifferentServerBeforeArtifact(t *testing.T) {
 	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
 	artifactReads := 0

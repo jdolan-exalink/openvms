@@ -299,22 +299,59 @@ func (s *Service) loadAgentInstallBinary() ([]byte, error) {
 	if s.agentInstallBinary != nil {
 		return s.agentInstallBinary()
 	}
-	binary, err := readInstallArtifact("/opt/openvms/edge-agent", agentInstallMaxBinary)
+	artifact, err := s.desiredAgentArtifact()
 	if err != nil {
 		return nil, err
 	}
-	hash, err := readInstallArtifact("/opt/openvms/edge-agent.sha256", 128)
+	return artifact.Binary, nil
+}
+
+// AgentArtifact couples the verified bytes to identity derived from those exact
+// bytes. Status, install, and update must all use this resolver rather than
+// independently selecting binaries or trusting API build labels.
+type AgentArtifact struct {
+	Binary   []byte
+	Identity agent.BinaryIdentity
+}
+
+// LoadTrustedAgentArtifact loads only the packaged binary and its adjacent
+// digest/architecture manifest; it deliberately has no source-build fallback.
+func LoadTrustedAgentArtifact(binaryPath string) (AgentArtifact, error) {
+	binary, err := readInstallArtifact(binaryPath, int64(agentInstallMaxBinary))
 	if err != nil {
-		return nil, err
+		return AgentArtifact{}, err
 	}
-	arch, err := readInstallArtifact("/opt/openvms/edge-agent.goarch", 16)
+	hash, err := readInstallArtifact(binaryPath+".sha256", 128)
 	if err != nil {
-		return nil, err
+		return AgentArtifact{}, err
 	}
-	if err := verifyTrustedAgentBinary(binary, strings.TrimSpace(string(hash)), strings.TrimSpace(string(arch))); err != nil {
-		return nil, err
+	arch, err := readInstallArtifact(binaryPath+".goarch", 16)
+	if err != nil {
+		return AgentArtifact{}, err
 	}
-	return binary, nil
+	expectedArch := strings.TrimSpace(string(arch))
+	if err := verifyTrustedAgentBinary(binary, strings.TrimSpace(string(hash)), expectedArch); err != nil {
+		return AgentArtifact{}, err
+	}
+	identity, err := agent.IdentityFromBinary(binary)
+	if err != nil {
+		return AgentArtifact{}, err
+	}
+	if identity.Architecture != expectedArch {
+		return AgentArtifact{}, errors.New("trusted agent build architecture mismatch")
+	}
+	version, err := readInstallArtifact(binaryPath+".version", 65)
+	if err == nil {
+		label := string(version)
+		label = strings.TrimSuffix(label, "\n")
+		if !agent.ValidReleaseVersion(label) {
+			return AgentArtifact{}, errors.New("trusted agent release version is invalid")
+		}
+		identity.Version = label
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return AgentArtifact{}, errors.New("trusted agent release version is unavailable")
+	}
+	return AgentArtifact{Binary: binary, Identity: identity}, nil
 }
 
 func readInstallArtifact(path string, maxBytes int64) ([]byte, error) {

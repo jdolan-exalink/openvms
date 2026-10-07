@@ -1,6 +1,7 @@
 package provision
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/jdolan-exalink/openvms/internal/agent"
 )
 
 type fakeAgentUpdateConn struct {
@@ -33,7 +36,11 @@ func (f *fakeAgentUpdateConn) Run(_ context.Context, command string) (string, er
 		if f.preflight != "" {
 			return f.preflight, nil
 		}
-		return "openvms_agent_update_preflight=ok os=ubuntu arch=" + runtime.GOARCH + " service=active token=protected tls=disabled unit=compatible\n", nil
+		tls := "disabled"
+		if strings.Contains(command, "tls_mode=enabled") {
+			tls = "enabled"
+		}
+		return "openvms_agent_update_preflight=ok os=ubuntu arch=" + runtime.GOARCH + " service=active token=protected tls=" + tls + " unit=compatible\n", nil
 	}
 	if strings.Contains(command, "openvms_agent_update_rollback=ok") {
 		return "openvms_agent_update_rollback=ok\n", nil
@@ -121,6 +128,81 @@ func TestRunAgentUpdatePreservesIdentityAndVerifiesTLSHealth(t *testing.T) {
 	}
 }
 
+func TestRunAgentUpdatePreservesExistingTLSFilesAndTrust(t *testing.T) {
+	request := validAgentUpdateRequest(t)
+	request.PreserveTLS = true
+	request.TLSPrivateKey = nil
+	request.TLSMode = AgentTLSTrustCustom
+	conn := &fakeAgentUpdateConn{preflight: "openvms_agent_update_preflight=ok os=ubuntu arch=" + runtime.GOARCH + " service=active token=protected tls=enabled unit=compatible\n"}
+	err := RunAgentUpdate(context.Background(), request,
+		func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+			return conn, nil
+		},
+		func(_ context.Context, host string, port uint16, token string, ca []byte) error {
+			if host != request.Host || port != request.SecurePort || token != request.AgentToken || !bytes.Equal(ca, request.TLSCertificate) {
+				t.Fatal("health verification did not use the existing registered trust and bearer")
+			}
+			return nil
+		})
+	if err != nil {
+		t.Fatalf("preserving TLS update: %v", err)
+	}
+	for _, path := range []string{"/new/agent.crt", "/new/agent.key", "/new/agent.env"} {
+		for written := range conn.writes {
+			if strings.HasSuffix(written, path) {
+				t.Fatalf("TLS-preserving update wrote protected file %s", written)
+			}
+		}
+	}
+	commands := strings.Join(conn.commands, "\n")
+	for _, forbidden := range []string{"cp -p /etc/openvms/agent.crt", "cp -p /etc/openvms/agent.key", "cp -p /etc/openvms/agent.env", "agent.crt:/etc/openvms/agent.crt", "agent.key:/etc/openvms/agent.key", "agent.env:/etc/openvms/agent.env"} {
+		if strings.Contains(commands, forbidden) {
+			t.Fatalf("TLS-preserving update modifies protected file with %q", forbidden)
+		}
+	}
+}
+
+func TestRunAgentUpdateTLSPreservingRollbackNeverReplacesTrustOrEnvironment(t *testing.T) {
+	request := validAgentUpdateRequest(t)
+	request.PreserveTLS = true
+	request.TLSMode = AgentTLSTrustCustom
+	request.TLSPrivateKey = nil
+	conn := &fakeAgentUpdateConn{}
+	err := RunAgentUpdate(context.Background(), request,
+		func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+			return conn, nil
+		},
+		func(context.Context, string, uint16, string, []byte) error { return errors.New("health not verified") })
+	var failure *agentUpdateFailure
+	if err == nil || !errors.As(err, &failure) || failure.rollback != agentUpdateRollbackRestored {
+		t.Fatalf("TLS-preserving health failure = %v, expected confirmed rollback", err)
+	}
+	commands := strings.Join(conn.commands, "\n")
+	for _, forbidden := range []string{"agent.crt:/etc/openvms/agent.crt", "agent.key:/etc/openvms/agent.key", "agent.env:/etc/openvms/agent.env", "cp -p /etc/openvms/agent.key", "rm -f /etc/openvms/agent.crt"} {
+		if strings.Contains(commands, forbidden) {
+			t.Fatalf("TLS-preserving rollback could change protected file via %q", forbidden)
+		}
+	}
+}
+
+func TestAgentUpdateHealthRequiresExactArtifactDigestAndArchitecture(t *testing.T) {
+	expected := agent.BinaryIdentity{SHA256: strings.Repeat("a", 64), Architecture: "amd64"}
+	for name, body := range map[string]string{
+		"matching artifact":  fmt.Sprintf(`{"status":"ok","binary_identity":{"sha256":"%s","architecture":"amd64"}}`, expected.SHA256),
+		"wrong digest":       `{"status":"ok","binary_identity":{"sha256":"` + strings.Repeat("b", 64) + `","architecture":"amd64"}}`,
+		"wrong architecture": fmt.Sprintf(`{"status":"ok","binary_identity":{"sha256":"%s","architecture":"arm64"}}`, expected.SHA256),
+		"missing identity":   `{"status":"ok"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			got := matchesAgentUpdateHealth([]byte(body), expected)
+			want := name == "matching artifact"
+			if got != want {
+				t.Fatalf("matchesAgentUpdateHealth = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestRunAgentUpdateHealthFailureAttemptsRollbackAndNeverClaimsSuccess(t *testing.T) {
 	request := validAgentUpdateRequest(t)
 	conn := &fakeAgentUpdateConn{}
@@ -153,6 +235,7 @@ func TestRunAgentUpdateRejectsInvalidTargetBeforeSSH(t *testing.T) {
 		{"missing pin", func(r *AgentUpdateRequest) { r.ExpectedHostKey = "" }},
 		{"missing existing token", func(r *AgentUpdateRequest) { r.AgentToken = "" }},
 		{"bad certificate SAN", func(r *AgentUpdateRequest) { r.TLSCertificate, r.TLSPrivateKey = newAgentInstallTLS(t, "192.0.2.11") }},
+		{"preserve TLS refuses private key payload", func(r *AgentUpdateRequest) { r.PreserveTLS = true; r.TLSMode = AgentTLSTrustCustom }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -335,8 +418,8 @@ func TestRunAgentUpdateReturnsSafeTypedFailureDiagnostics(t *testing.T) {
 
 func TestAgentUpdateActivationAndRollbackTrapOwnedTemporaryFiles(t *testing.T) {
 	for name, script := range map[string]string{
-		"activation": agentUpdateActivate("/var/lib/openvms-agent-update/0123456789abcdef"),
-		"rollback":   agentUpdateRollback("/var/lib/openvms-agent-update/0123456789abcdef"),
+		"activation": agentUpdateActivate("/var/lib/openvms-agent-update/0123456789abcdef", false),
+		"rollback":   agentUpdateRollback("/var/lib/openvms-agent-update/0123456789abcdef", false),
 	} {
 		t.Run(name, func(t *testing.T) {
 			for _, required := range []string{"mktemp --", "temporary_files", "trap", "rm -f --"} {
@@ -358,7 +441,7 @@ func TestAgentUpdateActivationAndRollbackTrapOwnedTemporaryFiles(t *testing.T) {
 
 func TestAgentUpdatePrepareUsesExclusiveStageClaimBeforeSuccessMarker(t *testing.T) {
 	root := "/var/lib/openvms-agent-update/0123456789abcdef"
-	script := agentUpdatePrepare(root, 7443)
+	script := agentUpdatePrepare(root, 7443, false)
 	claim := strings.Index(script, `mkdir -m 0700 "$base"`)
 	marker := strings.Index(script, "openvms_agent_update_staged=ready")
 	if !strings.Contains(script, `[ ! -e "$base" ] && [ ! -L "$base" ]`) || claim < 0 || marker < 0 || claim > marker {
@@ -366,5 +449,37 @@ func TestAgentUpdatePrepareUsesExclusiveStageClaimBeforeSuccessMarker(t *testing
 	}
 	if strings.Contains(script, "rm -rf") {
 		t.Fatal("prepare plan must never remove an unclaimed stage path")
+	}
+}
+
+func TestAgentUpdateExistingTLSPlanUsesOnlyFixedTLSLayout(t *testing.T) {
+	preflight := agentUpdatePreflight(true, 7443)
+	for _, required := range []string{
+		"OPENVMS_AGENT_ONVIF_TLS_LISTEN=0.0.0.0:7443",
+		"TLS_CERT_FILE=/etc/openvms/agent.crt",
+		"TLS_KEY_FILE=/etc/openvms/agent.key",
+		"stat -c '%a' /etc/openvms/agent.crt",
+		"stat -c '%a' /etc/openvms/agent.key",
+		"tls_mode=enabled",
+	} {
+		if !strings.Contains(preflight, required) {
+			t.Errorf("fixed-layout TLS preflight omitted %q", required)
+		}
+	}
+	if validAgentUpdatePreflight("openvms_agent_update_preflight=ok os=ubuntu arch="+runtime.GOARCH+" service=active token=protected tls=disabled unit=compatible", true) {
+		t.Fatal("TLS-preserving mode accepted a TLS-disabled target")
+	}
+	prepare := agentUpdatePrepare("/var/lib/openvms-agent-update/0123456789abcdef", 7443, true)
+	activate := agentUpdateActivate("/var/lib/openvms-agent-update/0123456789abcdef", true)
+	rollback := agentUpdateRollback("/var/lib/openvms-agent-update/0123456789abcdef", true)
+	for name, script := range map[string]string{"prepare": prepare, "activate": activate, "rollback": rollback} {
+		for _, forbidden := range []string{"cp -p /etc/openvms/agent.crt", "cp -p /etc/openvms/agent.key", "agent.crt:/etc/openvms/agent.crt", "agent.key:/etc/openvms/agent.key", "agent.env:/etc/openvms/agent.env", "rm -f /etc/openvms/agent.crt"} {
+			if strings.Contains(script, forbidden) {
+				t.Errorf("%s plan modifies existing TLS material/config via %q", name, forbidden)
+			}
+		}
+		if strings.Contains(script, "%!") {
+			t.Errorf("%s shell plan contains fmt formatting error", name)
+		}
 	}
 }

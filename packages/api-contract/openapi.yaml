@@ -3749,12 +3749,17 @@ components:
         day: { type: integer, minimum: 0, maximum: 31 }
     ServerAgent:
       type: object
-      required: [installed, version, current_version, outdated]
+      required: [installed, version, current_version, outdated, binary_status, binary_upgrade_available]
       properties:
         installed: { type: boolean }
         version: { type: string }
         current_version: { type: string }
         outdated: { type: boolean }
+        binary_status: { $ref: "#/components/schemas/ServerAgentBinaryStatus" }
+        binary_available: { $ref: "#/components/schemas/ServerAgentBinaryIdentity" }
+        binary_observed: { $ref: "#/components/schemas/ServerAgentBinaryIdentity" }
+        binary_outdated: { type: boolean, description: "Present only when both exact binary digests were verified." }
+        binary_upgrade_available: { type: boolean, description: "A user-triggered install or upgrade path is available; this does not imply a known binary mismatch." }
         variant: { type: string }
         ntp: { type: string }
         cpu_percent: { type: number }
@@ -3769,6 +3774,18 @@ components:
         database_total_bytes: { type: integer, format: int64 }
         database_free_bytes: { type: integer, format: int64 }
         error: { type: string }
+    ServerAgentBinaryStatus:
+      type: string
+      enum: [not_installed, current, update_available, unknown, unreachable]
+      description: "Binary lifecycle state; separate from protocol version and the legacy protocol outdated flag."
+    ServerAgentBinaryIdentity:
+      type: object
+      required: [sha256, architecture]
+      properties:
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        architecture: { type: string, maxLength: 32 }
+        version: { type: string, maxLength: 256, description: "Go binary release label; omitted when development or unavailable." }
+        commit: { type: string, maxLength: 256, description: "Go VCS revision embedded in these exact binary bytes, when available." }
     Camera:
       type: object
       required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, folder_id, sort_order, default_live_quality, description, location, tags, created_at, updated_at]

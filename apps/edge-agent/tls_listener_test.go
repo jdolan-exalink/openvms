@@ -140,6 +140,9 @@ func TestCurrentAgentHealthInfoUsesBuiltMetadata(t *testing.T) {
 	if got.Build != wantBuild {
 		t.Fatalf("build metadata = %+v, want %+v", got.Build, wantBuild)
 	}
+	if got.BinaryIdentity.SHA256 == "" || got.BinaryIdentity.Architecture == "" {
+		t.Fatalf("health omitted available executable identity: %+v", got.BinaryIdentity)
+	}
 }
 
 func TestAgentTLSHealthBoundsMetadataResponse(t *testing.T) {

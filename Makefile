@@ -1,6 +1,7 @@
 # OpenVMS developer entry points. `make help` lists them.
 SHELL := /bin/bash
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+AGENT_VERSION ?= 0.1.1
 INFRA := postgres valkey nats seaweedfs mosquitto frigate-helvecia frigate-cayasta
 
 export DATABASE_URL ?= postgres://openvms:openvms@localhost:5432/openvms?sslmode=disable
@@ -16,7 +17,7 @@ help: ## List targets
 
 .PHONY: up
 up: ## Build and start the full stack in Docker (web on http://localhost:8000)
-	VERSION=$(VERSION) docker compose up -d --build
+	VERSION=$(VERSION) AGENT_VERSION=$(AGENT_VERSION) docker compose up -d --build
 
 .PHONY: down
 down: ## Stop the stack (keeps volumes)
@@ -63,6 +64,10 @@ build: ## Build Go binaries into bin/ and the web bundle
 	for app in api worker frigate-mock; do \
 		CGO_ENABLED=0 go build -trimpath -ldflags "-X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Version=$(VERSION)" -o bin/$$app ./apps/$$app; \
 	done
+	CGO_ENABLED=0 go build -trimpath -ldflags "-X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Version=$(AGENT_VERSION)" -o bin/edge-agent ./apps/edge-agent
+	sha256sum bin/edge-agent | awk '{print $$1}' > bin/edge-agent.sha256
+	go env GOARCH > bin/edge-agent.goarch
+	printf '%s' "$(AGENT_VERSION)" > bin/edge-agent.version
 	pnpm build
 
 .PHONY: logs

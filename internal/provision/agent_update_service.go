@@ -45,7 +45,7 @@ func validateAgentUpdateStartRequest(in AgentUpdateStartRequest) error {
 }
 
 var ErrAgentUpdateUnavailable = errors.New("registered agent update unavailable")
-var ErrAgentUpdateTLSAlreadyConfigured = errors.New("agent update only supports a TLS-disabled registered agent")
+var ErrAgentUpdateTLSAlreadyConfigured = errors.New("registered agent TLS configuration changed during update")
 
 type agentUpdateTxChecker interface {
 	Require(authz.Permission, authz.Resource) error
@@ -144,16 +144,44 @@ func (s *Service) StartServerAgentUpdate(ctx context.Context, actor authz.Actor,
 	if row.ServerID != serverID || host == nil || host.To4() == nil || host.To4().String() != row.Host || row.Port < 1 || row.Port > 65535 || token == "" {
 		return AgentInstallJob{}, ErrAgentUpdateUnavailable
 	}
-	tlsExists := s.agentUpdateTLSExists
-	if tlsExists == nil {
-		tlsExists = s.registeredAgentTLSExists
-	}
-	exists, err := tlsExists(ctx, actor, serverID)
-	if err != nil {
+	var registeredTLS AgentTLSConfig
+	preserveTLS := false
+	if s.agentUpdateTLSConfig != nil || s.Store != nil {
+		tlsConfigLoader := s.agentUpdateTLSConfig
+		if tlsConfigLoader == nil {
+			tlsConfigLoader = s.registeredAgentTLSConfig
+		}
+		registeredTLS, err = tlsConfigLoader(ctx, actor, serverID)
+		if err == nil {
+			preserveTLS = true
+		} else if !errors.Is(err, ErrAgentTLSNotConfigured) && !errors.Is(err, store.ErrNotFound) {
+			return AgentInstallJob{}, ErrAgentUpdateUnavailable
+		}
+	} else if s.agentUpdateTLSExists != nil {
+		exists, checkErr := s.agentUpdateTLSExists(ctx, actor, serverID)
+		if checkErr != nil {
+			return AgentInstallJob{}, ErrAgentUpdateUnavailable
+		}
+		if exists {
+			return AgentInstallJob{}, ErrAgentUpdateTLSAlreadyConfigured
+		}
+	} else {
 		return AgentInstallJob{}, ErrAgentUpdateUnavailable
 	}
-	if exists {
-		return AgentInstallJob{}, ErrAgentUpdateTLSAlreadyConfigured
+	if preserveTLS && validateAgentTLSConfig(row.Host, registeredTLS) != nil {
+		return AgentInstallJob{}, ErrAgentUpdateUnavailable
+	}
+	if preserveTLS {
+		preflightHealth := s.agentUpdatePreflightHealth
+		if preflightHealth == nil && s.Store != nil {
+			preflightHealth = checkRegisteredAgentUpdateHealth
+		}
+		if preflightHealth == nil {
+			return AgentInstallJob{}, ErrAgentUpdateUnavailable
+		}
+		if err := preflightHealth(ctx, row.Host, uint16(registeredTLS.SecurePort), token, registeredTLS); err != nil {
+			return AgentInstallJob{}, ErrAgentUpdateUnavailable
+		}
 	}
 	binaryLoader := s.agentUpdateBinary
 	if binaryLoader == nil {
@@ -163,17 +191,26 @@ func (s *Service) StartServerAgentUpdate(ctx context.Context, actor authz.Actor,
 	if err != nil {
 		return AgentInstallJob{}, errors.New("trusted agent artifact unavailable")
 	}
-	credentials := s.agentUpdateCredentials
-	if credentials == nil {
-		credentials = newAgentUpdateTLSCredentials
-	}
-	certificate, privateKey, err := credentials(row.Host)
-	if err != nil || validateAgentTLSConfig(row.Host, AgentTLSConfig{SecurePort: agentInstallHTTPSPort, TrustMode: AgentTLSTrustCustom, CAPEM: certificate}) != nil {
-		return AgentInstallJob{}, errors.New("could not prepare agent TLS trust")
+	var certificate, privateKey []byte
+	securePort := uint16(agentInstallHTTPSPort)
+	trustMode := AgentTLSTrustCustom
+	if preserveTLS {
+		certificate = append([]byte(nil), registeredTLS.CAPEM...)
+		securePort = uint16(registeredTLS.SecurePort)
+		trustMode = registeredTLS.TrustMode
+	} else {
+		credentials := s.agentUpdateCredentials
+		if credentials == nil {
+			credentials = newAgentUpdateTLSCredentials
+		}
+		certificate, privateKey, err = credentials(row.Host)
+		if err != nil || validateAgentTLSConfig(row.Host, AgentTLSConfig{SecurePort: uint32(securePort), TrustMode: AgentTLSTrustCustom, CAPEM: certificate}) != nil {
+			return AgentInstallJob{}, errors.New("could not prepare agent TLS trust")
+		}
 	}
 	request := AgentUpdateRequest{
 		Host: row.Host, SSHPort: in.SSHPort, Username: "root", Password: in.Password,
-		Binary: binary, AgentToken: token, SecurePort: agentInstallHTTPSPort,
+		Binary: binary, AgentToken: token, SecurePort: securePort, TLSMode: trustMode, PreserveTLS: preserveTLS,
 		TLSCertificate: certificate, TLSPrivateKey: privateKey,
 	}
 	request.hostKeyTrust = func(ctx context.Context, fingerprint string) error {
@@ -220,6 +257,17 @@ func (s *Service) registeredAgentTLSExists(ctx context.Context, actor authz.Acto
 	return true, nil
 }
 
+func (s *Service) registeredAgentTLSConfig(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (AgentTLSConfig, error) {
+	row, err := s.agentTLSRow(ctx, actor, serverID)
+	if errors.Is(err, store.ErrNotFound) {
+		return AgentTLSConfig{}, ErrAgentTLSNotConfigured
+	}
+	if err != nil {
+		return AgentTLSConfig{}, ErrAgentUpdateUnavailable
+	}
+	return configFromRow(row), nil
+}
+
 func (s *Service) runServerAgentUpdate(actor authz.Actor, job *agentInstallJob, original db.ServerAgent, request AgentUpdateRequest) {
 	ctx, cancel := context.WithTimeout(context.Background(), agentUpdateJobTimeout)
 	defer cancel()
@@ -247,14 +295,27 @@ func (s *Service) runServerAgentUpdate(actor authz.Actor, job *agentInstallJob, 
 		s.failServerAgentUpdate(job, original.ServerID, err)
 		return
 	}
-	job.update("running", "registering", "Recording verified agent HTTPS trust")
-	persist := s.agentUpdatePersistTLS
-	if persist == nil {
-		persist = s.persistUpdatedAgentTLS
-	}
-	if err := persist(ctx, actor, original, request.SecurePort, request.TLSCertificate); err != nil {
-		s.failServerAgentUpdate(job, original.ServerID, newAgentUpdateFailure(agentUpdateStageRegistration, agentUpdateCodeTLSRegistrationFailed, agentUpdateRollbackNotAttempted))
-		return
+	if request.PreserveTLS {
+		job.update("running", "registering", "Confirming existing agent HTTPS trust remains unchanged")
+		verify := s.agentUpdateVerifyTLS
+		if verify == nil {
+			verify = s.verifyAgentUpdateTLSUnchanged
+		}
+		config := AgentTLSConfig{SecurePort: uint32(request.SecurePort), TrustMode: request.TLSMode, CAPEM: request.TLSCertificate}
+		if err := verify(ctx, actor, original, config); err != nil {
+			s.failServerAgentUpdate(job, original.ServerID, newAgentUpdateFailure(agentUpdateStageRegistration, agentUpdateCodeTLSRegistrationFailed, agentUpdateRollbackNotAttempted))
+			return
+		}
+	} else {
+		job.update("running", "registering", "Recording verified agent HTTPS trust")
+		persist := s.agentUpdatePersistTLS
+		if persist == nil {
+			persist = s.persistUpdatedAgentTLS
+		}
+		if err := persist(ctx, actor, original, request.SecurePort, request.TLSCertificate); err != nil {
+			s.failServerAgentUpdate(job, original.ServerID, newAgentUpdateFailure(agentUpdateStageRegistration, agentUpdateCodeTLSRegistrationFailed, agentUpdateRollbackNotAttempted))
+			return
+		}
 	}
 	job.update("succeeded", "complete", "Agent update and authenticated HTTPS health verified")
 }
@@ -362,6 +423,59 @@ func (s *Service) persistUpdatedAgentTLS(ctx context.Context, actor authz.Actor,
 			return checker, err
 		}, actor, original, config)
 	})
+}
+
+type agentUpdateTLSVerifyQueries interface {
+	GetServerForUpdate(context.Context, uuid.UUID) (db.GetServerForUpdateRow, error)
+	GetServerAgentForUpdate(context.Context, uuid.UUID) (db.ServerAgent, error)
+	GetServerAgentTLS(context.Context, uuid.UUID) (db.ServerAgentTl, error)
+	InsertAudit(context.Context, db.InsertAuditParams) error
+}
+
+func verifyAgentUpdateTLSInTransaction(ctx context.Context, q agentUpdateTLSVerifyQueries, loadChecker agentUpdateTxCheckerLoader, actor authz.Actor, original db.ServerAgent, expected AgentTLSConfig) error {
+	server, err := q.GetServerForUpdate(ctx, original.ServerID)
+	if err != nil || server.ID != original.ServerID || server.TenantID != original.TenantID {
+		return ErrAgentUpdateUnavailable
+	}
+	checker, err := loadChecker(ctx, server)
+	if err != nil {
+		return err
+	}
+	resource := access.Server(server.TenantID, server.SiteID, server.ID)
+	if err := checker.Require(authz.ServersManage, resource); err != nil {
+		return err
+	}
+	if err := checker.Require(authz.ServersConfigSecrets, resource); err != nil {
+		return err
+	}
+	currentAgent, err := q.GetServerAgentForUpdate(ctx, original.ServerID)
+	if err != nil || !sameAgentUpdateBinding(currentAgent, original) {
+		return ErrAgentUpdateUnavailable
+	}
+	currentTLS, err := q.GetServerAgentTLS(ctx, original.ServerID)
+	if err != nil || currentTLS.TenantID != original.TenantID {
+		return ErrAgentUpdateUnavailable
+	}
+	current := configFromRow(currentTLS)
+	if !sameAgentTLSConfig(current, expected) {
+		return ErrAgentUpdateUnavailable
+	}
+	return auditAgentTLS(ctx, q, actor, original.TenantID, original.ServerID, "SERVER_AGENT_BINARY_UPDATED_TLS_PRESERVED", &current, &current)
+}
+
+func (s *Service) verifyAgentUpdateTLSUnchanged(ctx context.Context, actor authz.Actor, original db.ServerAgent, expected AgentTLSConfig) error {
+	if s.Store == nil || original.ServerID == uuid.Nil || validateAgentTLSConfig(original.Host, expected) != nil {
+		return ErrAgentUpdateUnavailable
+	}
+	return s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		return verifyAgentUpdateTLSInTransaction(ctx, q, func(ctx context.Context, _ db.GetServerForUpdateRow) (agentUpdateTxChecker, error) {
+			return access.Load(ctx, q, actor)
+		}, actor, original, expected)
+	})
+}
+
+func sameAgentTLSConfig(a, b AgentTLSConfig) bool {
+	return a.SecurePort == b.SecurePort && a.TrustMode == b.TrustMode && equalBytes(a.CAPEM, b.CAPEM)
 }
 
 func equalBytes(a, b []byte) bool {

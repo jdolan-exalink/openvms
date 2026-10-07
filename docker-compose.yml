@@ -98,7 +98,7 @@ services:
     depends_on: [mosquitto]
 
   api:
-    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: api, VERSION: "${VERSION:-dev}" } }
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: api, VERSION: "${VERSION:-dev}", AGENT_VERSION: "${AGENT_VERSION:-0.1.1}" } }
     environment:
       <<: *go-env
       TRUST_FORWARDED_FOR: "true"

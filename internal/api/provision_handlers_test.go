@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/runtime/types"
 
+	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
@@ -31,8 +32,11 @@ func TestServerProvisionProjectsProgressWithoutCredentialFields(t *testing.T) {
 }
 
 func TestServerAgentProjectsMetricsAndVersion(t *testing.T) {
+	outdated := true
 	view := provision.AgentView{
 		Installed: true, Version: "1.2.3", Current: "1.2.4", Outdated: true, CPUPercent: 72.5,
+		BinaryStatus: provision.AgentBinaryUpdateAvailable, BinaryAvailable: &agent.BinaryIdentity{SHA256: strings.Repeat("a", 64), Architecture: "amd64", Commit: "desired"},
+		BinaryObserved: &agent.BinaryIdentity{SHA256: strings.Repeat("b", 64), Architecture: "amd64", Version: "v1.2.3"}, BinaryOutdated: &outdated, BinaryUpgradeAvailable: true,
 		MemoryTotal: 100, MemoryAvailable: 25, Coral: true, GPUPresent: true, GPUVendor: "NVIDIA", GPUName: "Test GPU",
 		CCTVTotal: 200, CCTVFree: 80, DatabaseTotal: 300, DatabaseFree: 120, Variant: "tensorrt", NTP: "synced",
 	}
@@ -45,6 +49,29 @@ func TestServerAgentProjectsMetricsAndVersion(t *testing.T) {
 	}
 	if got.Coral == nil || !*got.Coral || got.GpuName == nil || *got.GpuName != view.GPUName || got.Variant == nil || *got.Variant != view.Variant {
 		t.Fatalf("agent hardware state not projected: %#v", got)
+	}
+	if got.BinaryStatus != gen.ServerAgentBinaryStatusUpdateAvailable || got.BinaryOutdated == nil || !*got.BinaryOutdated || !got.BinaryUpgradeAvailable {
+		t.Fatalf("binary status not projected independently: %#v", got)
+	}
+	if got.BinaryAvailable == nil || got.BinaryAvailable.Sha256 != strings.Repeat("a", 64) || got.BinaryAvailable.Commit == nil || *got.BinaryAvailable.Commit != "desired" {
+		t.Fatalf("available binary identity not projected: %#v", got.BinaryAvailable)
+	}
+	if got.BinaryObserved == nil || got.BinaryObserved.Sha256 != strings.Repeat("b", 64) || got.BinaryObserved.Version == nil || *got.BinaryObserved.Version != "v1.2.3" {
+		t.Fatalf("observed binary identity not projected: %#v", got.BinaryObserved)
+	}
+}
+
+func TestServerAgentKeepsProtocolAndBinaryOutdatedSignalsSeparate(t *testing.T) {
+	view := provision.AgentView{
+		Installed: true, Version: "0.1.0", Current: "0.1.0", Outdated: false,
+		BinaryStatus: provision.AgentBinaryUpdateAvailable, BinaryOutdated: boolptr(true), BinaryUpgradeAvailable: true,
+	}
+	got := serverAgent(view)
+	if got.Version != "0.1.0" || got.CurrentVersion != "0.1.0" || got.Outdated {
+		t.Fatalf("legacy protocol fields changed: %#v", got)
+	}
+	if got.BinaryStatus != gen.ServerAgentBinaryStatusUpdateAvailable || got.BinaryOutdated == nil || !*got.BinaryOutdated {
+		t.Fatalf("binary mismatch was conflated with protocol status: %#v", got)
 	}
 }
 
