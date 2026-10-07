@@ -3763,6 +3763,12 @@ components:
         variant: { type: string }
         ntp: { type: string }
         cpu_percent: { type: number }
+        network_interfaces:
+          type: array
+          maxItems: 256
+          items: { $ref: "#/components/schemas/ServerAgentNetworkInterface" }
+          description: "Per-interface rates; absent for legacy agents or when no valid counter interval is available. Loopback is excluded."
+        network_sampled_at: { type: string, format: date-time, description: "UTC time of the latest valid network rate sample." }
         memory_total_bytes: { type: integer, format: int64 }
         memory_available_bytes: { type: integer, format: int64 }
         coral: { type: boolean }
@@ -3774,6 +3780,13 @@ components:
         database_total_bytes: { type: integer, format: int64 }
         database_free_bytes: { type: integer, format: int64 }
         error: { type: string }
+    ServerAgentNetworkInterface:
+      type: object
+      required: [name, rx_bytes_per_second, tx_bytes_per_second]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        rx_bytes_per_second: { type: number, minimum: 0 }
+        tx_bytes_per_second: { type: number, minimum: 0 }
     ServerAgentBinaryStatus:
       type: string
       enum: [not_installed, current, update_available, unknown, unreachable]

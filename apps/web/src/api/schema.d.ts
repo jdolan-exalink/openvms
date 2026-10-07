@@ -2791,6 +2791,13 @@ export interface components {
             variant?: string;
             ntp?: string;
             cpu_percent?: number;
+            /** @description Per-interface rates; absent for legacy agents or when no valid counter interval is available. Loopback is excluded. */
+            network_interfaces?: components["schemas"]["ServerAgentNetworkInterface"][];
+            /**
+             * Format: date-time
+             * @description UTC time of the latest valid network rate sample.
+             */
+            network_sampled_at?: string;
             /** Format: int64 */
             memory_total_bytes?: number;
             /** Format: int64 */
@@ -2808,6 +2815,11 @@ export interface components {
             /** Format: int64 */
             database_free_bytes?: number;
             error?: string;
+        };
+        ServerAgentNetworkInterface: {
+            name: string;
+            rx_bytes_per_second: number;
+            tx_bytes_per_second: number;
         };
         /**
          * @description Binary lifecycle state; separate from protocol version and the legacy protocol outdated flag.

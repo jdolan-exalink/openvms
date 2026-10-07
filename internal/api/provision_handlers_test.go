@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/runtime/types"
@@ -34,7 +35,7 @@ func TestServerProvisionProjectsProgressWithoutCredentialFields(t *testing.T) {
 func TestServerAgentProjectsMetricsAndVersion(t *testing.T) {
 	outdated := true
 	view := provision.AgentView{
-		Installed: true, Version: "1.2.3", Current: "1.2.4", Outdated: true, CPUPercent: 72.5,
+		Installed: true, Version: "1.2.3", Current: "1.2.4", Outdated: true, CPUPercent: 72.5, CPUAvailable: true,
 		BinaryStatus: provision.AgentBinaryUpdateAvailable, BinaryAvailable: &agent.BinaryIdentity{SHA256: strings.Repeat("a", 64), Architecture: "amd64", Commit: "desired"},
 		BinaryObserved: &agent.BinaryIdentity{SHA256: strings.Repeat("b", 64), Architecture: "amd64", Version: "v1.2.3"}, BinaryOutdated: &outdated, BinaryUpgradeAvailable: true,
 		MemoryTotal: 100, MemoryAvailable: 25, Coral: true, GPUPresent: true, GPUVendor: "NVIDIA", GPUName: "Test GPU",
@@ -58,6 +59,24 @@ func TestServerAgentProjectsMetricsAndVersion(t *testing.T) {
 	}
 	if got.BinaryObserved == nil || got.BinaryObserved.Sha256 != strings.Repeat("b", 64) || got.BinaryObserved.Version == nil || *got.BinaryObserved.Version != "v1.2.3" {
 		t.Fatalf("observed binary identity not projected: %#v", got.BinaryObserved)
+	}
+}
+
+func TestServerAgentProjectsOptionalFreshNetworkAndUnavailableCPU(t *testing.T) {
+	sampledAt := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	got := serverAgent(provision.AgentView{
+		Installed: true, Version: "0.1.0", Current: "0.1.0", BinaryStatus: provision.AgentBinaryUnknown,
+		NetworkInterfaces: []agent.NetworkInterface{{Name: "eth0", RXBytesPerSecond: 125.5, TXBytesPerSecond: 64}}, NetworkSampledAt: &sampledAt,
+	})
+	if got.CpuPercent != nil {
+		t.Fatalf("unavailable CPU was projected as a number: %#v", got.CpuPercent)
+	}
+	if got.NetworkInterfaces == nil || len(*got.NetworkInterfaces) != 1 || (*got.NetworkInterfaces)[0].Name != "eth0" || (*got.NetworkInterfaces)[0].RxBytesPerSecond != 125.5 || got.NetworkSampledAt == nil || !got.NetworkSampledAt.Equal(sampledAt) {
+		t.Fatalf("network sample was not projected: %#v", got)
+	}
+	legacy := serverAgent(provision.AgentView{Installed: true})
+	if legacy.NetworkInterfaces != nil || legacy.NetworkSampledAt != nil {
+		t.Fatalf("missing legacy measurements must remain absent: %#v", legacy)
 	}
 }
 

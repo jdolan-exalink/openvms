@@ -172,7 +172,22 @@ func serverProvision(s provision.Snapshot) gen.ServerProvision {
 }
 
 func serverAgent(s provision.AgentView) gen.ServerAgent {
-	out := gen.ServerAgent{Installed: s.Installed, Version: s.Version, CurrentVersion: s.Current, Outdated: s.Outdated, BinaryStatus: gen.ServerAgentBinaryStatus(s.BinaryStatus), BinaryUpgradeAvailable: s.BinaryUpgradeAvailable, CpuPercent: float32ptr(float32(s.CPUPercent)), MemoryTotalBytes: int64ptr(s.MemoryTotal), MemoryAvailableBytes: int64ptr(s.MemoryAvailable), CctvTotalBytes: int64ptr(s.CCTVTotal), CctvFreeBytes: int64ptr(s.CCTVFree), DatabaseTotalBytes: int64ptr(s.DatabaseTotal), DatabaseFreeBytes: int64ptr(s.DatabaseFree), Coral: boolptr(s.Coral), GpuPresent: boolptr(s.GPUPresent)}
+	out := gen.ServerAgent{Installed: s.Installed, Version: s.Version, CurrentVersion: s.Current, Outdated: s.Outdated, BinaryStatus: gen.ServerAgentBinaryStatus(s.BinaryStatus), BinaryUpgradeAvailable: s.BinaryUpgradeAvailable, MemoryTotalBytes: int64ptr(s.MemoryTotal), MemoryAvailableBytes: int64ptr(s.MemoryAvailable), CctvTotalBytes: int64ptr(s.CCTVTotal), CctvFreeBytes: int64ptr(s.CCTVFree), DatabaseTotalBytes: int64ptr(s.DatabaseTotal), DatabaseFreeBytes: int64ptr(s.DatabaseFree), Coral: boolptr(s.Coral), GpuPresent: boolptr(s.GPUPresent)}
+	if s.CPUAvailable {
+		out.CpuPercent = float32ptr(float32(s.CPUPercent))
+	}
+	if len(s.NetworkInterfaces) > 0 {
+		interfaces := make([]gen.ServerAgentNetworkInterface, 0, len(s.NetworkInterfaces))
+		for _, network := range s.NetworkInterfaces {
+			interfaces = append(interfaces, gen.ServerAgentNetworkInterface{
+				Name: network.Name, RxBytesPerSecond: float32(network.RXBytesPerSecond), TxBytesPerSecond: float32(network.TXBytesPerSecond),
+			})
+		}
+		out.NetworkInterfaces = &interfaces
+	}
+	if s.NetworkSampledAt != nil {
+		out.NetworkSampledAt = s.NetworkSampledAt
+	}
 	if s.BinaryAvailable != nil {
 		identity := serverAgentBinaryIdentity(*s.BinaryAvailable)
 		out.BinaryAvailable = &identity

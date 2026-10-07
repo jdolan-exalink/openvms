@@ -284,6 +284,7 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
   const pollExpiredRef = useRef(false);
   const lastSafeJobRef = useRef<Schemas["ServerAgentInstallJob"] | null>(null);
   const [pollTimedOut, setPollTimedOut] = useState(false);
+  const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
   const secureBrowser = location.protocol === "https:";
   const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
   const updateJob = useCallback((next: Schemas["ServerAgentInstallJob"]) => {
@@ -305,6 +306,7 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
     },
     onSuccess: (next) => {
       pollStartedAt.current = Date.now();
+      setAcceptedAt(next.status === "queued" || next.status === "running" ? performance.now() : null);
       pollExpiredRef.current = false;
       lastSafeJobRef.current = next;
       setPollTimedOut(false);
@@ -363,6 +365,8 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
   const pollBudgetExpired = pollTimedOut;
   const snapshot = pollBudgetExpired ? job : progress.data ?? job;
   const submitted = !!job?.id || start.isPending;
+  const timerActive = (snapshot?.status === "queued" || snapshot?.status === "running") && !progress.error && !pollBudgetExpired;
+  const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
   const close = () => {
     if (start.isPending) return;
     httpsRedirect.cancel();
@@ -418,11 +422,13 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
         <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !isValidSSHPort(port) || !secureBrowser}>{t("servers.agentUpdateSSHSubmit")}</Button>
       </div>
     </form> : <section aria-label={t("servers.agentUpdateSSHProgress")} className="flex flex-col gap-4">
-      <p aria-live="polite">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>
+      {start.isPending ? <JobBusyState label={t("servers.agentStarting")} /> : <p aria-live="polite">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>}
+      {acceptedAt != null && <JobBusyState busy={timerActive} elapsed={elapsedSeconds} label={t("servers.agentElapsed", { elapsed: formatElapsed(elapsedSeconds) })} />}
       {snapshot?.status === "succeeded" && !pollBudgetExpired && <p role="status" className="rounded-m3-lg bg-ok/10 p-3 text-sm">{t("servers.agentUpdateSSHSuccess")}</p>}
       {snapshot?.status === "failed" && <p role="alert" className="text-sm text-bad">{agentUpdateFailureMessage(snapshot.message, t)}</p>}
       {isRetryableAgentUpdateFailure(snapshot) && <Button className="self-end" variant="outlined" onClick={() => {
         setJob(null);
+        setAcceptedAt(null);
         lastSafeJobRef.current = null;
         setPollTimedOut(false);
         onStart();
@@ -462,6 +468,7 @@ function AgentInstallDialog({
   const pendingPasswordRef = useRef("");
   const pollStartedAt = useRef(0);
   const [pollTimedOut, setPollTimedOut] = useState(false);
+  const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
   const secureBrowser = location.protocol === "https:";
   const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
   const start = useMutation({
@@ -477,6 +484,7 @@ function AgentInstallDialog({
     },
     onSuccess: (next) => {
       pollStartedAt.current = Date.now();
+      setAcceptedAt(next.status === "queued" || next.status === "running" ? performance.now() : null);
       setPollTimedOut(false);
       onJob(next);
     },
@@ -511,6 +519,8 @@ function AgentInstallDialog({
   const snapshot = progress.data ?? job;
   const hasSubmitted = !!job?.id || start.isPending;
   const polling = job?.status === "queued" || job?.status === "running";
+  const timerActive = polling && !progress.error && !pollTimedOut;
+  const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
   const close = () => {
     if (start.isPending) return;
     httpsRedirect.cancel();
@@ -583,7 +593,8 @@ function AgentInstallDialog({
         </form>
       ) : (
         <section aria-label={t("servers.agentInstallProgress")} className="flex flex-col gap-4">
-          <p aria-live="polite" className="text-sm">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>
+          {start.isPending ? <JobBusyState label={t("servers.agentStarting")} /> : <p aria-live="polite" className="text-sm">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>}
+          {acceptedAt != null && <JobBusyState busy={timerActive} elapsed={elapsedSeconds} label={t("servers.agentElapsed", { elapsed: formatElapsed(elapsedSeconds) })} />}
           {snapshot?.status === "succeeded" && <p role="status" className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentInstallSuccessUnverified")}</p>}
           {snapshot?.status === "failed" && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallFailedCheckHost")}</p>}
           {progress.error && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
@@ -784,8 +795,46 @@ function Meter({ percent }: { percent: number }) {
   );
 }
 
+function useElapsedJob(startedAt: number | null, active: boolean) {
+  const [seconds, setSeconds] = useState(0);
+  useEffect(() => {
+    if (startedAt == null || !Number.isFinite(startedAt)) {
+      return;
+    }
+    const update = () => setSeconds(Math.max(0, Math.floor((performance.now() - startedAt) / 1000)));
+    update();
+    if (!active) return;
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [active, startedAt]);
+  return seconds;
+}
+
+function formatElapsed(seconds: number) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainder = seconds % 60;
+  return hours > 0 ? `${hours}:${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}` : `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function JobBusyState({ label, elapsed, busy = true }: { label: string; elapsed?: number; busy?: boolean }) {
+  return <div className="flex items-center gap-2 text-sm text-muted" role={elapsed == null ? "status" : "timer"} aria-live="off">
+    <span aria-hidden className={cn("size-3 rounded-full border-2 border-current border-r-transparent", busy && "motion-safe:animate-spin motion-reduce:animate-none")} />
+    <span>{label}</span>
+  </div>;
+}
+
 function AgentMonitor({ serverId }: { serverId: string }) {
   const t = useT();
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const initial = window.setTimeout(() => setNow(Date.now()), 0);
+    const timer = window.setInterval(() => setNow(Date.now()), 5000);
+    return () => {
+      window.clearTimeout(initial);
+      window.clearInterval(timer);
+    };
+  }, []);
   const agentStatus = useQuery({
     queryKey: ["server-agent", serverId],
     queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId } } })),
@@ -794,20 +843,32 @@ function AgentMonitor({ serverId }: { serverId: string }) {
   });
   const metrics = agentStatus.data;
   if (agentStatus.isPending) return <div className="mt-1 text-muted">{t("servers.agent")}…</div>;
-  if (!metrics) return <div className="mt-1 text-muted">{t("servers.agentLifecycleUnknown")}</div>;
+  if (agentStatus.isError || !metrics) return <div className="mt-1 text-muted">{t("servers.agentLifecycleUnknown")}</div>;
   const memory = (value?: number) => value == null ? "—" : `${(value / 1024 ** 3).toFixed(1)} GB`;
+  const cpu = typeof metrics.cpu_percent === "number" && Number.isFinite(metrics.cpu_percent)
+    ? Math.max(0, Math.min(100, Math.round(metrics.cpu_percent)))
+    : null;
+  const sampleAt = metrics.network_sampled_at ? Date.parse(metrics.network_sampled_at) : Number.NaN;
+  const networkIsFresh = Number.isFinite(sampleAt) && sampleAt <= now && now - sampleAt <= 15_000;
+  const network = networkIsFresh ? (metrics.network_interfaces ?? []).filter((entry) =>
+    !!entry.name && Number.isFinite(entry.rx_bytes_per_second) && entry.rx_bytes_per_second >= 0 && Number.isFinite(entry.tx_bytes_per_second) && entry.tx_bytes_per_second >= 0,
+  ) : [];
+  const rate = (value: number) => value < 1024 ? `${Math.round(value)} B/s` : `${(value / 1024).toFixed(1)} KiB/s`;
   return (
     <div className="mt-2 flex min-w-48 flex-col gap-1 whitespace-normal text-xs">
       <span className="font-sans font-medium">{t("servers.agent")}: {metrics.installed ? metrics.version || "—" : t("servers.agentMissing")}</span>
       {metrics.installed && <span className="font-sans text-muted">{t("servers.agentProtocolVersion", { version: metrics.version || "—" })}</span>}
       {metrics.installed && metrics.binary_observed && <span className="font-sans text-muted">{t("servers.agentBinaryObserved", { identity: formatBinaryIdentity(metrics.binary_observed) })}</span>}
       {metrics.binary_available && <span className="font-sans text-muted">{t("servers.agentBinaryAvailable", { identity: formatBinaryIdentity(metrics.binary_available) })}</span>}
-      {metrics.cpu_percent != null && (
+      {metrics.installed && metrics.binary_outdated === true && <span role="status" aria-label={t("servers.agentBinaryOutdatedStatus")} className="font-sans font-semibold text-warn">{t("servers.agentBinaryOutdated")}</span>}
+      {metrics.installed && cpu != null && (
         <>
-          <span className="font-sans">{t("servers.agentCpu", { percent: metrics.cpu_percent })}</span>
-          <Meter percent={metrics.cpu_percent} />
+          <span className="font-sans">{t("servers.agentCpu", { percent: cpu })}</span>
+          <Meter percent={cpu} />
         </>
       )}
+      {metrics.installed && cpu == null && <span className="font-sans text-muted">{t("servers.agentCPUUnavailable")}</span>}
+      {metrics.installed && network.length > 0 ? network.map((entry) => <span key={entry.name} className="font-sans text-muted">{t("servers.agentNetworkRate", { name: entry.name, rx: rate(entry.rx_bytes_per_second), tx: rate(entry.tx_bytes_per_second) })}</span>) : metrics.installed && <span className="font-sans text-muted">{t("servers.agentNetworkUnavailable")}</span>}
       {metrics.memory_total_bytes != null && (
         <>
           <span className="font-sans text-muted">{t("servers.agentMemory", { available: memory(metrics.memory_available_bytes), total: memory(metrics.memory_total_bytes) })}</span>

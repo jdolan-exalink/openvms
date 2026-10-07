@@ -114,6 +114,46 @@ describe("Servers", () => {
       return { calls, fetchMock };
     };
 
+    it("shows rounded CPU, only fresh per-interface rates, and explicit verified-outdated emphasis", async () => {
+      setupAgentInstall(installGrants, undefined, undefined, undefined, () => ({
+        installed: true,
+        version: "0.1.0",
+        cpu_percent: 72.6,
+        network_interfaces: [{ name: "eth0", rx_bytes_per_second: 1024, tx_bytes_per_second: 2048 }],
+        network_sampled_at: new Date(Date.now() - 1000).toISOString(),
+        binary_status: "update_available",
+        binary_outdated: true,
+      }));
+      renderPage(Servers);
+      expect(await screen.findByText("CPU 73%")).toBeInTheDocument();
+      expect(screen.getByText("frigate-h01").closest("li")?.textContent).toContain("eth0");
+      expect(screen.getByText(/eth0.*1\.0 KiB\/s.*2\.0 KiB\/s/)).toBeInTheDocument();
+      expect(screen.getByRole("status", { name: /binario del agente está desactualizado/i })).toHaveClass("font-semibold", "text-warn");
+    });
+
+    it("does not display legacy missing resource samples as zero or claim outdated state", async () => {
+      setupAgentInstall(installGrants, undefined, undefined, undefined, () => ({ installed: true, version: "0.1.0" }));
+      renderPage(Servers);
+      expect(await screen.findByText(/CPU no disponible/i)).toBeInTheDocument();
+      expect(screen.queryByText(/0\.0 KiB\/s/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("status", { name: /versión del agente desactualizada/i })).not.toBeInTheDocument();
+    });
+
+    it.each([-16_000, 5_000])("treats stale or future network samples as unavailable (%i ms)", async (offset) => {
+      setupAgentInstall(installGrants, undefined, undefined, undefined, () => ({
+        installed: true,
+        cpu_percent: 150,
+        network_interfaces: [{ name: "eth0", rx_bytes_per_second: 1024, tx_bytes_per_second: 1024 }],
+        network_sampled_at: new Date(Date.now() + offset).toISOString(),
+        binary_status: "current",
+        binary_outdated: false,
+      }));
+      renderPage(Servers);
+      expect(await screen.findByText(/Tasas de red no disponibles/i)).toBeInTheDocument();
+      expect(screen.getByText("CPU 100%")).toBeInTheDocument();
+      expect(screen.queryByRole("status", { name: /binario del agente está desactualizado/i })).not.toBeInTheDocument();
+    });
+
     it("does not request a manual SSH fingerprint", async () => {
       setupAgentInstall();
       renderPage(Servers);
@@ -122,6 +162,36 @@ describe("Servers", () => {
       expect(within(dialog).queryByLabelText(/Huella SHA-256 SSH verificada/i)).not.toBeInTheDocument();
       expect(within(dialog).getByText(/primer contacto/i)).toBeInTheDocument();
     });
+
+    it("shows no elapsed time while submission is pending and starts after a job is accepted", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      let accept!: (response: Response) => void;
+      let failPoll = false;
+      setupAgentInstall(
+        installGrants,
+        () => new Promise((resolve) => { accept = resolve; }),
+        async () => failPoll ? json({ code: "not_found", message: "unknown" }, 404) : json({ id: "job-1", status: "queued", stage: "validating" }),
+      );
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "one-time" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+      expect(await within(dialog).findByText(/Iniciando la operación del agente/i)).toBeInTheDocument();
+      expect(within(dialog).queryByText(/Tiempo transcurrido:/i)).not.toBeInTheDocument();
+      expect(within(dialog).getByRole("status").querySelector("[aria-hidden]")).toHaveClass("motion-safe:animate-spin", "motion-reduce:animate-none");
+      accept(json({ id: "job-1", status: "queued", stage: "validating" }, 202));
+      expect(await within(dialog).findByText(/Tiempo transcurrido: 0:00/i)).toBeInTheDocument();
+      expect(await within(dialog).findByText(/Tiempo transcurrido: 0:01/i, {}, { timeout: 3000 })).toBeInTheDocument();
+      failPoll = true;
+      expect(await within(dialog).findByText(/No se puede confirmar el resultado/i, {}, { timeout: 3000 })).toBeInTheDocument();
+      const frozen = within(dialog).getByRole("timer").textContent;
+      expect(within(dialog).getByRole("timer").querySelector("[aria-hidden]")).not.toHaveClass("motion-safe:animate-spin");
+      await new Promise((resolve) => window.setTimeout(resolve, 1100));
+      expect(within(dialog).getByRole("timer")).toHaveTextContent(frozen ?? "");
+    }, 10_000);
 
     it("requires both matching scoped grants and respects an explicit deny", async () => {
       setupAgentInstall([installGrants[0]!]);

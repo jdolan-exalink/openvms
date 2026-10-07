@@ -27,6 +27,9 @@ type AgentView struct {
 	Variant                string
 	NTP                    string
 	CPUPercent             float64
+	CPUAvailable           bool
+	NetworkInterfaces      []agent.NetworkInterface
+	NetworkSampledAt       *time.Time
 	MemoryTotal            int64
 	MemoryAvailable        int64
 	Coral                  bool
@@ -148,7 +151,15 @@ func applySnapshot(out *AgentView, snap agent.Snapshot) {
 		out.Variant = snap.Variant
 	}
 	out.NTP = snap.NTP
-	out.CPUPercent = snap.CPUPercent
+	if snap.CPUPercent != nil {
+		out.CPUPercent = *snap.CPUPercent
+		out.CPUAvailable = true
+	}
+	out.NetworkInterfaces = append([]agent.NetworkInterface(nil), snap.Network...)
+	if snap.NetworkSampledAt != nil {
+		sampledAt := *snap.NetworkSampledAt
+		out.NetworkSampledAt = &sampledAt
+	}
 	out.MemoryTotal = int64(snap.MemoryTotal)
 	out.MemoryAvailable = int64(snap.MemoryAvailable)
 	out.Coral = snap.Coral

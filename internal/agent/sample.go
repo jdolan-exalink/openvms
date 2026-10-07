@@ -14,20 +14,22 @@ import (
 
 // Snapshot is what the edge agent reports once a second.
 type Snapshot struct {
-	Version         string  `json:"version"`
-	Variant         string  `json:"variant"`
-	NTP             string  `json:"ntp"`
-	CPUPercent      float64 `json:"cpu_percent"`
-	MemoryTotal     uint64  `json:"memory_total_bytes"`
-	MemoryAvailable uint64  `json:"memory_available_bytes"`
-	Coral           bool    `json:"coral"`
-	GPUPresent      bool    `json:"gpu_present"`
-	GPUVendor       string  `json:"gpu_vendor"`
-	GPUName         string  `json:"gpu_name"`
-	CCTVTotal       uint64  `json:"cctv_total_bytes"`
-	CCTVFree        uint64  `json:"cctv_free_bytes"`
-	DatabaseTotal   uint64  `json:"database_total_bytes"`
-	DatabaseFree    uint64  `json:"database_free_bytes"`
+	Version          string             `json:"version"`
+	Variant          string             `json:"variant"`
+	NTP              string             `json:"ntp"`
+	CPUPercent       *float64           `json:"cpu_percent,omitempty"`
+	MemoryTotal      uint64             `json:"memory_total_bytes"`
+	MemoryAvailable  uint64             `json:"memory_available_bytes"`
+	Coral            bool               `json:"coral"`
+	GPUPresent       bool               `json:"gpu_present"`
+	GPUVendor        string             `json:"gpu_vendor"`
+	GPUName          string             `json:"gpu_name"`
+	CCTVTotal        uint64             `json:"cctv_total_bytes"`
+	CCTVFree         uint64             `json:"cctv_free_bytes"`
+	DatabaseTotal    uint64             `json:"database_total_bytes"`
+	DatabaseFree     uint64             `json:"database_free_bytes"`
+	Network          []NetworkInterface `json:"network_interfaces,omitempty"`
+	NetworkSampledAt *time.Time         `json:"network_sampled_at,omitempty"`
 }
 
 // Paths are the files a sample reads. Empty fields use this machine.
@@ -42,10 +44,11 @@ type Paths struct {
 
 // Sampler caches one reading so overlapping polls do not stack the CPU sample.
 type Sampler struct {
-	mu   sync.Mutex
-	at   time.Time
-	snap Snapshot
-	opts Paths
+	mu      sync.Mutex
+	at      time.Time
+	snap    Snapshot
+	opts    Paths
+	network *NetworkSampler
 }
 
 // NewSampler returns a sampler for the given paths.
@@ -68,7 +71,7 @@ func NewSampler(opts Paths) *Sampler {
 	if opts.DB == "" {
 		opts.DB = "/opt/frigate/config"
 	}
-	return &Sampler{opts: opts}
+	return &Sampler{opts: opts, network: newProcNetworkSampler(opts.Proc)}
 }
 
 // Current returns a snapshot no older than one second.
@@ -76,11 +79,28 @@ func (s *Sampler) Current(variant string) Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.at.IsZero() && time.Since(s.at) < time.Second {
-		return s.snap
+		return cloneSnapshot(s.snap)
 	}
 	s.snap = Read(s.opts, variant)
+	network := s.network.Sample()
+	s.snap.Network = append([]NetworkInterface(nil), network.Interfaces...)
+	s.snap.NetworkSampledAt = network.SampledAt
 	s.at = time.Now()
-	return s.snap
+	return cloneSnapshot(s.snap)
+}
+
+func cloneSnapshot(in Snapshot) Snapshot {
+	out := in
+	out.Network = append([]NetworkInterface(nil), in.Network...)
+	if in.CPUPercent != nil {
+		cpu := *in.CPUPercent
+		out.CPUPercent = &cpu
+	}
+	if in.NetworkSampledAt != nil {
+		sampledAt := *in.NetworkSampledAt
+		out.NetworkSampledAt = &sampledAt
+	}
+	return out
 }
 
 // Read samples the machine once.
@@ -98,7 +118,6 @@ func Read(opts Paths, variant string) Snapshot {
 		Version:         Version,
 		Variant:         variant,
 		NTP:             ntpState(opts.Proc),
-		CPUPercent:      host.CPUPercent,
 		MemoryTotal:     host.MemTotal,
 		MemoryAvailable: host.MemAvailable,
 		Coral:           coralPresent(opts),
@@ -106,6 +125,10 @@ func Read(opts Paths, variant string) Snapshot {
 		CCTVFree:        cctvFree,
 		DatabaseTotal:   dbTotal,
 		DatabaseFree:    dbFree,
+	}
+	if host.CPUAvailable {
+		cpu := host.CPUPercent
+		out.CPUPercent = &cpu
 	}
 	if len(host.GPUs) > 0 {
 		out.GPUPresent = true
