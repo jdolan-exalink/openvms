@@ -111,7 +111,6 @@ services:
       - /proc:/host/proc:ro
       - /sys/class/drm:/host/drm:ro
       - /:/hostfs:ro
-    ports: ["127.0.0.1:8080:8080"]
     depends_on:
       postgres: { condition: service_healthy }
       valkey: { condition: service_healthy }

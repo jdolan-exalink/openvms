@@ -84,6 +84,27 @@ func TestComposeDeclaresConfigurablePrivateAgentBridge(t *testing.T) {
 	}
 }
 
+func TestAPIIsInternalOnlyAndUsesNoHostPortPublication(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	services := asMap(t, document["services"])
+	api := asMap(t, services["api"])
+	if _, ok := api["ports"]; ok {
+		t.Fatal("API must stay private; browser traffic reaches it through the web proxy")
+	}
+	web := asMap(t, services["web"])
+	webEnv := asMap(t, web["environment"])
+	if webEnv["API_UPSTREAM"] != "${OPENVMS_AGENT_API_IPV4:-172.29.240.2}:8080" {
+		t.Fatalf("web API upstream must remain on the fixed internal API address, got %#v", webEnv["API_UPSTREAM"])
+	}
+}
+
 func asMap(t *testing.T, value any) map[string]any {
 	t.Helper()
 	result, ok := value.(map[string]any)
