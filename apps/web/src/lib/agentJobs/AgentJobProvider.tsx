@@ -14,6 +14,7 @@ export interface AgentJobRegistration {
 
 export interface TrackedAgentJob extends AgentJobRegistration {
   outcome: AgentJobOutcome;
+  serverObserved: boolean;
   acceptedAt: number;
   changedAt: number;
 }
@@ -168,14 +169,14 @@ export function AgentJobProvider({ children }: { children: ReactNode }) {
         if (oldestTerminal < 0) return current;
         retained.splice(oldestTerminal, 1);
       }
-      return [...retained, { ...registration, job: safeSnapshot(registration.job), outcome: "tracking", acceptedAt: now, changedAt: now }];
+      return [...retained, { ...registration, job: safeSnapshot(registration.job), outcome: "tracking", serverObserved: false, acceptedAt: now, changedAt: now }];
     });
   }, []);
 
   const onSnapshot = useCallback((id: string, snapshot: Schemas["ServerAgentInstallJob"]) => {
     setJobs((current) => current.map((entry) => {
       if (jobKey(entry.kind, entry.serverId, entry.job.id) !== id || entry.outcome !== "tracking" || !validJob(snapshot, entry.job.id)) return entry;
-      return { ...entry, job: safeSnapshot(snapshot), changedAt: Date.now() };
+      return { ...entry, job: safeSnapshot(snapshot), serverObserved: true, changedAt: Date.now() };
     }));
   }, []);
 

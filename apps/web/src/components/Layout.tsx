@@ -14,6 +14,7 @@ import { useRealtimeFeed } from "@/lib/realtime";
 import { useFeatures, type FeatureFlags } from "@/lib/features";
 import { useT } from "@/i18n";
 import { AgentJobProvider } from "@/lib/agentJobs/AgentJobProvider";
+import { AgentJobStatusRegion } from "./AgentJobStatusRegion";
 import { useInstallSheet } from "@/lib/pwa/useInstallSheet";
 import { AppShell, TopBarActionsSlot } from "./AppShell";
 import { AccountMenu } from "./AccountMenu";
@@ -105,6 +106,7 @@ export function Layout() {
                 <AccountMenu name={me.data?.display_name} username={me.data?.username} onLogout={() => void logout()} onInstall={install.show} />
               </div>
             </header>
+            <AgentJobStatusRegion />
             {fitWorkspace ? (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                 <Outlet />
