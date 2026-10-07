@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -145,6 +146,7 @@ func RunAgentUpdate(ctx context.Context, request AgentUpdateRequest, dial AgentI
 	defer cancel()
 	conn, err := dial(updateCtx, request.Host, request.SSHPort, request.Username, request.Password, request.ExpectedHostKey)
 	if err != nil {
+		slog.Warn("agent update dial failed", "host", request.Host, "port", request.SSHPort, "err", err)
 		if errors.Is(err, ErrAgentSSHHostKeyMismatch) {
 			return newAgentUpdateFailure(agentUpdateStageConnecting, agentUpdateCodeSSHHostKeyMismatch, agentUpdateRollbackNotAttempted)
 		}
@@ -202,6 +204,7 @@ func RunAgentUpdate(ctx context.Context, request AgentUpdateRequest, dial AgentI
 	}
 	activated, err := runAgentInstallStep(updateCtx, conn, agentUpdateActivate(root, request.PreserveTLS))
 	if err != nil || strings.TrimSpace(activated) != "openvms_agent_update=active" {
+		slog.Warn("agent update activate failed", "err", err, "output", activated)
 		rollback := rollbackAgentUpdate(conn, root, request.PreserveTLS)
 		if rollback == agentUpdateRollbackUncertain {
 			retainStage = true
@@ -371,7 +374,7 @@ trap cleanup_temporary_files EXIT
 trap 'exit 1' HUP INT TERM
 systemctl stop openvms-agent.service >/dev/null 2>&1
 for spec in %s; do
-  name=${spec%%:*}; rest=${spec#*:}; target=${rest%%:*}; mode=${rest##*:}
+  name=${spec%%%%:*}; rest=${spec#*:}; target=${rest%%%%:*}; mode=${rest##*:}
   temporary=$(mktemp -- "$target.openvms-$suffix.XXXXXX")
   temporary_files="${temporary_files}${temporary_files:+ }$temporary"
   install -o root -g root -m "$mode" "$base/new/$name" "$temporary"
@@ -480,26 +483,44 @@ func checkAgentUpdateHealth(ctx context.Context, host string, securePort uint16,
 	}
 	client, err := NewVerifiedAgentHTTPClient(host, securePort, caPEM, useSystemRoots, 5*time.Second)
 	if err != nil {
+		slog.Warn("checkAgentUpdateHealth NewVerifiedAgentHTTPClient failed", "err", err)
 		return errors.New("agent HTTPS health verification failed")
 	}
 	header := make(http.Header)
 	header.Set("Authorization", "Bearer "+token)
-	response, err := client.Do(ctx, http.MethodGet, "/v1/health", header, nil)
-	if err != nil {
-		return errors.New("agent HTTPS health verification failed")
+	deadline := time.Now().Add(10 * time.Second)
+	var lastErr error
+	for {
+		if ctx.Err() != nil {
+			return errors.New("agent HTTPS health verification failed")
+		}
+		response, err := client.Do(ctx, http.MethodGet, "/v1/health", header, nil)
+		if err == nil {
+			body, readErr := io.ReadAll(io.LimitReader(response.Body, agentUpdateMaxHealthBytes+1))
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK && readErr == nil && len(body) <= agentUpdateMaxHealthBytes {
+				if matchesAgentUpdateHealth(body, expected) {
+					return nil
+				}
+				slog.Warn("checkAgentUpdateHealth matches failed", "body", string(body), "expected_sha", expected.SHA256)
+			} else {
+				slog.Warn("checkAgentUpdateHealth bad response", "status", response.StatusCode, "readErr", readErr, "token_sha", fmt.Sprintf("%x", sha256.Sum256([]byte(token))))
+			}
+		} else {
+			lastErr = err
+		}
+
+		if time.Now().After(deadline) {
+			slog.Warn("checkAgentUpdateHealth timed out waiting for agent health", "last_err", lastErr, "host", host, "port", securePort)
+			return errors.New("agent HTTPS health verification failed")
+		}
+
+		select {
+		case <-ctx.Done():
+			return errors.New("agent HTTPS health verification failed")
+		case <-time.After(300 * time.Millisecond):
+		}
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return errors.New("agent HTTPS health verification failed")
-	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, agentUpdateMaxHealthBytes+1))
-	if err != nil || len(body) > agentUpdateMaxHealthBytes {
-		return errors.New("agent HTTPS health verification failed")
-	}
-	if !matchesAgentUpdateHealth(body, expected) {
-		return errors.New("agent HTTPS health verification failed")
-	}
-	return nil
 }
 
 func matchesAgentUpdateHealth(body []byte, expected agent.BinaryIdentity) bool {

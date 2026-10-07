@@ -200,7 +200,7 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
   const onInstallStart = useCallback(() => setDeployment({ kind: "install" }), []);
   const onUpdateStart = useCallback(() => setDeployment({ kind: "update" }), []);
   const onInstallFailure = useCallback(() => setDeployment((current) => current?.kind === "install" && !current.job ? null : current), []);
-  const onUpdateFailure = useCallback(() => setDeployment((current) => current?.kind === "update" && current.job?.status === "failed" ? null : current), []);
+  const onUpdateFailure = useCallback(() => setDeployment((current) => current?.kind === "update" && !current.job ? null : current), []);
   const trackedNeedsAttention = tracked && (
     tracked.outcome === "unknown" || tracked.job.status === "queued" || tracked.job.status === "running" || tracked.job.status === "failed"
   );
@@ -208,22 +208,20 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
     ? null
     : trackedNeedsAttention ? { kind: tracked.kind, job: tracked.job } : deployment;
   const active = !!visibleDeployment?.job && (visibleDeployment.job.status === "queued" || visibleDeployment.job.status === "running");
-  if (visibleDeployment?.kind === "install") return <div className="flex flex-wrap items-center gap-2"><AgentInstallControl server={server} otherOperationActive={false} onJob={onInstallJob} onStart={onInstallStart} onFailure={onInstallFailure} /></div>;
-  if (visibleDeployment?.kind === "update") return <div className="flex flex-wrap items-center gap-2"><AgentUpdateControl server={server} busy={false} ownActive={active} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} /></div>;
+  if (visibleDeployment?.kind === "install" || (!status.isPending && !status.data?.installed && status.data?.binary_status === "not_installed")) {
+    return <div className="flex flex-wrap items-center gap-2"><AgentInstallControl key={`install-${server.id}`} server={server} otherOperationActive={false} onJob={onInstallJob} onStart={onInstallStart} onFailure={onInstallFailure} /></div>;
+  }
+  if (visibleDeployment?.kind === "update" || (!status.isPending && status.data?.installed && status.data.binary_upgrade_available)) {
+    return <div className="flex flex-wrap items-center gap-2">
+      {status.data?.binary_status !== "update_available" && <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUpgradeUnverified")}</span>}
+      <AgentUpdateControl key={`update-${server.id}`} server={server} busy={false} ownActive={active} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} />
+    </div>;
+  }
   const agent = status.data;
   if (status.isPending) return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleChecking")}</Button>;
   if (status.isError || !agent) return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
   if (isAgentBinaryCurrent(agent)) {
     return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleCurrent")}</Button>;
-  }
-  if (agent.installed && agent.binary_upgrade_available) {
-    return <div className="flex flex-wrap items-center gap-2">
-      {agent.binary_status !== "update_available" && <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUpgradeUnverified")}</span>}
-      <AgentUpdateControl server={server} busy={false} ownActive={false} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} />
-    </div>;
-  }
-  if (!agent.installed && agent.binary_status === "not_installed") {
-    return <div className="flex flex-wrap items-center gap-2"><AgentInstallControl server={server} otherOperationActive={false} onJob={onInstallJob} onStart={onInstallStart} onFailure={onInstallFailure} /></div>;
   }
   return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
 }
@@ -670,12 +668,10 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
     onJob(next);
   }, [onJob]);
   const start = useMutation({
-    mutationFn: async () => {
-      const password = pendingPasswordRef.current;
-      pendingPasswordRef.current = "";
+    mutationFn: async ({ port, password }: { port: number; password: string }) => {
       return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/update-ssh", {
         params: { path: { serverId: server.id } },
-        body: { ssh_port: Number(port), ssh_password: password },
+        body: { ssh_port: port, ssh_password: password },
       }));
     },
     onSuccess: (next) => {
@@ -707,10 +703,12 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
     {!submitted ? <form className="flex flex-col gap-4" aria-label={t("servers.agentUpdateSSHForm")} onSubmit={(event: FormEvent) => {
       event.preventDefault();
       if (!secureBrowser || otherOperationActive) return;
-      pendingPasswordRef.current = passwordInputRef.current?.value ?? "";
+      const password = passwordInputRef.current?.value ?? "";
+      if (!password) return;
       if (passwordInputRef.current) passwordInputRef.current.value = "";
+      pendingPasswordRef.current = "";
       onStart();
-      start.mutate();
+      start.mutate({ port: Number(port), password });
     }}>
       <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentUpdateSSHScope")}</p>
       {!secureBrowser && <div className="flex flex-col gap-2">
@@ -783,12 +781,10 @@ function AgentInstallDialog({
   const secureBrowser = location.protocol === "https:";
   const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
   const start = useMutation({
-    mutationFn: async () => {
-      const password = pendingPasswordRef.current;
-      pendingPasswordRef.current = "";
+    mutationFn: async ({ host, port, password }: { host: string; port: number; password: string }) => {
       const body: Schemas["ServerAgentInstallRequest"] = {
-        ssh_host: form.host.trim(),
-        ssh_port: Number(form.port),
+        ssh_host: host.trim(),
+        ssh_port: port,
         ssh_password: password,
       };
       return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/install", { params: { path: { serverId: server.id } }, body }));
@@ -827,10 +823,12 @@ function AgentInstallDialog({
           onSubmit={(event: FormEvent) => {
             event.preventDefault();
             if (!secureBrowser || otherOperationActive) return;
-            pendingPasswordRef.current = passwordInputRef.current?.value ?? "";
+            const password = passwordInputRef.current?.value ?? "";
+            if (!password) return;
             if (passwordInputRef.current) passwordInputRef.current.value = "";
+            pendingPasswordRef.current = "";
             onStart();
-            start.mutate();
+            start.mutate({ host: form.host, port: Number(form.port), password });
           }}
         >
           <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentInstallScopeNotice")}</p>

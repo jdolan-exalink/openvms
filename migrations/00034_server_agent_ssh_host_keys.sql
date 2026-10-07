@@ -27,7 +27,7 @@ END $$;
 CREATE TABLE public.server_agent_ssh_host_keys (
     server_id uuid NOT NULL,
     tenant_id uuid NOT NULL REFERENCES public.tenants (id) ON DELETE CASCADE,
-    host text NOT NULL CHECK (family(host::inet) = 4 AND host::inet::text = host),
+    host text NOT NULL CHECK (family(host::inet) = 4 AND host(host::inet) = host),
     ssh_port integer NOT NULL CHECK (ssh_port BETWEEN 1 AND 65535),
     fingerprint text NOT NULL CHECK (fingerprint ~ '^SHA256:[A-Za-z0-9+/]{43}$'),
     created_at timestamptz NOT NULL DEFAULT now(),

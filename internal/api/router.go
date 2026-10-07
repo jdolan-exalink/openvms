@@ -232,7 +232,7 @@ func validateAgentUpdateBody(next http.Handler) http.Handler {
 		dec := json.NewDecoder(bytes.NewReader(limited))
 		dec.DisallowUnknownFields()
 		var body gen.ServerAgentUpdateRequest
-		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF || body.SshPassword == nil || body.SshPort < 1 || body.SshPort > 65535 {
+		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF || body.SshPassword == nil || *body.SshPassword == "" || body.SshPort < 1 || body.SshPort > 65535 {
 			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent update request")
 			return
 		}

@@ -649,6 +649,24 @@ describe("Servers", () => {
       expect(document.body).not.toHaveTextContent("secret-root-password");
     });
 
+    it("keeps dialog open with progress bar and log console while update is in progress", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      const agent = { installed: true, version: "0.1.0", current_version: "0.1.0", outdated: false, binary_status: "update_available", binary_observed: { sha256: "1".repeat(64), architecture: "amd64", version: "0.1.0" }, binary_available: { sha256: "2".repeat(64), architecture: "amd64", version: "0.1.1" }, binary_outdated: true, binary_upgrade_available: true };
+      setup(async (request) => {
+        expect(await request.clone().json()).toEqual({ ssh_port: 22, ssh_password: "my-valid-password" });
+        return json({ id: "job-progress-1", status: "running", stage: "transferring" }, 202);
+      }, async () => {
+        return json({ id: "job-progress-1", status: "running", stage: "transferring" });
+      }, grants, undefined, agent);
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Actualizar agente y configurar HTTPS/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Actualizar el agente OpenVMS/i });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "my-valid-password" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
+      expect(await within(dialog).findByRole("progressbar")).toBeInTheDocument();
+      expect(within(dialog).getByText("Consola de eventos")).toBeInTheDocument();
+    });
+
     it("clears the password when the update dialog is closed before submission", async () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       setup();
