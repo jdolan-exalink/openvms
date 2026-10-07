@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, stubApi } from "@/test-utils";
 import { AgentJobProvider, useAgentJobs } from "./AgentJobProvider";
+import { AgentJobStatusRegion } from "@/components/AgentJobStatusRegion";
 
 const acceptedJob = {
   id: "job-1",
@@ -53,6 +54,74 @@ describe("AgentJobProvider", () => {
     fireEvent.click(screen.getByRole("button", { name: "Accept install and navigate" }));
     expect(await screen.findByText("Other route mounted")).toBeInTheDocument();
     await waitFor(() => expect(polls).toBeGreaterThan(0));
+  });
+
+  it("clears tracked jobs when the authenticated session identity changes", async () => {
+    let polls = 0;
+    function SessionHarness() {
+      const [session, updateSession] = useState("operator-1");
+      return <>
+        <button onClick={() => updateSession("operator-2")}>Switch session</button>
+        <AgentJobProvider key={session}>
+          <AgentJobStatusRegion />
+          <RouteHarness />
+        </AgentJobProvider>
+      </>;
+    }
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "GET /api/v1/servers/server-1/agent/install/job-1": () => {
+        polls++;
+        return json({ ...acceptedJob, status: "running", stage: "transferring", message: "Transferring agent files over SFTP" });
+      },
+    })));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SessionHarness />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Accept install and navigate" }));
+    expect(await screen.findByText("North lab")).toBeInTheDocument();
+    await waitFor(() => expect(polls).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: "Switch session" }));
+
+    await waitFor(() => expect(screen.queryByText("North lab")).not.toBeInTheDocument());
+    expect(screen.queryByRole("region", { name: "Agent operations" })).not.toBeInTheDocument();
+  });
+
+  it("retains only the safe job projection when a status response contains credential-like text", async () => {
+    function JobState() {
+      const { registerJob, jobs } = useAgentJobs();
+      return <>
+        <button onClick={() => registerJob({ kind: "install", serverId: "server-1", serverName: "North lab", job: acceptedJob })}>Track job</button>
+        <output data-testid="tracked-job-state">{JSON.stringify(jobs)}</output>
+      </>;
+    }
+    const fetchMock = vi.fn(stubApi({
+      "GET /api/v1/servers/server-1/agent/install/job-1": () => json({
+        ...acceptedJob,
+        status: "failed",
+        stage: "failed",
+        message: "ssh_password=credential-like-secret token=opaque-secret",
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <AgentJobProvider><JobState /></AgentJobProvider>
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Track job" }));
+    await waitFor(() => expect(screen.getByTestId("tracked-job-state")).toHaveTextContent('"serverObserved":true'));
+
+    expect(screen.getByTestId("tracked-job-state")).not.toHaveTextContent("credential-like-secret");
+    expect(screen.getByTestId("tracked-job-state")).not.toHaveTextContent("opaque-secret");
+    expect(fetchMock.mock.calls.some(([request]) => new URL((request as Request).url).search)).toBe(false);
+    expect(Array.from({ length: localStorage.length }, (_, index) => localStorage.getItem(localStorage.key(index) ?? "") ?? "").join(" ")).not.toContain("credential-like-secret");
+    expect(Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.getItem(sessionStorage.key(index) ?? "") ?? "").join(" ")).not.toContain("credential-like-secret");
   });
 
   it("does not create a second poller when the same accepted job is registered twice", async () => {
