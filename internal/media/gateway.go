@@ -232,6 +232,24 @@ func (g *Gateway) vod(w http.ResponseWriter, r *http.Request) {
 		g.fail(w, r, a, err)
 		return
 	}
+	if resp.StatusCode >= 500 {
+		for _, audioSuffix := range []string{"-a1", "-a2", "-a0"} {
+			if strings.Contains(file, audioSuffix) {
+				fallbackFile := strings.Replace(file, audioSuffix, "", 1)
+				fallbackPath := "/vod/" + url.PathEscape(cam.RemoteName) + "/start/" + start + "/end/" + end + "/" + fallbackFile
+				fallbackResp, fallbackErr := ad.Media().Open(r.Context(), fallbackPath, nil, r.Header)
+				if fallbackErr == nil && fallbackResp.StatusCode < 400 {
+					resp.Body.Close()
+					resp = fallbackResp
+					g.Svc.Log.WarnContext(r.Context(), "vod: audio muxing failed on upstream Frigate, fell back to video-only track",
+						"camera", cam.RemoteName, "file", file, "fallback", fallbackFile, "status", fallbackResp.StatusCode)
+					break
+				} else if fallbackResp != nil {
+					fallbackResp.Body.Close()
+				}
+			}
+		}
+	}
 	cache := "private, max-age=300"
 	if strings.HasSuffix(file, ".m3u8") {
 		cache = "private, no-cache"
