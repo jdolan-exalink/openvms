@@ -7,7 +7,6 @@ import {
   Download,
   FastForward,
   FileCode2,
-  Film,
   Layers,
   Maximize2,
   Minimize2,
@@ -1137,102 +1136,126 @@ export function EvidencePlayerModal({
         })}
       </div>
 
-      {/* Unified Synchronized Transport Controls & Multi-Camera Timelines */}
-      <div className="flex flex-col gap-3 p-3.5 bg-surface-1 rounded-m3-lg border border-outline-variant/60 shadow-xs">
-        {/* Master Timeline Range Slider with Real-time Seconds Counter */}
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 font-mono text-xs min-w-28 text-right justify-end">
-            <span className="font-semibold text-primary">{formatTime(currentTime)}</span>
-            <span className="text-muted">/</span>
-            <span className="text-muted">{formatTime(duration > 0 ? duration : expectedDuration)}</span>
+      {/* Compact Multi-Camera Dock Timeline (Live Recorded Pattern) */}
+      <div className="flex flex-col gap-2 p-3 bg-surface-1 rounded-m3-lg border border-outline-variant/60 shadow-xs">
+        {/* Top Header: Clock, Active Counts & Detections Legend */}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs pb-1 border-b border-outline-variant/30">
+          <div className="flex items-center gap-2 font-mono">
+            <span className="font-bold text-primary text-sm">{formatTime(currentTime)}</span>
+            <span className="text-muted text-xs">/</span>
+            <span className="text-muted text-xs">
+              {formatTime(duration > 0 ? duration : expectedDuration)}
+            </span>
+            <span className="text-[11px] text-muted ml-2">
+              ({items.length} {items.length === 1 ? "cámara" : "cámaras"} · {allEvents.length}{" "}
+              {allEvents.length === 1 ? "evento" : "eventos"})
+            </span>
           </div>
 
-          <div className="relative flex-1 flex flex-col justify-center">
-            <input
-              type="range"
-              min={0}
-              max={duration > 0 ? duration : expectedDuration}
-              step={0.1}
-              value={currentTime}
-              onPointerDown={() => {
-                isSeekingRef.current = true;
-              }}
-              onPointerUp={(e) => {
-                isSeekingRef.current = false;
-                seekTo(parseFloat(e.currentTarget.value));
-              }}
-              onChange={(e) => {
-                const val = parseFloat(e.target.value);
-                setCurrentTime(val);
-                if (!isSeekingRef.current) {
-                  seekTo(val);
-                }
-              }}
-              className="w-full h-2.5 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-primary"
-              aria-label="Línea de tiempo unificada"
-            />
+          {/* Detections Legend */}
+          <div className="flex flex-wrap items-center gap-2.5 text-[10px] text-muted">
+            <span className="flex items-center gap-1">
+              <span className="size-2 rounded-full bg-bad" />
+              <span>Alerta</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-2 rounded-full bg-[#06b6d4]" />
+              <span>Persona</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-2 rounded-full bg-[#eab308]" />
+              <span>Vehículo</span>
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="size-2 rounded-full bg-[#a855f7]" />
+              <span>LPR</span>
+            </span>
           </div>
         </div>
 
-        {/* Multi-Camera Synchronized Timelines & Detection Tracks (Like Live Recorded Mode) */}
-        <div className="flex flex-col gap-2 p-3 bg-surface-2/70 rounded-m3-md border border-outline-variant/50">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs pb-1.5 border-b border-outline-variant/30">
-            <span className="font-semibold text-on-surface flex items-center gap-1.5">
-              <Icon icon={Film} size="xs" />
-              <span>Líneas de tiempo por cámara y detecciones ({items.length})</span>
-            </span>
-
-            {/* Detections Legend */}
-            <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted">
-              <span className="flex items-center gap-1">
-                <span className="size-2.5 rounded-full bg-bad" />
-                <span>Alerta</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="size-2.5 rounded-full bg-[#06b6d4]" />
-                <span>Persona</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="size-2.5 rounded-full bg-[#eab308]" />
-                <span>Vehículo</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="size-2.5 rounded-full bg-[#a855f7]" />
-                <span>LPR / Patente</span>
-              </span>
+        {/* Unified Timeline Block: Ruler + Range Slider + Stacked Compact Rows */}
+        <div className="flex flex-col gap-1">
+          {/* Time Ruler above tracks */}
+          <div className="flex items-center select-none text-[10px] text-muted font-mono">
+            <div className="w-20 sm:w-28 shrink-0 text-right pr-2 text-muted/70">Tiempo</div>
+            <div className="relative flex-1 h-3.5 flex items-center">
+              {[0, 0.25, 0.5, 0.75, 1].map((pct, i) => (
+                <span
+                  key={i}
+                  style={{
+                    left: `${pct * 100}%`,
+                    transform:
+                      i === 0 ? "none" : i === 4 ? "translateX(-100%)" : "translateX(-50%)",
+                  }}
+                  className="absolute top-0 whitespace-nowrap text-[10px]"
+                >
+                  {formatTime(pct * (duration > 0 ? duration : expectedDuration))}
+                </span>
+              ))}
             </div>
           </div>
 
-          {/* Stacked Camera Timeline Tracks with Synchronized Vertical Needle */}
-          <div className="flex flex-col gap-2 pt-1">
+          {/* Range Slider for scrubbing directly below ruler */}
+          <div className="flex items-center">
+            <div className="w-20 sm:w-28 shrink-0" />
+            <div className="relative flex-1 flex flex-col justify-center">
+              <input
+                type="range"
+                min={0}
+                max={duration > 0 ? duration : expectedDuration}
+                step={0.1}
+                value={currentTime}
+                onPointerDown={() => {
+                  isSeekingRef.current = true;
+                }}
+                onPointerUp={(e) => {
+                  isSeekingRef.current = false;
+                  seekTo(parseFloat(e.currentTarget.value));
+                }}
+                onChange={(e) => {
+                  const val = parseFloat(e.target.value);
+                  setCurrentTime(val);
+                  if (!isSeekingRef.current) {
+                    seekTo(val);
+                  }
+                }}
+                className="w-full h-1.5 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-primary"
+                aria-label="Línea de tiempo"
+              />
+            </div>
+          </div>
+
+          {/* Stacked Camera Rows (Compact, max-h bounded with scroll) */}
+          <div className="flex flex-col gap-1 max-h-24 sm:max-h-28 overflow-y-auto pr-1">
             {items.map((it) => {
               const camEvents = allEvents.filter((e) => e.camera_id === it.camera_id);
+              const maxD = duration > 0 ? duration : expectedDuration;
 
               return (
-                <div key={it.id} className="flex items-center gap-2.5">
+                <div key={it.id} className="flex items-center gap-1.5">
                   {/* Camera Name Label */}
                   <div
-                    className="w-28 sm:w-36 text-xs font-semibold text-on-surface truncate shrink-0 flex items-center gap-1.5"
+                    className="w-20 sm:w-28 text-[11px] font-medium text-on-surface truncate shrink-0 flex items-center gap-1 select-none"
                     title={it.camera_name}
                   >
-                    <Icon icon={Camera} size="xs" className="text-muted shrink-0" />
+                    <Icon icon={Camera} size="xs" className="text-muted shrink-0 size-3" />
                     <span className="truncate">{it.camera_name}</span>
                   </div>
 
                   {/* Camera Timeline Track */}
                   <div
-                    className="relative flex-1 h-8 bg-surface-3 rounded-m3-sm overflow-hidden cursor-pointer border border-outline-variant/40 hover:border-primary/60 transition-colors"
+                    className="relative flex-1 h-5 bg-surface-3/80 rounded-[3px] overflow-hidden cursor-pointer border border-outline-variant/30 hover:border-primary/50 transition-colors"
                     onClick={(e) => {
                       const rect = e.currentTarget.getBoundingClientRect();
                       const pct = (e.clientX - rect.left) / rect.width;
-                      seekTo(pct * (duration > 0 ? duration : expectedDuration));
+                      seekTo(pct * maxD);
                     }}
-                    title={`Línea de tiempo de ${it.camera_name} — Clic para reproducir en este instante`}
+                    title={`Línea de tiempo de ${it.camera_name} — Clic para reproducir`}
                   >
-                    {/* Background continuous recording bar */}
-                    <div className="absolute inset-y-0 inset-x-0 bg-primary/10" />
+                    {/* Continuous recording coverage */}
+                    <div className="absolute inset-0 bg-primary/15" />
 
-                    {/* Detection blocks for this camera */}
+                    {/* Detection blocks */}
                     {camEvents.map((ev, evIdx) => {
                       const st =
                         new Date(ev.start_time).getTime() / 1000 - clipStartUnix;
@@ -1241,11 +1264,10 @@ export function EvidencePlayerModal({
                           ? new Date(ev.end_time).getTime() / 1000
                           : new Date(ev.start_time).getTime() / 1000 + 4) -
                         clipStartUnix;
-                      const maxD = duration > 0 ? duration : expectedDuration;
                       const leftPct = Math.min(100, Math.max(0, (st / maxD) * 100));
                       const widthPct = Math.min(
                         100 - leftPct,
-                        Math.max(2, ((et - st) / maxD) * 100)
+                        Math.max(1.5, ((et - st) / maxD) * 100)
                       );
 
                       const isAlert = ev.severity === "alert";
@@ -1269,7 +1291,7 @@ export function EvidencePlayerModal({
                         <div
                           key={`${ev.id}-${evIdx}`}
                           style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
-                          className={`absolute top-0.5 bottom-0.5 rounded-sm ${bgColor} opacity-90 hover:opacity-100 shadow-xs flex items-center justify-center text-[10px] font-mono font-bold px-1 overflow-hidden z-10`}
+                          className={`absolute top-0.5 bottom-0.5 rounded-[2px] ${bgColor} opacity-95 hover:opacity-100 flex items-center justify-center text-[9px] font-mono font-bold overflow-hidden z-10 shadow-xs`}
                           title={`${fmtTime(ev.start_time)} · ${ev.labels
                             .map(labelName)
                             .join(", ")}${
@@ -1281,10 +1303,10 @@ export function EvidencePlayerModal({
                       );
                     })}
 
-                    {/* Synchronized Vertical Playhead Needle on each track */}
+                    {/* Synchronized Vertical Playhead Needle */}
                     <div
                       style={{ left: `${playheadPct}%` }}
-                      className="absolute inset-y-0 w-0.5 bg-white shadow-md z-20 pointer-events-none transition-none"
+                      className="absolute inset-y-0 w-0.5 bg-white shadow-[0_0_4px_rgba(255,255,255,0.9)] z-20 pointer-events-none transition-none"
                     />
                   </div>
                 </div>
@@ -1293,9 +1315,9 @@ export function EvidencePlayerModal({
           </div>
         </div>
 
-        {/* Playback Transport Buttons & Speeds */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-          <div className="flex items-center gap-1.5">
+        {/* Compact Transport Controls */}
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-outline-variant/30">
+          <div className="flex items-center gap-1.5 flex-wrap">
             <Button
               variant="filled"
               size="sm"
@@ -1369,13 +1391,13 @@ export function EvidencePlayerModal({
 
           {/* Speed selector */}
           <div className="flex items-center gap-1 text-xs">
-            <span className="text-muted mr-1">Velocidad:</span>
+            <span className="text-muted mr-1 text-[11px]">Velocidad:</span>
             {[0.5, 1, 2, 4].map((rate) => (
               <button
                 key={rate}
                 type="button"
                 onClick={() => changeSpeed(rate)}
-                className={`px-2 py-1 rounded-m3-sm font-mono font-medium transition-colors ${
+                className={`px-1.5 py-0.5 rounded-m3-sm font-mono text-xs font-medium transition-colors cursor-pointer ${
                   playbackRate === rate
                     ? "bg-primary text-on-primary"
                     : "bg-surface-2 text-on-surface hover:bg-surface-3"

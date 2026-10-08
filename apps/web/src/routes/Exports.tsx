@@ -413,7 +413,23 @@ export function Exports() {
                                 )}
 
                                 {it.status === "ready" && (
-                                  <div className="flex justify-end pt-1">
+                                  <div className="flex items-center justify-end gap-2 pt-1">
+                                    <Button
+                                      variant="filled"
+                                      size="sm"
+                                      onClick={() => {
+                                        setPlaybackJob({
+                                          ...job,
+                                          name: `${job.name} · ${it.camera_name}`,
+                                          items: [it],
+                                        });
+                                      }}
+                                      title={`Reproducir evidencia de ${it.camera_name}`}
+                                    >
+                                      <Icon icon={Play} size="xs" />
+                                      <span>Reproducir</span>
+                                    </Button>
+
                                     <LinkButton
                                       variant="outlined"
                                       size="sm"
