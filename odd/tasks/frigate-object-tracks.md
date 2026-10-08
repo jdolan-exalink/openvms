@@ -62,5 +62,11 @@ Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); 
 - T3: `objectTracks.ts` (`trailUntil`, `positionAt`, `zoneEntries`, `trackWindow`) with 14 vitest tests (RED: module missing; GREEN: 14 passed). Synthetic trajectories removed; real dots, trail, current marker, zone-entry pills, and a touched-zone highlight driven by the interpolated position. No render test for the overlay (typecheck and helper tests only).
 - Checks: `go build`, `go vet`, `go test ./internal/... ./migrations/...` ok; typecheck clean; vitest 942 passed, 2 failed in `Exports.test.tsx`, which fail the same way at HEAD (pre-existing); lint shows no new issues in touched files.
 
+- RDD: user declined review for T2+T3 (`5683e09..c175f22`) and for their uncommitted maps WIP (twice more). Off-path medium: writer self-verification plus parent spot check done.
+- User test 1: no line visible. Cause: the export tested was from before ingest (10:49 UTC), plus a possibly stale PWA bundle. Created export `5e67d0d7` (Escuela 21:24:40-21:28:05 UTC): manifest carries 452 tracks; user confirmed the trajectory renders.
+- User test 2: the translucent box covered the video. Fix `e4965f6`: no backdrop blur or glow, outlined active zone, chip capped to the latest 3 entries.
+- Bug (manifest): stale open events (Frigate reviews never closed, oldest from 2026-09-29) matched every export window. Fix `fee5f6e`: open events count only when they started within 1h of the window (matches the syncer's stale-review limit); query/scan errors are logged instead of dropped; empty index serializes as `[]`. SQL RED/GREEN on the live DB (stale event included → excluded). Verified with new export `9c39d37c`: only the real event remains.
+- Investigated "empty manifest" (morning export `8c850ae2`): not a bug. The job was finalized at 11:19, before manifest events existed (`e993006`, 14:25).
+
 ## Next step
-Commit T2/T3, redeploy, then the user tests the player. Integration tests pending (user-run). Chain strategy still pending.
+Pending: user confirms overlay look; integration tests (user-run); PATCH export (rename/protect) smoke test; optional history backfill; optional overlay render test; PR chain strategy.
