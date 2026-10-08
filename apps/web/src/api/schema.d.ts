@@ -1601,6 +1601,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/export-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List multi-camera export jobs */
+        get: operations["listExportJobs"];
+        put?: never;
+        /** Create an asynchronous multi-camera export job */
+        post: operations["createExportJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export-jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /** Get details of an export job */
+        get: operations["getExportJob"];
+        put?: never;
+        post?: never;
+        /** Delete an export job */
+        delete: operations["deleteExportJob"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export-jobs/{jobId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel an in-progress export job */
+        post: operations["cancelExportJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/export-jobs/{jobId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry a failed export job */
+        post: operations["retryExportJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/alarms": {
         parameters: {
             query?: never;
@@ -3521,6 +3597,88 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @enum {string} */
+        ExportJobStatus: "queued" | "preparing" | "transferring" | "processing" | "ready" | "failed" | "cancelled" | "expired";
+        /** @enum {string} */
+        ExportJobItemStatus: "queued" | "preparing" | "transferring" | "processing" | "ready" | "failed" | "cancelled";
+        ExportJobItem: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            job_id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            camera_id: string;
+            camera_name: string;
+            /** Format: uuid */
+            server_id: string;
+            server_name: string;
+            remote_export_id?: string;
+            status: components["schemas"]["ExportJobItemStatus"];
+            /** @description 0 to 100. */
+            progress: number;
+            error: string;
+            /** Format: int64 */
+            total_bytes: number;
+            /** Format: int64 */
+            transferred_bytes: number;
+            remote_path?: string;
+            local_path?: string;
+            sha256_hash?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ExportJob: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            /** Format: uuid */
+            site_id?: string;
+            /** Format: uuid */
+            requested_by: string;
+            requested_by_name: string;
+            name: string;
+            /** Format: date-time */
+            start_time: string;
+            /** Format: date-time */
+            end_time: string;
+            status: components["schemas"]["ExportJobStatus"];
+            /** @description 0 to 100. */
+            progress: number;
+            error: string;
+            /** Format: int64 */
+            total_bytes: number;
+            /** Format: int64 */
+            transferred_bytes: number;
+            speed_bps: number;
+            eta_seconds: number;
+            camera_count: number;
+            local_path?: string;
+            manifest?: {
+                [key: string]: unknown;
+            };
+            protected: boolean;
+            /** Format: date-time */
+            expires_at?: string;
+            items?: components["schemas"]["ExportJobItem"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CreateExportJobInput: {
+            camera_ids: string[];
+            /** Format: date-time */
+            start_time: string;
+            /** Format: date-time */
+            end_time: string;
+            name?: string;
+            protected?: boolean;
         };
         /** @enum {string} */
         AlarmStatus: "open" | "acknowledged" | "assigned" | "investigating" | "resolved" | "closed";
@@ -7242,6 +7400,155 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listExportJobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Export jobs, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ExportJob"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createExportJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateExportJobInput"];
+            };
+        };
+        responses: {
+            /** @description Started */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getExportJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Export job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteExportJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    cancelExportJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancelled export job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    retryExportJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Retried export job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     listAlarms: {

@@ -158,6 +158,7 @@ export function DayTimeline({
   onSeek,
   selectedId,
   onSelectCamera,
+  selection,
 }: {
   /** Start of the shown day (unix seconds, local midnight). */
   day: number;
@@ -171,6 +172,8 @@ export function DayTimeline({
   /** Camera of the selected grid tile: its row is highlighted. */
   selectedId?: string;
   onSelectCamera?: (cameraId: string) => void;
+  /** Active [IN - OUT] range in unix seconds. */
+  selection?: { start: number; end: number };
 }) {
   const rulerEl = useRef<HTMLDivElement>(null);
   const rowsEl = useRef<HTMLDivElement>(null);
@@ -358,8 +361,29 @@ export function DayTimeline({
       ctx.lineTo(px, RULER_H - 1);
       ctx.fill();
     }
+    if (selection && selection.end > selection.start) {
+      const accent = cssVar(host, "--md-primary", "#f38d70");
+      const sx1 = Math.max(0, x(selection.start));
+      const sx2 = Math.min(width, x(selection.end));
+      if (sx2 > sx1) {
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = 0.25;
+        ctx.fillRect(sx1, 0, sx2 - sx1, RULER_H);
+        ctx.globalAlpha = 1;
+
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(sx1, 0);
+        ctx.lineTo(sx1, RULER_H);
+        ctx.moveTo(sx2, 0);
+        ctx.lineTo(sx2, RULER_H);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, width, shownPosition]);
+  }, [view, width, shownPosition, selection]);
 
   // Rows: gridlines, coverage bars, detections and the playhead.
   useEffect(() => {
@@ -485,8 +509,29 @@ export function DayTimeline({
       ctx.stroke();
       ctx.lineWidth = 1;
     }
+
+    if (selection && selection.end > selection.start) {
+      const sx1 = Math.max(0, x(selection.start));
+      const sx2 = Math.min(width, x(selection.end));
+      if (sx2 > sx1) {
+        ctx.fillStyle = accent;
+        ctx.globalAlpha = 0.12;
+        ctx.fillRect(sx1, 0, sx2 - sx1, rowsH);
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(sx1, 0);
+        ctx.lineTo(sx1, rowsH);
+        ctx.moveTo(sx2, 0);
+        ctx.lineTo(sx2, rowsH);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 1;
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view, width, rowsH, rows, shownPosition, liveNow, selectedId, frame]);
+  }, [view, width, rowsH, rows, shownPosition, liveNow, selectedId, frame, selection]);
 
   // Tooltip: follows the pointer, clamped to the viewport, above the pointer unless there is no room.
   useLayoutEffect(() => {
