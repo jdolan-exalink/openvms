@@ -3,6 +3,7 @@ import { convertPlan, type ConvertedPlan } from "@/lib/maps/planConversion";
 import { ApiError } from "@/api/client";
 import { uploadFloorPlan } from "@/lib/maps/plans";
 import { Button, Select } from "@/components/ui";
+import { RoomPlannerModal } from "./RoomPlannerModal";
 interface PlanUploadProps { siteId:string; floorId:string; revision:number; onSaved:()=>void; onConflict?:()=>void;onDirty?:(dirty:boolean)=>void; source?: Blob }
 
 async function rotatePng(blob: Blob): Promise<{ blob: Blob; width: number; height: number }> {
@@ -27,6 +28,7 @@ function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,s
   const [file,setFile] = useState<File>();
   const [page,setPage] = useState(1);
   const [preview,setPreview] = useState<(ConvertedPlan & {url:string})>();
+  const [designerOpen, setDesignerOpen] = useState(false);
   const [busy,setBusy] = useState(false);
   const [error,setError] = useState<string>();
   useEffect(()=>{onDirty?.(!!preview||busy);return()=>onDirty?.(false);},[preview,busy,onDirty]);
@@ -91,13 +93,18 @@ function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,s
   }
   return <section aria-label="Fondo del plano" className="space-y-3 rounded-m3-xl bg-surface-1/95 p-4 text-xs shadow-lg backdrop-blur">
     <h3 className="text-lg font-bold">Fondo del plano</h3>
-    <label className="m3-press inline-flex h-11 cursor-pointer items-center rounded-full bg-secondary-container px-5 text-sm font-bold text-on-secondary-container has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary">
-      Elegir imagen
-      <input aria-label="Archivo de plano" type="file" accept="image/png,image/svg+xml,application/pdf,.png,.svg,.pdf"
-        className="sr-only" onChange={event=>{
-          const next=event.target.files?.[0];if(!next)return;setFile(next);setPage(1);void prepare(next,1);
-        }}/>
-    </label>
+    <div className="flex flex-wrap items-center gap-2">
+      <label className="m3-press inline-flex h-11 cursor-pointer items-center rounded-full bg-secondary-container px-5 text-sm font-bold text-on-secondary-container has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary">
+        Elegir imagen
+        <input aria-label="Archivo de plano" type="file" accept="image/png,image/svg+xml,application/pdf,.png,.svg,.pdf"
+          className="sr-only" onChange={event=>{
+            const next=event.target.files?.[0];if(!next)return;setFile(next);setPage(1);void prepare(next,1);
+          }}/>
+      </label>
+      <Button variant="tonal" disabled={busy} onClick={() => setDesignerOpen(true)}>
+        Diseñar plano
+      </Button>
+    </div>
     {file && <p className="break-all font-mono text-on-surface-variant">{file.name}</p>}
     {preview && preview.pageCount>1 && <label className="block">Página PDF<Select aria-label="Página PDF" value={page} disabled={busy} className="mt-1"
       onChange={event=>{const next=Number(event.target.value);setPage(next);if(file)void prepare(file,next);}}>
@@ -115,5 +122,39 @@ function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,s
     <div className="flex flex-wrap gap-2"><Button variant="filled" disabled={!preview || busy} onClick={()=>void save()}>Guardar fondo</Button>
       {(busy||preview) && <Button variant="outlined" onClick={()=>{request.current?.abort();setBusy(false);clearPreview();}}>Cancelar</Button>}
     </div>
+    {designerOpen && (
+      <RoomPlannerModal
+        initialState={(() => {
+          try {
+            const raw = localStorage.getItem(`openvms_floor_plan_${floorId}`);
+            return raw ? JSON.parse(raw) : undefined;
+          } catch {
+            return undefined;
+          }
+        })()}
+        onSave={async (file, state) => {
+          const controller = new AbortController();
+          request.current?.abort();
+          request.current = controller;
+          setBusy(true);
+          setError(undefined);
+          try {
+            const result = await convertPlan(file, { page: 1, signal: controller.signal });
+            await uploadFloorPlan(siteId, floorId, revision, result.blob, controller.signal);
+            try {
+              localStorage.setItem(`openvms_floor_plan_${floorId}`, JSON.stringify(state));
+            } catch (_) {}
+            setDesignerOpen(false);
+            onSaved();
+          } catch (cause) {
+            setError(cause instanceof Error ? cause.message : "No se pudo guardar el plano diseñado.");
+            throw cause;
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onClose={() => setDesignerOpen(false)}
+      />
+    )}
   </section>;
 }

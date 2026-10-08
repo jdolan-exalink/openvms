@@ -8,9 +8,10 @@ import { cn } from "@/lib/cn";
 import { convertPlan } from "@/lib/maps/planConversion";
 import { uploadFloorPlan } from "@/lib/maps/plans";
 import { PlanUpload } from "./PlanUpload";
+import { RoomPlannerModal } from "./RoomPlannerModal";
 
 type Floor = Schemas["MapFloor"];
-type Kind = "geo" | "image";
+type Kind = "geo" | "image" | "draw";
 type View =
   | { kind: "list" }
   | { kind: "create" }
@@ -35,6 +36,7 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
   const [name, setName] = useState("");
   const [kind, setKind] = useState<Kind | "">("");
   const [planFile, setPlanFile] = useState<File>();
+  const [plannerFloor, setPlannerFloor] = useState<Floor>();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
@@ -102,6 +104,15 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
     }
   }
 
+  async function createFloorAndOpenDesigner() {
+    const buildingId = await ensureBuilding();
+    const created = unwrap(await api.POST("/api/v1/maps/sites/{siteId}/buildings/{buildingId}/floors", {
+      params: { path: { siteId: site.id, buildingId } },
+      body: { name: name.trim(), ordinal: nextOrdinal() },
+    }));
+    setPlannerFloor(created);
+  }
+
   async function rename(floor: Floor) {
     if (floor.revision == null) throw new Error("La revisión del mapa no está disponible.");
     unwrap(await api.PATCH("/api/v1/maps/sites/{siteId}/floors/{floorId}", {
@@ -149,17 +160,25 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
         </div>
       )}
       {view.kind === "create" && (
-        <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (kind === "geo") { onOpenGeographic?.(); close(); return; } void run(createImage); }}>
+        <form className="space-y-4" onSubmit={(event) => {
+          event.preventDefault();
+          if (kind === "geo") { onOpenGeographic?.(); close(); return; }
+          if (kind === "draw") { void run(createFloorAndOpenDesigner); return; }
+          void run(createImage);
+        }}>
           <fieldset className="space-y-2">
             <legend className="text-sm font-bold">Tipo de mapa</legend>
-            <TypeOption selected={kind === "geo"} value="geo" title="Mapa real" detail="El mapa geográfico del sitio, con coordenadas." onSelect={() => setKind("geo")} />
-            <TypeOption selected={kind === "image"} value="image" title="Fondo de imagen" detail="Un plano o edificio, sin coordenadas." onSelect={() => setKind("image")} />
+            <TypeOption selected={kind === "geo"} value="geo" title="Plano real (Geográfico)" detail="El mapa geoespacial y satelital del sitio, con coordenadas GPS reales." onSelect={() => setKind("geo")} />
+            <TypeOption selected={kind === "image"} value="image" title="Subir imagen o plano CAD" detail="Un archivo de plano existente (PNG, SVG o PDF)." onSelect={() => setKind("image")} />
+            <TypeOption selected={kind === "draw"} value="draw" title="Diseñar plano" detail="Crear un plano personalizado dibujando paredes, puertas, ventanas y ambientes." onSelect={() => setKind("draw")} />
           </fieldset>
+          {(kind === "image" || kind === "draw") && (
+            <Field label="Nombre del mapa">
+              <TextInput aria-label="Nombre del mapa" value={name} placeholder="Ej. Planta Baja, Depósito Central..." onChange={(event) => setName(event.target.value)} />
+            </Field>
+          )}
           {kind === "image" && (
             <>
-              <Field label="Nombre del mapa">
-                <TextInput aria-label="Nombre del mapa" value={name} onChange={(event) => setName(event.target.value)} />
-              </Field>
               <label className="block text-sm">
                 Imagen de fondo
                 <input aria-label="Imagen de fondo" type="file" accept="image/png,image/svg+xml,application/pdf,.png,.svg,.pdf" className="mt-1 block w-full rounded-m3-md bg-surface-2 p-2 text-sm file:mr-3 file:h-9 file:rounded-full file:border-0 file:bg-secondary-container file:px-4 file:text-sm file:font-bold file:text-on-secondary-container" onChange={(event) => setPlanFile(event.target.files?.[0])} />
@@ -168,9 +187,16 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
               <p className="text-sm text-on-surface-variant">PNG, SVG o PDF. Al crearlo se guarda el fondo y después podés girarlo para acomodarlo.</p>
             </>
           )}
+          {kind === "draw" && (
+            <p className="text-sm text-on-surface-variant">
+              Al hacer clic en «Crear y diseñar plano», se abrirá el editor interactivo para dibujar paredes, aberturas y ambientes a escala.
+            </p>
+          )}
           {kind === "geo" && <p className="text-sm text-on-surface-variant">Este sitio tiene un mapa real. Abrirlo muestra el mapa geográfico.</p>}
           <div className="flex gap-2">
-            <Button variant="primary" type="submit" disabled={busy || !kind || (kind === "image" && !name.trim())}>{kind === "geo" ? "Usar mapa real" : "Crear mapa"}</Button>
+            <Button variant="primary" type="submit" disabled={busy || !kind || (kind !== "geo" && !name.trim())}>
+              {kind === "geo" ? "Usar mapa real" : kind === "draw" ? "Crear y diseñar plano" : "Crear mapa"}
+            </Button>
             <Button variant="outlined" onClick={() => setView({ kind: "list" })}>Volver</Button>
           </div>
         </form>
@@ -199,7 +225,44 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
     </div>
   );
 
-  const dialog = open ? createPortal(<Modal title="Mapas" onClose={close}>{panel}</Modal>, document.body) : null;
+  const dialog = open ? (
+    <>
+      {createPortal(<Modal title="Mapas" onClose={close}>{panel}</Modal>, document.body)}
+      {plannerFloor && (
+        <RoomPlannerModal
+          mapName={plannerFloor.name}
+          onSave={async (file, state) => {
+            setBusy(true);
+            setError(undefined);
+            try {
+              const converted = await convertPlan(file, { page: 1 });
+              if (plannerFloor.revision == null) throw new Error("La revisión del mapa no está disponible.");
+              await uploadFloorPlan(site.id, plannerFloor.id, plannerFloor.revision, converted.blob);
+              try {
+                localStorage.setItem(`openvms_floor_plan_${plannerFloor.id}`, JSON.stringify(state));
+              } catch (_) {}
+              onSaved();
+              onCreated(plannerFloor.id);
+              setPlannerFloor(undefined);
+              close();
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : String(cause));
+              throw cause;
+            } finally {
+              setBusy(false);
+            }
+          }}
+          onClose={() => {
+            if (plannerFloor) {
+              onCreated(plannerFloor.id);
+              setView({ kind: "edit", floor: plannerFloor });
+            }
+            setPlannerFloor(undefined);
+          }}
+        />
+      )}
+    </>
+  ) : null;
 
   if (embedded) {
     return (
