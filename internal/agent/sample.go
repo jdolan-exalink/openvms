@@ -81,10 +81,17 @@ func (s *Sampler) Current(variant string) Snapshot {
 	if !s.at.IsZero() && time.Since(s.at) < time.Second {
 		return cloneSnapshot(s.snap)
 	}
+	prevNetwork := s.snap.Network
+	prevNetworkAt := s.snap.NetworkSampledAt
 	s.snap = Read(s.opts, variant)
 	network := s.network.Sample()
-	s.snap.Network = append([]NetworkInterface(nil), network.Interfaces...)
-	s.snap.NetworkSampledAt = network.SampledAt
+	if network.SampledAt != nil {
+		s.snap.Network = append([]NetworkInterface(nil), network.Interfaces...)
+		s.snap.NetworkSampledAt = network.SampledAt
+	} else {
+		s.snap.Network = prevNetwork
+		s.snap.NetworkSampledAt = prevNetworkAt
+	}
 	s.at = time.Now()
 	return cloneSnapshot(s.snap)
 }

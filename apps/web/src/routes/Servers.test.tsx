@@ -160,7 +160,7 @@ describe("Servers", () => {
       fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       expect(within(dialog).queryByLabelText(/Huella SHA-256 SSH verificada/i)).not.toBeInTheDocument();
-      expect(within(dialog).getByText(/primer contacto/i)).toBeInTheDocument();
+      expect(within(dialog).getByLabelText("Host SSH IPv4")).toBeInTheDocument();
     });
 
     it("shows no elapsed time while submission is pending and starts after a job is accepted", async () => {
@@ -521,9 +521,10 @@ describe("Servers", () => {
       setup(undefined, undefined, grants, undefined, { installed: true, version: "0.1.0", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_observed: { sha256: "a".repeat(64), architecture: "amd64", version: "0.1.1", commit: "0123456789abcdef" }, binary_available: { sha256: "a".repeat(64), architecture: "amd64", version: "0.1.1", commit: "0123456789abcdef" } });
       renderPage(Servers);
       expect(await screen.findByRole("button", { name: /Agente actualizado/i })).toBeDisabled();
-      expect(screen.getByText("Versión del protocolo 0.1.0")).toBeInTheDocument();
-      expect(screen.getByText("Binario instalado: 0.1.1 (0123456789ab)")).toBeInTheDocument();
-      expect(screen.getByText("Binario disponible: 0.1.1 (0123456789ab)")).toBeInTheDocument();
+      expect(screen.getByText(/0\.1\.1/)).toBeInTheDocument();
+      expect(screen.queryByText(/Versión del protocolo/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Binario instalado/i)).not.toBeInTheDocument();
+      expect(screen.queryByText(/Binario disponible/i)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: /Actualizar agente y configurar HTTPS/i })).not.toBeInTheDocument();
     });
 
