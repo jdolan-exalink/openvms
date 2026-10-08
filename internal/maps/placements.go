@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/platform/httpx"
@@ -291,9 +292,10 @@ func (s *Service) UpsertPlacement(ctx context.Context, actor authz.Actor, entity
 	return &res, nil
 }
 
-// DeletePlacement removes a map placement by ID.
+// DeletePlacement removes a map placement by placement ID or entity ID.
 func (s *Service) DeletePlacement(ctx context.Context, actor authz.Actor, placementID uuid.UUID, ifMatch *string) error {
-	return s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+	return s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
+		q := db.New(tx)
 		chk, err := access.Load(ctx, q, actor)
 		if err != nil {
 			return err
@@ -303,7 +305,26 @@ func (s *Service) DeletePlacement(ctx context.Context, actor authz.Actor, placem
 			TenantID: actor.TenantID,
 		})
 		if err != nil {
-			return store.Classify(err)
+			if errors.Is(store.Classify(err), store.ErrNotFound) {
+				var p db.MapPlacement
+				queryErr := tx.QueryRow(ctx, `
+					SELECT id, tenant_id, site_id, entity_type, entity_id, floor_id, lat, lng, x, y, bearing_deg, fov_deg, range_m, props, revision, created_by, updated_by, created_at, updated_at
+					FROM map_placements
+					WHERE entity_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)
+					LIMIT 1
+				`, placementID, actor.TenantID).Scan(
+					&p.ID, &p.TenantID, &p.SiteID, &p.EntityType, &p.EntityID, &p.FloorID,
+					&p.Lat, &p.Lng, &p.X, &p.Y, &p.BearingDeg, &p.FovDeg, &p.RangeM,
+					&p.Props, &p.Revision, &p.CreatedBy, &p.UpdatedBy, &p.CreatedAt, &p.UpdatedAt,
+				)
+				if queryErr == nil {
+					placement = p
+					err = nil
+				}
+			}
+			if err != nil {
+				return store.Classify(err)
+			}
 		}
 		if err := chk.Require(authz.MapsEditDevice, access.Site(placement.TenantID, placement.SiteID)); err != nil {
 			return err
@@ -317,7 +338,7 @@ func (s *Service) DeletePlacement(ctx context.Context, actor authz.Actor, placem
 		}
 
 		if err := q.DeleteMapPlacement(ctx, db.DeleteMapPlacementParams{
-			ID:       placementID,
+			ID:       placement.ID,
 			TenantID: actor.TenantID,
 		}); err != nil {
 			return store.Classify(err)

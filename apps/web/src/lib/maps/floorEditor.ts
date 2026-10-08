@@ -24,6 +24,10 @@ export const emptyFloorDraft = (): FloorDraft => ({ entries: {}, past: [], futur
 export function stageFloor(draft: FloorDraft, id: string, point: Point, revision?: number): FloorDraft {
   return { entries: { ...draft.entries, [id]: { ...point, revision: draft.entries[id]?.revision ?? revision } }, past: [...draft.past, draft.entries], future: [] };
 }
+export function unstageFloor(draft: FloorDraft, id: string): FloorDraft {
+  const { [id]: _, ...entries } = draft.entries;
+  return { entries, past: [...draft.past, draft.entries], future: [] };
+}
 export function undoFloor(draft: FloorDraft): FloorDraft {
   const entries = draft.past.at(-1);
   return entries ? { entries, past: draft.past.slice(0, -1), future: [draft.entries, ...draft.future] } : draft;
@@ -60,5 +64,14 @@ export async function saveFloorPlacement(siteId: string, floorId: string, camera
   return unwrap(await api.PUT("/api/v1/maps/placements/{entityType}/{entityId}", {
     params: { path: { entityType: "camera", entityId: cameraId }, ...(entry.revision !== undefined ? { header: { "If-Match": `"${entry.revision}"` } } : {}) },
     body: { site_id: siteId, floor_id: floorId, x: entry.x, y: entry.y, ...(camera ? { bearing_deg: camera.bearingDeg ?? undefined, fov_deg: camera.fovDeg, range_m: camera.rangeM, props: { camera_type: camera.cameraType, ptz: camera.ptz, lpr: camera.lpr } as never } : {}) },
+  }));
+}
+
+export async function unplaceFloorCamera(cameraId: string, revision?: number) {
+  return unwrap(await api.DELETE("/api/v1/maps/placements/{placementId}", {
+    params: {
+      path: { placementId: cameraId },
+      ...(revision !== undefined ? { header: { "If-Match": `"${revision}"` } } : {}),
+    },
   }));
 }

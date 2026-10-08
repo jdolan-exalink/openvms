@@ -3,6 +3,7 @@ package maps
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -135,6 +136,18 @@ func (s *Service) SaveFloor(ctx context.Context, actor authz.Actor, siteID, buil
 				return store.Classify(err)
 			}
 			row, err = q.CreateMapFloor(ctx, db.CreateMapFloorParams{TenantID: site.TenantID, BuildingID: buildingID, Name: name, Ordinal: int32(ordinal)})
+			if errors.Is(store.Classify(err), store.ErrConflict) {
+				floors, fErr := q.ListMapFloorsByBuilding(ctx, db.ListMapFloorsByBuildingParams{BuildingID: buildingID, TenantID: site.TenantID})
+				if fErr == nil {
+					maxOrd := int32(ordinal)
+					for _, fl := range floors {
+						if fl.Ordinal >= maxOrd {
+							maxOrd = fl.Ordinal + 1
+						}
+					}
+					row, err = q.CreateMapFloor(ctx, db.CreateMapFloorParams{TenantID: site.TenantID, BuildingID: buildingID, Name: name, Ordinal: maxOrd})
+				}
+			}
 		} else {
 			old, e := q.LockMapFloorOnSite(ctx, db.LockMapFloorOnSiteParams{ID: *id, TenantID: site.TenantID, SiteID: siteID})
 			if e != nil {
@@ -170,13 +183,42 @@ func (s *Service) DeleteFloor(ctx context.Context, actor authz.Actor, siteID, id
 		if err = matchRevision(ifMatch, row.Revision); err != nil {
 			return err
 		}
-		occupied, err := q.MapFloorHasContent(ctx, db.MapFloorHasContentParams{FloorID: id, TenantID: site.TenantID})
-		if err != nil {
-			return err
+		// Unplace any cameras/entities placed on this floor
+		placements, err := q.ListMapPlacementsDetailed(ctx, db.ListMapPlacementsDetailedParams{
+			SiteID:   siteID,
+			TenantID: &site.TenantID,
+			FloorID:  &id,
+		})
+		if err == nil {
+			for _, p := range placements {
+				_ = q.DeleteMapPlacement(ctx, db.DeleteMapPlacementParams{
+					ID:       p.ID,
+					TenantID: &site.TenantID,
+				})
+			}
 		}
-		if occupied {
-			return &ValidationError{Msg: "remove this floor's placements and zones before deleting it"}
+
+		// Clean up any zones created on this floor
+		zones, err := q.ListMapZonesBySite(ctx, db.ListMapZonesBySiteParams{
+			SiteID:   siteID,
+			TenantID: &site.TenantID,
+		})
+		if err == nil {
+			var uid *uuid.UUID
+			if actor.UserID != uuid.Nil {
+				uid = &actor.UserID
+			}
+			for _, z := range zones {
+				if z.FloorID != nil && *z.FloorID == id {
+					_ = q.DeleteMapZone(ctx, db.DeleteMapZoneParams{
+						UserID:   uid,
+						ID:       z.ID,
+						TenantID: &site.TenantID,
+					})
+				}
+			}
 		}
+
 		deleted, err := q.DeleteMapFloor(ctx, db.DeleteMapFloorParams{ID: id, TenantID: site.TenantID})
 		if err != nil {
 			return err

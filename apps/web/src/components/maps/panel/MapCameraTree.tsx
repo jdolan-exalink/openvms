@@ -1,4 +1,4 @@
-import { Folder, FolderOpen, GripVertical, Maximize2, MapPin, Minimize2, Server, Video } from "lucide-react";
+import { Folder, FolderOpen, GripVertical, Maximize2, MapPin, Minimize2, Server, Video, X } from "lucide-react";
 import { Icon } from "@/components/Icon";
 import { Chevron, Count, dot, nodeIcon, rowBase, rowSelected } from "@/components/ExplorerParts";
 import { IconButton } from "@/components/ui";
@@ -64,6 +64,7 @@ type RowShared = {
   onSelect: (id: string) => void;
   onOpen?: (id: string) => void;
   onClose?: (id: string) => void;
+  onUnplace?: (id: string) => void;
   openIds?: ReadonlySet<string>;
   draggable: boolean;
   draggingId?: string;
@@ -84,6 +85,7 @@ export function MapCameraTree({
   onSelect,
   onOpen,
   onClose,
+  onUnplace,
   openIds,
   draggable = false,
   draggingId,
@@ -100,6 +102,8 @@ export function MapCameraTree({
   onOpen?: (id: string) => void;
   /** Closes an already open live window; when omitted the toggle only opens. */
   onClose?: (id: string) => void;
+  /** Unplaces a camera from the active map. */
+  onUnplace?: (id: string) => void;
   /** Cameras whose live window is open on the map. */
   openIds?: ReadonlySet<string>;
   draggable?: boolean;
@@ -112,7 +116,7 @@ export function MapCameraTree({
   const groups = useMemo(() => groupCameras(cameras, folders, servers, keepEmptyFolders), [cameras, folders, servers, keepEmptyFolders]);
   const toggle = (key: string) => setClosed((current) => ({ ...current, [key]: !current[key] }));
   if (groups.length === 0) return <p className="px-1 text-xs text-on-surface-variant">No hay cámaras para este filtro.</p>;
-  const shared: RowShared = { selectedId, armedId, onSelect, onOpen, onClose, openIds, draggable, draggingId, onDragStart, onDragEnd };
+  const shared: RowShared = { selectedId, armedId, onSelect, onOpen, onClose, onUnplace, openIds, draggable, draggingId, onDragStart, onDragEnd };
   return (
     <nav aria-label="Cámaras" className="flex min-w-0 flex-col text-sm">
       {groups.map((group) => {
@@ -158,14 +162,14 @@ export function MapCameraTree({
 
 function CameraRow({ camera, indent, shared }: { camera: MapTreeCamera; indent: string; shared: RowShared }) {
   const t = useT();
-  const { selectedId, armedId, onSelect, onOpen, onClose, openIds, draggable, draggingId, onDragStart, onDragEnd } = shared;
+  const { selectedId, armedId, onSelect, onOpen, onClose, onUnplace, openIds, draggable, draggingId, onDragStart, onDragEnd } = shared;
   const selected = selectedId === camera.id || armedId === camera.id;
   const placed = camera.placed === true;
   const windowOpen = openIds?.has(camera.id) === true;
   const toggleLabel = t(windowOpen ? "maps.closeLiveNamed" : "maps.openLiveNamed", { name: camera.name });
   const canToggle = onOpen && camera.placed !== false;
   return (
-    <div className={cn(indent, "flex min-w-0 items-center gap-1")}>
+    <div className={cn(indent, "group/cam flex min-w-0 items-center gap-1")}>
       <button
         type="button"
         draggable={draggable}
@@ -186,6 +190,16 @@ function CameraRow({ camera, indent, shared }: { camera: MapTreeCamera; indent: 
         )}
         {draggable && <Icon icon={GripVertical} size="xs" className="ml-auto shrink-0 text-on-surface-variant" />}
       </button>
+      {placed && onUnplace && (
+        <IconButton
+          icon={X}
+          size="sm"
+          aria-label="Quitar de mapa"
+          title="Quitar cámara del mapa"
+          className="size-6 shrink-0 text-on-surface-variant hover:bg-bad/10 hover:text-bad"
+          onClick={() => onUnplace(camera.id)}
+        />
+      )}
       {canToggle && (
         <IconButton
           icon={windowOpen ? Minimize2 : Maximize2}

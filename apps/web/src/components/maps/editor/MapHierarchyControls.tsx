@@ -168,8 +168,8 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
         }}>
           <fieldset className="space-y-2">
             <legend className="text-sm font-bold">Tipo de mapa</legend>
-            <TypeOption selected={kind === "geo"} value="geo" title="Plano real (Geográfico)" detail="El mapa geoespacial y satelital del sitio, con coordenadas GPS reales." onSelect={() => setKind("geo")} />
-            <TypeOption selected={kind === "image"} value="image" title="Subir imagen o plano CAD" detail="Un archivo de plano existente (PNG, SVG o PDF)." onSelect={() => setKind("image")} />
+            <TypeOption selected={kind === "geo"} value="geo" title="Plano real (Mapa real)" detail="El mapa geoespacial y satelital del sitio, con coordenadas GPS reales." onSelect={() => setKind("geo")} />
+            <TypeOption selected={kind === "image"} value="image" title="Fondo de imagen (Plano CAD o imagen)" detail="Un archivo de plano existente (PNG, SVG o PDF)." onSelect={() => setKind("image")} />
             <TypeOption selected={kind === "draw"} value="draw" title="Diseñar plano" detail="Crear un plano personalizado dibujando paredes, puertas, ventanas y ambientes." onSelect={() => setKind("draw")} />
           </fieldset>
           {(kind === "image" || kind === "draw") && (
@@ -210,10 +210,11 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
           {editing.revision != null && <PlanUpload siteId={site.id} floorId={editing.id} revision={editing.revision} onSaved={onSaved} />}
           {confirming ? (
             <div className="space-y-2 rounded-m3-lg bg-bad/10 p-4 text-sm">
-              <p>¿Borrar «{editing.name}»? Solo se puede si no tiene cámaras ni zonas.</p>
-              <div className="flex gap-2">
+              <p className="font-medium text-bad">¿Eliminar el plano «{editing.name}»?</p>
+              <p className="text-xs text-on-surface-variant">Todas las cámaras y zonas ubicadas en este plano se desubicarán automáticamente.</p>
+              <div className="flex gap-2 pt-1">
                 <Button variant="danger" disabled={busy} onClick={() => void run(() => remove(editing))}>Eliminar mapa</Button>
-                <Button variant="outlined" onClick={() => setConfirming(false)}>Volver</Button>
+                <Button variant="outlined" onClick={() => setConfirming(false)}>Cancelar</Button>
               </div>
             </div>
           ) : (

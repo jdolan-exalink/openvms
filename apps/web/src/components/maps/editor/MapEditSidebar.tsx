@@ -24,12 +24,14 @@ export function MapEditSidebar({
   servers = [],
   armedId,
   onArm,
+  onUnplace,
 }: {
   cameras: readonly MapEditCamera[];
   folders?: readonly MapTreeFolder[];
   servers?: readonly MapTreeServer[];
   armedId?: string;
   onArm: (cameraId: string) => void;
+  onUnplace?: (cameraId: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [draggingId, setDraggingId] = useState<string>();
@@ -43,20 +45,22 @@ export function MapEditSidebar({
   return (
     <section
       aria-label="Cámaras del mapa"
-      className="pointer-events-auto flex h-full min-h-0 w-full flex-col overflow-hidden"
+      className="pointer-events-auto flex h-full min-h-0 w-full flex-col overflow-hidden text-xs"
     >
-      <header className="px-1 pb-2">
-        <h2 className="text-lg font-bold">Cámaras</h2>
-        <p className="font-mono text-[11px] text-on-surface-variant">{placedCount} en el mapa · {cameras.length - placedCount} sin ubicar</p>
+      <header className="flex items-center justify-between px-1 pb-1.5">
+        <h2 className="text-xs font-bold text-on-surface uppercase tracking-wide">Cámaras</h2>
+        <span className="rounded-full bg-surface-2 px-2 py-0.5 font-mono text-[10px] text-on-surface-variant">
+          {placedCount} / {cameras.length}
+        </span>
       </header>
       <label className="relative mb-2 block">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-on-surface-variant" aria-hidden />
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-on-surface-variant" aria-hidden />
         <TextInput
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Buscar cámara"
+          placeholder="Buscar cámara..."
           aria-label="Buscar cámara"
-          className="h-11 pl-10 text-xs"
+          className="h-8 pl-8 pr-2 text-xs"
         />
       </label>
       <div className="min-h-0 flex-1 overflow-auto">
@@ -66,6 +70,7 @@ export function MapEditSidebar({
           servers={servers}
           armedId={armedId}
           onSelect={onArm}
+          onUnplace={onUnplace}
           draggable
           draggingId={draggingId}
           keepEmptyFolders={!needle}

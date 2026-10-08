@@ -99,6 +99,7 @@ export function buildZonesLayers(): LayerSpecification[] {
     minzoom: 12,
     layout: {
       "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Regular"],
       "text-size": 11,
       "text-offset": [0, 0.6],
       "text-anchor": "top",

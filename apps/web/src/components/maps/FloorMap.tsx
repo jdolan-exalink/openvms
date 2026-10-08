@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Undo2, Redo2 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { alarmsQuery, cameraFoldersQuery, camerasQuery, meQuery, serversQuery } from "@/api/queries";
@@ -6,7 +7,7 @@ import { can } from "@/lib/perm";
 import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { mapsOverviewQuery } from "@/lib/maps/api";
 import type { CameraEntity, MapMode } from "@/lib/maps/types";
-import { floorEntitiesQuery, floorUnplacedQuery, emptyFloorDraft, stageFloor, undoFloor, redoFloor, saveFloorPlacement, type Point } from "@/lib/maps/floorEditor";
+import { floorEntitiesQuery, floorUnplacedQuery, emptyFloorDraft, stageFloor, unstageFloor, undoFloor, redoFloor, saveFloorPlacement, unplaceFloorCamera, type Point } from "@/lib/maps/floorEditor";
 import { loadPlanView, savePlanView } from "@/lib/maps/mapView";
 import { loadFloorPlan } from "@/lib/maps/plans";
 import type { WorkspaceFloor } from "./MapWorkspace";
@@ -22,7 +23,7 @@ import { CameraPanel } from "./panel/CameraPanel";
 import { captureGrowOrigin, rectFromElement, type GrowRect } from "./panel/MapGrowFrame";
 import { usePinnedMapWindows } from "./panel/usePinnedMapWindows";
 import { useFeatures } from "@/lib/features";
-import { Button, ErrorNote } from "../ui";
+import { Button, IconButton, ErrorNote } from "../ui";
 interface Props {
   siteId: string;
   floor: WorkspaceFloor;
@@ -101,6 +102,25 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
     setArmed(undefined);
     setError(undefined);
   }
+  async function unplaceCamera(id: string) {
+    if (!editable || saving) return;
+    setError(undefined);
+    if (draft.entries[id]) {
+      setDraft(previous => unstageFloor(previous, id));
+    }
+    const saved = source.find(camera => camera.id === id);
+    if (saved) {
+      try {
+        await unplaceFloorCamera(id, saved.revision);
+        await Promise.all([
+          client.invalidateQueries({ queryKey: floorEntitiesQuery(siteId, floor.id).queryKey }),
+          client.invalidateQueries({ queryKey: floorUnplacedQuery(siteId, floor.id).queryKey }),
+        ]);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
+    }
+  }
   async function save() {
     if (!editable || saving)
       return;
@@ -164,21 +184,40 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
      {can(me.data, "maps.edit") && (floor.revision ? <PlanUpload siteId={siteId} floorId={floor.id} revision={floor.revision} source={plan.data} onDirty={setPlanDirty} onSaved={() => { setPlanError(undefined); onPlanSaved(); }} onConflict={() => { setPlanError("The background changed on the server. Reload and review it before uploading again. Nothing was overwritten."); onPlanSaved(); }}/> : <p role="alert" className="rounded-m3-lg bg-surface-1/95 p-3 text-xs shadow-2xl">La revisión del mapa no está disponible. Recargá la lista antes de subir un plano.</p>)}
     </div>
   )}
-  {mode === "edit" && <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-20 flex w-80 max-w-[calc(100%-1.5rem)] min-h-0 flex-col overflow-hidden rounded-m3-xl bg-surface-1/95 shadow-2xl backdrop-blur">
-   <div className="min-h-0 flex-1 p-2"><MapEditSidebar cameras={sidebarCameras} armedId={armed} onArm={setArmed}/></div>
-   <footer className="shrink-0 space-y-2 bg-surface-2 p-3 text-xs">
-    <p className="font-mono text-on-surface-variant">{pending.length} cambio(s) sin guardar</p>
-    {armed && editable && <Button variant="tonal" size="sm" onClick={() => place(armed, { x: .5, y: .5 })}>Ubicar en el centro</Button>}
-    {error && <p role="alert" className="text-bad">{error}</p>}
-    <div className="flex gap-2">
-     <Button variant="text" size="sm" disabled={saving || !draft.past.length} onClick={() => setDraft(undoFloor(draft))}>Deshacer</Button>
-     <Button variant="text" size="sm" disabled={saving || !draft.future.length} onClick={() => setDraft(redoFloor(draft))}>Rehacer</Button>
+  {mode === "edit" && <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-20 flex w-76 max-w-[calc(100%-1.5rem)] min-h-0 flex-col overflow-hidden rounded-m3-xl border border-outline-variant/30 bg-surface-1/95 shadow-2xl backdrop-blur-md">
+   <div className="min-h-0 flex-1 p-2"><MapEditSidebar cameras={sidebarCameras} armedId={armed} onArm={setArmed} onUnplace={unplaceCamera} /></div>
+   <footer className="shrink-0 space-y-2 border-t border-outline-variant/20 bg-surface-2/80 p-2.5 text-xs">
+    <div className="flex items-center justify-between font-mono text-[11px] text-on-surface-variant">
+      <span>{pending.length > 0 ? `${pending.length} cambio(s) sin guardar` : "Sin cambios"}</span>
+      <div className="flex gap-1">
+        <IconButton
+          icon={Undo2}
+          size="sm"
+          disabled={saving || !draft.past.length}
+          aria-label="Deshacer"
+          title="Deshacer"
+          onClick={() => setDraft(undoFloor(draft))}
+        />
+        <IconButton
+          icon={Redo2}
+          size="sm"
+          disabled={saving || !draft.future.length}
+          aria-label="Rehacer"
+          title="Rehacer"
+          onClick={() => setDraft(redoFloor(draft))}
+        />
+      </div>
     </div>
-    <div className="flex gap-2">
-     <Button variant="outlined" className="flex-1" onClick={() => { setDraft(emptyFloorDraft()); setError(undefined); setModeState({ initial: initialMode, value: "live" }); onModeChange?.("live"); }}>Cancelar</Button>
-     <Button variant="filled" className="flex-1" disabled={saving || !editable || pending.length === 0} onClick={() => void save()}>{pending.length > 0 ? `Guardar (${pending.length})` : "Guardar"}</Button>
+    {armed && editable && (
+      <Button variant="tonal" size="sm" className="w-full text-xs" onClick={() => place(armed, { x: .5, y: .5 })}>
+        Ubicar seleccionada en el centro
+      </Button>
+    )}
+    {error && <p role="alert" className="text-bad text-[11px] leading-tight">{error}</p>}
+    <div className="flex gap-1.5 pt-0.5">
+     <Button variant="outlined" size="sm" className="flex-1 text-xs" onClick={() => { setDraft(emptyFloorDraft()); setError(undefined); setModeState({ initial: initialMode, value: "live" }); onModeChange?.("live"); }}>Cancelar</Button>
+     <Button variant="filled" size="sm" className="flex-1 text-xs" disabled={saving || !editable || pending.length === 0} onClick={() => void save()}>{pending.length > 0 ? `Guardar (${pending.length})` : "Guardar"}</Button>
     </div>
-    {error && <p className="text-on-surface-variant">No se reintentó. Cancelá y recargá si cambió la revisión.</p>}
    </footer>
   </aside>}
   {liveChrome && <MapSocSidebar

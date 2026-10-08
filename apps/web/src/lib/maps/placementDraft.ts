@@ -62,6 +62,16 @@ export function stagePlacement(state: DraftState, entry: DraftPlacement, revisio
   return next;
 }
 
+/** unstagePlacement removes a pending change from the draft. */
+export function unstagePlacement(state: DraftState, entityId: string): DraftState {
+  if (!state.entries[entityId]) return state;
+  const next = clone(state);
+  next.past.push({ ...state.entries });
+  next.future = [];
+  delete next.entries[entityId];
+  return next;
+}
+
 /** stageMany applies a bulk change (place-all-at-centre) as one undo step. */
 export function stageMany(state: DraftState, entries: readonly DraftPlacement[]): DraftState {
   if (entries.length === 0) return state;
