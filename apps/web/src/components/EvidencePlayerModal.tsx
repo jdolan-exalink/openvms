@@ -1,10 +1,12 @@
 import {
+  Camera,
   Check,
   CheckCircle2,
   Copy,
   Download,
   FastForward,
   FileCode2,
+  Film,
   Layers,
   Pause,
   Play,
@@ -101,7 +103,7 @@ function CameraEvidenceOverlay({
   cameraId,
   currentTime,
   clipStartUnix,
-  manifestEvents,
+  cameraEvents,
   manifestZones,
   isPublic,
   layers,
@@ -109,7 +111,7 @@ function CameraEvidenceOverlay({
   cameraId: string;
   currentTime: number;
   clipStartUnix: number;
-  manifestEvents?: ForensicEvent[];
+  cameraEvents: ForensicEvent[];
   manifestZones?: Record<string, any>;
   isPublic?: boolean;
   layers: {
@@ -123,24 +125,6 @@ function CameraEvidenceOverlay({
   const configDoc = useQuery({
     ...cameraFrigateDocQuery(cameraId),
     enabled: !!cameraId && !isPublic && !manifestZones?.[cameraId],
-  });
-
-  // Query events during the clip window when not public
-  const eventsQuery = useQuery({
-    queryKey: ["evidence-events", cameraId, clipStartUnix],
-    queryFn: async (): Promise<ForensicEvent[]> => {
-      const res = await api.GET("/api/v1/events", {
-        params: {
-          query: {
-            camera_id: [cameraId],
-            limit: 100,
-          },
-        },
-      });
-      const data = unwrap(res);
-      return data.items as ForensicEvent[];
-    },
-    enabled: !!cameraId && !isPublic && !manifestEvents,
   });
 
   // Resolved zones for this camera
@@ -182,32 +166,23 @@ function CameraEvidenceOverlay({
     ];
   }, [manifestZones, cameraId, configDoc.data]);
 
-  // Resolved events for this camera
-  const events: ForensicEvent[] = useMemo(() => {
-    if (manifestEvents && manifestEvents.length > 0) {
-      return manifestEvents.filter((e) => e.camera_id === cameraId);
-    }
-    return eventsQuery.data || [];
-  }, [manifestEvents, cameraId, eventsQuery.data]);
-
   // Current active instant in epoch seconds
   const currentInstantUnix = clipStartUnix + currentTime;
 
   // Active events at this exact second
   const activeEvents = useMemo(() => {
-    return events.filter((ev) => {
+    return cameraEvents.filter((ev) => {
       const st = new Date(ev.start_time).getTime() / 1000;
       const et = ev.end_time ? new Date(ev.end_time).getTime() / 1000 : st + 6;
       return currentInstantUnix >= st - 0.5 && currentInstantUnix <= et + 0.5;
     });
-  }, [events, currentInstantUnix]);
+  }, [cameraEvents, currentInstantUnix]);
 
   // Set of zone names touched by active events
   const touchedZoneNames = useMemo(() => {
     const s = new Set<string>();
     activeEvents.forEach((ev) => {
       (ev.zones || []).forEach((z) => s.add(z));
-      // If event has no specific zone, default to first zone
       if ((!ev.zones || ev.zones.length === 0) && zones.length > 0 && zones[0]) {
         s.add(zones[0].name);
       }
@@ -464,6 +439,41 @@ export function EvidencePlayerModal({
   const isSeekingRef = useRef(false);
   const masterKey = job.items?.[0]?.id || "";
 
+  const items = job.items || [];
+  const cameraIds = useMemo(() => items.map((it) => it.camera_id).filter(Boolean), [items]);
+
+  // Query events for all cameras in the export job
+  const allEventsQuery = useQuery({
+    queryKey: ["export-all-events", job.id, cameraIds],
+    queryFn: async (): Promise<ForensicEvent[]> => {
+      if (cameraIds.length === 0) return [];
+      const res = await api.GET("/api/v1/events", {
+        params: {
+          query: {
+            camera_id: cameraIds,
+            from: job.start_time,
+            to: job.end_time,
+            limit: 300,
+          },
+        },
+      });
+      const data = unwrap(res);
+      return data.items as ForensicEvent[];
+    },
+    enabled:
+      !!job.id &&
+      !isPublic &&
+      cameraIds.length > 0 &&
+      (!job.manifest?.events || job.manifest.events.length === 0),
+  });
+
+  const allEvents: ForensicEvent[] = useMemo(() => {
+    if (job.manifest?.events && Array.isArray(job.manifest.events) && job.manifest.events.length > 0) {
+      return job.manifest.events;
+    }
+    return allEventsQuery.data || [];
+  }, [job.manifest, allEventsQuery.data]);
+
   // Video source resolver
   const getVideoSrc = (item: EvidencePlayerCameraItem): string => {
     if (item.video_url) {
@@ -494,11 +504,44 @@ export function EvidencePlayerModal({
       videoRefs.current.forEach((v) => {
         v.play().catch(() => {});
       });
-    }, 80);
+    }, 100);
     return () => clearTimeout(timer);
   }, []);
 
-  // Sync state from master video
+  // Real-time playback position ticker (10 Hz): guarantees seconds counter and timeline needle advance continuously
+  useEffect(() => {
+    if (!isPlaying) return;
+
+    const interval = setInterval(() => {
+      if (isSeekingRef.current) return;
+
+      // Find any video element actively playing
+      let activeEl: HTMLVideoElement | null = null;
+      if (masterKey && videoRefs.current.has(masterKey)) {
+        const mv = videoRefs.current.get(masterKey);
+        if (mv && !mv.paused && !mv.ended) activeEl = mv;
+      }
+      if (!activeEl) {
+        for (const [, v] of videoRefs.current.entries()) {
+          if (!v.paused && !v.ended && v.currentTime > 0) {
+            activeEl = v;
+            break;
+          }
+        }
+      }
+
+      if (activeEl) {
+        setCurrentTime(activeEl.currentTime);
+        if (activeEl.duration && isFinite(activeEl.duration) && activeEl.duration > 0) {
+          setDuration((prev) => Math.max(prev, activeEl!.duration));
+        }
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [isPlaying, masterKey]);
+
+  // Sync state from video HTML events as well
   const onTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
     const target = e.currentTarget;
     if (!isSeekingRef.current) {
@@ -585,7 +628,6 @@ export function EvidencePlayerModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [togglePlay, currentTime, duration]);
 
-  const items = job.items || [];
   const gridColsClass =
     items.length <= 1
       ? "grid-cols-1"
@@ -593,13 +635,11 @@ export function EvidencePlayerModal({
         ? "grid-cols-1 md:grid-cols-2"
         : "grid-cols-1 md:grid-cols-2";
 
-  // Manifest events list for timeline markers
-  const manifestEvents: ForensicEvent[] = useMemo(() => {
-    if (job.manifest?.events && Array.isArray(job.manifest.events)) {
-      return job.manifest.events;
-    }
-    return [];
-  }, [job.manifest]);
+  // Playhead percentage for needle cursor
+  const playheadPct = Math.min(
+    100,
+    Math.max(0, (currentTime / (duration > 0 ? duration : expectedDuration)) * 100)
+  );
 
   return (
     <Modal
@@ -727,10 +767,10 @@ export function EvidencePlayerModal({
       )}
 
       {/* Multi-Camera Video Grid with Forensic Overlays */}
-      <div className={`grid ${gridColsClass} gap-3 overflow-y-auto max-h-[60vh] p-1`}>
+      <div className={`grid ${gridColsClass} gap-3 overflow-y-auto max-h-[50vh] p-1`}>
         {items.map((it) => {
-          const isMaster = it.id === masterKey;
           const isCopied = copiedHash === it.id;
+          const camEvents = allEvents.filter((e) => e.camera_id === it.camera_id);
 
           return (
             <div
@@ -760,12 +800,15 @@ export function EvidencePlayerModal({
                   playsInline
                   autoPlay
                   preload="auto"
-                  onTimeUpdate={isMaster ? onTimeUpdate : undefined}
+                  onTimeUpdate={onTimeUpdate}
                   onLoadedMetadata={onLoadedMetadata}
                   onCanPlay={(e) => {
                     if (isPlaying) {
                       e.currentTarget.play().catch(() => {});
                     }
+                  }}
+                  onEnded={() => {
+                    setIsPlaying(false);
                   }}
                   className="w-full h-full object-contain"
                 />
@@ -775,7 +818,7 @@ export function EvidencePlayerModal({
                   cameraId={it.camera_id}
                   currentTime={currentTime}
                   clipStartUnix={clipStartUnix}
-                  manifestEvents={manifestEvents}
+                  cameraEvents={camEvents}
                   manifestZones={job.manifest?.zones}
                   isPublic={isPublic}
                   layers={layers}
@@ -804,13 +847,16 @@ export function EvidencePlayerModal({
         })}
       </div>
 
-      {/* Unified Synchronized Transport Controls */}
-      <div className="flex flex-col gap-2 p-3 bg-surface-1 rounded-m3-lg border border-outline-variant/60">
-        {/* Timeline Range Slider with Instant Seek */}
+      {/* Unified Synchronized Transport Controls & Multi-Camera Timelines */}
+      <div className="flex flex-col gap-3 p-3.5 bg-surface-1 rounded-m3-lg border border-outline-variant/60 shadow-xs">
+        {/* Master Timeline Range Slider with Real-time Seconds Counter */}
         <div className="flex items-center gap-3">
-          <span className="text-xs font-mono text-muted min-w-14 text-right">
-            {formatTime(currentTime)}
-          </span>
+          <div className="flex items-center gap-1 font-mono text-xs min-w-28 text-right justify-end">
+            <span className="font-semibold text-primary">{formatTime(currentTime)}</span>
+            <span className="text-muted">/</span>
+            <span className="text-muted">{formatTime(duration > 0 ? duration : expectedDuration)}</span>
+          </div>
+
           <div className="relative flex-1 flex flex-col justify-center">
             <input
               type="range"
@@ -832,62 +878,132 @@ export function EvidencePlayerModal({
                   seekTo(val);
                 }
               }}
-              className="w-full h-2 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-primary"
+              className="w-full h-2.5 bg-surface-3 rounded-lg appearance-none cursor-pointer accent-primary"
               aria-label="Línea de tiempo unificada"
             />
           </div>
-          <span className="text-xs font-mono text-muted min-w-14">
-            {formatTime(duration > 0 ? duration : expectedDuration)}
-          </span>
         </div>
 
-        {/* Forensic Event Markers Strip */}
-        {manifestEvents.length > 0 && (
-          <div
-            className="relative h-4 w-full bg-surface-2 rounded overflow-hidden cursor-pointer border border-outline-variant/40"
-            onClick={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct = (e.clientX - rect.left) / rect.width;
-              seekTo(pct * (duration > 0 ? duration : expectedDuration));
-            }}
-            title="Haga clic para saltar al evento"
-          >
-            {manifestEvents.map((ev, i) => {
-              const evTime = (new Date(ev.start_time).getTime() / 1000) - clipStartUnix;
-              const maxD = duration > 0 ? duration : expectedDuration;
-              const leftPct = Math.min(100, Math.max(0, (evTime / maxD) * 100));
-              const isAlert = ev.severity === "alert";
+        {/* Multi-Camera Synchronized Timelines & Detection Tracks (Like Live Recorded Mode) */}
+        <div className="flex flex-col gap-2 p-3 bg-surface-2/70 rounded-m3-md border border-outline-variant/50">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs pb-1.5 border-b border-outline-variant/30">
+            <span className="font-semibold text-on-surface flex items-center gap-1.5">
+              <Icon icon={Film} size="xs" />
+              <span>Líneas de tiempo por cámara y detecciones ({items.length})</span>
+            </span>
+
+            {/* Detections Legend */}
+            <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted">
+              <span className="flex items-center gap-1">
+                <span className="size-2.5 rounded-full bg-bad" />
+                <span>Alerta</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="size-2.5 rounded-full bg-[#06b6d4]" />
+                <span>Persona</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="size-2.5 rounded-full bg-[#eab308]" />
+                <span>Vehículo</span>
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="size-2.5 rounded-full bg-[#a855f7]" />
+                <span>LPR / Patente</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Stacked Camera Timeline Tracks with Synchronized Vertical Needle */}
+          <div className="flex flex-col gap-2 pt-1">
+            {items.map((it) => {
+              const camEvents = allEvents.filter((e) => e.camera_id === it.camera_id);
 
               return (
-                <div
-                  key={`${ev.id}-${i}`}
-                  style={{ left: `${leftPct}%` }}
-                  className={`absolute top-0 bottom-0 w-1.5 rounded-full ${
-                    isAlert ? "bg-bad" : "bg-primary"
-                  }`}
-                  title={`${fmtTime(ev.start_time)} · ${ev.labels.join(", ")}${
-                    ev.zones?.length ? ` (${ev.zones.join(", ")})` : ""
-                  }`}
-                />
+                <div key={it.id} className="flex items-center gap-2.5">
+                  {/* Camera Name Label */}
+                  <div
+                    className="w-28 sm:w-36 text-xs font-semibold text-on-surface truncate shrink-0 flex items-center gap-1.5"
+                    title={it.camera_name}
+                  >
+                    <Icon icon={Camera} size="xs" className="text-muted shrink-0" />
+                    <span className="truncate">{it.camera_name}</span>
+                  </div>
+
+                  {/* Camera Timeline Track */}
+                  <div
+                    className="relative flex-1 h-8 bg-surface-3 rounded-m3-sm overflow-hidden cursor-pointer border border-outline-variant/40 hover:border-primary/60 transition-colors"
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const pct = (e.clientX - rect.left) / rect.width;
+                      seekTo(pct * (duration > 0 ? duration : expectedDuration));
+                    }}
+                    title={`Línea de tiempo de ${it.camera_name} — Clic para reproducir en este instante`}
+                  >
+                    {/* Background continuous recording bar */}
+                    <div className="absolute inset-y-0 inset-x-0 bg-primary/10" />
+
+                    {/* Detection blocks for this camera */}
+                    {camEvents.map((ev, evIdx) => {
+                      const st =
+                        new Date(ev.start_time).getTime() / 1000 - clipStartUnix;
+                      const et =
+                        (ev.end_time
+                          ? new Date(ev.end_time).getTime() / 1000
+                          : new Date(ev.start_time).getTime() / 1000 + 4) -
+                        clipStartUnix;
+                      const maxD = duration > 0 ? duration : expectedDuration;
+                      const leftPct = Math.min(100, Math.max(0, (st / maxD) * 100));
+                      const widthPct = Math.min(
+                        100 - leftPct,
+                        Math.max(2, ((et - st) / maxD) * 100)
+                      );
+
+                      const isAlert = ev.severity === "alert";
+                      const isPerson = ev.labels.some((l) => l === "person");
+                      const isCar = ev.labels.some(
+                        (l) => l === "car" || l === "truck" || l === "motorcycle"
+                      );
+                      const hasPlate = ev.plates && ev.plates.length > 0;
+
+                      const bgColor = isAlert
+                        ? "bg-bad text-white"
+                        : hasPlate
+                        ? "bg-[#a855f7] text-white"
+                        : isCar
+                        ? "bg-[#eab308] text-black"
+                        : isPerson
+                        ? "bg-[#06b6d4] text-white"
+                        : "bg-primary text-white";
+
+                      return (
+                        <div
+                          key={`${ev.id}-${evIdx}`}
+                          style={{ left: `${leftPct}%`, width: `${widthPct}%` }}
+                          className={`absolute top-0.5 bottom-0.5 rounded-sm ${bgColor} opacity-90 hover:opacity-100 shadow-xs flex items-center justify-center text-[10px] font-mono font-bold px-1 overflow-hidden z-10`}
+                          title={`${fmtTime(ev.start_time)} · ${ev.labels
+                            .map(labelName)
+                            .join(", ")}${
+                            hasPlate ? ` · Patente: ${ev.plates?.[0]}` : ""
+                          }${ev.zones?.length ? ` · Zonas: ${ev.zones.join(", ")}` : ""}`}
+                        >
+                          {hasPlate ? ev.plates?.[0] : isCar ? "🚗" : isPerson ? "👤" : ""}
+                        </div>
+                      );
+                    })}
+
+                    {/* Synchronized Vertical Playhead Needle on each track */}
+                    <div
+                      style={{ left: `${playheadPct}%` }}
+                      className="absolute inset-y-0 w-0.5 bg-white shadow-md z-20 pointer-events-none transition-all duration-75"
+                    />
+                  </div>
+                </div>
               );
             })}
-            {/* Playhead position cursor */}
-            <div
-              style={{
-                left: `${Math.min(
-                  100,
-                  Math.max(
-                    0,
-                    (currentTime / (duration > 0 ? duration : expectedDuration)) * 100
-                  )
-                )}%`,
-              }}
-              className="absolute top-0 bottom-0 w-0.5 bg-on-surface shadow-sm"
-            />
           </div>
-        )}
+        </div>
 
-        {/* Playback Buttons & Speeds */}
+        {/* Playback Transport Buttons & Speeds */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
           <div className="flex items-center gap-1.5">
             <Button
@@ -924,7 +1040,7 @@ export function EvidencePlayerModal({
               variant="outlined"
               size="sm"
               onClick={() => seekTo(0)}
-              title="Reiniciar reproducción"
+              title="Reiniciar reproducción desde el inicio"
             >
               <Icon icon={RotateCcw} size="xs" />
             </Button>
