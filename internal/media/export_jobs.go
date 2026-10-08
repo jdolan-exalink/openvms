@@ -220,14 +220,55 @@ ORDER BY j.created_at DESC LIMIT 200`)
 			return err
 		}
 		defer rows.Close()
+		jobIndex := make(map[uuid.UUID]int)
+		var jobIDs []uuid.UUID
 		for rows.Next() {
 			job, err := scanExportJob(rows)
 			if err != nil {
 				return err
 			}
+			job.Items = []ExportJobItem{}
+			jobIndex[job.ID] = len(out)
+			jobIDs = append(jobIDs, job.ID)
 			out = append(out, job)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+
+		if len(jobIDs) > 0 {
+			itemRows, err := tx.Query(ctx, `
+SELECT i.id, i.job_id, i.tenant_id, i.camera_id, COALESCE(c.display_name, ''), i.server_id, COALESCE(s.name, ''),
+       i.remote_export_id, i.status, i.progress, COALESCE(i.error, ''), i.total_bytes, i.transferred_bytes, i.remote_path, i.local_path,
+       i.sha256_hash, i.created_at, i.updated_at
+FROM export_job_items i
+LEFT JOIN cameras c ON c.id = i.camera_id
+LEFT JOIN frigate_servers s ON s.id = i.server_id
+WHERE i.job_id = ANY($1)
+ORDER BY i.created_at ASC`, jobIDs)
+			if err != nil {
+				return err
+			}
+			defer itemRows.Close()
+			for itemRows.Next() {
+				var it ExportJobItem
+				if err := itemRows.Scan(
+					&it.ID, &it.JobID, &it.TenantID, &it.CameraID, &it.CameraName, &it.ServerID, &it.ServerName,
+					&it.RemoteExportID, &it.Status, &it.Progress, &it.Error, &it.TotalBytes, &it.TransferredBytes,
+					&it.RemotePath, &it.LocalPath, &it.SHA256Hash, &it.CreatedAt, &it.UpdatedAt,
+				); err != nil {
+					return err
+				}
+				if idx, ok := jobIndex[it.JobID]; ok {
+					out[idx].Items = append(out[idx].Items, it)
+				}
+			}
+			if err := itemRows.Err(); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if out == nil {
 		out = []ExportJob{}

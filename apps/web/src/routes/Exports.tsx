@@ -276,45 +276,54 @@ export function Exports() {
                                 return (
                                   <div
                                     key={it.id}
-                                    className="flex flex-wrap items-center justify-between gap-2 p-2 bg-surface-1 rounded-m3-sm border border-outline-variant/40 text-xs"
+                                    className="flex flex-col gap-1 p-2 bg-surface-1 rounded-m3-sm border border-outline-variant/40 text-xs"
                                   >
-                                    <div className="flex items-center gap-2">
-                                      <Icon icon={Camera} size="xs" className="text-muted" />
-                                      <span className="font-medium text-on-surface">{it.camera_name}</span>
-                                      {it.server_name && (
-                                        <span className="text-[11px] text-muted">({it.server_name})</span>
-                                      )}
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2">
+                                        <Icon icon={Camera} size="xs" className="text-muted" />
+                                        <span className="font-medium text-on-surface">{it.camera_name}</span>
+                                        {it.server_name && (
+                                          <span className="text-[11px] text-muted">({it.server_name})</span>
+                                        )}
+                                      </div>
+
+                                      <div className="flex items-center gap-3">
+                                        {it.sha256_hash ? (
+                                          <span
+                                            className="inline-flex items-center gap-1 text-[11px] text-ok font-mono"
+                                            title={`SHA-256: ${it.sha256_hash}`}
+                                          >
+                                            <Icon icon={CheckCircle2} size="xs" />
+                                            <span>SHA-256: {it.sha256_hash.slice(0, 10)}...</span>
+                                          </span>
+                                        ) : null}
+
+                                        {it.total_bytes > 0 && (
+                                          <span className="text-muted font-mono">{fmtBytes(it.total_bytes)}</span>
+                                        )}
+
+                                        <StatusBadge status={it.status} tone={itemCfg.tone} label={itemCfg.label} />
+
+                                        {it.status === "ready" && (
+                                          <LinkButton
+                                            variant="text"
+                                            size="sm"
+                                            href={`/media/v1/export-jobs/${job.id}/items/${it.id}/download`}
+                                            title={`Descargar ${it.camera_name}`}
+                                          >
+                                            <Icon icon={Download} size="xs" />
+                                            <span>Clip</span>
+                                          </LinkButton>
+                                        )}
+                                      </div>
                                     </div>
 
-                                    <div className="flex items-center gap-3">
-                                      {it.sha256_hash ? (
-                                        <span
-                                          className="inline-flex items-center gap-1 text-[11px] text-ok font-mono"
-                                          title={`SHA-256: ${it.sha256_hash}`}
-                                        >
-                                          <Icon icon={CheckCircle2} size="xs" />
-                                          <span>SHA-256: {it.sha256_hash.slice(0, 10)}...</span>
-                                        </span>
-                                      ) : null}
-
-                                      {it.total_bytes > 0 && (
-                                        <span className="text-muted font-mono">{fmtBytes(it.total_bytes)}</span>
-                                      )}
-
-                                      <StatusBadge status={it.status} tone={itemCfg.tone} label={itemCfg.label} />
-
-                                      {it.status === "ready" && (
-                                        <LinkButton
-                                          variant="text"
-                                          size="sm"
-                                          href={`/media/v1/export-jobs/${job.id}/items/${it.id}/download`}
-                                          title={`Descargar ${it.camera_name}`}
-                                        >
-                                          <Icon icon={Download} size="xs" />
-                                          <span>Clip</span>
-                                        </LinkButton>
-                                      )}
-                                    </div>
+                                    {it.error && (
+                                      <div className="text-[11px] text-bad flex items-center gap-1 font-mono mt-0.5">
+                                        <Icon icon={AlertCircle} size="xs" />
+                                        <span>Error: {it.error}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}

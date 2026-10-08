@@ -54,7 +54,12 @@ func (l *BandwidthLimiter) Acquire(ctx context.Context, serverID string, n int) 
 
 		// Replenish server tokens
 		if l.serverRate > 0 {
-			tokens := l.serverTokens[serverID] + elapsed*float64(l.serverRate)
+			tokens, ok := l.serverTokens[serverID]
+			if !ok {
+				tokens = float64(l.serverRate)
+			} else {
+				tokens += elapsed * float64(l.serverRate)
+			}
 			if tokens > float64(l.serverRate) {
 				tokens = float64(l.serverRate)
 			}

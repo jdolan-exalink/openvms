@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -111,6 +112,7 @@ type activeItemRow struct {
 	remoteExportID string
 	status         string
 	progress       float32
+	error          string
 	remotePath     string
 	localPath      string
 	sha256Hash     string
@@ -169,7 +171,7 @@ func (m *ExportJobManager) processJob(ctx context.Context, j activeJobRow) {
 		rows, err := tx.Query(ctx, `
 SELECT i.id, i.job_id, i.tenant_id, i.camera_id, COALESCE(c.display_name, ''), COALESCE(c.remote_name, ''),
        i.server_id, COALESCE(s.name, ''), i.remote_export_id, i.status, i.progress, i.remote_path, i.local_path,
-       i.sha256_hash, i.total_bytes, i.transferred_bytes, i.created_at
+       i.sha256_hash, i.total_bytes, i.transferred_bytes, i.created_at, COALESCE(i.error, '')
 FROM export_job_items i
 LEFT JOIN cameras c ON c.id = i.camera_id
 LEFT JOIN frigate_servers s ON s.id = i.server_id
@@ -179,23 +181,42 @@ ORDER BY i.created_at ASC`, j.id)
 			return err
 		}
 		defer rows.Close()
-		q := db.New(tx)
 		for rows.Next() {
 			var it activeItemRow
 			if err := rows.Scan(
 				&it.id, &it.jobID, &it.tenantID, &it.cameraID, &it.cameraName, &it.remoteName,
 				&it.serverID, &it.serverName, &it.remoteExportID, &it.status, &it.progress, &it.remotePath,
-				&it.localPath, &it.sha256Hash, &it.totalBytes, &it.transferred, &it.createdAt,
+				&it.localPath, &it.sha256Hash, &it.totalBytes, &it.transferred, &it.createdAt, &it.error,
 			); err != nil {
 				return err
 			}
-			srv, serr := q.GetServerRow(ctx, it.serverID)
-			if serr == nil {
-				it.serverRow = srv
-			}
 			items = append(items, it)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+
+		serverCache := make(map[uuid.UUID]db.FrigateServer)
+		q := db.New(tx)
+		for idx := range items {
+			sid := items[idx].serverID
+			if sid == uuid.Nil {
+				continue
+			}
+			srv, ok := serverCache[sid]
+			if !ok {
+				var serr error
+				srv, serr = q.GetServerRow(ctx, sid)
+				if serr != nil {
+					m.Log.WarnContext(ctx, "export manager: get server row", "server_id", sid, "error", serr)
+					continue
+				}
+				serverCache[sid] = srv
+			}
+			items[idx].serverRow = srv
+		}
+		return nil
 	})
 	if err != nil {
 		m.Log.WarnContext(ctx, "export manager: query job items", "job_id", j.id, "error", err)
@@ -204,7 +225,7 @@ ORDER BY i.created_at ASC`, j.id)
 
 	allReady := len(items) > 0
 	anyFailed := false
-	var firstError string
+	var failedReasons []string
 
 	for idx := range items {
 		it := items[idx]
@@ -220,9 +241,15 @@ ORDER BY i.created_at ASC`, j.id)
 			m.ensureTransferring(ctx, j, it)
 		case "failed":
 			anyFailed = true
-			if firstError == "" {
-				firstError = "at least one camera export failed"
+			camName := it.cameraName
+			if camName == "" {
+				camName = it.cameraID.String()[:8]
 			}
+			errDesc := it.error
+			if errDesc == "" {
+				errDesc = "export failed"
+			}
+			failedReasons = append(failedReasons, fmt.Sprintf("%s: %s", camName, errDesc))
 		case "ready":
 			// Completed item
 		default:
@@ -246,8 +273,12 @@ ORDER BY i.created_at ASC`, j.id)
 			}
 		}
 		if !hasProgressing {
+			detailedError := strings.Join(failedReasons, "; ")
+			if detailedError == "" {
+				detailedError = "at least one camera export failed"
+			}
 			_ = m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-				_, err := tx.Exec(ctx, `UPDATE export_jobs SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`, j.id, firstError)
+				_, err := tx.Exec(ctx, `UPDATE export_jobs SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`, j.id, detailedError)
 				return err
 			})
 		}
@@ -255,13 +286,18 @@ ORDER BY i.created_at ASC`, j.id)
 }
 
 func (m *ExportJobManager) startRemoteExport(ctx context.Context, j activeJobRow, it *activeItemRow) {
-	if it.remoteName == "" || it.serverRow.ID == uuid.Nil {
-		m.failItem(ctx, it.id, "camera or server unavailable")
+	if it.remoteName == "" {
+		m.failItem(ctx, it.id, "camera remote name missing or camera deleted")
+		return
+	}
+	if it.serverRow.ID == uuid.Nil {
+		m.failItem(ctx, it.id, "frigate server not found or deleted")
 		return
 	}
 	a, err := m.Adapters.Get(ctx, it.serverRow)
 	if err != nil {
 		m.Log.WarnContext(ctx, "export manager: adapter get", "server_id", it.serverID, "error", err)
+		m.failItem(ctx, it.id, fmt.Sprintf("adapter error: %v", err))
 		return
 	}
 
@@ -298,7 +334,11 @@ func (m *ExportJobManager) pollRemoteExport(ctx context.Context, j activeJobRow,
 	info, err := a.Export(ctx, it.remoteExportID)
 	switch {
 	case err == nil && info.Failed:
-		m.failItem(ctx, it.id, info.Error)
+		errMsg := info.Error
+		if errMsg == "" {
+			errMsg = "Frigate export failed"
+		}
+		m.failItem(ctx, it.id, errMsg)
 	case err == nil && !info.InProgress && info.VideoPath != "":
 		// Video file is ready in Frigate, transition to transferring!
 		_ = m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
@@ -365,6 +405,10 @@ func (m *ExportJobManager) transferItem(ctx context.Context, j activeJobRow, it 
 		return err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("frigate HTTP %d for %s", resp.StatusCode, it.remotePath)
+	}
 
 	totalSize := resp.ContentLength
 	if totalSize < 0 {
@@ -528,8 +572,10 @@ WHERE id = $1`, j.id, jobDir, bJSON, totalBytes)
 }
 
 func (m *ExportJobManager) failItem(ctx context.Context, itemID uuid.UUID, errMsg string) {
-	_ = m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE export_job_items SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`, itemID, errMsg)
+	dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = m.Store.TxRaw(dbCtx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(dbCtx, `UPDATE export_job_items SET status = 'failed', error = $2, updated_at = now() WHERE id = $1`, itemID, errMsg)
 		return err
 	})
 }
