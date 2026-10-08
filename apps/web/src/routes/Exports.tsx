@@ -14,6 +14,7 @@ import {
   Download,
   Film,
   HardDrive,
+  Pencil,
   Play,
   RotateCw,
   Share2,
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import { api, unwrap } from "@/api/client";
 import { exportJobsQuery, exportsQuery } from "@/api/queries";
+import { EditExportModal } from "@/components/EditExportModal";
 import { EvidencePlayerModal } from "@/components/EvidencePlayerModal";
 import { Icon } from "@/components/Icon";
 import { ShareExportModal } from "@/components/ShareExportModal";
@@ -74,6 +76,7 @@ export function Exports() {
   const [expandedJobs, setExpandedJobs] = useState<Record<string, boolean>>({});
   const [playbackJob, setPlaybackJob] = useState<any | null>(null);
   const [shareJob, setShareJob] = useState<any | null>(null);
+  const [editJob, setEditJob] = useState<any | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
   const jobs = useQuery(exportJobsQuery);
@@ -155,12 +158,29 @@ export function Exports() {
                         <StatusBadge status={job.status} tone={cfg.tone} label={cfg.label} />
                       </div>
 
-                      {job.protected && (
+                      {job.protected ? (
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
                           <Icon icon={ShieldCheck} size="xs" />
                           <span>Evidencia protegida</span>
                         </span>
-                      )}
+                      ) : job.expires_at ? (
+                        <span
+                          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-warn-container text-on-warn-container border border-warn/30"
+                          title={`Se eliminará automáticamente el ${fmtDateTime(job.expires_at)}`}
+                        >
+                          <Icon icon={Clock} size="xs" />
+                          <span>
+                            Auto-borrado en{" "}
+                            {Math.max(
+                              0,
+                              Math.ceil(
+                                (new Date(job.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+                              )
+                            )}{" "}
+                            días
+                          </span>
+                        </span>
+                      ) : null}
 
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-m3-sm text-xs font-medium bg-surface-2 text-on-surface-variant">
                         <Icon icon={Camera} size="xs" />
@@ -177,6 +197,16 @@ export function Exports() {
 
                     {/* Action Toolbar with generous spacing */}
                     <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                      <Button
+                        variant="outlined"
+                        size="sm"
+                        onClick={() => setEditJob(job)}
+                        title="Editar nombre y proteger evidencia forense"
+                      >
+                        <Icon icon={Pencil} size="xs" />
+                        <span>Editar</span>
+                      </Button>
+
                       {job.status === "ready" && (
                         <>
                           <Button
@@ -492,6 +522,10 @@ export function Exports() {
 
       {shareJob && (
         <ShareExportModal job={shareJob} onClose={() => setShareJob(null)} />
+      )}
+
+      {editJob && (
+        <EditExportModal job={editJob} onClose={() => setEditJob(null)} />
       )}
     </div>
   );

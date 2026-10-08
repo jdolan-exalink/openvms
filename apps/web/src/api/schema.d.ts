@@ -1636,7 +1636,8 @@ export interface paths {
         delete: operations["deleteExportJob"];
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update an export job (rename or toggle protected) */
+        patch: operations["updateExportJob"];
         trace?: never;
     };
     "/api/v1/export-jobs/{jobId}/cancel": {
@@ -7496,6 +7497,39 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateExportJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name?: string;
+                    protected?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Updated export job */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExportJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];

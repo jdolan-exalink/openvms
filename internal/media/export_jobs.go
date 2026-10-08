@@ -159,8 +159,8 @@ func (s *Service) CreateExportJob(ctx context.Context, actor authz.Actor, in Cre
 
 	err := s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
 		err := tx.QueryRow(ctx, `
-INSERT INTO export_jobs (tenant_id, site_id, requested_by, name, start_time, end_time, status, protected)
-VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7) RETURNING id`,
+INSERT INTO export_jobs (tenant_id, site_id, requested_by, name, start_time, end_time, status, protected, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, CASE WHEN $7 = true THEN NULL ELSE now() + interval '30 days' END) RETURNING id`,
 			firstTenant, firstSite, actor.UserID, in.Name, in.Start, in.End, in.Protected).Scan(&jobID)
 		if err != nil {
 			return err
@@ -414,6 +414,67 @@ WHERE job_id = $1 AND status != 'ready'`, id)
 			RequestID:  logging.RequestID(ctx),
 			Ip:         httpx.ClientIP(ctx),
 			Details:    []byte(`{"name":"` + job.Name + `"}`),
+		})
+	})
+	if err != nil {
+		return ExportJob{}, err
+	}
+	return s.GetExportJob(ctx, actor, id)
+}
+
+type UpdateExportJobInput struct {
+	Name      *string `json:"name"`
+	Protected *bool   `json:"protected"`
+}
+
+func (s *Service) UpdateExportJob(ctx context.Context, actor authz.Actor, id uuid.UUID, in UpdateExportJobInput) (ExportJob, error) {
+	job, err := s.GetExportJob(ctx, actor, id)
+	if err != nil {
+		return ExportJob{}, err
+	}
+	if job.RequestedBy != actor.UserID {
+		return ExportJob{}, access.ErrForbidden
+	}
+
+	err = s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
+		newName := job.Name
+		if in.Name != nil && strings.TrimSpace(*in.Name) != "" {
+			newName = strings.TrimSpace(*in.Name)
+		}
+		newProtected := job.Protected
+		if in.Protected != nil {
+			newProtected = *in.Protected
+		}
+
+		_, err := tx.Exec(ctx, `
+UPDATE export_jobs
+SET name = $2,
+    protected = $3,
+    expires_at = CASE 
+        WHEN $3 = true THEN NULL 
+        WHEN $3 = false AND expires_at IS NULL THEN now() + interval '30 days'
+        ELSE expires_at 
+    END,
+    updated_at = now()
+WHERE id = $1 AND deleted_at IS NULL`, id, newName, newProtected)
+		if err != nil {
+			return err
+		}
+
+		b, _ := json.Marshal(map[string]any{
+			"name":      newName,
+			"protected": newProtected,
+		})
+		return db.New(tx).InsertAudit(ctx, db.InsertAuditParams{
+			TenantID:   &job.TenantID,
+			ActorID:    &actor.UserID,
+			ActorName:  actor.Username,
+			Action:     "EXPORT_UPDATED",
+			TargetType: "export_job",
+			TargetID:   &id,
+			RequestID:  logging.RequestID(ctx),
+			Ip:         httpx.ClientIP(ctx),
+			Details:    b,
 		})
 	})
 	if err != nil {

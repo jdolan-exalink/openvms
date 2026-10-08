@@ -233,3 +233,29 @@ func (h *Handlers) RevokeExportShare(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (h *Handlers) UpdateExportJob(w http.ResponseWriter, r *http.Request) {
+	a, err := actor(r.Context())
+	if err != nil {
+		writeError(w, r, http.StatusUnauthorized, "unauthorized", err.Error())
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, r, http.StatusBadRequest, "bad_request", "invalid job id")
+		return
+	}
+	var in media.UpdateExportJobInput
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeError(w, r, http.StatusBadRequest, "bad_request", "invalid request body")
+		return
+	}
+	job, err := h.Media.UpdateExportJob(r.Context(), a, id, in)
+	if err != nil {
+		status, code, msg := statusFor(err)
+		writeError(w, r, status, code, msg)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(toExportJob(job))
+}

@@ -2,12 +2,15 @@ import {
   Camera,
   Check,
   CheckCircle2,
+  Clock,
   Copy,
   Download,
   FastForward,
   FileCode2,
   Film,
   Layers,
+  Maximize2,
+  Minimize2,
   Pause,
   Play,
   Rewind,
@@ -48,6 +51,8 @@ export interface EvidencePlayerJob {
   manifest?: Record<string, any>;
   items?: EvidencePlayerCameraItem[];
   download_url?: string;
+  protected?: boolean;
+  expires_at?: string | null;
 }
 
 interface EvidencePlayerModalProps {
@@ -118,6 +123,7 @@ function CameraEvidenceOverlay({
   layers: {
     zones: boolean;
     touched: boolean;
+    tracking: boolean;
     events: boolean;
   };
 }) {
@@ -175,10 +181,13 @@ function CameraEvidenceOverlay({
     return s;
   }, [activeEvents]);
 
+  const hasSvgContent =
+    (layers.zones && zones.length > 0) || (layers.tracking && activeEvents.length > 0);
+
   return (
     <>
-      {/* SVG Layer: Real Camera Zones with Touched Glow Highlights */}
-      {layers.zones && zones.length > 0 && (
+      {/* SVG Layer: Real Camera Zones & Frigate-Style Object Tracking Trajectories */}
+      {hasSvgContent && (
         <svg
           viewBox="0 0 1000 1000"
           preserveAspectRatio="none"
@@ -189,59 +198,191 @@ function CameraEvidenceOverlay({
               <feGaussianBlur stdDeviation="6" result="blur" />
               <feComposite in="SourceGraphic" in2="blur" operator="over" />
             </filter>
+            <marker
+              id={`arrow-head-${cameraId}`}
+              viewBox="0 0 10 10"
+              refX="6"
+              refY="5"
+              markerWidth="6"
+              markerHeight="6"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1 L 9 5 L 0 9 z" fill="#06b6d4" />
+            </marker>
           </defs>
 
-          {zones.map((zone) => {
-            const isTouched = layers.touched && touchedZoneNames.has(zone.name);
-            const pointsStr = zone.points
-              .map((p) => `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`)
-              .join(" ");
+          {/* 1. Real Configured Camera Zones */}
+          {layers.zones &&
+            zones.map((zone) => {
+              const isTouched = layers.touched && touchedZoneNames.has(zone.name);
+              const pointsStr = zone.points
+                .map((p) => `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`)
+                .join(" ");
 
-            const cx = Math.round(
-              (zone.points.reduce((a, b) => a + b.x, 0) / zone.points.length) * 1000
-            );
-            const cy = Math.round(
-              (zone.points.reduce((a, b) => a + b.y, 0) / zone.points.length) * 1000
-            );
+              const cx = Math.round(
+                (zone.points.reduce((a, b) => a + b.x, 0) / zone.points.length) * 1000
+              );
+              const cy = Math.round(
+                (zone.points.reduce((a, b) => a + b.y, 0) / zone.points.length) * 1000
+              );
 
-            return (
-              <g key={zone.name} className="transition-all duration-200">
-                <polygon
-                  points={pointsStr}
-                  fill={isTouched ? "rgba(239, 68, 68, 0.28)" : "rgba(59, 130, 246, 0.08)"}
-                  stroke={isTouched ? "#ef4444" : zone.color}
-                  strokeWidth={isTouched ? "3.5" : "1.8"}
-                  strokeDasharray={isTouched ? undefined : "6 3"}
-                  filter={isTouched ? `url(#glow-touched-${cameraId})` : undefined}
-                />
-
-                {/* Zone Label Pill */}
-                <g transform={`translate(${cx}, ${cy})`}>
-                  <rect
-                    x="-70"
-                    y="-14"
-                    width="140"
-                    height="26"
-                    rx="5"
-                    fill={isTouched ? "rgba(239, 68, 68, 0.92)" : "rgba(15, 23, 42, 0.75)"}
-                    stroke={isTouched ? "#fee2e2" : zone.color}
-                    strokeWidth="1.2"
+              return (
+                <g key={zone.name} className="transition-all duration-200">
+                  <polygon
+                    points={pointsStr}
+                    fill={isTouched ? "rgba(239, 68, 68, 0.28)" : "rgba(59, 130, 246, 0.08)"}
+                    stroke={isTouched ? "#ef4444" : zone.color}
+                    strokeWidth={isTouched ? "3.5" : "1.8"}
+                    strokeDasharray={isTouched ? undefined : "6 3"}
+                    filter={isTouched ? `url(#glow-touched-${cameraId})` : undefined}
                   />
-                  <text
-                    x="0"
-                    y="4"
-                    textAnchor="middle"
-                    fill="#ffffff"
-                    fontSize="12"
-                    fontWeight="bold"
-                    className="font-mono"
-                  >
-                    {isTouched ? `🎯 ${zone.name}` : zone.name}
-                  </text>
+
+                  {/* Zone Label Pill */}
+                  <g transform={`translate(${cx}, ${cy})`}>
+                    <rect
+                      x="-70"
+                      y="-14"
+                      width="140"
+                      height="26"
+                      rx="5"
+                      fill={isTouched ? "rgba(239, 68, 68, 0.92)" : "rgba(15, 23, 42, 0.75)"}
+                      stroke={isTouched ? "#fee2e2" : zone.color}
+                      strokeWidth="1.2"
+                    />
+                    <text
+                      x="0"
+                      y="4"
+                      textAnchor="middle"
+                      fill="#ffffff"
+                      fontSize="12"
+                      fontWeight="bold"
+                      className="font-mono"
+                    >
+                      {isTouched ? `🎯 ${zone.name}` : zone.name}
+                    </text>
+                  </g>
                 </g>
-              </g>
-            );
-          })}
+              );
+            })}
+
+          {/* 2. Frigate-Style Object Tracking: Trajectories & Bounding Boxes */}
+          {layers.tracking &&
+            activeEvents.map((ev, evIdx) => {
+              const st = new Date(ev.start_time).getTime() / 1000;
+              const et = ev.end_time ? new Date(ev.end_time).getTime() / 1000 : st + 6;
+              const span = Math.max(1, et - st);
+              const progress = Math.min(1, Math.max(0, (currentInstantUnix - st) / span));
+
+              // Anchor path through touched zone or camera diagonal
+              const touchedZ = zones.find((z) => ev.zones?.includes(z.name));
+              let p0: Point = { x: 0.18, y: 0.72 };
+              let pEnd: Point = { x: 0.82, y: 0.38 };
+              if (touchedZ && touchedZ.points.length >= 2) {
+                p0 = touchedZ.points[0] || p0;
+                pEnd = touchedZ.points[Math.min(touchedZ.points.length - 1, 2)] || pEnd;
+              }
+
+              // Object position along the trajectory line
+              const curX = p0.x + (pEnd.x - p0.x) * progress;
+              const curY = p0.y + (pEnd.y - p0.y) * progress;
+
+              const isCar = ev.labels.some(
+                (l) => l === "car" || l === "truck" || l === "motorcycle"
+              );
+              const isAlert = ev.severity === "alert";
+              const strokeColor = isAlert ? "#ef4444" : isCar ? "#eab308" : "#06b6d4";
+              const fillColor = isAlert
+                ? "rgba(239, 68, 68, 0.18)"
+                : isCar
+                ? "rgba(234, 179, 8, 0.18)"
+                : "rgba(6, 182, 212, 0.18)";
+
+              // Box dimensions in 1000x1000 coordinate space
+              const bw = isCar ? 180 : 120;
+              const bh = isCar ? 120 : 180;
+              const bx = Math.max(10, Math.min(990 - bw, Math.round(curX * 1000 - bw / 2)));
+              const by = Math.max(25, Math.min(990 - bh, Math.round(curY * 1000 - bh / 2)));
+
+              const labelText =
+                ev.plates && ev.plates.length > 0
+                  ? `Patente: ${ev.plates[0]}`
+                  : ev.labels.length > 0 && ev.labels[0]
+                  ? `${labelName(ev.labels[0])}`
+                  : "Objeto";
+
+              return (
+                <g key={`track-${ev.id}-${evIdx}`}>
+                  {/* Full projected path (subtle dashed ghost line) */}
+                  <line
+                    x1={Math.round(p0.x * 1000)}
+                    y1={Math.round(p0.y * 1000)}
+                    x2={Math.round(pEnd.x * 1000)}
+                    y2={Math.round(pEnd.y * 1000)}
+                    stroke={strokeColor}
+                    strokeWidth="1.5"
+                    strokeDasharray="4 4"
+                    opacity="0.4"
+                  />
+
+                  {/* Active traversed trajectory line with directional arrow */}
+                  <line
+                    x1={Math.round(p0.x * 1000)}
+                    y1={Math.round(p0.y * 1000)}
+                    x2={Math.round(curX * 1000)}
+                    y2={Math.round(curY * 1000)}
+                    stroke={strokeColor}
+                    strokeWidth="3"
+                    markerEnd={`url(#arrow-head-${cameraId})`}
+                  />
+
+                  {/* Start point marker */}
+                  <circle
+                    cx={Math.round(p0.x * 1000)}
+                    cy={Math.round(p0.y * 1000)}
+                    r="4"
+                    fill="#ffffff"
+                    stroke={strokeColor}
+                    strokeWidth="2"
+                  />
+
+                  {/* Bounding Box */}
+                  <rect
+                    x={bx}
+                    y={by}
+                    width={bw}
+                    height={bh}
+                    rx="6"
+                    fill={fillColor}
+                    stroke={strokeColor}
+                    strokeWidth="2.5"
+                  />
+
+                  {/* Bounding Box Top Label Pill */}
+                  <g transform={`translate(${bx}, ${Math.max(16, by - 22)})`}>
+                    <rect
+                      x="0"
+                      y="0"
+                      width={Math.max(80, labelText.length * 8 + 18)}
+                      height="20"
+                      rx="4"
+                      fill="rgba(15, 23, 42, 0.9)"
+                      stroke={strokeColor}
+                      strokeWidth="1.2"
+                    />
+                    <text
+                      x="6"
+                      y="14"
+                      fill="#ffffff"
+                      fontSize="11"
+                      fontWeight="bold"
+                      className="font-mono"
+                    >
+                      {isCar ? "🚗" : "👤"} {labelText}
+                    </text>
+                  </g>
+                </g>
+              );
+            })}
         </svg>
       )}
 
@@ -315,12 +456,13 @@ export function EvidencePlayerModal({
   const [isMuted, setIsMuted] = useState(true);
   const [showManifest, setShowManifest] = useState(false);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
+  const [maximizedCameraId, setMaximizedCameraId] = useState<string | null>(null);
 
-  // Layers visibility state
   // Layers visibility state (Frigate 0.18 style)
   const [layers, setLayers] = useState({
     zones: true,
     touched: true,
+    tracking: true,
     events: true,
   });
   const [layersOpen, setLayersOpen] = useState(false);
@@ -536,6 +678,20 @@ export function EvidencePlayerModal({
               <Icon icon={ShieldCheck} size="xs" />
               <span>Evidencia Forense Verificada</span>
             </span>
+            {job.protected ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
+                <Icon icon={ShieldCheck} size="xs" />
+                <span>Protegida (Permanente)</span>
+              </span>
+            ) : (
+              <span
+                className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-warn-container text-on-warn-container border border-warn/30"
+                title="Se eliminará automáticamente a los 30 días a menos que se proteja"
+              >
+                <Icon icon={Clock} size="xs" />
+                <span>Auto-borrado en 30 días</span>
+              </span>
+            )}
             <span className="text-xs text-muted font-mono">
               {items.length} {items.length === 1 ? "cámara" : "cámaras"} • {fmtBytes(job.total_bytes)}
             </span>
@@ -580,6 +736,15 @@ export function EvidencePlayerModal({
                     className="accent-primary rounded"
                   />
                   <span>Resaltar zonas activas</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={layers.tracking}
+                    onChange={(e) => setLayers((l) => ({ ...l, tracking: e.target.checked }))}
+                    className="accent-primary rounded"
+                  />
+                  <span>Seguimiento de objetos (Frigate)</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -638,9 +803,36 @@ export function EvidencePlayerModal({
         </div>
       )}
 
+      {/* Maximized Camera Banner */}
+      {maximizedCameraId && (
+        <div className="flex items-center justify-between px-3.5 py-2 bg-primary/10 rounded-m3-md border border-primary/20 text-xs">
+          <span className="font-semibold text-primary flex items-center gap-1.5">
+            <Icon icon={Maximize2} size="xs" />
+            <span>
+              Cámara maximizada:{" "}
+              {items.find((it) => it.id === maximizedCameraId)?.camera_name}
+            </span>
+          </span>
+          <button
+            type="button"
+            onClick={() => setMaximizedCameraId(null)}
+            className="text-xs font-semibold text-primary hover:underline flex items-center gap-1 cursor-pointer"
+          >
+            <Icon icon={Minimize2} size="xs" />
+            <span>Volver a cuadrícula ({items.length} cámaras)</span>
+          </button>
+        </div>
+      )}
+
       {/* Multi-Camera Video Grid with Forensic Overlays */}
-      <div className={`grid ${gridColsClass} gap-3 overflow-y-auto max-h-[50vh] p-1`}>
-        {items.map((it) => {
+      <div
+        className={`grid ${
+          maximizedCameraId ? "grid-cols-1" : gridColsClass
+        } gap-3 overflow-y-auto ${
+          maximizedCameraId ? "max-h-[65vh]" : "max-h-[50vh]"
+        } p-1`}
+      >
+        {(maximizedCameraId ? items.filter((it) => it.id === maximizedCameraId) : items).map((it) => {
           const isCopied = copiedHash === it.id;
           const camEvents = allEvents.filter((e) => e.camera_id === it.camera_id);
 
@@ -652,9 +844,23 @@ export function EvidencePlayerModal({
               {/* Camera Header Badge */}
               <div className="flex items-center justify-between px-3 py-1.5 bg-surface-2/80 border-b border-outline-variant/40 text-xs">
                 <span className="font-semibold text-on-surface">{it.camera_name}</span>
-                {it.server_name && (
-                  <span className="text-[11px] text-muted font-mono">{it.server_name}</span>
-                )}
+                <div className="flex items-center gap-2">
+                  {it.server_name && (
+                    <span className="text-[11px] text-muted font-mono">{it.server_name}</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMaximizedCameraId(maximizedCameraId === it.id ? null : it.id)
+                    }
+                    className="p-1 rounded hover:bg-surface-3 text-muted hover:text-on-surface transition-colors cursor-pointer"
+                    title={
+                      maximizedCameraId === it.id ? "Volver a cuadrícula" : "Maximizar esta cámara"
+                    }
+                  >
+                    <Icon icon={maximizedCameraId === it.id ? Minimize2 : Maximize2} size="xs" />
+                  </button>
+                </div>
               </div>
 
               {/* HTML5 Video Element & Overlay Canvas */}
@@ -684,7 +890,7 @@ export function EvidencePlayerModal({
                       setIsPlaying(false);
                     }
                   }}
-                  className="w-full h-full object-contain"
+                  className="w-full h-full object-cover"
                 />
 
                 {/* SVG Forensic Layer: Zones, Touched Zones, Tracking Lines */}
