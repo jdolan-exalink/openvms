@@ -234,28 +234,18 @@ func (h *Handlers) RevokeExportShare(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handlers) UpdateExportJob(w http.ResponseWriter, r *http.Request) {
-	a, err := actor(r.Context())
+func (h *Handlers) UpdateExportJob(ctx context.Context, r gen.UpdateExportJobRequestObject) (gen.UpdateExportJobResponseObject, error) {
+	a, err := actor(ctx)
 	if err != nil {
-		writeError(w, r, http.StatusUnauthorized, "unauthorized", err.Error())
-		return
-	}
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		writeError(w, r, http.StatusBadRequest, "bad_request", "invalid job id")
-		return
+		return nil, err
 	}
 	var in media.UpdateExportJobInput
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		writeError(w, r, http.StatusBadRequest, "bad_request", "invalid request body")
-		return
+	if r.Body != nil {
+		in = media.UpdateExportJobInput{Name: r.Body.Name, Protected: r.Body.Protected}
 	}
-	job, err := h.Media.UpdateExportJob(r.Context(), a, id, in)
+	job, err := h.Media.UpdateExportJob(ctx, a, r.JobId, in)
 	if err != nil {
-		status, code, msg := statusFor(err)
-		writeError(w, r, status, code, msg)
-		return
+		return nil, err
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(toExportJob(job))
+	return gen.UpdateExportJob200JSONResponse(toExportJob(job)), nil
 }

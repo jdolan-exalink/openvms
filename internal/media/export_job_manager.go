@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -550,16 +551,20 @@ func (m *ExportJobManager) finalizeJob(ctx context.Context, j activeJobRow, item
 		Zones     []string `json:"zones"`
 		Plates    []string `json:"plates"`
 		Severity  string   `json:"severity"`
+		// Tracks freezes the real Frigate trajectories at export time (same JSON as the API's
+		// ObjectTrack) so shared links and offline copies need no live lookup.
+		Tracks json.RawMessage `json:"tracks"`
 	}
 	var manifestEvents []eventManifestItem
 
 	if len(camIDs) > 0 {
 		_ = m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 			rows, qerr := tx.Query(ctx, `
-SELECT id, camera_id, start_time, COALESCE(end_time, start_time), labels, zones, plates, severity
-FROM events
-WHERE camera_id = ANY($1) AND start_time <= $3 AND (end_time IS NULL OR end_time >= $2)
-ORDER BY start_time ASC`, camIDs, j.start, j.end)
+SELECT e.id, e.camera_id, e.start_time, COALESCE(e.end_time, e.start_time), e.labels, e.zones, e.plates, e.severity,
+`+events.TracksSubquery+`
+FROM events e
+WHERE e.camera_id = ANY($1) AND e.start_time <= $3 AND (e.end_time IS NULL OR e.end_time >= $2)
+ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 			if qerr != nil {
 				return qerr
 			}
@@ -569,7 +574,8 @@ ORDER BY start_time ASC`, camIDs, j.start, j.end)
 				var st, et time.Time
 				var labels, zones, plates []string
 				var sev string
-				if err := rows.Scan(&evID, &cID, &st, &et, &labels, &zones, &plates, &sev); err == nil {
+				var tracks []byte
+				if err := rows.Scan(&evID, &cID, &st, &et, &labels, &zones, &plates, &sev, &tracks); err == nil {
 					manifestEvents = append(manifestEvents, eventManifestItem{
 						ID:        evID.String(),
 						CameraID:  cID.String(),
@@ -579,6 +585,7 @@ ORDER BY start_time ASC`, camIDs, j.start, j.end)
 						Zones:     zones,
 						Plates:    plates,
 						Severity:  sev,
+						Tracks:    tracks,
 					})
 				}
 			}

@@ -3270,6 +3270,40 @@ export interface components {
             /** @description The VMS has copied this event's preview clip to central storage (an OpenVMS-internal signal, not a probe of Frigate's own preview availability). */
             has_preview: boolean;
             attributes?: components["schemas"]["EventAttributes"];
+            /** @description Tracked objects of this event as reported by Frigate. Empty when none were recorded. */
+            tracks: components["schemas"]["ObjectTrack"][];
+        };
+        ObjectTrack: {
+            /** @description Tracked-object id inside the origin Frigate. */
+            object_id: string;
+            label: string;
+            /** @description Zones the object entered, as last reported by Frigate. */
+            zones: string[];
+            /** @description Latest bounding box [x, y, width, height], normalized 0..1. Not time-indexed. */
+            box?: number[] | null;
+            /** @description Observed positions, oldest first. */
+            path: components["schemas"]["TrackPoint"][];
+            /** Format: date-time */
+            start_time: string;
+            /** Format: date-time */
+            end_time?: string | null;
+        };
+        TrackPoint: {
+            /**
+             * Format: double
+             * @description Normalized 0..1
+             */
+            x: number;
+            /**
+             * Format: double
+             * @description Normalized 0..1
+             */
+            y: number;
+            /**
+             * Format: double
+             * @description Unix seconds.
+             */
+            t: number;
         };
         EventAttributes: {
             vehicle?: components["schemas"]["VehicleAttributes"];

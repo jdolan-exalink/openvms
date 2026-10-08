@@ -99,7 +99,6 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 	r.Post("/api/v1/export-jobs/{id}/shares", h.CreateExportShare)
 	r.Get("/api/v1/export-jobs/{id}/shares", h.ListExportShares)
 	r.Delete("/api/v1/export-jobs/shares/{shareId}", h.RevokeExportShare)
-	r.Patch("/api/v1/export-jobs/{id}", h.UpdateExportJob)
 
 	return otelhttp.NewHandler(r, "openvms-api"), nil
 }
