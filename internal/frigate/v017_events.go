@@ -15,9 +15,12 @@ import (
 func (a *v017) Media() Media { return a.c }
 
 type objectData struct {
-	TopScore   *float64 `json:"top_score"`
-	Plate      *string  `json:"recognized_license_plate"`
-	PlateScore *float64 `json:"recognized_license_plate_score"`
+	TopScore   *float64  `json:"top_score"`
+	Plate      *string   `json:"recognized_license_plate"`
+	PlateScore *float64  `json:"recognized_license_plate_score"`
+	Box        []float64 `json:"box"`
+	// PathData is kept raw so one malformed entry can be skipped instead of failing the page.
+	PathData []json.RawMessage `json:"path_data"`
 }
 
 type objectResponse struct {
@@ -48,6 +51,27 @@ func subLabel(raw json.RawMessage) string {
 	return ""
 }
 
+// decodePath reads Frigate's path_data, a list of [[x, y], unix_ts]. Malformed entries are
+// skipped: a partial trajectory is still real data, a failed page would lose the whole object.
+func decodePath(raw []json.RawMessage) []TrackPoint {
+	var out []TrackPoint
+	for _, r := range raw {
+		var e struct {
+			Pos []float64
+			T   float64
+		}
+		var tuple []json.RawMessage
+		if json.Unmarshal(r, &tuple) != nil || len(tuple) != 2 {
+			continue
+		}
+		if json.Unmarshal(tuple[0], &e.Pos) != nil || len(e.Pos) != 2 || json.Unmarshal(tuple[1], &e.T) != nil {
+			continue
+		}
+		out = append(out, TrackPoint{X: e.Pos[0], Y: e.Pos[1], T: e.T})
+	}
+	return out
+}
+
 // TrackedObjects returns objects ordered by start time, oldest first, so callers can
 // page forward with After.
 func (a *v017) TrackedObjects(ctx context.Context, q ObjectQuery) ([]TrackedObject, error) {
@@ -73,7 +97,10 @@ func (a *v017) TrackedObjects(ctx context.Context, q ObjectQuery) ([]TrackedObje
 		t := TrackedObject{
 			ID: o.ID, Camera: o.Camera, Label: o.Label, SubLabel: subLabel(o.SubLabel), Zones: o.Zones,
 			StartTime: o.StartTime, EndTime: o.EndTime, TopScore: o.Data.TopScore, PlateScore: o.Data.PlateScore,
-			HasSnapshot: o.HasSnapshot,
+			HasSnapshot: o.HasSnapshot, Path: decodePath(o.Data.PathData),
+		}
+		if len(o.Data.Box) == 4 {
+			t.Box = o.Data.Box
 		}
 		if t.TopScore == nil {
 			t.TopScore = o.TopScore

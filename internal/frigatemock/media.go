@@ -16,9 +16,11 @@ import (
 // plate search, timeline and exports to be exercised without a real Frigate.
 
 type objectData struct {
-	TopScore   float64  `json:"top_score"`
-	Plate      *string  `json:"recognized_license_plate,omitempty"`
-	PlateScore *float64 `json:"recognized_license_plate_score,omitempty"`
+	TopScore   float64   `json:"top_score"`
+	Plate      *string   `json:"recognized_license_plate,omitempty"`
+	PlateScore *float64  `json:"recognized_license_plate_score,omitempty"`
+	Box        []float64 `json:"box,omitempty"`
+	PathData   [][]any   `json:"path_data,omitempty"`
 }
 
 type trackedObject struct {
@@ -66,6 +68,12 @@ func (s *Server) objects(w http.ResponseWriter, r *http.Request) {
 				ID: det, Camera: rev.Camera, Label: rev.Data.Objects[0], Zones: rev.Data.Zones,
 				StartTime: rev.StartTime + float64(i), EndTime: rev.EndTime, HasSnapshot: rev.Severity == "alert",
 				Data: objectData{TopScore: 0.87},
+			}
+			if rev.Track != nil {
+				o.Data.Box = rev.Track.Box
+				for _, p := range rev.Track.Path {
+					o.Data.PathData = append(o.Data.PathData, []any{[]float64{p[0], p[1]}, p[2]})
+				}
 			}
 			if lpr[rev.Camera] && len(rev.Data.SubLabels) > 0 {
 				plate := rev.Data.SubLabels[len(rev.Data.SubLabels)-1]

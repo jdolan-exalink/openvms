@@ -29,6 +29,16 @@ type Review struct {
 	Severity        string     `json:"severity"`
 	ThumbPath       string     `json:"thumb_path"`
 	Data            ReviewData `json:"data"`
+	// Track, when set, is served as the box and path_data of every tracked object derived from
+	// this review. It is not part of Frigate's review payload.
+	Track *Track `json:"-"`
+}
+
+// Track is the trajectory a mock tracked object reports: Box is [x, y, w, h] and Path holds
+// [x, y, unix_ts] samples, all coordinates normalized like Frigate's.
+type Track struct {
+	Box  []float64
+	Path [][3]float64
 }
 
 // ReviewMessage is the payload published on {topic_prefix}/reviews.

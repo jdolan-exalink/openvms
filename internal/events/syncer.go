@@ -7,6 +7,7 @@ package events
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -97,6 +98,9 @@ const (
 	// plates, new labels) of items that were still open at the previous pull.
 	reviewOverlap = 2 * time.Minute
 	objectOverlap = 10 * time.Minute
+	// An object still open this long after it started (Frigate restarted mid-track and never
+	// closed it) no longer holds the object cursor back, so it cannot pin the cursor forever.
+	objectOpenHold = time.Hour
 	// Thumbnails copied per server and pull; the rest wait for the next pull.
 	thumbsPerPull    = 40
 	maxThumbAttempts = 5
@@ -431,7 +435,12 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 	after := unix(from)
 	var reads []frigate.TrackedObject
 	var snapshots []frigate.TrackedObject
+	var tracks []frigate.TrackedObject
 	newest := from
+	// Oldest object that has not ended yet: its path keeps growing, so the cursor must not
+	// pass it or the object falls out of the re-read window with a partial path.
+	var openFrom *time.Time
+	stale := s.clock().Add(-objectOpenHold)
 	for page := 0; page < 40; page++ {
 		// No Cameras filter: every camera's objects are read, not only LPR-tagged ones. Plate
 		// extraction below is a client-side filter on o.Plate, not a "plates only" request to
@@ -441,9 +450,14 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 			return err
 		}
 		for _, o := range items {
-			if t := fromUnix(o.StartTime); t.After(newest) {
+			t := fromUnix(o.StartTime)
+			if t.After(newest) {
 				newest = t
 			}
+			if o.EndTime == nil && t.After(stale) && (openFrom == nil || t.Before(*openFrom)) {
+				openFrom = &t
+			}
+			tracks = append(tracks, o)
 			if o.Plate != "" {
 				reads = append(reads, o)
 			}
@@ -457,6 +471,15 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 		after = items[len(items)-1].StartTime
 	}
 	return s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		for _, o := range tracks {
+			cam, ok := cams[o.Camera]
+			if !ok {
+				continue
+			}
+			if err := upsertObjectTrack(ctx, tx, srv, cam.ID, o); err != nil {
+				return err
+			}
+		}
 		for _, o := range reads {
 			cam, ok := cams[o.Camera]
 			if !ok {
@@ -484,9 +507,13 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 				return err
 			}
 		}
-		// The cursor moves to the newest object seen; the next pull re-reads objectOverlap
-		// before it for plates recognized after an object started.
+		// The cursor moves to the newest object seen, or to the oldest one still open, and the
+		// next pull re-reads objectOverlap before it for plates recognized after an object
+		// started and for paths that kept growing.
 		cursor := newest
+		if openFrom != nil && openFrom.Before(cursor) {
+			cursor = *openFrom
+		}
 		if st.objectCursor != nil && cursor.Before(*st.objectCursor) {
 			cursor = *st.objectCursor
 		}
@@ -519,6 +546,47 @@ INSERT INTO object_snapshots (server_id, tenant_id, remote_object_id)
 VALUES ($1, $2, $3)
 ON CONFLICT (server_id, remote_object_id) DO NOTHING`, srv.ID, srv.TenantID, remoteObjectID)
 	return err
+}
+
+// upsertObjectTrack stores the box and path of a Frigate tracked object, keyed like
+// object_snapshots so an event reaches it through detection_ids. The row is rewritten on every
+// pull that still sees the object, so the path converges to the final one when it ends.
+func upsertObjectTrack(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID uuid.UUID, o frigate.TrackedObject) error {
+	var box []byte
+	if len(o.Box) == 4 {
+		box, _ = json.Marshal(o.Box)
+	}
+	path, err := json.Marshal(nonNilPath(o.Path))
+	if err != nil {
+		return fmt.Errorf("encode path of %s: %w", o.ID, err)
+	}
+	var end *time.Time
+	if o.EndTime != nil {
+		t := fromUnix(*o.EndTime)
+		end = &t
+	}
+	_, err = tx.Exec(ctx, `
+INSERT INTO object_tracks (server_id, tenant_id, camera_id, remote_object_id, label, zones, box, path, start_time, end_time)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (server_id, remote_object_id) DO UPDATE SET
+    label = excluded.label,
+    zones = excluded.zones,
+    box = excluded.box,
+    path = excluded.path,
+    end_time = excluded.end_time,
+    updated_at = now()`,
+		srv.ID, srv.TenantID, cameraID, o.ID, o.Label, nonNil(o.Zones), box, path, fromUnix(o.StartTime), end)
+	if err != nil {
+		return fmt.Errorf("upsert track %s: %w", o.ID, err)
+	}
+	return nil
+}
+
+func nonNilPath(p []frigate.TrackPoint) []frigate.TrackPoint {
+	if p == nil {
+		return []frigate.TrackPoint{}
+	}
+	return p
 }
 
 // NormalizePlate keeps letters and digits in upper case: "ab 123-cd" → "AB123CD".

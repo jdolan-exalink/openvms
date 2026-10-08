@@ -147,6 +147,18 @@ type TrackedObject struct {
 	TopScore   *float64 `json:"-"`
 	// HasSnapshot mirrors Frigate's own Event.has_snapshot (PRD §44 "Has snapshot" filter).
 	HasSnapshot bool `json:"-"`
+	// Box is Frigate's latest bounding box [x, y, w, h], normalized 0..1; nil when absent.
+	Box []float64 `json:"-"`
+	// Path is the object's trajectory (bottom-center of the box), oldest first.
+	Path []TrackPoint `json:"-"`
+}
+
+// TrackPoint is one sample of a tracked object's path: normalized 0..1 frame coordinates
+// and the Unix time (seconds) it was observed.
+type TrackPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	T float64 `json:"t"`
 }
 
 // RecordingSegment is a stretch of continuous recording.
