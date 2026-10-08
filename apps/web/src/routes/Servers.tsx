@@ -1,6 +1,6 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
@@ -173,7 +173,7 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
     retry: false,
   });
   const refreshAgentStatus = status.refetch;
-  const [deployment, setDeployment] = useState<{ kind: "install" | "update"; job?: Schemas["ServerAgentInstallJob"] } | null>(null);
+  const [deployment, setDeployment] = useState<{ kind: "install" | "update" | "uninstall"; job?: Schemas["ServerAgentInstallJob"] } | null>(null);
   const refreshedTerminalJob = useRef<string | null>(null);
   const tracked = jobs.filter((entry) => entry.serverId === server.id).sort((a, b) => a.changedAt - b.changedAt).at(-1);
   useEffect(() => {
@@ -197,10 +197,20 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
     }
     setDeployment({ kind: "update", job });
   }, [refreshAgentStatus]);
+  const onUninstallJob = useCallback((job: Schemas["ServerAgentInstallJob"]) => {
+    if (job.status === "succeeded") {
+      setDeployment(null);
+      void refreshAgentStatus();
+      return;
+    }
+    setDeployment({ kind: "uninstall", job });
+  }, [refreshAgentStatus]);
   const onInstallStart = useCallback(() => setDeployment({ kind: "install" }), []);
   const onUpdateStart = useCallback(() => setDeployment({ kind: "update" }), []);
+  const onUninstallStart = useCallback(() => setDeployment({ kind: "uninstall" }), []);
   const onInstallFailure = useCallback(() => setDeployment((current) => current?.kind === "install" && !current.job ? null : current), []);
   const onUpdateFailure = useCallback(() => setDeployment((current) => current?.kind === "update" && !current.job ? null : current), []);
+  const onUninstallFailure = useCallback(() => setDeployment((current) => current?.kind === "uninstall" && !current.job ? null : current), []);
   const trackedNeedsAttention = tracked && (
     tracked.outcome === "unknown" || tracked.job.status === "queued" || tracked.job.status === "running" || tracked.job.status === "failed"
   );
@@ -208,22 +218,31 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
     ? null
     : trackedNeedsAttention ? { kind: tracked.kind, job: tracked.job } : deployment;
   const active = !!visibleDeployment?.job && (visibleDeployment.job.status === "queued" || visibleDeployment.job.status === "running");
-  if (visibleDeployment?.kind === "install" || (!status.isPending && !status.data?.installed && status.data?.binary_status === "not_installed")) {
+  if (!status.isPending && !status.data?.installed && status.data?.binary_status === "not_installed" && visibleDeployment?.kind !== "uninstall") {
     return <div className="flex flex-wrap items-center gap-2"><AgentInstallControl key={`install-${server.id}`} server={server} otherOperationActive={false} onJob={onInstallJob} onStart={onInstallStart} onFailure={onInstallFailure} /></div>;
   }
-  if (visibleDeployment?.kind === "update" || (!status.isPending && status.data?.installed && status.data.binary_upgrade_available)) {
-    return <div className="flex flex-wrap items-center gap-2">
-      {status.data?.binary_status !== "update_available" && <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUpgradeUnverified")}</span>}
-      <AgentUpdateControl key={`update-${server.id}`} server={server} busy={false} ownActive={active} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} />
-    </div>;
-  }
   const agent = status.data;
-  if (status.isPending) return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleChecking")}</Button>;
-  if (status.isError || !agent) return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
-  if (isAgentBinaryCurrent(agent)) {
-    return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleCurrent")}</Button>;
-  }
-  return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
+  if (status.isPending && !visibleDeployment) return <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleChecking")}</Button>;
+  if ((status.isError || !agent) && !visibleDeployment) return <div className="flex flex-wrap items-center gap-2"><span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span><Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button></div>;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {visibleDeployment?.kind === "update" || (!status.isPending && status.data?.installed && status.data.binary_upgrade_available) ? (
+        <>
+          {status.data?.binary_status !== "update_available" && <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUpgradeUnverified")}</span>}
+          <AgentUpdateControl key={`update-${server.id}`} server={server} busy={false} ownActive={active && visibleDeployment?.kind === "update"} onJob={onUpdateJob} onStart={onUpdateStart} onFailure={onUpdateFailure} />
+        </>
+      ) : (agent && isAgentBinaryCurrent(agent)) ? (
+        <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleCurrent")}</Button>
+      ) : (
+        <>
+          <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span>
+          <Button size="sm" variant="outlined" disabled={status.isFetching} onClick={() => void status.refetch()}>{t("servers.agentLifecycleRefresh")}</Button>
+        </>
+      )}
+      <AgentUninstallControl key={`uninstall-${server.id}`} server={server} busy={false} ownActive={active && visibleDeployment?.kind === "uninstall"} onJob={onUninstallJob} onStart={onUninstallStart} onFailure={onUninstallFailure} />
+    </div>
+  );
 }
 
 function AgentInstallControl({ server, otherOperationActive, onJob, onStart, onFailure }: {
@@ -282,6 +301,29 @@ function AgentUpdateControl({ server, busy, ownActive, onJob, onStart, onFailure
   </>;
 }
 
+function AgentUninstallControl({ server, busy, ownActive, onJob, onStart, onFailure }: {
+  server: Schemas["Server"];
+  busy: boolean;
+  ownActive: boolean;
+  onJob: (job: Schemas["ServerAgentInstallJob"]) => void;
+  onStart: () => void;
+  onFailure: () => void;
+}) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const { jobs } = useAgentJobs();
+  const tracked = jobs.filter((entry) => entry.kind === "uninstall" && entry.serverId === server.id).sort((a, b) => a.changedAt - b.changedAt).at(-1);
+  const active = ownActive || tracked?.job.status === "queued" || tracked?.job.status === "running";
+  return <>
+    <Button size="sm" variant="outlined" className="text-bad hover:bg-bad/10 hover:border-bad/40" onClick={() => setOpen(true)} disabled={busy}>
+      <Icon icon={Trash2} size="xs" />
+      {active ? t("servers.agentUninstallProgress") : t("servers.agentUninstallAction")}
+    </Button>
+    {busy && <span role="status" className="text-xs text-muted">{t("servers.agentUpdateSSHBusy")}</span>}
+    <AgentUninstallDialog server={server} open={open} onClose={() => setOpen(false)} onJob={onJob} otherOperationActive={busy} onStart={onStart} onFailure={onFailure} initialJob={tracked?.job ?? null} />
+  </>;
+}
+
 interface AgentJobLogEntry {
   id: string;
   timestamp: string;
@@ -304,6 +346,12 @@ function computeAgentJobProgress(status?: string, stage?: string, isPending?: bo
       return 85;
     case "registering":
       return 95;
+    case "stopping":
+      return 35;
+    case "removing":
+      return 65;
+    case "cleaning":
+      return 90;
     case "complete":
       return 100;
     default:
@@ -327,6 +375,12 @@ function getAgentJobStageLabel(status: string | undefined, stage: string | undef
       return t("servers.agentJobStageActivating");
     case "registering":
       return t("servers.agentJobStageRegistering");
+    case "stopping":
+      return t("servers.agentJobStageStopping");
+    case "removing":
+      return t("servers.agentJobStageRemoving");
+    case "cleaning":
+      return t("servers.agentJobStageCleaning");
     case "complete":
       return t("servers.agentJobStageComplete");
     default:
@@ -388,7 +442,7 @@ function useAgentJobLogs({
 }: {
   job: Schemas["ServerAgentInstallJob"] | null | undefined;
   isPending: boolean;
-  kind: "install" | "update";
+  kind: "install" | "update" | "uninstall";
   outcomeUnknown?: boolean;
   t: ReturnType<typeof useT>;
 }) {
@@ -420,7 +474,12 @@ function useAgentJobLogs({
           id: `start-${Date.now()}`,
           timestamp: now,
           level: "info",
-          message: kind === "update" ? t("servers.agentLogStartingUpdate") : t("servers.agentLogStartingInstall"),
+          message:
+            kind === "uninstall"
+              ? t("servers.agentLogStartingUninstall")
+              : kind === "update"
+              ? t("servers.agentLogStartingUpdate")
+              : t("servers.agentLogStartingInstall"),
         },
       ]);
     }
@@ -441,13 +500,19 @@ function useAgentJobLogs({
       });
     }
 
-    const stageOrder = ["validating", "connecting", "transferring", "activating", "registering", "complete"];
+    const stageOrder = [
+      "validating", "connecting", "transferring", "activating", "registering",
+      "stopping", "removing", "cleaning", "complete",
+    ];
     const stageMessages: Record<string, () => string> = {
       validating: () => t("servers.agentLogStageValidating"),
       connecting: () => t("servers.agentLogStageConnecting"),
       transferring: () => t("servers.agentLogStageTransferring"),
       activating: () => t("servers.agentLogStageActivating"),
       registering: () => t("servers.agentLogStageRegistering"),
+      stopping: () => t("servers.agentLogStageStopping"),
+      removing: () => t("servers.agentLogStageRemoving"),
+      cleaning: () => t("servers.agentLogStageCleaning"),
     };
 
     if (job.stage && job.stage !== "failed") {
@@ -484,7 +549,12 @@ function useAgentJobLogs({
         id: `success-${job.id}`,
         timestamp: now,
         level: "success",
-        message: kind === "update" ? t("servers.agentLogUpdateSucceeded") : t("servers.agentLogInstallSucceeded"),
+        message:
+          kind === "uninstall"
+            ? t("servers.agentLogUninstallSucceeded")
+            : kind === "update"
+            ? t("servers.agentLogUpdateSucceeded")
+            : t("servers.agentLogInstallSucceeded"),
       });
     }
 
@@ -881,6 +951,155 @@ function AgentInstallDialog({
   );
 }
 
+function AgentUninstallDialog({
+  server,
+  open,
+  onClose,
+  onJob,
+  otherOperationActive,
+  onStart,
+  onFailure,
+  initialJob,
+}: {
+  server: Schemas["Server"];
+  open: boolean;
+  onClose: () => void;
+  onJob: (job: Schemas["ServerAgentInstallJob"]) => void;
+  otherOperationActive: boolean;
+  onStart: () => void;
+  onFailure: () => void;
+  initialJob: Schemas["ServerAgentInstallJob"] | null;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const { jobs, registerJob } = useAgentJobs();
+  const [job, setJob] = useState<Schemas["ServerAgentInstallJob"] | null>(initialJob);
+  const tracked = jobs.find((entry) => entry.kind === "uninstall" && entry.serverId === server.id && entry.job.id === job?.id);
+  const snapshot = tracked?.job ?? job;
+  const [port, setPort] = useState("22");
+  const passwordInputRef = useRef<HTMLInputElement>(null);
+  const pendingPasswordRef = useRef("");
+  const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
+  const secureBrowser = location.protocol === "https:";
+  const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
+
+  const updateJob = useCallback((next: Schemas["ServerAgentInstallJob"]) => {
+    setJob(next);
+    onJob(next);
+    if (next.status === "succeeded") {
+      void qc.invalidateQueries({ queryKey: ["server-agent", server.id] });
+    }
+  }, [onJob, qc, server.id]);
+
+  const start = useMutation({
+    mutationFn: async ({ port, password }: { port: number; password: string }) => {
+      return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/uninstall", {
+        params: { path: { serverId: server.id } },
+        body: { ssh_port: port, ssh_password: password },
+      }));
+    },
+    onSuccess: (next) => {
+      setAcceptedAt(next.status === "queued" || next.status === "running" ? performance.now() : null);
+      updateJob(next);
+      registerJob({ kind: "uninstall", serverId: server.id, serverName: server.name, job: next });
+    },
+    onError: () => {
+      pendingPasswordRef.current = "";
+      onFailure();
+    },
+  });
+
+  const pollBudgetExpired = tracked?.outcome === "unknown";
+  const submitted = !!job?.id || start.isPending;
+  const timerActive = (snapshot?.status === "queued" || snapshot?.status === "running") && !pollBudgetExpired;
+  const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
+  const logs = useAgentJobLogs({ job: snapshot, isPending: start.isPending, kind: "uninstall", outcomeUnknown: pollBudgetExpired, t });
+
+  const close = () => {
+    if (start.isPending) return;
+    httpsRedirect.cancel();
+    pendingPasswordRef.current = "";
+    if (passwordInputRef.current) passwordInputRef.current.value = "";
+    if (snapshot?.status === "succeeded") {
+      void qc.invalidateQueries({ queryKey: ["server-agent", server.id] });
+    }
+    onClose();
+  };
+
+  useEffect(() => () => {
+    pendingPasswordRef.current = "";
+    if (passwordInputRef.current) passwordInputRef.current.value = "";
+  }, []);
+
+  if (!open) return null;
+  return (
+    <Modal title={t("servers.agentUninstallTitle", { server: server.name })} onClose={close}>
+      {!submitted ? (
+        <form
+          className="flex flex-col gap-4"
+          aria-label={t("servers.agentUninstallTitle", { server: server.name })}
+          onSubmit={(event: FormEvent) => {
+            event.preventDefault();
+            if (!secureBrowser || otherOperationActive) return;
+            const password = passwordInputRef.current?.value ?? "";
+            if (!password) return;
+            if (passwordInputRef.current) passwordInputRef.current.value = "";
+            pendingPasswordRef.current = "";
+            onStart();
+            start.mutate({ port: Number(port), password });
+          }}
+        >
+          <p className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad font-medium">{t("servers.agentUninstallScope")}</p>
+          {!secureBrowser && (
+            <div className="flex flex-col gap-2">
+              <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallHttpsRequired")}</p>
+              <Button type="button" variant="outlined" disabled={httpsRedirect.pending} onClick={() => { void httpsRedirect.redirect(); }}>
+                {httpsRedirect.pending ? t("servers.agentHttpsRedirectChecking") : t("servers.agentHttpsRedirectAction")}
+              </Button>
+              {httpsRedirect.failed && <p role="alert" className="text-sm text-bad">{t("servers.agentHttpsRedirectFailed")}</p>}
+            </div>
+          )}
+          <p className="text-sm text-muted">{t("servers.agentUpdateSSHHostFixed")}</p>
+          <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentSSHHostKeyTOFU")}</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t("servers.agentInstallPortLabel")}>
+              <TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={port} onChange={(event) => setPort(event.target.value)} autoComplete="off" />
+            </Field>
+            <Field label={t("servers.agentInstallPasswordLabel")} hint={t("servers.agentInstallPasswordHint")}>
+              <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary" autoComplete="off" maxLength={4096} />
+            </Field>
+          </div>
+          {start.error && <p role="alert" className="text-sm text-bad">{t("servers.agentUninstallFailed")}</p>}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="text" onClick={close}>{t("common.cancel")}</Button>
+            <Button type="submit" variant="primary" className="bg-bad text-surface-base hover:bg-bad/90" disabled={start.isPending || otherOperationActive || !isValidSSHPort(port) || !secureBrowser}>
+              {t("servers.agentUninstallSubmit")}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <section aria-label={t("servers.agentUninstallProgress")} className="flex flex-col gap-4">
+          {start.isPending ? <JobBusyState label={t("servers.agentStarting")} /> : <p aria-live="polite" className="text-sm">{installJobStatusText(snapshot?.status, snapshot?.stage, t)}</p>}
+          <AgentJobProgressBar status={snapshot?.status} stage={snapshot?.stage} isPending={start.isPending} />
+          {acceptedAt != null && <JobBusyState busy={timerActive} elapsed={elapsedSeconds} label={t("servers.agentElapsed", { elapsed: formatElapsed(elapsedSeconds) })} />}
+          <AgentJobLogConsole logs={logs} isRunning={start.isPending || timerActive} status={snapshot?.status} />
+          {snapshot?.status === "succeeded" && !pollBudgetExpired && (
+            <p role="status" className="rounded-m3-lg bg-ok/10 p-3 text-sm text-ok font-medium">{t("servers.agentUninstallSuccess")}</p>
+          )}
+          {snapshot?.status === "failed" && (
+            <p role="alert" className="text-sm text-bad">{snapshot.message ?? t("servers.agentUninstallFailed")}</p>
+          )}
+          {pollBudgetExpired && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
+          {(snapshot?.status === "queued" || snapshot?.status === "running") && (
+            <p className="text-sm text-muted">{t("servers.agentInstallCloseDoesNotCancel")}</p>
+          )}
+          <Button className="self-end" onClick={close}>{t("common.close")}</Button>
+        </section>
+      )}
+    </Modal>
+  );
+}
+
 function isCanonicalIPv4(value: string) {
   const octets = value.split(".");
   return octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && String(Number(octet)) === octet && Number(octet) <= 255);
@@ -1125,9 +1344,8 @@ function AgentMonitor({ serverId }: { serverId: string }) {
   const sampleAt = metrics.network_sampled_at ? Date.parse(metrics.network_sampled_at) : Number.NaN;
   const networkIsFresh = Number.isFinite(sampleAt) && sampleAt <= now && now - sampleAt <= 15_000;
   const network = networkIsFresh ? (metrics.network_interfaces ?? []).filter((entry) =>
-    !!entry.name && Number.isFinite(entry.rx_bytes_per_second) && entry.rx_bytes_per_second >= 0 && Number.isFinite(entry.tx_bytes_per_second) && entry.tx_bytes_per_second >= 0,
+    !!entry.name && isLanInterfaceName(entry.name) && Number.isFinite(entry.rx_bytes_per_second) && entry.rx_bytes_per_second >= 0 && Number.isFinite(entry.tx_bytes_per_second) && entry.tx_bytes_per_second >= 0,
   ) : [];
-  const rate = (value: number) => value < 1024 ? `${Math.round(value)} B/s` : `${(value / 1024).toFixed(1)} KiB/s`;
   return (
     <div className="mt-2 flex min-w-48 flex-col gap-1 whitespace-normal text-xs">
       <span className="font-sans font-medium">{t("servers.agent")}: {metrics.installed ? metrics.version || "—" : t("servers.agentMissing")}</span>
@@ -1142,7 +1360,13 @@ function AgentMonitor({ serverId }: { serverId: string }) {
         </>
       )}
       {metrics.installed && cpu == null && <span className="font-sans text-muted">{t("servers.agentCPUUnavailable")}</span>}
-      {metrics.installed && network.length > 0 ? network.map((entry) => <span key={entry.name} className="font-sans text-muted">{t("servers.agentNetworkRate", { name: entry.name, rx: rate(entry.rx_bytes_per_second), tx: rate(entry.tx_bytes_per_second) })}</span>) : metrics.installed && <span className="font-sans text-muted">{t("servers.agentNetworkUnavailable")}</span>}
+      {metrics.installed && (
+        <LanNetworkMeters
+          serverId={serverId}
+          interfaces={network}
+          sampledAt={metrics.network_sampled_at}
+        />
+      )}
       {metrics.memory_total_bytes != null && (
         <>
           <span className="font-sans text-muted">{t("servers.agentMemory", { available: memory(metrics.memory_available_bytes), total: memory(metrics.memory_total_bytes) })}</span>
@@ -1150,6 +1374,241 @@ function AgentMonitor({ serverId }: { serverId: string }) {
         </>
       )}
       {metrics.error && <span role="alert" className="font-sans text-bad">{t("servers.agentError", { error: metrics.error })}</span>}
+    </div>
+  );
+}
+
+export function isLanInterfaceName(name: string): boolean {
+  if (name === "lo" || name.startsWith("lo:")) return false;
+  const virtualPrefixes = [
+    "docker", "br-", "veth", "virbr", "dummy", "tun", "tap",
+    "flannel", "cni", "kube", "vnet", "sit", "ip6tnl",
+  ];
+  return !virtualPrefixes.some((prefix) => name.startsWith(prefix));
+}
+
+export function formatNetworkRate(bytesPerSec: number): string {
+  if (!Number.isFinite(bytesPerSec) || bytesPerSec <= 0) return "0 B/s";
+  if (bytesPerSec < 1024) return `${Math.round(bytesPerSec)} B/s`;
+  if (bytesPerSec < 1024 * 1024) return `${(bytesPerSec / 1024).toFixed(1)} KiB/s`;
+  return `${(bytesPerSec / (1024 * 1024)).toFixed(2)} MiB/s`;
+}
+
+export interface NetworkTrafficSample {
+  timestamp: number;
+  rx: number;
+  tx: number;
+}
+
+const networkTrafficHistoryStore = new Map<string, NetworkTrafficSample[]>();
+const maxTrafficSamples = 20;
+
+export function recordNetworkSample(key: string, rx: number, tx: number): NetworkTrafficSample[] {
+  const current = networkTrafficHistoryStore.get(key) ?? [];
+  const next = [...current, { timestamp: Date.now(), rx, tx }].slice(-maxTrafficSamples);
+  networkTrafficHistoryStore.set(key, next);
+  return next;
+}
+
+export function getNetworkHistory(key: string): readonly NetworkTrafficSample[] {
+  return networkTrafficHistoryStore.get(key) ?? [];
+}
+
+export function clearNetworkHistory(): void {
+  networkTrafficHistoryStore.clear();
+}
+
+export function LanNetworkMeters({
+  serverId,
+  interfaces,
+  sampledAt,
+}: {
+  serverId: string;
+  interfaces: Schemas["ServerAgentNetworkInterface"][];
+  sampledAt?: string;
+}) {
+  const t = useT();
+  const [historyRevision, setHistoryRevision] = useState(0);
+
+  useEffect(() => {
+    if (!sampledAt || interfaces.length === 0) return;
+    for (const iface of interfaces) {
+      if (iface.name && Number.isFinite(iface.rx_bytes_per_second) && Number.isFinite(iface.tx_bytes_per_second)) {
+        recordNetworkSample(`${serverId}:${iface.name}`, iface.rx_bytes_per_second, iface.tx_bytes_per_second);
+      }
+    }
+    setHistoryRevision((r) => r + 1);
+  }, [serverId, interfaces, sampledAt]);
+
+  const lanInterfaces = interfaces.filter((entry) => !!entry.name && isLanInterfaceName(entry.name));
+
+  if (lanInterfaces.length === 0) {
+    return <span className="font-sans text-muted">{t("servers.agentNetworkUnavailable")}</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5" role="region" aria-label={t("servers.agentNetworkLive")}>
+      {lanInterfaces.map((iface) => {
+        const historyKey = `${serverId}:${iface.name}`;
+        const samples = getNetworkHistory(historyKey);
+        return (
+          <LanInterfaceCard
+            key={iface.name}
+            iface={iface}
+            samples={samples}
+            revision={historyRevision}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function LanInterfaceCard({
+  iface,
+  samples,
+  revision: _revision,
+}: {
+  iface: Schemas["ServerAgentNetworkInterface"];
+  samples: readonly NetworkTrafficSample[];
+  revision: number;
+}) {
+  const t = useT();
+  const [isHovered, setIsHovered] = useState(false);
+  const rx = iface.rx_bytes_per_second ?? 0;
+  const tx = iface.tx_bytes_per_second ?? 0;
+  const peakRx = samples.length > 0 ? Math.max(...samples.map((s) => s.rx), rx) : rx;
+  const peakTx = samples.length > 0 ? Math.max(...samples.map((s) => s.tx), tx) : tx;
+  const maxRate = Math.max(1024, peakRx, peakTx);
+
+  const width = 200;
+  const height = 44;
+  const padding = 4;
+  const chartWidth = width;
+  const chartHeight = height - padding * 2;
+
+  const pointsRx: string[] = [];
+  const pointsTx: string[] = [];
+
+  const effectiveSamples = samples.length < 2
+    ? [{ rx, tx, timestamp: Date.now() - 5000 }, { rx, tx, timestamp: Date.now() }]
+    : samples;
+
+  effectiveSamples.forEach((sample, i) => {
+    const x = (i / (effectiveSamples.length - 1)) * chartWidth;
+    const yRx = height - padding - (Math.min(sample.rx, maxRate) / maxRate) * chartHeight;
+    const yTx = height - padding - (Math.min(sample.tx, maxRate) / maxRate) * chartHeight;
+    pointsRx.push(`${x.toFixed(1)},${yRx.toFixed(1)}`);
+    pointsTx.push(`${x.toFixed(1)},${yTx.toFixed(1)}`);
+  });
+
+  const pathRx = `M ${pointsRx.join(" L ")}`;
+  const pathTx = `M ${pointsTx.join(" L ")}`;
+  const areaRx = `${pathRx} L ${chartWidth},${height} L 0,${height} Z`;
+
+  return (
+    <div
+      tabIndex={0}
+      role="group"
+      aria-label={`${iface.name} RX ${formatNetworkRate(rx)} TX ${formatNetworkRate(tx)}`}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      onFocus={() => setIsHovered(true)}
+      onBlur={() => setIsHovered(false)}
+      className="relative flex flex-col gap-1 rounded-m3-md border border-surface-3 bg-surface-2/40 px-2.5 py-1.5 transition-all hover:border-primary/50 hover:bg-surface-2/80 focus-visible:outline-2 focus-visible:outline-primary cursor-default select-none"
+    >
+      <span className="sr-only">
+        {t("servers.agentNetworkRate", { name: iface.name, rx: formatNetworkRate(rx), tx: formatNetworkRate(tx) })}
+      </span>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <span
+            aria-hidden
+            className="size-1.5 rounded-full bg-ok animate-pulse"
+          />
+          <span className="font-mono font-bold text-xs text-surface-on">{iface.name}</span>
+          <span className="rounded bg-primary/15 px-1 py-0.2 text-[10px] font-semibold text-primary uppercase">LAN</span>
+        </div>
+        <div className="flex items-center gap-2.5 font-mono text-[11px]">
+          <span className="inline-flex items-center gap-0.5 text-primary" title={t("servers.agentNetworkPeakRx")}>
+            <Icon icon={ArrowDown} size="xs" />
+            {formatNetworkRate(rx)}
+          </span>
+          <span className="inline-flex items-center gap-0.5 text-surface-on/70" title={t("servers.agentNetworkPeakTx")}>
+            <Icon icon={ArrowUp} size="xs" />
+            {formatNetworkRate(tx)}
+          </span>
+        </div>
+      </div>
+
+      <div className="h-1 w-full overflow-hidden rounded-full bg-surface-3/50 flex">
+        <div
+          className="h-full bg-primary transition-all duration-300"
+          style={{ width: `${Math.min(100, Math.max(3, (rx / maxRate) * 70))}%` }}
+        />
+        <div
+          className="h-full bg-ok/80 transition-all duration-300 ml-0.5"
+          style={{ width: `${Math.min(100, Math.max(3, (tx / maxRate) * 30))}%` }}
+        />
+      </div>
+
+      {isHovered && (
+        <div
+          role="tooltip"
+          className="absolute left-0 bottom-full mb-2 z-40 w-60 rounded-m3-lg border border-surface-3 bg-surface-base/95 p-3 shadow-2xl backdrop-blur flex flex-col gap-2.5 pointer-events-none"
+        >
+          <div className="flex items-center justify-between border-b border-surface-3/60 pb-1.5">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-surface-on">
+              <Icon icon={Activity} size="xs" className="text-primary" />
+              <span>{t("servers.agentNetworkHistory")}</span>
+            </div>
+            <span className="inline-flex items-center gap-1 rounded-full bg-ok/10 px-1.5 py-0.5 text-[10px] font-medium text-ok">
+              <span className="size-1.5 rounded-full bg-ok animate-pulse" />
+              {t("servers.agentNetworkLive")}
+            </span>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center justify-between text-[10px] text-muted font-sans">
+              <span className="inline-flex items-center gap-1 text-primary">
+                <span className="size-1.5 rounded-full bg-primary" />
+                RX ({formatNetworkRate(rx)})
+              </span>
+              <span className="inline-flex items-center gap-1 text-ok">
+                <span className="size-1.5 rounded-full bg-ok" />
+                TX ({formatNetworkRate(tx)})
+              </span>
+            </div>
+
+            <svg
+              viewBox={`0 0 ${width} ${height}`}
+              className="h-11 w-full overflow-visible"
+              aria-hidden="true"
+            >
+              <defs>
+                <linearGradient id={`rx-gradient-${iface.name}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--color-primary, #3b82f6)" stopOpacity="0.25" />
+                  <stop offset="100%" stopColor="var(--color-primary, #3b82f6)" stopOpacity="0.0" />
+                </linearGradient>
+              </defs>
+              <path d={areaRx} fill={`url(#rx-gradient-${iface.name})`} />
+              <path d={pathRx} fill="none" stroke="currentColor" className="text-primary" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path d={pathTx} fill="none" stroke="currentColor" className="text-ok" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" strokeDasharray="3 2" />
+            </svg>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 border-t border-surface-3/60 pt-2 text-[10px]">
+            <div>
+              <span className="block text-muted">{t("servers.agentNetworkPeakRx")}</span>
+              <span className="font-mono font-semibold text-primary">{formatNetworkRate(peakRx)}</span>
+            </div>
+            <div>
+              <span className="block text-muted">{t("servers.agentNetworkPeakTx")}</span>
+              <span className="font-mono font-semibold text-surface-on">{formatNetworkRate(peakTx)}</span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

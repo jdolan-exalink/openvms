@@ -1,7 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
-import { Servers } from "./Servers";
+import { Servers, isLanInterfaceName, formatNetworkRate, recordNetworkSample, getNetworkHistory, clearNetworkHistory, LanNetworkMeters } from "./Servers";
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
@@ -1112,6 +1112,174 @@ describe("Servers", () => {
       fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
       await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
       expect(writes(fetchMock, "DELETE")).toHaveLength(0);
+    });
+  });
+
+  describe("LAN network filtering and hover history meter", () => {
+    it("isLanInterfaceName filters loopback and virtual/docker interfaces strictly", () => {
+      // Excluded interfaces
+      expect(isLanInterfaceName("lo")).toBe(false);
+      expect(isLanInterfaceName("lo:0")).toBe(false);
+      expect(isLanInterfaceName("docker0")).toBe(false);
+      expect(isLanInterfaceName("br-4b3d3e0117cd")).toBe(false);
+      expect(isLanInterfaceName("veth15fbffe")).toBe(false);
+      expect(isLanInterfaceName("veth3e023d4")).toBe(false);
+      expect(isLanInterfaceName("virbr0")).toBe(false);
+      expect(isLanInterfaceName("dummy0")).toBe(false);
+      expect(isLanInterfaceName("tun0")).toBe(false);
+      expect(isLanInterfaceName("tap0")).toBe(false);
+      expect(isLanInterfaceName("cni0")).toBe(false);
+      expect(isLanInterfaceName("flannel.1")).toBe(false);
+      expect(isLanInterfaceName("kube-bridge")).toBe(false);
+      expect(isLanInterfaceName("vnet0")).toBe(false);
+      expect(isLanInterfaceName("sit0")).toBe(false);
+      expect(isLanInterfaceName("ip6tnl0")).toBe(false);
+
+      // Included physical/LAN interfaces
+      expect(isLanInterfaceName("eth0")).toBe(true);
+      expect(isLanInterfaceName("eth1")).toBe(true);
+      expect(isLanInterfaceName("enp3s0")).toBe(true);
+      expect(isLanInterfaceName("ens18")).toBe(true);
+      expect(isLanInterfaceName("eno1")).toBe(true);
+      expect(isLanInterfaceName("wlan0")).toBe(true);
+      expect(isLanInterfaceName("bond0")).toBe(true);
+    });
+
+    it("formatNetworkRate formats byte throughput into B/s, KiB/s and MiB/s", () => {
+      expect(formatNetworkRate(0)).toBe("0 B/s");
+      expect(formatNetworkRate(-100)).toBe("0 B/s");
+      expect(formatNetworkRate(512)).toBe("512 B/s");
+      expect(formatNetworkRate(1024)).toBe("1.0 KiB/s");
+      expect(formatNetworkRate(51200)).toBe("50.0 KiB/s");
+      expect(formatNetworkRate(1048576)).toBe("1.00 MiB/s");
+      expect(formatNetworkRate(20971520)).toBe("20.00 MiB/s");
+    });
+
+    it("recordNetworkSample and getNetworkHistory buffer up to 20 samples per key", () => {
+      clearNetworkHistory();
+      const key = "server-1:eth0";
+      for (let i = 1; i <= 25; i++) {
+        recordNetworkSample(key, i * 1000, i * 500);
+      }
+      const history = getNetworkHistory(key);
+      expect(history).toHaveLength(20);
+      expect(history[0]!.rx).toBe(6000);
+      expect(history[19]!.rx).toBe(25000);
+    });
+
+    it("LanNetworkMeters filters out non-LAN interfaces and renders physical LAN cards", async () => {
+      clearNetworkHistory();
+      const sampleInterfaces = [
+        { name: "lo", rx_bytes_per_second: 100, tx_bytes_per_second: 100 },
+        { name: "docker0", rx_bytes_per_second: 5000, tx_bytes_per_second: 2000 },
+        { name: "veth12345", rx_bytes_per_second: 3000, tx_bytes_per_second: 1500 },
+        { name: "eth0", rx_bytes_per_second: 20480, tx_bytes_per_second: 10240 },
+      ];
+
+      renderPage(() => (
+        <LanNetworkMeters
+          serverId="srv-test"
+          interfaces={sampleInterfaces}
+          sampledAt={new Date().toISOString()}
+        />
+      ));
+
+      expect(await screen.findByText("eth0")).toBeInTheDocument();
+      expect(screen.queryByText("docker0")).not.toBeInTheDocument();
+      expect(screen.queryByText("lo")).not.toBeInTheDocument();
+      expect(screen.queryByText("veth12345")).not.toBeInTheDocument();
+
+      // Live rates
+      expect(screen.getByText("20.0 KiB/s")).toBeInTheDocument();
+      expect(screen.getByText("10.0 KiB/s")).toBeInTheDocument();
+
+      // Card hover shows tooltip with history and live badge
+      const card = screen.getByRole("group", { name: /eth0 RX/i });
+      fireEvent.mouseEnter(card);
+
+      const tooltip = await screen.findByRole("tooltip");
+      expect(tooltip).toBeInTheDocument();
+      expect(within(tooltip).getByText(/Historial de tr[aá]fico|Traffic history/i)).toBeInTheDocument();
+      expect(within(tooltip).getByText(/En vivo|Live/i)).toBeInTheDocument();
+      expect(within(tooltip).getByText(/Pico bajada|Peak download/i)).toBeInTheDocument();
+      expect(within(tooltip).getByText(/Pico subida|Peak upload/i)).toBeInTheDocument();
+
+      fireEvent.mouseLeave(card);
+      await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
+    });
+  });
+
+  describe("Agent uninstallation", () => {
+    it("renders uninstall button and submits uninstallation job over SSH", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      let uninstallBody: any = null;
+      const grants = [
+        { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "a" },
+        { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "a" },
+      ];
+      const baseStub = stubApi({
+        "/api/v1/servers": () => json({ items: [server("a", "opevms-mimo", "s1")] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s1", name: "Helvecia" }] }),
+        "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants }),
+        "/api/v1/servers/a/agent": () => json({
+          installed: true,
+          version: "0.1.0",
+          binary_status: "current",
+          binary_observed: { sha256: "a".repeat(64), architecture: "amd64", version: "0.1.0" },
+          binary_available: { sha256: "a".repeat(64), architecture: "amd64", version: "0.1.0" },
+          binary_outdated: false,
+          binary_upgrade_available: false,
+        }),
+        "/api/v1/classify/policy": () => json({ servers: [] }),
+        "/api/v1/sync/status": () => json({ items: [] }),
+        "/api/v1/servers/a/agent/uninstall/job-uninstall-1": () => json({
+          id: "job-uninstall-1",
+          status: "succeeded",
+          stage: "complete",
+          message: "Agent uninstalled successfully",
+        }),
+      });
+
+      const fetchMock = vi.fn(async (request: Request) => {
+        const url = new URL(request.url);
+        if (url.pathname === "/api/v1/servers/a/agent/uninstall" && request.method === "POST") {
+          uninstallBody = await request.clone().json();
+          return json({ id: "job-uninstall-1", status: "queued", stage: "stopping" }, 202);
+        }
+        return baseStub(request);
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      renderPage(Servers);
+
+      // Locate uninstall button
+      const uninstallBtn = await screen.findByRole("button", { name: /Desinstalar agente|Uninstall agent/i });
+      expect(uninstallBtn).toBeInTheDocument();
+      fireEvent.click(uninstallBtn);
+
+      // Open uninstallation modal
+      const modal = await screen.findByRole("dialog", { name: /Desinstalar el agente OpenVMS/i });
+      expect(modal).toBeInTheDocument();
+      expect(modal).toHaveTextContent(/servicio openvms-agent/i);
+
+      // Fill SSH password
+      const passwordInput = within(modal).getByLabelText(/Contraseña SSH root/i);
+      fireEvent.change(passwordInput, { target: { value: "testpass" } });
+
+      // Submit
+      const submitBtn = within(modal).getByRole("button", { name: /Desinstalar agente/i });
+      fireEvent.click(submitBtn);
+
+      await waitFor(() => {
+        expect(uninstallBody).toEqual({ ssh_port: 22, ssh_password: "testpass" });
+      });
+
+      // Progress bar and log console appear
+      expect(await within(modal).findByRole("progressbar")).toBeInTheDocument();
+      expect(await within(modal).findByRole("log")).toBeInTheDocument();
+
+      // Succeeded message
+      expect(await within(modal).findByText(/El agente OpenVMS fue desinstalado exitosamente/i)).toBeInTheDocument();
     });
   });
 });

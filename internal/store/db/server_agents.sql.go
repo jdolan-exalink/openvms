@@ -11,6 +11,19 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteServerAgent = `-- name: DeleteServerAgent :execrows
+DELETE FROM server_agents
+WHERE server_id = $1
+`
+
+func (q *Queries) DeleteServerAgent(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteServerAgent, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getServerAgent = `-- name: GetServerAgent :one
 SELECT server_id, tenant_id, host, port, variant, token_sealed, version, updated_at
 FROM server_agents

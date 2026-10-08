@@ -153,7 +153,7 @@ func parseNetworkCounters(b []byte) (map[string]networkCounters, error) {
 			}
 			values[i] = value
 		}
-		if name == "lo" {
+		if !isLANInterface(name) {
 			continue
 		}
 		if _, exists := out[name]; exists {
@@ -172,3 +172,21 @@ func parseNetworkCounters(b []byte) (map[string]networkCounters, error) {
 	}
 	return out, nil
 }
+
+// isLANInterface returns true only for physical or LAN interfaces,
+// excluding loopback, Docker bridges, veth pairs, virtual bridges, and tunnels.
+func isLANInterface(name string) bool {
+	if name == "lo" || strings.HasPrefix(name, "lo:") {
+		return false
+	}
+	for _, prefix := range []string{
+		"docker", "br-", "veth", "virbr", "dummy", "tun", "tap",
+		"flannel", "cni", "kube", "vnet", "sit", "ip6tnl",
+	} {
+		if strings.HasPrefix(name, prefix) {
+			return false
+		}
+	}
+	return true
+}
+

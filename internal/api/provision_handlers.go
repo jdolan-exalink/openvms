@@ -108,6 +108,38 @@ func (h *Handlers) GetServerAgentUpdateJob(ctx context.Context, r gen.GetServerA
 	return gen.GetServerAgentUpdateJob200JSONResponse(serverAgentInstallJob(job)), nil
 }
 
+func (h *Handlers) UninstallServerAgentOverSsh(ctx context.Context, r gen.UninstallServerAgentOverSshRequestObject) (gen.UninstallServerAgentOverSshResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || r.Body.SshPassword == nil {
+		return nil, &provision.ValidationError{Msg: "agent uninstall request is required"}
+	}
+	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
+		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
+	}
+	job, err := h.Provision.StartServerAgentUninstall(ctx, a, uuid.UUID(r.ServerId), provision.AgentUninstallStartRequest{
+		SSHPort: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gen.UninstallServerAgentOverSsh202JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func (h *Handlers) GetServerAgentUninstallJob(ctx context.Context, r gen.GetServerAgentUninstallJobRequestObject) (gen.GetServerAgentUninstallJobResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, uuid.UUID(r.ServerId), uuid.UUID(r.JobId))
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetServerAgentUninstallJob200JSONResponse(serverAgentInstallJob(job)), nil
+}
+
 func serverAgentInstallJob(in provision.AgentInstallJob) gen.ServerAgentInstallJob {
 	out := gen.ServerAgentInstallJob{Id: types.UUID(in.ID), Status: gen.ServerAgentInstallJobStatus(in.Status), Stage: gen.ServerAgentInstallJobStage(in.Stage)}
 	if in.Message != "" {

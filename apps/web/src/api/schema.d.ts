@@ -635,6 +635,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/uninstall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Uninstall a registered agent from the host over SSH
+         * @description Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
+         */
+        post: operations["uninstallServerAgentOverSsh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/uninstall/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read transient existing-agent uninstall progress
+         * @description Requires both server-scoped permissions. Uninstall jobs live only in API memory; progress contains no credentials or remote command output.
+         */
+        get: operations["getServerAgentUninstallJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/onvif/discover": {
         parameters: {
             query?: never;
@@ -5340,6 +5385,63 @@ export interface operations {
         requestBody?: never;
         responses: {
             /** @description Update progress without credentials */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uninstallServerAgentOverSsh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Ephemeral in-memory uninstall job accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getServerAgentUninstallJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Uninstall progress without credentials */
             200: {
                 headers: {
                     [name: string]: unknown;

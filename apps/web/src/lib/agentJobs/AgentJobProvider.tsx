@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "@/api/client";
 
-export type AgentJobKind = "install" | "update";
+export type AgentJobKind = "install" | "update" | "uninstall";
 export type AgentJobOutcome = "tracking" | "unknown";
 
 export interface AgentJobRegistration {
@@ -30,11 +30,19 @@ const pollRequestTimeoutMs = 15_000;
 const maximumTrackedJobs = 128;
 
 const statuses = new Set(["queued", "running", "succeeded", "failed"]);
-const stages = new Set(["validating", "connecting", "transferring", "activating", "registering", "complete", "failed"]);
+const stages = new Set(["validating", "connecting", "transferring", "activating", "registering", "stopping", "removing", "cleaning", "complete", "failed"]);
 const safeMessages = new Set([
   "Install queued",
   "Validating agent installer",
   "Connecting to the SSH host using stored first-contact key trust",
+  "Connecting to the SSH host",
+  "Stopping and disabling agent service",
+  "Purging agent registration from database",
+  "Agent uninstalled successfully",
+  "Could not establish SSH connection to host",
+  "Failed to remove agent files on host",
+  "Agent files removed on host but database purge failed",
+  "Agent uninstallation failed unexpectedly",
   "Transferring agent files over SFTP",
   "Activating the agent service",
   "Registering encrypted agent credentials and TLS trust",
@@ -104,6 +112,10 @@ function TrackedJobPoller({ entry, onSnapshot, onUnknown }: {
       try {
         const request = entry.kind === "install"
           ? api.GET("/api/v1/servers/{serverId}/agent/install/{jobId}", {
+            params: { path: { serverId: entry.serverId, jobId: entry.job.id } }, signal: controller.signal,
+          })
+          : entry.kind === "uninstall"
+          ? api.GET("/api/v1/servers/{serverId}/agent/uninstall/{jobId}", {
             params: { path: { serverId: entry.serverId, jobId: entry.job.id } }, signal: controller.signal,
           })
           : api.GET("/api/v1/servers/{serverId}/agent/update-ssh/{jobId}", {

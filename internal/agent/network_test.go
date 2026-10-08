@@ -128,3 +128,36 @@ func TestProcNetworkReaderBoundsFileSize(t *testing.T) {
 		t.Fatalf("oversized proc file must fail closed: %#v", got)
 	}
 }
+
+func TestParseNetworkCountersFiltersVirtualAndDockerInterfaces(t *testing.T) {
+	proc := `Inter-|   Receive                                                |  Transmit
+ face |bytes    packets errs drop fifo frame compressed multicast|bytes    packets errs drop fifo colls carrier compressed
+    lo:    1951      20    0    0    0     0          0         0     1951      20    0    0    0     0       0          0
+  eth0: 995778189 2152565    0 457590    0     0          0         0 12002960   28946    0    0    0     0       0          0
+docker0:       0       0    0    0    0     0          0         0        0       0    0    2    0     0       0          0
+br-4b3d3e0117cd: 9413270   14173    0    0    0     0          0         0  3496481   25959    0    2    0     0       0          0
+veth15fbffe: 3750452    4114    0    0    0     0          0         0  3812908    5054    0    0    0     0       0          0
+veth3e023d4: 13421822   19190    0    0    0     0          0         0  7249059   30102    0    0    0     0       0          0
+virbr0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+  enp3s0: 1000 1 0 0 0 0 0 0 2000 1 0 0 0 0 0 0
+`
+	counters, err := parseNetworkCounters([]byte(proc))
+	if err != nil {
+		t.Fatalf("unexpected error parsing counters: %v", err)
+	}
+	if len(counters) != 2 {
+		t.Fatalf("expected exactly 2 LAN interfaces (eth0, enp3s0), got %d: %#v", len(counters), counters)
+	}
+	if _, ok := counters["eth0"]; !ok {
+		t.Errorf("expected eth0 to be present")
+	}
+	if _, ok := counters["enp3s0"]; !ok {
+		t.Errorf("expected enp3s0 to be present")
+	}
+	for _, excluded := range []string{"lo", "docker0", "br-4b3d3e0117cd", "veth15fbffe", "veth3e023d4", "virbr0"} {
+		if _, ok := counters[excluded]; ok {
+			t.Errorf("interface %s should have been excluded", excluded)
+		}
+	}
+}
+

@@ -30,3 +30,8 @@ WHERE server_id = @server_id;
 INSERT INTO server_agents (server_id, tenant_id, host, port, variant, token_sealed, version)
 VALUES (@server_id, @tenant_id, @host, @port, @variant, @token_sealed, @version)
 ON CONFLICT (server_id) DO NOTHING;
+
+-- name: DeleteServerAgent :execrows
+DELETE FROM server_agents
+WHERE server_id = @server_id;
+

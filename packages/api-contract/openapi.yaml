@@ -797,6 +797,48 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/uninstall:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: uninstallServerAgentOverSsh
+      summary: Uninstall a registered agent from the host over SSH
+      description: Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerAgentUpdateRequest" }
+      responses:
+        "202":
+          description: Ephemeral in-memory uninstall job accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/servers/{serverId}/agent/uninstall/{jobId}:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgentUninstallJob
+      summary: Read transient existing-agent uninstall progress
+      description: Requires both server-scoped permissions. Uninstall jobs live only in API memory; progress contains no credentials or remote command output.
+      responses:
+        "200":
+          description: Uninstall progress without credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/servers/{serverId}/onvif/discover:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
