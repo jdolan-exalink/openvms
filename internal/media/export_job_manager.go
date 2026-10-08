@@ -523,7 +523,7 @@ func (m *ExportJobManager) finalizeJob(ctx context.Context, j activeJobRow, item
 	var camList []cameraManifest
 	var totalBytes int64
 	hashes := make(map[string]string)
-
+	camIDs := make([]uuid.UUID, 0, len(items))
 	for _, it := range items {
 		filename := fmt.Sprintf("%s.mp4", it.id.String())
 		camList = append(camList, cameraManifest{
@@ -538,6 +538,52 @@ func (m *ExportJobManager) finalizeJob(ctx context.Context, j activeJobRow, item
 		})
 		totalBytes += it.totalBytes
 		hashes[filename] = it.sha256Hash
+		camIDs = append(camIDs, it.cameraID)
+	}
+
+	type eventManifestItem struct {
+		ID        string   `json:"id"`
+		CameraID  string   `json:"camera_id"`
+		StartTime string   `json:"start_time"`
+		EndTime   string   `json:"end_time"`
+		Labels    []string `json:"labels"`
+		Zones     []string `json:"zones"`
+		Plates    []string `json:"plates"`
+		Severity  string   `json:"severity"`
+	}
+	var manifestEvents []eventManifestItem
+
+	if len(camIDs) > 0 {
+		_ = m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			rows, qerr := tx.Query(ctx, `
+SELECT id, camera_id, start_time, COALESCE(end_time, start_time), labels, zones, plates, severity
+FROM events
+WHERE camera_id = ANY($1) AND start_time <= $3 AND (end_time IS NULL OR end_time >= $2)
+ORDER BY start_time ASC`, camIDs, j.start, j.end)
+			if qerr != nil {
+				return qerr
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var evID, cID uuid.UUID
+				var st, et time.Time
+				var labels, zones, plates []string
+				var sev string
+				if err := rows.Scan(&evID, &cID, &st, &et, &labels, &zones, &plates, &sev); err == nil {
+					manifestEvents = append(manifestEvents, eventManifestItem{
+						ID:        evID.String(),
+						CameraID:  cID.String(),
+						StartTime: st.UTC().Format(time.RFC3339),
+						EndTime:   et.UTC().Format(time.RFC3339),
+						Labels:    labels,
+						Zones:     zones,
+						Plates:    plates,
+						Severity:  sev,
+					})
+				}
+			}
+			return nil
+		})
 	}
 
 	manifestObj := map[string]any{
@@ -550,6 +596,7 @@ func (m *ExportJobManager) finalizeJob(ctx context.Context, j activeJobRow, item
 		"end_time":            j.end.UTC().Format(time.RFC3339),
 		"protected":           j.protected,
 		"cameras":             camList,
+		"events":              manifestEvents,
 		"total_bytes":         totalBytes,
 		"hashes":              hashes,
 		"integrity_algorithm": "SHA-256",
