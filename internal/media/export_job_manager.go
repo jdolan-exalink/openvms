@@ -555,15 +555,19 @@ func (m *ExportJobManager) finalizeJob(ctx context.Context, j activeJobRow, item
 		// ObjectTrack) so shared links and offline copies need no live lookup.
 		Tracks json.RawMessage `json:"tracks"`
 	}
-	var manifestEvents []eventManifestItem
+	manifestEvents := []eventManifestItem{}
 
 	if len(camIDs) > 0 {
-		_ = m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		// An event still open is only taken when it started within an hour of the window: the
+		// syncer stops re-reading reviews open longer than that (Frigate restarted mid-review and
+		// never closed them), so older open rows are stale and would leak into every export.
+		err := m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 			rows, qerr := tx.Query(ctx, `
 SELECT e.id, e.camera_id, e.start_time, COALESCE(e.end_time, e.start_time), e.labels, e.zones, e.plates, e.severity,
 `+events.TracksSubquery+`
 FROM events e
-WHERE e.camera_id = ANY($1) AND e.start_time <= $3 AND (e.end_time IS NULL OR e.end_time >= $2)
+WHERE e.camera_id = ANY($1) AND e.start_time <= $3
+  AND (e.end_time >= $2 OR (e.end_time IS NULL AND e.start_time >= $2::timestamptz - interval '1 hour'))
 ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 			if qerr != nil {
 				return qerr
@@ -575,22 +579,28 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 				var labels, zones, plates []string
 				var sev string
 				var tracks []byte
-				if err := rows.Scan(&evID, &cID, &st, &et, &labels, &zones, &plates, &sev, &tracks); err == nil {
-					manifestEvents = append(manifestEvents, eventManifestItem{
-						ID:        evID.String(),
-						CameraID:  cID.String(),
-						StartTime: st.UTC().Format(time.RFC3339),
-						EndTime:   et.UTC().Format(time.RFC3339),
-						Labels:    labels,
-						Zones:     zones,
-						Plates:    plates,
-						Severity:  sev,
-						Tracks:    tracks,
-					})
+				if err := rows.Scan(&evID, &cID, &st, &et, &labels, &zones, &plates, &sev, &tracks); err != nil {
+					return err
 				}
+				manifestEvents = append(manifestEvents, eventManifestItem{
+					ID:        evID.String(),
+					CameraID:  cID.String(),
+					StartTime: st.UTC().Format(time.RFC3339),
+					EndTime:   et.UTC().Format(time.RFC3339),
+					Labels:    labels,
+					Zones:     zones,
+					Plates:    plates,
+					Severity:  sev,
+					Tracks:    tracks,
+				})
 			}
-			return nil
+			return rows.Err()
 		})
+		if err != nil {
+			// The video is still valid evidence; the manifest just lacks the event index.
+			m.Log.WarnContext(ctx, "export manager: manifest events not loaded", "job_id", j.id, "err", err)
+			manifestEvents = []eventManifestItem{}
+		}
 	}
 
 	manifestObj := map[string]any{
