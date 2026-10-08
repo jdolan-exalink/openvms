@@ -24,6 +24,7 @@ import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { Button, LinkButton } from "@/components/ui";
 import { fmtBytes, fmtDateTime, fmtTime, labelName } from "@/lib/format";
+import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
 import { parseCoordinates, type Point } from "@/lib/zoneGeometry";
 
 export interface EvidencePlayerCameraItem {
@@ -96,8 +97,8 @@ function formatTime(sec: number): string {
 }
 
 /**
- * CameraEvidenceOverlay draws SVG visual zones, touched zone highlights,
- * trajectory tracking lines, and bounding boxes synchronized with playback time.
+ * CameraEvidenceOverlay renders configured Frigate camera zones and a stable event HUD chip,
+ * matching Frigate 0.18 event review style without synthetic jumping bounding boxes.
  */
 function CameraEvidenceOverlay({
   cameraId,
@@ -117,8 +118,7 @@ function CameraEvidenceOverlay({
   layers: {
     zones: boolean;
     touched: boolean;
-    trajectories: boolean;
-    bboxes: boolean;
+    events: boolean;
   };
 }) {
   // Query camera config for zones when not public
@@ -127,7 +127,7 @@ function CameraEvidenceOverlay({
     enabled: !!cameraId && !isPublic && !manifestZones?.[cameraId],
   });
 
-  // Resolved zones for this camera
+  // Resolved zones for this camera — only real configured zones, never fake dummy zones
   const zones: ZoneInfo[] = useMemo(() => {
     const rawZones =
       manifestZones?.[cameraId] ||
@@ -151,19 +151,7 @@ function CameraEvidenceOverlay({
       if (list.length > 0) return list;
     }
 
-    // Default surveillance coverage zone so zones are always demonstrable
-    return [
-      {
-        name: "Área de Cobertura",
-        points: [
-          { x: 0.08, y: 0.12 },
-          { x: 0.92, y: 0.12 },
-          { x: 0.92, y: 0.88 },
-          { x: 0.08, y: 0.88 },
-        ],
-        color: "#3b82f6",
-      },
-    ];
+    return [];
   }, [manifestZones, cameraId, configDoc.data]);
 
   // Current active instant in epoch seconds
@@ -174,7 +162,7 @@ function CameraEvidenceOverlay({
     return cameraEvents.filter((ev) => {
       const st = new Date(ev.start_time).getTime() / 1000;
       const et = ev.end_time ? new Date(ev.end_time).getTime() / 1000 : st + 6;
-      return currentInstantUnix >= st - 0.5 && currentInstantUnix <= et + 0.5;
+      return currentInstantUnix >= st && currentInstantUnix <= et;
     });
   }, [cameraEvents, currentInstantUnix]);
 
@@ -183,222 +171,124 @@ function CameraEvidenceOverlay({
     const s = new Set<string>();
     activeEvents.forEach((ev) => {
       (ev.zones || []).forEach((z) => s.add(z));
-      if ((!ev.zones || ev.zones.length === 0) && zones.length > 0 && zones[0]) {
-        s.add(zones[0].name);
-      }
     });
     return s;
-  }, [activeEvents, zones]);
+  }, [activeEvents]);
 
   return (
-    <svg
-      viewBox="0 0 1000 1000"
-      preserveAspectRatio="none"
-      className="absolute inset-0 w-full h-full pointer-events-none z-10 select-none"
-    >
-      <defs>
-        <filter id="glow-touched" x="-20%" y="-20%" width="140%" height="140%">
-          <feGaussianBlur stdDeviation="8" result="blur" />
-          <feComposite in="SourceGraphic" in2="blur" operator="over" />
-        </filter>
-        <marker
-          id="arrow-head"
-          viewBox="0 0 10 10"
-          refX="5"
-          refY="5"
-          markerWidth="6"
-          markerHeight="6"
-          orient="auto-start-reverse"
+    <>
+      {/* SVG Layer: Real Camera Zones with Touched Glow Highlights */}
+      {layers.zones && zones.length > 0 && (
+        <svg
+          viewBox="0 0 1000 1000"
+          preserveAspectRatio="none"
+          className="absolute inset-0 w-full h-full pointer-events-none z-10 select-none"
         >
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#06b6d4" />
-        </marker>
-      </defs>
+          <defs>
+            <filter id={`glow-touched-${cameraId}`} x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="6" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
+          </defs>
 
-      {/* Render Zones */}
-      {layers.zones &&
-        zones.map((zone) => {
-          const isTouched = layers.touched && touchedZoneNames.has(zone.name);
-          const pointsStr = zone.points
-            .map((p) => `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`)
-            .join(" ");
+          {zones.map((zone) => {
+            const isTouched = layers.touched && touchedZoneNames.has(zone.name);
+            const pointsStr = zone.points
+              .map((p) => `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`)
+              .join(" ");
 
-          // Centroid for label
-          const cx = Math.round(
-            (zone.points.reduce((a, b) => a + b.x, 0) / zone.points.length) * 1000
-          );
-          const cy = Math.round(
-            (zone.points.reduce((a, b) => a + b.y, 0) / zone.points.length) * 1000
-          );
+            const cx = Math.round(
+              (zone.points.reduce((a, b) => a + b.x, 0) / zone.points.length) * 1000
+            );
+            const cy = Math.round(
+              (zone.points.reduce((a, b) => a + b.y, 0) / zone.points.length) * 1000
+            );
 
-          return (
-            <g key={zone.name} className="transition-all duration-300">
-              <polygon
-                points={pointsStr}
-                fill={isTouched ? "rgba(239, 68, 68, 0.35)" : "rgba(59, 130, 246, 0.12)"}
-                stroke={isTouched ? "#ef4444" : zone.color}
-                strokeWidth={isTouched ? "4.5" : "2"}
-                strokeDasharray={isTouched ? undefined : "8 4"}
-                filter={isTouched ? "url(#glow-touched)" : undefined}
-              />
-
-              {/* Zone Label Pill */}
-              <g transform={`translate(${cx}, ${cy})`}>
-                <rect
-                  x="-75"
-                  y="-16"
-                  width="150"
-                  height="30"
-                  rx="6"
-                  fill={isTouched ? "rgba(239, 68, 68, 0.9)" : "rgba(15, 23, 42, 0.75)"}
-                  stroke={isTouched ? "#fee2e2" : zone.color}
-                  strokeWidth="1.5"
-                />
-                <text
-                  x="0"
-                  y="4"
-                  textAnchor="middle"
-                  fill="#ffffff"
-                  fontSize="13"
-                  fontWeight="bold"
-                  className="font-mono"
-                >
-                  {isTouched ? `🎯 ${zone.name}` : zone.name}
-                </text>
-              </g>
-            </g>
-          );
-        })}
-
-      {/* Render Active Objects, Trajectories & Bounding Boxes */}
-      {activeEvents.map((ev, evIdx) => {
-        const st = new Date(ev.start_time).getTime() / 1000;
-        const et = ev.end_time ? new Date(ev.end_time).getTime() / 1000 : st + 6;
-        const span = Math.max(1, et - st);
-        const progress = Math.min(1, Math.max(0, (currentInstantUnix - st) / span));
-
-        // Use the first zone or defaults to anchor object trajectory
-        const anchorZone = zones.find((z) => ev.zones?.includes(z.name)) || zones[0];
-        const pts = anchorZone?.points || [
-          { x: 0.2, y: 0.3 },
-          { x: 0.8, y: 0.7 },
-        ];
-
-        // Generate trajectory path points across the zone
-        const p0 = pts[0] || { x: 0.2, y: 0.4 };
-        const pEnd = pts[Math.min(pts.length - 1, 2)] || { x: 0.8, y: 0.6 };
-
-        const waypoints: Point[] = [
-          p0,
-          { x: p0.x * 0.7 + pEnd.x * 0.3, y: p0.y * 0.6 + pEnd.y * 0.4 - 0.05 },
-          { x: p0.x * 0.4 + pEnd.x * 0.6, y: p0.y * 0.3 + pEnd.y * 0.7 + 0.04 },
-          pEnd,
-        ];
-
-        // Current object position along the trajectory
-        const curX = p0.x + (pEnd.x - p0.x) * progress;
-        const curY =
-          p0.y +
-          (pEnd.y - p0.y) * progress +
-          Math.sin(progress * Math.PI) * 0.06;
-
-        const posX = Math.round(curX * 1000);
-        const posY = Math.round(curY * 1000);
-
-        // Bounding box dimensions
-        const isCar = ev.labels.some((l) => l === "car" || l === "truck" || l === "motorcycle");
-        const bw = isCar ? 180 : 110;
-        const bh = isCar ? 130 : 180;
-        const bx = Math.max(20, Math.min(980 - bw, posX - bw / 2));
-        const by = Math.max(35, Math.min(980 - bh, posY - bh / 2));
-
-        // Trajectory path up to current progress
-        const traversedPoints: Point[] = [p0];
-        if (progress > 0.33 && waypoints[1]) traversedPoints.push(waypoints[1]);
-        if (progress > 0.66 && waypoints[2]) traversedPoints.push(waypoints[2]);
-        traversedPoints.push({ x: curX, y: curY });
-
-        const trajStr = traversedPoints
-          .map((p) => `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`)
-          .join(" ");
-
-        const labelText = ev.plates && ev.plates.length > 0
-          ? `${ev.plates[0]}`
-          : ev.labels.length > 0 && ev.labels[0]
-            ? `${labelName(ev.labels[0])}`
-            : "Objeto";
-
-        return (
-          <g key={`${ev.id}-${evIdx}`}>
-            {/* Trajectory Tracking Line */}
-            {layers.trajectories && (
-              <>
-                <polyline
-                  points={trajStr}
-                  fill="none"
-                  stroke="#06b6d4"
-                  strokeWidth="3.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeDasharray="8 4"
-                  markerEnd="url(#arrow-head)"
-                />
-                {traversedPoints.map((pt, i) => (
-                  <circle
-                    key={i}
-                    cx={Math.round(pt.x * 1000)}
-                    cy={Math.round(pt.y * 1000)}
-                    r="4"
-                    fill="#ffffff"
-                    stroke="#06b6d4"
-                    strokeWidth="2"
-                  />
-                ))}
-              </>
-            )}
-
-            {/* Bounding Box & Target Tag */}
-            {layers.bboxes && (
-              <>
-                <rect
-                  x={bx}
-                  y={by}
-                  width={bw}
-                  height={bh}
-                  rx="8"
-                  fill="rgba(34, 197, 94, 0.16)"
-                  stroke="#22c55e"
-                  strokeWidth="3"
+            return (
+              <g key={zone.name} className="transition-all duration-200">
+                <polygon
+                  points={pointsStr}
+                  fill={isTouched ? "rgba(239, 68, 68, 0.28)" : "rgba(59, 130, 246, 0.08)"}
+                  stroke={isTouched ? "#ef4444" : zone.color}
+                  strokeWidth={isTouched ? "3.5" : "1.8"}
+                  strokeDasharray={isTouched ? undefined : "6 3"}
+                  filter={isTouched ? `url(#glow-touched-${cameraId})` : undefined}
                 />
 
-                {/* Floating Tag */}
-                <g transform={`translate(${bx}, ${Math.max(20, by - 32)})`}>
+                {/* Zone Label Pill */}
+                <g transform={`translate(${cx}, ${cy})`}>
                   <rect
-                    x="0"
-                    y="0"
-                    width={Math.max(90, labelText.length * 9 + 24)}
+                    x="-70"
+                    y="-14"
+                    width="140"
                     height="26"
                     rx="5"
-                    fill="rgba(15, 23, 42, 0.9)"
-                    stroke="#22c55e"
-                    strokeWidth="1.5"
+                    fill={isTouched ? "rgba(239, 68, 68, 0.92)" : "rgba(15, 23, 42, 0.75)"}
+                    stroke={isTouched ? "#fee2e2" : zone.color}
+                    strokeWidth="1.2"
                   />
                   <text
-                    x="10"
-                    y="18"
+                    x="0"
+                    y="4"
+                    textAnchor="middle"
                     fill="#ffffff"
-                    fontSize="13"
+                    fontSize="12"
                     fontWeight="bold"
                     className="font-mono"
                   >
-                    {isCar ? "🚗" : "👤"} {labelText}
+                    {isTouched ? `🎯 ${zone.name}` : zone.name}
                   </text>
                 </g>
-              </>
-            )}
-          </g>
-        );
-      })}
-    </svg>
+              </g>
+            );
+          })}
+        </svg>
+      )}
+
+      {/* Frigate 0.18-style Event Info HUD (Floating chips in top-left corner) */}
+      {layers.events && activeEvents.length > 0 && (
+        <div className="absolute top-2.5 left-2.5 z-20 pointer-events-none flex flex-col gap-1.5 max-w-[85%] select-none">
+          {activeEvents.map((ev) => {
+            const isAlert = ev.severity === "alert";
+            const isCar = ev.labels.some((l) => l === "car" || l === "truck" || l === "motorcycle");
+            const isPerson = ev.labels.some((l) => l === "person");
+
+            return (
+              <div
+                key={ev.id}
+                className="flex flex-wrap items-center gap-2 px-2.5 py-1.5 rounded-m3-sm bg-surface-0/90 backdrop-blur-md border border-outline-variant/60 shadow-md text-xs"
+              >
+                <span
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                    isAlert ? "bg-bad text-white" : "bg-primary text-white"
+                  }`}
+                >
+                  {isAlert ? "Alerta" : "Detección"}
+                </span>
+
+                <span className="font-semibold text-on-surface flex items-center gap-1 font-mono">
+                  <span>{isCar ? "🚗" : isPerson ? "👤" : "🎯"}</span>
+                  <span>{ev.labels.map(labelName).join(", ") || "Objeto"}</span>
+                </span>
+
+                {ev.plates && ev.plates.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-200 border border-purple-500/40 font-mono text-[11px] font-bold">
+                    Patente: {ev.plates[0]}
+                  </span>
+                )}
+
+                {ev.zones && ev.zones.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded bg-surface-2 text-on-surface-variant border border-outline-variant/40 text-[11px] flex items-center gap-1">
+                    <span>🎯</span>
+                    <span>{ev.zones.join(", ")}</span>
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -427,11 +317,11 @@ export function EvidencePlayerModal({
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
 
   // Layers visibility state
+  // Layers visibility state (Frigate 0.18 style)
   const [layers, setLayers] = useState({
     zones: true,
     touched: true,
-    trajectories: true,
-    bboxes: true,
+    events: true,
   });
   const [layersOpen, setLayersOpen] = useState(false);
 
@@ -441,6 +331,11 @@ export function EvidencePlayerModal({
 
   const items = job.items || [];
   const cameraIds = useMemo(() => items.map((it) => it.camera_id).filter(Boolean), [items]);
+  const itemIds = useMemo(() => items.map((it) => it.id), [items]);
+
+  // Synchronize follower playback with the master video element
+  const getVideo = useCallback((id: string) => videoRefs.current.get(id), []);
+  useSyncedPlayback(masterKey, itemIds, getVideo);
 
   // Query events for all cameras in the export job
   const allEventsQuery = useQuery({
@@ -508,32 +403,18 @@ export function EvidencePlayerModal({
     return () => clearTimeout(timer);
   }, []);
 
-  // Real-time playback position ticker (10 Hz): guarantees seconds counter and timeline needle advance continuously
+  // Real-time playback position ticker (10 Hz): strictly driven by the master video element
   useEffect(() => {
-    if (!isPlaying) return;
+    if (!isPlaying || !masterKey) return;
 
     const interval = setInterval(() => {
       if (isSeekingRef.current) return;
 
-      // Find any video element actively playing
-      let activeEl: HTMLVideoElement | null = null;
-      if (masterKey && videoRefs.current.has(masterKey)) {
-        const mv = videoRefs.current.get(masterKey);
-        if (mv && !mv.paused && !mv.ended) activeEl = mv;
-      }
-      if (!activeEl) {
-        for (const [, v] of videoRefs.current.entries()) {
-          if (!v.paused && !v.ended && v.currentTime > 0) {
-            activeEl = v;
-            break;
-          }
-        }
-      }
-
-      if (activeEl) {
-        setCurrentTime(activeEl.currentTime);
-        if (activeEl.duration && isFinite(activeEl.duration) && activeEl.duration > 0) {
-          setDuration((prev) => Math.max(prev, activeEl!.duration));
+      const mv = videoRefs.current.get(masterKey);
+      if (mv && !mv.paused && !mv.seeking) {
+        setCurrentTime(mv.currentTime);
+        if (mv.duration && isFinite(mv.duration) && mv.duration > 0) {
+          setDuration((prev) => Math.max(prev, mv.duration));
         }
       }
     }, 100);
@@ -541,18 +422,18 @@ export function EvidencePlayerModal({
     return () => clearInterval(interval);
   }, [isPlaying, masterKey]);
 
-  // Sync state from video HTML events as well
-  const onTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+  // Sync state strictly from master video HTML events
+  const onTimeUpdate = (itemId: string, e: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (itemId !== masterKey || isSeekingRef.current) return;
     const target = e.currentTarget;
-    if (!isSeekingRef.current) {
-      setCurrentTime(target.currentTime);
-    }
+    setCurrentTime(target.currentTime);
     if (target.duration && isFinite(target.duration) && target.duration > 0) {
       setDuration((prev) => Math.max(prev, target.duration));
     }
   };
 
-  const onLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement>) => {
+  const onLoadedMetadata = (itemId: string, e: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (itemId !== masterKey) return;
     const target = e.currentTarget;
     if (target.duration && isFinite(target.duration) && target.duration > 0) {
       setDuration((prev) => Math.max(prev, target.duration));
@@ -671,16 +552,16 @@ export function EvidencePlayerModal({
               variant={layersOpen ? "filled" : "outlined"}
               size="sm"
               onClick={() => setLayersOpen(!layersOpen)}
-              title="Capas forenses (Zonas, seguimiento, cajas)"
+              title="Capas forenses (Zonas y eventos estilo Frigate)"
             >
               <Icon icon={Layers} size="xs" />
               <span>Capas</span>
             </Button>
 
             {layersOpen && (
-              <div className="absolute right-0 top-10 z-50 w-56 p-3 bg-surface-2 rounded-m3-md border border-outline-variant shadow-lg flex flex-col gap-2 text-xs">
+              <div className="absolute right-0 top-10 z-50 w-56 p-3 bg-surface-2 rounded-m3-md border border-outline-variant shadow-lg flex flex-col gap-2.5 text-xs">
                 <span className="font-semibold text-on-surface border-b border-outline-variant/40 pb-1">
-                  Capas de análisis forense
+                  Capas estilo Frigate
                 </span>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -689,7 +570,7 @@ export function EvidencePlayerModal({
                     onChange={(e) => setLayers((l) => ({ ...l, zones: e.target.checked }))}
                     className="accent-primary rounded"
                   />
-                  <span>Zonas de interés</span>
+                  <span>Zonas configuradas</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -698,25 +579,16 @@ export function EvidencePlayerModal({
                     onChange={(e) => setLayers((l) => ({ ...l, touched: e.target.checked }))}
                     className="accent-primary rounded"
                   />
-                  <span>Zonas tocadas (Alerta)</span>
+                  <span>Resaltar zonas activas</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={layers.trajectories}
-                    onChange={(e) => setLayers((l) => ({ ...l, trajectories: e.target.checked }))}
+                    checked={layers.events}
+                    onChange={(e) => setLayers((l) => ({ ...l, events: e.target.checked }))}
                     className="accent-primary rounded"
                   />
-                  <span>Líneas de seguimiento</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={layers.bboxes}
-                    onChange={(e) => setLayers((l) => ({ ...l, bboxes: e.target.checked }))}
-                    className="accent-primary rounded"
-                  />
-                  <span>Cajas de detección</span>
+                  <span>Ficha de eventos (HUD)</span>
                 </label>
               </div>
             )}
@@ -800,15 +672,17 @@ export function EvidencePlayerModal({
                   playsInline
                   autoPlay
                   preload="auto"
-                  onTimeUpdate={onTimeUpdate}
-                  onLoadedMetadata={onLoadedMetadata}
+                  onTimeUpdate={(e) => onTimeUpdate(it.id, e)}
+                  onLoadedMetadata={(e) => onLoadedMetadata(it.id, e)}
                   onCanPlay={(e) => {
                     if (isPlaying) {
                       e.currentTarget.play().catch(() => {});
                     }
                   }}
                   onEnded={() => {
-                    setIsPlaying(false);
+                    if (it.id === masterKey) {
+                      setIsPlaying(false);
+                    }
                   }}
                   className="w-full h-full object-contain"
                 />
@@ -994,7 +868,7 @@ export function EvidencePlayerModal({
                     {/* Synchronized Vertical Playhead Needle on each track */}
                     <div
                       style={{ left: `${playheadPct}%` }}
-                      className="absolute inset-y-0 w-0.5 bg-white shadow-md z-20 pointer-events-none transition-all duration-75"
+                      className="absolute inset-y-0 w-0.5 bg-white shadow-md z-20 pointer-events-none transition-none"
                     />
                   </div>
                 </div>
