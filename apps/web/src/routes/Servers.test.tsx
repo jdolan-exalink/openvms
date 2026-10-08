@@ -380,7 +380,8 @@ describe("Servers", () => {
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
       fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
       fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
-      expect(await screen.findByRole("button", { name: /Agente actualizado/i })).toBeDisabled();
+      expect(await screen.findByRole("button", { name: /Desinstalar agente/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Agente actualizado/i })).not.toBeInTheDocument();
       expect(calls.filter((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/agent/install"))).toHaveLength(1);
     });
 
@@ -520,7 +521,8 @@ describe("Servers", () => {
     it("disables the unified action only for a digest-verified current agent", async () => {
       setup(undefined, undefined, grants, undefined, { installed: true, version: "0.1.0", binary_status: "current", binary_outdated: false, binary_upgrade_available: false, binary_observed: { sha256: "a".repeat(64), architecture: "amd64", version: "0.1.1", commit: "0123456789abcdef" }, binary_available: { sha256: "a".repeat(64), architecture: "amd64", version: "0.1.1", commit: "0123456789abcdef" } });
       renderPage(Servers);
-      expect(await screen.findByRole("button", { name: /Agente actualizado/i })).toBeDisabled();
+      expect(await screen.findByRole("button", { name: /Desinstalar agente/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Agente actualizado/i })).not.toBeInTheDocument();
       expect(screen.getByText(/0\.1\.1/)).toBeInTheDocument();
       expect(screen.queryByText(/Versión del protocolo/i)).not.toBeInTheDocument();
       expect(screen.queryByText(/Binario instalado/i)).not.toBeInTheDocument();
@@ -640,7 +642,8 @@ describe("Servers", () => {
       fireEvent.change(within(dialog).getByLabelText("Puerto SSH"), { target: { value: "2222" } });
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "secret-root-password" } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
-      expect(await screen.findByRole("button", { name: /Agente actualizado/i })).toBeDisabled();
+      expect(await screen.findByRole("button", { name: /Desinstalar agente/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Agente actualizado/i })).not.toBeInTheDocument();
       expect(calls.filter((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/update-ssh"))).toHaveLength(1);
       expect(screen.queryByDisplayValue("secret-root-password")).not.toBeInTheDocument();
       const post = calls.find((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/update-ssh"));
@@ -807,7 +810,8 @@ describe("Servers", () => {
       expect(calls.filter((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/update-ssh"))).toHaveLength(1);
       fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "fresh-root-secret" } });
       fireEvent.click(within(dialog).getByRole("button", { name: "Actualizar agente" }));
-      expect(await screen.findByRole("button", { name: /Agente actualizado/i })).toBeDisabled();
+      expect(await screen.findByRole("button", { name: /Desinstalar agente/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /Agente actualizado/i })).not.toBeInTheDocument();
       expect(bodies).toEqual([
         { ssh_port: 22, ssh_password: "first-root-secret" },
         { ssh_port: 22, ssh_password: "fresh-root-secret" },

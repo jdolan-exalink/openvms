@@ -258,7 +258,7 @@ function AgentSSHControls({ server }: { server: Schemas["Server"] }) {
           />
         </>
       ) : (agent && isAgentBinaryCurrent(agent)) ? (
-        <Button size="sm" variant="outlined" disabled>{t("servers.agentLifecycleCurrent")}</Button>
+        null
       ) : (
         <>
           <span role="status" className="text-xs text-muted">{t("servers.agentLifecycleUnknown")}</span>
@@ -1401,7 +1401,8 @@ function AgentMonitor({ serverId }: { serverId: string }) {
     ? Math.max(0, Math.min(100, Math.round(metrics.cpu_percent)))
     : null;
   const sampleAt = metrics.network_sampled_at ? Date.parse(metrics.network_sampled_at) : Number.NaN;
-  const networkIsFresh = Number.isFinite(sampleAt) && sampleAt <= now && now - sampleAt <= 15_000;
+  const isStale = Number.isFinite(sampleAt) && (now - sampleAt > 15_000 || sampleAt - now > 4_000);
+  const networkIsFresh = Number.isFinite(sampleAt) && !isStale;
   const network = networkIsFresh ? (metrics.network_interfaces ?? []).filter((entry) =>
     !!entry.name && isLanInterfaceName(entry.name) && Number.isFinite(entry.rx_bytes_per_second) && entry.rx_bytes_per_second >= 0 && Number.isFinite(entry.tx_bytes_per_second) && entry.tx_bytes_per_second >= 0,
   ) : [];
@@ -1442,18 +1443,18 @@ function AgentMonitor({ serverId }: { serverId: string }) {
         </>
       )}
       {metrics.installed && cpu == null && <span className="font-sans text-muted">{t("servers.agentCPUUnavailable")}</span>}
+      {metrics.memory_total_bytes != null && (
+        <>
+          <span className="font-sans text-muted">{t("servers.agentMemory", { available: memory(metrics.memory_available_bytes), total: memory(metrics.memory_total_bytes) })}</span>
+          {metrics.memory_available_bytes != null && metrics.memory_total_bytes > 0 && <Meter percent={((metrics.memory_total_bytes - metrics.memory_available_bytes) / metrics.memory_total_bytes) * 100} />}
+        </>
+      )}
       {metrics.installed && (
         <LanNetworkMeters
           serverId={serverId}
           interfaces={network}
           sampledAt={metrics.network_sampled_at}
         />
-      )}
-      {metrics.memory_total_bytes != null && (
-        <>
-          <span className="font-sans text-muted">{t("servers.agentMemory", { available: memory(metrics.memory_available_bytes), total: memory(metrics.memory_total_bytes) })}</span>
-          {metrics.memory_available_bytes != null && metrics.memory_total_bytes > 0 && <Meter percent={((metrics.memory_total_bytes - metrics.memory_available_bytes) / metrics.memory_total_bytes) * 100} />}
-        </>
       )}
       {metrics.error && <span role="alert" className="font-sans text-bad">{t("servers.agentError", { error: metrics.error })}</span>}
     </div>
@@ -1520,7 +1521,7 @@ export function LanNetworkMeters({
       }
     }
     setHistoryRevision((r) => r + 1);
-  }, [serverId, interfaces, sampledAt]);
+  }, [serverId, sampledAt]);
 
   const lanInterfaces = interfaces.filter((entry) => !!entry.name && isLanInterfaceName(entry.name));
 
