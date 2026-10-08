@@ -104,7 +104,7 @@ BEGIN
              OR (c.conname = 'server_agent_tls_trust_mode_check' AND c.contype = 'c' AND c.convalidated
                  AND lower(regexp_replace(replace(pg_get_constraintdef(c.oid), '::text', ''), '[[:space:]()]', '', 'g')) = 'checktrust_mode=anyarray[''system'',''custom'']')
              OR (c.conname = 'server_agent_tls_check' AND c.contype = 'c' AND c.convalidated
-                 AND lower(regexp_replace(replace(pg_get_constraintdef(c.oid), '::text', ''), '[[:space:]()]', '', 'g')) = 'checktrust_mode=''system''andca_pemisnullortrust_mode=''custom''andca_pemisnotnullandlength(ca_pem)>0'));
+                 AND lower(regexp_replace(replace(pg_get_constraintdef(c.oid), '::text', ''), '[[:space:]()]', '', 'g')) = 'checktrust_mode=''system''andca_pemisnullortrust_mode=''custom''andca_pemisnotnullandlengthca_pem>0'));
         SELECT count(*) INTO table_index_count
           FROM pg_catalog.pg_constraint c
           JOIN pg_catalog.pg_index i ON i.indexrelid = c.conindid
