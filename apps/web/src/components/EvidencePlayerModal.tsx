@@ -259,10 +259,6 @@ function CameraEvidenceOverlay({
             <filter id={`shadow-${cameraId}`} x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="3" stdDeviation="4" floodColor="#000000" floodOpacity="0.85" />
             </filter>
-            <filter id={`glow-touched-${cameraId}`} x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="8" result="blur" />
-              <feComposite in="SourceGraphic" in2="blur" operator="over" />
-            </filter>
           </defs>
 
           {/* 1. Real Configured Camera Zones with High-Contrast Legible Pills */}
@@ -286,11 +282,10 @@ function CameraEvidenceOverlay({
                 <g key={zone.name} className="transition-all duration-200">
                   <polygon
                     points={pointsStr}
-                    fill={isTouched ? "rgba(239, 68, 68, 0.26)" : "rgba(15, 23, 42, 0.16)"}
+                    fill={isTouched ? "rgba(239, 68, 68, 0.08)" : "none"}
                     stroke={isTouched ? "#ef4444" : zone.color}
-                    strokeWidth={isTouched ? "6" : "3.5"}
+                    strokeWidth={isTouched ? "5" : "3"}
                     strokeDasharray={isTouched ? undefined : "12 6"}
-                    filter={isTouched ? `url(#glow-touched-${cameraId})` : undefined}
                   />
 
                   {/* High-Contrast Crisp Zone Label Pill (Readable at any scale) */}
@@ -431,7 +426,7 @@ function CameraEvidenceOverlay({
 
       {/* Frigate 0.18-style Event Info HUD (Floating chips in top-left corner) */}
       {layers.events && activeEvents.length > 0 && (
-        <div className="absolute top-2.5 left-2.5 z-20 pointer-events-none flex flex-col gap-1.5 max-w-[85%] select-none">
+        <div className="absolute top-2.5 left-2.5 z-20 pointer-events-none flex flex-col gap-1.5 max-w-[60%] select-none">
           {activeEvents.map((ev) => {
             const isAlert = ev.severity === "alert";
             const isCar = ev.labels.some((l) => l === "car" || l === "truck" || l === "motorcycle");
@@ -440,7 +435,7 @@ function CameraEvidenceOverlay({
             return (
               <div
                 key={ev.id}
-                className="flex flex-wrap items-center gap-2 px-2.5 py-1.5 rounded-m3-sm bg-surface-0/90 backdrop-blur-md border border-outline-variant/60 shadow-md text-xs"
+                className="flex flex-wrap items-center gap-1.5 px-2 py-1 rounded-m3-sm bg-surface-0/75 border border-outline-variant/60 shadow-md text-xs"
               >
                 <span
                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
@@ -471,6 +466,10 @@ function CameraEvidenceOverlay({
                 {visible
                   .filter((v) => v.ev.id === ev.id)
                   .flatMap((v) => v.reached)
+                  .sort((a, b) => a.t - b.t)
+                  // Busy scenes keep one long event open: show only the latest entries so the
+                  // chip never grows over the video.
+                  .slice(-3)
                   .map((e) => (
                     <span
                       key={`${e.zone}-${e.t}`}
