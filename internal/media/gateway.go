@@ -92,6 +92,11 @@ func (g *Gateway) Routes() http.Handler {
 	r.Get("/exports/{id}/download", g.exportDownload)
 	r.Get("/export-jobs/{id}/download", g.exportJobDownload)
 	r.Get("/export-jobs/{id}/items/{itemId}/download", g.exportJobItemDownload)
+	r.Get("/export-jobs/{id}/items/{itemId}/video", g.exportJobItemVideo)
+	r.Get("/public/shares/{token}", g.publicShareInfo)
+	r.Post("/public/shares/{token}", g.publicShareInfo)
+	r.Get("/public/shares/{token}/download", g.publicShareDownload)
+	r.Get("/public/shares/{token}/items/{itemId}/video", g.publicShareItemVideo)
 	return r
 }
 
@@ -677,6 +682,268 @@ func (g *Gateway) exportJobItemDownload(w http.ResponseWriter, r *http.Request) 
 	if r.Header.Get("Range") == "" {
 		g.audit(r.Context(), a, job.TenantID, ActionExportDownload, "export_job_item", itemID, map[string]any{"name": filename})
 	}
+	http.ServeContent(w, r, filename, targetItem.UpdatedAt, f)
+}
+
+func (g *Gateway) exportJobItemVideo(w http.ResponseWriter, r *http.Request) {
+	a, ok := g.actorOr401(w, r)
+	if !ok {
+		return
+	}
+	jobID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid export job id")
+		return
+	}
+	itemID, err := uuid.Parse(chi.URLParam(r, "itemId"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid item id")
+		return
+	}
+	job, err := g.Svc.GetExportJob(r.Context(), a, jobID)
+	if err != nil {
+		g.fail(w, r, a, err)
+		return
+	}
+
+	var targetItem *ExportJobItem
+	for i := range job.Items {
+		if job.Items[i].ID == itemID {
+			targetItem = &job.Items[i]
+			break
+		}
+	}
+	if targetItem == nil {
+		writeErr(w, http.StatusNotFound, "not_found", "export job item not found")
+		return
+	}
+
+	if targetItem.Status != "ready" || targetItem.LocalPath == "" {
+		writeErr(w, http.StatusConflict, "not_ready", "item video is not ready yet")
+		return
+	}
+
+	if job.RequestedBy != a.UserID {
+		if _, err := g.Svc.Authorize(r.Context(), a, targetItem.CameraID, authz.ExportsDownload); err != nil {
+			writeErr(w, http.StatusForbidden, "forbidden", "you do not have permission to view this camera export")
+			return
+		}
+	}
+
+	f, err := os.Open(targetItem.LocalPath)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "video file not found on disk")
+		return
+	}
+	defer f.Close()
+
+	filename := fmt.Sprintf("%s_%s.mp4", safeFilename(job.Name), safeFilename(targetItem.CameraName))
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, filename))
+	http.ServeContent(w, r, filename, targetItem.UpdatedAt, f)
+}
+
+func (g *Gateway) publicShareInfo(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	var password string
+	if r.Method == http.MethodPost {
+		var body struct {
+			Password string `json:"password"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		password = body.Password
+	}
+	if password == "" {
+		password = r.URL.Query().Get("password")
+	}
+
+	clientIP := httpx.ClientIP(r.Context())
+	job, share, err := g.Svc.GetPublicShare(r.Context(), token, password, clientIP)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrNotFound), errors.Is(err, pgx.ErrNoRows):
+			writeErr(w, http.StatusNotFound, "not_found", "shared evidence not found")
+		case errors.Is(err, ErrSharePasswordRequired):
+			writeErr(w, http.StatusUnauthorized, "password_required", "password required to access evidence")
+		case errors.Is(err, ErrSharePasswordInvalid):
+			writeErr(w, http.StatusForbidden, "invalid_password", "incorrect evidence password")
+		case errors.Is(err, ErrShareExpired):
+			writeErr(w, http.StatusGone, "expired", "this evidence share link has expired")
+		case errors.Is(err, ErrShareRevoked):
+			writeErr(w, http.StatusGone, "revoked", "this evidence share link has been revoked")
+		default:
+			g.Svc.Log.WarnContext(r.Context(), "public share info", "error", err)
+			writeErr(w, http.StatusInternalServerError, "internal", "could not load shared evidence")
+		}
+		return
+	}
+
+	type publicItem struct {
+		ID         string `json:"id"`
+		CameraID   string `json:"camera_id"`
+		CameraName string `json:"camera_name"`
+		ServerName string `json:"server_name"`
+		SHA256Hash string `json:"sha256_hash"`
+		TotalBytes int64  `json:"total_bytes"`
+		VideoURL   string `json:"video_url"`
+		Status     string `json:"status"`
+	}
+
+	var items []publicItem
+	for _, it := range job.Items {
+		items = append(items, publicItem{
+			ID:         it.ID.String(),
+			CameraID:   it.CameraID.String(),
+			CameraName: it.CameraName,
+			ServerName: it.ServerName,
+			SHA256Hash: it.SHA256Hash,
+			TotalBytes: it.TotalBytes,
+			VideoURL:   fmt.Sprintf("/media/v1/public/shares/%s/items/%s/video?password=%s", token, it.ID.String(), url.QueryEscape(password)),
+			Status:     it.Status,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"share_token": token,
+		"expires_at":  share.ExpiresAt,
+		"has_password": share.HasPassword,
+		"job": map[string]any{
+			"id":           job.ID.String(),
+			"name":         job.Name,
+			"start_time":   job.Start,
+			"end_time":     job.End,
+			"camera_count": job.CameraCount,
+			"total_bytes":  job.TotalBytes,
+			"manifest":     job.Manifest,
+			"items":        items,
+			"download_url": fmt.Sprintf("/media/v1/public/shares/%s/download?password=%s", token, url.QueryEscape(password)),
+		},
+	})
+}
+
+func (g *Gateway) publicShareDownload(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	password := r.URL.Query().Get("password")
+	clientIP := httpx.ClientIP(r.Context())
+
+	job, _, err := g.Svc.GetPublicShare(r.Context(), token, password, clientIP)
+	if err != nil {
+		if errors.Is(err, ErrSharePasswordRequired) {
+			writeErr(w, http.StatusUnauthorized, "password_required", "password required")
+			return
+		}
+		if errors.Is(err, ErrSharePasswordInvalid) {
+			writeErr(w, http.StatusForbidden, "invalid_password", "invalid password")
+			return
+		}
+		writeErr(w, http.StatusNotFound, "not_found", "shared evidence not found")
+		return
+	}
+
+	// Single camera and format != zip -> direct mp4 download
+	format := r.URL.Query().Get("format")
+	if len(job.Items) == 1 && format != "zip" {
+		item := job.Items[0]
+		if item.LocalPath == "" {
+			writeErr(w, http.StatusNotFound, "not_found", "item video file not found")
+			return
+		}
+		f, err := os.Open(item.LocalPath)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, "not_found", "file not found on disk")
+			return
+		}
+		defer f.Close()
+
+		filename := fmt.Sprintf("%s.mp4", safeFilename(job.Name))
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+		http.ServeContent(w, r, filename, job.UpdatedAt, f)
+		return
+	}
+
+	// Multi-camera or format=zip -> stream dynamic ZIP package containing manifest.json and each camera's mp4
+	zipFilename := fmt.Sprintf("%s.zip", safeFilename(job.Name))
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipFilename))
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	manifestFile := filepath.Join(job.LocalPath, "manifest.json")
+	if mData, err := os.ReadFile(manifestFile); err == nil {
+		if fw, err := zw.Create("manifest.json"); err == nil {
+			_, _ = fw.Write(mData)
+		}
+	}
+
+	for _, it := range job.Items {
+		if it.LocalPath == "" {
+			continue
+		}
+		f, err := os.Open(it.LocalPath)
+		if err != nil {
+			continue
+		}
+		camName := it.CameraName
+		if camName == "" {
+			camName = it.CameraID.String()
+		}
+		entryName := fmt.Sprintf("video/%s_%s.mp4", safeFilename(camName), it.ID.String()[:8])
+		if fw, err := zw.Create(entryName); err == nil {
+			_, _ = io.Copy(fw, f)
+		}
+		f.Close()
+	}
+}
+
+func (g *Gateway) publicShareItemVideo(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	itemID, err := uuid.Parse(chi.URLParam(r, "itemId"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid item id")
+		return
+	}
+	password := r.URL.Query().Get("password")
+	clientIP := httpx.ClientIP(r.Context())
+
+	job, _, err := g.Svc.GetPublicShare(r.Context(), token, password, clientIP)
+	if err != nil {
+		if errors.Is(err, ErrSharePasswordRequired) {
+			writeErr(w, http.StatusUnauthorized, "password_required", "password required")
+			return
+		}
+		if errors.Is(err, ErrSharePasswordInvalid) {
+			writeErr(w, http.StatusForbidden, "invalid_password", "invalid password")
+			return
+		}
+		writeErr(w, http.StatusNotFound, "not_found", "shared evidence not found")
+		return
+	}
+
+	var targetItem *ExportJobItem
+	for i := range job.Items {
+		if job.Items[i].ID == itemID {
+			targetItem = &job.Items[i]
+			break
+		}
+	}
+	if targetItem == nil || targetItem.LocalPath == "" {
+		writeErr(w, http.StatusNotFound, "not_found", "video item not found")
+		return
+	}
+
+	f, err := os.Open(targetItem.LocalPath)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "video file not found on disk")
+		return
+	}
+	defer f.Close()
+
+	filename := fmt.Sprintf("%s_%s.mp4", safeFilename(job.Name), safeFilename(targetItem.CameraName))
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, filename))
 	http.ServeContent(w, r, filename, targetItem.UpdatedAt, f)
 }
 

@@ -88,7 +88,7 @@ func Authenticate(q *db.Queries, opts AuthOptions) func(http.Handler) http.Handl
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			protected := strings.HasPrefix(r.URL.Path, "/api/v1/") || strings.HasPrefix(r.URL.Path, "/media/") || r.URL.Path == "/ws"
-			if !protected || publicPaths[r.URL.Path] {
+			if !protected || publicPaths[r.URL.Path] || strings.HasPrefix(r.URL.Path, "/media/v1/public/") || strings.HasPrefix(r.URL.Path, "/api/v1/public/") {
 				next.ServeHTTP(w, r)
 				return
 			}

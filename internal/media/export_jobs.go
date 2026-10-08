@@ -2,8 +2,12 @@ package media
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -12,10 +16,27 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/platform/httpx"
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
+)
+
+const (
+	ActionExportCancelled     = "EXPORT_CANCELLED"
+	ActionExportRetried       = "EXPORT_RETRIED"
+	ActionExportDeleted       = "EXPORT_DELETED"
+	ActionExportShared        = "EXPORT_SHARED"
+	ActionExportShareRevoked  = "EXPORT_SHARE_REVOKED"
+	ActionExportShareAccessed = "EXPORT_SHARE_ACCESSED"
+)
+
+var (
+	ErrSharePasswordRequired = errors.New("share password required")
+	ErrSharePasswordInvalid  = errors.New("invalid share password")
+	ErrShareExpired          = errors.New("share has expired")
+	ErrShareRevoked          = errors.New("share has been revoked")
 )
 
 type ExportJob struct {
@@ -324,7 +345,11 @@ ORDER BY i.created_at ASC`, id)
 }
 
 func (s *Service) CancelExportJob(ctx context.Context, actor authz.Actor, id uuid.UUID) (ExportJob, error) {
-	err := s.rawTx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
+	job, err := s.GetExportJob(ctx, actor, id)
+	if err != nil {
+		return ExportJob{}, err
+	}
+	err = s.rawTx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
 		tag, err := tx.Exec(ctx, `
 UPDATE export_jobs SET status = 'cancelled', updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL AND status IN ('queued', 'preparing', 'transferring', 'processing')`, id)
@@ -337,7 +362,20 @@ WHERE id = $1 AND deleted_at IS NULL AND status IN ('queued', 'preparing', 'tran
 		_, err = tx.Exec(ctx, `
 UPDATE export_job_items SET status = 'cancelled', updated_at = now()
 WHERE job_id = $1 AND status NOT IN ('ready', 'failed')`, id)
-		return err
+		if err != nil {
+			return err
+		}
+		return db.New(tx).InsertAudit(ctx, db.InsertAuditParams{
+			TenantID:   &job.TenantID,
+			ActorID:    &actor.UserID,
+			ActorName:  actor.Username,
+			Action:     ActionExportCancelled,
+			TargetType: "export_job",
+			TargetID:   &id,
+			RequestID:  logging.RequestID(ctx),
+			Ip:         httpx.ClientIP(ctx),
+			Details:    []byte(`{"name":"` + job.Name + `"}`),
+		})
 	})
 	if err != nil {
 		return ExportJob{}, err
@@ -346,7 +384,11 @@ WHERE job_id = $1 AND status NOT IN ('ready', 'failed')`, id)
 }
 
 func (s *Service) RetryExportJob(ctx context.Context, actor authz.Actor, id uuid.UUID) (ExportJob, error) {
-	err := s.rawTx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
+	job, err := s.GetExportJob(ctx, actor, id)
+	if err != nil {
+		return ExportJob{}, err
+	}
+	err = s.rawTx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
 		tag, err := tx.Exec(ctx, `
 UPDATE export_jobs SET status = 'queued', error = '', progress = 0, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL AND status IN ('failed', 'cancelled')`, id)
@@ -359,7 +401,20 @@ WHERE id = $1 AND deleted_at IS NULL AND status IN ('failed', 'cancelled')`, id)
 		_, err = tx.Exec(ctx, `
 UPDATE export_job_items SET status = 'queued', error = '', progress = 0, updated_at = now()
 WHERE job_id = $1 AND status != 'ready'`, id)
-		return err
+		if err != nil {
+			return err
+		}
+		return db.New(tx).InsertAudit(ctx, db.InsertAuditParams{
+			TenantID:   &job.TenantID,
+			ActorID:    &actor.UserID,
+			ActorName:  actor.Username,
+			Action:     ActionExportRetried,
+			TargetType: "export_job",
+			TargetID:   &id,
+			RequestID:  logging.RequestID(ctx),
+			Ip:         httpx.ClientIP(ctx),
+			Details:    []byte(`{"name":"` + job.Name + `"}`),
+		})
 	})
 	if err != nil {
 		return ExportJob{}, err
@@ -377,6 +432,258 @@ func (s *Service) DeleteExportJob(ctx context.Context, actor authz.Actor, id uui
 	}
 	return s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
 		_, err := tx.Exec(ctx, `UPDATE export_jobs SET deleted_at = now() WHERE id = $1`, id)
-		return err
+		if err != nil {
+			return err
+		}
+		return db.New(tx).InsertAudit(ctx, db.InsertAuditParams{
+			TenantID:   &job.TenantID,
+			ActorID:    &actor.UserID,
+			ActorName:  actor.Username,
+			Action:     ActionExportDeleted,
+			TargetType: "export_job",
+			TargetID:   &id,
+			RequestID:  logging.RequestID(ctx),
+			Ip:         httpx.ClientIP(ctx),
+			Details:    []byte(`{"name":"` + job.Name + `"}`),
+		})
 	})
+}
+
+type ExportShare struct {
+	ID          uuid.UUID  `json:"id"`
+	TenantID    uuid.UUID  `json:"tenant_id"`
+	JobID       uuid.UUID  `json:"job_id"`
+	ShareToken  string     `json:"share_token"`
+	CreatedBy   uuid.UUID  `json:"created_by"`
+	ExpiresAt   *time.Time `json:"expires_at"`
+	HasPassword bool       `json:"has_password"`
+	ViewsCount  int        `json:"views_count"`
+	CreatedAt   time.Time  `json:"created_at"`
+	RevokedAt   *time.Time `json:"revoked_at"`
+}
+
+type CreateExportShareInput struct {
+	ExpiresAt *time.Time `json:"expires_at"`
+	Password  string     `json:"password"`
+}
+
+func (s *Service) CreateExportShare(ctx context.Context, actor authz.Actor, jobID uuid.UUID, in CreateExportShareInput) (ExportShare, error) {
+	job, err := s.GetExportJob(ctx, actor, jobID)
+	if err != nil {
+		return ExportShare{}, err
+	}
+	if job.Status != "ready" {
+		return ExportShare{}, invalid("export job is not ready yet")
+	}
+
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return ExportShare{}, err
+	}
+	token := hex.EncodeToString(b)
+
+	var pwHash string
+	if in.Password != "" {
+		h, err := identity.HashPassword(in.Password)
+		if err != nil {
+			return ExportShare{}, fmt.Errorf("hash share password: %w", err)
+		}
+		pwHash = h
+	}
+
+	var share ExportShare
+	share.ID = uuid.New()
+	share.TenantID = job.TenantID
+	share.JobID = jobID
+	share.ShareToken = token
+	share.CreatedBy = actor.UserID
+	share.ExpiresAt = in.ExpiresAt
+	share.HasPassword = in.Password != ""
+	share.CreatedAt = time.Now()
+
+	err = s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
+		err := tx.QueryRow(ctx, `
+INSERT INTO export_shares (id, tenant_id, job_id, share_token, created_by, expires_at, password_hash)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, created_at, updated_at`,
+			share.ID, share.TenantID, share.JobID, share.ShareToken, share.CreatedBy, share.ExpiresAt, pwHash,
+		).Scan(&share.ID, &share.CreatedAt, &share.CreatedAt)
+		if err != nil {
+			return err
+		}
+
+		bDetails, _ := json.Marshal(map[string]any{
+			"job_id":       jobID,
+			"job_name":     job.Name,
+			"has_password": in.Password != "",
+			"expires_at":   in.ExpiresAt,
+		})
+		return db.New(tx).InsertAudit(ctx, db.InsertAuditParams{
+			TenantID:   &job.TenantID,
+			ActorID:    &actor.UserID,
+			ActorName:  actor.Username,
+			Action:     ActionExportShared,
+			TargetType: "export_share",
+			TargetID:   &share.ID,
+			RequestID:  logging.RequestID(ctx),
+			Ip:         httpx.ClientIP(ctx),
+			Details:    bDetails,
+		})
+	})
+	if err != nil {
+		return ExportShare{}, err
+	}
+	return share, nil
+}
+
+func (s *Service) ListExportShares(ctx context.Context, actor authz.Actor, jobID uuid.UUID) ([]ExportShare, error) {
+	_, err := s.GetExportJob(ctx, actor, jobID)
+	if err != nil {
+		return nil, err
+	}
+	var out []ExportShare
+	err = s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
+		rows, err := tx.Query(ctx, `
+SELECT id, tenant_id, job_id, share_token, created_by, expires_at, (password_hash != ''), views_count, created_at, revoked_at
+FROM export_shares
+WHERE job_id = $1 AND revoked_at IS NULL
+ORDER BY created_at DESC`, jobID)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var sh ExportShare
+			if err := rows.Scan(
+				&sh.ID, &sh.TenantID, &sh.JobID, &sh.ShareToken, &sh.CreatedBy,
+				&sh.ExpiresAt, &sh.HasPassword, &sh.ViewsCount, &sh.CreatedAt, &sh.RevokedAt,
+			); err != nil {
+				return err
+			}
+			out = append(out, sh)
+		}
+		return rows.Err()
+	})
+	if out == nil {
+		out = []ExportShare{}
+	}
+	return out, err
+}
+
+func (s *Service) RevokeExportShare(ctx context.Context, actor authz.Actor, shareID uuid.UUID) error {
+	return s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
+		var tenantID uuid.UUID
+		var jobID uuid.UUID
+		err := tx.QueryRow(ctx, `
+UPDATE export_shares SET revoked_at = now()
+WHERE id = $1 AND revoked_at IS NULL
+RETURNING tenant_id, job_id`, shareID).Scan(&tenantID, &jobID)
+		if err != nil {
+			return err
+		}
+		return db.New(tx).InsertAudit(ctx, db.InsertAuditParams{
+			TenantID:   &tenantID,
+			ActorID:    &actor.UserID,
+			ActorName:  actor.Username,
+			Action:     ActionExportShareRevoked,
+			TargetType: "export_share",
+			TargetID:   &shareID,
+			RequestID:  logging.RequestID(ctx),
+			Ip:         httpx.ClientIP(ctx),
+			Details:    []byte(`{"job_id":"` + jobID.String() + `"}`),
+		})
+	})
+}
+
+func (s *Service) GetPublicShare(ctx context.Context, token string, password string, clientIP *netip.Addr) (ExportJob, ExportShare, error) {
+	var share ExportShare
+	var pwHash string
+	err := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `
+SELECT id, tenant_id, job_id, share_token, created_by, expires_at, password_hash, views_count, created_at, revoked_at
+FROM export_shares
+WHERE share_token = $1`, token)
+		if err := row.Scan(
+			&share.ID, &share.TenantID, &share.JobID, &share.ShareToken, &share.CreatedBy,
+			&share.ExpiresAt, &pwHash, &share.ViewsCount, &share.CreatedAt, &share.RevokedAt,
+		); err != nil {
+			return err
+		}
+		share.HasPassword = pwHash != ""
+		if share.RevokedAt != nil {
+			return ErrShareRevoked
+		}
+		if share.ExpiresAt != nil && share.ExpiresAt.Before(time.Now()) {
+			return ErrShareExpired
+		}
+		if pwHash != "" {
+			if password == "" {
+				return ErrSharePasswordRequired
+			}
+			if !identity.VerifyPassword(pwHash, password) {
+				return ErrSharePasswordInvalid
+			}
+		}
+
+		// Increment views and audit access
+		_, _ = tx.Exec(ctx, `UPDATE export_shares SET views_count = views_count + 1 WHERE id = $1`, share.ID)
+		_ = db.New(tx).InsertAudit(ctx, db.InsertAuditParams{
+			TenantID:   &share.TenantID,
+			Action:     ActionExportShareAccessed,
+			TargetType: "export_share",
+			TargetID:   &share.ID,
+			RequestID:  logging.RequestID(ctx),
+			Ip:         clientIP,
+			Details:    []byte(`{"token":"` + token[:8] + `..."}`),
+		})
+		return nil
+	})
+	if err != nil {
+		return ExportJob{}, ExportShare{}, err
+	}
+
+	// Fetch the job using AllTenants
+	var job ExportJob
+	err = s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `
+SELECT `+exportJobColumns+`
+FROM export_jobs j
+JOIN users u ON u.id = j.requested_by
+WHERE j.id = $1 AND j.deleted_at IS NULL`, share.JobID)
+		var jerr error
+		job, jerr = scanExportJob(row)
+		if jerr != nil {
+			return jerr
+		}
+
+		itemRows, err := tx.Query(ctx, `
+SELECT i.id, i.job_id, i.tenant_id, i.camera_id, COALESCE(c.display_name, ''), i.server_id, COALESCE(s.name, ''),
+       i.remote_export_id, i.status, i.progress, COALESCE(i.error, ''), i.total_bytes, i.transferred_bytes, i.remote_path, i.local_path,
+       i.sha256_hash, i.created_at, i.updated_at
+FROM export_job_items i
+LEFT JOIN cameras c ON c.id = i.camera_id
+LEFT JOIN frigate_servers s ON s.id = i.server_id
+WHERE i.job_id = $1
+ORDER BY i.created_at ASC`, share.JobID)
+		if err != nil {
+			return err
+		}
+		defer itemRows.Close()
+		for itemRows.Next() {
+			var it ExportJobItem
+			if err := itemRows.Scan(
+				&it.ID, &it.JobID, &it.TenantID, &it.CameraID, &it.CameraName, &it.ServerID, &it.ServerName,
+				&it.RemoteExportID, &it.Status, &it.Progress, &it.Error, &it.TotalBytes, &it.TransferredBytes,
+				&it.RemotePath, &it.LocalPath, &it.SHA256Hash, &it.CreatedAt, &it.UpdatedAt,
+			); err != nil {
+				return err
+			}
+			job.Items = append(job.Items, it)
+		}
+		return itemRows.Err()
+	})
+	if err != nil {
+		return ExportJob{}, ExportShare{}, err
+	}
+	return job, share, nil
 }

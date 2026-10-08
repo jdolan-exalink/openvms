@@ -65,6 +65,13 @@ export function fmtDuration(startIso: string, endIso?: string | null): string {
   return `${m} min ${s % 60} s`;
 }
 
+export function fmtBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  return `${(bytes / Math.pow(1024, i)).toFixed(i > 1 ? 2 : 0)} ${units[i]}`;
+}
+
 /** toLocalInput formats a Date for <input type="datetime-local">. */
 export function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");

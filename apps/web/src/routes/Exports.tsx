@@ -9,13 +9,17 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  Play,
   RotateCw,
+  Share2,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { api, unwrap } from "@/api/client";
 import { exportJobsQuery, exportsQuery } from "@/api/queries";
+import { EvidencePlayerModal } from "@/components/EvidencePlayerModal";
 import { Icon } from "@/components/Icon";
+import { ShareExportModal } from "@/components/ShareExportModal";
 import {
   Button,
   Empty,
@@ -68,6 +72,8 @@ export function Exports() {
   const t = useT();
   const qc = useQueryClient();
   const [expandedJobs, setExpandedJobs] = useState<Record<string, boolean>>({});
+  const [playbackJob, setPlaybackJob] = useState<any | null>(null);
+  const [shareJob, setShareJob] = useState<any | null>(null);
 
   const jobs = useQuery(exportJobsQuery);
   const legacyExports = useQuery(exportsQuery);
@@ -215,15 +221,37 @@ export function Exports() {
                           {/* Col 6: Actions */}
                           <div className="col-span-1 md:col-span-1 flex items-center justify-end gap-1.5 whitespace-nowrap">
                             {job.status === "ready" && (
-                              <LinkButton
-                                variant="filled"
-                                size="sm"
-                                href={`/media/v1/export-jobs/${job.id}/download`}
-                                title={job.camera_count > 1 ? "Descargar paquete ZIP" : "Descargar video MP4"}
-                              >
-                                <Icon icon={Download} size="xs" />
-                                <span>{job.camera_count > 1 ? "Descargar ZIP" : "Descargar"}</span>
-                              </LinkButton>
+                              <>
+                                <Button
+                                  variant="filled"
+                                  size="sm"
+                                  onClick={() => setPlaybackJob(job)}
+                                  title="Reproducir evidencia multi-cámara sincronizada"
+                                >
+                                  <Icon icon={Play} size="xs" />
+                                  <span>Reproducir</span>
+                                </Button>
+
+                                <Button
+                                  variant="outlined"
+                                  size="sm"
+                                  onClick={() => setShareJob(job)}
+                                  title="Compartir evidencia de forma segura"
+                                >
+                                  <Icon icon={Share2} size="xs" />
+                                  <span>Compartir</span>
+                                </Button>
+
+                                <LinkButton
+                                  variant="outlined"
+                                  size="sm"
+                                  href={`/media/v1/export-jobs/${job.id}/download`}
+                                  title={job.camera_count > 1 ? "Descargar paquete ZIP" : "Descargar video MP4"}
+                                >
+                                  <Icon icon={Download} size="xs" />
+                                  <span>{job.camera_count > 1 ? "Descargar ZIP" : "Descargar"}</span>
+                                </LinkButton>
+                              </>
                             )}
 
                             {inProgress && (
@@ -402,6 +430,14 @@ export function Exports() {
             </tbody>
           </Table>
         </div>
+      )}
+
+      {playbackJob && (
+        <EvidencePlayerModal job={playbackJob} onClose={() => setPlaybackJob(null)} />
+      )}
+
+      {shareJob && (
+        <ShareExportModal job={shareJob} onClose={() => setShareJob(null)} />
       )}
     </div>
   );
