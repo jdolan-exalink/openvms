@@ -19,11 +19,13 @@ function createTransport(initialPos = 1775600100) {
     setSpeed: vi.fn(),
     day: 1775600000,
     getPosition: () => pos,
-    subscribePosition: (listener) => {
+    subscribePosition: (listener: () => void) => {
       listeners.add(listener);
-      return () => listeners.delete(listener);
+      return () => {
+        listeners.delete(listener);
+      };
     },
-  };
+  } as unknown as RecTransport;
   return {
     transport,
     setPos: (next: number) => {

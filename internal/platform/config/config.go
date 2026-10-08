@@ -60,6 +60,11 @@ type Config struct {
 
 	ShutdownTimeout time.Duration
 
+	// Export storage and bandwidth limits (internal/media).
+	ExportStoragePath         string
+	ExportGlobalBandwidthMbps int
+	ExportServerBandwidthMbps int
+
 	// WorkerURL is the worker probe address. The API reads ONNX throughput from it.
 	WorkerURL string
 }
@@ -110,6 +115,9 @@ func Load(service string) (Config, error) {
 		LivePongWait:                duration("LIVE_PONG_WAIT", 60*time.Second),
 		NotifyDeliveryRetention:     duration("NOTIFY_DELIVERY_RETENTION", 30*24*time.Hour),
 		NotifyReadRetention:         duration("NOTIFY_READ_RETENTION", 90*24*time.Hour),
+		ExportStoragePath:           str("EXPORT_STORAGE_PATH", "/mnt/openvms/exports"),
+		ExportGlobalBandwidthMbps:   integer("EXPORT_GLOBAL_BANDWIDTH_MBPS", 50),
+		ExportServerBandwidthMbps:   integer("EXPORT_SERVER_BANDWIDTH_MBPS", 10),
 		Waha: WahaConfig{
 			BaseURL: str("WAHA_BASE_URL", "http://waha:3000"),
 			APIKey:  str("WAHA_API_KEY", ""),

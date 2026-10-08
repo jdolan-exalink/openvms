@@ -1,16 +1,20 @@
 package media
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"image"
 	_ "image/jpeg" // logo format sniffing only
 	_ "image/png"  // logo format sniffing only
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -86,6 +90,8 @@ func (g *Gateway) Routes() http.Handler {
 	r.Get("/lpr/reads/{id}/snapshot.jpg", g.lprReadSnapshot)
 	r.Get("/lpr/reads/{id}/clip.mp4", g.lprReadClip)
 	r.Get("/exports/{id}/download", g.exportDownload)
+	r.Get("/export-jobs/{id}/download", g.exportJobDownload)
+	r.Get("/export-jobs/{id}/items/{itemId}/download", g.exportJobItemDownload)
 	return r
 }
 
@@ -497,6 +503,163 @@ func (g *Gateway) exportDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Disposition", `attachment; filename="`+safeFilename(ex.Name)+`.mp4"`)
 	relay(w, resp, "private, no-store")
+}
+
+func (g *Gateway) exportJobDownload(w http.ResponseWriter, r *http.Request) {
+	a, ok := g.actorOr401(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid export job id")
+		return
+	}
+	job, err := g.Svc.GetExportJob(r.Context(), a, id)
+	if err != nil {
+		g.fail(w, r, a, err)
+		return
+	}
+	if job.Status != "ready" || job.LocalPath == "" {
+		writeErr(w, http.StatusConflict, "not_ready", "the export job is not ready yet")
+		return
+	}
+
+	if job.RequestedBy != a.UserID {
+		authorized := false
+		for _, it := range job.Items {
+			if _, err := g.Svc.Authorize(r.Context(), a, it.CameraID, authz.ExportsDownload); err == nil {
+				authorized = true
+				break
+			}
+		}
+		if !authorized {
+			writeErr(w, http.StatusForbidden, "forbidden", "you do not have permission to download this export")
+			return
+		}
+	}
+
+	// Single camera and format != zip -> direct mp4 download
+	format := r.URL.Query().Get("format")
+	if len(job.Items) == 1 && format != "zip" {
+		item := job.Items[0]
+		if item.LocalPath == "" {
+			writeErr(w, http.StatusNotFound, "not_found", "item video file not found")
+			return
+		}
+		f, err := os.Open(item.LocalPath)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, "not_found", "file not found on disk")
+			return
+		}
+		defer f.Close()
+
+		filename := fmt.Sprintf("%s.mp4", safeFilename(job.Name))
+		w.Header().Set("Content-Type", "video/mp4")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+		if r.Header.Get("Range") == "" {
+			g.audit(r.Context(), a, job.TenantID, ActionExportDownload, "export_job", id, map[string]any{"name": job.Name, "format": "mp4"})
+		}
+		http.ServeContent(w, r, filename, job.UpdatedAt, f)
+		return
+	}
+
+	// Multi-camera or format=zip -> stream dynamic ZIP package containing manifest.json and each camera's mp4
+	zipFilename := fmt.Sprintf("%s.zip", safeFilename(job.Name))
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, zipFilename))
+
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+
+	manifestFile := filepath.Join(job.LocalPath, "manifest.json")
+	if mData, err := os.ReadFile(manifestFile); err == nil {
+		if fw, err := zw.Create("manifest.json"); err == nil {
+			_, _ = fw.Write(mData)
+		}
+	}
+
+	for _, it := range job.Items {
+		if it.LocalPath == "" {
+			continue
+		}
+		f, err := os.Open(it.LocalPath)
+		if err != nil {
+			continue
+		}
+		camName := it.CameraName
+		if camName == "" {
+			camName = it.CameraID.String()
+		}
+		entryName := fmt.Sprintf("video/%s_%s.mp4", safeFilename(camName), it.ID.String()[:8])
+		if fw, err := zw.Create(entryName); err == nil {
+			_, _ = io.Copy(fw, f)
+		}
+		f.Close()
+	}
+
+	g.audit(r.Context(), a, job.TenantID, ActionExportDownload, "export_job", id, map[string]any{"name": job.Name, "format": "zip"})
+}
+
+func (g *Gateway) exportJobItemDownload(w http.ResponseWriter, r *http.Request) {
+	a, ok := g.actorOr401(w, r)
+	if !ok {
+		return
+	}
+	jobID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid export job id")
+		return
+	}
+	itemID, err := uuid.Parse(chi.URLParam(r, "itemId"))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad_request", "invalid item id")
+		return
+	}
+	job, err := g.Svc.GetExportJob(r.Context(), a, jobID)
+	if err != nil {
+		g.fail(w, r, a, err)
+		return
+	}
+
+	var targetItem *ExportJobItem
+	for i := range job.Items {
+		if job.Items[i].ID == itemID {
+			targetItem = &job.Items[i]
+			break
+		}
+	}
+	if targetItem == nil {
+		writeErr(w, http.StatusNotFound, "not_found", "export job item not found")
+		return
+	}
+
+	if targetItem.Status != "ready" || targetItem.LocalPath == "" {
+		writeErr(w, http.StatusConflict, "not_ready", "item video is not ready yet")
+		return
+	}
+
+	if job.RequestedBy != a.UserID {
+		if _, err := g.Svc.Authorize(r.Context(), a, targetItem.CameraID, authz.ExportsDownload); err != nil {
+			writeErr(w, http.StatusForbidden, "forbidden", "you do not have permission to download this camera export")
+			return
+		}
+	}
+
+	f, err := os.Open(targetItem.LocalPath)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "video file not found on disk")
+		return
+	}
+	defer f.Close()
+
+	filename := fmt.Sprintf("%s_%s.mp4", safeFilename(job.Name), safeFilename(targetItem.CameraName))
+	w.Header().Set("Content-Type", "video/mp4")
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	if r.Header.Get("Range") == "" {
+		g.audit(r.Context(), a, job.TenantID, ActionExportDownload, "export_job_item", itemID, map[string]any{"name": filename})
+	}
+	http.ServeContent(w, r, filename, targetItem.UpdatedAt, f)
 }
 
 var unsafeChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)

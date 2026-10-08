@@ -111,6 +111,7 @@ services:
       - /proc:/host/proc:ro
       - /sys/class/drm:/host/drm:ro
       - /:/hostfs:ro
+      - exports:/mnt/openvms/exports
     depends_on:
       postgres: { condition: service_healthy }
       valkey: { condition: service_healthy }
@@ -154,6 +155,8 @@ services:
     environment:
       <<: *go-env
       HTTP_ADDR: ":8081"
+    volumes:
+      - exports:/mnt/openvms/exports
     depends_on:
       api: { condition: service_started }
     restart: unless-stopped
@@ -227,3 +230,4 @@ volumes:
   seaweedfs:
   caddy:
   waha:
+  exports:

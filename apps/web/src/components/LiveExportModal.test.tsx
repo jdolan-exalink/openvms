@@ -7,9 +7,9 @@ import type { TimelineCamera } from "./DayTimeline";
 afterEach(() => vi.unstubAllGlobals());
 
 const mockCameras: TimelineCamera[] = [
-  { id: "cam-1", name: "Front Gate", spans: [{ start: 100, end: 500, type: "motion" }] },
-  { id: "cam-2", name: "Backyard", spans: [{ start: 100, end: 500, type: "motion" }] },
-  { id: "cam-3", name: "Parking Lot", spans: [{ start: 100, end: 500, type: "motion" }] },
+  { id: "cam-1", name: "Front Gate", spans: [{ start: 100, end: 500 }] },
+  { id: "cam-2", name: "Backyard", spans: [{ start: 100, end: 500 }] },
+  { id: "cam-3", name: "Parking Lot", spans: [{ start: 100, end: 500 }] },
 ];
 
 describe("LiveExportModal", () => {

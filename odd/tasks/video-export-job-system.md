@@ -33,8 +33,8 @@ Implement an enterprise-grade, non-blocking video export and evidence orchestrat
 
 - [x] `EXP-01` — Live REC [IN - OUT] range selection & export trigger
 - [x] `EXP-02` — Database schema & API contracts for export jobs
-- [ ] `EXP-03` — Orchestrator Export Job Manager & Bandwidth Limiter
-- [ ] `EXP-04` — Export Center real-time dashboard
+- [x] `EXP-03` — Orchestrator Export Job Manager & Bandwidth Limiter
+- [x] `EXP-04` — Export Center real-time dashboard
 
 ## Verification
 
@@ -43,7 +43,12 @@ Implement an enterprise-grade, non-blocking video export and evidence orchestrat
   - `TestCreateExportJobInputValidation`: passes (no cameras, end before start, >24h, future range, name length).
   - `TestExportJobsRoutesRequireAuthentication`: passes (401 verification across all 6 endpoints).
   - `TestToExportJobMapping`: passes (DTO field mapping, items, checksums).
+  - `TestBandwidthLimiter_Unlimited`, `TestBandwidthLimiter_ContextCancellation`, `TestThrottledReader`: pass.
+  - `TestEnsureExportDir`, `TestExportPackageForensicHashing`: pass.
+  - Full Go test suite (`go test ./...`): passes 100%.
 - Frontend tests (`apps/web`):
   - `LiveRecDock.test.tsx`: passes (renders IN/OUT, updates markers, shows duration, shortcut keys I/O/Esc).
   - `LiveExportModal.test.tsx`: passes (range card, camera picker, multi-camera selection, protected evidence flag, async POST submission).
-  - Full TypeScript typecheck (`tsc --noEmit`): 0 errors.
+  - `Exports.test.tsx`: passes (empty state, transferring job with speed/ETA/progress/protection, accordion cameras with SHA-256 integrity, ready job with ZIP download).
+  - Full Vitest suite (`pnpm --filter @openvms/web test`): 125 files, 930 tests pass.
+  - Production build (`pnpm --filter @openvms/web build`): passes with zero type or bundle errors.
