@@ -24,7 +24,7 @@ describe("Exports", () => {
 
     renderPage(() => <Exports />);
 
-    expect(await screen.findByText("Todavía no hay exportaciones.")).toBeInTheDocument();
+    expect(await screen.findByText("Todavía no hay exportaciones registradas.")).toBeInTheDocument();
   });
 
   it("renders multi-camera export job with progress, speed, ETA, and expanded camera details", async () => {
@@ -99,9 +99,8 @@ describe("Exports", () => {
     expect(await screen.findByText("Investigación Portón Principal")).toBeInTheDocument();
     expect(screen.getByText("Evidencia protegida")).toBeInTheDocument();
 
-    // Cameras count button
-    const camCountBtn = screen.getByText("2 cámaras");
-    expect(camCountBtn).toBeInTheDocument();
+    // Cameras count badge
+    expect(screen.getByText("2 cámaras")).toBeInTheDocument();
 
     // Progress percentage, speed, and ETA
     expect(screen.getByText("72%")).toBeInTheDocument();
@@ -109,13 +108,13 @@ describe("Exports", () => {
     expect(screen.getByText("ETA 01:26")).toBeInTheDocument();
 
     // Cancel action is available for transferring job
-    expect(screen.getByTitle("Cancelar exportación")).toBeInTheDocument();
+    expect(screen.getByTitle("Cancelar trabajo de exportación")).toBeInTheDocument();
 
     // Expand cameras accordion
-    fireEvent.click(camCountBtn);
+    fireEvent.click(screen.getByRole("button", { name: "Ver 2 cámaras y hashes SHA-256" }));
 
     // Shows included cameras
-    expect(await screen.findByText("Cámaras incluidas (2)")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Ocultar detalle de cámaras" })).toBeInTheDocument();
     expect(screen.getByText("Acceso Norte")).toBeInTheDocument();
     expect(screen.getByText("Plaza Centro")).toBeInTheDocument();
 
