@@ -148,6 +148,12 @@ services:
     depends_on: [api]
     restart: unless-stopped
 
+  relay:
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: relay, VERSION: "${VERSION:-dev}" } }
+    environment:
+      OPENVMS_RELAY_ADDR: ":8554"
+    restart: unless-stopped
+
   worker:
     # runtime-ffmpeg (not the default distroless runtime): PDW-4's clip watermark job
     # shells out to ffmpeg. Every other Go service stays distroless (deploy/docker/go.Dockerfile).

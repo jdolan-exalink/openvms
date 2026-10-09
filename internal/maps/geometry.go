@@ -175,3 +175,39 @@ func HaversineMeters(lat1, lng1, lat2, lng2 float64) float64 {
 	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 	return earthRadiusM * c
 }
+
+// DestinationPoint calculates target lat/lng given starting lat/lng, bearing in degrees and distance in meters.
+func DestinationPoint(lat, lng, bearingDeg, distanceM float64) (float64, float64) {
+	const earthRadiusM = 6371000.0
+	distRatio := distanceM / earthRadiusM
+	bearingRad := bearingDeg * math.Pi / 180.0
+	latRad := lat * math.Pi / 180.0
+	lngRad := lng * math.Pi / 180.0
+
+	sinLat := math.Sin(latRad)*math.Cos(distRatio) + math.Cos(latRad)*math.Sin(distRatio)*math.Cos(bearingRad)
+	targetLatRad := math.Asin(sinLat)
+	y := math.Sin(bearingRad) * math.Sin(distRatio) * math.Cos(latRad)
+	x := math.Cos(distRatio) - math.Sin(latRad)*math.Sin(targetLatRad)
+	targetLngRad := lngRad + math.Atan2(y, x)
+
+	return targetLatRad * 180.0 / math.Pi, targetLngRad * 180.0 / math.Pi
+}
+
+// PointInPolygon reports whether point pt is inside the polygon specified by ring.
+func PointInPolygon(pt Point, ring []Point) bool {
+	inside := false
+	n := len(ring)
+	if n < 3 {
+		return false
+	}
+	j := n - 1
+	for i := 0; i < n; i++ {
+		if ((ring[i].Y > pt.Y) != (ring[j].Y > pt.Y)) &&
+			(pt.X < (ring[j].X-ring[i].X)*(pt.Y-ring[i].Y)/(ring[j].Y-ring[i].Y)+ring[i].X) {
+			inside = !inside
+		}
+		j = i
+	}
+	return inside
+}
+

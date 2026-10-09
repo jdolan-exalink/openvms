@@ -1,0 +1,66 @@
+syntax = "proto3";
+
+package openvms.v1;
+
+option go_package = "github.com/jdolan-exalink/openvms/gen/go/openvms/v1;openvmsv1";
+
+enum CandidateType {
+  CANDIDATE_TYPE_UNSPECIFIED = 0;
+  CANDIDATE_TYPE_LAN = 1;
+  CANDIDATE_TYPE_WAN = 2;
+  CANDIDATE_TYPE_P2P = 3;
+  CANDIDATE_TYPE_RELAY = 4;
+}
+
+enum TransportProtocol {
+  TRANSPORT_PROTOCOL_UNSPECIFIED = 0;
+  TRANSPORT_PROTOCOL_RTP_UDP = 1;
+  TRANSPORT_PROTOCOL_RTP_TCP = 2;
+  TRANSPORT_PROTOCOL_WEBRTC = 3;
+  TRANSPORT_PROTOCOL_QUIC = 4;
+}
+
+message ConnectionCandidate {
+  CandidateType type = 1;
+  string address = 2;
+  int32 port = 3;
+  TransportProtocol protocol = 4;
+  int32 priority = 5;
+  string auth_token = 6;
+  string tls_fingerprint = 7;
+}
+
+message GetConnectionCandidatesRequest {
+  string node_id = 1;
+  string camera_id = 2;
+  string client_device_id = 3;
+  TransportProtocol preferred_protocol = 4;
+}
+
+message GetConnectionCandidatesResponse {
+  string node_id = 1;
+  string camera_id = 2;
+  repeated ConnectionCandidate candidates = 3;
+  string session_id = 4;
+}
+
+message ReportNetworkTelemetryRequest {
+  string session_id = 1;
+  string client_device_id = 2;
+  string node_id = 3;
+  ConnectionCandidate selected_candidate = 4;
+  float rtt_ms = 5;
+  float jitter_ms = 6;
+  float packet_loss_pct = 7;
+  int64 throughput_kbps = 8;
+  int64 timestamp = 9;
+}
+
+message ReportNetworkTelemetryResponse {
+  bool acknowledged = 1;
+}
+
+service ConnectionService {
+  rpc GetConnectionCandidates(GetConnectionCandidatesRequest) returns (GetConnectionCandidatesResponse);
+  rpc ReportNetworkTelemetry(ReportNetworkTelemetryRequest) returns (ReportNetworkTelemetryResponse);
+}

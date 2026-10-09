@@ -23,5 +23,12 @@ const messages = {
   framesPerSecond: "frames/s",
   onnxDetail: "{ms} ms per crop · {perMin} per minute · {threads} threads · on for {on} of {total} cameras",
   modelNotLoaded: "The model is not loaded in the worker yet.",
+  remoteClients: "Connected remote clients",
+  clientsWeb: "Via WEB",
+  clientsApi: "Via API / Desktop",
+  clientsTotal: "Total connected",
+  webClientsDetail: "{count} live websocket",
+  apiClientsDetail: "{count} gRPC / Desktop / Tokens",
+  activeClients: "Active sessions",
 } as const;
 export default messages;

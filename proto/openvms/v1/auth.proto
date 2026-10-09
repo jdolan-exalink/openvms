@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package openvms.v1;
+
+option go_package = "github.com/jdolan-exalink/openvms/gen/go/openvms/v1;openvmsv1";
+
+message ClientInfo {
+  string name = 1;
+  string version = 2;
+  string platform = 3;
+  string architecture = 4;
+  string device_id = 5;
+  string hostname = 6;
+}
+
+message HandshakeRequest {
+  ClientInfo client = 1;
+}
+
+message HandshakeResponse {
+  string server_version = 1;
+  int32 protocol_version = 2;
+  string minimum_client_version = 3;
+  repeated string features = 4;
+}
+
+message User {
+  string id = 1;
+  string username = 2;
+  string display_name = 3;
+  string tenant_id = 4;
+  repeated string permissions = 5;
+  repeated string roles = 6;
+}
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+  string device_id = 3;
+  string mfa_code = 4;
+}
+
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+  User user = 4;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+  string device_id = 2;
+}
+
+message RefreshTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+}
+
+message LogoutRequest {
+  string access_token = 1;
+}
+
+message LogoutResponse {
+  bool success = 1;
+}
+
+service AuthService {
+  rpc Handshake(HandshakeRequest) returns (HandshakeResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+  rpc Logout(LogoutRequest) returns (LogoutResponse);
+}

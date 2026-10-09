@@ -54,4 +54,44 @@ describe("Dashboard", () => {
     expect(screen.getByText("Servidor Principal")).toBeInTheDocument();
     expect(screen.getByText("Eventos sincronizados: 42")).toBeInTheDocument();
   });
+
+  it("renders remote clients connected via WEB and API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/system/connections": () =>
+            json({
+              web: 4,
+              api: 2,
+              total: 6,
+              details: {
+                web_sockets: 3,
+                web_sessions: 4,
+                grpc: 1,
+                media_sessions: 1,
+                api_tokens_recent: 0,
+                desktop_sessions: 0,
+              },
+            }),
+          "/api/v1/system/info": () =>
+            json({ name: "openvms-api", version: "v0.1.0", commit: "abc", build_time: "", go_version: "go1.26", schema_version: 2 }),
+          "/api/v1/sites": () => json({ items: [] }),
+          "/api/v1/servers": () => json({ items: [] }),
+          "/api/v1/cameras": () => json({ items: [] }),
+          "/api/v1/events/sync-status": () => json({ items: [] }),
+        }),
+      ),
+    );
+
+    renderPage(Dashboard);
+
+    expect(await screen.findByRole("heading", { name: "Clientes remotos conectados" })).toBeInTheDocument();
+    expect(screen.getByText("Vía WEB")).toBeInTheDocument();
+    expect(screen.getByText("Vía API / Desktop")).toBeInTheDocument();
+    expect(screen.getByText("Total conectados")).toBeInTheDocument();
+    expect(await screen.findByText("4")).toBeInTheDocument();
+    expect(await screen.findByText("2")).toBeInTheDocument();
+    expect(await screen.findByText("6")).toBeInTheDocument();
+  });
 });

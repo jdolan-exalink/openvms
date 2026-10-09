@@ -810,7 +810,7 @@ function GridTile({
       }}
       {...touchTap.handlers}
       className={cn(
-        "group relative isolate select-none touch-manipulation [-webkit-touch-callout:none] aspect-video overflow-hidden [contain:paint] bg-video outline-none focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
+        "group relative select-none touch-manipulation [-webkit-touch-callout:none] aspect-video overflow-hidden bg-video outline-none focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
         isSelected && "outline-2 outline-offset-1 outline-primary",
         isDragging && "opacity-50",
         isHidden && "hidden",
@@ -836,13 +836,13 @@ function GridTile({
         <>
           {isDuplicate ? (
             <div className="relative size-full">
-              <img src={`/media/v1/cameras/${tile.camera_id}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-contain opacity-60" />
+              <img src={`/media/v1/cameras/${tile.camera_id}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-fill opacity-60" />
               <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs"><span className="rounded-full bg-surface-1/80 px-3 py-1 text-on-surface">{tr("live.alreadyVisible")}</span></span>
             </div>
           ) : recLayer && !persistent ? null : (
             // Without persistent players a live socket would keep streaming under REC, so it is
             // unmounted there; persistent sessions stay mounted and suspended (last frame kept).
-            <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} className="size-full" />
+            <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" />
           )}
           {recLayer}
           <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 p-2 text-xs">

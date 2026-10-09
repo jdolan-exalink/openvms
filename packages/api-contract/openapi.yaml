@@ -2869,6 +2869,51 @@ paths:
                 required: [count]
                 properties:
                   count: { type: integer }
+  /api/v1/maps/analytics:
+    get:
+      tags: [maps]
+      operationId: getMapAnalytics
+      summary: Activity heatmaps and analytics
+      description: Returns aggregated and normalized activity heatmap points for cameras on a site.
+      parameters:
+        - name: site_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: camera_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: zone_id
+          in: query
+          schema: { type: string, format: uuid }
+        - name: metric
+          in: query
+          schema:
+            type: string
+            enum: [object, person, vehicle, motion, alarm, lpr]
+            default: object
+        - name: object_type
+          in: query
+          schema: { type: string }
+        - name: start
+          in: query
+          schema: { type: string, format: date-time }
+        - name: end
+          in: query
+          schema: { type: string, format: date-time }
+        - name: coverage
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Analytics heatmap data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MapAnalyticsResponse"
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/maps/config:
     get:
       tags: [maps]
@@ -5453,3 +5498,23 @@ components:
         geometry: { type: object }
         style: { type: object, nullable: true }
         metadata: { type: object, nullable: true }
+    MapAnalyticsPoint:
+      type: object
+      required: [lat, lng, weight, count]
+      properties:
+        camera_id: { type: string, format: uuid, nullable: true }
+        lat: { type: number, format: double }
+        lng: { type: number, format: double }
+        weight: { type: number, format: double }
+        count: { type: integer, format: int64 }
+    MapAnalyticsResponse:
+      type: object
+      required: [points, total, max_count]
+      properties:
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/MapAnalyticsPoint" }
+        total: { type: integer, format: int64 }
+        max_count: { type: integer, format: int64 }
+
+

@@ -274,3 +274,45 @@ var (
 	// ErrOptimisticLockConflict is returned when an If-Match revision does not match current state.
 	ErrOptimisticLockConflict = errors.New("optimistic lock conflict: revision mismatch")
 )
+
+// AnalyticsMetric defines the metric to aggregate for heatmaps.
+type AnalyticsMetric string
+
+const (
+	MetricObject  AnalyticsMetric = "object"
+	MetricPerson  AnalyticsMetric = "person"
+	MetricVehicle AnalyticsMetric = "vehicle"
+	MetricMotion  AnalyticsMetric = "motion"
+	MetricAlarm   AnalyticsMetric = "alarm"
+	MetricLPR     AnalyticsMetric = "lpr"
+)
+
+// AnalyticsPoint represents a single weighted point on the map.
+type AnalyticsPoint struct {
+	CameraID *uuid.UUID `json:"camera_id,omitempty"`
+	Lat      float64    `json:"lat"`
+	Lng      float64    `json:"lng"`
+	Weight   float64    `json:"weight"`
+	Count    int64      `json:"count"`
+}
+
+// AnalyticsResult holds the heatmap points and summary.
+type AnalyticsResult struct {
+	Points   []AnalyticsPoint `json:"points"`
+	Total    int64            `json:"total"`
+	MaxCount int64            `json:"max_count"`
+}
+
+// AnalyticsQuery holds the filtering parameters for heatmaps.
+type AnalyticsQuery struct {
+	SiteID     *uuid.UUID
+	ZoneID     *uuid.UUID
+	CameraID   *uuid.UUID
+	Metric     AnalyticsMetric
+	ObjectType *string
+	Start      time.Time
+	End        time.Time
+	Coverage   bool
+}
+
+

@@ -177,3 +177,49 @@ func TestOnvifDiscoveryRouteRejectsUnknownRequestFields(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", rw.Code, rw.Body.String())
 	}
 }
+
+type stubTracker int
+
+func (s stubTracker) Connections() int       { return int(s) }
+func (s stubTracker) ActiveConnections() int { return int(s) }
+func (s stubTracker) ActiveCount() int       { return int(s) }
+
+func TestSystemConnectionsEndpoint(t *testing.T) {
+	h := &Handlers{
+		Log:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		RealtimeTracker: stubTracker(3),
+		GRPCTracker:     stubTracker(2),
+		SessionsTracker: stubTracker(1),
+	}
+	router, err := NewRouter(h, h.Log, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/system/connections")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("want 200, got %d", resp.StatusCode)
+	}
+
+	var body SystemConnectionsResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Web != 3 {
+		t.Errorf("want web 3, got %d", body.Web)
+	}
+	if body.API != 3 {
+		t.Errorf("want api 3, got %d", body.API)
+	}
+	if body.Total != 6 {
+		t.Errorf("want total 6, got %d", body.Total)
+	}
+}
+

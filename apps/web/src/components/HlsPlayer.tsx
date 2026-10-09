@@ -82,8 +82,9 @@ export const HlsPlayer = forwardRef<
     posterKey?: string | number;
     /** Show the "Cargando grabación…" chip while the poster is up. */
     posterChip?: boolean;
+    objectFit?: "contain" | "cover" | "fill";
   }
->(function HlsPlayer({ cameraId, start, end, startOffset = 0, className, onTime, ariaLabel, controls = true, muted, autoPlay = true, rate, poster, posterFallback, posterKey, posterChip }, ref) {
+>(function HlsPlayer({ cameraId, start, end, startOffset = 0, className, onTime, ariaLabel, controls = true, muted, autoPlay = true, rate, poster, posterFallback, posterKey, posterChip, objectFit = "contain" }, ref) {
   const video = useRef<HTMLVideoElement>(null);
   const [error, setError] = useState("");
   const [waiting, setWaiting] = useState(true);
@@ -168,7 +169,7 @@ export const HlsPlayer = forwardRef<
       <>
         <video
           ref={video}
-          className="size-full object-contain"
+          className={cn("size-full", objectFit === "fill" ? "object-fill" : objectFit === "cover" ? "object-cover" : "object-contain")}
           controls={controls && zoom.scale <= 1}
           muted={muted}
           playsInline
@@ -181,7 +182,7 @@ export const HlsPlayer = forwardRef<
             alt=""
             draggable={false}
             onError={() => posterFallback && posterSrc !== posterFallback && setPosterSrc(posterFallback)}
-            className={cn("pointer-events-none absolute inset-0 size-full object-contain transition-opacity duration-150 motion-reduce:transition-none", showPoster ? "opacity-100" : "opacity-0")}
+            className={cn("pointer-events-none absolute inset-0 size-full transition-opacity duration-150 motion-reduce:transition-none", objectFit === "fill" ? "object-fill" : objectFit === "cover" ? "object-cover" : "object-contain", showPoster ? "opacity-100" : "opacity-0")}
           />
         )}
       </>

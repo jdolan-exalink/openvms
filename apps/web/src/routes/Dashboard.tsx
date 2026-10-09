@@ -1,7 +1,7 @@
 import { useT } from "@/i18n";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { camerasQuery, readinessQuery, serversQuery, sitesQuery, syncStatusQuery, systemCapacityQuery, systemInfoQuery } from "@/api/queries";
+import { camerasQuery, readinessQuery, serversQuery, sitesQuery, syncStatusQuery, systemCapacityQuery, systemConnectionsQuery, systemInfoQuery } from "@/api/queries";
 import type { Schemas } from "@/api/client";
 import { PageHeader } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -17,6 +17,7 @@ const dependencyLabels: Record<string, string> = {
 export function Dashboard() {
   const t = useT();
   const capacity = useQuery(systemCapacityQuery);
+  const connections = useQuery(systemConnectionsQuery);
   const ready = useQuery(readinessQuery);
   const info = useQuery(systemInfoQuery);
   const sites = useQuery(sitesQuery);
@@ -34,6 +35,27 @@ export function Dashboard() {
       />
 
       <CapacityPanel data={capacity.data} pending={capacity.isPending} />
+
+      <section aria-labelledby="remote-clients" className="flex flex-col gap-3">
+        <h2 id="remote-clients" className="text-xl font-bold">{t("dashboard.remoteClients")}</h2>
+        <ul className="grid gap-3 sm:grid-cols-3">
+          <Stat
+            label={t("dashboard.clientsTotal")}
+            value={connections.data?.total}
+            detail={t("dashboard.activeClients")}
+          />
+          <Stat
+            label={t("dashboard.clientsWeb")}
+            value={connections.data?.web}
+            detail={t("dashboard.webClientsDetail", { count: connections.data?.details?.web_sockets ?? connections.data?.web ?? 0 })}
+          />
+          <Stat
+            label={t("dashboard.clientsApi")}
+            value={connections.data?.api}
+            detail={t("dashboard.apiClientsDetail", { count: connections.data?.api ?? 0 })}
+          />
+        </ul>
+      </section>
 
       <section aria-labelledby="inventory" className="flex flex-col gap-3">
         <h2 id="inventory" className="text-xl font-bold">{t("dashboard.inventory")}</h2>
@@ -194,14 +216,26 @@ function fmtBytes(n: number) {
   return `${Math.round(n / 1024 ** 2)} MiB`;
 }
 
-function Stat({ to, label, value, detail, warn }: { to: string; label: string; value?: number; detail?: string; warn?: boolean }) {
+function Stat({ to, label, value, detail, warn }: { to?: string; label: string; value?: number; detail?: string; warn?: boolean }) {
+  const content = (
+    <>
+      <span className="font-mono text-[11px] tracking-wider text-muted uppercase">{label}</span>
+      <span className="text-4xl font-extrabold tabular-nums">{value ?? "—"}</span>
+      {detail && <span className={cn("text-xs", warn ? "text-warn" : "text-muted")}>{detail}</span>}
+    </>
+  );
+
   return (
     <li>
-      <Link to={to} className="m3-press flex min-h-11 flex-col gap-1 rounded-m3-xl bg-surface-1 px-5 py-4 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-primary">
-        <span className="font-mono text-[11px] tracking-wider text-muted uppercase">{label}</span>
-        <span className="text-4xl font-extrabold tabular-nums">{value ?? "—"}</span>
-        {detail && <span className={cn("text-xs", warn ? "text-warn" : "text-muted")}>{detail}</span>}
-      </Link>
+      {to ? (
+        <Link to={to} className="m3-press flex min-h-11 flex-col gap-1 rounded-m3-xl bg-surface-1 px-5 py-4 hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-primary">
+          {content}
+        </Link>
+      ) : (
+        <div className="flex min-h-11 flex-col gap-1 rounded-m3-xl bg-surface-1 px-5 py-4">
+          {content}
+        </div>
+      )}
     </li>
   );
 }

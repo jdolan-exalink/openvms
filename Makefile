@@ -37,8 +37,13 @@ dev-api:
 dev-web:
 	pnpm dev
 
+.PHONY: proto
+proto: ## Compile Protobuf contracts to Go
+	@mkdir -p gen/go/openvms/v1
+	protoc -I. --go_out=. --go_opt=module=github.com/jdolan-exalink/openvms --go-grpc_out=. --go-grpc_opt=module=github.com/jdolan-exalink/openvms proto/openvms/v1/*.proto
+
 .PHONY: generate
-generate: ## Regenerate Go server and TS client from packages/api-contract/openapi.yaml
+generate: proto ## Regenerate Go server, TS client and proto stubs
 	go generate ./...
 	pnpm generate
 

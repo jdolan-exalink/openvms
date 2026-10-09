@@ -14,6 +14,7 @@ type Config struct {
 	Service  string
 	LogLevel string
 	HTTPAddr string
+	GRPCAddr string
 
 	DatabaseURL    string
 	MigrateOnStart bool
@@ -95,6 +96,7 @@ func Load(service string) (Config, error) {
 		Service:                     service,
 		LogLevel:                    str("LOG_LEVEL", "info"),
 		HTTPAddr:                    str("HTTP_ADDR", ":8080"),
+		GRPCAddr:                    str("GRPC_ADDR", ":9090"),
 		DatabaseURL:                 str("DATABASE_URL", ""),
 		MigrateOnStart:              boolean("MIGRATE_ON_START", true),
 		ValkeyAddr:                  str("VALKEY_ADDR", "localhost:6379"),

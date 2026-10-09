@@ -178,3 +178,49 @@ func TestHaversineMeters(t *testing.T) {
 		t.Fatalf("expected 0 for identical points, got %f", zero)
 	}
 }
+
+func TestDestinationPoint(t *testing.T) {
+	// Starting at (0, 0), move north 111,195m (~1 degree of latitude)
+	lat, lng := DestinationPoint(0, 0, 0, 111195)
+	if math.Abs(lat-1.0) > 0.01 {
+		t.Fatalf("expected lat ~1.0, got %f", lat)
+	}
+	if math.Abs(lng-0.0) > 0.001 {
+		t.Fatalf("expected lng ~0.0, got %f", lng)
+	}
+
+	// Move east at equator 111,195m (~1 degree of longitude)
+	lat2, lng2 := DestinationPoint(0, 0, 90, 111195)
+	if math.Abs(lat2-0.0) > 0.001 {
+		t.Fatalf("expected lat ~0.0, got %f", lat2)
+	}
+	if math.Abs(lng2-1.0) > 0.01 {
+		t.Fatalf("expected lng ~1.0, got %f", lng2)
+	}
+}
+
+func TestPointInPolygon(t *testing.T) {
+	poly := []Point{
+		{X: 0, Y: 0},
+		{X: 10, Y: 0},
+		{X: 10, Y: 10},
+		{X: 0, Y: 10},
+		{X: 0, Y: 0},
+	}
+
+	inside := Point{X: 5, Y: 5}
+	if !PointInPolygon(inside, poly) {
+		t.Fatal("expected (5, 5) to be inside polygon")
+	}
+
+	outside := Point{X: 15, Y: 5}
+	if PointInPolygon(outside, poly) {
+		t.Fatal("expected (15, 5) to be outside polygon")
+	}
+
+	outside2 := Point{X: -1, Y: -1}
+	if PointInPolygon(outside2, poly) {
+		t.Fatal("expected (-1, -1) to be outside polygon")
+	}
+}
+
