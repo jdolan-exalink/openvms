@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldCheck, X } from "lucide-react";
+import { IconButton } from "@/components/ui";
 import { ArPlate } from "@/components/plates/ArPlate";
 import { fmtDateTime } from "@/lib/format";
 import { listProtectedImages, protectRemoteImage } from "@/lib/protectedImages";
@@ -36,9 +37,9 @@ export function MapPlateSnapshot({ target, onClose }: { target: PlateSnapshotTar
   });
   return (
     <MapGrowFrame label={`Detección ${target.plate}`} origin={target.origin} onClose={onClose} className="z-40">
-      <div className="relative aspect-video w-full bg-black">
+      <div className="relative aspect-video w-full bg-video">
         {failed ? (
-          <p className="flex size-full items-center justify-center text-sm text-white/70">Imagen no disponible</p>
+          <p className="flex size-full items-center justify-center text-sm text-on-surface-variant">Imagen no disponible</p>
         ) : (
           <img
             src={target.imageUrl}
@@ -49,12 +50,12 @@ export function MapPlateSnapshot({ target, onClose }: { target: PlateSnapshotTar
         )}
         <div data-map-drag className="absolute inset-x-0 top-0 z-[3] flex cursor-grab items-center gap-2 bg-gradient-to-b from-black/80 via-black/45 to-transparent px-3 py-2 text-xs text-white active:cursor-grabbing">
           <ArPlate plate={target.plate} large />
-          <button type="button" disabled={alreadyProtected || protect.isPending} onClick={() => protect.mutate()} className="inline-flex items-center gap-1 rounded bg-black/50 px-1.5 py-0.5 hover:bg-black/70 disabled:opacity-70">
-            <ShieldCheck className="size-3.5" aria-hidden />
+          <button type="button" disabled={alreadyProtected || protect.isPending} onClick={() => protect.mutate()} className="inline-flex min-h-9 items-center gap-1 rounded-full bg-black/50 px-3 text-xs font-bold hover:bg-black/70 disabled:opacity-70">
+            <ShieldCheck className="size-4" aria-hidden />
             {alreadyProtected || protect.isSuccess ? "Protegida" : "Proteger"}
           </button>
-          <span className="min-w-0 truncate font-medium">{target.cameraName}</span>
-          {target.seenAt && <span className="hidden shrink-0 text-white/70 sm:inline">{fmtDateTime(target.seenAt)}</span>}
+          <span className="min-w-0 truncate font-bold">{target.cameraName}</span>
+          {target.seenAt && <span className="hidden shrink-0 font-mono text-white/70 sm:inline">{fmtDateTime(target.seenAt)}</span>}
           <PlateClose />
         </div>
       </div>
@@ -65,8 +66,6 @@ export function MapPlateSnapshot({ target, onClose }: { target: PlateSnapshotTar
 function PlateClose() {
   const close = useGrowClose();
   return (
-    <button type="button" onClick={close} className="ml-auto rounded p-1 hover:bg-white/20" aria-label="Cerrar detección">
-      <X className="size-3.5" aria-hidden />
-    </button>
+    <IconButton icon={X} onClick={close} size="sm" className="ml-auto text-white hover:bg-white/20" aria-label="Cerrar detección" />
   );
 }

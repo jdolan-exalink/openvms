@@ -57,6 +57,7 @@ function segmentStyle(segment: GridSegment, columns: number, rows: number): CSSP
   };
 }
 
+/** Road-marking colors (white, yellow, black outline) model physical pavement lines, so they are theme-independent. */
 function LineMark({ segment }: { segment: GridSegment }) {
   const vertical = segment.orientation === "v";
   return (

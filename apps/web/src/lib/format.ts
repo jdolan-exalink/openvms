@@ -214,6 +214,7 @@ export function vehicleHeadline(v?: VehicleReading): string | null {
   return null;
 }
 
+/** Physical vehicle paint swatches (data colors for the detected car color, not theme colors). */
 const paintHex: Record<string, string> = {
   black: "#1c1c1c",
   white: "#f5f5f4",

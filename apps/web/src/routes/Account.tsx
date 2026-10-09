@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { api, unwrap } from "@/api/client";
 import { meQuery } from "@/api/queries";
+import { ThemePicker } from "@/components/ThemePicker";
 import { Button, ErrorNote, Field, PageHeader, TextInput } from "@/components/ui";
 
 /** Account: change your password and set up the second factor (TOTP). */
@@ -13,11 +14,23 @@ export function Account() {
     <div className="mx-auto flex max-w-2xl flex-col gap-6">
       <PageHeader title={t("nav.myAccount")} description={me.data ? `${me.data.display_name} (${me.data.username})` : undefined} />
       {me.data?.must_change_password && (
-        <p role="status" className="rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">{t("account.adminAskedPassword")}</p>
+        <p role="status" className="rounded-m3-lg bg-warn/15 px-4 py-3 text-sm text-warn">{t("account.adminAskedPassword")}</p>
       )}
+      <AppearanceSection />
       <PasswordForm />
       <MfaSection enabled={!!me.data?.mfa_enabled} />
     </div>
+  );
+}
+
+function AppearanceSection() {
+  const t = useT();
+  return (
+    <section className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-5">
+      <h2 className="text-lg font-bold">{t("account.appearance")}</h2>
+      <p className="text-sm text-muted">{t("account.appearanceHelp")}</p>
+      <ThemePicker />
+    </section>
   );
 }
 
@@ -39,14 +52,14 @@ function PasswordForm() {
   });
   return (
     <form
-      className="flex flex-col gap-3 rounded border border-line bg-surface p-4"
+      className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-5"
       onSubmit={(e: FormEvent) => {
         e.preventDefault();
         setDone(false);
         change.mutate();
       }}
     >
-      <h2 className="font-semibold">{t("auth.password")}</h2>
+      <h2 className="text-lg font-bold">{t("auth.password")}</h2>
       <Field label={t("account.currentPassword")}>
         <TextInput type="password" autoComplete="current-password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} />
       </Field>
@@ -58,7 +71,7 @@ function PasswordForm() {
       </Field>
       <ErrorNote error={change.error} />
       {done && <p className="text-sm text-ok">{t("account.passwordUpdated")}</p>}
-      <Button type="submit" variant="primary" disabled={change.isPending} className="self-start">
+      <Button type="submit" variant="filled" disabled={change.isPending} className="self-start">
         {t("account.changePassword")}
       </Button>
     </form>
@@ -88,8 +101,8 @@ function MfaSection({ enabled }: { enabled: boolean }) {
   });
 
   return (
-    <section className="flex flex-col gap-3 rounded border border-line bg-surface p-4">
-      <h2 className="font-semibold">{t("account.twoFactor")}</h2>
+    <section className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-5">
+      <h2 className="text-lg font-bold">{t("account.twoFactor")}</h2>
       {enabled ? (
         <>
           <p className="text-sm text-ok">{t("account.twoFactorOn")}</p>
@@ -103,7 +116,7 @@ function MfaSection({ enabled }: { enabled: boolean }) {
             <Field label={t("account.passwordToDisable")}>
               <TextInput type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
             </Field>
-            <Button type="submit" disabled={disable.isPending}>
+            <Button type="submit" variant="outlined" className="border-bad/60 text-bad" disabled={disable.isPending}>
               {t("account.disable")}
             </Button>
           </form>
@@ -120,15 +133,15 @@ function MfaSection({ enabled }: { enabled: boolean }) {
           <p className="text-sm">
             {t("account.setupKey")}
           </p>
-          <code className="rounded bg-raised px-3 py-2 font-mono text-sm tracking-widest break-all select-all">{setup.data.secret.match(/.{1,4}/g)?.join(" ")}</code>
-          <a href={setup.data.otpauth_url} className="text-sm text-accent underline break-all">
+          <code className="rounded-m3-md bg-surface-2 px-3 py-2 font-mono text-sm tracking-widest break-all select-all">{setup.data.secret.match(/.{1,4}/g)?.join(" ")}</code>
+          <a href={setup.data.otpauth_url} className="text-sm text-primary underline break-all">
             {setup.data.otpauth_url}
           </a>
           <Field label={t("account.appCode")}>
             <TextInput required inputMode="numeric" pattern="[0-9 ]{6,7}" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} />
           </Field>
           <ErrorNote error={enable.error} />
-          <Button type="submit" variant="primary" disabled={enable.isPending} className="self-start">
+          <Button type="submit" variant="filled" disabled={enable.isPending} className="self-start">
             {t("account.enable")}
           </Button>
         </form>
@@ -136,7 +149,7 @@ function MfaSection({ enabled }: { enabled: boolean }) {
         <>
           <p className="text-sm text-muted">{t("account.twoFactorHelp")}</p>
           <ErrorNote error={setup.error} />
-          <Button variant="primary" onClick={() => setup.mutate()} disabled={setup.isPending} className="self-start">
+          <Button variant="filled" onClick={() => setup.mutate()} disabled={setup.isPending} className="self-start">
             {t("account.setup")}
           </Button>
         </>

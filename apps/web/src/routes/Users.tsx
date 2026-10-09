@@ -1,13 +1,13 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { KeyRound, Plus } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { groupsQuery, meQuery, tenantsQuery, usersQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Button, Checkbox, Empty, ErrorNote, Field, LinkButton, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 import { fmtDateTime } from "@/lib/format";
 import { can } from "@/lib/perm";
 
@@ -38,8 +38,8 @@ export function Users() {
         description={t("settings.users")}
         actions={
           manage ? (
-            <Button variant="primary" onClick={() => setEditing("new")}>
-              <Plus className="size-4" aria-hidden /> Nuevo usuario
+            <Button variant="filled" onClick={() => setEditing("new")}>
+              <Icon icon={Plus} size="xs" /> Nuevo usuario
             </Button>
           ) : null
         }
@@ -77,7 +77,7 @@ export function Users() {
           </thead>
           <tbody>
             {visible.map((u) => (
-              <tr key={u.id} className="border-t border-line align-top">
+              <tr key={u.id} className="border-t border-outline-variant align-top">
                 <td>
                   <div className="font-medium">{u.display_name}</div>
                   <div className="font-mono text-xs text-muted">
@@ -91,18 +91,20 @@ export function Users() {
                   {statusText[u.status] ?? u.status}
                   {!u.has_password && <div className="text-xs text-muted">Solo token</div>}
                 </td>
-                <td className="text-xs">{fmtDateTime(u.last_login_at)}</td>
+                <td className="font-mono text-xs">{fmtDateTime(u.last_login_at)}</td>
                 <td className="text-right whitespace-nowrap">
+                  <div className="inline-flex items-center gap-1">
                   {can(me.data, "permissions.manage") && (
-                    <Link to="/permissions" search={{ subject: `user:${u.id}` }} className="mr-2 inline-flex items-center gap-1 text-xs text-accent hover:underline">
-                      <KeyRound className="size-3.5" aria-hidden /> Permisos
-                    </Link>
+                    <LinkButton size="sm" to="/permissions" search={{ subject: `user:${u.id}` }}>
+                      <Icon icon={KeyRound} size="xs" /> Permisos
+                    </LinkButton>
                   )}
                   {manage && (
-                    <Button aria-label={`Editar ${u.username}`} onClick={() => setEditing(u)}>
+                    <Button size="sm" variant="tonal" aria-label={`Editar ${u.username}`} onClick={() => setEditing(u)}>
                       Editar
                     </Button>
                   )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -232,9 +234,7 @@ function UserForm({ user, groups, onDone }: { user?: Schemas["User"]; groups: Sc
           <TextInput type="password" minLength={10} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" />
         </Field>
         {f.password && (
-          <label className="flex items-center gap-2 self-center text-sm">
-            <input type="checkbox" checked={f.must_change_password} onChange={(e) => setF({ ...f, must_change_password: e.target.checked })} /> Pedir cambio al ingresar
-          </label>
+          <Checkbox className="self-center" checked={f.must_change_password} onChange={(v) => setF({ ...f, must_change_password: v })} label="Pedir cambio al ingresar" />
         )}
         {user && (
           <Field label="Estado">
@@ -246,9 +246,7 @@ function UserForm({ user, groups, onDone }: { user?: Schemas["User"]; groups: Sc
           </Field>
         )}
         {user?.mfa_enabled && (
-          <label className="flex items-center gap-2 self-center text-sm">
-            <input type="checkbox" checked={f.disable_mfa} onChange={(e) => setF({ ...f, disable_mfa: e.target.checked })} /> Quitar MFA (teléfono perdido)
-          </label>
+          <Checkbox className="self-center" checked={f.disable_mfa} onChange={(v) => setF({ ...f, disable_mfa: v })} label="Quitar MFA (teléfono perdido)" />
         )}
       </div>
       {tenantGroups.length > 0 && (
@@ -256,21 +254,19 @@ function UserForm({ user, groups, onDone }: { user?: Schemas["User"]; groups: Sc
           <legend className="mb-1 font-medium">Grupos</legend>
           <div className="flex flex-wrap gap-3">
             {tenantGroups.map((g) => (
-              <label key={g.id} className="flex items-center gap-1.5">
-                <input type="checkbox" checked={f.group_ids.includes(g.id)} onChange={() => toggleGroup(g.id)} /> {g.name}
-              </label>
+              <Checkbox key={g.id} className="rounded-full bg-surface-2 px-3" checked={f.group_ids.includes(g.id)} onChange={() => toggleGroup(g.id)} label={g.name} />
             ))}
           </div>
         </fieldset>
       )}
       <ErrorNote error={save.error ?? remove.error} />
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" variant="primary" disabled={save.isPending}>
+        <Button type="submit" variant="filled" disabled={save.isPending}>
           {save.isPending ? "Guardando…" : "Guardar"}
         </Button>
-        <Button onClick={onDone}>Cancelar</Button>
+        <Button variant="text" onClick={onDone}>Cancelar</Button>
         {user && user.id !== me.data?.id && (
-          <Button className="ml-auto text-bad" onClick={() => setConfirming(true)}>
+          <Button variant="outlined" className="ml-auto border-bad/60 text-bad" onClick={() => setConfirming(true)}>
             Eliminar usuario
           </Button>
         )}

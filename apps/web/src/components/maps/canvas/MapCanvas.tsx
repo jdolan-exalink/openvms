@@ -25,6 +25,7 @@ import { AnimationBudget, isPrefersReducedMotion } from "@/lib/maps/animationBud
 import { defaultMapRealtimeStore, MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { registerSdfSprites } from "./sprite";
 import { bindCameraPointerDrag } from "@/lib/maps/editorInteractions";
+import { bindLongPress, trackPointerKind } from "@/lib/touch";
 
 export interface MapCanvasProps {
   provider: MapProviderConfig;
@@ -300,14 +301,32 @@ export function MapCanvas({
       }
     });
 
+    // Touch: a finger emulates hover, so the hover preview ignores it and a tap opens the preview
+    // instead; a long press opens the camera context menu (right click on a mouse).
+    const pointerKind = trackPointerKind(map.getCanvas());
+    const longPress = bindLongPress(map.getCanvas(), ({ x, y }) => {
+      if (drawingZoneRef.current || !map.getLayer("cam-point-circle")) return;
+      const rect = map.getCanvas().getBoundingClientRect();
+      const point = { x: x - rect.left, y: y - rect.top };
+      const id = map.queryRenderedFeatures([point.x, point.y], { layers: ["cam-point-circle"] })[0]?.properties?.id;
+      if (id) onContextMenuCameraRef.current?.(String(id), point);
+    });
+
     // Unclustered camera click
     map.on("click", "cam-point-circle", (e) => {
       if (drawingZoneRef.current) return;
+      if (longPress.consumeFired()) return;
       if (cameraDrag.consumeClick()) return;
       const feat = e.features?.[0];
       if (feat?.properties?.id) {
         onSelectCameraRef.current?.(feat.properties.id);
+        if (pointerKind.isTouch()) onHoverCameraRef.current?.(feat.properties.id, { x: e.point.x, y: e.point.y });
       }
+    });
+    // Tapping empty map dismisses a preview a tap opened.
+    map.on("click", (e) => {
+      if (!pointerKind.isTouch() || !map.getLayer("cam-point-circle")) return;
+      if (map.queryRenderedFeatures(e.point, { layers: ["cam-point-circle"] }).length === 0) onHoverCameraRef.current?.(null);
     });
 
     const cameraDrag = bindCameraPointerDrag(map.getCanvas(), {
@@ -358,15 +377,18 @@ export function MapCanvas({
 
     map.on("mouseenter", "cam-point-circle", (e) => {
       map.getCanvas().style.cursor = "pointer";
+      if (pointerKind.isTouch()) return;
       const id = e.features?.[0]?.properties?.id;
       if (id) onHoverCameraRef.current?.(id, { x: e.point.x, y: e.point.y });
     });
     map.on("mousemove", "cam-point-circle", (e) => {
+      if (pointerKind.isTouch()) return;
       const id = e.features?.[0]?.properties?.id;
       if (id) onHoverCameraRef.current?.(id, { x: e.point.x, y: e.point.y });
     });
     map.on("mouseleave", "cam-point-circle", () => {
       map.getCanvas().style.cursor = "";
+      if (pointerKind.isTouch()) return;
       onHoverCameraRef.current?.(null);
     });
 
@@ -416,6 +438,8 @@ export function MapCanvas({
     return () => {
       if (fovDebounceTimerRef.current) clearTimeout(fovDebounceTimerRef.current);
       cameraDrag.dispose();
+      longPress.dispose();
+      pointerKind.dispose();
       resizeObserver.disconnect();
       controller.destroy();
       map.remove();

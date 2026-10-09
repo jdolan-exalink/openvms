@@ -1,13 +1,13 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { KeyRound, Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraGroupsQuery, camerasQuery, meQuery, tenantsQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
-import { Button, Empty, ErrorNote, Field, PageHeader, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Icon } from "@/components/Icon";
+import { Button, Checkbox, Empty, ErrorNote, Field, LinkButton, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
 /** Camera groups allow grouping cameras for permissions and view layouts. */
@@ -34,7 +34,7 @@ export function CameraGroups() {
         actions={
           manage ? (
             <Button variant="primary" onClick={() => setEditing("new")}>
-              <Plus className="size-4" aria-hidden /> Nuevo grupo
+              <Icon icon={Plus} size="sm" /> Nuevo grupo
             </Button>
           ) : null
         }
@@ -75,7 +75,7 @@ export function CameraGroups() {
           </thead>
           <tbody>
             {visible.map((g) => (
-              <tr key={g.id} className="border-t border-line align-top">
+              <tr key={g.id} className="border-t border-outline-variant align-top">
                 <td>
                   <div className="font-medium">{g.name}</div>
                   {g.description && <div className="text-xs text-muted">{g.description}</div>}
@@ -85,16 +85,12 @@ export function CameraGroups() {
                 </td>
                 <td className="text-right">
                   {can(me.data, "permissions.manage") && (
-                    <Link
-                      to="/permissions"
-                      search={{ subject: `camera_group:${g.id}` }}
-                      className="mr-2 inline-flex items-center gap-1 text-xs text-accent hover:underline"
-                    >
-                      <KeyRound className="size-3.5" aria-hidden /> Permisos
-                    </Link>
+                    <LinkButton size="sm" to="/permissions" search={{ subject: `camera_group:${g.id}` }} className="mr-2">
+                      <Icon icon={KeyRound} size="xs" /> Permisos
+                    </LinkButton>
                   )}
                   {manage && (
-                    <Button aria-label={`Editar ${g.name}`} onClick={() => setEditing(g)}>
+                    <Button size="sm" aria-label={`Editar ${g.name}`} onClick={() => setEditing(g)}>
                       Editar
                     </Button>
                   )}
@@ -202,19 +198,14 @@ function CameraGroupForm({
         <div className="grid gap-4 sm:grid-cols-2">
           {!group && me.data?.tenant_id === null && (
             <Field label="Organización">
-              <select
-                required
-                value={f.tenant_id}
-                onChange={(e) => setF({ ...f, tenant_id: e.target.value })}
-                className="w-full rounded border border-line bg-bg px-3 py-1.5 text-sm"
-              >
+              <Select required value={f.tenant_id} onChange={(e) => setF({ ...f, tenant_id: e.target.value })}>
                 <option value="">Elegí una organización</option>
                 {tenants.data?.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
                   </option>
                 ))}
-              </select>
+              </Select>
             </Field>
           )}
           <Field label="Nombre">
@@ -227,17 +218,9 @@ function CameraGroupForm({
         <fieldset className="flex flex-col gap-2">
           <legend className="text-sm font-medium">Cámaras del grupo</legend>
           {cameras.length === 0 && <span className="text-xs text-muted">No hay cámaras disponibles.</span>}
-          <div className="grid max-h-48 gap-2 overflow-y-auto sm:grid-cols-2">
+          <div className="grid max-h-56 gap-2 overflow-y-auto sm:grid-cols-2">
             {cameras.map((c) => (
-              <label key={c.id} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={f.camera_ids.includes(c.id)}
-                  onChange={() => toggle(c.id)}
-                  className="rounded border-line"
-                />
-                <span>{c.display_name}</span>
-              </label>
+              <Checkbox key={c.id} className="rounded-m3-md bg-surface-2 px-3" checked={f.camera_ids.includes(c.id)} onChange={() => toggle(c.id)} label={c.display_name} />
             ))}
           </div>
         </fieldset>
@@ -246,9 +229,9 @@ function CameraGroupForm({
           <Button type="submit" variant="primary" disabled={save.isPending}>
             {save.isPending ? "Guardando…" : "Guardar"}
           </Button>
-          <Button onClick={onDone}>Cancelar</Button>
+          <Button variant="text" onClick={onDone}>Cancelar</Button>
           {group && (
-            <Button className="ml-auto text-bad" onClick={() => setConfirming(true)}>
+            <Button variant="outlined" className="ml-auto text-bad" onClick={() => setConfirming(true)}>
               Eliminar grupo
             </Button>
           )}

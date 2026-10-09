@@ -1,16 +1,17 @@
 # Coral (USB or PCIe). Standard Frigate image.
-name: openvms-frigate
+version: "3.8"
 services:
   frigate:
     container_name: frigate
     privileged: true
     restart: unless-stopped
+    depends_on: [mosquitto]
     image: ghcr.io/blakeblackshear/frigate:stable
     shm_size: "256mb"
     volumes:
       - /etc/localtime:/etc/localtime:ro
-      - ./config:/config
-      - ./storage:/media/frigate
+      - /opt/frigate/config:/config
+      - /mnt/cctv:/media/frigate
     devices:
       - /dev/bus/usb:/dev/bus/usb
     ports:
@@ -18,3 +19,11 @@ services:
       - "8554:8554"
       - "8555:8555/tcp"
       - "8555:8555/udp"
+  mosquitto:
+    container_name: mosquitto
+    restart: unless-stopped
+    image: eclipse-mosquitto:2
+    volumes:
+      - /opt/frigate/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "127.0.0.1:1883:1883"

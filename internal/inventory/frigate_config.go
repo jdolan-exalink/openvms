@@ -305,6 +305,30 @@ func (s *Service) secretsServer(ctx context.Context, actor authz.Actor, serverID
 	return srv, err
 }
 
+// RequireServerConfigSecrets checks the server-scoped secret permission without returning
+// any configuration content. Callers handling transient credentials use this before
+// loading registered-agent secrets or making an outbound request.
+func (s *Service) RequireServerConfigSecrets(ctx context.Context, actor authz.Actor, serverID uuid.UUID) error {
+	_, err := s.secretsServer(ctx, actor, serverID, false)
+	return err
+}
+
+// RequireServerManageAndConfigSecrets checks both permissions in one scoped transaction.
+// Credentialed agent operations use this to avoid a permission-revocation race between checks.
+func (s *Service) RequireServerManageAndConfigSecrets(ctx context.Context, actor authz.Actor, serverID uuid.UUID) error {
+	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		srv, err := q.GetServer(ctx, serverID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		resource := access.Server(srv.TenantID, srv.SiteID, srv.ID)
+		if err := c.Require(authz.ServersManage, resource); err != nil {
+			return err
+		}
+		return c.Require(authz.ServersConfigSecrets, resource)
+	})
+}
+
 // SaveServerFrigateRaw validates (through Frigate) and writes a full config.yml, storing a
 // revision. Requires servers.config and servers.config.secrets.
 func (s *Service) SaveServerFrigateRaw(ctx context.Context, actor authz.Actor, serverID uuid.UUID, yamlText string, restart bool) (FrigateRawSaveResult, error) {

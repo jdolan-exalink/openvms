@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { type ReactNode, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 
@@ -11,20 +12,21 @@ import { useFocusTrap } from "@/lib/useFocusTrap";
  * are trapped inside, and focus returns to whatever triggered it on close (useFocusTrap).
  */
 export function Modal({ title, onClose, children, className }: { title: string; onClose: () => void; children: ReactNode; className?: string }) {
+  const t = useT();
   const containerRef = useRef<HTMLDivElement>(null);
   useFocusTrap(containerRef, onClose);
 
   const dialog = (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-scrim p-4"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div ref={containerRef} role="dialog" aria-modal="true" aria-label={title} className={cn("flex max-h-[90vh] w-full max-w-3xl flex-col gap-4 overflow-auto rounded border border-line bg-surface p-4 shadow-lg", className)}>
+      <div ref={containerRef} role="dialog" aria-modal="true" aria-label={title} className={cn("flex max-h-[90vh] w-full max-w-3xl flex-col gap-4 overflow-auto rounded-m3-2xl bg-surface-1 p-6 shadow-lg", className)}>
         <div className="flex items-center justify-between gap-4">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button type="button" aria-label="Cerrar" onClick={onClose} className="rounded p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent">
+          <h2 className="text-[22px] font-bold">{title}</h2>
+          <button type="button" aria-label={t("common.close")} onClick={onClose} className="m3-press inline-flex size-11 items-center justify-center rounded-full hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary">
             <X className="size-5" aria-hidden />
           </button>
         </div>

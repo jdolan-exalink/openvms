@@ -410,6 +410,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/provision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install Frigate, NTP and the OpenVMS agent on a new host over SSH
+         * @description The SSH password is used only for this install session. It is not stored and
+         *     is never returned. Requires servers.manage on the target site.
+         */
+        post: operations["startServerProvision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/provision/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /** Install progress for a job started by this user */
+        get: operations["getServerProvision"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}": {
         parameters: {
             query?: never;
@@ -469,6 +509,124 @@ export interface paths {
          * @description Requires servers.restart on the server.
          */
         post: operations["restartServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/tls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read registered agent TLS trust configuration
+         * @description Requires servers.manage. Returns only the public custom CA bundle, never credentials or private keys.
+         */
+        get: operations["getServerAgentTlsConfig"];
+        /**
+         * Configure registered agent TLS trust
+         * @description Requires servers.manage. The CA bundle is public trust material; private keys and agent credentials are not accepted.
+         */
+        put: operations["setServerAgentTlsConfig"];
+        post?: never;
+        /**
+         * Disable registered agent TLS configuration
+         * @description Requires servers.manage. This only deletes trust metadata and does not issue an agent or camera request.
+         */
+        delete: operations["deleteServerAgentTlsConfig"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/onvif/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discover ONVIF devices from a registered edge agent
+         * @description Requires servers.manage. Accepts only a local interface name; agent credentials and camera URLs or credentials are never accepted. Discovery uses the agent's local CIDR policy.
+         */
+        post: operations["discoverServerOnvif"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/onvif/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read ONVIF device information through a registered agent
+         * @description Requires servers.manage and servers.config.secrets. Credentials are transient, sent only over verified agent HTTPS, and are never stored or returned.
+         */
+        post: operations["probeServerOnvif"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Live agent metrics for the servers screen
+         * @description Polled about once a second while the servers screen is open.
+         */
+        get: operations["getServerAgent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replace the edge agent with the current build
+         * @description Requires servers.manage on the server.
+         */
+        post: operations["updateServerAgent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2387,6 +2545,146 @@ export interface components {
             updated: number;
             /** @description Cameras no longer present in Frigate. They are kept and flagged, not deleted. */
             missing: number;
+        };
+        ServerProvisionRequest: {
+            /** Format: uuid */
+            site_id: string;
+            /** @description Address of the new machine. Example: 192.0.2.10 */
+            ip: string;
+            /** @description Display name for the newly installed server. */
+            server_name: string;
+            /** @description Optional verified SHA256 SSH host key fingerprint. When supplied */
+            host_key?: string;
+            /**
+             * @description Explicitly accept the first SSH host key without prior verification. The initial host identity is not verified.
+             * @default false
+             */
+            trust_on_first_use: boolean;
+            ssh_user: string;
+            /**
+             * Format: password
+             * @description Used only for this install session. Not stored.
+             */
+            ssh_password: string;
+            /**
+             * @description Explicitly allow recordings on the root filesystem when /mnt/cctv is not mounted. Demo use only; disk may fill.
+             * @default false
+             */
+            allow_system_disk: boolean;
+        };
+        ServerProvisionStep: {
+            /** @enum {string} */
+            id: "connecting" | "packages" | "hardware" | "compose" | "ntp" | "agent" | "register";
+            /** @enum {string} */
+            state: "pending" | "running" | "done" | "error";
+            detail?: string;
+        };
+        ServerProvision: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "running" | "succeeded" | "failed";
+            steps: components["schemas"]["ServerProvisionStep"][];
+            /**
+             * @description CPU fallback and/or explicit system-disk recording warning.
+             * @enum {string}
+             */
+            warning?: "cpu" | "system_disk" | "cpu_system_disk";
+            /** @enum {string} */
+            variant?: "coral" | "tensorrt" | "openvino" | "cpu";
+            /** Format: uuid */
+            server_id?: string;
+            error?: string;
+            /** @description SHA256 fingerprint seen on first SSH contact. */
+            host_key?: string;
+        };
+        ServerAgentTLSConfig: {
+            secure_port: number;
+            /** @enum {string} */
+            trust_mode: "system" | "custom";
+            /** @description Public CA certificates in PEM format; required only for custom trust mode. */
+            ca_pem?: string;
+        };
+        OnvifDiscoveryRequest: {
+            interface_name: string;
+        };
+        OnvifDiscoveryDevice: {
+            xaddrs: string[];
+        };
+        OnvifDiscoveryResult: {
+            devices: components["schemas"]["OnvifDiscoveryDevice"][];
+        };
+        OnvifProbeRequest: {
+            /** @description HTTP(S) ONVIF device endpoint on an IPv4 literal. */
+            endpoint: string;
+            username?: string;
+            password?: string;
+        };
+        OnvifProbeResult: {
+            device_information: components["schemas"]["OnvifProbeDeviceInformation"];
+            services: components["schemas"]["OnvifProbeService"][];
+            system_time: components["schemas"]["OnvifProbeClock"];
+        };
+        OnvifProbeDeviceInformation: {
+            manufacturer: string;
+            model: string;
+            firmware_version: string;
+            serial_number: string;
+            hardware_id: string;
+        };
+        OnvifProbeService: {
+            namespace: string;
+            xaddrs: string[];
+            version: components["schemas"]["OnvifProbeVersion"];
+        };
+        OnvifProbeVersion: {
+            major: number;
+            minor: number;
+        };
+        OnvifProbeClock: {
+            date_time_type: string;
+            utc: components["schemas"]["OnvifProbeDateTime"];
+            local: components["schemas"]["OnvifProbeDateTime"];
+        };
+        OnvifProbeDateTime: {
+            time: components["schemas"]["OnvifProbeTime"];
+            date: components["schemas"]["OnvifProbeDate"];
+        };
+        OnvifProbeTime: {
+            hour: number;
+            minute: number;
+            second: number;
+        };
+        OnvifProbeDate: {
+            year: number;
+            month: number;
+            day: number;
+        };
+        ServerAgent: {
+            installed: boolean;
+            version: string;
+            current_version: string;
+            outdated: boolean;
+            variant?: string;
+            ntp?: string;
+            cpu_percent?: number;
+            /** Format: int64 */
+            memory_total_bytes?: number;
+            /** Format: int64 */
+            memory_available_bytes?: number;
+            coral?: boolean;
+            gpu_present?: boolean;
+            gpu_vendor?: string;
+            gpu_name?: string;
+            /** Format: int64 */
+            cctv_total_bytes?: number;
+            /** Format: int64 */
+            cctv_free_bytes?: number;
+            /** Format: int64 */
+            database_total_bytes?: number;
+            /** Format: int64 */
+            database_free_bytes?: number;
+            error?: string;
         };
         Camera: {
             /** Format: uuid */
@@ -4530,6 +4828,58 @@ export interface operations {
             502: components["responses"]["FrigateUnreachable"];
         };
     };
+    startServerProvision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerProvisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Install started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerProvision"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getServerProvision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Progress */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerProvision"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getServer: {
         parameters: {
             query?: never;
@@ -4655,6 +5005,198 @@ export interface operations {
                     "application/json": {
                         success: boolean;
                     };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getServerAgentTlsConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent TLS trust configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentTLSConfig"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    setServerAgentTlsConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentTLSConfig"];
+            };
+        };
+        responses: {
+            /** @description Saved configuration */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentTLSConfig"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteServerAgentTlsConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description TLS configuration deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    discoverServerOnvif: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnvifDiscoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description Credential-free discovered device endpoints */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnvifDiscoveryResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    probeServerOnvif: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OnvifProbeRequest"];
+            };
+        };
+        responses: {
+            /** @description Bounded, sanitized read-only ONVIF device information */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OnvifProbeResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getServerAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent reading */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgent"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateServerAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent after the update */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgent"];
                 };
             };
             401: components["responses"]["Unauthorized"];

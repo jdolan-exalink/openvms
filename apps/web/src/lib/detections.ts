@@ -14,7 +14,10 @@ export function detectionCategory(label: string): DetectionCategory {
   return "other";
 }
 
-/** Subtle, legible in light and dark; deliberately distinct from the accent used for coverage. */
+/**
+ * Subtle, legible in light and dark; deliberately distinct from the accent used for coverage.
+ * Fixed categorical series palette (data colors), identical across themes so categories stay recognizable.
+ */
 export const CATEGORY_COLOR: Record<DetectionCategory, string> = {
   person: "#f59e0b",
   vehicle: "#a855f7",

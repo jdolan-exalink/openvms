@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { convertPlan, type ConvertedPlan } from "@/lib/maps/planConversion";
 import { ApiError } from "@/api/client";
 import { uploadFloorPlan } from "@/lib/maps/plans";
-import { Button } from "@/components/ui";
+import { Button, Select } from "@/components/ui";
 interface PlanUploadProps { siteId:string; floorId:string; revision:number; onSaved:()=>void; onConflict?:()=>void;onDirty?:(dirty:boolean)=>void; source?: Blob }
 
 async function rotatePng(blob: Blob): Promise<{ blob: Blob; width: number; height: number }> {
@@ -89,32 +89,31 @@ function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,s
       setError(cause instanceof Error ? cause.message : "No se pudo abrir la imagen actual.");
     } finally { setBusy(false); }
   }
-  return <section aria-label="Fondo del plano" className="space-y-2 rounded-xl border border-line bg-surface p-3 text-xs shadow-lg">
-    <h3 className="font-semibold">Fondo del plano</h3>
-    <label className="inline-flex cursor-pointer items-center rounded border border-line bg-surface px-3 py-1 text-xs">
+  return <section aria-label="Fondo del plano" className="space-y-3 rounded-m3-xl bg-surface-1/95 p-4 text-xs shadow-lg backdrop-blur">
+    <h3 className="text-lg font-bold">Fondo del plano</h3>
+    <label className="m3-press inline-flex h-11 cursor-pointer items-center rounded-full bg-secondary-container px-5 text-sm font-bold text-on-secondary-container has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-primary">
       Elegir imagen
       <input aria-label="Archivo de plano" type="file" accept="image/png,image/svg+xml,application/pdf,.png,.svg,.pdf"
         className="sr-only" onChange={event=>{
           const next=event.target.files?.[0];if(!next)return;setFile(next);setPage(1);void prepare(next,1);
         }}/>
     </label>
-    {file && <p className="break-all text-muted">{file.name}</p>}
-    {preview && preview.pageCount>1 && <label className="block">Página PDF<select aria-label="Página PDF" value={page} disabled={busy}
+    {file && <p className="break-all font-mono text-on-surface-variant">{file.name}</p>}
+    {preview && preview.pageCount>1 && <label className="block">Página PDF<Select aria-label="Página PDF" value={page} disabled={busy} className="mt-1"
       onChange={event=>{const next=Number(event.target.value);setPage(next);if(file)void prepare(file,next);}}>
       {Array.from({length:preview.pageCount},(_,index)=><option key={index+1} value={index+1}>{index+1}</option>)}
-    </select></label>}
-    {preview && <><img src={preview.url} alt="Vista previa del plano" className="max-h-40 max-w-64 rounded border border-line"/>
-      <p className="text-muted">{preview.width} × {preview.height} px</p>
-      {preview.warnings.map(warning=><p key={warning} role="status" className="text-warning">{warning}</p>)}
-      <Button disabled={busy} onClick={() => void rotate()}>Girar</Button>
+    </Select></label>}
+    {preview && <><img src={preview.url} alt="Vista previa del plano" className="max-h-40 max-w-64 rounded-m3-lg"/>
+      <p className="font-mono text-on-surface-variant">{preview.width} × {preview.height} px</p>
+      {preview.warnings.map(warning=><p key={warning} role="status" className="text-warn">{warning}</p>)}
+      <Button variant="tonal" disabled={busy} onClick={() => void rotate()}>Girar</Button>
     </>}
-    {!preview && source && <Button disabled={busy} onClick={() => void adjustCurrent()}>Acomodar imagen</Button>}
-    {error && <p role="alert">{error}</p>}
+    {!preview && source && <Button variant="tonal" disabled={busy} onClick={() => void adjustCurrent()}>Acomodar imagen</Button>}
+    {error && <p role="alert" className="text-bad">{error}</p>}
     {busy && <p role="status">Procesando plano…</p>}
-    <p className="text-muted">PNG, SVG o una página PDF; máximo 20 MiB. Girar acomoda el plano antes de guardarlo.</p>
-    <div className="flex gap-2"><button type="button" disabled={!preview || busy} onClick={()=>void save()}
-      className="rounded bg-accent px-3 py-1 text-white disabled:opacity-40">Guardar fondo</button>
-      {(busy||preview) && <button type="button" onClick={()=>{request.current?.abort();setBusy(false);clearPreview();}}>Cancelar</button>}
+    <p className="text-on-surface-variant">PNG, SVG o una página PDF; máximo 20 MiB. Girar acomoda el plano antes de guardarlo.</p>
+    <div className="flex flex-wrap gap-2"><Button variant="filled" disabled={!preview || busy} onClick={()=>void save()}>Guardar fondo</Button>
+      {(busy||preview) && <Button variant="outlined" onClick={()=>{request.current?.abort();setBusy(false);clearPreview();}}>Cancelar</Button>}
     </div>
   </section>;
 }

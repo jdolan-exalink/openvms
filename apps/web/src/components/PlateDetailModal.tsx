@@ -11,7 +11,8 @@ import { can } from "@/lib/perm";
 import { useT, type MessageKey } from "@/i18n";
 import { Modal } from "./Modal";
 
-const downloadLinkClass = "inline-flex items-center gap-2 rounded border border-line px-3 py-1.5 text-sm hover:bg-raised";
+const downloadLinkClass =
+  "m3-press inline-flex h-11 items-center justify-center gap-2 rounded-full border border-outline px-5 text-sm font-bold hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary";
 
 type DetailTab = "photo" | "clip";
 const TABS: { id: DetailTab; label: MessageKey }[] = [
@@ -53,7 +54,7 @@ function ClipWatermarkDownload({ readId }: { readId: string }) {
 
   if (jobId === null) {
     return (
-      <Button onClick={() => create.mutate()} disabled={create.isPending}>
+      <Button variant="tonal" onClick={() => create.mutate()} disabled={create.isPending}>
         <Download className="size-4" aria-hidden /> {t("plates.downloadClip")}
       </Button>
     );
@@ -193,7 +194,7 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
           </div>
         </dl>
 
-        <div role="tablist" aria-label={tr("plates.tabs")} className="flex gap-1 border-b border-line">
+        <div role="tablist" aria-label={tr("plates.tabs")} className="flex gap-1 border-b border-outline-variant">
           {TABS.map((tabItem, index) => (
             <button
               key={tabItem.id}
@@ -208,8 +209,8 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
               tabIndex={tab === tabItem.id ? 0 : -1}
               onClick={() => setTab(tabItem.id)}
               onKeyDown={(e) => onTabKeyDown(e, index)}
-              className={`-mb-px border-b-2 px-3 py-1.5 text-sm font-medium ${
-                tab === tabItem.id ? "border-accent text-fg" : "border-transparent text-muted hover:text-fg"
+              className={`-mb-px min-h-11 border-b-2 px-4 text-sm font-bold focus-visible:outline-2 focus-visible:outline-primary ${
+                tab === tabItem.id ? "border-primary text-primary" : "border-transparent text-on-surface-variant hover:text-on-surface"
               }`}
             >
               {tr(tabItem.label)}
@@ -220,11 +221,11 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
         {tab === "photo" && (
           <div id={panelId("photo")} role="tabpanel" aria-labelledby={tabId("photo")} tabIndex={0} className="flex flex-col gap-4">
             {canViewPhoto ? (
-              <div className="relative overflow-hidden rounded border border-line">
+              <div className="relative overflow-hidden rounded-m3-lg">
                 <img
                   src={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?quality=100`}
                   alt={tr("plates.photoAlt", { plate: read.plate_normalized })}
-                  className="max-h-[70vh] w-full bg-black object-contain"
+                  className="max-h-[70vh] w-full bg-video object-contain"
                 />
                 <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
               </div>
@@ -242,8 +243,8 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
         {tab === "clip" && (
           <div id={panelId("clip")} role="tabpanel" aria-labelledby={tabId("clip")} tabIndex={0} className="flex flex-col gap-4">
             {canViewClip ? (
-              <div className="relative overflow-hidden rounded border border-line">
-                <video controls preload="metadata" className="max-h-[70vh] w-full bg-black" src={`/media/v1/lpr/reads/${read.id}/clip.mp4`}>
+              <div className="relative overflow-hidden rounded-m3-lg">
+                <video controls preload="metadata" className="max-h-[70vh] w-full bg-video" src={`/media/v1/lpr/reads/${read.id}/clip.mp4`}>
                   {tr("plates.clipUnsupported")}
                 </video>
                 <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />

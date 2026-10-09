@@ -30,5 +30,8 @@ const messages = {
   planLoading: "Loading floor plan…",
   planOpenFailed: "The floor plan could not be opened.",
   planMissing: "This floor plan has no image.",
+  onMap: "On the map",
+  openLiveNamed: "Open live view: {name}",
+  closeLiveNamed: "Close live view: {name}",
 } as const;
 export default messages;

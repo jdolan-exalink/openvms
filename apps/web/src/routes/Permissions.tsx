@@ -7,7 +7,7 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import {
   cameraGroupsQuery, camerasQuery, grantsQuery, groupsQuery, meQuery, permissionCatalogQuery, serversQuery, sitesQuery, tenantsQuery, usersQuery,
 } from "@/api/queries";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Button, Empty, IconButton, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 
 type Scope = Schemas["ScopeType"];
 
@@ -150,7 +150,7 @@ export function Permissions() {
           {!!grants.data?.length && (
             <div className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm font-medium text-muted">Permisos directos asignados</span>
+                <span className="text-lg font-bold">Permisos directos asignados</span>
                 <Summary>{summarizeGrants(grants.data.length)}</Summary>
               </div>
               <Table label="Permisos otorgados">
@@ -165,14 +165,14 @@ export function Permissions() {
                 <tbody>
                   {grouped.map((group) => (
                     <Fragment key={group.label}>
-                      <tr className="border-t-2 border-line bg-surface/60 text-xs font-semibold text-fg">
-                        <td colSpan={4} className="py-2.5 px-3">
+                      <tr className="bg-surface-2 text-xs font-bold text-on-surface">
+                        <td colSpan={4} className="px-3 py-2.5">
                           <span>{group.label}</span>
                           <span className="ml-2 font-normal text-muted">({group.grants.length})</span>
                         </td>
                       </tr>
                       {group.grants.map((g) => (
-                        <tr key={g.id} className="border-t border-line">
+                        <tr key={g.id} className="border-t border-outline-variant">
                           <td className="pl-6">
                             <div className="font-mono text-xs font-semibold">{g.permission}</div>
                           </td>
@@ -180,8 +180,8 @@ export function Permissions() {
                             <span
                               className={
                                 g.effect === "deny"
-                                  ? "inline-flex items-center rounded bg-bad/10 px-2 py-0.5 text-xs font-medium text-bad"
-                                  : "inline-flex items-center rounded bg-ok/10 px-2 py-0.5 text-xs font-medium text-ok"
+                                  ? "inline-flex h-6 items-center rounded-full bg-bad/15 px-2.5 text-xs font-medium text-bad"
+                                  : "inline-flex h-6 items-center rounded-full bg-ok/15 px-2.5 text-xs font-medium text-ok"
                               }
                             >
                               {g.effect === "deny" ? "Denegar" : "Permitir"}
@@ -189,14 +189,13 @@ export function Permissions() {
                           </td>
                           <td className="text-xs text-muted">{permDesc.get(g.permission) ?? "—"}</td>
                           <td className="text-right">
-                            <Button
+                            <IconButton
+                              icon={Trash2}
                               onClick={() => remove.mutate(g.id)}
                               aria-label={`Revocar ${g.permission}`}
                               title={`Revocar ${g.permission}`}
-                              className="text-muted hover:text-bad"
-                            >
-                              <Trash2 className="size-3.5" aria-hidden />
-                            </Button>
+                              className="text-on-surface-variant hover:bg-bad/15 hover:text-bad"
+                            />
                           </td>
                         </tr>
                       ))}
@@ -323,7 +322,7 @@ function GrantForm({
         setResult("");
         grant.mutate();
       }}
-      className="grid gap-3 rounded border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-4"
+      className="grid gap-3 rounded-m3-xl bg-surface-1 p-5 sm:grid-cols-2 lg:grid-cols-4"
     >
       <Field label="Qué">
         <Select value={what} onChange={(e) => setWhat(e.target.value)}>
@@ -380,7 +379,7 @@ function GrantForm({
         <div />
       )}
       <div className="flex flex-wrap items-center gap-3 sm:col-span-2 lg:col-span-4">
-        <Button type="submit" variant="primary" disabled={grant.isPending}>
+        <Button type="submit" variant="filled" disabled={grant.isPending}>
           {grant.isPending ? "Aplicando…" : "Otorgar"}
         </Button>
         {result && <span className="text-sm text-muted">{result}</span>}

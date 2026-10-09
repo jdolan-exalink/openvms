@@ -13,8 +13,8 @@ function setup(overrides: Partial<ComponentProps<typeof MapOperationsPanel>> = {
     onEdit: vi.fn(), onOpenLive: vi.fn(), onEvents: vi.fn(), onPlayback: vi.fn(), onResetVisibility: vi.fn(),
     ...overrides,
   };
-  render(<MapOperationsPanel {...props} />);
-  return props;
+  const view = render(<MapOperationsPanel {...props} />);
+  return Object.assign(props, { unmount: view.unmount });
 }
 describe("Map operational states", () => {
   it("selects a coordinate-less site without relying on its map marker", () => {
@@ -60,5 +60,36 @@ describe("Map operational states", () => {
   it("distinguishes an invalid or unauthorized deep-link site", () => {
     setup({ requestedSiteId: "missing" });
     expect(screen.getByRole("alert")).toHaveTextContent("unavailable or not authorized");
+  });
+  describe("camera explorer rows", () => {
+    const inventory = [
+      { id: "a", display_name: "Placed cam", status: "online", server_id: "srv", folder_id: null },
+      { id: "b", display_name: "Loose cam", status: "offline", server_id: "srv", folder_id: null },
+    ] as never;
+    const placed = { id: "a", name: "Placed cam", type: "camera" as const, siteId: "s",
+      position: { kind: "geo" as const, lat: 1, lng: 2 }, status: "online" as const, metadata: {}, activeAlarms: 0,
+      camera: { bearingDeg: 0, fovDeg: 60, rangeM: 10, cameraType: "fixed" as const, ptz: false, lpr: false } };
+
+    it("marks only placed cameras with an on-map icon and no text label", () => {
+      setup({ currentSite: site, cameras: [placed], inventory, servers: [{ id: "srv", name: "Server" }] });
+      expect(screen.getAllByRole("img", { name: "En el mapa" })).toHaveLength(1);
+      expect(screen.queryByText("En el mapa")).not.toBeInTheDocument();
+    });
+    it("toggles the live window with a pressed state and an accurate name", () => {
+      const onOpenLive = vi.fn();
+      const onCloseLive = vi.fn();
+      const view = setup({ currentSite: site, cameras: [placed], inventory, servers: [{ id: "srv", name: "Server" }], openCameraIds: [], onOpenLive, onCloseLive });
+      const open = screen.getByRole("button", { name: "Abrir vista en vivo: Placed cam" });
+      expect(open).toHaveAttribute("aria-pressed", "false");
+      fireEvent.click(open);
+      expect(onOpenLive).toHaveBeenCalledWith("a");
+      view.unmount();
+      setup({ currentSite: site, cameras: [placed], inventory, servers: [{ id: "srv", name: "Server" }], openCameraIds: ["a"], onOpenLive, onCloseLive });
+      const close = screen.getByRole("button", { name: "Cerrar vista en vivo: Placed cam" });
+      expect(close).toHaveAttribute("aria-pressed", "true");
+      fireEvent.click(close);
+      expect(onCloseLive).toHaveBeenCalledWith("a");
+      expect(screen.queryByRole("button", { name: /vista en vivo: Loose cam/ })).not.toBeInTheDocument();
+    });
   });
 });

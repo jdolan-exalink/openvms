@@ -1,5 +1,5 @@
-import { faPlus } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { Plus } from "lucide-react";
+import { Icon } from "../Icon";
 import { useState } from "react";
 import { Button, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -41,18 +41,18 @@ export function LabelPicker({
             <label
               key={l}
               className={cn(
-                "group relative flex size-12 cursor-pointer items-center justify-center rounded border text-2xl select-none",
-                on ? "border-accent bg-accent/15" : "border-line bg-bg opacity-70 hover:opacity-100",
+                "group relative flex size-12 cursor-pointer items-center justify-center rounded-m3-md text-2xl select-none",
+                on ? "bg-primary-container" : "bg-surface-2 opacity-70 hover:opacity-100",
                 disabled && "cursor-not-allowed opacity-50",
-                "focus-within:outline-2 focus-within:outline-accent",
+                "focus-within:outline-2 focus-within:outline-primary",
               )}
             >
               <input type="checkbox" className="peer sr-only" aria-label={name} checked={on} disabled={disabled} onChange={(e) => toggle(l, e.target.checked)} />
               <span aria-hidden>{labelEmoji(l)}</span>
-              <span aria-hidden className={cn("absolute top-0.5 right-0.5 flex size-4 items-center justify-center rounded-sm border text-[10px] leading-none", on ? "border-accent bg-accent text-bg" : "border-line bg-surface text-transparent")}>
+              <span aria-hidden className={cn("absolute top-0.5 right-0.5 flex size-4 items-center justify-center rounded-full text-[10px] leading-none", on ? "bg-primary text-on-primary" : "bg-surface-3 text-transparent")}>
                 ✓
               </span>
-              <span role="tooltip" aria-hidden className="pointer-events-none absolute -top-8 left-1/2 z-10 hidden -translate-x-1/2 rounded bg-raised px-2 py-1 text-xs whitespace-nowrap text-ink shadow group-focus-within:block group-hover:block">
+              <span role="tooltip" aria-hidden className="pointer-events-none absolute -top-8 left-1/2 z-10 hidden -translate-x-1/2 rounded-m3-sm bg-surface-3 px-2 py-1 text-xs whitespace-nowrap text-on-surface shadow group-focus-within:block group-hover:block">
                 {name}
               </span>
             </label>
@@ -66,7 +66,7 @@ export function LabelPicker({
             <TextInput value={custom} onChange={(e) => setCustom(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } }} />
           </label>
           <Button disabled={!custom.trim()} onClick={addCustom}>
-            <FontAwesomeIcon icon={faPlus} aria-hidden /> Añadir etiqueta
+            <Icon icon={Plus} size="xs" /> Añadir etiqueta
           </Button>
         </div>
       )}

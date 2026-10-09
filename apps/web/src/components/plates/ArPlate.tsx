@@ -1,6 +1,9 @@
 import { cn } from "@/lib/cn";
 
-/** Mercosur Argentina plate, or the older black plate when the text is ABC123. */
+/**
+ * Mercosur Argentina plate, or the older black plate when the text is ABC123. Plate colors
+ * model the physical plate (white/black/Mercosur blue), so they are fixed in every theme.
+ */
 export function ArPlate({ plate, large = false }: { plate: string; large?: boolean }) {
   const raw = plate.replace(/[^A-Za-z0-9]/g, "").toUpperCase();
   const classic = /^[A-Z]{3}\d{3}$/.test(raw);

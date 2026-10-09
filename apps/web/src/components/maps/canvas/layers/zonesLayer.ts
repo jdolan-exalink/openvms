@@ -10,6 +10,7 @@ import type {
 import type { Feature, FeatureCollection, LineString, Point, Polygon } from "geojson";
 import { ZONE_KIND_COLOR } from "@/lib/maps/zoneDraft";
 import type { Zone, ZoneKind } from "@/lib/maps/types";
+import { readMapPalette } from "../palette";
 
 export const ZONES_SOURCE_ID = "zones";
 
@@ -69,6 +70,7 @@ export function buildZonesSource(zones: Zone[] = []): GeoJSONSourceSpecification
 }
 
 export function buildZonesLayers(): LayerSpecification[] {
+  const palette = readMapPalette();
   const zoneFill: FillLayerSpecification = {
     id: "zone-fill",
     type: "fill",
@@ -103,8 +105,8 @@ export function buildZonesLayers(): LayerSpecification[] {
       "text-max-width": 8,
     },
     paint: {
-      "text-color": "#ffffff",
-      "text-halo-color": "#0e1523",
+      "text-color": palette.label,
+      "text-halo-color": palette.labelHalo,
       "text-halo-width": 2,
     },
   };
@@ -145,6 +147,7 @@ export function sketchToFeatureCollection(sketch?: ZoneSketch): FeatureCollectio
 }
 
 export function buildZoneSketchLayers(): LayerSpecification[] {
+  const palette = readMapPalette();
   const fill: FillLayerSpecification = {
     id: "zone-sketch-fill",
     type: "fill",
@@ -168,7 +171,7 @@ export function buildZoneSketchLayers(): LayerSpecification[] {
       "circle-radius": 6,
       "circle-color": ["get", "color"],
       "circle-stroke-width": 2,
-      "circle-stroke-color": "#ffffff",
+      "circle-stroke-color": palette.ring,
     },
   };
   return [fill, line, vertex];

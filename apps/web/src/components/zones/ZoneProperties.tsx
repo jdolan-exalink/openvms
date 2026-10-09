@@ -1,6 +1,7 @@
 import { Check, Copy } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { Field, TextInput } from "@/components/ui";
+import { Icon } from "@/components/Icon";
+import { Button, Field, Switch, Textarea, TextInput } from "@/components/ui";
 import { labelName } from "@/lib/format";
 import { serializeCoordinates } from "@/lib/zoneGeometry";
 import { type EditorItem, type ItemIssues } from "./zoneDraft";
@@ -15,11 +16,12 @@ export interface LabelPickerProps {
 function FallbackLabelPicker({ value, onChange, ariaLabel, labels }: LabelPickerProps & { labels: string[] }) {
   const all = [...new Set([...labels, ...value])];
   return (
-    <div role="group" aria-label={ariaLabel} className="flex flex-wrap gap-x-3 gap-y-1">
+    <div role="group" aria-label={ariaLabel} className="flex flex-wrap gap-x-4 gap-y-1">
       {all.map((l) => (
-        <label key={l} className="inline-flex items-center gap-1 text-sm">
+        <label key={l} className="inline-flex min-h-11 items-center gap-2 text-sm">
           <input
             type="checkbox"
+            className="size-5 accent-primary"
             checked={value.includes(l)}
             onChange={(e) => onChange(e.target.checked ? [...value, l] : value.filter((v) => v !== l))}
           />
@@ -98,7 +100,7 @@ export function ZoneProperties({
   }
 
   return (
-    <section aria-label="Propiedades" className="flex flex-col gap-3 border-t border-line pt-3">
+    <section aria-label="Propiedades" className="flex flex-col gap-3 rounded-m3-lg bg-surface-2 p-4">
       <Field
         label={isZone ? "Nombre de la zona" : "Nombre de la máscara"}
         hint={isZone ? "Minúsculas, números y guion bajo; único en la cámara." : dictFormat ? undefined : "El nombre solo se guarda con el formato de máscaras de Frigate 0.18."}
@@ -111,10 +113,7 @@ export function ZoneProperties({
         />
       </Field>
       {!isZone && dictFormat && (
-        <label className="inline-flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={item.enabled} onChange={(e) => onPatch({ enabled: e.target.checked })} />
-          Máscara activa
-        </label>
+        <Switch label="Máscara activa" checked={item.enabled} onChange={(next) => onPatch({ enabled: next })} />
       )}
       {item.kind === "object" && <p className="text-xs text-muted">Ámbito: {item.scope ? labelName(item.scope) : "todos los objetos"}</p>}
       {isZone && (
@@ -141,22 +140,18 @@ export function ZoneProperties({
       <div className="flex flex-col gap-1 text-sm">
         <div className="flex items-center justify-between">
           <label htmlFor="zone-coords">Coordenadas ({item.points.length} puntos)</label>
-          <button
-            type="button"
-            onClick={copy}
-            className="inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
-          >
-            {copied ? <Check className="size-3" aria-hidden /> : <Copy className="size-3" aria-hidden />}
+          <Button size="sm" variant="text" onClick={copy}>
+            <Icon icon={copied ? Check : Copy} size="xs" />
             {copied ? "Copiado" : "Copiar"}
-          </button>
+          </Button>
         </div>
-        <textarea
+        <Textarea
           id="zone-coords"
           readOnly
           rows={3}
           value={coords}
           onFocus={(e) => e.currentTarget.select()}
-          className="w-full rounded border border-line bg-bg px-2 py-1 font-mono text-xs"
+          className="min-h-0 bg-surface-3 font-mono text-xs"
         />
       </div>
       {issues.errors.map((m) => (

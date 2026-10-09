@@ -123,25 +123,25 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
 
   const panel = (
     <div className="space-y-4">
-      {error && <p role="alert" className="rounded border border-bad/40 bg-bad/10 px-3 py-2 text-sm text-bad">{error}</p>}
+      {error && <p role="alert" className="rounded-m3-lg bg-bad/10 px-3 py-2 text-sm text-bad">{error}</p>}
       {view.kind === "list" && (
         <div className="space-y-3">
           <ul className="space-y-2">
-            <li className="flex items-center gap-3 rounded border border-line bg-bg px-3 py-2">
+            <li className="flex flex-wrap items-center gap-3 rounded-m3-lg bg-surface-2 px-4 py-3">
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">Mapa geográfico</span>
-                <span className="text-xs text-muted">Mapa real · usa coordenadas</span>
+                <span className="block text-sm font-bold">Mapa geográfico</span>
+                <span className="text-xs text-on-surface-variant">Mapa real · usa coordenadas</span>
               </span>
-              <Button onClick={() => { onOpenGeographic?.(); close(); }}>Abrir</Button>
+              <Button variant="tonal" onClick={() => { onOpenGeographic?.(); close(); }}>Abrir</Button>
             </li>
             {floors.map(({ floor }) => (
-              <li key={floor.id} className="flex items-center gap-3 rounded border border-line bg-bg px-3 py-2">
+              <li key={floor.id} className="flex flex-wrap items-center gap-3 rounded-m3-lg bg-surface-2 px-4 py-3">
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">{floor.name}</span>
-                  <span className="text-xs text-muted">Fondo de imagen</span>
+                  <span className="block truncate text-sm font-bold">{floor.name}</span>
+                  <span className="text-xs text-on-surface-variant">Fondo de imagen</span>
                 </span>
-                <Button aria-label={`Editar ${floor.name}`} onClick={() => { setName(floor.name); setConfirming(false); setError(undefined); setView({ kind: "edit", floor }); }}>Editar</Button>
-                <Button className="text-bad" aria-label={`Borrar ${floor.name}`} onClick={() => { setName(floor.name); setConfirming(true); setError(undefined); setView({ kind: "edit", floor }); }}>Borrar</Button>
+                <Button variant="tonal" aria-label={`Editar ${floor.name}`} onClick={() => { setName(floor.name); setConfirming(false); setError(undefined); setView({ kind: "edit", floor }); }}>Editar</Button>
+                <Button variant="outlined" className="border-bad text-bad" aria-label={`Borrar ${floor.name}`} onClick={() => { setName(floor.name); setConfirming(true); setError(undefined); setView({ kind: "edit", floor }); }}>Borrar</Button>
               </li>
             ))}
           </ul>
@@ -151,7 +151,7 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
       {view.kind === "create" && (
         <form className="space-y-4" onSubmit={(event) => { event.preventDefault(); if (kind === "geo") { onOpenGeographic?.(); close(); return; } void run(createImage); }}>
           <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">Tipo de mapa</legend>
+            <legend className="text-sm font-bold">Tipo de mapa</legend>
             <TypeOption selected={kind === "geo"} value="geo" title="Mapa real" detail="El mapa geográfico del sitio, con coordenadas." onSelect={() => setKind("geo")} />
             <TypeOption selected={kind === "image"} value="image" title="Fondo de imagen" detail="Un plano o edificio, sin coordenadas." onSelect={() => setKind("image")} />
           </fieldset>
@@ -162,16 +162,16 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
               </Field>
               <label className="block text-sm">
                 Imagen de fondo
-                <input aria-label="Imagen de fondo" type="file" accept="image/png,image/svg+xml,application/pdf,.png,.svg,.pdf" className="mt-1 block w-full text-sm" onChange={(event) => setPlanFile(event.target.files?.[0])} />
+                <input aria-label="Imagen de fondo" type="file" accept="image/png,image/svg+xml,application/pdf,.png,.svg,.pdf" className="mt-1 block w-full rounded-m3-md bg-surface-2 p-2 text-sm file:mr-3 file:h-9 file:rounded-full file:border-0 file:bg-secondary-container file:px-4 file:text-sm file:font-bold file:text-on-secondary-container" onChange={(event) => setPlanFile(event.target.files?.[0])} />
               </label>
-              {planFile && <p className="text-sm text-muted">{planFile.name}</p>}
-              <p className="text-sm text-muted">PNG, SVG o PDF. Al crearlo se guarda el fondo y después podés girarlo para acomodarlo.</p>
+              {planFile && <p className="text-sm text-on-surface-variant">{planFile.name}</p>}
+              <p className="text-sm text-on-surface-variant">PNG, SVG o PDF. Al crearlo se guarda el fondo y después podés girarlo para acomodarlo.</p>
             </>
           )}
-          {kind === "geo" && <p className="text-sm text-muted">Este sitio tiene un mapa real. Abrirlo muestra el mapa geográfico.</p>}
+          {kind === "geo" && <p className="text-sm text-on-surface-variant">Este sitio tiene un mapa real. Abrirlo muestra el mapa geográfico.</p>}
           <div className="flex gap-2">
             <Button variant="primary" type="submit" disabled={busy || !kind || (kind === "image" && !name.trim())}>{kind === "geo" ? "Usar mapa real" : "Crear mapa"}</Button>
-            <Button onClick={() => setView({ kind: "list" })}>Volver</Button>
+            <Button variant="outlined" onClick={() => setView({ kind: "list" })}>Volver</Button>
           </div>
         </form>
       )}
@@ -183,17 +183,17 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
           <Button variant="primary" disabled={busy || !name.trim() || editing.revision == null} onClick={() => void run(() => rename(editing))}>Guardar</Button>
           {editing.revision != null && <PlanUpload siteId={site.id} floorId={editing.id} revision={editing.revision} onSaved={onSaved} />}
           {confirming ? (
-            <div className="space-y-2 rounded border border-bad/40 bg-bad/10 p-3 text-sm">
+            <div className="space-y-2 rounded-m3-lg bg-bad/10 p-4 text-sm">
               <p>¿Borrar «{editing.name}»? Solo se puede si no tiene cámaras ni zonas.</p>
               <div className="flex gap-2">
-                <Button disabled={busy} onClick={() => void run(() => remove(editing))}>Eliminar mapa</Button>
-                <Button onClick={() => setConfirming(false)}>Volver</Button>
+                <Button variant="danger" disabled={busy} onClick={() => void run(() => remove(editing))}>Eliminar mapa</Button>
+                <Button variant="outlined" onClick={() => setConfirming(false)}>Volver</Button>
               </div>
             </div>
           ) : (
-            <Button className="text-bad" onClick={() => setConfirming(true)}>Borrar</Button>
+            <Button variant="outlined" className="border-bad text-bad" onClick={() => setConfirming(true)}>Borrar</Button>
           )}
-          <Button onClick={() => { setConfirming(false); setView({ kind: "list" }); }}>Volver a la lista</Button>
+          <Button variant="text" onClick={() => { setConfirming(false); setView({ kind: "list" }); }}>Volver a la lista</Button>
         </div>
       )}
     </div>
@@ -204,7 +204,7 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
   if (embedded) {
     return (
       <>
-        <Button className="w-full" disabled={disabled} onClick={openDialog}>
+        <Button variant="tonal" className="w-full" disabled={disabled} onClick={openDialog}>
           <Map className="size-4" aria-hidden />
           Editor de mapas
         </Button>
@@ -215,7 +215,7 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
 
   return (
     <>
-      <button type="button" disabled={disabled} onClick={openDialog}>Mapas</button>
+      <Button variant="tonal" disabled={disabled} onClick={openDialog}>Mapas</Button>
       {dialog}
     </>
   );
@@ -223,11 +223,11 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
 
 function TypeOption({ selected, value, title, detail, onSelect }: { selected: boolean; value: Kind; title: string; detail: string; onSelect: () => void }) {
   return (
-    <label className={cn("flex items-start gap-2 rounded border px-3 py-2", selected ? "border-accent bg-accent/10" : "border-line bg-bg")}>
-      <input className="mt-1" type="radio" name="tipo-de-mapa" value={value} checked={selected} onChange={onSelect} />
+    <label className={cn("flex min-h-11 items-start gap-3 rounded-m3-lg px-4 py-3", selected ? "bg-primary-container text-on-primary-container" : "bg-surface-2")}>
+      <input className="mt-1 size-4 accent-primary" type="radio" name="tipo-de-mapa" value={value} checked={selected} onChange={onSelect} />
       <span>
-        <span className="block text-sm font-medium">{title}</span>
-        <span className="text-xs text-muted">{detail}</span>
+        <span className="block text-sm font-bold">{title}</span>
+        <span className="text-xs opacity-80">{detail}</span>
       </span>
     </label>
   );

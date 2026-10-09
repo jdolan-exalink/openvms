@@ -2,7 +2,9 @@ import { useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { CameraEntity, Site } from "@/lib/maps/types";
 import { clampPinnedOrigin, measureMapStage, PINNED_WINDOW_WIDTH, type PinnedWindow } from "@/lib/maps/pinnedWindows";
 import { MsePlayer } from "@/components/MsePlayer";
-import { STATE_COLORS, computeDisplayState } from "@/lib/maps/entityIndex";
+import { computeDisplayState } from "@/lib/maps/entityIndex";
+import { IconButton } from "@/components/ui";
+import { STATE_DOT } from "../stateTone";
 import { ExternalLink, LayoutGrid, X } from "lucide-react";
 
 export interface CameraPanelProps {
@@ -29,6 +31,8 @@ function SingleCameraCard({
   onArrange,
   persistent = false,
   canPreview = true,
+  zIndex,
+  onRaise,
 }: {
   camera: CameraEntity;
   siteName?: string;
@@ -40,6 +44,8 @@ function SingleCameraCard({
   onArrange?: () => void;
   persistent?: boolean;
   canPreview?: boolean;
+  zIndex: number;
+  onRaise: () => void;
 }) {
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
   const displayState = computeDisplayState(
@@ -47,7 +53,6 @@ function SingleCameraCard({
     camera.activeAlarms,
     camera.metadata?.serverOffline as boolean | undefined,
   );
-  const stateColor = STATE_COLORS[displayState] ?? "#7e8a9a";
   const snapshotUrl = `/media/v1/cameras/${camera.id}/snapshot.jpg?h=240`;
   const left = drag?.x ?? x;
   const top = drag?.y ?? y;
@@ -79,51 +84,28 @@ function SingleCameraCard({
     <div
       data-map-source={camera.id}
       data-map-source-rank="2"
-      className="pointer-events-auto absolute flex flex-col overflow-hidden rounded-lg border border-line bg-surface text-xs shadow-md"
-      style={{ left, top, width: PINNED_WINDOW_WIDTH }}
+      className="pointer-events-auto absolute isolate flex flex-col overflow-hidden bg-surface-1 text-xs shadow-lg"
+      style={{ left, top, width: PINNED_WINDOW_WIDTH, zIndex }}
+      onPointerDownCapture={onRaise}
     >
       <div
         data-map-drag
         onPointerDown={startDrag}
-        className="relative z-[3] flex h-7 cursor-grab items-center gap-1.5 border-b border-line bg-muted/30 px-2 active:cursor-grabbing"
+        className="relative flex h-11 cursor-grab items-center gap-1.5 bg-surface-2 pl-3 pr-1 active:cursor-grabbing"
         title={siteName ? `${camera.name} · ${siteName}` : camera.name}
       >
-        <span style={{ backgroundColor: stateColor }} className="inline-block size-1.5 shrink-0 rounded-full" />
-        <h4 className="min-w-0 flex-1 truncate font-medium text-ink">{camera.name}</h4>
+        <span className={`inline-block size-2 shrink-0 rounded-full ${STATE_DOT[displayState]}`} />
+        <h4 className="min-w-0 flex-1 truncate font-bold text-on-surface">{camera.name}</h4>
         {onArrange && (
-          <button
-            type="button"
-            onClick={onArrange}
-            className="rounded p-0.5 text-muted hover:bg-raised hover:text-ink"
-            title="Ordenar ventanas"
-            aria-label="Ordenar ventanas"
-          >
-            <LayoutGrid className="size-3.5" />
-          </button>
+          <IconButton icon={LayoutGrid} onClick={onArrange} title="Ordenar ventanas" aria-label="Ordenar ventanas" size="sm" />
         )}
         {canPreview && (
-          <button
-            type="button"
-            onClick={() => onOpenLive(camera.id)}
-            className="rounded p-0.5 text-muted hover:bg-raised hover:text-ink"
-            title="Maximizar en el mapa"
-            aria-label="Maximizar"
-          >
-            <ExternalLink className="size-3.5" />
-          </button>
+          <IconButton icon={ExternalLink} onClick={() => onOpenLive(camera.id)} title="Maximizar en el mapa" aria-label="Maximizar" size="sm" />
         )}
-        <button
-          type="button"
-          onClick={() => onUnpin(camera.id)}
-          className="rounded p-0.5 text-muted hover:bg-raised hover:text-ink"
-          title="Cerrar"
-          aria-label="Close preview"
-        >
-          <X className="size-3.5" />
-        </button>
+        <IconButton icon={X} onClick={() => onUnpin(camera.id)} title="Cerrar" aria-label="Close preview" size="sm" />
       </div>
 
-      <div className="relative aspect-video w-full overflow-hidden bg-black/60">
+      <div className="relative aspect-video w-full overflow-hidden bg-video">
         {canPreview && (
           <img
             src={snapshotUrl}
@@ -162,7 +144,12 @@ export function CameraPanel({
   persistent = false,
   canPreview = true,
 }: CameraPanelProps) {
+  // Stacking order, oldest first. A window the order does not know yet is new and goes on top.
+  const [order, setOrder] = useState<string[]>([]);
   if (pinnedCameras.length === 0) return null;
+  const present = pinnedCameras.map((camera) => camera.id);
+  const stack = [...order.filter((id) => present.includes(id)), ...present.filter((id) => !order.includes(id))];
+  const raise = (id: string) => setOrder(stack.at(-1) === id ? stack : [...stack.filter((item) => item !== id), id]);
   const siteMap = new Map(sites.map((site) => [site.id, site.name]));
   const place = new Map(windows.map((window) => [window.id, window]));
 
@@ -183,6 +170,8 @@ export function CameraPanel({
             onArrange={onArrange}
             persistent={persistent}
             canPreview={canPreview}
+            zIndex={stack.indexOf(camera.id) + 1}
+            onRaise={() => raise(camera.id)}
           />
         );
       })}

@@ -1,4 +1,5 @@
 import type {
+  ExpressionSpecification,
   FillLayerSpecification,
   GeoJSONSourceSpecification,
   LayerSpecification,
@@ -8,6 +9,7 @@ import type { Feature, FeatureCollection, Polygon } from "geojson";
 import type { CameraEntity } from "@/lib/maps/types";
 import { type BoundingBox, buildFovCone, isPointInBounds } from "@/lib/maps/geo";
 import { STATE_COLORS } from "@/lib/maps/entityIndex";
+import { readMapPalette } from "../palette";
 
 export const FOV_SOURCE_ID = "fov";
 
@@ -15,6 +17,8 @@ export interface FovFeatureProperties {
   id: string;
   name: string;
   color: string;
+  /** 1 when the camera has active alarms; the layer picks the themed color from it. */
+  alarm: number;
   camera_type: string;
 }
 
@@ -46,6 +50,7 @@ export function camerasToFovCollection(
         id: cam.id,
         name: cam.name,
         color,
+        alarm: cam.activeAlarms > 0 ? 1 : 0,
         camera_type: cam.camera.cameraType,
       },
     });
@@ -70,6 +75,8 @@ export function buildFovSource(
 
 export function buildFovLayers(coverageEnabled = true): LayerSpecification[] {
   const visibility = coverageEnabled ? "visible" : "none";
+  const palette = readMapPalette();
+  const fovColor: ExpressionSpecification = ["case", [">", ["get", "alarm"], 0], palette.bad, palette.ok];
 
   // 1. FOV Cone Fill
   const fovFill: FillLayerSpecification = {
@@ -81,7 +88,7 @@ export function buildFovLayers(coverageEnabled = true): LayerSpecification[] {
       visibility,
     },
     paint: {
-      "fill-color": ["get", "color"],
+      "fill-color": fovColor,
       "fill-opacity": [
         "case",
         ["boolean", ["feature-state", "selected"], false],
@@ -103,7 +110,7 @@ export function buildFovLayers(coverageEnabled = true): LayerSpecification[] {
       visibility,
     },
     paint: {
-      "line-color": ["get", "color"],
+      "line-color": fovColor,
       "line-width": [
         "case",
         ["boolean", ["feature-state", "selected"], false],

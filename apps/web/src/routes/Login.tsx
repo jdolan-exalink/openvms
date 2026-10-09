@@ -66,14 +66,16 @@ export function Login() {
   }
 
   return (
-    <main className="relative flex min-h-dvh items-center justify-center px-4">
+    <main className="relative flex min-h-dvh items-center justify-center bg-surface-dim px-4 py-16">
       <div className="absolute right-4 top-4">
         <AccountMenu />
       </div>
-      <div className="flex w-full max-w-sm flex-col gap-4 rounded border border-line bg-surface p-6">
-        <div className="flex items-center gap-2">
-          <Brand className="size-5 text-accent" aria-hidden />
-          <h1 className="text-lg font-semibold tracking-tight">OpenVMS</h1>
+      <div className="flex w-full max-w-sm flex-col gap-5 rounded-m3-2xl bg-surface-1 p-6 sm:p-8">
+        <div className="flex items-center gap-3">
+          <span className="flex size-12 shrink-0 items-center justify-center rounded-m3-lg bg-primary text-on-primary">
+            <Brand className="size-6" aria-hidden />
+          </span>
+          <h1 className="text-3xl font-extrabold tracking-tight">OpenVMS</h1>
         </div>
         {mode === "password" ? (
           <form onSubmit={submitPassword} className="flex flex-col gap-4">
@@ -104,7 +106,7 @@ export function Login() {
               </Field>
             )}
             <ErrorNote error={error} />
-            <Button type="submit" variant="primary" disabled={busy}>
+            <Button type="submit" variant="filled" className="w-full" disabled={busy}>
               {busy ? t("auth.verifying") : needTotp ? t("auth.verify") : t("auth.signIn")}
             </Button>
           </form>
@@ -114,14 +116,14 @@ export function Login() {
               <TextInput type="password" autoComplete="off" required value={token} onChange={(e) => setTokenValue(e.target.value)} placeholder="ovms_…" />
             </Field>
             <ErrorNote error={error} />
-            <Button type="submit" variant="primary" disabled={busy || !token.trim()}>
+            <Button type="submit" variant="filled" className="w-full" disabled={busy || !token.trim()}>
               {busy ? t("auth.verifying") : t("auth.signIn")}
             </Button>
           </form>
         )}
-        <button
-          type="button"
-          className="self-start text-xs text-muted underline-offset-2 hover:text-ink hover:underline"
+        <Button
+          variant="text"
+          className="self-start"
           onClick={() => {
             setError(null);
             setNeedTotp(false);
@@ -129,7 +131,7 @@ export function Login() {
           }}
         >
           {mode === "password" ? t("auth.signInToken") : t("auth.signInPassword")}
-        </button>
+        </Button>
       </div>
     </main>
   );

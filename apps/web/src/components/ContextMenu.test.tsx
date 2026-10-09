@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { Trash2 } from "lucide-react";
 import { clampToViewport, ContextMenu, type MenuItem } from "@/components/ContextMenu";
 
 const setup = (over: Partial<{ onSelect: () => void; onClose: () => void }> = {}) => {
@@ -16,6 +17,20 @@ const setup = (over: Partial<{ onSelect: () => void; onClose: () => void }> = {}
 };
 
 describe("ContextMenu", () => {
+  it("renders item icons as decorative lucide glyphs and a chevron on submenu rows", () => {
+    const items: MenuItem[] = [
+      { id: "del", label: "Borrar", icon: Trash2, onSelect: vi.fn() },
+      { id: "sub", label: "Mas", children: [{ id: "x", label: "X" }] },
+    ];
+    render(<ContextMenu x={10} y={10} items={items} onClose={vi.fn()} />);
+    const del = screen.getByRole("menuitem", { name: "Borrar" });
+    const glyph = del.querySelector("svg");
+    expect(glyph).not.toBeNull();
+    expect(glyph).toHaveClass("lucide-trash-2");
+    expect(glyph).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByRole("menuitem", { name: "Mas" }).querySelector("svg.lucide-chevron-right")).not.toBeNull();
+  });
+
   it("focuses the first item, moves with arrows and activates with Enter", () => {
     const { onSelect, onClose } = setup();
     expect(screen.getByRole("menu")).toBeInTheDocument();

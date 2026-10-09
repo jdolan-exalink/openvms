@@ -1,11 +1,11 @@
-import { DndContext, DragOverlay, type DragEndEvent, KeyboardSensor, PointerSensor, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
+import { ChevronsRight } from "lucide-react";
+import { Icon } from "@/components/Icon";
+import { DndContext, DragOverlay, type DragEndEvent, useDroppable } from "@dnd-kit/core";
 import { rectSortingStrategy, rectSwappingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { faAnglesRight } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { Camera, CircleCheck, CircleHelp, CircleX, History, Maximize2, Minimize2, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
@@ -23,7 +23,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { type ExplorerActions, LiveExplorer } from "@/components/LiveExplorer";
 import { Modal } from "@/components/Modal";
 import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/Presentations";
-import { Button, ErrorNote, TextInput } from "@/components/ui";
+import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
   cameraIdOf, duplicateTileIndexes, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
@@ -31,13 +31,14 @@ import {
   type Tile,
 } from "@/lib/liveGrid";
 import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
-import { assignRecPlayers, parseRecSearch, pickMaster, REC_ENTRY_OFFSET_S, recSearch } from "@/lib/liveRec";
 import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { can } from "@/lib/perm";
+import { LivePhone } from "@/components/LivePhone";
+import { useIsPhoneDevice } from "@/lib/useIsPhoneDevice";
+import { useLiveDragSensors } from "@/lib/dndSensors";
+import { useTouchDoubleTap } from "@/lib/useTouchDoubleTap";
 import { useCameraFolders } from "@/lib/useCameraFolders";
-import { useRecData } from "@/lib/useRecData";
-import { useRecPlayback } from "@/lib/useRecPlayback";
-import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
+import { useRecSession } from "@/lib/useRecSession";
 
 /** copyViewName picks «Nombre (copia)» or «Nombre (copia 2)» so a duplicate stays unique. */
 function copyViewName(name: string, taken: Set<string>): string {
@@ -50,15 +51,14 @@ function copyViewName(name: string, taken: Set<string>): string {
   return `${base} ${taken.size + 1}`;
 }
 
-const unixNow = () => Math.floor(Date.now() / 1000);
-/** How often the shared REC time is written to the URL while playing. */
-const URL_SYNC_MS = 15_000;
+/** Explorer panel is w-80 (20rem) from the rail edge; main already pads 2rem, plus an 0.5rem gap. */
+const PINNED_STYLE = { "--pinned-offset": "18.5rem" } as CSSProperties;
 
 /**
  * Live is the multi-server live screen (PRD §46-49): a camera tree grouped by site and
  * server, a grid of live tiles from any Frigate, and saved views.
  */
-export function Live() {
+function LiveDesktop() {
   const tr = useT();
   const me = useQuery(meQuery);
   const cameras = useQuery(camerasQuery({}));
@@ -124,6 +124,18 @@ export function Live() {
     }, 280);
   };
   useEffect(() => () => clearTimeout(hideEdge.current), []);
+  // Touch has no hover to leave: an unpinned edge explorer closes on a tap outside it (menus and dialogs it opened excluded).
+  useEffect(() => {
+    if (!edgeOpen || sidebarPinned) return;
+    const onDown = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") return;
+      if ((event.target as Element | null)?.closest?.('[data-testid="live-edge"], [data-context-menu], [role="dialog"]')) return;
+      edgeHover.current = false;
+      setEdgeOpen(false);
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, [edgeOpen, sidebarPinned]);
   // The explorer is the same edge panel in the page and in fullscreen, so the shell column stays shut.
   useEffect(() => {
     setContextSidebarCollapsed(true);
@@ -157,14 +169,6 @@ export function Live() {
   const search = useSearch({ strict: false }) as Record<string, unknown>;
   const navigate = useNavigate();
   const canRec = can(me.data, "recordings.view");
-  const { rec: urlRec, t: urlT } = parseRecSearch(search);
-  const rec = urlRec && canRec;
-  const [now, setNow] = useState(unixNow);
-  useEffect(() => {
-    if (!rec) return;
-    const id = setInterval(() => setNow(unixNow()), 30_000);
-    return () => clearInterval(id);
-  }, [rec]);
 
   // Restore the last grid selection for this user+tenant once both are known, dropping any
   // camera the user can no longer see. This adjusts state during render (React's documented
@@ -268,10 +272,7 @@ export function Live() {
   // Swapping (not shifting) keeps every other tile in its cell, so only the two swapped cameras move.
   const reorder = (from: number, to: number) => setTiles((t) => (persistentPlayers ? swapTiles(t, from, to) : reorderTiles(t, from, to)));
 
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
+  const sensors = useLiveDragSensors(sortableKeyboardCoordinates);
 
   const placeMap = (map: { site_id: string; floor_id?: string; name: string }, index?: number) => {
     const at = index ?? selectedRef.current;
@@ -498,60 +499,15 @@ export function Live() {
   const gridCols = focus !== null ? 1 : columns;
   const duplicates = useMemo(() => (persistentPlayers ? duplicateTileIndexes(tiles) : new Set<number>()), [persistentPlayers, tiles]);
 
-  const transport = useRecPlayback({ active: rec, seedT: urlT ?? now - REC_ENTRY_OFFSET_S, now });
   const gridCameraIds = useMemo(() => [...new Set(tiles.flatMap((t) => { const id = cameraIdOf(t); return id && camById.has(id) ? [id] : []; }))], [tiles, camById]);
-  const recData = useRecData(gridCameraIds, transport.day, rec);
-  const denied = useMemo(() => new Set(recData.denied), [recData.denied]);
   const focusedCameraId = focus !== null ? cameraIdOf(tiles[focus] ?? null) : undefined;
-  const { players: recPlayers, limited: recLimited } = useMemo(
-    () => assignRecPlayers(focusedCameraId ? [focusedCameraId] : gridCameraIds, (id) => !denied.has(id)),
-    [focusedCameraId, gridCameraIds, denied],
-  );
-  const hasCoverage = (id: string) => (recData.spans[id]?.length ?? 0) > 0;
-  const syncIds = useMemo(() => recPlayers.filter((id) => !recData.loaded.includes(id) || (recData.spans[id]?.length ?? 0) > 0), [recPlayers, recData.loaded, recData.spans]);
-  const masterId = pickMaster(syncIds, cameraIdOf(tiles[selected] ?? null), hasCoverage);
-  useSyncedPlayback(rec ? masterId : "", syncIds, (id) => transport.players.current.get(id)?.video);
-  const timelineCameras = useMemo(
-    () => gridCameraIds.filter((id) => !denied.has(id)).map((id) => ({ id, name: camById.get(id)?.display_name ?? id, spans: recData.spans[id] ?? [], live: camById.get(id)?.status === "online" })),
-    [gridCameraIds, denied, camById, recData.spans],
-  );
-
-  // Entering GRABADO starts five minutes before now and plays. If the cameras stopped earlier, it starts at the end of the last recording.
-  const entryPending = useRef(false);
-  const setMode = (next: "live" | "rec") => {
-    entryPending.current = next === "rec";
-    void navigate({ to: ".", search: ((prev: Record<string, unknown>) => ({ ...prev, ...recSearch(next === "rec", unixNow() - REC_ENTRY_OFFSET_S) })) as never });
-  };
-  const { seek } = transport;
-  useEffect(() => {
-    if (!rec) entryPending.current = false;
-  }, [rec]);
-  useEffect(() => {
-    if (!rec || !entryPending.current || recData.loaded.length < gridCameraIds.length - recData.denied.length || recData.loaded.length === 0) return;
-    entryPending.current = false;
-    const ends = recData.loaded.flatMap((id) => (recData.spans[id] ?? []).map((s) => s.end));
-    const latest = ends.length ? Math.max(...ends) : undefined;
-    if (latest !== undefined && latest < now - REC_ENTRY_OFFSET_S - 60) seek(latest - 5);
-  }, [rec, recData, gridCameraIds.length, now, seek]);
-  // Keep ?t= in step with the shared clock so reload and copied links land where the user is:
-  // every URL_SYNC_MS while playing, and shortly after the last seek or pause.
-  const { win, playing, getPosition, subscribePosition } = transport;
-  useEffect(() => {
-    if (!rec) return;
-    const write = () =>
-      void navigate({ to: ".", replace: true, search: ((prev: Record<string, unknown>) => ({ ...prev, ...recSearch(true, Math.floor(getPosition())) })) as never });
-    let debounce: ReturnType<typeof setTimeout> | undefined;
-    const unsubscribe = subscribePosition(() => {
-      clearTimeout(debounce);
-      debounce = setTimeout(write, 1500);
-    });
-    const interval = playing ? setInterval(write, URL_SYNC_MS) : undefined;
-    return () => {
-      unsubscribe();
-      clearTimeout(debounce);
-      clearInterval(interval);
-    };
-  }, [rec, win, playing, getPosition, subscribePosition, navigate]);
+  const { rec, now, transport, recData, denied, recLimited, hasCoverage, masterId, timelineCameras, setMode } = useRecSession({
+    canRec,
+    cameraIds: gridCameraIds,
+    focusedId: focusedCameraId,
+    selectedId: cameraIdOf(tiles[selected] ?? null),
+    cameraById: camById,
+  });
   const dragLabel = activeDrag?.startsWith("camera:")
     ? camById.get(activeDrag.slice("camera:".length))?.display_name
     : activeDrag?.startsWith("tfolder:")
@@ -562,7 +518,11 @@ export function Live() {
           ? mapFromDragId(activeDrag)?.name
           : undefined;
   const modeToggle = <LiveModeToggle rec={rec} onChange={setMode} />;
-  const topBarActions = canRec && !fullscreen && topBar.available && topBar.target ? createPortal(modeToggle, topBar.target) : null;
+  // The pinned explorer is a fixed panel that covers the header's left edge, so the portaled
+  // toggle starts at the panel's right edge instead of underneath it.
+  const topBarActions = canRec && !fullscreen && topBar.available && topBar.target
+    ? createPortal(<div data-testid="live-mode-toggle-slot" className={cn(sidebarPinned && "md:ml-(--pinned-offset)")} style={PINNED_STYLE}>{modeToggle}</div>, topBar.target)
+    : null;
   const canCreateView = can(me.data, "views.create_private") || can(me.data, "views.create_shared");
   const canShareView = can(me.data, "views.create_shared");
   const sidebarContent = (
@@ -599,17 +559,21 @@ export function Live() {
   const sidebar = createPortal(
     <div
       data-testid="live-edge"
-      className={cn("fixed inset-y-0 z-40", fullscreen ? "left-0" : "left-16", edgeVisible ? "w-80 max-w-[85vw]" : "w-3")}
-      onPointerEnter={revealEdge}
-      onPointerLeave={concealEdge}
+      className={cn("fixed inset-y-0 z-40", fullscreen ? "left-0" : "left-0 md:left-(--rail-w)", edgeVisible ? "w-80 max-w-[85vw]" : "w-3 [@media(pointer:coarse)]:w-11")}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "touch") revealEdge();
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType !== "touch") concealEdge();
+      }}
     >
-      <aside hidden={!edgeVisible} aria-label={tr("live.explorer")} className="flex h-full min-h-0 w-80 max-w-[85vw] flex-col border-r border-line bg-surface px-3 py-4 shadow-2xl">
-        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-0.5 bg-accent/70" />
+      <aside hidden={!edgeVisible} aria-label={tr("live.explorer")} className="flex h-full min-h-0 w-80 max-w-[85vw] flex-col rounded-r-m3-xl bg-surface-1 px-3 py-4 shadow-2xl">
+        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-0.5 bg-primary/70" />
         {sidebarContent}
       </aside>
       {!edgeVisible && (
-        <button type="button" aria-label={tr("live.showExplorer")} title={tr("live.showExplorer")} className="absolute inset-0 flex items-center justify-center bg-surface/95 text-muted" onClick={revealEdge}>
-          <FontAwesomeIcon icon={faAnglesRight} className="text-[10px]" aria-hidden />
+        <button type="button" aria-label={tr("live.showExplorer")} title={tr("live.showExplorer")} className="absolute inset-0 flex items-center justify-center bg-surface-1/95 text-on-surface-variant" onClick={revealEdge}>
+          <Icon icon={ChevronsRight} size={12} />
         </button>
       )}
     </div>,
@@ -617,7 +581,7 @@ export function Live() {
   );
 
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col gap-2", sidebarPinned && "pl-80")}>
+    <div className={cn("flex min-h-0 flex-1 flex-col gap-2", sidebarPinned && "md:pl-(--pinned-offset)")} style={PINNED_STYLE}>
       <h1 className="sr-only">{tr("nav.live")}</h1>
       {topBarActions}
       <DndContext
@@ -639,7 +603,7 @@ export function Live() {
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
               <LiveGridFrame role="group" label={tr("live.videoGrid")} mode={rec ? "rec" : "live"}
                 className={cn(
-                  "grid min-h-0 flex-1 gap-1 overflow-y-auto rounded-md ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
+                  "grid min-h-0 flex-1 gap-2 overflow-y-auto p-1 ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
                   rec ? "ring-bad/50" : "ring-ok/40",
                 )}
                 style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, "--grid-rows": focus !== null ? 1 : rows } as CSSProperties}
@@ -708,7 +672,7 @@ export function Live() {
         </div>
         {sidebar}
         <DragOverlay dropAnimation={null}>
-          {dragLabel ? <div className="pointer-events-none rounded border border-accent bg-surface px-2 py-1 text-xs shadow-lg">{dragLabel}</div> : null}
+          {dragLabel ? <div className="pointer-events-none rounded-m3-md bg-surface-2 px-3 py-1.5 text-xs shadow-lg ring-2 ring-primary">{dragLabel}</div> : null}
         </DragOverlay>
       </DndContext>
       {editorOpen && (
@@ -729,17 +693,15 @@ export function Live() {
         <Modal title={tr("live.properties")} onClose={() => setViewDialog(null)} className="max-w-md">
           <TextInput aria-label={tr("live.viewName")} placeholder={tr("live.viewName")} value={dialogName} onChange={(event) => setDialogName(event.target.value)} />
           {canShareView ? (
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={dialogShared} onChange={(event) => setDialogShared(event.target.checked)} /> {tr("live.sharedOrg")}
-            </label>
+            <Switch checked={dialogShared} onChange={setDialogShared} label={tr("live.sharedOrg")} />
           ) : (
             viewDialog.mode === "edit" && dialogShared && <p className="text-sm text-muted">{tr("live.sharedOrg")}</p>
           )}
           {viewDialog.mode === "edit" && viewId === viewDialog.id && <p className="text-xs text-muted">{tr("live.saveUpdatesGrid")}</p>}
           <ErrorNote error={save.error} />
           <div className="flex justify-end gap-2">
-            <Button onClick={() => setViewDialog(null)}>{tr("common.cancel")}</Button>
-            <Button variant="primary" onClick={() => save.mutate()} disabled={!dialogName.trim() || save.isPending}>
+            <Button variant="text" onClick={() => setViewDialog(null)}>{tr("common.cancel")}</Button>
+            <Button variant="filled" onClick={() => save.mutate()} disabled={!dialogName.trim() || save.isPending}>
               {tr("live.save")}
             </Button>
           </div>
@@ -766,6 +728,14 @@ export function Live() {
     </div>
   );
 }
+
+/** Live renders the phone camera list below `md` and the grid otherwise. */
+export function Live() {
+  return useIsPhoneDevice() ? <LivePhone /> : <LiveDesktop />;
+}
+
+/** Overlay action on a camera tile: a 32px pill on the translucent surface so it reads over any video. */
+const tileAction = "size-8 [@media(pointer:coarse)]:size-11 rounded-full bg-surface-1/80 text-on-surface backdrop-blur hover:bg-surface-1";
 
 function LiveGridFrame({ className, style, role, label, mode, children }: { className?: string; style?: CSSProperties; role?: string; label: string; mode?: string; children: ReactNode }) {
   const { setNodeRef } = useDroppable({ id: LIVE_GRID_DROP_ID });
@@ -824,16 +794,24 @@ function GridTile({
   const tr = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...placement };
+  // Touch: two quick taps expand the tile like a double click. The dblclick some browsers synthesize after it is ignored.
+  const touchTap = useTouchDoubleTap(onToggleFocus);
   return (
     <div
       ref={setNodeRef}
       style={style}
       aria-label={tr("live.cell", { index: index + 1 })}
+      aria-current={isSelected ? "true" : undefined}
+      data-selected={isSelected ? "true" : undefined}
       onClick={onSelect}
-      onDoubleClick={onToggleFocus}
+      onDoubleClick={() => {
+        if (touchTap.justHandled()) return;
+        onToggleFocus();
+      }}
+      {...touchTap.handlers}
       className={cn(
-        "group relative aspect-video overflow-hidden md:aspect-auto md:min-h-0 rounded border bg-black outline-none focus-visible:ring-2 focus-visible:ring-accent",
-        isSelected ? "border-accent" : "border-line",
+        "group relative isolate select-none touch-manipulation [-webkit-touch-callout:none] aspect-video overflow-hidden [contain:paint] bg-video outline-none focus-visible:ring-2 focus-visible:ring-primary md:aspect-auto md:min-h-0",
+        isSelected && "outline-2 outline-offset-1 outline-primary",
         isDragging && "opacity-50",
         isHidden && "hidden",
       )}
@@ -843,25 +821,23 @@ function GridTile({
       {tile && isMapTile(tile) ? (
         <>
           <LiveMapTile map={tile.map} />
-          <button
-            type="button"
+          <IconButton
+            icon={X}
             title={tr("live.removeMap")}
             aria-label={tr("live.removeNamed", { name: tile.map.name })}
-            className="absolute right-2 top-2 z-[3] rounded bg-black/70 p-1 text-white hover:bg-white/20"
+            className={tileAction + " absolute right-2 top-2 z-[3]"}
             onClick={(event) => {
               event.stopPropagation();
               onRemove();
             }}
-          >
-            <X className="size-3.5" aria-hidden />
-          </button>
+          />
         </>
       ) : tile && camera && "camera_id" in tile ? (
         <>
           {isDuplicate ? (
             <div className="relative size-full">
               <img src={`/media/v1/cameras/${tile.camera_id}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-contain opacity-60" />
-              <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs text-white">{tr("live.alreadyVisible")}</span>
+              <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs"><span className="rounded-full bg-surface-1/80 px-3 py-1 text-on-surface">{tr("live.alreadyVisible")}</span></span>
             </div>
           ) : recLayer && !persistent ? null : (
             // Without persistent players a live socket would keep streaming under REC, so it is
@@ -869,49 +845,47 @@ function GridTile({
             <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} className="size-full" />
           )}
           {recLayer}
-          <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 bg-gradient-to-b from-black/80 via-black/45 to-transparent px-2 py-1.5 text-xs text-white">
-            <Camera className="size-3.5 shrink-0" aria-hidden />
-            <span className="truncate font-medium">{camera.display_name}</span>
-            <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">
-              <span className={cn("size-1.5 rounded-full ring-1 ring-white/80", status === "online" ? "bg-emerald-400" : status === "offline" ? "bg-red-400" : "bg-amber-300")} />
-              {status === "online" ? <CircleCheck className="size-3" aria-hidden /> : status === "offline" ? <CircleX className="size-3" aria-hidden /> : <CircleHelp className="size-3" aria-hidden />}
-              <span className="sr-only">{status ?? "unknown"}</span>
+          <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 p-2 text-xs">
+            <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-on-surface backdrop-blur">
+              <Icon icon={Camera} size="xs" className="shrink-0" />
+              <span className="truncate font-medium">{camera.display_name}</span>
+              <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">
+                <span className={cn("size-2 rounded-full", status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-warn")} />
+                <Icon icon={status === "online" ? CircleCheck : status === "offline" ? CircleX : CircleHelp} size={12} className={status === "offline" ? "text-bad" : undefined} />
+                <span className="sr-only">{status ?? "unknown"}</span>
+              </span>
             </span>
             <span className="ml-auto flex shrink-0 gap-1">
               {canViewRecordings && (
-                <Link to="/playback" search={{ camera: tile.camera_id }} title={tr("nav.recordings")} aria-label={tr("live.recordingsOf", { name: camera.display_name })} className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">
-                  <History className="size-3.5" aria-hidden />
+                <Link to="/playback" search={{ camera: tile.camera_id }} title={tr("nav.recordings")} aria-label={tr("live.recordingsOf", { name: camera.display_name })} className={cn(tileAction, "m3-press inline-flex items-center justify-center focus-visible:outline-2 focus-visible:outline-primary")}>
+                  <Icon icon={History} size="xs" />
                 </Link>
               )}
-              <button
-                type="button"
+              <IconButton
+                icon={isFocused ? Minimize2 : Maximize2}
                 title={isFocused ? tr("live.backToGrid") : tr("live.expandTile")}
                 aria-label={isFocused ? tr("live.backToGrid") : tr("live.expandTile")}
-                className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                className={tileAction}
                 onClick={(e) => {
                   e.stopPropagation();
                   onToggleFocus();
                 }}
-              >
-                {isFocused ? <Minimize2 className="size-3.5" aria-hidden /> : <Maximize2 className="size-3.5" aria-hidden />}
-              </button>
-              <button
-                type="button"
+              />
+              <IconButton
+                icon={X}
                 title={tr("live.remove")}
                 aria-label={tr("live.removeNamed", { name: camera.display_name })}
-                className="rounded p-1 hover:bg-white/20 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white"
+                className={tileAction}
                 onClick={(e) => {
                   e.stopPropagation();
                   onRemove();
                 }}
-              >
-                <X className="size-3.5" aria-hidden />
-              </button>
+              />
             </span>
           </div>
         </>
       ) : (
-        <div className="flex size-full items-center justify-center text-xs text-muted">{tile && !camera ? tr("live.noAccess") : tr("live.emptyCell")}</div>
+        <div className="flex size-full items-center justify-center text-xs text-on-surface-variant">{tile && !camera ? tr("live.noAccess") : tr("live.emptyCell")}</div>
       )}
     </div>
   );

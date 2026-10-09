@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { alarmsQuery, cameraFoldersQuery, camerasQuery, meQuery, serversQuery } from "@/api/queries";
 import { can } from "@/lib/perm";
+import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { mapsOverviewQuery } from "@/lib/maps/api";
 import type { CameraEntity, MapMode } from "@/lib/maps/types";
 import { floorEntitiesQuery, floorUnplacedQuery, emptyFloorDraft, stageFloor, undoFloor, redoFloor, saveFloorPlacement, type Point } from "@/lib/maps/floorEditor";
@@ -21,7 +22,7 @@ import { CameraPanel } from "./panel/CameraPanel";
 import { captureGrowOrigin, rectFromElement, type GrowRect } from "./panel/MapGrowFrame";
 import { usePinnedMapWindows } from "./panel/usePinnedMapWindows";
 import { useFeatures } from "@/lib/features";
-import { ErrorNote } from "../ui";
+import { Button, ErrorNote } from "../ui";
 interface Props {
   siteId: string;
   floor: WorkspaceFloor;
@@ -55,7 +56,12 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
   const [planError, setPlanError] = useState<string>();
   const [selected, setSelected] = useState<string>();
   const [armed, setArmed] = useState<string>();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarPinned, setSidebarPinned] = useState(loadSidebarPinned);
+  const toggleSidebarPin = () => setSidebarPinned((current) => {
+    const next = !current;
+    saveSidebarPinned(next);
+    return next;
+  });
   const [plateSnapshot, setPlateSnapshot] = useState<PlateSnapshotTarget>();
   const [maximizedId, setMaximizedId] = useState<string>();
   const [maximizedOrigin, setMaximizedOrigin] = useState<GrowRect>();
@@ -149,35 +155,35 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
   }
   return <section className="relative flex h-full min-h-0 flex-1 flex-col gap-2 overflow-hidden" aria-label={`Mapa: ${floor.name}`}>
  {[{ label: "Camera placements", query: entities }, { label: "Unplaced cameras", query: unplaced }, { label: "Private background", query: plan }].map(({ label, query }) => query.isError &&
-      <div key={label} role="alert">{label}: {query.error.message} <button onClick={() => void query.refetch()}>Retry {label.toLowerCase()}</button></div>)}
+      <div key={label} role="alert" className="flex flex-wrap items-center gap-2 rounded-m3-lg bg-bad/10 px-3 py-2 text-sm text-bad">{label}: {query.error.message} <Button variant="text" size="sm" onClick={() => void query.refetch()}>Retry {label.toLowerCase()}</Button></div>)}
  <div data-map-stage className="relative min-h-0 flex-1 overflow-hidden">
   {mode === "edit" && (editorMaps || can(me.data, "maps.edit")) && (
     <div className="absolute left-3 top-16 z-30 flex max-h-[calc(100%-5rem)] w-72 flex-col gap-2 overflow-auto">
-     {editorMaps && <div className="rounded-xl border border-white/10 bg-surface/90 p-2 shadow-2xl backdrop-blur">{editorMaps}</div>}
-     {planError && <p role="alert" className="rounded-xl border border-bad/40 bg-surface/90 p-2 text-xs text-bad shadow-2xl">{planError}</p>}
-     {can(me.data, "maps.edit") && (floor.revision ? <PlanUpload siteId={siteId} floorId={floor.id} revision={floor.revision} source={plan.data} onDirty={setPlanDirty} onSaved={() => { setPlanError(undefined); onPlanSaved(); }} onConflict={() => { setPlanError("The background changed on the server. Reload and review it before uploading again. Nothing was overwritten."); onPlanSaved(); }}/> : <p role="alert" className="rounded-xl border border-white/10 bg-surface/90 p-2 text-xs shadow-2xl">La revisión del mapa no está disponible. Recargá la lista antes de subir un plano.</p>)}
+     {editorMaps && <div className="rounded-m3-xl bg-surface-1/95 p-2 shadow-2xl backdrop-blur">{editorMaps}</div>}
+     {planError && <p role="alert" className="rounded-m3-lg bg-surface-1/95 p-3 text-xs text-bad shadow-2xl">{planError}</p>}
+     {can(me.data, "maps.edit") && (floor.revision ? <PlanUpload siteId={siteId} floorId={floor.id} revision={floor.revision} source={plan.data} onDirty={setPlanDirty} onSaved={() => { setPlanError(undefined); onPlanSaved(); }} onConflict={() => { setPlanError("The background changed on the server. Reload and review it before uploading again. Nothing was overwritten."); onPlanSaved(); }}/> : <p role="alert" className="rounded-m3-lg bg-surface-1/95 p-3 text-xs shadow-2xl">La revisión del mapa no está disponible. Recargá la lista antes de subir un plano.</p>)}
     </div>
   )}
-  {mode === "edit" && <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-20 flex w-80 min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-surface/90 shadow-2xl backdrop-blur">
+  {mode === "edit" && <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-20 flex w-80 max-w-[calc(100%-1.5rem)] min-h-0 flex-col overflow-hidden rounded-m3-xl bg-surface-1/95 shadow-2xl backdrop-blur">
    <div className="min-h-0 flex-1 p-2"><MapEditSidebar cameras={sidebarCameras} armedId={armed} onArm={setArmed}/></div>
-   <footer className="shrink-0 space-y-2 border-t border-white/10 p-2 text-xs">
-    <p className="text-muted">{pending.length} cambio(s) sin guardar</p>
-    {armed && editable && <button type="button" onClick={() => place(armed, { x: .5, y: .5 })} className="rounded border border-line bg-surface px-2 py-1 text-xs">Ubicar en el centro</button>}
-    {error && <p role="alert">{error}</p>}
+   <footer className="shrink-0 space-y-2 bg-surface-2 p-3 text-xs">
+    <p className="font-mono text-on-surface-variant">{pending.length} cambio(s) sin guardar</p>
+    {armed && editable && <Button variant="tonal" size="sm" onClick={() => place(armed, { x: .5, y: .5 })}>Ubicar en el centro</Button>}
+    {error && <p role="alert" className="text-bad">{error}</p>}
     <div className="flex gap-2">
-     <button type="button" disabled={saving || !draft.past.length} onClick={() => setDraft(undoFloor(draft))}>Deshacer</button>
-     <button type="button" disabled={saving || !draft.future.length} onClick={() => setDraft(redoFloor(draft))}>Rehacer</button>
+     <Button variant="text" size="sm" disabled={saving || !draft.past.length} onClick={() => setDraft(undoFloor(draft))}>Deshacer</Button>
+     <Button variant="text" size="sm" disabled={saving || !draft.future.length} onClick={() => setDraft(redoFloor(draft))}>Rehacer</Button>
     </div>
     <div className="flex gap-2">
-     <button type="button" className="flex-1 rounded border border-line px-2 py-1.5" onClick={() => { setDraft(emptyFloorDraft()); setError(undefined); setModeState({ initial: initialMode, value: "live" }); onModeChange?.("live"); }}>Cancelar</button>
-     <button type="button" className="flex-1 rounded bg-accent px-2 py-1.5 font-medium text-white disabled:opacity-50" disabled={saving || !editable || pending.length === 0} onClick={() => void save()}>{pending.length > 0 ? `Guardar (${pending.length})` : "Guardar"}</button>
+     <Button variant="outlined" className="flex-1" onClick={() => { setDraft(emptyFloorDraft()); setError(undefined); setModeState({ initial: initialMode, value: "live" }); onModeChange?.("live"); }}>Cancelar</Button>
+     <Button variant="filled" className="flex-1" disabled={saving || !editable || pending.length === 0} onClick={() => void save()}>{pending.length > 0 ? `Guardar (${pending.length})` : "Guardar"}</Button>
     </div>
-    {error && <p>No se reintentó. Cancelá y recargá si cambió la revisión.</p>}
+    {error && <p className="text-on-surface-variant">No se reintentó. Cancelá y recargá si cambió la revisión.</p>}
    </footer>
   </aside>}
   {liveChrome && <MapSocSidebar
-    open={sidebarOpen}
-    onToggle={() => setSidebarOpen((current) => !current)}
+    pinned={sidebarPinned}
+    onTogglePin={toggleSidebarPin}
     alarmCount={alarms.data?.length ?? 0}
     showAlarms={can(me.data, "alarms.view")}
     showLpr={can(me.data, "lpr.view")}
@@ -211,7 +217,9 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
         onSelectSite={() => undefined}
         onSelectCamera={selectCamera}
         onEdit={() => { setModeState({ initial: initialMode, value: "edit" }); onModeChange?.("edit"); }}
-        onOpenLive={openCamera}
+        onOpenLive={(id) => { if (can(me.data, "live.view")) pinned.pin(id); }}
+        onCloseLive={pinned.unpin}
+        openCameraIds={pinned.windows.map((window) => window.id)}
         onEvents={(id) => void navigate({ to: "/events", search: { camera: id } })}
         onPlayback={(id) => void navigate({ to: "/playback", search: { camera: id } })}
         onResetVisibility={() => undefined}
@@ -235,10 +243,12 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
     canPreview={can(me.data, "live.view")}
   />}
   {maximized && <MapMaximizedCamera camera={maximized} origin={maximizedOrigin} persistent={persistentPlayers} closeOnEscape={!plateSnapshot} onClose={() => { setMaximizedId(undefined); setMaximizedOrigin(undefined); }} />}
-  {mode === "investigate" && selectedCamera && <section aria-label="Selected floor camera" className="absolute right-3 top-16 z-20 max-w-xs space-y-2 rounded border border-line bg-surface p-2 text-xs">
-  <strong>{selectedCamera.name}</strong>
-  {can(me.data, "events.view") && <button onClick={() => void navigate({ to: "/events", search: { camera: selectedCamera.id } })}>Events</button>}
-  {can(me.data, "recordings.view") && <button onClick={() => void navigate({ to: "/playback", search: { camera: selectedCamera.id } })}>Playback</button>}
+  {mode === "investigate" && selectedCamera && <section aria-label="Selected floor camera" className="absolute right-3 top-16 z-20 flex max-w-xs flex-col gap-2 rounded-m3-xl bg-surface-1/95 p-3 text-xs shadow-2xl backdrop-blur">
+  <strong className="text-sm">{selectedCamera.name}</strong>
+  <div className="flex flex-wrap gap-2">
+  {can(me.data, "events.view") && <Button variant="tonal" size="sm" onClick={() => void navigate({ to: "/events", search: { camera: selectedCamera.id } })}>Events</Button>}
+  {can(me.data, "recordings.view") && <Button variant="tonal" size="sm" onClick={() => void navigate({ to: "/playback", search: { camera: selectedCamera.id } })}>Playback</Button>}
+  </div>
   </section>}
   <div className="absolute inset-0"><FloorPlanCanvas ref={canvasRef} key={`${siteId}/${floor.id}/${me.data?.id ?? "pending"}`} imageBlob={plan.data} width={floor.plan_width_px || 1000} height={floor.plan_height_px || 1000} cameras={cameras} editable={editable && !saving} onPlace={place} onSelect={id => { if (mode === "edit") { setSelected(id); onSelectCamera?.(id); } else selectCamera(id); }} onOpen={mode === "live" ? openCamera : undefined} tenantId={me.data?.tenant_id} siteId={siteId} floorId={floor.id} canEvents={can(me.data, "events.view")} canSnapshots={can(me.data, "snapshots.view")} initialView={me.data ? loadPlanView(me.data.tenant_id, me.data.id, floor.id) ?? undefined : undefined} onViewChange={view => { if (me.data) savePlanView(me.data.tenant_id, me.data.id, floor.id, view); }}/></div>
  </div>

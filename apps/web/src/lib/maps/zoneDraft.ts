@@ -2,12 +2,16 @@ import type { Polygon } from "geojson";
 import { hasSelfIntersection } from "@/lib/zoneGeometry";
 import type { Zone, ZoneKind } from "./types";
 
+/** Default colors per zone kind; persisted with the zone as user data, so they are fixed hex values. */
 export const ZONE_KIND_COLOR: Record<ZoneKind, string> = {
   security: "#1683f8",
   perimeter: "#f59e0b",
   warning: "#ef3f46",
   custom: "#a855f7",
 };
+
+/** Swatches offered in the zone editor; zone colors are persisted as data, not theme colors. */
+export const ZONE_COLOR_CHOICES = ["#1683f8", "#22c55e", "#f59e0b", "#ef3f46", "#a855f7", "#f8fafc"] as const;
 
 /**
  * A zone under construction: vertices accumulate on map clicks until the operator closes

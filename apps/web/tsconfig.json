@@ -14,9 +14,9 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node", "vite/client", "vitest/globals", "@testing-library/jest-dom"],
+    "types": ["node", "vite/client", "vite-plugin-pwa/react", "vite-plugin-pwa/client", "vitest/globals", "@testing-library/jest-dom"],
     "baseUrl": ".",
     "paths": { "@/*": ["src/*"] }
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts", "pwa.config.ts", "pwa.config.test.ts", "pwa-assets.config.ts"]
 }

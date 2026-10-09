@@ -4,21 +4,22 @@ import { Check, CheckCheck, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
 import { api, unwrap, type Schemas } from "@/api/client";
 import { alarmAssigneesQuery, alarmsQuery, camerasQuery, type AlarmFilter } from "@/api/queries";
+import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Table, Th } from "@/components/ui";
+import { Button, Chip, Empty, ErrorNote, Field, PageHeader, Pill, type PillTone, Select, Table, Th } from "@/components/ui";
 import { VehicleFacts } from "@/components/VehicleMark";
 import { fmtDateTime } from "@/lib/format";
 
 type Alarm = Schemas["Alarm"];
 type AlarmStatus = Schemas["AlarmStatus"];
 
-const statusBadgeStyles: Record<AlarmStatus, { label: string; bg: string; text: string }> = {
-  open: { label: "Abierta", bg: "bg-bad/10 border-bad/30", text: "text-bad" },
-  acknowledged: { label: "Reconocida", bg: "bg-warn/10 border-warn/30", text: "text-warn" },
-  assigned: { label: "Asignada", bg: "bg-primary/10 border-primary/30", text: "text-primary" },
-  investigating: { label: "En investigación", bg: "bg-warn/10 border-warn/30", text: "text-warn" },
-  resolved: { label: "Resuelta", bg: "bg-ok/10 border-ok/30", text: "text-ok" },
-  closed: { label: "Cerrada", bg: "bg-muted border-border", text: "text-muted-foreground" },
+const statusBadgeStyles: Record<AlarmStatus, { label: string; tone: PillTone }> = {
+  open: { label: "Abierta", tone: "bad" },
+  acknowledged: { label: "Reconocida", tone: "warn" },
+  assigned: { label: "Asignada", tone: "primary" },
+  investigating: { label: "En investigación", tone: "warn" },
+  resolved: { label: "Resuelta", tone: "ok" },
+  closed: { label: "Cerrada", tone: "neutral" },
 };
 
 export function Alarms() {
@@ -133,9 +134,9 @@ export function Alarms() {
       <ErrorNote error={alarms.error ?? mutationError} />
 
       {/* Filters bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 rounded border border-line bg-surface p-3">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-m3-xl bg-surface-1 p-4">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-muted">Estado:</span>
+          <span className="text-sm font-medium text-on-surface-variant">Estado:</span>
           {filterTabs.map((tab) => {
             const isSelected =
               tab.key === "active"
@@ -144,10 +145,10 @@ export function Alarms() {
                   ? !filter.status && !filter.status_group
                   : filter.status === tab.filter.status && !filter.status_group;
             return (
-              <button
+              <Chip
                 key={tab.key}
-                type="button"
-                onClick={() => {
+                selected={isSelected}
+                onChange={() => {
                   setFilter((prev) => ({
                     ...prev,
                     status: tab.filter.status,
@@ -155,22 +156,19 @@ export function Alarms() {
                   }));
                   setSelectedIds(new Set());
                 }}
-                className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
-                  isSelected ? "bg-accent text-bg" : "bg-bg text-fg hover:bg-raised"
-                }`}
               >
                 {tab.label}
-              </button>
+              </Chip>
             );
           })}
         </div>
 
         {cameras.data && cameras.data.length > 0 && (
           <div className="flex items-center gap-2">
-            <label htmlFor="filter-camera" className="text-xs font-medium text-muted">
+            <label htmlFor="filter-camera" className="text-sm font-medium text-on-surface-variant">
               Cámara:
             </label>
-            <select
+            <Select
               id="filter-camera"
               value={filter.camera_id ?? ""}
               onChange={(e) => {
@@ -178,7 +176,7 @@ export function Alarms() {
                 setFilter((prev) => ({ ...prev, camera_id: val ? val : undefined }));
                 setSelectedIds(new Set());
               }}
-              className="rounded border border-line bg-bg px-2 py-1 text-xs text-fg"
+              className="h-11 sm:w-56"
             >
               <option value="">Todas las cámaras</option>
               {cameras.data.map((c) => (
@@ -186,41 +184,37 @@ export function Alarms() {
                   {c.display_name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
         )}
       </div>
 
       {/* Bulk action toolbar */}
       {selectedIds.size > 0 && (
-        <div className="flex items-center justify-between gap-4 rounded border border-accent/40 bg-accent/10 px-4 py-2 text-sm">
-          <span className="font-medium text-accent">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-m3-xl bg-primary-container px-4 py-3 text-sm">
+          <span className="font-bold text-on-primary-container">
             {selectedIds.size} alarma{selectedIds.size > 1 ? "s" : ""} seleccionada{selectedIds.size > 1 ? "s" : ""}
           </span>
           <div className="flex items-center gap-2">
             <Button
-              variant="secondary"
+              size="sm"
+              variant="tonal"
               onClick={() => handleBulkAction("acknowledge")}
               disabled={bulkMutation.isPending}
-              className="text-xs"
             >
-              <Check className="size-3.5" aria-hidden /> Reconocer seleccionadas
+              <Icon icon={Check} size="xs" /> Reconocer seleccionadas
             </Button>
             <Button
-              variant="primary"
+              size="sm"
+              variant="filled"
               onClick={() => handleBulkAction("resolve")}
               disabled={bulkMutation.isPending}
-              className="text-xs"
             >
-              <CheckCheck className="size-3.5" aria-hidden /> Resolver seleccionadas
+              <Icon icon={CheckCheck} size="xs" /> Resolver seleccionadas
             </Button>
-            <button
-              type="button"
-              onClick={() => setSelectedIds(new Set())}
-              className="text-xs text-muted hover:text-fg underline ml-2"
-            >
+            <Button size="sm" variant="text" onClick={() => setSelectedIds(new Set())} className="ml-1 text-on-primary-container">
               Deseleccionar
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -239,7 +233,7 @@ export function Alarms() {
                   aria-label="Seleccionar todas las alarmas"
                   checked={selectedIds.size === items.length && items.length > 0}
                   onChange={toggleSelectAll}
-                  className="rounded border-line"
+                  className="size-5 accent-primary"
                 />
               </Th>
               <Th>Severidad / Evento</Th>
@@ -254,19 +248,19 @@ export function Alarms() {
             {items.map((a) => {
               const badge = statusBadgeStyles[a.status] ?? statusBadgeStyles.open;
               return (
-                <tr key={a.id} className="border-t border-line align-middle">
+                <tr key={a.id} className="border-t border-outline-variant align-middle">
                   <td>
                     <input
                       type="checkbox"
                       aria-label={`Seleccionar alarma ${a.id}`}
                       checked={selectedIds.has(a.id)}
                       onChange={() => toggleSelect(a.id)}
-                      className="rounded border-line"
+                      className="size-5 accent-primary"
                     />
                   </td>
                   <td>
                     <div className="flex items-center gap-2">
-                      <span className="rounded bg-bad px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-bg">
+                      <span className="inline-flex h-6 items-center rounded-full bg-bad px-2.5 text-[11px] font-bold uppercase tracking-wider text-surface-dim light:text-white">
                         {a.event_severity}
                       </span>
                       <VehicleFacts labels={a.event_labels ?? []} vehicle={a.vehicle} person={a.person} serverName={a.server_name} />
@@ -276,15 +270,11 @@ export function Alarms() {
                     <div className="font-medium">{a.camera_name}</div>
                     <div className="text-xs text-muted">{a.site_name}{a.server_name ? ` · ${a.server_name}` : ""}</div>
                   </td>
-                  <td className="text-xs whitespace-nowrap">
+                  <td className="font-mono text-xs whitespace-nowrap">
                     {fmtDateTime(a.event_start_time)}
                   </td>
                   <td>
-                    <span
-                      className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${badge.bg} ${badge.text}`}
-                    >
-                      {badge.label}
-                    </span>
+                    <Pill tone={badge.tone}>{badge.label}</Pill>
                     {a.status === "acknowledged" && a.acknowledged_by_name && (
                       <div className="text-[11px] text-muted">
                         por {a.acknowledged_by_name}
@@ -298,8 +288,8 @@ export function Alarms() {
                   </td>
                   <td className="text-sm">
                     {a.assigned_to_name ? (
-                      <span className="inline-flex items-center gap-1 text-fg">
-                        <Users className="size-3 text-muted" aria-hidden />
+                      <span className="inline-flex items-center gap-1 text-on-surface">
+                        <Icon icon={Users} size="xs" className="text-muted" />
                         {a.assigned_to_name}
                       </span>
                     ) : (
@@ -310,39 +300,39 @@ export function Alarms() {
                     <div className="inline-flex items-center justify-end gap-1.5">
                       {a.status === "open" && (
                         <Button
-                          variant="secondary"
+                          size="sm"
+                          variant="tonal"
                           onClick={() => ackMutation.mutate(a.id)}
                           disabled={ackMutation.isPending}
                           title="Reconocer alarma"
                           aria-label={`Reconocer alarma ${a.id}`}
-                          className="px-2 py-1 text-xs"
                         >
-                          <Check className="size-3" aria-hidden /> Reconocer
+                          <Icon icon={Check} size="xs" /> Reconocer
                         </Button>
                       )}
                       {a.status !== "resolved" && (
                         <>
                           <Button
-                            variant="secondary"
+                            size="sm"
+                            variant="tonal"
                             onClick={() => {
                               setAssignAlarm(a);
                               setSelectedUserId(a.assigned_to ?? "");
                             }}
                             title="Asignar alarma"
                             aria-label={`Asignar alarma ${a.id}`}
-                            className="px-2 py-1 text-xs"
                           >
-                            <UserPlus className="size-3" aria-hidden /> Asignar
+                            <Icon icon={UserPlus} size="xs" /> Asignar
                           </Button>
                           <Button
-                            variant="primary"
+                            size="sm"
+                            variant="filled"
                             onClick={() => resolveMutation.mutate(a.id)}
                             disabled={resolveMutation.isPending}
                             title="Resolver alarma"
                             aria-label={`Resolver alarma ${a.id}`}
-                            className="px-2 py-1 text-xs"
                           >
-                            <CheckCheck className="size-3" aria-hidden /> Resolver
+                            <Icon icon={CheckCheck} size="xs" /> Resolver
                           </Button>
                         </>
                       )}
@@ -388,7 +378,7 @@ export function Alarms() {
 
             <div className="flex justify-end gap-2 pt-2">
               <Button
-                variant="secondary"
+                variant="text"
                 onClick={() => {
                   setAssignAlarm(null);
                   setSelectedUserId("");
@@ -397,7 +387,7 @@ export function Alarms() {
                 Cancelar
               </Button>
               <Button
-                variant="primary"
+                variant="filled"
                 disabled={!selectedUserId || assignMutation.isPending}
                 onClick={() => {
                   if (!selectedUserId) return;

@@ -1,26 +1,32 @@
 import { Link } from "@tanstack/react-router";
-import { ChevronDown, KeyRound, LogOut, Moon, Sun } from "lucide-react";
+import { ChevronDown, Download, KeyRound, LogOut, Sun } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import { LOCALES, setLocale, useLocale, useT, type Locale } from "@/i18n";
 import { cn } from "@/lib/cn";
+import { ThemePicker } from "@/components/ThemePicker";
+import { useInstallPrompt } from "@/lib/pwa/useInstallPrompt";
 
 /** AccountMenu is the compact session menu: language, theme, password, and sign-out. */
 export function AccountMenu({
   name,
   username,
   onLogout,
+  onInstall,
 }: {
   name?: string;
   username?: string;
   /** When set, the menu also offers password and sign-out. The login screen omits it. */
   onLogout?: () => void;
+  /** Opens the install sheet; the entry shows only while the app can be installed. */
+  onInstall?: () => void;
 }) {
   const t = useT();
   const locale = useLocale();
   const [open, setOpen] = useState(false);
-  const [light, setLight] = useState(() => document.documentElement.classList.contains("light"));
   const rootRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+  const { canInstall, isIOS, isStandalone } = useInstallPrompt();
+  const showInstall = Boolean(onInstall) && !isStandalone && (canInstall || isIOS);
   const signedIn = Boolean(onLogout);
   const initial = (name ?? username ?? "·").slice(0, 1).toUpperCase();
 
@@ -41,16 +47,6 @@ export function AccountMenu({
   }, [open]);
 
   const chooseLocale = (id: Locale) => setLocale(id);
-  const chooseTheme = (nextLight: boolean) => {
-    document.documentElement.classList.toggle("light", nextLight);
-    document.documentElement.classList.toggle("dark", !nextLight);
-    try {
-      localStorage.setItem("openvms.theme", nextLight ? "light" : "dark");
-    } catch {
-      // The theme still applies for this session.
-    }
-    setLight(nextLight);
-  };
 
   return (
     <div ref={rootRef} className="relative">
@@ -104,31 +100,24 @@ export function AccountMenu({
             ))}
           </div>
           <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.14em] text-muted">{t("common.theme")}</p>
-          <div role="group" aria-label={t("common.theme")} className="mb-1 grid grid-cols-2 gap-1 rounded-xl bg-bg p-1">
-            <button
-              type="button"
-              aria-pressed={!light}
-              aria-label={t("common.darkMode")}
-              onClick={() => chooseTheme(false)}
-              className={cn("flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs", !light ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
-            >
-              <Moon className="size-3.5" aria-hidden />
-              {t("common.dark")}
-            </button>
-            <button
-              type="button"
-              aria-pressed={light}
-              aria-label={t("common.lightMode")}
-              onClick={() => chooseTheme(true)}
-              className={cn("flex items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs", light ? "bg-surface text-ink shadow-sm" : "text-muted hover:text-ink")}
-            >
-              <Sun className="size-3.5" aria-hidden />
-              {t("common.light")}
-            </button>
-          </div>
+          <ThemePicker compact className="mb-1" />
           {signedIn && (
             <>
               <div className="my-1 border-t border-line" />
+              {showInstall && (
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    onInstall?.();
+                  }}
+                  className="flex w-full items-center gap-2 rounded-xl px-2 py-2 text-left text-sm text-ink hover:bg-raised"
+                >
+                  <Download className="size-3.5 text-muted" aria-hidden />
+                  {t("common.installApp")}
+                </button>
+              )}
               <Link
                 to="/account"
                 role="menuitem"

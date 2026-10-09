@@ -41,6 +41,27 @@ export function zoomAtPoint(current: DigitalZoom, width: number, height: number,
   return clampZoom({ scale, x: localX - contentX * scale, y: localY - contentY * scale }, width, height);
 }
 
+/**
+ * pinchZoom applies one step of a two-finger gesture: the scale follows the finger distance
+ * and the picture point that was under the previous midpoint stays under the new one (so the
+ * pinch also pans). Midpoints are inside the box.
+ */
+export function pinchZoom(
+  current: DigitalZoom,
+  width: number,
+  height: number,
+  prevMid: { x: number; y: number },
+  mid: { x: number; y: number },
+  prevDistance: number,
+  distance: number,
+): DigitalZoom {
+  if (prevDistance < 1) return current;
+  const scale = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, current.scale * (distance / prevDistance)));
+  const contentX = (prevMid.x - current.x) / current.scale;
+  const contentY = (prevMid.y - current.y) / current.scale;
+  return clampZoom({ scale, x: mid.x - contentX * scale, y: mid.y - contentY * scale }, width, height);
+}
+
 /** panBy shifts the picture and clamps it so the box stays covered. */
 export function panBy(current: DigitalZoom, width: number, height: number, dx: number, dy: number): DigitalZoom {
   if (current.scale <= ZOOM_MIN) return IDENTITY_ZOOM;

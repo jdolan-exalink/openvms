@@ -1,11 +1,12 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { Schemas } from "@/api/client";
 import { cameraGroupsQuery, meQuery, type PlateFilter, platesQuery, sitesQuery } from "@/api/queries";
 import { PlateDetailModal } from "@/components/PlateDetailModal";
 import { PlateReadCard } from "@/components/plates/PlateReadCard";
 import { type FilterChip, SearchSummary } from "@/components/SearchSummary";
-import { Button, Empty, ErrorNote, Field, Select, TextInput } from "@/components/ui";
+import { Button, Empty, ErrorNote, Field, Select, Switch, TextInput } from "@/components/ui";
 import { fromLocalInput, vehicleColorOptions, vehicleTypeOptions } from "@/lib/format";
 import { todayEventsRange } from "@/lib/eventsSearch";
 import { can } from "@/lib/perm";
@@ -106,7 +107,7 @@ export function Plates() {
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <h1 className="sr-only">{t("nav.plates")}</h1>
       <form
-        className="grid gap-3 rounded border border-line bg-surface p-3 sm:grid-cols-2 lg:grid-cols-5"
+        className="grid gap-3 rounded-m3-xl bg-surface-1 p-4 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={(e) => {
           e.preventDefault();
           setApplied(form);
@@ -115,6 +116,7 @@ export function Plates() {
         <Field label={t("common.plate")}>
           <TextInput
             autoFocus
+            className="font-mono"
             value={form.plate}
             disabled={!can(me.data, "lpr.search")}
             onChange={(e) => setForm({ ...form, plate: e.target.value.toUpperCase() })}
@@ -158,16 +160,14 @@ export function Plates() {
           </Select>
         </Field>
         <Field label={t("common.from")}>
-          <TextInput type="datetime-local" value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} />
+          <TextInput type="datetime-local" className="font-mono" value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} />
         </Field>
         <Field label={t("common.to")}>
-          <TextInput type="datetime-local" value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} />
+          <TextInput type="datetime-local" className="font-mono" value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} />
         </Field>
-        <div className="flex flex-col justify-end gap-2">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={form.exact} onChange={(e) => setForm({ ...form, exact: e.target.checked })} /> {t("common.exactMatch")}
-          </label>
-          <Button type="submit" variant="primary">
+        <div className="flex flex-col justify-end gap-2 sm:col-span-2 lg:col-span-1">
+          <Switch checked={form.exact} onChange={(next) => setForm({ ...form, exact: next })} label={t("common.exactMatch")} />
+          <Button type="submit" variant="filled">
             {t("common.search")}
           </Button>
         </div>
@@ -198,11 +198,13 @@ export function Plates() {
           ))}
         </ul>
       )}
-      <div className="flex items-center justify-between gap-2 text-sm">
-        <Button type="button" disabled={page === 0} onClick={() => setPage(page - 1)}>{t("common.previous")}</Button>
-        <span className="text-muted">{applied.from === today.from && applied.to === today.to ? t("plates.todayPage", { page: page + 1 }) : t("plates.page", { page: page + 1 })}</span>
-        <Button type="button" disabled={!canNext || reads.isFetchingNextPage} onClick={() => void goNext()}>
-          {reads.isFetchingNextPage ? t("common.loading") : t("common.next")}
+      <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+        <Button type="button" variant="tonal" disabled={page === 0} onClick={() => setPage(page - 1)}>
+          <ChevronLeft className="size-4" aria-hidden /> {t("common.previous")}
+        </Button>
+        <span className="font-mono text-muted">{applied.from === today.from && applied.to === today.to ? t("plates.todayPage", { page: page + 1 }) : t("plates.page", { page: page + 1 })}</span>
+        <Button type="button" variant="tonal" disabled={!canNext || reads.isFetchingNextPage} onClick={() => void goNext()}>
+          {reads.isFetchingNextPage ? t("common.loading") : t("common.next")} <ChevronRight className="size-4" aria-hidden />
         </Button>
       </div>
       {detailRead && <PlateDetailModal read={detailRead} onClose={() => setDetailRead(null)} />}

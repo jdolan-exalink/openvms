@@ -151,14 +151,14 @@ export function MapGrowFrame({
   return (
     <div className={`pointer-events-none inset-0 flex items-center justify-center p-4 md:p-10 ${fixed ? "fixed" : "absolute"} ${className}`}>
       {scrim && (
-        <button type="button" aria-label="Cerrar" className="pointer-events-auto absolute inset-0 bg-black/70" onClick={() => requestCloseRef.current()} />
+        <button type="button" aria-label="Cerrar" className="pointer-events-auto absolute inset-0 bg-scrim" onClick={() => requestCloseRef.current()} />
       )}
       <GrowCloseContext.Provider value={requestClose}>
         <div
           ref={cardRef}
           role="dialog"
           aria-label={label}
-          className="pointer-events-auto relative z-10 w-[min(56rem,100%)] origin-center overflow-hidden rounded-xl border border-white/15 bg-black shadow-2xl"
+          className="pointer-events-auto relative z-10 w-[min(56rem,100%)] origin-center isolate overflow-hidden [contain:paint] bg-video shadow-2xl"
         >
           {children}
         </div>

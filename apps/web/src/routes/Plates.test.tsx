@@ -104,7 +104,7 @@ describe("Plates", () => {
     await screen.findByRole("option", { name: "Perimeter" });
 
     fireEvent.change(screen.getByLabelText("Patente"), { target: { value: "ab123cd" } });
-    fireEvent.click(screen.getByLabelText("Coincidencia exacta"));
+    fireEvent.click(screen.getByRole("switch", { name: "Coincidencia exacta" }));
     fireEvent.change(screen.getByLabelText("Sitio"), { target: { value: "site1" } });
     fireEvent.change(screen.getByLabelText("Grupo de cámaras"), { target: { value: "g1" } });
     fireEvent.change(screen.getByLabelText("Desde"), { target: { value: "2024-01-01T10:00" } });
@@ -324,7 +324,7 @@ describe("Plates", () => {
     expect(screen.queryByRole("list", { name: "Filtros aplicados" })).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Patente"), { target: { value: "ab12" } });
-    fireEvent.click(screen.getByLabelText("Coincidencia exacta"));
+    fireEvent.click(screen.getByRole("switch", { name: "Coincidencia exacta" }));
     fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
 
     const chips = await screen.findByRole("list", { name: "Filtros aplicados" });

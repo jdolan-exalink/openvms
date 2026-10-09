@@ -1,8 +1,8 @@
-import { faLock, faPlus, faRotateLeft, faTrash } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { Lock, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { Icon } from "../Icon";
 import { useId, useState } from "react";
 import { TagInput } from "@/components/TagInput";
-import { Button, Select, TextInput } from "@/components/ui";
+import { Button, Select, Switch, Textarea, TextInput } from "@/components/ui";
 import { deepEqual, humanizeKey, type JSchema, isSecretPath, kindOf, resolve, sectionLabel, validateValue } from "@/lib/frigateSchema";
 
 export type FormCtx = {
@@ -47,8 +47,8 @@ function LockedField({ label }: { label: string }) {
   return (
     <div className="flex flex-col gap-1 text-sm">
       <span className="font-medium">{label}</span>
-      <span title="Requiere permiso de credenciales" className="inline-flex items-center gap-2 rounded border border-line bg-raised px-3 py-1.5 text-muted">
-        <FontAwesomeIcon icon={faLock} aria-hidden />
+      <span title="Requiere permiso de credenciales" className="inline-flex min-h-12 items-center gap-2 rounded-m3-md bg-surface-2 px-3 text-muted">
+        <Icon icon={Lock} size="xs" />
         <span aria-hidden>••••••••</span>
         <span className="sr-only">Protegido: requiere permiso de credenciales</span>
       </span>
@@ -58,16 +58,16 @@ function LockedField({ label }: { label: string }) {
 
 function ResetButton({ onClick }: { onClick: () => void }) {
   return (
-    <button type="button" onClick={onClick} className="inline-flex items-center gap-1 text-xs text-muted hover:text-ink focus-visible:outline-2 focus-visible:outline-accent">
-      <FontAwesomeIcon icon={faRotateLeft} aria-hidden /> Usar valor por defecto
+    <button type="button" onClick={onClick} className="m3-press inline-flex min-h-9 items-center gap-1 self-start rounded-full px-2 text-xs font-bold text-primary hover:bg-primary/10 focus-visible:outline-2 focus-visible:outline-primary">
+      <Icon icon={RotateCcw} size="xs" /> Usar valor por defecto
     </button>
   );
 }
 
 function RemoveButton({ name, onRemove }: { name: string; onRemove: () => void }) {
   return (
-    <button type="button" aria-label={`Quitar ${name}`} onClick={(e) => { e.preventDefault(); onRemove(); }} className="text-muted hover:text-bad focus-visible:outline-2 focus-visible:outline-accent">
-      <FontAwesomeIcon icon={faTrash} aria-hidden />
+    <button type="button" aria-label={`Quitar ${name}`} onClick={(e) => { e.preventDefault(); onRemove(); }} className="m3-press inline-flex size-9 items-center justify-center rounded-full text-on-surface-variant hover:bg-bad/10 hover:text-bad focus-visible:outline-2 focus-visible:outline-primary">
+      <Icon icon={Trash2} size="xs" />
     </button>
   );
 }
@@ -89,7 +89,7 @@ function JsonField({ label, value, onChange, disabled }: { label: string; value:
   return (
     <div className="flex flex-col gap-1 text-sm">
       <label htmlFor={id} className="font-medium">{label}</label>
-      <textarea
+      <Textarea
         id={id}
         rows={4}
         disabled={disabled}
@@ -104,7 +104,7 @@ function JsonField({ label, value, onChange, disabled }: { label: string; value:
             setBad(true);
           }
         }}
-        className="rounded border border-line bg-bg px-3 py-1.5 font-mono text-xs focus-visible:outline-2 focus-visible:outline-accent"
+        className="font-mono text-xs"
       />
       {bad && <span role="alert" className="text-xs text-bad">JSON no válido; el cambio no se aplicó.</span>}
     </div>
@@ -113,12 +113,12 @@ function JsonField({ label, value, onChange, disabled }: { label: string; value:
 
 function Collapsible({ title, hint, children, defaultOpen = false, actions }: { title: string; hint?: string; children: React.ReactNode; defaultOpen?: boolean; actions?: React.ReactNode }) {
   return (
-    <details open={defaultOpen} className="rounded border border-line bg-surface/50">
-      <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm font-medium">
+    <details open={defaultOpen} className="rounded-m3-lg bg-surface-2">
+      <summary className="flex min-h-11 cursor-pointer flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm font-bold">
         <span>{title}</span>
         {actions}
       </summary>
-      <div className="flex flex-col gap-3 border-t border-line p-3">
+      <div className="flex flex-col gap-3 border-t border-outline-variant p-4">
         {hint && <p className="text-xs text-muted">{hint}</p>}
         {children}
       </div>
@@ -146,12 +146,9 @@ export function FieldNode(props: NodeProps) {
     case "boolean":
       return (
         <div className="flex flex-col gap-1 text-sm">
-          <label className="flex items-center gap-2">
-            <input id={id} type="checkbox" role="switch" disabled={disabled} checked={value === true || (value === undefined && node.default === true)} onChange={(e) => onChange(e.target.checked)} />
-            <span className="font-medium">{label}</span>
-            {resetBtn}
-          </label>
+          <Switch label={label} disabled={disabled} checked={value === true || (value === undefined && node.default === true)} onChange={onChange} />
           <Help text={node.description} />
+          {resetBtn}
         </div>
       );
     case "enum":
@@ -248,7 +245,7 @@ export function FieldNode(props: NodeProps) {
           {!disabled && (
             <div>
               <Button onClick={() => onChange([...list, emptyFor(node.items, ctx.root)])}>
-                <FontAwesomeIcon icon={faPlus} aria-hidden /> Añadir
+                <Icon icon={Plus} size="xs" /> Añadir
               </Button>
             </div>
           )}
@@ -293,7 +290,7 @@ function MapField({ name, path, ctx, label, obj, node, bare, onChange, onRemove 
             <TextInput value={newKey} onChange={(e) => setNewKey(e.target.value)} aria-invalid={duplicate} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} />
           </label>
           <Button disabled={!newKey.trim() || duplicate} onClick={add}>
-            <FontAwesomeIcon icon={faPlus} aria-hidden /> Añadir
+            <Icon icon={Plus} size="xs" /> Añadir
           </Button>
         </div>
       )}

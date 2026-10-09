@@ -27,9 +27,9 @@ export function SectionPanel({ section, schema, value, onChange, ctx, config, on
   return (
     <div className="flex flex-col gap-5">
       <CuratedPanel section={section} schema={schema} value={value} onChange={onChange} ctx={ctx} zones={zones} onEditZones={onEditZones} />
-      <details className="rounded border border-line">
-        <summary className="cursor-pointer px-3 py-2 text-sm font-medium">Opciones avanzadas</summary>
-        <div className="border-t border-line p-3">{generic}</div>
+      <details className="rounded-m3-lg bg-surface-2">
+        <summary className="min-h-11 cursor-pointer px-4 py-2.5 text-sm font-bold">Opciones avanzadas</summary>
+        <div className="border-t border-outline-variant p-4">{generic}</div>
       </details>
     </div>
   );

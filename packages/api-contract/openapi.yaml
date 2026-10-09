@@ -666,6 +666,102 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/agent/tls:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgentTlsConfig
+      summary: Read registered agent TLS trust configuration
+      description: Requires servers.manage. Returns only the public custom CA bundle, never credentials or private keys.
+      responses:
+        "200":
+          description: Agent TLS trust configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentTLSConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [servers]
+      operationId: setServerAgentTlsConfig
+      summary: Configure registered agent TLS trust
+      description: Requires servers.manage. The CA bundle is public trust material; private keys and agent credentials are not accepted.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerAgentTLSConfig" }
+      responses:
+        "200":
+          description: Saved configuration
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentTLSConfig" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [servers]
+      operationId: deleteServerAgentTlsConfig
+      summary: Disable registered agent TLS configuration
+      description: Requires servers.manage. This only deletes trust metadata and does not issue an agent or camera request.
+      responses:
+        "204": { description: TLS configuration deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/onvif/discover:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: discoverServerOnvif
+      summary: Discover ONVIF devices from a registered edge agent
+      description: Requires servers.manage. Accepts only a local interface name; agent credentials and camera URLs or credentials are never accepted. Discovery uses the agent's local CIDR policy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OnvifDiscoveryRequest" }
+      responses:
+        "200":
+          description: Credential-free discovered device endpoints
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnvifDiscoveryResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/onvif/probe:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: probeServerOnvif
+      summary: Read ONVIF device information through a registered agent
+      description: Requires servers.manage and servers.config.secrets. Credentials are transient, sent only over verified agent HTTPS, and are never stored or returned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/OnvifProbeRequest" }
+      responses:
+        "200":
+          description: Bounded, sanitized read-only ONVIF device information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnvifProbeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/servers/{serverId}/agent:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3392,10 +3488,13 @@ components:
           description: Cameras no longer present in Frigate. They are kept and flagged, not deleted.
     ServerProvisionRequest:
       type: object
-      required: [site_id, ip, ssh_user, ssh_password]
+      required: [site_id, ip, server_name, ssh_user, ssh_password]
       properties:
         site_id: { type: string, format: uuid }
-        ip: { type: string, description: Address of the new machine. example: 192.0.2.10 }
+        ip: { type: string, description: "Address of the new machine. Example: 192.0.2.10" }
+        server_name: { type: string, minLength: 1, maxLength: 200, description: Display name for the newly installed server. }
+        host_key: { type: string, description: Optional verified SHA256 SSH host key fingerprint. When supplied, it must match the server key. }
+        trust_on_first_use: { type: boolean, default: false, description: Explicitly accept the first SSH host key without prior verification. The initial host identity is not verified. }
         ssh_user: { type: string, minLength: 1, maxLength: 64 }
         ssh_password:
           type: string
@@ -3404,6 +3503,10 @@ components:
           maxLength: 256
           writeOnly: true
           description: Used only for this install session. Not stored.
+        allow_system_disk:
+          type: boolean
+          default: false
+          description: Explicitly allow recordings on the root filesystem when /mnt/cctv is not mounted. Demo use only; disk may fill.
     ServerProvisionStep:
       type: object
       required: [id, state]
@@ -3428,13 +3531,112 @@ components:
           items: { $ref: "#/components/schemas/ServerProvisionStep" }
         warning:
           type: string
-          description: cpu when the host has no Coral, NVIDIA, or OpenVINO.
+          enum: [cpu, system_disk, cpu_system_disk]
+          description: CPU fallback and/or explicit system-disk recording warning.
         variant:
           type: string
           enum: [coral, tensorrt, openvino, cpu]
         server_id: { type: string, format: uuid }
         error: { type: string }
         host_key: { type: string, description: SHA256 fingerprint seen on first SSH contact. }
+    ServerAgentTLSConfig:
+      type: object
+      additionalProperties: false
+      required: [secure_port, trust_mode]
+      properties:
+        secure_port: { type: integer, minimum: 1, maximum: 65535 }
+        trust_mode: { type: string, enum: [system, custom] }
+        ca_pem: { type: string, maxLength: 65536, description: Public CA certificates in PEM format; required only for custom trust mode. }
+    OnvifDiscoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [interface_name]
+      properties:
+        interface_name: { type: string, minLength: 1, maxLength: 64 }
+    OnvifDiscoveryDevice:
+      type: object
+      additionalProperties: false
+      required: [xaddrs]
+      properties:
+        xaddrs: { type: array, items: { type: string, format: uri } }
+    OnvifDiscoveryResult:
+      type: object
+      additionalProperties: false
+      required: [devices]
+      properties:
+        devices: { type: array, items: { $ref: "#/components/schemas/OnvifDiscoveryDevice" } }
+    OnvifProbeRequest:
+      type: object
+      additionalProperties: false
+      required: [endpoint]
+      properties:
+        endpoint: { type: string, minLength: 1, maxLength: 2048, description: HTTP(S) ONVIF device endpoint on an IPv4 literal. }
+        username: { type: string, maxLength: 256 }
+        password: { type: string, maxLength: 1024, writeOnly: true }
+    OnvifProbeResult:
+      type: object
+      additionalProperties: false
+      required: [device_information, services, system_time]
+      properties:
+        device_information: { $ref: "#/components/schemas/OnvifProbeDeviceInformation" }
+        services: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/OnvifProbeService" } }
+        system_time: { $ref: "#/components/schemas/OnvifProbeClock" }
+    OnvifProbeDeviceInformation:
+      type: object
+      additionalProperties: false
+      required: [manufacturer, model, firmware_version, serial_number, hardware_id]
+      properties:
+        manufacturer: { type: string, maxLength: 256 }
+        model: { type: string, maxLength: 256 }
+        firmware_version: { type: string, maxLength: 256 }
+        serial_number: { type: string, maxLength: 256 }
+        hardware_id: { type: string, maxLength: 256 }
+    OnvifProbeService:
+      type: object
+      additionalProperties: false
+      required: [namespace, xaddrs, version]
+      properties:
+        namespace: { type: string, maxLength: 256 }
+        xaddrs: { type: array, maxItems: 16, items: { type: string, format: uri } }
+        version: { $ref: "#/components/schemas/OnvifProbeVersion" }
+    OnvifProbeVersion:
+      type: object
+      additionalProperties: false
+      required: [major, minor]
+      properties:
+        major: { type: integer, minimum: 0, maximum: 10000 }
+        minor: { type: integer, minimum: 0, maximum: 10000 }
+    OnvifProbeClock:
+      type: object
+      additionalProperties: false
+      required: [date_time_type, utc, local]
+      properties:
+        date_time_type: { type: string, maxLength: 256 }
+        utc: { $ref: "#/components/schemas/OnvifProbeDateTime" }
+        local: { $ref: "#/components/schemas/OnvifProbeDateTime" }
+    OnvifProbeDateTime:
+      type: object
+      additionalProperties: false
+      required: [time, date]
+      properties:
+        time: { $ref: "#/components/schemas/OnvifProbeTime" }
+        date: { $ref: "#/components/schemas/OnvifProbeDate" }
+    OnvifProbeTime:
+      type: object
+      additionalProperties: false
+      required: [hour, minute, second]
+      properties:
+        hour: { type: integer, minimum: 0, maximum: 23 }
+        minute: { type: integer, minimum: 0, maximum: 59 }
+        second: { type: integer, minimum: 0, maximum: 60 }
+    OnvifProbeDate:
+      type: object
+      additionalProperties: false
+      required: [year, month, day]
+      properties:
+        year: { type: integer, minimum: 0, maximum: 9999 }
+        month: { type: integer, minimum: 0, maximum: 12 }
+        day: { type: integer, minimum: 0, maximum: 31 }
     ServerAgent:
       type: object
       required: [installed, version, current_version, outdated]
@@ -4848,6 +5050,3 @@ components:
         geometry: { type: object }
         style: { type: object, nullable: true }
         metadata: { type: object, nullable: true }
-
-
-

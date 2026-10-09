@@ -1,5 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, unwrap } from "@/api/client";
+import { Switch } from "@/components/ui";
 
 /** BodyClassifySwitch turns the crop classifier on or off for one server or camera. */
 export function BodyClassifySwitch({
@@ -34,17 +35,5 @@ export function BodyClassifySwitch({
       await qc.invalidateQueries({ queryKey: ["system", "capacity"] });
     },
   });
-  return (
-    <label className="inline-flex items-center gap-2 text-xs">
-      <input
-        type="checkbox"
-        role="switch"
-        aria-label={label}
-        checked={enabled}
-        disabled={disabled || save.isPending}
-        onChange={(e) => save.mutate(e.target.checked)}
-      />
-      {label}
-    </label>
-  );
+  return <Switch checked={enabled} onChange={(next) => save.mutate(next)} disabled={disabled || save.isPending} label={label} className="text-xs" />;
 }

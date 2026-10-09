@@ -14,20 +14,20 @@ import (
 
 // Snapshot is what the edge agent reports once a second.
 type Snapshot struct {
-	Version             string  `json:"version"`
-	Variant             string  `json:"variant"`
-	NTP                 string  `json:"ntp"`
-	CPUPercent          float64 `json:"cpu_percent"`
-	MemoryTotal         uint64  `json:"memory_total_bytes"`
-	MemoryAvailable     uint64  `json:"memory_available_bytes"`
-	Coral               bool    `json:"coral"`
-	GPUPresent          bool    `json:"gpu_present"`
-	GPUVendor           string  `json:"gpu_vendor"`
-	GPUName             string  `json:"gpu_name"`
-	CCTVTotal           uint64  `json:"cctv_total_bytes"`
-	CCTVFree            uint64  `json:"cctv_free_bytes"`
-	DatabaseTotal       uint64  `json:"database_total_bytes"`
-	DatabaseFree        uint64  `json:"database_free_bytes"`
+	Version         string  `json:"version"`
+	Variant         string  `json:"variant"`
+	NTP             string  `json:"ntp"`
+	CPUPercent      float64 `json:"cpu_percent"`
+	MemoryTotal     uint64  `json:"memory_total_bytes"`
+	MemoryAvailable uint64  `json:"memory_available_bytes"`
+	Coral           bool    `json:"coral"`
+	GPUPresent      bool    `json:"gpu_present"`
+	GPUVendor       string  `json:"gpu_vendor"`
+	GPUName         string  `json:"gpu_name"`
+	CCTVTotal       uint64  `json:"cctv_total_bytes"`
+	CCTVFree        uint64  `json:"cctv_free_bytes"`
+	DatabaseTotal   uint64  `json:"database_total_bytes"`
+	DatabaseFree    uint64  `json:"database_free_bytes"`
 }
 
 // Paths are the files a sample reads. Empty fields use this machine.
@@ -63,10 +63,10 @@ func NewSampler(opts Paths) *Sampler {
 		opts.Dev = "/dev"
 	}
 	if opts.CCTV == "" {
-		opts.CCTV = "/opt/openvms/frigate/storage"
+		opts.CCTV = "/mnt/cctv"
 	}
 	if opts.DB == "" {
-		opts.DB = "/"
+		opts.DB = "/opt/frigate/config"
 	}
 	return &Sampler{opts: opts}
 }

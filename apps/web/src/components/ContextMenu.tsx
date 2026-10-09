@@ -1,8 +1,7 @@
-import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
-import { faChevronRight } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { ChevronRight, type LucideIcon } from "lucide-react";
 import { type KeyboardEvent, type ReactNode, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Icon } from "@/components/Icon";
 import { cn } from "@/lib/cn";
 
 export type MenuItem =
@@ -11,7 +10,7 @@ export type MenuItem =
       separator?: false;
       id: string;
       label: string;
-      icon?: IconDefinition;
+      icon?: LucideIcon;
       /** Shown dimmed at the end of the row, e.g. "Próximamente". */
       hint?: string;
       disabled?: boolean;
@@ -154,10 +153,10 @@ function MenuList({ items, onClose, autoFocus, onLeave }: { items: MenuItem[]; o
       ref={listRef}
       role="menu"
       onKeyDown={onKeyDown}
-      className="min-w-48 max-w-72 rounded-lg border border-line bg-surface py-1 text-sm shadow-xl"
+      className="min-w-48 max-w-72 rounded-m3-lg bg-surface-2 py-2 text-sm text-on-surface shadow-xl"
     >
       {items.map((item) => {
-        if (item.separator) return <div key={item.id} role="separator" className="my-1 h-px bg-line" />;
+        if (item.separator) return <div key={item.id} role="separator" className="my-1 h-px bg-outline-variant" />;
         const hasSub = !!item.children?.length;
         const open = openSub === item.id;
         return (
@@ -181,15 +180,15 @@ function MenuList({ items, onClose, autoFocus, onLeave }: { items: MenuItem[]; o
                 onClose();
               }}
               className={cn(
-                "flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-raised focus:bg-raised focus:outline-none",
+                "flex min-h-9 w-full items-center gap-3 px-3 py-1.5 text-left hover:bg-on-surface/8 focus:bg-on-surface/12 focus:outline-none",
                 item.danger && "text-bad",
                 item.disabled && "cursor-not-allowed opacity-50",
               )}
             >
-              <span className="flex w-4 shrink-0 justify-center text-xs text-muted">{item.icon && <FontAwesomeIcon icon={item.icon} fixedWidth aria-hidden />}</span>
+              <span className="flex w-5 shrink-0 justify-center text-on-surface-variant">{item.icon && <Icon icon={item.icon} size="xs" />}</span>
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
               {item.hint && <span className="shrink-0 text-[11px] text-muted">{item.hint}</span>}
-              {hasSub && <FontAwesomeIcon icon={faChevronRight} className="shrink-0 text-[10px] text-muted" aria-hidden />}
+              {hasSub && <Icon icon={ChevronRight} size="xs" className="shrink-0 text-on-surface-variant" />}
             </button>
             {hasSub && open && (
               <Submenu>

@@ -2,6 +2,7 @@ import { Video, Search, BarChart3, Edit3, SlidersHorizontal, Layers, Radar } fro
 import { useT, type MessageKey } from "@/i18n";
 import type { MapMode } from "@/lib/maps/types";
 import { cn } from "@/lib/cn";
+import { IconButton } from "@/components/ui";
 
 export interface MapToolbarProps {
   mode: MapMode;
@@ -38,8 +39,8 @@ export function MapToolbar({
 }: MapToolbarProps) {
   const t = useT();
   return (
-    <div className={embedded ? "contents" : "flex items-center gap-2 rounded-lg border border-line bg-surface/90 p-1 shadow-sm backdrop-blur-xs"}>
-      <div className="order-1 flex items-center gap-0.5 rounded-md bg-bg/50 p-0.5" role="tablist" aria-label={t("maps.mode")}>
+    <div className={embedded ? "contents" : "flex flex-wrap items-center gap-2 rounded-m3-xl bg-surface-1/95 p-1 shadow-sm backdrop-blur-xs"}>
+      <div className="order-1 flex items-center gap-0.5 rounded-full bg-surface-2 p-0.5" role="tablist" aria-label={t("maps.mode")}>
         {MODES.filter((m) => !m.requiresEdit || canEdit).map((m) => {
           const Icon = m.icon;
           const active = mode === m.id;
@@ -51,10 +52,10 @@ export function MapToolbar({
               aria-selected={active}
               onClick={() => onModeChange(m.id)}
               className={cn(
-                "flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-medium transition-colors",
+                "m3-press flex h-11 items-center gap-1.5 rounded-full px-3 text-xs font-bold focus-visible:outline-2 focus-visible:outline-primary",
                 active
-                  ? "bg-accent text-white shadow-xs"
-                  : "text-muted hover:bg-raised hover:text-ink focus-visible:outline-2 focus-visible:outline-accent",
+                  ? "bg-primary-container text-on-primary-container"
+                  : "text-on-surface-variant hover:bg-on-surface/8",
               )}
             >
               {m.id === "live" && (
@@ -63,59 +64,47 @@ export function MapToolbar({
                   <span className={cn("relative size-2 rounded-full", active ? "bg-ok shadow-[0_0_8px] shadow-ok" : "bg-ok/40")} />
                 </span>
               )}
-              <Icon className="size-3.5" aria-hidden />
+              <Icon className="size-4" aria-hidden />
               <span>{t(m.label)}</span>
             </button>
           );
         })}
       </div>
 
-      <div className="order-5 h-4 w-px bg-line" aria-hidden />
+      <div className="order-5 hidden h-5 w-px bg-outline-variant sm:block" aria-hidden />
 
       <div className="order-5 flex items-center gap-1">
         {onToggleCoverage && (
-          <button
-            type="button"
+          <IconButton
+            icon={Radar}
+            variant={coverage ? "tonal" : "standard"}
             onClick={onToggleCoverage}
             aria-pressed={coverage}
             title={coverage ? t("maps.hideFov") : t("maps.showFov")}
-            className={cn(
-              "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
-              coverage && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",
-            )}
-          >
-            <Radar className="size-3.5" aria-hidden />
-          </button>
+            aria-label={coverage ? t("maps.hideFov") : t("maps.showFov")}
+          />
         )}
 
         {onToggleLayers && (
-          <button
-            type="button"
+          <IconButton
+            icon={Layers}
+            variant={layersActive ? "tonal" : "standard"}
             onClick={onToggleLayers}
             aria-pressed={layersActive}
             title={t("maps.layers")}
-            className={cn(
-              "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
-              layersActive && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",
-            )}
-          >
-            <Layers className="size-3.5" aria-hidden />
-          </button>
+            aria-label={t("maps.layers")}
+          />
         )}
 
         {onToggleFilters && (
-          <button
-            type="button"
+          <IconButton
+            icon={SlidersHorizontal}
+            variant={filtersActive ? "tonal" : "standard"}
             onClick={onToggleFilters}
             aria-pressed={filtersActive}
             title={t("common.filters")}
-            className={cn(
-              "flex size-7 items-center justify-center rounded text-muted hover:bg-raised hover:text-ink transition-colors",
-              filtersActive && "bg-accent/15 text-accent ring-1 ring-inset ring-accent/30",
-            )}
-          >
-            <SlidersHorizontal className="size-3.5" aria-hidden />
-          </button>
+            aria-label={t("common.filters")}
+          />
         )}
       </div>
     </div>

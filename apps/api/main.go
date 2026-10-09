@@ -46,6 +46,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/postgres"
 	"github.com/jdolan-exalink/openvms/internal/platform/telemetry"
 	"github.com/jdolan-exalink/openvms/internal/platform/valkeyx"
+	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/realtime"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
@@ -141,6 +142,7 @@ func run() error {
 	mapsSvc.Config.DefaultCenter = maps.DetectServerCenter(ctx, log)
 	handlers := &api.Handlers{
 		Inv:           inv,
+		Provision:     provision.New(inv, st, sealer, log),
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Alarms:        alarmsSvc,
 		Media:         mediaSvc,

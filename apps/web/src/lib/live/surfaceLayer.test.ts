@@ -49,6 +49,60 @@ describe("VideoSurfaceLayerController", () => {
     release();
   });
 
+  it("clips the video to the rounded corners of the tile around its slot", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const layer = new VideoSurfaceLayerController();
+    layer.setHost(host);
+    const { session, video } = fakeSession();
+
+    const tile = document.createElement("div");
+    tile.style.borderRadius = "28px";
+    document.body.appendChild(tile);
+    const slot = slotAt({ left: 10, top: 20, width: 300, height: 200 });
+    tile.appendChild(slot);
+    layer.register(session, slot);
+    const wrapper = video.parentElement?.parentElement as HTMLElement;
+    expect(wrapper.style.clipPath).toBe("inset(0px 0px 0px 0px round 28px 28px 28px 28px)");
+
+    // Selecting the tile grows its radius; the next frame follows it.
+    tile.style.borderRadius = "36px";
+    layer.layoutNow();
+    expect(wrapper.style.clipPath).toBe("inset(0px 0px 0px 0px round 36px 36px 36px 36px)");
+  });
+
+  it("stays square when the clipping tile is square even if an outer frame is rounded", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const layer = new VideoSurfaceLayerController();
+    layer.setHost(host);
+    const { session, video } = fakeSession();
+    const frame = document.createElement("div");
+    frame.style.borderRadius = "28px";
+    const tile = document.createElement("div");
+    tile.style.overflowX = "hidden";
+    tile.style.overflowY = "hidden";
+    tile.getBoundingClientRect = () => ({ left: 10, top: 20, right: 310, bottom: 220, width: 300, height: 200, x: 10, y: 20, toJSON: () => ({}) }) as DOMRect;
+    frame.appendChild(tile);
+    document.body.appendChild(frame);
+    const slot = slotAt({ left: 10, top: 20, width: 300, height: 200 });
+    tile.appendChild(slot);
+    layer.register(session, slot);
+    const wrapper = video.parentElement?.parentElement as HTMLElement;
+    expect(wrapper.style.clipPath).toBe("none");
+  });
+
+  it("keeps a plain rectangle when nothing around the slot is rounded", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const layer = new VideoSurfaceLayerController();
+    layer.setHost(host);
+    const { session, video } = fakeSession();
+    layer.register(session, slotAt({ left: 0, top: 0, width: 100, height: 80 }));
+    const wrapper = video.parentElement?.parentElement as HTMLElement;
+    expect(wrapper.style.clipPath).toBe("none");
+  });
+
   it("positions the persistent video over its slot and never re-parents it", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

@@ -120,7 +120,7 @@ export function Branding() {
       <ErrorNote error={branding.error} />
       {branding.data && (
         <form
-          className="flex flex-col gap-4 rounded border border-line bg-surface p-4"
+          className="flex flex-col gap-5 rounded-m3-xl bg-surface-1 p-5"
           onSubmit={(e: FormEvent) => {
             e.preventDefault();
             save.mutate();
@@ -147,19 +147,19 @@ export function Branding() {
           <Field label="Logo (PNG o JPEG, hasta 512 KB)">
             <div className="flex items-center gap-3">
               {branding.data.has_logo && !logoFile && (
-                <img src={`/api/v1/tenants/${tenantId}/branding/logo`} alt="Logo actual" className="h-12 w-12 rounded border border-line object-contain" />
+                <img src={`/api/v1/tenants/${tenantId}/branding/logo`} alt="Logo actual" className="size-14 rounded-m3-md bg-surface-2 object-contain p-1" />
               )}
-              {manage && <input type="file" accept="image/png,image/jpeg" onChange={onLogoChange} className="text-sm" />}
+              {manage && <input type="file" accept="image/png,image/jpeg" onChange={onLogoChange} className="min-h-11 text-sm file:mr-3 file:h-9 file:cursor-pointer file:rounded-full file:border-0 file:bg-secondary-container file:px-4 file:text-sm file:font-bold file:text-on-secondary-container" />}
             </div>
             {logoError && <p role="alert" className="text-sm text-bad">{logoError}</p>}
           </Field>
           {manage && (
-            <div className="flex gap-2">
-              <Button type="submit" variant="primary" disabled={save.isPending || (ownerName === null && timezone === null && !logoFile)}>
+            <div className="flex flex-wrap gap-2">
+              <Button type="submit" variant="filled" disabled={save.isPending || (ownerName === null && timezone === null && !logoFile)}>
                 Guardar
               </Button>
               {branding.data.has_logo && (
-                <Button type="button" onClick={() => removeLogo.mutate()} disabled={removeLogo.isPending}>
+                <Button type="button" variant="outlined" className="border-bad/60 text-bad" onClick={() => removeLogo.mutate()} disabled={removeLogo.isPending}>
                   Quitar logo
                 </Button>
               )}

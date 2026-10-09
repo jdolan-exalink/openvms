@@ -43,7 +43,7 @@ function YamlDiff({ before, after }: { before: string; after: string }) {
   const rows = useMemo(() => collapse(lineDiff(before, after)), [before, after]);
   if (!rows.some((r) => r.kind !== "gap")) return <p className="text-sm text-muted">El archivo no cambió.</p>;
   return (
-    <pre aria-label="Diferencias del YAML" className="max-h-96 overflow-auto rounded border border-line bg-bg p-2 font-mono text-xs">
+    <pre aria-label="Diferencias del YAML" className="max-h-96 overflow-auto rounded-m3-md bg-surface-2 p-3 font-mono text-xs">
       {rows.map((r, i) =>
         r.kind === "gap" ? (
           <div key={i} className="text-muted">… {r.count} líneas sin cambios …</div>
@@ -65,7 +65,7 @@ function RevisionDetail({ rev, onClose }: { rev: Revision; onClose: () => void }
         {fmtDateTime(rev.created_at)} · {rev.actor_name} · {kindLabel[rev.kind]}
       </p>
       <h3 className="text-sm font-semibold">Parche enviado</h3>
-      <pre className="max-h-60 overflow-auto rounded border border-line bg-bg p-2 font-mono text-xs">{JSON.stringify(rev.patch, null, 2)}</pre>
+      <pre className="max-h-60 overflow-auto rounded-m3-md bg-surface-2 p-3 font-mono text-xs">{JSON.stringify(rev.patch, null, 2)}</pre>
       {rev.before_yaml !== undefined && rev.after_yaml !== undefined ? (
         <>
           <h3 className="text-sm font-semibold">Archivo de configuración: antes → después</h3>
@@ -111,7 +111,7 @@ export function FrigateHistory({
       {revisions.data?.length === 0 && <Empty>Aún no hay cambios guardados para esta cámara.</Empty>}
       <ul className="flex flex-col gap-2">
         {revisions.data?.map((rev) => (
-          <li key={rev.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-line px-3 py-2 text-sm">
+          <li key={rev.id} className="flex flex-wrap items-center justify-between gap-2 rounded-m3-lg bg-surface-2 px-4 py-3 text-sm">
             <div className="flex flex-col gap-1">
               <span>
                 <span className="font-medium">{kindLabel[rev.kind]}</span> · {rev.actor_name}
@@ -119,14 +119,14 @@ export function FrigateHistory({
               <span className="text-xs text-muted">{fmtDateTime(rev.created_at)}</span>
               <span className="flex flex-wrap gap-1">
                 {rev.sections.map((s) => (
-                  <span key={s} className="rounded bg-raised px-1.5 py-0.5 text-[11px]">{sectionLabel(s)}</span>
+                  <span key={s} className="rounded-full bg-secondary-container px-2 py-0.5 text-[11px] text-on-secondary-container">{sectionLabel(s)}</span>
                 ))}
               </span>
             </div>
             <div className="flex gap-2">
-              <Button aria-label={`Ver cambio del ${fmtDateTime(rev.created_at)}`} onClick={() => setViewing(rev)}>Ver cambio</Button>
+              <Button size="sm" aria-label={`Ver cambio del ${fmtDateTime(rev.created_at)}`} onClick={() => setViewing(rev)}>Ver cambio</Button>
               {canRollback && (
-                <Button aria-label={`Restaurar versión anterior al ${fmtDateTime(rev.created_at)}`} onClick={() => setRestoring(rev)}>
+                <Button size="sm" aria-label={`Restaurar versión anterior al ${fmtDateTime(rev.created_at)}`} onClick={() => setRestoring(rev)}>
                   Restaurar esta versión
                 </Button>
               )}

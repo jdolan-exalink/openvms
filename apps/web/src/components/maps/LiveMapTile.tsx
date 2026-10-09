@@ -34,7 +34,7 @@ function LiveGeoTile({ map }: { map: LiveMapRef }) {
   return (
     <div className="relative size-full bg-bg">
       {ready && config.data && center ? (
-        <Suspense fallback={<p className="p-3 text-xs text-muted">{t("maps.mapLoading")}</p>}>
+        <Suspense fallback={<p className="p-3 text-xs text-on-surface-variant">{t("maps.mapLoading")}</p>}>
           <MapCanvas
             provider={config.data.provider}
             cameras={cameras}
@@ -48,7 +48,7 @@ function LiveGeoTile({ map }: { map: LiveMapRef }) {
           />
         </Suspense>
       ) : (
-        <p className="p-3 text-xs text-muted">{entities.isError || config.isError ? t("maps.mapOpenFailed") : t("maps.mapLoading")}</p>
+        <p className="p-3 text-xs text-on-surface-variant">{entities.isError || config.isError ? t("maps.mapOpenFailed") : t("maps.mapLoading")}</p>
       )}
       <TileName name={map.name} />
     </div>
@@ -91,7 +91,7 @@ function LiveFloorTile({ map }: { map: LiveMapRef }) {
           floorId={floorId}
         />
       ) : (
-        <p className="flex size-full items-center justify-center p-3 text-center text-xs text-muted">
+        <p className="flex size-full items-center justify-center p-3 text-center text-xs text-on-surface-variant">
           {plan.isError ? t("maps.planOpenFailed") : me.isLoading || detail.isLoading || plan.isLoading ? t("maps.planLoading") : t("maps.planMissing")}
         </p>
       )}
@@ -101,5 +101,5 @@ function LiveFloorTile({ map }: { map: LiveMapRef }) {
 }
 
 function TileName({ name }: { name: string }) {
-  return <div className="pointer-events-none absolute left-2 top-2 z-20 max-w-[70%] truncate rounded bg-black/70 px-2 py-1 text-xs text-white">{name}</div>;
+  return <div className="pointer-events-none absolute left-2 top-2 z-20 max-w-[70%] truncate rounded-full bg-scrim px-3 py-1 text-xs font-bold text-on-surface backdrop-blur">{name}</div>;
 }

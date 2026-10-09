@@ -11,6 +11,8 @@ type Entry = {
   slot: HTMLElement | null;
   /** Ancestors of the slot that clip it (scroll containers), resolved when the slot registers. */
   clippers: HTMLElement[];
+  /** Nearest rounded box around the slot (the grid tile); the video copies its corners. */
+  rounded: HTMLElement | null;
   playing: boolean;
   applied: string;
   unsubscribe: () => void;
@@ -30,6 +32,35 @@ function clippingAncestors(el: HTMLElement): HTMLElement[] {
     if (/(auto|scroll|hidden|clip)/.test(overflowX + overflowY)) out.push(p);
   }
   return out;
+}
+
+const ROUNDED_LOOKUP_DEPTH = 4;
+
+/** cornerRadii returns top-left, top-right, bottom-right, bottom-left radii (circular part only). */
+function cornerRadii(el: HTMLElement): string[] {
+  const s = getComputedStyle(el);
+  const longhands = [s.borderTopLeftRadius, s.borderTopRightRadius, s.borderBottomRightRadius, s.borderBottomLeftRadius];
+  if (longhands.some((v) => parseFloat(v) > 0)) return longhands.map((v) => (v || "0px").split(" ")[0] ?? "0px");
+  // Some engines only report the shorthand: expand 1–4 values the way CSS does.
+  const parts = (s.borderRadius.split("/")[0] ?? "").trim().split(/\s+/).filter(Boolean);
+  const [a = "0px", b = a, c = a, d = b] = parts;
+  return [a, b, c, d];
+}
+
+const isRounded = (el: HTMLElement) => cornerRadii(el).some((v) => parseFloat(v) > 0);
+
+/**
+ * roundedAncestor finds the tile whose corners the video must follow. The video lives in the
+ * fixed layer, not inside the tile, so the tile's own overflow clipping never reaches it.
+ */
+function roundedAncestor(el: HTMLElement): HTMLElement | null {
+  let p: HTMLElement | null = el;
+  for (let depth = 0; p && depth <= ROUNDED_LOOKUP_DEPTH; depth++, p = p.parentElement) {
+    if (isRounded(p)) return p;
+    // The tile clips its own content: a square tile is square, whatever frames it.
+    if (p !== el && /(hidden|clip)/.test(getComputedStyle(p).overflowX + getComputedStyle(p).overflowY)) return null;
+  }
+  return null;
 }
 
 /**
@@ -100,6 +131,7 @@ export class VideoSurfaceLayerController {
     if (entry.slot && entry.slot !== slot) this.observer?.unobserve(entry.slot);
     entry.slot = slot;
     entry.clippers = clippingAncestors(slot);
+    entry.rounded = roundedAncestor(slot);
     entry.applied = "";
     this.observer?.observe(slot);
     this.layout(entry);
@@ -109,6 +141,7 @@ export class VideoSurfaceLayerController {
       this.observer?.unobserve(slot);
       entry.slot = null;
       entry.clippers = [];
+      entry.rounded = null;
       this.layout(entry);
     };
   }
@@ -153,7 +186,7 @@ export class VideoSurfaceLayerController {
       left: "0",
       top: "0",
       overflow: "hidden",
-      background: "#000",
+      background: "#000", // video letterbox is physically black in every theme
       pointerEvents: "none",
       willChange: "transform",
       visibility: "hidden",
@@ -173,7 +206,7 @@ export class VideoSurfaceLayerController {
     wrapper.appendChild(stage);
     this.host?.appendChild(wrapper);
     session.attach(stage);
-    const entry: Entry = { session, wrapper, stage, slot: null, clippers: [], playing: false, applied: "", unsubscribe: () => {} };
+    const entry: Entry = { session, wrapper, stage, slot: null, clippers: [], rounded: null, playing: false, applied: "", unsubscribe: () => {} };
     const sync = () => {
       const { state } = session.getSnapshot();
       if (state === "EVICTED") return this.drop(entry);
@@ -232,8 +265,12 @@ export class VideoSurfaceLayerController {
       bottom = Math.min(bottom, cr.bottom);
     }
     if (right <= left || bottom <= top) return hide();
-    const clip = top > r.top || left > r.left || right < r.right || bottom < r.bottom
-      ? `inset(${top - r.top}px ${r.right - right}px ${r.bottom - bottom}px ${left - r.left}px)`
+    const cut = top > r.top || left > r.left || right < r.right || bottom < r.bottom;
+    // Read every frame so a tile whose radius animates (selection) stays clean mid-transition.
+    const radii = e.rounded?.isConnected ? cornerRadii(e.rounded) : null;
+    const round = radii && radii.some((v) => parseFloat(v) > 0) ? ` round ${radii.join(" ")}` : "";
+    const clip = cut || round
+      ? `inset(${top - r.top}px ${r.right - right}px ${r.bottom - bottom}px ${left - r.left}px${round})`
       : "none";
     return this.apply(e, `${r.left}|${r.top}|${r.width}|${r.height}|${clip}`, r, clip);
   }

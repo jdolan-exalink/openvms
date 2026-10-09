@@ -1,5 +1,4 @@
-import { X } from "lucide-react";
-import { Button } from "@/components/ui";
+import { Button, RemovableChip } from "@/components/ui";
 import { useT } from "@/i18n";
 
 export type FilterChip = { key: string; label: string; onRemove: () => void };
@@ -34,15 +33,12 @@ export function SearchSummary({
         <>
           <ul aria-label={t("common.appliedFilters")} className="flex flex-wrap gap-2">
             {chips.map((c) => (
-              <li key={c.key} className="inline-flex items-center gap-1 rounded-full border border-line bg-raised py-0.5 pl-2.5 pr-1 text-xs">
-                <span>{c.label}</span>
-                <button type="button" onClick={c.onRemove} aria-label={t("common.removeFilter", { label: c.label })} className="rounded-full p-0.5 hover:bg-line focus-visible:outline-2 focus-visible:outline-accent">
-                  <X className="size-3" aria-hidden />
-                </button>
+              <li key={c.key}>
+                <RemovableChip label={c.label} removeLabel={t("common.removeFilter", { label: c.label })} onRemove={c.onRemove} />
               </li>
             ))}
           </ul>
-          <Button onClick={onClear} className="px-2 py-0.5 text-xs">
+          <Button variant="text" size="sm" onClick={onClear}>
             {t("common.clearFilters")}
           </Button>
         </>

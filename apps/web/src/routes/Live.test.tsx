@@ -1,5 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { AppShell } from "@/components/AppShell";
+import { AppShell, TopBarActionsSlot } from "@/components/AppShell";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import { json, renderPage, stubApi } from "@/test-utils";
@@ -85,6 +85,41 @@ const emptyCatalogs = {
 };
 
 describe("Live", () => {
+  it("marks the selected tile with aria-current and moves it on click", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "North")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    const first = await screen.findByLabelText("Cuadro 1");
+    const second = screen.getByLabelText("Cuadro 2");
+    expect(first).toHaveAttribute("aria-current", "true");
+    expect(second).not.toHaveAttribute("aria-current");
+    fireEvent.click(second);
+    expect(second).toHaveAttribute("aria-current", "true");
+    expect(first).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps video tiles square, selected or not, and marks selection with an outline", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "North")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    const first = await screen.findByLabelText("Cuadro 1");
+    const second = screen.getByLabelText("Cuadro 2");
+    for (const tile of [first, second]) {
+      expect(tile.className).not.toMatch(/rounded/);
+      expect(tile.className).not.toMatch(/border-radius/);
+    }
+    expect(first.className).toContain("outline-primary");
+    expect(first.className).toContain("outline-offset");
+  });
+
   it("consumes an authorized camera handoff while preserving the saved selection", async () => {
     stubBrowserAPIs();
     localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
@@ -344,6 +379,55 @@ describe("Live", () => {
     );
   });
 
+  it("expands a tile on a touch double tap without toggling it back on the synthesized dblclick", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await waitFor(() => expect(document.querySelector('[aria-label="Cuadro 1"]')?.textContent).toContain("Puerta norte"));
+    const tile = document.querySelector('[aria-label="Cuadro 1"]') as HTMLElement;
+    const tap = (x: number) => {
+      fireEvent.pointerDown(tile, { pointerId: 1, pointerType: "touch", isPrimary: true, clientX: x, clientY: 40 });
+      fireEvent.pointerUp(tile, { pointerId: 1, pointerType: "touch", isPrimary: true, clientX: x, clientY: 40 });
+    };
+    tap(50);
+    expect(screen.queryByRole("button", { name: "Volver a la grilla" })).not.toBeInTheDocument();
+    tap(52);
+    expect(await screen.findByRole("button", { name: "Volver a la grilla" })).toBeInTheDocument();
+    fireEvent.doubleClick(tile);
+    expect(screen.getByRole("button", { name: "Volver a la grilla" })).toBeInTheDocument();
+  });
+
+  it("keeps the mouse double click toggling the tile and lets touch-action stay off the whole tile", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await waitFor(() => expect(document.querySelector('[aria-label="Cuadro 1"]')?.textContent).toContain("Puerta norte"));
+    const tile = document.querySelector('[aria-label="Cuadro 1"]') as HTMLElement;
+    expect(tile.className).toContain("select-none");
+    fireEvent.doubleClick(tile);
+    expect(await screen.findByRole("button", { name: "Volver a la grilla" })).toBeInTheDocument();
+  });
+
   it("reorders two tiles with the keyboard (dnd-kit's built-in accessibility)", async () => {
     stubBrowserAPIs();
     vi.stubGlobal(
@@ -541,8 +625,8 @@ describe("Live", () => {
 
     const shared = await screen.findByRole("button", { name: "Perímetro · Marta Gómez" });
     const privateView = screen.getByRole("button", { name: "Turno noche" });
-    expect(shared.querySelector("[data-icon='cloud']")).not.toBeNull();
-    expect(privateView.querySelector("[data-icon='cloud']")).toBeNull();
+    expect(within(shared).getByRole("img", { name: "Compartida" })).toBeInTheDocument();
+    expect(within(privateView).queryByRole("img", { name: "Compartida" })).toBeNull();
     expect(shared).toHaveAttribute("title", expect.stringContaining("Compartida por Marta Gómez"));
   });
 
@@ -555,6 +639,25 @@ describe("Live", () => {
     fireEvent.change(screen.getByLabelText("Buscar en el explorador"), { target: { value: "perí" } });
     expect(screen.queryByRole("button", { name: /Turno noche/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Perímetro/ })).toBeInTheDocument();
+  });
+
+  it("opens the edge explorer with a tap and closes it with a tap outside, ignoring touch hover", async () => {
+    localStorage.setItem("openvms.live.sidebar.pinned", "0");
+    viewsApi([]);
+
+    renderPage(Live);
+    const edge = await screen.findByTestId("live-edge");
+    fireEvent.pointerEnter(edge, { pointerType: "touch" });
+    expect(edge.querySelector("aside")).toHaveAttribute("hidden");
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar explorador" }));
+    expect(edge.querySelector("aside")).not.toHaveAttribute("hidden");
+    fireEvent.pointerLeave(edge, { pointerType: "touch" });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    expect(edge.querySelector("aside")).not.toHaveAttribute("hidden");
+    fireEvent.pointerDown(edge.querySelector("aside") as HTMLElement, { pointerType: "touch" });
+    expect(edge.querySelector("aside")).not.toHaveAttribute("hidden");
+    fireEvent.pointerDown(document.body, { pointerType: "touch" });
+    await waitFor(() => expect(edge.querySelector("aside")).toHaveAttribute("hidden"));
   });
 
   it("keeps the explorer on the left edge and remembers the pin", async () => {
@@ -617,6 +720,60 @@ describe("Live", () => {
     expect(screen.getByRole("button", { name: "Puerta norte" })).toBeInTheDocument();
   });
 
+  function foldersApi() {
+    stubBrowserAPIs();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte", { folder_id: "f1", sort_order: 0 })] }),
+          "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+          "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" }] }),
+          "/api/v1/camera-folders": () =>
+            json({ items: [{ id: "f1", tenant_id: "t1", server_id: "srv1", name: "Accesos", sort_order: 0, created_at: "", updated_at: "" }], manageable_server_ids: ["srv1"] }),
+          "/api/v1/views": () => json({ items: [] }),
+        }),
+      ),
+    );
+  }
+  const touch = (type: "pointerDown" | "pointerMove" | "pointerUp", el: Element, x: number, y: number) =>
+    fireEvent[type](el, { pointerId: 7, pointerType: "touch", isPrimary: true, clientX: x, clientY: y });
+
+  it("opens the explorer context menu on a touch long press at the touch point and not on a short tap", async () => {
+    foldersApi();
+    renderPage(Live);
+    const row = await screen.findByRole("button", { name: "Puerta norte" });
+    expect(row).toHaveAttribute("data-longpress");
+    touch("pointerDown", row, 30, 40);
+    touch("pointerUp", row, 30, 40);
+    await new Promise((r) => setTimeout(r, 650));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    touch("pointerDown", row, 30, 40);
+    const menu = await screen.findByRole("menu", {}, { timeout: 2000 });
+    expect(menu).toBeInTheDocument();
+    const anchor = menu.closest<HTMLElement>("[data-context-menu]");
+    expect(anchor?.style.left).toBe("30px");
+    expect(anchor?.style.top).toBe("40px");
+  });
+
+  it("cancels the long press when the finger moves", async () => {
+    foldersApi();
+    renderPage(Live);
+    const row = await screen.findByRole("button", { name: "Puerta norte" });
+    touch("pointerDown", row, 30, 40);
+    touch("pointerMove", row, 30, 60);
+    await new Promise((r) => setTimeout(r, 700));
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("keeps folder row actions visible on devices without hover", async () => {
+    foldersApi();
+    renderPage(Live);
+    const rename = await screen.findByRole("button", { name: "Renombrar carpeta Accesos" });
+    expect(rename.parentElement?.className).toContain("[@media(hover:none)]:opacity-100");
+  });
+
   it("labels the layout picker as a group", async () => {
     viewsApi([]);
 
@@ -671,7 +828,13 @@ describe("Live with persistent players (P0 acceptance)", () => {
     renderPage(LiveWithSessions);
     fireEvent.click(await screen.findByRole("button", { name: /Puerta norte/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Porton sur/ }));
-    await waitFor(() => expect(screen.getByLabelText("Cuadro 1").querySelector("video")).not.toBeNull());
+    // Both sessions open asynchronously: wait for both pictures and both sockets, or the
+    // connection counts below race the second camera's connect.
+    await waitFor(() => {
+      expect(screen.getByLabelText("Cuadro 1").querySelector("video")).not.toBeNull();
+      expect(screen.getByLabelText("Cuadro 2").querySelector("video")).not.toBeNull();
+      expect(FakeSocket.created).toBe(2);
+    });
   }
 
   it("moving a camera from cell 1 to cell 8 keeps the same session and does not reconnect", async () => {
@@ -776,6 +939,24 @@ describe("Live with persistent players (P0 acceptance)", () => {
       renderPage(Live);
       await screen.findByLabelText("Cuadro 1");
       expect(screen.queryByRole("group", { name: "Modo de reproducción" })).toBeNull();
+    });
+
+    it("keeps the toggle clear of the pinned explorer and flush when unpinned", async () => {
+      setup(withRecordings);
+      const WithShell = () => (
+        <AppShell primaryNav={<nav aria-label="Primary navigation" />} contextSidebar={<div id="live-context-sidebar" />}>
+          <TopBarActionsSlot />
+          <Live />
+        </AppShell>
+      );
+      const first = renderPage(WithShell);
+      await screen.findByRole("button", { name: "Grabado" });
+      expect(screen.getByTestId("live-mode-toggle-slot")).toHaveClass("md:ml-(--pinned-offset)");
+      first.unmount();
+      localStorage.setItem("openvms.live.sidebar.pinned", "0");
+      renderPage(WithShell);
+      await screen.findByRole("button", { name: "Grabado" });
+      expect(screen.getByTestId("live-mode-toggle-slot")).not.toHaveClass("md:ml-(--pinned-offset)");
     });
 
     it("switches to REC from the toggle and back to LIVE, clearing the URL state", async () => {

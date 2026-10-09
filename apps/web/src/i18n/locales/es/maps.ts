@@ -30,5 +30,8 @@ const messages = {
   planLoading: "Cargando plano…",
   planOpenFailed: "No se pudo abrir el plano.",
   planMissing: "Este plano no tiene imagen.",
+  onMap: "En el mapa",
+  openLiveNamed: "Abrir vista en vivo: {name}",
+  closeLiveNamed: "Cerrar vista en vivo: {name}",
 } as const;
 export default messages;

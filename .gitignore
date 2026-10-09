@@ -23,6 +23,7 @@ dist/
 
 # Local design reference (not part of the product)
 /avigilon_alta_cloud_vms_mockup.html
+/vms_mapas_soc.html
 
 # Local basemap archives (fetch your own PMTiles extract; not committed).
 deploy/tiles/

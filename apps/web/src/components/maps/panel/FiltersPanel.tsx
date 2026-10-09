@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
-import { STATE_COLORS } from "@/lib/maps/entityIndex";
+import { Button, Checkbox, IconButton } from "@/components/ui";
+import { STATE_DOT } from "../stateTone";
 import type { CameraDisplayState, MapFilters } from "@/lib/maps/types";
 
 export interface FiltersPanelProps {
@@ -35,36 +36,25 @@ function toggle<T extends string>(values: T[] | undefined, value: T): T[] | unde
 /** FiltersPanel edits the dimensions the entity payload can actually answer. */
 export function FiltersPanel({ filters, onChange, onClose }: FiltersPanelProps) {
   return (
-    <section aria-label="Filters" className="w-64 rounded border border-line bg-surface p-3 shadow-sm">
-      <header className="mb-2 flex items-center justify-between">
-        <h2 className="text-sm font-semibold">Filtros</h2>
+    <section aria-label="Filters" className="w-64 rounded-m3-xl bg-surface-1/95 p-4 shadow-lg backdrop-blur">
+      <header className="mb-1 flex items-center justify-between">
+        <h2 className="text-lg font-bold">Filtros</h2>
         <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => onChange({})}
-            className="rounded px-1.5 py-0.5 text-xs text-muted hover:bg-raised hover:text-ink"
-          >
+          <Button variant="text" size="sm" onClick={() => onChange({})}>
             Limpiar
-          </button>
+          </Button>
           {onClose && (
-            <button
-              type="button"
-              aria-label="Close filters panel"
-              onClick={onClose}
-              className="rounded p-1 text-muted hover:bg-raised hover:text-ink"
-            >
-              <X className="size-3.5" aria-hidden />
-            </button>
+            <IconButton icon={X} aria-label="Close filters panel" onClick={onClose} className="-mr-2" />
           )}
         </div>
       </header>
 
       <fieldset className="mb-3">
-        <legend className="mb-1 text-xs font-medium text-muted">Estado (leyenda)</legend>
-        <div className="space-y-1">
+        <legend className="mb-1 text-xs font-bold text-on-surface-variant">Estado (leyenda)</legend>
+        <div>
           {STATUSES.map(({ value, label }) => (
-            <div key={value} className="flex items-center gap-2 text-sm text-ink">
-              <span aria-hidden className="size-3 rounded-full" style={{ backgroundColor: STATE_COLORS[value] }} />
+            <div key={value} className="flex min-h-9 items-center gap-3 text-sm text-on-surface">
+              <span aria-hidden className={`size-3 rounded-full ${STATE_DOT[value]}`} />
               {label}
             </div>
           ))}
@@ -72,23 +62,21 @@ export function FiltersPanel({ filters, onChange, onClose }: FiltersPanelProps) 
       </fieldset>
 
       <fieldset className="mb-3">
-        <legend className="mb-1 text-xs font-medium text-muted">Tipo de cámara</legend>
-        <div className="space-y-1">
+        <legend className="mb-1 text-xs font-bold text-on-surface-variant">Tipo de cámara</legend>
+        <div>
           {CAMERA_TYPES.map(({ value, label }) => (
-            <label key={value} className="flex cursor-pointer items-center gap-2 text-sm text-ink">
-              <input
-                type="checkbox"
-                checked={filters.camera_types?.includes(value) ?? false}
-                onChange={() => onChange({ ...filters, camera_types: toggle(filters.camera_types, value) })}
-                className="size-3.5 accent-accent"
-              />
-              {label}
-            </label>
+            <Checkbox
+              key={value}
+              checked={filters.camera_types?.includes(value) ?? false}
+              onChange={() => onChange({ ...filters, camera_types: toggle(filters.camera_types, value) })}
+              label={label}
+              className="text-on-surface"
+            />
           ))}
         </div>
       </fieldset>
 
-      <p className="border-t border-line pt-2 text-xs text-muted">
+      <p className="rounded-m3-lg bg-surface-2 p-3 text-xs text-on-surface-variant">
         Todas las cámaras se muestran independientemente de su estado o alarmas.
       </p>
     </section>

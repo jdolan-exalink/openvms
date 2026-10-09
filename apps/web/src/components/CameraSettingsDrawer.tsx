@@ -1,12 +1,11 @@
+import { SlidersHorizontal } from "lucide-react";
+import { Icon } from "./Icon";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { faSliders } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { Link } from "@tanstack/react-router";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraFrigateConfigQuery } from "@/api/queries";
 import { Modal } from "@/components/Modal";
-import { Button, ErrorNote, Field, Select, StatusBadge, TextInput } from "@/components/ui";
+import { Button, ErrorNote, Field, LinkButton, Select, StatusBadge, Switch, TextInput } from "@/components/ui";
 
 type Camera = Schemas["Camera"];
 
@@ -114,10 +113,7 @@ export function CameraSettingsDrawer({
                 <TextInput value={name} onChange={(e) => setName(e.target.value)} aria-invalid={invalid} />
               </Field>
               {invalid && <p role="alert" className="text-xs text-bad">El nombre no puede estar vacío.</p>}
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-                Habilitada
-              </label>
+              <Switch label="Habilitada" checked={enabled} onChange={setEnabled} />
               <Field label="Calidad en vivo por defecto" hint="Flujo que usa la cámara al añadirla a la grilla de Vivo.">
                 <Select value={quality} onChange={(e) => setQuality(e.target.value as Camera["default_live_quality"])}>
                   <option value="sub">Sub (menor calidad)</option>
@@ -138,26 +134,27 @@ export function CameraSettingsDrawer({
             <p className="text-xs text-muted">Necesitas cameras.manage para editar los ajustes de VMS.</p>
           )}
 
-          <div className="mt-2 border-t border-line pt-3">
-            <h3 className="text-sm font-semibold text-foreground mb-2">Configuración en Frigate</h3>
+          <div className="mt-2 flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-4">
+            <h3 className="mb-2 text-base font-bold">Configuración en Frigate</h3>
             {frigateConfig.isLoading && <p className="text-xs text-muted">Cargando configuración de Frigate…</p>}
             {frigateConfig.error && <p className="text-xs text-muted">Configuración de Frigate no disponible.</p>}
             {frigateConfig.data && <FrigateSummary config={frigateConfig.data} />}
             {canConfigServer && (
-              <Link
+              <LinkButton
+                variant="tonal"
                 to="/cameras/$cameraId/frigate"
                 params={{ cameraId: camera.id }}
                 onClick={onClose}
-                className="mt-3 inline-flex items-center gap-2 rounded border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:bg-raised"
+                className="mt-3 self-start"
               >
-                <FontAwesomeIcon icon={faSliders} aria-hidden /> Editar configuración de Frigate
-              </Link>
+                <Icon icon={SlidersHorizontal} size="xs" /> Editar configuración de Frigate
+              </LinkButton>
             )}
           </div>
 
           <ErrorNote error={save.error} />
           <div className="flex justify-end gap-2 mt-2">
-            <Button onClick={onClose}>Cancelar</Button>
+            <Button variant="text" onClick={onClose}>Cancelar</Button>
             <Button type="submit" variant="primary" disabled={save.isPending}>
               {save.isPending ? "Guardando…" : "Guardar"}
             </Button>
@@ -167,8 +164,8 @@ export function CameraSettingsDrawer({
         <div className="flex flex-col gap-3">
           <p className="text-xs text-muted">Necesitas el permiso cameras.manage o servers.config para editar esta cámara.</p>
           {frigateConfig.data && (
-            <div className="border-t border-line pt-2">
-              <h3 className="text-sm font-semibold mb-2">Configuración en Frigate</h3>
+            <div className="rounded-m3-lg bg-surface-2 p-4">
+              <h3 className="mb-2 text-base font-bold">Configuración en Frigate</h3>
               <FrigateSummary config={frigateConfig.data} />
             </div>
           )}

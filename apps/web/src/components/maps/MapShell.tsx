@@ -38,6 +38,7 @@ import { MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { IncidentFocus } from "@/lib/maps/incidentPolicy";
 import { MapOperationsPanel } from "./panel/MapOperationsPanel";
 import { MapSocSidebar } from "./panel/MapSocSidebar";
+import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { MapMaximizedCamera } from "./panel/MapMaximizedCamera";
 import { MapPlateSnapshot, type PlateSnapshotTarget } from "./panel/MapPlateSnapshot";
 import { captureGrowOrigin, rectFromElement, type GrowRect } from "./panel/MapGrowFrame";
@@ -62,7 +63,7 @@ import { saveSiteMonitoringCenter } from "@/lib/maps/sites";
 import { addCameraToLiveGrid } from "@/lib/maps/liveGridHelper";
 import { usePinnedMapWindows } from "./panel/usePinnedMapWindows";
 import { useFeatures } from "@/lib/features";
-import { ErrorNote } from "../ui";
+import { Button, Checkbox, ErrorNote } from "../ui";
 import { Loader2 } from "lucide-react";
 
 export interface MapShellProps {
@@ -229,7 +230,12 @@ function MapShellContent({
   const cameraDragMovedRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [dropReady, setDropReady] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarPinned, setSidebarPinned] = useState(loadSidebarPinned);
+  const toggleSidebarPin = () => setSidebarPinned((current) => {
+    const next = !current;
+    saveSidebarPinned(next);
+    return next;
+  });
   const [maximizedCameraId, setMaximizedCameraId] = useState<string>();
   const [maximizedOrigin, setMaximizedOrigin] = useState<GrowRect>();
   const [plateSnapshot, setPlateSnapshot] = useState<PlateSnapshotTarget>();
@@ -643,12 +649,12 @@ function MapShellContent({
       width: container && container.clientWidth > 64 ? container.clientWidth : 1280,
       height: container && container.clientHeight > 64 ? container.clientHeight : 720,
     };
-    const view = saved ?? (geoPoints.length ? frameCameras(geoPoints, viewport, sidebarOpen ? MAP_SIDEBAR_PADDING : { ...MAP_SIDEBAR_PADDING, left: 28 }) : null);
+    const view = saved ?? (geoPoints.length ? frameCameras(geoPoints, viewport, MAP_SIDEBAR_PADDING) : null);
     if (!view) return;
     framedSite.current = siteId;
     if (!saved) saveGeoView(me.data.tenant_id, me.data.id, siteId, view);
     map.jumpTo({ center: view.center, zoom: view.zoom });
-  }, [center, zoom, currentSite?.id, geoPoints, me.data, readyMap, sidebarOpen]);
+  }, [center, zoom, currentSite?.id, geoPoints, me.data, readyMap]);
   useEffect(() => {
     const map = mapRef.current;
     const prev = followViewRef.current;
@@ -684,8 +690,8 @@ function MapShellContent({
   if (configQuery.isLoading) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-bg" data-testid="map-loading">
-        <div className="flex flex-col items-center gap-2 text-muted">
-          <Loader2 className="size-6 animate-spin text-accent" aria-hidden />
+        <div className="flex flex-col items-center gap-2 text-on-surface-variant">
+          <Loader2 className="size-6 animate-spin text-primary" aria-hidden />
           <span className="text-sm">Cargando mapa operativo...</span>
         </div>
       </div>
@@ -695,9 +701,9 @@ function MapShellContent({
   if (configQuery.isError || !configQuery.data) {
     return (
       <div className="flex h-full w-full items-center justify-center p-6 bg-bg">
-        <div className="max-w-md">
+        <div className="flex max-w-md flex-col items-start gap-3 rounded-m3-xl bg-surface-1 p-5">
           <ErrorNote error={configQuery.error || new Error("No se pudo obtener la configuración del proveedor de mapas")} />
-          <button type="button" onClick={() => void configQuery.refetch()} className="mt-2 rounded border border-line px-3 py-1">Reintentar</button>
+          <Button variant="tonal" onClick={() => void configQuery.refetch()}>Reintentar</Button>
         </div>
       </div>
     );
@@ -725,11 +731,7 @@ function MapShellContent({
         filtersActive={filtersOpen}
       />
       {can(me.data, "live.view") && (
-        <label className="order-6 flex items-center gap-2 px-1 text-xs">
-          <input type="checkbox" checked={hoverLiveEnabled}
-            onChange={(event) => setHoverLiveOverride(event.target.checked)} />
-          Live on hover
-        </label>
+        <Checkbox className="order-6 px-2 text-xs font-medium text-on-surface-variant" checked={hoverLiveEnabled} onChange={setHoverLiveOverride} label="Live on hover" />
       )}
     </>
   );
@@ -804,12 +806,12 @@ function MapShellContent({
       onDragLeave={() => setDropReady(false)}
       onDragEnd={() => setDropReady(false)}
       onDrop={handleMapDrop}>
-      {dropReady && <div role="status" className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-xl border-2 border-dashed border-accent bg-accent/10">
-        <span className="rounded-lg bg-surface px-4 py-2 text-sm font-medium text-accent shadow-lg">Suelta la cámara para colocarla</span>
+      {dropReady && <div role="status" className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-m3-xl border-2 border-dashed border-primary bg-primary/10">
+        <span className="rounded-full bg-primary-container px-4 py-2 text-sm font-bold text-on-primary-container shadow-lg">Suelta la cámara para colocarla</span>
       </div>}
       {modeSlot ? createPortal(modeChrome, modeSlot) : hostedChrome ? null : (
         <div className="pointer-events-none absolute left-3 top-3 z-30">
-          <div className="pointer-events-auto flex items-center gap-2 rounded-xl border border-white/10 bg-surface/90 p-1 shadow-lg backdrop-blur">{modeChrome}</div>
+          <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-m3-xl bg-surface-1/95 p-1 shadow-lg backdrop-blur">{modeChrome}</div>
         </div>
       )}
 
@@ -862,8 +864,8 @@ function MapShellContent({
 
         {!editActive && (
           <MapSocSidebar
-            open={sidebarOpen}
-            onToggle={() => setSidebarOpen((current) => !current)}
+            pinned={sidebarPinned}
+            onTogglePin={toggleSidebarPin}
             alarmCount={alarms.data?.length ?? 0}
             showAlarms={!!currentSite && can(me.data, "alarms.view")}
             showLpr={can(me.data, "lpr.view")}
@@ -888,7 +890,8 @@ function MapShellContent({
                   { label: "Saved preferences", error: prefsQuery.error, retry: () => void prefsQuery.refetch() },
                 ]}
                 onSelectSite={handleSelectSite} onSelectCamera={handleSelectCamera}
-                onEdit={() => handleModeChange("edit")} onOpenLive={handleOpenLive}
+                onEdit={() => handleModeChange("edit")} onOpenLive={handlePinCamera} onCloseLive={handleUnpinCamera}
+                openCameraIds={pinned.windows.map((window) => window.id)}
                 onEvents={(cameraId) => void navigate({ to: "/events", search: { camera: cameraId } })}
                 onPlayback={(cameraId) => void navigate({ to: "/playback", search: { camera: cameraId } })}
                 onResetVisibility={() => { setFiltersOverride(EMPTY_FILTERS); setLayersOverride({ ...layers, cameras: true, sites: true }); }}
@@ -914,39 +917,40 @@ function MapShellContent({
         )}
 
         {editActive && editorMaps && (
-          <div className="absolute left-3 top-16 z-30 w-72 rounded-xl border border-white/10 bg-surface/90 p-2 text-ink shadow-2xl backdrop-blur">
+          <div className="absolute left-3 top-16 z-30 w-72 max-w-[calc(100%-1.5rem)] rounded-m3-xl bg-surface-1/95 p-2 text-on-surface shadow-2xl backdrop-blur">
             {editorMaps}
           </div>
         )}
 
         {editActive && (
-          <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-30 flex w-80 min-h-0 flex-col overflow-hidden rounded-xl border border-white/10 bg-surface/90 text-ink shadow-2xl backdrop-blur">
-            <header className="border-b border-white/10 px-3 py-2">
-              <h2 className="text-sm font-semibold">Edición</h2>
-              <p className="text-[11px] text-muted">{pending.length} cambio(s) sin guardar</p>
+          <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-30 flex w-80 max-w-[calc(100%-1.5rem)] min-h-0 flex-col overflow-hidden rounded-m3-xl bg-surface-1/95 text-on-surface shadow-2xl backdrop-blur">
+            <header className="px-4 pb-2 pt-3">
+              <h2 className="text-lg font-bold">Edición</h2>
+              <p className="font-mono text-[11px] text-on-surface-variant">{pending.length} cambio(s) sin guardar</p>
             </header>
-            <div className="shrink-0 space-y-2 border-b border-white/10 p-2">
+            <div className="shrink-0 space-y-2 px-2 pb-2">
               {unplacedCameras === undefined && (
-                <p role="status" className="text-xs text-muted">El inventario de cámaras sin ubicar no está disponible.</p>
+                <p role="status" className="text-xs text-on-surface-variant">El inventario de cámaras sin ubicar no está disponible.</p>
               )}
               {saveError && <p role="alert" className="text-xs text-bad">{saveError}</p>}
               {draft.conflicts.length > 0 && (
-                <button type="button" onClick={() => void handleRebase()} className="rounded border border-bad px-2 py-1 text-xs font-medium text-bad">
+                <Button variant="danger" size="sm" onClick={() => void handleRebase()}>
                   Rebase
-                </button>
+                </Button>
               )}
               {can(me.data, "maps.edit") && (
                 <div>
                   {centerError && <p role="alert" className="mb-1 text-xs text-bad">{centerError}</p>}
-                  <button
-                    type="button"
+                  <Button
+                    variant="tonal"
+                    size="sm"
                     disabled={centerSaving}
                     onClick={() => void handleSetMonitoringCenter()}
-                    className="w-full rounded border border-line px-2 py-1 text-xs text-ink hover:bg-raised disabled:opacity-50"
+                    className="w-full"
                     title="Guarda la vista actual como centro del sitio: al entrar al mapa se abre aquí"
                   >
                     Fijar centro de monitoreo aquí
-                  </button>
+                  </Button>
                 </div>
               )}
               {activeDraftId && draft.entries[activeDraftId] && (
@@ -963,7 +967,7 @@ function MapShellContent({
               <div className="min-h-0 flex-1 p-2">
                 <MapEditSidebar cameras={editCameras} folders={treeFolders} servers={treeServers} armedId={armedCameraId} onArm={setArmedCameraId} />
               </div>
-              <div className="max-h-[48%] shrink-0 overflow-auto border-t border-white/10">
+              <div className="max-h-[48%] shrink-0 overflow-auto bg-surface-2">
                 <ZonesPanel
                   zones={zonesQuery.data ?? []}
                   draft={zoneDraft}
@@ -985,9 +989,10 @@ function MapShellContent({
                 />
               </div>
             </div>
-            <footer className="flex shrink-0 gap-2 border-t border-white/10 p-2">
-              <button
-                type="button"
+            <footer className="flex shrink-0 gap-2 bg-surface-2 p-3">
+              <Button
+                variant="outlined"
+                className="flex-1"
                 onClick={() => {
                   setDraft(emptyDraft());
                   setArmedCameraId(undefined);
@@ -995,13 +1000,12 @@ function MapShellContent({
                   setSaveError(undefined);
                   handleModeChange("live");
                 }}
-                className="flex-1 rounded border border-line px-2 py-1.5 text-xs text-ink"
               >
                 Cancelar
-              </button>
-              <button type="button" onClick={() => void handleSave()} disabled={saving || pending.length === 0} className="flex-1 rounded bg-accent px-2 py-1.5 text-xs font-medium text-white disabled:opacity-50">
+              </Button>
+              <Button variant="filled" className="flex-1" onClick={() => void handleSave()} disabled={saving || pending.length === 0}>
                 {pending.length > 0 ? `Guardar (${pending.length})` : "Guardar ubicaciones"}
-              </button>
+              </Button>
             </footer>
           </aside>
         )}

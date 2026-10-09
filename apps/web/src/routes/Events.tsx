@@ -1,12 +1,12 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useNavigate, useSearch } from "@tanstack/react-router";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { CheckCheck, ChevronLeft, ChevronRight, Download, History, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, type EventFilter, eventsQuery, meQuery, serversQuery } from "@/api/queries";
 import { type FilterChip } from "@/components/SearchSummary";
 import { Modal } from "@/components/Modal";
-import { Button, Empty, ErrorNote, Select, TextInput } from "@/components/ui";
+import { Button, Chip, Empty, ErrorNote, IconButton, LinkButton, RemovableChip, Select, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { VehicleFacts } from "@/components/VehicleMark";
 import { fmtDateTime, fmtDuration, fromLocalInput, isClassifiedVehicleType, labelName, objectFilterOptions, vehicleColorOptions, vehicleTypeOptions } from "@/lib/format";
@@ -128,18 +128,17 @@ export function Events() {
     });
   };
 
-  const control = "h-8 w-auto py-1 text-xs";
   return (
     <div className="mx-auto flex max-w-7xl flex-col gap-3">
       <form
-        className="flex flex-col gap-2"
+        className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-3 sm:p-4"
         onSubmit={(e) => {
           e.preventDefault();
           apply(form);
         }}
       >
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Select aria-label={t("common.server")} className={cn(control, "max-w-40")} value={form.server} onChange={(e) => setForm({ ...form, server: e.target.value, camera: "" })}>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <Select aria-label={t("common.server")} value={form.server} onChange={(e) => setForm({ ...form, server: e.target.value, camera: "" })}>
             <option value="">{t("common.server")}</option>
             {servers.data?.map((s) => (
               <option key={s.id} value={s.id}>
@@ -147,7 +146,7 @@ export function Events() {
               </option>
             ))}
           </Select>
-          <Select aria-label={t("common.camera")} className={cn(control, "max-w-40")} value={form.camera} onChange={(e) => set("camera", e.target.value)}>
+          <Select aria-label={t("common.camera")} value={form.camera} onChange={(e) => set("camera", e.target.value)}>
             <option value="">{t("common.camera")}</option>
             {camsOfServer.map((c) => (
               <option key={c.id} value={c.id}>
@@ -157,7 +156,6 @@ export function Events() {
           </Select>
           <Select
             aria-label={t("common.object")}
-            className={cn(control, "max-w-36")}
             value={form.label || (isClassifiedVehicleType(form.vehicleType) ? form.vehicleType : "")}
             onChange={(e) => {
               const value = e.target.value;
@@ -173,61 +171,60 @@ export function Events() {
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </Select>
-          <Select aria-label={t("events.vehicleType")} className={cn(control, "max-w-36")} value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)}>
+          <Select aria-label={t("events.vehicleType")} value={form.vehicleType} onChange={(e) => set("vehicleType", e.target.value)}>
             <option value="">{t("events.classification")}</option>
             {vehicleTypeOptions().map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </Select>
-          <Select aria-label={t("common.color")} className={cn(control, "max-w-32")} value={form.vehicleColor} onChange={(e) => set("vehicleColor", e.target.value)}>
+          <Select aria-label={t("common.color")} value={form.vehicleColor} onChange={(e) => set("vehicleColor", e.target.value)}>
             <option value="">{t("common.color")}</option>
             {vehicleColorOptions().map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </Select>
-          <Select aria-label={t("events.kind")} className={cn(control, "max-w-36")} value={form.severity} onChange={(e) => set("severity", e.target.value as Form["severity"])}>
+          <Select aria-label={t("events.kind")} value={form.severity} onChange={(e) => set("severity", e.target.value as Form["severity"])}>
             <option value="">{t("events.both")}</option>
             <option value="alert">{t("events.alertsOnly")}</option>
             <option value="detection">{t("events.detectionsOnly")}</option>
           </Select>
-          <TextInput aria-label={t("common.from")} type="datetime-local" className={cn(control, "w-auto")} value={form.from} onChange={(e) => set("from", e.target.value)} />
-          <TextInput aria-label={t("common.to")} type="datetime-local" className={cn(control, "w-auto")} value={form.to} onChange={(e) => set("to", e.target.value)} />
+          <TextInput aria-label={t("common.from")} type="datetime-local" className="font-mono" value={form.from} onChange={(e) => set("from", e.target.value)} />
+          <TextInput aria-label={t("common.to")} type="datetime-local" className="font-mono" value={form.to} onChange={(e) => set("to", e.target.value)} />
           {can(me.data, "lpr.search") && (
-            <TextInput aria-label={t("common.plate")} className={cn(control, "w-28")} value={form.plate} onChange={(e) => set("plate", e.target.value.toUpperCase())} placeholder={t("common.plate")} />
+            <TextInput aria-label={t("common.plate")} className="font-mono" value={form.plate} onChange={(e) => set("plate", e.target.value.toUpperCase())} placeholder={t("common.plate")} />
           )}
-          <Button type="submit" variant="primary" className="h-8 px-2.5 py-1 text-xs">
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="submit" variant="filled">
             {t("common.search")}
           </Button>
-          <Button className="h-8 px-2.5 py-1 text-xs" onClick={() => apply(emptyForm)}>
+          <Button variant="outlined" onClick={() => apply(emptyForm)}>
             {t("common.clear")}
           </Button>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <FilterButton pressed={form.pending} onClick={() => toggleFlag("pending")}>
+          <span className="mx-1 hidden h-6 w-px bg-outline-variant sm:block" aria-hidden />
+          <Chip selected={form.pending} onChange={() => toggleFlag("pending")}>
             {t("events.unreviewed")}
-          </FilterButton>
-          <FilterButton pressed={form.hasSnapshot} onClick={() => toggleFlag("hasSnapshot")}>
+          </Chip>
+          <Chip selected={form.hasSnapshot} onChange={() => toggleFlag("hasSnapshot")}>
             {t("events.withSnapshot")}
-          </FilterButton>
-          <FilterButton pressed={form.hasPreview} onClick={() => toggleFlag("hasPreview")}>
+          </Chip>
+          <Chip selected={form.hasPreview} onChange={() => toggleFlag("hasPreview")}>
             {t("events.withPreview")}
-          </FilterButton>
+          </Chip>
           {canReview && items.length > 0 && (
-            <FilterButton pressed={allSelected} onClick={() => setSelected(allSelected ? new Set() : new Set(items.map((e) => e.id)))}>
+            <Chip selected={allSelected} onChange={() => setSelected(allSelected ? new Set() : new Set(items.map((e) => e.id)))}>
               {allSelected ? t("events.clearSelection") : t("events.selectAll")}
-            </FilterButton>
+            </Chip>
           )}
           {canReview && (
             <BulkReview selectedIds={selectedIds} onClearSelection={() => setSelected(new Set())} />
           )}
         </div>
         {chips.length > 0 && (
-          <ul aria-label={t("common.appliedFilters")} className="flex flex-wrap gap-1">
+          <ul aria-label={t("common.appliedFilters")} className="flex flex-wrap gap-2">
             {chips.map((c) => (
               <li key={c.key}>
-                <button type="button" onClick={c.onRemove} aria-label={t("common.removeFilter", { label: c.label })} className="rounded-full border border-line px-2 py-0.5 text-[11px] text-muted hover:bg-raised">
-                  {c.label}
-                </button>
+                <RemovableChip label={c.label} removeLabel={t("common.removeFilter", { label: c.label })} onRemove={c.onRemove} />
               </li>
             ))}
           </ul>
@@ -239,7 +236,7 @@ export function Events() {
         {items.map((e) => (
           <li key={e.id} className="relative flex min-w-0">
             {canReview && (
-              <label className="absolute left-2 top-2 z-10 flex items-center rounded bg-bg/80 p-1">
+              <label className="absolute left-3 top-3 z-10 flex size-8 items-center justify-center rounded-full bg-surface-dim/80">
                 <input
                   type="checkbox"
                   checked={selected.has(e.id)}
@@ -252,23 +249,23 @@ export function Events() {
               type="button"
               onClick={() => setOpen(e)}
               className={cn(
-                "flex h-full w-full min-w-0 flex-col overflow-hidden rounded border border-line border-l-4 bg-surface text-left hover:border-accent focus-visible:outline-2 focus-visible:outline-accent",
-                e.severity === "alert" ? "border-l-bad" : "border-l-line",
-                selected.has(e.id) && "border-accent ring-2 ring-accent",
+                "m3-press flex h-full min-h-11 w-full min-w-0 flex-col overflow-hidden rounded-m3-lg bg-surface-1 text-left hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-primary",
+                e.severity === "alert" && "ring-1 ring-bad/60",
+                selected.has(e.id) && "bg-primary-container/40 ring-2 ring-primary",
               )}
             >
               <Thumb event={e} snapshot={can(me.data, "snapshots.view")} />
-              <div className="flex min-w-0 flex-1 flex-col gap-1 p-2 text-sm">
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5 p-3 text-sm">
                 <div className="flex items-center gap-2">
-                  <span className={cn("rounded px-1.5 py-0.5 font-mono text-[10px] uppercase", e.severity === "alert" ? "bg-bad/20 text-bad" : "bg-raised text-muted")}>
+                  <span className={cn("rounded-full px-2.5 py-0.5 font-mono text-[10px] uppercase", e.severity === "alert" ? "bg-bad/20 text-bad" : "bg-surface-3 text-on-surface-variant")}>
                     {e.severity === "alert" ? t("events.alert") : t("events.detection")}
                   </span>
                   <ReviewBadge reviewed={e.reviewed} />
                 </div>
                 <VehicleFacts labels={e.labels} vehicle={e.attributes?.vehicle} person={e.attributes?.person} serverName={e.server_name} cameraName={e.camera_name} vehicleJob={e.attributes?.vehicle_job} personJob={e.attributes?.person_job} />
                 <div className="mt-auto flex items-center justify-between gap-2 pt-1 text-xs text-muted">
-                  <span className="shrink-0">{fmtDateTime(e.start_time)}</span>
-                  {e.plates.length > 0 && <span className="truncate rounded bg-accent/15 px-1.5 font-mono text-accent">{e.plates[0]}{e.plates.length > 1 ? ` +${e.plates.length - 1}` : ""}</span>}
+                  <span className="shrink-0 font-mono">{fmtDateTime(e.start_time)}</span>
+                  {e.plates.length > 0 && <span className="truncate rounded-full bg-primary-container px-2 py-0.5 font-mono text-on-primary-container">{e.plates[0]}{e.plates.length > 1 ? ` +${e.plates.length - 1}` : ""}</span>}
                 </div>
               </div>
             </button>
@@ -276,34 +273,14 @@ export function Events() {
         ))}
       </ul>
       {(page > 0 || hasNext) && (
-        <nav aria-label={t("events.pages")} className="flex items-center justify-center gap-2 text-xs text-muted">
-          <Button className="h-8 px-2 py-1 text-xs" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} aria-label={t("events.prevPage")}>
-            <ChevronLeft className="size-4" aria-hidden />
-          </Button>
-          <span>{t("maps.page", { page: page + 1 })}</span>
-          <Button className="h-8 px-2 py-1 text-xs" onClick={goNext} disabled={!hasNext || events.isFetchingNextPage} aria-label={t("events.nextPage")}>
-            <ChevronRight className="size-4" aria-hidden />
-          </Button>
+        <nav aria-label={t("events.pages")} className="flex items-center justify-center gap-3 text-sm text-muted">
+          <IconButton variant="tonal" icon={ChevronLeft} onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} aria-label={t("events.prevPage")} />
+          <span className="font-mono">{t("maps.page", { page: page + 1 })}</span>
+          <IconButton variant="tonal" icon={ChevronRight} onClick={goNext} disabled={!hasNext || events.isFetchingNextPage} aria-label={t("events.nextPage")} />
         </nav>
       )}
       {open && <EventDetail event={open} me={me.data} onClose={closeDetail} />}
     </div>
-  );
-}
-
-function FilterButton({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onClick}
-      className={cn(
-        "h-8 rounded-full border px-2.5 text-xs",
-        pressed ? "border-accent bg-accent/15 text-accent" : "border-line text-muted hover:bg-raised",
-      )}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -329,8 +306,8 @@ function BulkReview({ selectedIds, onClearSelection }: { selectedIds: string[]; 
   return (
     <>
       {selectedIds.length > 1 && (
-        <Button variant="primary" className="h-8 px-2.5 py-1 text-xs" onClick={() => (setDone(""), bulk.mutate())} disabled={bulk.isPending || tooMany}>
-          <CheckCheck className="size-3.5" aria-hidden /> {bulk.isPending ? t("common.saving") : t("events.markReviewed")}
+        <Button variant="tonal" onClick={() => (setDone(""), bulk.mutate())} disabled={bulk.isPending || tooMany}>
+          <CheckCheck className="size-4" aria-hidden /> {bulk.isPending ? t("common.saving") : t("events.markReviewed")}
         </Button>
       )}
       {tooMany && <span role="status" className="text-xs text-warn">{t("events.maxBatch", { count: MAX_BULK })}</span>}
@@ -348,7 +325,7 @@ function ReviewBadge({ reviewed }: { reviewed: boolean }) {
       <CheckCheck className="size-4" aria-hidden /> {t("events.reviewed")}
     </span>
   ) : (
-    <span className="ml-auto shrink-0 rounded border border-warn/40 px-1.5 text-xs text-warn">{t("events.unreviewed")}</span>
+    <span className="ml-auto shrink-0 rounded-full bg-warn/15 px-2.5 py-0.5 text-xs text-warn">{t("events.unreviewed")}</span>
   );
 }
 
@@ -356,7 +333,7 @@ function Thumb({ event, snapshot }: { event: Schemas["Event"]; snapshot: boolean
   const [src, setSrc] = useState(snapshot && event.has_snapshot ? `/media/v1/events/${event.id}/snapshot.jpg` : `/api/v1/events/${event.id}/thumbnail`);
   const [failed, setFailed] = useState(false);
   return (
-    <div className="relative aspect-video shrink-0 overflow-hidden bg-raised">
+    <div className="relative m-2 mb-0 aspect-video shrink-0 overflow-hidden rounded-m3-md bg-video">
       {!failed && (
         <img
           src={src}
@@ -430,7 +407,7 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
       <div className="flex flex-col gap-3">
         <VehicleFacts labels={e.labels} vehicle={e.attributes?.vehicle} person={e.attributes?.person} serverName={e.server_name} cameraName={e.camera_name} vehicleJob={e.attributes?.vehicle_job} personJob={e.attributes?.person_job} />
         <p className="flex flex-wrap items-center gap-2 text-sm text-muted">
-          <span className={cn("rounded px-1.5 py-0.5 font-mono text-[10px] uppercase", e.severity === "alert" ? "bg-bad/20 text-bad" : "bg-raised text-muted")}>
+          <span className={cn("rounded-full px-2.5 py-0.5 font-mono text-[10px] uppercase", e.severity === "alert" ? "bg-bad/20 text-bad" : "bg-surface-3 text-on-surface-variant")}>
             {e.severity === "alert" ? tr("events.alert") : tr("events.detection")}
           </span>
           <ReviewBadge reviewed={e.reviewed} />
@@ -439,13 +416,13 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
           src={can(me, "snapshots.view") ? `/media/v1/events/${e.id}/snapshot.jpg` : `/api/v1/events/${e.id}/thumbnail`}
           onError={(x) => ((x.currentTarget as HTMLImageElement).src = `/api/v1/events/${e.id}/thumbnail`)}
           alt={tr("events.captureAlt")}
-          className="w-full rounded bg-black object-contain"
+          className="w-full rounded-m3-lg bg-video object-contain"
         />
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
           <dt className="text-muted">{tr("events.started")}</dt>
-          <dd>{fmtDateTime(e.start_time)}</dd>
+          <dd className="font-mono">{fmtDateTime(e.start_time)}</dd>
           <dt className="text-muted">{tr("events.duration")}</dt>
-          <dd>{fmtDuration(e.start_time, e.end_time)}</dd>
+          <dd className="font-mono">{fmtDuration(e.start_time, e.end_time)}</dd>
           <dt className="text-muted">{tr("events.zones")}</dt>
           <dd>{e.zones.join(", ") || "—"}</dd>
           <dt className="text-muted">{tr("events.plates")}</dt>
@@ -460,29 +437,29 @@ function EventDetail({ event, me, onClose }: { event: Schemas["Event"]; me?: Sch
         )}
         <div className="flex flex-wrap gap-2">
           {can(me, "recordings.view") && (
-            <Link to="/playback" search={{ camera: e.camera_id, t }} className="inline-flex items-center gap-2 rounded bg-accent px-3 py-1.5 text-sm font-medium text-bg hover:bg-accent/90">
+            <LinkButton variant="filled" to="/playback" search={{ camera: e.camera_id, t }}>
               <History className="size-4" aria-hidden /> {tr("events.viewRecording")}
-            </Link>
+            </LinkButton>
           )}
           {can(me, "exports.create") && (
-            <Button onClick={() => exp.mutate()} disabled={exp.isPending || !!exp.data}>
+            <Button variant="tonal" onClick={() => exp.mutate()} disabled={exp.isPending || !!exp.data}>
               <Download className="size-4" aria-hidden /> {tr("events.exportClip")}
             </Button>
           )}
           {can(me, "events.review") && classifiable && (
-            <Button onClick={() => reprocess.mutate()} disabled={reprocess.isPending || reading}>
+            <Button variant="tonal" onClick={() => reprocess.mutate()} disabled={reprocess.isPending || reading}>
               <RefreshCw className={cn("size-4", (reprocess.isPending || reading) && "animate-spin")} aria-hidden />{" "}
               {reprocess.isPending || reading ? tr("events.reprocessing") : tr("events.reprocess")}
             </Button>
           )}
           {can(me, "events.review") && (
-            <Button onClick={() => review.mutate()} disabled={review.isPending}>
+            <Button variant="tonal" onClick={() => review.mutate()} disabled={review.isPending}>
               <CheckCheck className="size-4" aria-hidden />{" "}
               {review.isPending ? tr("common.saving") : e.reviewed ? tr("events.markUnreviewed") : tr("events.markReviewedOne")}
             </Button>
           )}
           {can(me, "snapshots.download") && (
-            <a href={`/media/v1/events/${e.id}/snapshot.jpg?download=1`} className="inline-flex items-center gap-2 rounded border border-line px-3 py-1.5 text-sm hover:bg-raised">
+            <a href={`/media/v1/events/${e.id}/snapshot.jpg?download=1`} className="m3-press inline-flex h-11 items-center justify-center gap-2 rounded-full border border-outline px-5 text-sm font-bold hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary">
               {tr("events.downloadSnapshot")}
             </a>
           )}

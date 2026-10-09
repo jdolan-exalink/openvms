@@ -1,13 +1,13 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
 import { KeyRound, Plus } from "lucide-react";
+import { Icon } from "@/components/Icon";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { groupsQuery, meQuery, tenantsQuery, usersQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
-import { Button, Empty, ErrorNote, Field, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
+import { Button, Checkbox, Empty, ErrorNote, Field, LinkButton, PageHeader, Select, Summary, Table, TextInput, Th } from "@/components/ui";
 import { can } from "@/lib/perm";
 
 /** Groups of users. Grants given to a group apply to all its members. */
@@ -30,8 +30,8 @@ export function Groups() {
         description={t("settings.groupPermissions")}
         actions={
           manage ? (
-            <Button variant="primary" onClick={() => setEditing("new")}>
-              <Plus className="size-4" aria-hidden /> Nuevo grupo
+            <Button variant="filled" onClick={() => setEditing("new")}>
+              <Icon icon={Plus} size="xs" /> Nuevo grupo
             </Button>
           ) : null
         }
@@ -57,23 +57,25 @@ export function Groups() {
           </thead>
           <tbody>
             {visible.map((g) => (
-              <tr key={g.id} className="border-t border-line align-top">
+              <tr key={g.id} className="border-t border-outline-variant align-top">
                 <td>
                   <div className="font-medium">{g.name}</div>
                   {g.description && <div className="text-xs text-muted">{g.description}</div>}
                 </td>
                 <td className="text-xs">{g.member_ids.map((m) => userName.get(m) ?? "—").join(", ") || "—"}</td>
                 <td className="text-right whitespace-nowrap">
+                  <div className="inline-flex items-center gap-1">
                   {can(me.data, "permissions.manage") && (
-                    <Link to="/permissions" search={{ subject: `group:${g.id}` }} className="mr-2 inline-flex items-center gap-1 text-xs text-accent hover:underline">
-                      <KeyRound className="size-3.5" aria-hidden /> Permisos
-                    </Link>
+                    <LinkButton size="sm" to="/permissions" search={{ subject: `group:${g.id}` }}>
+                      <Icon icon={KeyRound} size="xs" /> Permisos
+                    </LinkButton>
                   )}
                   {manage && (
-                    <Button aria-label={`Editar ${g.name}`} onClick={() => setEditing(g)}>
+                    <Button size="sm" variant="tonal" aria-label={`Editar ${g.name}`} onClick={() => setEditing(g)}>
                       Editar
                     </Button>
                   )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -170,21 +172,19 @@ function GroupForm({ group, users, onDone }: { group?: Schemas["UserGroup"]; use
         <legend className="mb-1 font-medium">Miembros</legend>
         <div className="flex flex-wrap gap-3">
           {candidates.map((u) => (
-            <label key={u.id} className="flex items-center gap-1.5">
-              <input type="checkbox" checked={f.member_ids.includes(u.id)} onChange={() => toggle(u.id)} /> {u.display_name}
-            </label>
+            <Checkbox key={u.id} className="rounded-full bg-surface-2 px-3" checked={f.member_ids.includes(u.id)} onChange={() => toggle(u.id)} label={u.display_name} />
           ))}
           {candidates.length === 0 && <span className="text-muted">No hay usuarios en esta organización.</span>}
         </div>
       </fieldset>
       <ErrorNote error={save.error ?? remove.error} />
       <div className="flex gap-2">
-        <Button type="submit" variant="primary" disabled={save.isPending}>
+        <Button type="submit" variant="filled" disabled={save.isPending}>
           Guardar
         </Button>
-        <Button onClick={onDone}>Cancelar</Button>
+        <Button variant="text" onClick={onDone}>Cancelar</Button>
         {group && (
-          <Button className="ml-auto text-bad" onClick={() => setConfirming(true)}>
+          <Button variant="outlined" className="ml-auto border-bad/60 text-bad" onClick={() => setConfirming(true)}>
             Eliminar grupo
           </Button>
         )}

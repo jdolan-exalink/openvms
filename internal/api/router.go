@@ -4,10 +4,13 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -49,6 +52,7 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 
 	r := chi.NewRouter()
 	r.Use(httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
+	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody)
 	if opts.Queries != nil {
 		r.Use(Authenticate(opts.Queries, AuthOptions{IdleTimeout: opts.SessionIdle}))
 	}
@@ -106,4 +110,90 @@ func serveDocs(w http.ResponseWriter, _ *http.Request) {
 <meta name="viewport" content="width=device-width, initial-scale=1"></head>
 <body><script id="api-reference" data-url="/openapi.json"></script>
 <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1"></script></body></html>`))
+}
+
+// validateOnvifDiscoveryBody enforces the narrow request contract at runtime; generated
+// OpenAPI decoders do not enforce additionalProperties or body-size limits themselves.
+func validateOnvifDiscoveryBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method == http.MethodPost && len(parts) == 6 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "servers" && parts[4] == "onvif" && parts[5] == "discover" {
+			limited, err := io.ReadAll(io.LimitReader(r.Body, 1025))
+			if err != nil || len(limited) > 1024 {
+				writeError(w, r, http.StatusBadRequest, "bad_request", "request body exceeds 1 KiB")
+				return
+			}
+			dec := json.NewDecoder(bytes.NewReader(limited))
+			dec.DisallowUnknownFields()
+			var body struct {
+				InterfaceName string `json:"interface_name"`
+			}
+			if err := dec.Decode(&body); err != nil || dec.Decode(new(any)) != io.EOF {
+				writeError(w, r, http.StatusBadRequest, "bad_request", "invalid ONVIF discovery request")
+				return
+			}
+			r.Body = io.NopCloser(bytes.NewReader(limited))
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// validateOnvifProbeBody bounds transient credentials and rejects unknown or trailing JSON.
+func validateOnvifProbeBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method != http.MethodPost || len(parts) != 6 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "servers" || parts[4] != "onvif" || parts[5] != "probe" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		limited, err := io.ReadAll(io.LimitReader(r.Body, onvifProbeRequestMaxBytes+1))
+		if err != nil || len(limited) > onvifProbeRequestMaxBytes {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "ONVIF probe request exceeds the size limit")
+			return
+		}
+		dec := json.NewDecoder(bytes.NewReader(limited))
+		dec.DisallowUnknownFields()
+		var body gen.OnvifProbeRequest
+		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid ONVIF probe request")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(limited))
+		next.ServeHTTP(w, r)
+	})
+}
+
+const (
+	agentTLSPemMaxBytes       = 64 << 10
+	agentTLSRequestMaxBytes   = 128 << 10
+	onvifProbeRequestMaxBytes = 4096
+)
+
+// validateAgentTLSConfigBody bounds and strictly decodes public trust configuration.
+func validateAgentTLSConfigBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method != http.MethodPut || len(parts) != 6 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "servers" || parts[4] != "agent" || parts[5] != "tls" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		limited, err := io.ReadAll(io.LimitReader(r.Body, agentTLSRequestMaxBytes+1))
+		if err != nil || len(limited) > agentTLSRequestMaxBytes {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "request body exceeds the agent TLS configuration limit")
+			return
+		}
+		dec := json.NewDecoder(bytes.NewReader(limited))
+		dec.DisallowUnknownFields()
+		var body gen.ServerAgentTLSConfig
+		if err := dec.Decode(&body); err != nil || dec.Decode(new(any)) != io.EOF {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent TLS configuration")
+			return
+		}
+		if _, err := provisionAgentTLSConfig(body); err != nil {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent TLS configuration")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(limited))
+		next.ServeHTTP(w, r)
+	})
 }

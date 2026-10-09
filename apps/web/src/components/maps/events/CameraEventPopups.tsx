@@ -119,11 +119,11 @@ function EventCard({ notice, name, x, y, canSnapshots, quiet, onOpenPlate }: { n
     const rect = source.getBoundingClientRect();
     onOpenPlate({ id: notice.id, plate, cameraName: name, imageUrl: image, origin: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } });
   } : undefined;
-  return <section data-map-source={notice.cameraId} data-map-source-rank="1" tabIndex={openPlate ? 0 : undefined} onClick={openPlate ? (click) => openPlate(click.currentTarget) : undefined} onKeyDown={openPlate ? (key) => { if (key.key === "Enter" || key.key === " ") { key.preventDefault(); openPlate(key.currentTarget); } } : undefined} className={cn("soc-popup absolute w-56 -translate-x-1/2 -translate-y-full rounded-2xl border bg-surface/95 p-2 shadow-2xl backdrop-blur-md", openPlate && "pointer-events-auto cursor-pointer", quiet && "invisible", critical ? "border-bad/70" : "border-accent/60")} style={{ left: x, top: y - 16 }} aria-label={`Camera event: ${name}`}>
-    <strong className="block truncate text-xs">{name}</strong>
-    <span className={critical ? "text-bad text-xs" : "text-muted text-xs"}>{critical ? "Alerta crítica" : "Lectura LPR"}</span>
+  return <section data-map-source={notice.cameraId} data-map-source-rank="1" tabIndex={openPlate ? 0 : undefined} onClick={openPlate ? (click) => openPlate(click.currentTarget) : undefined} onKeyDown={openPlate ? (key) => { if (key.key === "Enter" || key.key === " ") { key.preventDefault(); openPlate(key.currentTarget); } } : undefined} className={cn("soc-popup absolute w-56 -translate-x-1/2 -translate-y-full rounded-m3-xl bg-surface-1/95 p-3 shadow-2xl ring-2 backdrop-blur-md", openPlate && "pointer-events-auto cursor-pointer", quiet && "invisible", critical ? "ring-bad/70" : "ring-primary/60")} style={{ left: x, top: y - 16 }} aria-label={`Camera event: ${name}`}>
+    <strong className="block truncate text-xs font-bold">{name}</strong>
+    <span className={critical ? "text-bad text-xs font-medium" : "text-on-surface-variant text-xs"}>{critical ? "Alerta crítica" : "Lectura LPR"}</span>
     <VehicleFacts labels={event.labels} vehicle={event.attributes?.vehicle} person={event.attributes?.person} serverName={event.server_name} vehicleJob={event.attributes?.vehicle_job} personJob={event.attributes?.person_job} />
     {event.plates.length > 0 && <p className="mt-1 flex flex-wrap gap-1">{event.plates.map((plate) => <ArPlate key={plate} plate={plate} />)}</p>}
-    {failed ? <p className="text-xs text-muted">Image unavailable</p> : <img src={image} alt={`Event at ${name}`} className="mt-1 h-24 w-full rounded-lg object-cover" onError={() => setFailed(true)} />}
+    {failed ? <p className="text-xs text-on-surface-variant">Image unavailable</p> : <img src={image} alt={`Event at ${name}`} className="mt-1 h-24 w-full rounded-m3-md object-cover" onError={() => setFailed(true)} />}
   </section>;
 }

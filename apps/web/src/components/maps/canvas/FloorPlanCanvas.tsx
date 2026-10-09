@@ -1,6 +1,7 @@
 import { useEffect, useImperativeHandle, useRef, useState, type PointerEvent, type Ref } from "react";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { cameraIcon, offlineIcon } from "@/lib/inventoryIcons";
+import { Minus, Plus, Video, X } from "lucide-react";
+import { Icon } from "@/components/Icon";
+import { Button, IconButton } from "@/components/ui";
 import type { CameraEntity } from "@/lib/maps/types";
 import { computeDisplayState } from "@/lib/maps/entityIndex";
 import { floorPoint, type Point, type PlanView } from "@/lib/maps/floorEditor";
@@ -141,7 +142,7 @@ export function FloorPlanCanvas({ ref, imageUrl, imageBlob, width, height, camer
         onSelect(current.id);
     }
   }
-  return <div className="relative h-full min-h-0 w-full overflow-hidden rounded-xl border border-line bg-raised">
+  return <div className="relative h-full min-h-0 w-full overflow-hidden rounded-m3-xl bg-surface-2">
   <div ref={viewport} data-testid="floor-viewport" className="absolute inset-0 touch-none overflow-hidden" onPointerDown={event => { const marker = (event.target as Element).closest<HTMLElement>("[data-camera-id]"); start(event, marker?.dataset.cameraId); }} onPointerMove={move} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)} onLostPointerCapture={event => finish(event, true)} onDragOver={event => { if (editable && event.dataTransfer.types.includes(DRAG_MIME) && point(event.clientX, event.clientY)) {
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
@@ -158,7 +159,7 @@ export function FloorPlanCanvas({ ref, imageUrl, imageBlob, width, height, camer
       setView({ scale, x: x - (x - view.x) * scale / view.scale, y: y - (y - view.y) * scale / view.scale });
     }}>
    {imageUrl || imageBlob ? <img ref={image} src={imageUrl} alt="Map background" draggable={false} className="pointer-events-none absolute select-none" style={{ left: fitted.left + view.x, top: fitted.top + view.y, width: fitted.width, height: fitted.height, transform: `scale(${view.scale})`, transformOrigin: "top left" }}/>
-      : <p className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 px-4 text-center text-sm text-muted">Elegí una imagen de fondo, o colocá las cámaras sobre este plano.</p>}
+      : <p className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 px-4 text-center text-sm text-on-surface-variant">Elegí una imagen de fondo, o colocá las cámaras sobre este plano.</p>}
    {cameras.map(camera => {
       const pos = project(camera);
       if (!pos)
@@ -166,19 +167,19 @@ export function FloorPlanCanvas({ ref, imageUrl, imageBlob, width, height, camer
       // Alarm counts do not change connection color; server outages override stale camera status.
       const connectivity = computeDisplayState(camera.status, 0, !!camera.metadata.serverOffline);
       const unavailable = connectivity === "OFFLINE" || connectivity === "NO_SIGNAL" || connectivity === "UNREACHABLE";
-      return <button key={camera.id} type="button" aria-label={camera.name} title={camera.name} data-camera-id={camera.id} data-map-source={camera.id} data-map-source-rank="0" data-connection={connectivity.toLowerCase()} onClick={event => { if (event.detail === 0) onSelect(camera.id); }} onDoubleClick={() => { if (!editable) onOpen?.(camera.id); }} className={`absolute z-10 flex size-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 bg-surface shadow-lg ${unavailable ? "border-muted text-muted" : connectivity === "ONLINE" ? "border-ok text-ok" : "border-warning text-warning"}`} style={{ left: pos.x, top: pos.y, touchAction: "none", cursor: editable ? "grab" : "pointer" }}>
-     <FontAwesomeIcon icon={cameraIcon} aria-hidden/>
-     {unavailable && <FontAwesomeIcon icon={offlineIcon} aria-label="Unavailable" className="absolute -bottom-1 -right-1 rounded-full bg-surface p-1 text-xs"/>}
-     {camera.activeAlarms > 0 && <span className="absolute -right-1 -top-2 rounded-full bg-bad px-1 text-xs text-white">{camera.activeAlarms}</span>}
-     <span className="pointer-events-none absolute top-full mt-1 max-w-32 truncate rounded bg-surface/90 px-1 text-[10px] text-ink">{camera.name}</span>
+      return <button key={camera.id} type="button" aria-label={camera.name} title={camera.name} data-camera-id={camera.id} data-map-source={camera.id} data-map-source-rank="0" data-connection={connectivity.toLowerCase()} onClick={event => { if (event.detail === 0) onSelect(camera.id); }} onDoubleClick={() => { if (!editable) onOpen?.(camera.id); }} className={`absolute z-10 flex size-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 bg-surface-1 shadow-lg focus-visible:outline-2 focus-visible:outline-primary ${unavailable ? "border-muted text-muted" : connectivity === "ONLINE" ? "border-ok text-ok" : "border-warn text-warn"}`} style={{ left: pos.x, top: pos.y, touchAction: "none", cursor: editable ? "grab" : "pointer" }}>
+     <Icon icon={Video} size="xs" />
+     {unavailable && <Icon icon={X} size={18} label="Unavailable" className="absolute -bottom-1 -right-1 rounded-full bg-surface-1 p-1" />}
+     {camera.activeAlarms > 0 && <span className="absolute -right-1 -top-2 rounded-full bg-bad px-1.5 font-mono text-xs font-bold text-surface-dim light:text-white">{camera.activeAlarms}</span>}
+     <span className="pointer-events-none absolute top-full mt-1 max-w-32 truncate rounded-full bg-surface-1/90 px-2 text-[10px] font-medium text-on-surface">{camera.name}</span>
     </button>;
     })}
    <CameraEventPopups map={null} cameras={cameras} projectCamera={project} projectionKey={floorId} tenantId={tenantId} siteId={siteId} canEvents={canEvents} canSnapshots={canSnapshots}/>
   </div>
-  <div className="absolute bottom-2 right-2 z-30 flex gap-1 rounded bg-surface p-1">
-   <button type="button" aria-label="Acercar" onClick={() => setView({ ...view, scale: Math.min(8, view.scale * 1.2) })}>+</button>
-   <button type="button" aria-label="Alejar" onClick={() => setView({ ...view, scale: Math.max(.5, view.scale / 1.2) })}>−</button>
-   <button type="button" onClick={() => setView({ scale: 1, x: 0, y: 0 })}>Ajustar</button>
+  <div className="absolute bottom-3 right-3 z-30 flex items-center gap-1 rounded-full bg-surface-1/95 p-1 shadow-lg backdrop-blur">
+   <IconButton icon={Plus} aria-label="Acercar" onClick={() => setView({ ...view, scale: Math.min(8, view.scale * 1.2) })} />
+   <IconButton icon={Minus} aria-label="Alejar" onClick={() => setView({ ...view, scale: Math.max(.5, view.scale / 1.2) })} />
+   <Button variant="text" size="sm" onClick={() => setView({ scale: 1, x: 0, y: 0 })}>Ajustar</Button>
   </div>
  </div>;
 }

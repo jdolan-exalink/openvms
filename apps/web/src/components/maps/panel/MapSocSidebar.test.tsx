@@ -28,8 +28,8 @@ function renderLpr() {
   render(
     <QueryClientProvider client={client}>
       <MapSocSidebar
-        open
-        onToggle={vi.fn()}
+        pinned
+        onTogglePin={vi.fn()}
         alarmCount={0}
         showAlarms
         showLpr

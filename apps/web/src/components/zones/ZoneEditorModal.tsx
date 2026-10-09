@@ -1,7 +1,8 @@
 import { HelpCircle, RefreshCw, X } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Button, Select } from "@/components/ui";
+import { Icon } from "@/components/Icon";
+import { Button, IconButton, Select } from "@/components/ui";
 import { knownLabels, labelName } from "@/lib/format";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { type Point, hasSelfIntersection, isValidZoneName, newId, removeVertex } from "@/lib/zoneGeometry";
@@ -240,33 +241,28 @@ function ZoneEditorDialog({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/70 p-2 sm:p-4">
+      <div className="fixed inset-0 z-50 bg-scrim p-2 sm:p-4">
         <div
           ref={containerRef}
           role="dialog"
           aria-modal="true"
           aria-label={`Editor de zonas y máscaras de ${cameraId}`}
-          className="mx-auto flex size-full max-w-[1800px] flex-col gap-3 overflow-hidden rounded border border-line bg-surface p-3 shadow-lg"
+          className="mx-auto flex size-full max-w-[1800px] flex-col gap-3 overflow-hidden rounded-m3-xl bg-surface-1 p-4 shadow-lg"
         >
           <div className="relative flex items-center justify-between gap-3">
-            <h2 className="truncate text-lg font-semibold">Zonas y máscaras · {cameraId}</h2>
+            <h2 className="truncate text-[22px] font-bold">Zonas y máscaras · {cameraId}</h2>
             <div className="flex items-center gap-1">
-              <button
-                type="button"
+              <IconButton
+                icon={HelpCircle}
                 aria-label="Ayuda de atajos"
                 aria-expanded={showHelp}
                 aria-controls="zone-help"
                 onClick={() => setShowHelp((v) => !v)}
-                className="rounded p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent"
-              >
-                <HelpCircle className="size-5" aria-hidden />
-              </button>
-              <button type="button" aria-label="Cerrar" onClick={requestClose} className="rounded p-1 hover:bg-raised focus-visible:outline-2 focus-visible:outline-accent">
-                <X className="size-5" aria-hidden />
-              </button>
+              />
+              <IconButton icon={X} aria-label="Cerrar" onClick={requestClose} />
             </div>
             {showHelp && (
-              <div id="zone-help" role="tooltip" className="absolute top-full right-0 z-10 mt-1 w-96 max-w-full rounded border border-line bg-bg p-3 text-xs shadow-lg">
+              <div id="zone-help" role="tooltip" className="absolute top-full right-0 z-10 mt-1 w-96 max-w-full rounded-m3-lg bg-surface-3 p-4 text-xs shadow-lg">
                 <p className="mb-1 font-medium">Atajos</p>
                 <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
                   {SHORTCUTS.map(([k, d]) => (
@@ -341,14 +337,14 @@ function ZoneEditorDialog({
                     : "Selecciona una figura para editarla o crea una nueva."}
                 </p>
                 <div className="flex gap-2">
-                  {drawing && drawing.points.length >= 3 && <Button onClick={closeDrawing}>Cerrar polígono</Button>}
-                  {drawing && <Button onClick={() => setDrawing(null)}>Cancelar dibujo</Button>}
-                  <Button aria-label="Actualizar imagen de la cámara" onClick={() => setNonce(Date.now())}>
-                    <RefreshCw className="size-4" aria-hidden /> Actualizar imagen
+                  {drawing && drawing.points.length >= 3 && <Button size="sm" variant="tonal" onClick={closeDrawing}>Cerrar polígono</Button>}
+                  {drawing && <Button size="sm" variant="text" onClick={() => setDrawing(null)}>Cancelar dibujo</Button>}
+                  <Button size="sm" aria-label="Actualizar imagen de la cámara" onClick={() => setNonce(Date.now())}>
+                    <Icon icon={RefreshCw} size="xs" /> Actualizar imagen
                   </Button>
                 </div>
               </div>
-              <div className="min-h-64 flex-1 overflow-hidden rounded border border-line">
+              <div className="min-h-64 flex-1 overflow-hidden rounded-m3-lg">
                 <ZoneCanvas
                   items={items}
                   selectedUid={selectedUid}
@@ -373,12 +369,12 @@ function ZoneEditorDialog({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             <p role={hasErrors ? "alert" : undefined} className={hasErrors ? "text-sm text-bad" : "text-sm text-muted"}>
               {hasErrors ? "Hay figuras con errores; corrígelas para guardar." : dirty ? "Cambios sin guardar." : "Sin cambios."}
             </p>
             <div className="flex gap-2">
-              <Button onClick={requestClose}>Cancelar</Button>
+              <Button variant="text" onClick={requestClose}>Cancelar</Button>
               <Button variant="primary" disabled={!draft || !dirty || hasErrors || !!drawing} onClick={() => draft && onSave(draftToValue(draft, frigateVersion))}>
                 Guardar cambios
               </Button>
