@@ -25,7 +25,7 @@ Frigate already provides `data.path_data` (`[[x,y], unix_ts]`, normalized, botto
 - TDD: Strict TDD enabled (source: user global CLAUDE.md). Runners: `go test ./internal/frigate/...` (unit), `go test -race -tags integration ./internal/events/...` (integration, Docker), `pnpm --dir apps/web test` (vitest).
 
 ## Tasks
-- [x] T1 Ingest (commit `5683e09`; integration test run pending): adapter decodes `box`/`path_data`; migration `00039_object_tracks.sql`; syncer upserts tracks for known cameras and holds back the object cursor for open objects. Route: delegated direct (writer trigger: 3+ non-trivial files).
+- [x] T1 Ingest (commit `5683e09`): adapter decodes `box`/`path_data`; migration `00039_object_tracks.sql`; syncer upserts tracks for known cameras and holds back the object cursor for open objects. Route: delegated direct (writer trigger: 3+ non-trivial files).
 - [x] T2 API + manifest: `Event.tracks` in openapi + `make generate`; aggregated subquery in `eventColumns`/`scanEvent`; `toEvent`; export manifest copies tracks. Route: delegated direct (writer trigger).
 - [x] T3 Player: pure helper `apps/web/src/lib/objectTracks.ts` (trail up to t, current position, zone entries via point-in-polygon) with vitest; replace synthetic overlay. Route: delegated direct (writer trigger).
 - [x] T4 Syncer closes stale open reviews: re-check reviews open > 1h against Frigate and close them (Frigate end_time, or last known activity when Frigate no longer has them). Bounded per pull. Route: delegated direct (writer trigger, with T5).
@@ -82,6 +82,9 @@ Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); 
 - T6 unblocked: on user request, applied the `00037_export_shares.sql` Up block manually to the local DB in one transaction (table, indexes, RLS policy; `openvms_app` has INSERT). Temporary 1h share on export `9c39d37c`: public endpoint 200, `job.manifest.events` = 1 with 452 tracks, items = 1. Share revoked afterwards (204; public then 410).
 - T8 `065588a`: share password validated once via POST; HttpOnly, SameSite=Strict cookie scoped to the share path, HMAC keyed by the password hash, 1h capped at share expiry; `?password=` removed. Cookie unit RED (`undefined: shareCookieExpiry`) then GREEN. Deployed smoke: no cookie 401, `?password=` 401, wrong 403, right 200 + cookie, video 206/401, revoked 410. Web suite 943 passed, 2 pre-existing failures.
 - RDD: range `5d0e64e..065588a` medium (slice_budget_reached, 432 lines). User granted; native review approved and acknowledged (`review-6b62d8c8771e93de`). Advisory follow-ups: handler cookie flow and `GetPublicShare` auth switch lack tests; manifest zone lookups run serially (15s each); public page loses the password on retry; test stubs a global without restore. User's maps WIP also reviewed on their grant: approved and acknowledged.
+- Integration tests run: `go test -race -tags integration ./internal/events/` ok (130s), including `TestObjectTracksSync`, `TestStaleOpenReviewsAreResolved`, and `TestListEventsOverlap`; `./internal/media/...` ok. Their RED was never observed (written while Docker runs were blocked).
+- PATCH export smoke (strict handler) on export `9c39d37c`: rename ok, protect ok, a wrong type returns 400 `bad_request`, an unknown id returns 404, and a request with no session returns 401. An empty name is ignored and the current name kept. Restored afterwards.
+- User's maps WIP review: a CRITICAL finding (`revision ?? 1` fabricated an optimistic-concurrency token). With the user's approval, the original guard was restored as the single native correction. Approved and acknowledged (`review-1367d88769009e7d`).
 
 ## Next step
-Pending: integration tests (user-run); PATCH export smoke test; optional backfill and overlay render test; PR chain strategy.
+Pending: PR chain strategy (user decision); optional backfill, overlay render test, and review advisories.
