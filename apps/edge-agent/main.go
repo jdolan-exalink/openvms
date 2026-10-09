@@ -11,7 +11,9 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agent"
@@ -67,6 +69,33 @@ func main() {
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Info("listening", "addr", addr, "version", agent.Version)
+
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	serverAddr := env("OPENVMS_SERVER_ADDR", env("OPENVMS_CONTROL_ADDR", ""))
+	if serverAddr != "" {
+		nodeID := env("OPENVMS_NODE_ID", "node-auto")
+		worker := agent.NewWorker(agent.WorkerConfig{
+			NodeID:          nodeID,
+			ControlGRPCAddr: serverAddr,
+			Sampler:         sampler,
+			Log:             log,
+		})
+		go func() {
+			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Warn("heartbeat worker stopped", "error", err)
+			}
+		}()
+	}
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, sCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer sCancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+
 	if tlsEnabled {
 		tlsServer := newAgentTLSServer(tlsConfig, healthHandler, discoveryHandler, probeHandler)
 		log.Info("ONVIF TLS listener enabled", "addr", tlsServer.Addr)

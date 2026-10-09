@@ -436,3 +436,54 @@ FOR UPDATE OF f FOR SHARE OF b,s;
 -- name: MapFloorHasContent :one
 SELECT (EXISTS(SELECT 1 FROM map_placements p WHERE p.floor_id = sqlc.arg('floor_id')::uuid AND p.tenant_id = sqlc.arg('tenant_id')::uuid)
  OR EXISTS(SELECT 1 FROM map_zones z WHERE z.floor_id = sqlc.arg('floor_id')::uuid AND z.tenant_id = sqlc.arg('tenant_id')::uuid AND z.deleted_at IS NULL))::boolean AS has_content;
+
+-- name: UpsertEventCountHourly :exec
+INSERT INTO event_counts_hourly (tenant_id, camera_id, hour, label, severity, n)
+VALUES (@tenant_id, @camera_id, @hour, @label, @severity, @n)
+ON CONFLICT (camera_id, hour, label, severity)
+DO UPDATE SET n = event_counts_hourly.n + EXCLUDED.n;
+
+-- name: QueryMapAnalyticsEvents :many
+SELECT e.camera_id, count(*)::bigint AS count
+FROM events e
+WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR e.tenant_id = sqlc.narg('tenant_id'))
+  AND e.start_time >= @start_time AND e.start_time < @end_time
+  AND e.camera_id = ANY(@camera_ids::uuid[])
+  AND (sqlc.narg('labels')::text[] IS NULL OR e.labels && sqlc.narg('labels'))
+GROUP BY e.camera_id;
+
+-- name: QueryMapAnalyticsRollups :many
+SELECT r.camera_id, sum(r.n)::bigint AS count
+FROM event_counts_hourly r
+WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR r.tenant_id = sqlc.narg('tenant_id'))
+  AND r.hour >= @start_time AND r.hour < @end_time
+  AND r.camera_id = ANY(@camera_ids::uuid[])
+  AND (sqlc.narg('labels')::text[] IS NULL OR r.label = ANY(sqlc.narg('labels')::text[]))
+GROUP BY r.camera_id;
+
+-- name: QueryMapAnalyticsAlarms :many
+SELECT a.camera_id, count(*)::bigint AS count
+FROM alarms a
+WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR a.tenant_id = sqlc.narg('tenant_id'))
+  AND a.created_at >= @start_time AND a.created_at < @end_time
+  AND a.camera_id = ANY(@camera_ids::uuid[])
+GROUP BY a.camera_id;
+
+-- name: QueryMapAnalyticsLPR :many
+SELECT l.camera_id, count(*)::bigint AS count
+FROM lpr_reads l
+WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR l.tenant_id = sqlc.narg('tenant_id'))
+  AND l.seen_at >= @start_time AND l.seen_at < @end_time
+  AND l.camera_id = ANY(@camera_ids::uuid[])
+GROUP BY l.camera_id;
+
+-- name: ListMapPlacementsForCameras :many
+SELECT entity_id, lat, lng, bearing_deg, fov_deg, range_m
+FROM map_placements
+WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id'))
+  AND entity_type = 'camera'
+  AND entity_id = ANY(@camera_ids::uuid[])
+  AND floor_id IS NULL
+  AND lat IS NOT NULL AND lng IS NOT NULL;
+
+

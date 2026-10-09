@@ -31,12 +31,14 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
+	"github.com/jdolan-exalink/openvms/internal/control"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/health"
 	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/maps"
 	"github.com/jdolan-exalink/openvms/internal/media"
+	"github.com/jdolan-exalink/openvms/internal/mediasession"
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 	"github.com/jdolan-exalink/openvms/internal/platform/config"
@@ -183,6 +185,28 @@ func run() error {
 	})
 	defer rtHub.Close()
 	go (&realtime.Feed{Source: realtime.JetStreamSource{JS: js}, Hub: rtHub, Routes: rtRoutes, Log: log}).Run(ctx)
+	sessionsMgr := mediasession.NewManager(15 * time.Minute)
+	defer sessionsMgr.Close()
+
+	grpcCtrl := control.NewServer(control.Config{
+		Addr:      cfg.GRPCAddr,
+		Identity:  handlers.Identity,
+		Inventory: inv,
+		Realtime:  rtHub,
+		Sessions:  sessionsMgr,
+		Log:       log,
+		Features:  cfg.Features.EnabledList(),
+	})
+	go func() {
+		if err := grpcCtrl.Start(cfg.GRPCAddr); err != nil {
+			log.Warn("grpc control server stopped", "error", err)
+		}
+	}()
+
+	handlers.RealtimeTracker = rtHub
+	handlers.GRPCTracker = grpcCtrl
+	handlers.SessionsTracker = sessionsMgr
+
 	router, err := api.NewRouter(handlers, log, api.Options{
 		Queries:                     db.New(pool),
 		TrustForwardedFor:           cfg.TrustForwardedFor,
@@ -217,10 +241,12 @@ func run() error {
 
 	select {
 	case err := <-errCh:
+		grpcCtrl.GracefulStop()
 		return err
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
+	grpcCtrl.GracefulStop()
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	return srv.Shutdown(sctx)

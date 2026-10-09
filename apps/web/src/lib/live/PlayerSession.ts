@@ -125,7 +125,7 @@ export class PlayerSession {
       metrics: this.metrics,
     });
     this.video = document.createElement("video");
-    this.video.className = "size-full object-contain";
+    this.video.className = "size-full object-fill";
     this.video.autoplay = true;
     this.video.playsInline = true;
     // A <video> paints opaque black before the first frame. Stay invisible until
@@ -235,8 +235,8 @@ export class PlayerSession {
     else this.video.removeAttribute("muted");
   }
 
-  /** setObjectFit chooses how the picture fills its box. Undefined keeps the default contain. */
-  setObjectFit(fit?: "contain" | "cover"): void {
+  /** setObjectFit chooses how the picture fills its box. Undefined keeps the default fill. */
+  setObjectFit(fit?: "contain" | "cover" | "fill"): void {
     this.video.style.objectFit = fit ?? "";
   }
 

@@ -56,4 +56,30 @@ describe("MapToolbar", () => {
     fireEvent.click(screen.getByTitle("Filtros"));
     expect(onToggleFilters).toHaveBeenCalledOnce();
   });
+
+  it("renders analytics controls and triggers changes in analytics mode", () => {
+    const onMetricChange = vi.fn();
+    const onTimeframeChange = vi.fn();
+    render(
+      <MapToolbar
+        mode="analytics"
+        onModeChange={vi.fn()}
+        analyticsMetric="person"
+        onAnalyticsMetricChange={onMetricChange}
+        analyticsTimeframe="24h"
+        onAnalyticsTimeframeChange={onTimeframeChange}
+      />,
+    );
+
+    const vehicleBtn = screen.getByRole("radio", { name: "Vehículos" });
+    expect(vehicleBtn).toBeInTheDocument();
+    fireEvent.click(vehicleBtn);
+    expect(onMetricChange).toHaveBeenCalledWith("vehicle");
+
+    const tf7d = screen.getByRole("radio", { name: "7d" });
+    expect(tf7d).toBeInTheDocument();
+    fireEvent.click(tf7d);
+    expect(onTimeframeChange).toHaveBeenCalledWith("7d");
+  });
 });
+

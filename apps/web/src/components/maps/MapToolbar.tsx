@@ -14,6 +14,10 @@ export interface MapToolbarProps {
   onToggleFilters?: () => void;
   layersActive?: boolean;
   filtersActive?: boolean;
+  analyticsMetric?: "object" | "person" | "vehicle" | "motion" | "alarm" | "lpr";
+  onAnalyticsMetricChange?: (metric: "object" | "person" | "vehicle" | "motion" | "alarm" | "lpr") => void;
+  analyticsTimeframe?: "1h" | "24h" | "7d" | "30d";
+  onAnalyticsTimeframeChange?: (tf: "1h" | "24h" | "7d" | "30d") => void;
   /** Sit inside a parent bar instead of drawing a second box. */
   embedded?: boolean;
 }
@@ -23,6 +27,22 @@ const MODES: { id: MapMode; label: MessageKey; icon: typeof Video; requiresEdit?
   { id: "investigate", label: "maps.investigate", icon: Search },
   { id: "analytics", label: "maps.analytics", icon: BarChart3 },
   { id: "edit", label: "maps.editor", icon: Edit3, requiresEdit: true },
+];
+
+const ANALYTICS_METRICS: { id: "person" | "vehicle" | "motion" | "alarm" | "lpr" | "object"; label: string }[] = [
+  { id: "person", label: "Personas" },
+  { id: "vehicle", label: "Vehículos" },
+  { id: "motion", label: "Movimiento" },
+  { id: "alarm", label: "Alarmas" },
+  { id: "lpr", label: "LPR" },
+  { id: "object", label: "Todo" },
+];
+
+const ANALYTICS_TIMEFRAMES: { id: "1h" | "24h" | "7d" | "30d"; label: string }[] = [
+  { id: "1h", label: "1h" },
+  { id: "24h", label: "24h" },
+  { id: "7d", label: "7d" },
+  { id: "30d", label: "30d" },
 ];
 
 export function MapToolbar({
@@ -35,6 +55,10 @@ export function MapToolbar({
   onToggleFilters,
   layersActive = false,
   filtersActive = false,
+  analyticsMetric,
+  onAnalyticsMetricChange,
+  analyticsTimeframe,
+  onAnalyticsTimeframeChange,
   embedded = false,
 }: MapToolbarProps) {
   const t = useT();
@@ -70,6 +94,62 @@ export function MapToolbar({
           );
         })}
       </div>
+
+      {mode === "analytics" && onAnalyticsMetricChange && (
+        <>
+          <div className="order-2 hidden h-5 w-px bg-outline-variant sm:block" aria-hidden />
+          <div className="order-2 flex items-center gap-0.5 rounded-full bg-surface-2 p-0.5" role="radiogroup" aria-label="Métrica de analítica">
+            {ANALYTICS_METRICS.map((met) => {
+              const active = (analyticsMetric ?? "person") === met.id;
+              return (
+                <button
+                  key={met.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => onAnalyticsMetricChange(met.id)}
+                  className={cn(
+                    "m3-press flex h-8 items-center rounded-full px-2.5 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-primary",
+                    active
+                      ? "bg-secondary-container text-on-secondary-container"
+                      : "text-on-surface-variant hover:bg-on-surface/8",
+                  )}
+                >
+                  {met.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {mode === "analytics" && onAnalyticsTimeframeChange && (
+        <>
+          <div className="order-3 hidden h-5 w-px bg-outline-variant sm:block" aria-hidden />
+          <div className="order-3 flex items-center gap-0.5 rounded-full bg-surface-2 p-0.5" role="radiogroup" aria-label="Rango de tiempo">
+            {ANALYTICS_TIMEFRAMES.map((tf) => {
+              const active = (analyticsTimeframe ?? "24h") === tf.id;
+              return (
+                <button
+                  key={tf.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => onAnalyticsTimeframeChange(tf.id)}
+                  className={cn(
+                    "m3-press flex h-8 items-center rounded-full px-2.5 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-primary",
+                    active
+                      ? "bg-secondary-container text-on-secondary-container"
+                      : "text-on-surface-variant hover:bg-on-surface/8",
+                  )}
+                >
+                  {tf.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       <div className="order-5 hidden h-5 w-px bg-outline-variant sm:block" aria-hidden />
 

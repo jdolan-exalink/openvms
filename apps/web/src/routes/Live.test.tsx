@@ -120,6 +120,30 @@ describe("Live", () => {
     expect(first.className).toContain("outline-offset");
   });
 
+  it("keeps camera overlay controls above video without isolation trapping and stretches video to frame", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "North")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    const tile = await screen.findByLabelText("Cuadro 1");
+    expect(tile.className).not.toContain("isolate");
+    expect(tile.className).not.toContain("contain:paint");
+
+    const camBtn = await screen.findByRole("button", { name: /North/ });
+    fireEvent.click(camBtn);
+
+    const nameEl = await within(tile).findByText("North");
+    expect(nameEl).toBeInTheDocument();
+    const overlay = nameEl.closest(".absolute");
+    expect(overlay?.className).toContain("z-[3]");
+
+    const video = tile.querySelector("video");
+    expect(video?.className).toContain("object-fill");
+  });
+
   it("consumes an authorized camera handoff while preserving the saved selection", async () => {
     stubBrowserAPIs();
     localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [

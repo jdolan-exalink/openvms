@@ -1316,6 +1316,57 @@ func (q *Queries) ListMapPlacementsDetailed(ctx context.Context, arg ListMapPlac
 	return items, nil
 }
 
+const listMapPlacementsForCameras = `-- name: ListMapPlacementsForCameras :many
+SELECT entity_id, lat, lng, bearing_deg, fov_deg, range_m
+FROM map_placements
+WHERE ($1::uuid IS NULL OR tenant_id = $1)
+  AND entity_type = 'camera'
+  AND entity_id = ANY($2::uuid[])
+  AND floor_id IS NULL
+  AND lat IS NOT NULL AND lng IS NOT NULL
+`
+
+type ListMapPlacementsForCamerasParams struct {
+	TenantID  *uuid.UUID
+	CameraIds []uuid.UUID
+}
+
+type ListMapPlacementsForCamerasRow struct {
+	EntityID   uuid.UUID
+	Lat        *float64
+	Lng        *float64
+	BearingDeg *float32
+	FovDeg     *float32
+	RangeM     *float32
+}
+
+func (q *Queries) ListMapPlacementsForCameras(ctx context.Context, arg ListMapPlacementsForCamerasParams) ([]ListMapPlacementsForCamerasRow, error) {
+	rows, err := q.db.Query(ctx, listMapPlacementsForCameras, arg.TenantID, arg.CameraIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListMapPlacementsForCamerasRow{}
+	for rows.Next() {
+		var i ListMapPlacementsForCamerasRow
+		if err := rows.Scan(
+			&i.EntityID,
+			&i.Lat,
+			&i.Lng,
+			&i.BearingDeg,
+			&i.FovDeg,
+			&i.RangeM,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMapRegions = `-- name: ListMapRegions :many
 SELECT id, tenant_id, parent_id, name, created_at FROM map_regions
 WHERE tenant_id = $1
@@ -1717,6 +1768,196 @@ func (q *Queries) MapFloorHasContent(ctx context.Context, arg MapFloorHasContent
 	return has_content, err
 }
 
+const queryMapAnalyticsAlarms = `-- name: QueryMapAnalyticsAlarms :many
+SELECT a.camera_id, count(*)::bigint AS count
+FROM alarms a
+WHERE ($1::uuid IS NULL OR a.tenant_id = $1)
+  AND a.created_at >= $2 AND a.created_at < $3
+  AND a.camera_id = ANY($4::uuid[])
+GROUP BY a.camera_id
+`
+
+type QueryMapAnalyticsAlarmsParams struct {
+	TenantID  *uuid.UUID
+	StartTime time.Time
+	EndTime   time.Time
+	CameraIds []uuid.UUID
+}
+
+type QueryMapAnalyticsAlarmsRow struct {
+	CameraID uuid.UUID
+	Count    int64
+}
+
+func (q *Queries) QueryMapAnalyticsAlarms(ctx context.Context, arg QueryMapAnalyticsAlarmsParams) ([]QueryMapAnalyticsAlarmsRow, error) {
+	rows, err := q.db.Query(ctx, queryMapAnalyticsAlarms,
+		arg.TenantID,
+		arg.StartTime,
+		arg.EndTime,
+		arg.CameraIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryMapAnalyticsAlarmsRow{}
+	for rows.Next() {
+		var i QueryMapAnalyticsAlarmsRow
+		if err := rows.Scan(&i.CameraID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queryMapAnalyticsEvents = `-- name: QueryMapAnalyticsEvents :many
+SELECT e.camera_id, count(*)::bigint AS count
+FROM events e
+WHERE ($1::uuid IS NULL OR e.tenant_id = $1)
+  AND e.start_time >= $2 AND e.start_time < $3
+  AND e.camera_id = ANY($4::uuid[])
+  AND ($5::text[] IS NULL OR e.labels && $5)
+GROUP BY e.camera_id
+`
+
+type QueryMapAnalyticsEventsParams struct {
+	TenantID  *uuid.UUID
+	StartTime time.Time
+	EndTime   time.Time
+	CameraIds []uuid.UUID
+	Labels    []string
+}
+
+type QueryMapAnalyticsEventsRow struct {
+	CameraID uuid.UUID
+	Count    int64
+}
+
+func (q *Queries) QueryMapAnalyticsEvents(ctx context.Context, arg QueryMapAnalyticsEventsParams) ([]QueryMapAnalyticsEventsRow, error) {
+	rows, err := q.db.Query(ctx, queryMapAnalyticsEvents,
+		arg.TenantID,
+		arg.StartTime,
+		arg.EndTime,
+		arg.CameraIds,
+		arg.Labels,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryMapAnalyticsEventsRow{}
+	for rows.Next() {
+		var i QueryMapAnalyticsEventsRow
+		if err := rows.Scan(&i.CameraID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queryMapAnalyticsLPR = `-- name: QueryMapAnalyticsLPR :many
+SELECT l.camera_id, count(*)::bigint AS count
+FROM lpr_reads l
+WHERE ($1::uuid IS NULL OR l.tenant_id = $1)
+  AND l.seen_at >= $2 AND l.seen_at < $3
+  AND l.camera_id = ANY($4::uuid[])
+GROUP BY l.camera_id
+`
+
+type QueryMapAnalyticsLPRParams struct {
+	TenantID  *uuid.UUID
+	StartTime time.Time
+	EndTime   time.Time
+	CameraIds []uuid.UUID
+}
+
+type QueryMapAnalyticsLPRRow struct {
+	CameraID uuid.UUID
+	Count    int64
+}
+
+func (q *Queries) QueryMapAnalyticsLPR(ctx context.Context, arg QueryMapAnalyticsLPRParams) ([]QueryMapAnalyticsLPRRow, error) {
+	rows, err := q.db.Query(ctx, queryMapAnalyticsLPR,
+		arg.TenantID,
+		arg.StartTime,
+		arg.EndTime,
+		arg.CameraIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryMapAnalyticsLPRRow{}
+	for rows.Next() {
+		var i QueryMapAnalyticsLPRRow
+		if err := rows.Scan(&i.CameraID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const queryMapAnalyticsRollups = `-- name: QueryMapAnalyticsRollups :many
+SELECT r.camera_id, sum(r.n)::bigint AS count
+FROM event_counts_hourly r
+WHERE ($1::uuid IS NULL OR r.tenant_id = $1)
+  AND r.hour >= $2 AND r.hour < $3
+  AND r.camera_id = ANY($4::uuid[])
+  AND ($5::text[] IS NULL OR r.label = ANY($5::text[]))
+GROUP BY r.camera_id
+`
+
+type QueryMapAnalyticsRollupsParams struct {
+	TenantID  *uuid.UUID
+	StartTime time.Time
+	EndTime   time.Time
+	CameraIds []uuid.UUID
+	Labels    []string
+}
+
+type QueryMapAnalyticsRollupsRow struct {
+	CameraID uuid.UUID
+	Count    int64
+}
+
+func (q *Queries) QueryMapAnalyticsRollups(ctx context.Context, arg QueryMapAnalyticsRollupsParams) ([]QueryMapAnalyticsRollupsRow, error) {
+	rows, err := q.db.Query(ctx, queryMapAnalyticsRollups,
+		arg.TenantID,
+		arg.StartTime,
+		arg.EndTime,
+		arg.CameraIds,
+		arg.Labels,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryMapAnalyticsRollupsRow{}
+	for rows.Next() {
+		var i QueryMapAnalyticsRollupsRow
+		if err := rows.Scan(&i.CameraID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateMapBuilding = `-- name: UpdateMapBuilding :one
 UPDATE map_buildings
 SET name = coalesce($1, name),
@@ -1996,6 +2237,34 @@ func (q *Queries) UpdateSiteGeo(ctx context.Context, arg UpdateSiteGeoParams) (U
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertEventCountHourly = `-- name: UpsertEventCountHourly :exec
+INSERT INTO event_counts_hourly (tenant_id, camera_id, hour, label, severity, n)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (camera_id, hour, label, severity)
+DO UPDATE SET n = event_counts_hourly.n + EXCLUDED.n
+`
+
+type UpsertEventCountHourlyParams struct {
+	TenantID uuid.UUID
+	CameraID uuid.UUID
+	Hour     time.Time
+	Label    string
+	Severity string
+	N        int32
+}
+
+func (q *Queries) UpsertEventCountHourly(ctx context.Context, arg UpsertEventCountHourlyParams) error {
+	_, err := q.db.Exec(ctx, upsertEventCountHourly,
+		arg.TenantID,
+		arg.CameraID,
+		arg.Hour,
+		arg.Label,
+		arg.Severity,
+		arg.N,
+	)
+	return err
 }
 
 const upsertFloorPlacement = `-- name: UpsertFloorPlacement :one

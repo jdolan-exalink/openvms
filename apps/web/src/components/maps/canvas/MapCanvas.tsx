@@ -20,6 +20,7 @@ import { buildFovSource, camerasToFovCollection, FOV_SOURCE_ID } from "./layers/
 import { buildSitesSource, SITES_SOURCE_ID, sitesToFeatureCollection } from "./layers/sitesLayer";
 import { buildZoneSketchLayers, buildZonesSource, sketchToFeatureCollection, ZONE_SKETCH_SOURCE_ID, zonesToFeatureCollection, ZONES_SOURCE_ID, type ZoneSketch } from "./layers/zonesLayer";
 import { buildFxSource, FX_SOURCE_ID } from "./layers/fxLayers";
+import { buildHeatmapSource, HEATMAP_SOURCE_ID, analyticsToFeatureCollection, type AnalyticsPoint } from "./layers/heatmapLayer";
 import { reconcileOwnedLayers, applyLayerVisibility, LAYER_GROUPS, type LayerGroup } from "./layers/visibility";
 import { AnimationBudget, isPrefersReducedMotion } from "@/lib/maps/animationBudget";
 import { defaultMapRealtimeStore, MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
@@ -62,6 +63,10 @@ export interface MapCanvasProps {
   onReapplyCustomLayers?: () => void;
   /** Edit mode keeps every camera separate so markers can be dragged at any zoom. */
   clusterCameras?: boolean;
+  /** Activity heatmap points to render on the map. */
+  heatmapPoints?: AnalyticsPoint[];
+  /** When true, dims camera layers and disables fx for heatmap clarity. */
+  analyticsMode?: boolean;
   className?: string;
 }
 
@@ -95,6 +100,8 @@ export function MapCanvas({
   onMoveEnd,
   onReapplyCustomLayers,
   clusterCameras = true,
+  heatmapPoints = [],
+  analyticsMode = false,
   className = "relative h-full w-full overflow-hidden",
 }: MapCanvasProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -125,6 +132,8 @@ export function MapCanvas({
   const clusterRef = useRef(clusterCameras);
   clusterRef.current = clusterCameras;
   const installedClusterRef = useRef<boolean | null>(null);
+  const heatmapPointsRef = useRef(heatmapPoints);
+  const analyticsModeRef = useRef(analyticsMode);
 
   const setupCustomLayersRef = useRef<(map: maplibregl.Map) => void>(() => {});
 
@@ -152,6 +161,8 @@ export function MapCanvas({
     zonesRef.current = zones;
     coverageRef.current = coverage;
     layerVisibilityRef.current = layerVisibility;
+    heatmapPointsRef.current = heatmapPoints;
+    analyticsModeRef.current = analyticsMode;
 
     setupCustomLayersRef.current = (map: maplibregl.Map) => {
       registerSdfSprites(map);
@@ -167,6 +178,11 @@ export function MapCanvas({
       }
       if (!map.getSource(ZONE_SKETCH_SOURCE_ID)) {
         map.addSource(ZONE_SKETCH_SOURCE_ID, { type: "geojson", data: sketchToFeatureCollection(zoneSketchRef.current) });
+      }
+
+      // 1c. Heatmap Source & Layers (underneath FOV and cameras)
+      if (!map.getSource(HEATMAP_SOURCE_ID)) {
+        map.addSource(HEATMAP_SOURCE_ID, buildHeatmapSource(heatmapPointsRef.current));
       }
 
       // 2. FOV Cones Source & Layers (Street level, rendered underneath cameras)
@@ -616,6 +632,50 @@ export function MapCanvas({
     const source = map.getSource(ZONE_SKETCH_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
     source?.setData(sketchToFeatureCollection(zoneSketch));
   }, [zoneSketch]);
+
+  // Update heatmap GeoJSON data
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    const source = map.getSource(HEATMAP_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    if (source) {
+      source.setData(analyticsToFeatureCollection(heatmapPoints));
+    }
+  }, [heatmapPoints]);
+
+  // Dim cameras and hide fx when in analytics mode
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !map.isStyleLoaded()) return;
+    if (analyticsMode) {
+      if (map.getLayer("cam-point-circle")) {
+        map.setPaintProperty("cam-point-circle", "circle-opacity", 0.4);
+      }
+      if (map.getLayer("cam-cluster")) {
+        map.setPaintProperty("cam-cluster", "circle-opacity", 0.4);
+      }
+      if (map.getLayer("fx-ripple")) {
+        map.setLayoutProperty("fx-ripple", "visibility", "none");
+      }
+      if (map.getLayer("fx-alarm-pulse")) {
+        map.setLayoutProperty("fx-alarm-pulse", "visibility", "none");
+      }
+    } else {
+      if (map.getLayer("cam-point-circle")) {
+        map.setPaintProperty("cam-point-circle", "circle-opacity", 1);
+      }
+      if (map.getLayer("cam-cluster")) {
+        map.setPaintProperty("cam-cluster", "circle-opacity", 1);
+      }
+      const vis = layerVisibilityRef.current ?? {};
+      if (map.getLayer("fx-ripple")) {
+        map.setLayoutProperty("fx-ripple", "visibility", vis.detectionFx !== false ? "visible" : "none");
+      }
+      if (map.getLayer("fx-alarm-pulse")) {
+        map.setLayoutProperty("fx-alarm-pulse", "visibility", vis.alarmFx !== false ? "visible" : "none");
+      }
+    }
+  }, [analyticsMode]);
 
   // Toggle layer-group visibility from the saved preferences
   useEffect(() => {

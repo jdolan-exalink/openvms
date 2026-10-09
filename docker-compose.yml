@@ -112,6 +112,7 @@ services:
       - /sys/class/drm:/host/drm:ro
       - /:/hostfs:ro
       - exports:/mnt/openvms/exports
+    ports: ["0.0.0.0:9090:9090"] # gRPC control plane for edge agents only; HTTP stays private
     depends_on:
       postgres: { condition: service_healthy }
       valkey: { condition: service_healthy }
@@ -146,6 +147,13 @@ services:
       onvif-agent:
         ipv4_address: ${OPENVMS_AGENT_IPV4:-172.29.240.3}
     depends_on: [api]
+    restart: unless-stopped
+
+  relay:
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: relay, VERSION: "${VERSION:-dev}" } }
+    environment:
+      OPENVMS_RELAY_ADDR: ":8554"
+    ports: ["0.0.0.0:8554:8554"]
     restart: unless-stopped
 
   worker:

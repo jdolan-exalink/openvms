@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package openvms.v1;
+
+option go_package = "github.com/jdolan-exalink/openvms/gen/go/openvms/v1;openvmsv1";
+
+import "proto/openvms/v1/common.proto";
+
+message Organization {
+  string id = 1;
+  string name = 2;
+  int64 created_at = 3;
+}
+
+message Site {
+  string id = 1;
+  string organization_id = 2;
+  string name = 3;
+  string timezone = 4;
+  double latitude = 5;
+  double longitude = 6;
+  OperationalStatus status = 7;
+  int64 created_at = 8;
+  int32 camera_count = 9;
+  int32 node_count = 10;
+}
+
+message ListSitesRequest {
+  Pagination pagination = 1;
+}
+
+message ListSitesResponse {
+  repeated Site sites = 1;
+  Pagination pagination = 2;
+}
+
+message GetSiteRequest {
+  string site_id = 1;
+}
+
+message GetSiteResponse {
+  Site site = 1;
+}
+
+service SiteService {
+  rpc ListSites(ListSitesRequest) returns (ListSitesResponse);
+  rpc GetSite(GetSiteRequest) returns (GetSiteResponse);
+}

@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package openvms.v1;
+
+option go_package = "github.com/jdolan-exalink/openvms/gen/go/openvms/v1;openvmsv1";
+
+// Device represents a client machine or terminal connecting to OpenVMS.
+message Device {
+  string device_id = 1;
+  string name = 2;
+  string platform = 3;      // windows, linux, macos, ios, android
+  string architecture = 4;  // x86_64, arm64
+  string hostname = 5;
+  string app_version = 6;
+}
+
+// Pagination controls for list endpoints.
+message Pagination {
+  int32 page = 1;
+  int32 page_size = 2;
+  int64 total_items = 3;
+  int32 total_pages = 4;
+}
+
+// TimeRange represents a UTC epoch second interval.
+message TimeRange {
+  int64 start_time = 1;
+  int64 end_time = 2;
+}
+
+// Status represents entity operational state.
+enum OperationalStatus {
+  OPERATIONAL_STATUS_UNSPECIFIED = 0;
+  OPERATIONAL_STATUS_ONLINE = 1;
+  OPERATIONAL_STATUS_OFFLINE = 2;
+  OPERATIONAL_STATUS_DEGRADED = 3;
+  OPERATIONAL_STATUS_MAINTENANCE = 4;
+}

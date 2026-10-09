@@ -858,3 +858,95 @@ func (s *Service) ListAudit(ctx context.Context, actor authz.Actor, f AuditFilte
 	}
 	return out, err
 }
+
+// ResolveSession verifies a session token or API token hash and returns the Actor.
+func (s *Service) ResolveSession(ctx context.Context, tokenHash []byte) (authz.Actor, error) {
+	var actor authz.Actor
+	idle := s.IdleTimeout
+	if idle <= 0 {
+		idle = 2 * time.Hour
+	}
+
+	err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		// 1. Try session hash first
+		sessParams := db.GetActorBySessionHashParams{
+			TokenHash:   tokenHash,
+			IdleSeconds: idle.Seconds(),
+		}
+		row, err := q.GetActorBySessionHash(ctx, sessParams)
+		if err == nil {
+			_ = q.TouchSession(ctx, row.SessionID)
+			sid := row.SessionID
+			actor = authz.Actor{
+				UserID:    row.ID,
+				Username:  row.Username,
+				TenantID:  row.TenantID,
+				SessionID: &sid,
+			}
+			return nil
+		}
+
+		// 2. Try API token hash next
+		apiRow, apiErr := q.GetActorByTokenHash(ctx, tokenHash)
+		if apiErr == nil {
+			_ = q.TouchAPIToken(ctx, apiRow.TokenID)
+			actor = authz.Actor{
+				UserID:   apiRow.ID,
+				Username: apiRow.Username,
+				TenantID: apiRow.TenantID,
+			}
+			return nil
+		}
+
+		return store.ErrNotFound
+	})
+
+	return actor, err
+}
+
+// RevokeSession revokes a session by its token hash.
+func (s *Service) RevokeSession(ctx context.Context, tokenHash []byte) error {
+	return s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		return q.RevokeSession(ctx, tokenHash)
+	})
+}
+
+// RemoteClientCounts holds recent active client counts from database sessions and API tokens.
+type RemoteClientCounts struct {
+	WebSessions     int
+	DesktopSessions int
+	APITokens       int
+}
+
+// CountActiveClients returns active distinct users across web sessions, desktop sessions, and API tokens.
+func (s *Service) CountActiveClients(ctx context.Context, window time.Duration) (RemoteClientCounts, error) {
+	if s == nil || s.Store == nil || s.Store.Pool == nil {
+		return RemoteClientCounts{}, nil
+	}
+	if window <= 0 {
+		window = 5 * time.Minute
+	}
+	since := time.Now().Add(-window)
+
+	var counts RemoteClientCounts
+	_ = s.Store.Pool.QueryRow(ctx, `
+		SELECT
+			COALESCE(COUNT(DISTINCT CASE WHEN user_agent IS NULL OR user_agent NOT LIKE 'OpenVMS-Desktop/%' THEN user_id END), 0) AS web_count,
+			COALESCE(COUNT(DISTINCT CASE WHEN user_agent LIKE 'OpenVMS-Desktop/%' THEN user_id END), 0) AS desktop_count
+		FROM sessions
+		WHERE revoked_at IS NULL
+		  AND expires_at > now()
+		  AND last_seen_at >= $1
+	`, since).Scan(&counts.WebSessions, &counts.DesktopSessions)
+
+	_ = s.Store.Pool.QueryRow(ctx, `
+		SELECT COALESCE(COUNT(DISTINCT user_id), 0)
+		FROM api_tokens
+		WHERE revoked_at IS NULL
+		  AND (expires_at IS NULL OR expires_at > now())
+		  AND last_used_at >= $1
+	`, since).Scan(&counts.APITokens)
+
+	return counts, nil
+}
+
