@@ -28,6 +28,9 @@ Frigate already provides `data.path_data` (`[[x,y], unix_ts]`, normalized, botto
 - [x] T1 Ingest (commit `5683e09`; integration test run pending): adapter decodes `box`/`path_data`; migration `00039_object_tracks.sql`; syncer upserts tracks for known cameras and holds back the object cursor for open objects. Route: delegated direct (writer trigger: 3+ non-trivial files).
 - [x] T2 API + manifest: `Event.tracks` in openapi + `make generate`; aggregated subquery in `eventColumns`/`scanEvent`; `toEvent`; export manifest copies tracks. Route: delegated direct (writer trigger).
 - [x] T3 Player: pure helper `apps/web/src/lib/objectTracks.ts` (trail up to t, current position, zone entries via point-in-polygon) with vitest; replace synthetic overlay. Route: delegated direct (writer trigger).
+- [x] T4 Syncer closes stale open reviews: re-check reviews open > 1h against Frigate and close them (Frigate end_time, or last known activity when Frigate no longer has them). Bounded per pull. Route: delegated direct (writer trigger, with T5).
+- [x] T5 Live fallback overlap: `/api/v1/events` optional `overlap=true` matches events overlapping `[from,to)` with the same stale-open rule as the manifest; the player fallback uses it. Route: delegated direct (with T4).
+- [ ] T6 (BLOCKED: local DB lacks `export_shares`; user declined manual 00037 apply) Public share links carry tracks: create a share for export `9c39d37c`, open the public endpoint, and confirm the manifest/tracks reach the public player. Route: inline (verification).
 
 ## Acceptance criteria
 - A tracked object's path_data/box from Frigate is stored and updated until the object ends.
@@ -68,5 +71,11 @@ Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); 
 - Bug (manifest): stale open events (Frigate reviews never closed, oldest from 2026-09-29) matched every export window. Fix `fee5f6e`: open events count only when they started within 1h of the window (matches the syncer's stale-review limit); query/scan errors are logged instead of dropped; empty index serializes as `[]`. SQL RED/GREEN on the live DB (stale event included → excluded). Verified with new export `9c39d37c`: only the real event remains.
 - Investigated "empty manifest" (morning export `8c850ae2`): not a bug. The job was finalized at 11:19, before manifest events existed (`e993006`, 14:25).
 
+- T5 `9afa0c2`: `overlap=true` on `/api/v1/events`; one `StaleOpenWindow` constant and `AliveAtOrAfter` rule shared with the manifest; the player fallback uses it. Unit RED (`undefined: addTimeFilter`) then GREEN.
+- T4 `5d0e64e`: `closeStaleReviews` re-reads up to 50 open events older than 1h per server and pull via `GET /api/review/{id}` (Frigate docs). 404 closes the event at its last tracked activity; an end time from Frigate is taken via `upsertReview`; other errors are logged and skipped. Unit RED (`a.Review undefined`) then GREEN. Deployed: all 8 stale open events resolved (e.g. the 2026-09-29 event got its real 8m39s end from Frigate).
+- Integration tests `TestStaleOpenReviewsAreResolved` and `TestListEventsOverlap` written, not run (Docker test runs blocked).
+- T6: creating a share returns 500, `relation "export_shares" does not exist`. goose v37 is marked applied at 12:59, but `00037_export_shares.sql` was committed at 13:23 (`553c6b9`): local DB drift. User declined applying it manually.
+- RDD: user declined review for `c175f22..5d0e64e` and the uncommitted workspace candidate.
+
 ## Next step
-Pending: user confirms overlay look; integration tests (user-run); PATCH export (rename/protect) smoke test; optional history backfill; optional overlay render test; PR chain strategy.
+Pending: integration tests (user-run); PATCH export smoke test; T6 once the local `export_shares` table exists; optional backfill and overlay render test; PR chain strategy.
