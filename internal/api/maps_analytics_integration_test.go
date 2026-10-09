@@ -28,9 +28,9 @@ func TestMapsAnalyticsIntegration(t *testing.T) {
 
 	now := time.Now().UTC().Truncate(time.Hour)
 	eventTimeRecent := now.Add(-2 * time.Hour)
-	rollupHour := now.Add(-48 * time.Hour)
+	olderEventTime := now.Add(-48 * time.Hour)
 
-	// Seed placement for the camera and seed some events & rollups
+	// Seed placement for the camera and seed recent and older raw events
 	err := te.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		// Update site geo
 		_, err := tx.Exec(ctx, `
@@ -75,13 +75,22 @@ func TestMapsAnalyticsIntegration(t *testing.T) {
 			}
 		}
 
-		// Insert hourly rollups for 48h ago
-		_, err = tx.Exec(ctx, `
-			INSERT INTO event_counts_hourly (tenant_id, camera_id, hour, label, severity, n)
-			VALUES ($1, $2, $3, 'person', 'info', 15)
-			ON CONFLICT (camera_id, hour, label, severity) DO UPDATE
-			SET n = EXCLUDED.n
-		`, tenantID, cam.ID, rollupHour)
+		// Insert 5 raw events 48h ago, outside the last-24h window
+		for i := 0; i < 5; i++ {
+			remID := fmt.Sprintf("rem-analytics-old-%d", i)
+			_, err = tx.Exec(ctx, `
+				INSERT INTO events (
+					tenant_id, site_id, server_id, camera_id, remote_id,
+					severity, labels, start_time, end_time
+				) VALUES (
+					$1, $2, $3, $4, $5,
+					'detection', ARRAY['person']::text[], $6, $6
+				)
+			`, tenantID, siteID, cam.ServerID, cam.ID, remID, olderEventTime.Add(time.Duration(i)*time.Minute))
+			if err != nil {
+				return err
+			}
+		}
 		return err
 	})
 	if err != nil {
@@ -151,7 +160,7 @@ func TestMapsAnalyticsIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("LongRangeRollupsQuery", func(t *testing.T) {
+	t.Run("LongRangeCountsRawEvents", func(t *testing.T) {
 		start := now.Add(-72 * time.Hour).Format(time.RFC3339)
 		end := now.Add(-24 * time.Hour).Format(time.RFC3339)
 		path := fmt.Sprintf("/api/v1/maps/analytics?site_id=%s&metric=person&start=%s&end=%s", siteID, start, end)
@@ -166,11 +175,11 @@ func TestMapsAnalyticsIntegration(t *testing.T) {
 			t.Fatalf("failed to unmarshal analytics response: %v", err)
 		}
 
-		if res.Total != 15 {
-			t.Fatalf("expected total 15 rollups, got %d", res.Total)
+		if res.Total != 5 {
+			t.Fatalf("expected total 5 events, got %d", res.Total)
 		}
-		if res.MaxCount != 15 {
-			t.Fatalf("expected max_count 15, got %d", res.MaxCount)
+		if res.MaxCount != 5 {
+			t.Fatalf("expected max_count 5, got %d", res.MaxCount)
 		}
 	})
 

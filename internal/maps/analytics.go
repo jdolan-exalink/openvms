@@ -194,7 +194,6 @@ func (s *Service) GetAnalytics(ctx context.Context, actor authz.Actor, query Ana
 		}
 
 		// Query counts based on metric and timeframe
-		duration := query.End.Sub(query.Start)
 		counts := make(map[uuid.UUID]int64)
 
 		switch query.Metric {
@@ -241,34 +240,20 @@ func (s *Service) GetAnalytics(ctx context.Context, actor authz.Actor, query Ana
 				}
 			}
 
-			if duration <= 24*time.Hour {
-				rows, err := q.QueryMapAnalyticsEvents(ctx, db.QueryMapAnalyticsEventsParams{
-					TenantID:  actor.TenantID,
-					StartTime: query.Start,
-					EndTime:   query.End,
-					CameraIds: candidateIDs,
-					Labels:    labels,
-				})
-				if err != nil {
-					return store.Classify(err)
-				}
-				for _, r := range rows {
-					counts[r.CameraID] = r.Count
-				}
-			} else {
-				rows, err := q.QueryMapAnalyticsRollups(ctx, db.QueryMapAnalyticsRollupsParams{
-					TenantID:  actor.TenantID,
-					StartTime: query.Start,
-					EndTime:   query.End,
-					CameraIds: candidateIDs,
-					Labels:    labels,
-				})
-				if err != nil {
-					return store.Classify(err)
-				}
-				for _, r := range rows {
-					counts[r.CameraID] = r.Count
-				}
+			// Count raw events for every window; the hourly rollup table has no
+			// writer yet, so reading it would silently return zero.
+			rows, err := q.QueryMapAnalyticsEvents(ctx, db.QueryMapAnalyticsEventsParams{
+				TenantID:  actor.TenantID,
+				StartTime: query.Start,
+				EndTime:   query.End,
+				CameraIds: candidateIDs,
+				Labels:    labels,
+			})
+			if err != nil {
+				return store.Classify(err)
+			}
+			for _, r := range rows {
+				counts[r.CameraID] = r.Count
 			}
 		}
 
