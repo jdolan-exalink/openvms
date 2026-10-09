@@ -4278,7 +4278,7 @@ components:
       enum: [alert, detection]
     Event:
       type: object
-      required: [id, tenant_id, site_id, site_name, server_id, server_name, camera_id, camera_name, remote_id, severity, labels, sub_labels, zones, plates, start_time, reviewed, has_thumbnail, has_snapshot, has_preview]
+      required: [id, tenant_id, site_id, site_name, server_id, server_name, camera_id, camera_name, remote_id, severity, labels, sub_labels, zones, plates, start_time, reviewed, has_thumbnail, has_snapshot, has_preview, tracks]
       properties:
         id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
@@ -4325,6 +4325,40 @@ components:
             signal, not a probe of Frigate's own preview availability).
         attributes:
           $ref: "#/components/schemas/EventAttributes"
+        tracks:
+          type: array
+          description: Tracked objects of this event as reported by Frigate. Empty when none were recorded.
+          items: { $ref: "#/components/schemas/ObjectTrack" }
+    ObjectTrack:
+      type: object
+      required: [object_id, label, zones, path, start_time]
+      properties:
+        object_id: { type: string, description: Tracked-object id inside the origin Frigate. }
+        label: { type: string }
+        zones:
+          type: array
+          description: Zones the object entered, as last reported by Frigate.
+          items: { type: string }
+        box:
+          type: array
+          nullable: true
+          description: Latest bounding box [x, y, width, height], normalized 0..1. Not time-indexed.
+          minItems: 4
+          maxItems: 4
+          items: { type: number, format: double }
+        path:
+          type: array
+          description: Observed positions, oldest first.
+          items: { $ref: "#/components/schemas/TrackPoint" }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time, nullable: true }
+    TrackPoint:
+      type: object
+      required: [x, y, t]
+      properties:
+        x: { type: number, format: double, description: Normalized 0..1, bottom-center of the box. }
+        y: { type: number, format: double, description: Normalized 0..1, bottom-center of the box. }
+        t: { type: number, format: double, description: Unix seconds. }
     EventAttributes:
       type: object
       properties:

@@ -25,6 +25,7 @@ func toEvent(e events.Event) gen.Event {
 		Zones: e.Zones, Plates: e.Plates, StartTime: e.StartTime, EndTime: e.EndTime,
 		Reviewed: e.Reviewed, HasThumbnail: e.HasThumbnail,
 		HasSnapshot: e.HasSnapshot, HasPreview: e.HasPreview,
+		Tracks: toObjectTracks(e.Tracks),
 	}
 	if e.Vehicle != nil || e.Person != nil || e.VehicleJob != "" || e.PersonJob != "" {
 		out.Attributes = &gen.EventAttributes{}
@@ -55,6 +56,28 @@ func toEvent(e events.Event) gen.Event {
 			LowerColor: e.Person.LowerColor, LowerConfidence: e.Person.LowerConfidence,
 			ColorQuality: gen.PersonAttributesColorQuality(e.Person.ColorQuality),
 		}
+	}
+	return out
+}
+
+func toObjectTracks(in []events.Track) []gen.ObjectTrack {
+	out := make([]gen.ObjectTrack, 0, len(in))
+	for _, t := range in {
+		ot := gen.ObjectTrack{
+			ObjectId: t.ObjectID, Label: t.Label, Zones: t.Zones, StartTime: t.StartTime, EndTime: t.EndTime,
+			Path: make([]gen.TrackPoint, 0, len(t.Path)),
+		}
+		if ot.Zones == nil {
+			ot.Zones = []string{}
+		}
+		if len(t.Box) == 4 {
+			box := t.Box
+			ot.Box = &box
+		}
+		for _, p := range t.Path {
+			ot.Path = append(ot.Path, gen.TrackPoint{X: p.X, Y: p.Y, T: p.T})
+		}
+		out = append(out, ot)
 	}
 	return out
 }

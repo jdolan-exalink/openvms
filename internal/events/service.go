@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -75,6 +76,50 @@ type Event struct {
 	// while a classification job exists. Empty when the event was never queued.
 	VehicleJob string
 	PersonJob  string
+	// Tracks are the Frigate tracked objects behind this event (via detection_ids). Never nil
+	// after a read; empty when none were recorded.
+	Tracks []Track
+}
+
+// Track is one tracked object's real observed trajectory. Box is Frigate's latest bounding box
+// only; it is not time-indexed. Path points are normalized bottom-center positions with unix
+// seconds.
+type Track struct {
+	ObjectID  string       `json:"object_id"`
+	Label     string       `json:"label"`
+	Zones     []string     `json:"zones"`
+	Box       []float64    `json:"box"`
+	Path      []TrackPoint `json:"path"`
+	StartTime time.Time    `json:"start_time"`
+	EndTime   *time.Time   `json:"end_time"`
+}
+
+// TrackPoint is one observed position of a tracked object.
+type TrackPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	T float64 `json:"t"`
+}
+
+// TracksSubquery aggregates the tracks of the event aliased e as one jsonb array in the shape of
+// Track. The export manifest reuses it so frozen manifests carry the same JSON as the API.
+const TracksSubquery = `(SELECT COALESCE(jsonb_agg(jsonb_build_object('object_id', ot.remote_object_id, 'label', ot.label,
+	'zones', ot.zones, 'box', ot.box, 'path', ot.path, 'start_time', ot.start_time, 'end_time', ot.end_time)
+	ORDER BY ot.start_time), '[]'::jsonb)
+	FROM object_tracks ot WHERE ot.server_id = e.server_id AND ot.remote_object_id = ANY(e.detection_ids))`
+
+func parseTracks(raw []byte) ([]Track, error) {
+	out := []Track{}
+	if len(raw) == 0 {
+		return out, nil
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	if out == nil {
+		out = []Track{}
+	}
+	return out, nil
 }
 
 // PersonAttr is the upper and lower clothing color of one person.
@@ -199,7 +244,7 @@ e.has_snapshot, e.preview_key <> '', e.lpr,
 va.vehicle_type, va.vehicle_type_confidence, va.vehicle_color, va.vehicle_color_confidence, va.color_quality,
 va.trailer_color, va.trailer_color_confidence,
 pa.upper_color, pa.upper_color_confidence, pa.lower_color, pa.lower_color_confidence, pa.color_quality,
-vj.status, pj.status`
+vj.status, pj.status, ` + TracksSubquery
 
 const eventJoins = `FROM events e
 JOIN cameras c ON c.id = e.camera_id
@@ -217,13 +262,17 @@ func scanEvent(row pgx.Row) (Event, error) {
 	var upper, lower, pQuality *string
 	var upperConf, lowerConf *float32
 	var vehicleJob, personJob *string
+	var tracksRaw []byte
 	err := row.Scan(&e.ID, &e.TenantID, &e.SiteID, &e.SiteName, &e.ServerID, &e.ServerName, &e.CameraID, &e.CameraName, &e.CameraLPR, &e.RemoteID,
 		&e.Severity, &e.Labels, &e.SubLabels, &e.Zones, &e.Plates, &e.StartTime, &e.EndTime, &e.Reviewed, &e.HasThumbnail,
 		&e.HasSnapshot, &e.HasPreview, &e.LPR,
 		&vType, &vTypeConf, &vColor, &vColorConf, &vQuality, &trailer, &trailerConf,
 		&upper, &upperConf, &lower, &lowerConf, &pQuality,
-		&vehicleJob, &personJob)
+		&vehicleJob, &personJob, &tracksRaw)
 	if err != nil {
+		return e, err
+	}
+	if e.Tracks, err = parseTracks(tracksRaw); err != nil {
 		return e, err
 	}
 	if vType != nil && vColor != nil && vQuality != nil && vTypeConf != nil && vColorConf != nil {

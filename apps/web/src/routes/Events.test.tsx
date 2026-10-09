@@ -49,6 +49,7 @@ function makeEvent(id: string, overrides: Partial<Schemas["Event"]> = {}): Schem
     has_thumbnail: false,
     has_snapshot: false,
     has_preview: false,
+    tracks: [],
     ...overrides,
   };
 }
