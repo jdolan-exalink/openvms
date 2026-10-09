@@ -50,6 +50,7 @@ Integrate the 7 unmerged commits of `feat/maps-phase2` into `main` through a rev
   - `cea2c33` (base `79b6408`): high, granted, approved with advisories (`review-c1ae8c68dd754723`).
   - `1870f73` (base `cea2c33`): medium, granted, approved with advisories (`review-bf2f0dc88ca70950`).
   - `cc39dad` + `fe1a2e4` (base `1870f73`): medium, granted, approved with advisories (`review-af1fdcdbb30fff2f`).
+- Whole branch vs `main` exceeded the lens budget again; merge commit `accd02c` conflict resolution stays covered only by functional checks (user choice). Post-merge range (base `accd02c`: `42a072d`, `e440df3`, `c236e1b`, `f722e9b`): high, granted, approved with advisories (`review-f948e34eb67ef4f8`): unbounded raw scan for long analytics windows, relay publication not guarded by the compose contract test.
 - M2: `go test -tags integration ./...` all pass except `TestMapsHierarchyPrivatePlanLifecycle`, which fails identically on `main` (pre-existing). Unit/web results from M1 stand.
 - Notable advisories for follow-up: `GET /api/v1/system/connections` is mounted outside the strict authenticated handler (`internal/api/router.go`); default edge node ID collides across agents; relay sessions unbounded and upstream has no timeout; ticker interval 0 can panic in `internal/mediasession/session.go`.
 
