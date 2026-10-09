@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2, Minimize2, X } from "lucide-react";
+import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui";
 
 interface RoomPlannerModalProps {
@@ -8,6 +9,38 @@ interface RoomPlannerModalProps {
   mapName?: string;
   onSave: (file: File, state: unknown) => Promise<void> | void;
   onClose: () => void;
+}
+
+// Decodes `data:<mime>[;params][;base64],<payload>`. The payload is base64 only when the
+// header says so; otherwise it is percent-encoded text (RFC 2397).
+function dataUrlToFile(dataUrl: string, filename: string): File {
+  const comma = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:") || comma < 0) {
+    throw new Error("El gráfico del plano no es un data URL válido.");
+  }
+  const params = dataUrl.slice("data:".length, comma).split(";");
+  const mime = params[0] || "image/png";
+  const payload = dataUrl.slice(comma + 1);
+  let bytes: Uint8Array<ArrayBuffer>;
+  if (params.slice(1).some((p) => p.toLowerCase() === "base64")) {
+    const binary = atob(payload);
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+  } else {
+    bytes = new TextEncoder().encode(decodeURIComponent(payload)) as Uint8Array<ArrayBuffer>;
+  }
+  return new File([bytes], filename, { type: mime });
+}
+
+// Only a failure to convert the chosen format justifies retrying with the other one. Server
+// responses (revision conflicts, permissions), network failures and aborts would fail the same
+// way again, and retrying a conflict could hide it behind a second, unrelated error.
+function canRetryInOtherFormat(cause: unknown): boolean {
+  if (cause instanceof ApiError || cause instanceof TypeError) return false;
+  if (cause instanceof DOMException && cause.name === "AbortError") return false;
+  return true;
 }
 
 export function RoomPlannerModal({
@@ -48,29 +81,48 @@ export function RoomPlannerModal({
         setError(undefined);
 
         try {
-          let file: File;
-          if (svg && typeof svg === "string" && svg.includes("<svg")) {
+          let file: File | undefined;
+          // Prefer canonical PNG directly from canvas renderer as OpenVMS plan API natively expects PNG,
+          // avoiding SVG browser rasterization quirks or security limits.
+          if (pngDataUrl && typeof pngDataUrl === "string" && pngDataUrl.startsWith("data:image/")) {
+            file = dataUrlToFile(pngDataUrl, `${mapName || "room-plan"}.png`);
+          } else if (svg && typeof svg === "string" && svg.includes("<svg")) {
             const blob = new Blob([svg], { type: "image/svg+xml" });
             file = new File([blob], `${mapName || "room-plan"}.svg`, {
               type: "image/svg+xml",
             });
-          } else if (pngDataUrl && typeof pngDataUrl === "string") {
-            const res = await fetch(pngDataUrl);
-            const blob = await res.blob();
-            file = new File([blob], `${mapName || "room-plan"}.png`, {
-              type: "image/png",
-            });
-          } else {
+          }
+
+          if (!file) {
             throw new Error("No se pudo obtener el gráfico del plano.");
           }
 
-          await onSave(file, state);
+          try {
+            await onSave(file, state);
+          } catch (primaryErr) {
+            if (!canRetryInOtherFormat(primaryErr)) {
+              throw primaryErr;
+            }
+            if (file.type === "image/png" && svg && typeof svg === "string" && svg.includes("<svg")) {
+              const svgBlob = new Blob([svg], { type: "image/svg+xml" });
+              const svgFile = new File([svgBlob], `${mapName || "room-plan"}.svg`, {
+                type: "image/svg+xml",
+              });
+              await onSave(svgFile, state);
+            } else if (file.type === "image/svg+xml" && pngDataUrl && typeof pngDataUrl === "string" && pngDataUrl.startsWith("data:image/")) {
+              const pngFile = dataUrlToFile(pngDataUrl, `${mapName || "room-plan"}.png`);
+              await onSave(pngFile, state);
+            } else {
+              throw primaryErr;
+            }
+          }
         } catch (cause) {
           setError(
             cause instanceof Error
               ? cause.message
               : "No se pudo guardar el plano diseñado."
           );
+        } finally {
           setSaving(false);
         }
       }

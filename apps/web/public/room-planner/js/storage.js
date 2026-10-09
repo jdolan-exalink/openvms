@@ -156,7 +156,7 @@ const Storage = (() => {
 
   /** Export as PNG */
   function exportPNG() {
-    const dataUrl = CanvasRenderer.exportPNG();
+    const dataUrl = CanvasRenderer.exportPNG(true);
     const a = document.createElement('a');
     a.href = dataUrl;
     a.download = getBaseName() + '.png';

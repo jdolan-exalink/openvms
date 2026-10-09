@@ -184,7 +184,7 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
      {can(me.data, "maps.edit") && (floor.revision ? <PlanUpload siteId={siteId} floorId={floor.id} revision={floor.revision} source={plan.data} onDirty={setPlanDirty} onSaved={() => { setPlanError(undefined); onPlanSaved(); }} onConflict={() => { setPlanError("The background changed on the server. Reload and review it before uploading again. Nothing was overwritten."); onPlanSaved(); }}/> : <p role="alert" className="rounded-m3-lg bg-surface-1/95 p-3 text-xs shadow-2xl">La revisión del mapa no está disponible. Recargá la lista antes de subir un plano.</p>)}
     </div>
   )}
-  {mode === "edit" && <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-20 flex w-76 max-w-[calc(100%-1.5rem)] min-h-0 flex-col overflow-hidden rounded-m3-xl border border-outline-variant/30 bg-surface-1/95 shadow-2xl backdrop-blur-md">
+  {mode === "edit" && <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-30 flex w-76 max-w-[calc(100%-1.5rem)] min-h-0 flex-col overflow-hidden rounded-m3-xl border border-outline-variant/30 bg-surface-1/95 shadow-2xl backdrop-blur-md">
    <div className="min-h-0 flex-1 p-2"><MapEditSidebar cameras={sidebarCameras} armedId={armed} onArm={setArmed} onUnplace={unplaceCamera} /></div>
    <footer className="shrink-0 space-y-2 border-t border-outline-variant/20 bg-surface-2/80 p-2.5 text-xs">
     <div className="flex items-center justify-between font-mono text-[11px] text-on-surface-variant">

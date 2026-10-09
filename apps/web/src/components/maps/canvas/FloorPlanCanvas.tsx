@@ -176,7 +176,7 @@ export function FloorPlanCanvas({ ref, imageUrl, imageBlob, width, height, camer
     })}
    <CameraEventPopups map={null} cameras={cameras} projectCamera={project} projectionKey={floorId} tenantId={tenantId} siteId={siteId} canEvents={canEvents} canSnapshots={canSnapshots}/>
   </div>
-  <div className="absolute bottom-3 right-3 z-30 flex items-center gap-1 rounded-full bg-surface-1/95 p-1 shadow-lg backdrop-blur">
+  <div className={`absolute z-20 flex items-center gap-1 rounded-full bg-surface-1/95 p-1 shadow-lg backdrop-blur transition-all ${editable ? "bottom-3 left-1/2 -translate-x-1/2" : "bottom-3 right-3"}`}>
    <IconButton icon={Plus} aria-label="Acercar" onClick={() => setView({ ...view, scale: Math.min(8, view.scale * 1.2) })} />
    <IconButton icon={Minus} aria-label="Alejar" onClick={() => setView({ ...view, scale: Math.max(.5, view.scale / 1.2) })} />
    <Button variant="text" size="sm" onClick={() => setView({ scale: 1, x: 0, y: 0 })}>Ajustar</Button>
