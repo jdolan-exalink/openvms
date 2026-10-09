@@ -32,6 +32,7 @@ Frigate already provides `data.path_data` (`[[x,y], unix_ts]`, normalized, botto
 - [x] T5 Live fallback overlap: `/api/v1/events` optional `overlap=true` matches events overlapping `[from,to)` with the same stale-open rule as the manifest; the player fallback uses it. Route: delegated direct (with T4).
 - [x] T6 Public share links carry tracks: create a share for export `9c39d37c`, open the public endpoint, and confirm the manifest/tracks reach the public player. Route: inline (verification).
 - [x] T7 Freeze camera zones into the export manifest (`manifest.zones[cameraId]`) so public links show zones, zone entries and the touched highlight. Route: delegated direct (writer).
+- [x] T8 Public share password out of URLs: POST validates the password once and sets a short-lived HttpOnly, SameSite=Strict cookie scoped to `/media/v1/public/shares/{token}`; info/video/download accept that cookie and no longer accept `?password=`; returned URLs carry no password; the web public page and player stop putting the password in URLs. Route: delegated direct (writer trigger: gateway + service + 2 web files).
 
 ## Acceptance criteria
 - A tracked object's path_data/box from Frigate is stored and updated until the object ends.

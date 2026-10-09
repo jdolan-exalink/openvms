@@ -177,12 +177,12 @@ VALUES ($1, $2, $3, $4, 'queued')`,
 		}
 
 		b, _ := json.Marshal(map[string]any{
-			"job_id":     jobID,
-			"cameras":    len(targets),
-			"start":      in.Start,
-			"end":        in.End,
-			"name":       in.Name,
-			"protected":  in.Protected,
+			"job_id":    jobID,
+			"cameras":   len(targets),
+			"start":     in.Start,
+			"end":       in.End,
+			"name":      in.Name,
+			"protected": in.Protected,
 		})
 		return db.New(tx).InsertAudit(ctx, db.InsertAuditParams{
 			TenantID:   &firstTenant,
@@ -521,6 +521,11 @@ type ExportShare struct {
 	ViewsCount  int        `json:"views_count"`
 	CreatedAt   time.Time  `json:"created_at"`
 	RevokedAt   *time.Time `json:"revoked_at"`
+
+	// AccessCookie is set only when GetPublicShare verified a password; callers turn it
+	// into a cookie. It is never serialized.
+	AccessCookie    string    `json:"-"`
+	AccessCookieExp time.Time `json:"-"`
 }
 
 type CreateExportShareInput struct {
@@ -656,7 +661,7 @@ RETURNING tenant_id, job_id`, shareID).Scan(&tenantID, &jobID)
 	})
 }
 
-func (s *Service) GetPublicShare(ctx context.Context, token string, password string, clientIP *netip.Addr) (ExportJob, ExportShare, error) {
+func (s *Service) GetPublicShare(ctx context.Context, token string, cred ShareCredential, clientIP *netip.Addr) (ExportJob, ExportShare, error) {
 	var share ExportShare
 	var pwHash string
 	err := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
@@ -678,11 +683,18 @@ WHERE share_token = $1`, token)
 			return ErrShareExpired
 		}
 		if pwHash != "" {
-			if password == "" {
+			now := time.Now()
+			switch {
+			case cred.Password != "":
+				if !identity.VerifyPassword(pwHash, cred.Password) {
+					return ErrSharePasswordInvalid
+				}
+				exp := shareCookieExpiry(now, share.ExpiresAt)
+				share.AccessCookie = signShareCookie(pwHash, token, exp)
+				share.AccessCookieExp = exp
+			case verifyShareCookie(pwHash, token, cred.Cookie, now):
+			default:
 				return ErrSharePasswordRequired
-			}
-			if !identity.VerifyPassword(pwHash, password) {
-				return ErrSharePasswordInvalid
 			}
 		}
 

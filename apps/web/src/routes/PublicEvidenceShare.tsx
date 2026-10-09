@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Video,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams } from "@tanstack/react-router";
 import { EvidencePlayerModal, type EvidencePlayerJob } from "@/components/EvidencePlayerModal";
 import { Icon } from "@/components/Icon";
@@ -26,16 +26,25 @@ interface PublicShareResponse {
 export function PublicEvidenceShare() {
   const { token } = useParams({ strict: false }) as { token: string };
   const [password, setPassword] = useState("");
-  const [submittedPassword, setSubmittedPassword] = useState("");
+  // The password only travels in a one-off POST body; it never enters a URL or query key.
+  const pendingPassword = useRef("");
+  const [submitCount, setSubmitCount] = useState(0);
   const [playerOpen, setPlayerOpen] = useState(false);
 
   const query = useQuery({
-    queryKey: ["public-share", token, submittedPassword],
+    queryKey: ["public-share", token, submitCount],
     queryFn: async (): Promise<PublicShareResponse> => {
-      const url = `/media/v1/public/shares/${token}${
-        submittedPassword ? `?password=${encodeURIComponent(submittedPassword)}` : ""
-      }`;
-      const res = await fetch(url);
+      const url = `/media/v1/public/shares/${token}`;
+      const password = pendingPassword.current;
+      pendingPassword.current = "";
+      const res = password
+        ? await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-OpenVMS-Request": "1" },
+            credentials: "same-origin",
+            body: JSON.stringify({ password }),
+          })
+        : await fetch(url, { credentials: "same-origin" });
       if (res.status === 401) {
         throw new Error("PASSWORD_REQUIRED");
       }
@@ -58,7 +67,8 @@ export function PublicEvidenceShare() {
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmittedPassword(password);
+    pendingPassword.current = password;
+    setSubmitCount((n) => n + 1);
   };
 
   const isPasswordRequired = query.error?.message === "PASSWORD_REQUIRED";
@@ -225,7 +235,6 @@ export function PublicEvidenceShare() {
                 onClose={() => setPlayerOpen(false)}
                 isPublic={true}
                 shareToken={token}
-                password={submittedPassword}
               />
             )}
           </div>

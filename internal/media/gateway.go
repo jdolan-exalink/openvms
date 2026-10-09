@@ -745,20 +745,17 @@ func (g *Gateway) exportJobItemVideo(w http.ResponseWriter, r *http.Request) {
 
 func (g *Gateway) publicShareInfo(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
-	var password string
+	cred := shareCredentialFromRequest(r, token)
 	if r.Method == http.MethodPost {
 		var body struct {
 			Password string `json:"password"`
 		}
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		password = body.Password
-	}
-	if password == "" {
-		password = r.URL.Query().Get("password")
+		_ = json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body)
+		cred.Password = body.Password
 	}
 
 	clientIP := httpx.ClientIP(r.Context())
-	job, share, err := g.Svc.GetPublicShare(r.Context(), token, password, clientIP)
+	job, share, err := g.Svc.GetPublicShare(r.Context(), token, cred, clientIP)
 	if err != nil {
 		switch {
 		case errors.Is(err, store.ErrNotFound), errors.Is(err, pgx.ErrNoRows):
@@ -776,6 +773,10 @@ func (g *Gateway) publicShareInfo(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, "internal", "could not load shared evidence")
 		}
 		return
+	}
+
+	if share.AccessCookie != "" {
+		setShareAccessCookie(w, r, token, share.AccessCookie, share.AccessCookieExp)
 	}
 
 	type publicItem struct {
@@ -798,15 +799,15 @@ func (g *Gateway) publicShareInfo(w http.ResponseWriter, r *http.Request) {
 			ServerName: it.ServerName,
 			SHA256Hash: it.SHA256Hash,
 			TotalBytes: it.TotalBytes,
-			VideoURL:   fmt.Sprintf("/media/v1/public/shares/%s/items/%s/video?password=%s", token, it.ID.String(), url.QueryEscape(password)),
+			VideoURL:   fmt.Sprintf("/media/v1/public/shares/%s/items/%s/video", token, it.ID.String()),
 			Status:     it.Status,
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"share_token": token,
-		"expires_at":  share.ExpiresAt,
+		"share_token":  token,
+		"expires_at":   share.ExpiresAt,
 		"has_password": share.HasPassword,
 		"job": map[string]any{
 			"id":           job.ID.String(),
@@ -817,17 +818,16 @@ func (g *Gateway) publicShareInfo(w http.ResponseWriter, r *http.Request) {
 			"total_bytes":  job.TotalBytes,
 			"manifest":     job.Manifest,
 			"items":        items,
-			"download_url": fmt.Sprintf("/media/v1/public/shares/%s/download?password=%s", token, url.QueryEscape(password)),
+			"download_url": fmt.Sprintf("/media/v1/public/shares/%s/download", token),
 		},
 	})
 }
 
 func (g *Gateway) publicShareDownload(w http.ResponseWriter, r *http.Request) {
 	token := chi.URLParam(r, "token")
-	password := r.URL.Query().Get("password")
 	clientIP := httpx.ClientIP(r.Context())
 
-	job, _, err := g.Svc.GetPublicShare(r.Context(), token, password, clientIP)
+	job, _, err := g.Svc.GetPublicShare(r.Context(), token, shareCredentialFromRequest(r, token), clientIP)
 	if err != nil {
 		if errors.Is(err, ErrSharePasswordRequired) {
 			writeErr(w, http.StatusUnauthorized, "password_required", "password required")
@@ -905,10 +905,9 @@ func (g *Gateway) publicShareItemVideo(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad_request", "invalid item id")
 		return
 	}
-	password := r.URL.Query().Get("password")
 	clientIP := httpx.ClientIP(r.Context())
 
-	job, _, err := g.Svc.GetPublicShare(r.Context(), token, password, clientIP)
+	job, _, err := g.Svc.GetPublicShare(r.Context(), token, shareCredentialFromRequest(r, token), clientIP)
 	if err != nil {
 		if errors.Is(err, ErrSharePasswordRequired) {
 			writeErr(w, http.StatusUnauthorized, "password_required", "password required")
@@ -1332,4 +1331,32 @@ func (g *Gateway) watchAccess(ctx context.Context, r *http.Request, a authz.Acto
 			}
 		}
 	}
+}
+
+// shareCredentialFromRequest reads the share access cookie. Passwords are never read from
+// the URL; only the POST body of publicShareInfo can present one.
+func shareCredentialFromRequest(r *http.Request, _ string) ShareCredential {
+	c, err := r.Cookie(ShareCookieName)
+	if err != nil {
+		return ShareCredential{}
+	}
+	return ShareCredential{Cookie: c.Value}
+}
+
+// shareCookiePath scopes the access cookie to a single share.
+func shareCookiePath(token string) string {
+	return "/media/v1/public/shares/" + token
+}
+
+func secureShareRequest(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+}
+
+// #nosec G124 -- Secure intentionally follows HTTPS/TLS detection; forcing it on breaks HTTP deployments.
+func setShareAccessCookie(w http.ResponseWriter, r *http.Request, token, value string, exp time.Time) {
+	http.SetCookie(w, &http.Cookie{
+		Name: ShareCookieName, Value: value, Path: shareCookiePath(token),
+		Expires: exp, MaxAge: int(time.Until(exp).Seconds()),
+		HttpOnly: true, Secure: secureShareRequest(r), SameSite: http.SameSiteStrictMode,
+	})
 }

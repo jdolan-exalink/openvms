@@ -62,7 +62,6 @@ interface EvidencePlayerModalProps {
   onClose: () => void;
   isPublic?: boolean;
   shareToken?: string;
-  password?: string;
 }
 
 interface ForensicEvent {
@@ -492,7 +491,6 @@ export function EvidencePlayerModal({
   onClose,
   isPublic = false,
   shareToken,
-  password,
 }: EvidencePlayerModalProps) {
   // Expected clip duration from timestamps
   const expectedDuration = Math.max(
@@ -572,8 +570,7 @@ export function EvidencePlayerModal({
       return item.video_url;
     }
     if (isPublic && shareToken) {
-      const pwParam = password ? `?password=${encodeURIComponent(password)}` : "";
-      return `/media/v1/public/shares/${shareToken}/items/${item.id}/video${pwParam}`;
+      return `/media/v1/public/shares/${shareToken}/items/${item.id}/video`;
     }
     return `/media/v1/export-jobs/${job.id}/items/${item.id}/video`;
   };
@@ -583,8 +580,7 @@ export function EvidencePlayerModal({
       return job.download_url;
     }
     if (isPublic && shareToken) {
-      const pwParam = password ? `?password=${encodeURIComponent(password)}` : "";
-      return `/media/v1/public/shares/${shareToken}/download${pwParam}`;
+      return `/media/v1/public/shares/${shareToken}/download`;
     }
     return `/media/v1/export-jobs/${job.id}/download`;
   };
