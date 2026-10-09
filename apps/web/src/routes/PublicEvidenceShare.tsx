@@ -9,7 +9,7 @@ import {
   ShieldCheck,
   Video,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useParams } from "@tanstack/react-router";
 import { EvidencePlayerModal, type EvidencePlayerJob } from "@/components/EvidencePlayerModal";
 import { Icon } from "@/components/Icon";
@@ -23,34 +23,49 @@ interface PublicShareResponse {
   job: EvidencePlayerJob;
 }
 
+type ShareErrorCode = "password_required" | "invalid_password" | "not_found" | "gone" | "failed";
+
+class ShareError extends Error {
+  constructor(
+    readonly code: ShareErrorCode,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export function PublicEvidenceShare() {
   const { token } = useParams({ strict: false }) as { token: string };
   const [password, setPassword] = useState("");
-  const [submittedPassword, setSubmittedPassword] = useState("");
+  // The password only travels in a one-off POST body; it never enters a URL or query key.
+  const pendingPassword = useRef("");
+  const [submitCount, setSubmitCount] = useState(0);
   const [playerOpen, setPlayerOpen] = useState(false);
 
   const query = useQuery({
-    queryKey: ["public-share", token, submittedPassword],
+    queryKey: ["public-share", token, submitCount],
     queryFn: async (): Promise<PublicShareResponse> => {
-      const url = `/media/v1/public/shares/${token}${
-        submittedPassword ? `?password=${encodeURIComponent(submittedPassword)}` : ""
-      }`;
-      const res = await fetch(url);
-      if (res.status === 401) {
-        throw new Error("PASSWORD_REQUIRED");
-      }
-      if (res.status === 403) {
-        throw new Error("Contraseña incorrecta");
-      }
-      if (res.status === 404) {
-        throw new Error("El enlace de evidencia solicitado no existe");
-      }
+      const url = `/media/v1/public/shares/${token}`;
+      const password = pendingPassword.current;
+      pendingPassword.current = "";
+      const request = password
+        ? fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-OpenVMS-Request": "1" },
+            credentials: "same-origin",
+            body: JSON.stringify({ password }),
+          })
+        : fetch(url, { credentials: "same-origin" });
+      const res = await request.catch(() => {
+        throw new ShareError("failed", "No se pudo conectar. Revisá la conexión y volvé a intentar.");
+      });
+      if (res.status === 401) throw new ShareError("password_required", "Ingresá la clave de acceso.");
+      if (res.status === 403) throw new ShareError("invalid_password", "Contraseña incorrecta");
+      if (res.status === 404) throw new ShareError("not_found", "El enlace de evidencia solicitado no existe");
       if (res.status === 410) {
-        throw new Error("Este enlace de evidencia ha expirado o fue revocado por el administrador");
+        throw new ShareError("gone", "Este enlace de evidencia ha expirado o fue revocado por el administrador");
       }
-      if (!res.ok) {
-        throw new Error("Error al consultar la evidencia");
-      }
+      if (!res.ok) throw new ShareError("failed", "Error al consultar la evidencia");
       return res.json();
     },
     retry: false,
@@ -58,10 +73,18 @@ export function PublicEvidenceShare() {
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setSubmittedPassword(password);
+    pendingPassword.current = password;
+    setSubmitCount((n) => n + 1);
   };
 
-  const isPasswordRequired = query.error?.message === "PASSWORD_REQUIRED";
+  const errorCode = query.error instanceof ShareError ? query.error.code : query.error ? "failed" : undefined;
+  // Keep the form (and the typed password) after a wrong password or a failed attempt, so the
+  // viewer can correct or resubmit it without reloading the page.
+  const isPasswordRequired =
+    errorCode === "password_required" ||
+    errorCode === "invalid_password" ||
+    (errorCode === "failed" && submitCount > 0);
+  const formError = isPasswordRequired && errorCode !== "password_required" ? query.error?.message : undefined;
 
   return (
     <div className="min-h-screen bg-surface-0 text-on-surface flex flex-col items-center p-4 md:p-8">
@@ -104,7 +127,13 @@ export function PublicEvidenceShare() {
                 />
               </Field>
 
-              <Button variant="filled" size="md" type="submit" disabled={!password.trim()}>
+              {formError && (
+                <p role="alert" className="text-sm text-bad">
+                  {formError}
+                </p>
+              )}
+
+              <Button variant="filled" size="md" type="submit" disabled={!password.trim() || query.isFetching}>
                 <Icon icon={Key} size="xs" />
                 <span>Acceder a la evidencia</span>
               </Button>
@@ -225,7 +254,6 @@ export function PublicEvidenceShare() {
                 onClose={() => setPlayerOpen(false)}
                 isPublic={true}
                 shareToken={token}
-                password={submittedPassword}
               />
             )}
           </div>

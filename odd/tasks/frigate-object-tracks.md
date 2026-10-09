@@ -25,9 +25,14 @@ Frigate already provides `data.path_data` (`[[x,y], unix_ts]`, normalized, botto
 - TDD: Strict TDD enabled (source: user global CLAUDE.md). Runners: `go test ./internal/frigate/...` (unit), `go test -race -tags integration ./internal/events/...` (integration, Docker), `pnpm --dir apps/web test` (vitest).
 
 ## Tasks
-- [x] T1 Ingest (commit `5683e09`; integration test run pending): adapter decodes `box`/`path_data`; migration `00039_object_tracks.sql`; syncer upserts tracks for known cameras and holds back the object cursor for open objects. Route: delegated direct (writer trigger: 3+ non-trivial files).
+- [x] T1 Ingest (commit `5683e09`): adapter decodes `box`/`path_data`; migration `00039_object_tracks.sql`; syncer upserts tracks for known cameras and holds back the object cursor for open objects. Route: delegated direct (writer trigger: 3+ non-trivial files).
 - [x] T2 API + manifest: `Event.tracks` in openapi + `make generate`; aggregated subquery in `eventColumns`/`scanEvent`; `toEvent`; export manifest copies tracks. Route: delegated direct (writer trigger).
 - [x] T3 Player: pure helper `apps/web/src/lib/objectTracks.ts` (trail up to t, current position, zone entries via point-in-polygon) with vitest; replace synthetic overlay. Route: delegated direct (writer trigger).
+- [x] T4 Syncer closes stale open reviews: re-check reviews open > 1h against Frigate and close them (Frigate end_time, or last known activity when Frigate no longer has them). Bounded per pull. Route: delegated direct (writer trigger, with T5).
+- [x] T5 Live fallback overlap: `/api/v1/events` optional `overlap=true` matches events overlapping `[from,to)` with the same stale-open rule as the manifest; the player fallback uses it. Route: delegated direct (with T4).
+- [x] T6 Public share links carry tracks: create a share for export `9c39d37c`, open the public endpoint, and confirm the manifest/tracks reach the public player. Route: inline (verification).
+- [x] T7 Freeze camera zones into the export manifest (`manifest.zones[cameraId]`) so public links show zones, zone entries and the touched highlight. Route: delegated direct (writer).
+- [x] T8 Public share password out of URLs: POST validates the password once and sets a short-lived HttpOnly, SameSite=Strict cookie scoped to `/media/v1/public/shares/{token}`; info/video/download accept that cookie and no longer accept `?password=`; returned URLs carry no password; the web public page and player stop putting the password in URLs. Route: delegated direct (writer trigger: gateway + service + 2 web files).
 
 ## Acceptance criteria
 - A tracked object's path_data/box from Frigate is stored and updated until the object ends.
@@ -41,7 +46,18 @@ Frigate already provides `data.path_data` (`[[x,y], unix_ts]`, normalized, botto
 - `go vet ./...`, `pnpm --dir apps/web typecheck`, `pnpm --dir apps/web test`, `pnpm --dir apps/web lint`
 
 ## Delivery
-Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); chain strategy pending user choice before first commit.
+Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk; chain strategy: stacked to the default branch `feat/maps` (origin has no `main`; user chose this). 69 unpushed base commits and 39 local `main` commits ship first as size:exception PRs.
+Slices (PR: head, range, authored lines):
+- #1 `stack/phone-live-and-maps` `origin/feat/maps..3d44726` (10997, exception)
+- #2 `stack/onvif-foundation` `3d44726..f3c89d5` (6210, exception)
+- #3 `stack/agent-tls-provisioning` `f3c89d5..91a1521` (12854, exception)
+- #4 `stack/exports-evidence-player` `91a1521..6cd0c62` (6344, exception)
+- #5 `stack/maps-room-planner` `6cd0c62..3383496` (5444, exception)
+- #6 `feat/object-tracks-1-ingest` `3383496..5683e09` (431)
+- #7 `feat/object-tracks-2-api` `5683e09..b0aa3f2` (232)
+- #8 `feat/object-tracks-3-player` `b0aa3f2..e4965f6` (682, overlay rewrite)
+- #9 `feat/object-tracks-4-stale-reviews` `e4965f6..5d0e64e` (537)
+- #10 `feat/frigate-object-tracks` `5d0e64e..HEAD` (439+)
 
 ## Progress
 - Exploration done (mapper handoff). Branch created.
@@ -68,5 +84,20 @@ Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); 
 - Bug (manifest): stale open events (Frigate reviews never closed, oldest from 2026-09-29) matched every export window. Fix `fee5f6e`: open events count only when they started within 1h of the window (matches the syncer's stale-review limit); query/scan errors are logged instead of dropped; empty index serializes as `[]`. SQL RED/GREEN on the live DB (stale event included → excluded). Verified with new export `9c39d37c`: only the real event remains.
 - Investigated "empty manifest" (morning export `8c850ae2`): not a bug. The job was finalized at 11:19, before manifest events existed (`e993006`, 14:25).
 
+- T5 `9afa0c2`: `overlap=true` on `/api/v1/events`; one `StaleOpenWindow` constant and `AliveAtOrAfter` rule shared with the manifest; the player fallback uses it. Unit RED (`undefined: addTimeFilter`) then GREEN.
+- T4 `5d0e64e`: `closeStaleReviews` re-reads up to 50 open events older than 1h per server and pull via `GET /api/review/{id}` (Frigate docs). 404 closes the event at its last tracked activity; an end time from Frigate is taken via `upsertReview`; other errors are logged and skipped. Unit RED (`a.Review undefined`) then GREEN. Deployed: all 8 stale open events resolved (e.g. the 2026-09-29 event got its real 8m39s end from Frigate).
+- Integration tests `TestStaleOpenReviewsAreResolved` and `TestListEventsOverlap` written, not run (Docker test runs blocked).
+- T6: creating a share returns 500, `relation "export_shares" does not exist`. goose v37 is marked applied at 12:59, but `00037_export_shares.sql` was committed at 13:23 (`553c6b9`): local DB drift. User declined applying it manually.
+- RDD: user declined review for `c175f22..5d0e64e` and the uncommitted workspace candidate.
+
+- T6 unblocked: on user request, applied the `00037_export_shares.sql` Up block manually to the local DB in one transaction (table, indexes, RLS policy; `openvms_app` has INSERT). Temporary 1h share on export `9c39d37c`: public endpoint 200, `job.manifest.events` = 1 with 452 tracks, items = 1. Share revoked afterwards (204; public then 410).
+- T8 `065588a`: share password validated once via POST; HttpOnly, SameSite=Strict cookie scoped to the share path, HMAC keyed by the password hash, 1h capped at share expiry; `?password=` removed. Cookie unit RED (`undefined: shareCookieExpiry`) then GREEN. Deployed smoke: no cookie 401, `?password=` 401, wrong 403, right 200 + cookie, video 206/401, revoked 410. Web suite 943 passed, 2 pre-existing failures.
+- RDD: range `5d0e64e..065588a` medium (slice_budget_reached, 432 lines). User granted; native review approved and acknowledged (`review-6b62d8c8771e93de`). Advisory follow-ups: handler cookie flow and `GetPublicShare` auth switch lack tests; manifest zone lookups run serially (15s each); public page loses the password on retry; test stubs a global without restore. User's maps WIP also reviewed on their grant: approved and acknowledged.
+- Integration tests run: `go test -race -tags integration ./internal/events/` ok (130s), including `TestObjectTracksSync`, `TestStaleOpenReviewsAreResolved`, and `TestListEventsOverlap`; `./internal/media/...` ok. Their RED was never observed (written while Docker runs were blocked).
+- PATCH export smoke (strict handler) on export `9c39d37c`: rename ok, protect ok, a wrong type returns 400 `bad_request`, an unknown id returns 404, and a request with no session returns 401. An empty name is ignored and the current name kept. Restored afterwards.
+- User's maps WIP review: a CRITICAL finding (`revision ?? 1` fabricated an optimistic-concurrency token). With the user's approval, the original guard was restored as the single native correction. Approved and acknowledged (`review-1367d88769009e7d`).
+- Advisory follow-up closed: `share_public_integration_test.go` (integration) covers `GetPublicShare` credentials (password, cookie, cookie for another share, tampered, unprotected, revoked beats cookie, expired) and the HTTP flow (401 without cookie, `?password=` ignored, 403 wrong, 200 + HttpOnly/SameSite=Strict/path-scoped cookie, no password in body, video 206 / download 200 with cookie and 401 without, 410 after revoke). Characterization tests; RED proven by temporarily reading `?password=` and by letting revoked protected shares through.
+- Advisory follow-ups closed: manifest zone lookups run concurrently (`575f283`, up to 8 in flight, 15s each; deployed export `e6f11661` with 4 cameras carries zones); the public share page keeps the form and the typed password after a wrong password or a failed request, and test globals are unstubbed. Range `065588a..575f283` reviewed on user grant: approved and acknowledged (`review-9887fdf910702c2c`).
+
 ## Next step
-Pending: user confirms overlay look; integration tests (user-run); PATCH export (rename/protect) smoke test; optional history backfill; optional overlay render test; PR chain strategy.
+Pending: review and merge PRs #1-#10 in order, retargeting each child to `feat/maps` after its parent merges; optional backfill, overlay render test, and review advisories.

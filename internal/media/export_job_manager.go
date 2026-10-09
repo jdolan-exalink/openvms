@@ -604,6 +604,8 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 		}
 	}
 
+	manifestZones := m.manifestZones(ctx, j.id, items)
+
 	manifestObj := map[string]any{
 		"export_id":           j.id.String(),
 		"name":                j.name,
@@ -615,6 +617,7 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 		"protected":           j.protected,
 		"cameras":             camList,
 		"events":              manifestEvents,
+		"zones":               manifestZones,
 		"total_bytes":         totalBytes,
 		"hashes":              hashes,
 		"integrity_algorithm": "SHA-256",
@@ -634,6 +637,105 @@ WHERE id = $1`, j.id, jobDir, bJSON, totalBytes)
 		return err
 	})
 	m.Log.InfoContext(ctx, "export manager: job finalized", "job_id", j.id, "cameras", len(items), "bytes", totalBytes)
+}
+
+// zonesForManifest keeps only the polygon coordinates of each zone in a Frigate camera config
+// section, exactly as Frigate returns them (comma-separated string or list), so frozen manifests
+// carry no other config. Zones without coordinates are dropped.
+func zonesForManifest(cfg map[string]any) map[string]any {
+	raw, _ := cfg["zones"].(map[string]any)
+	out := map[string]any{}
+	for name, z := range raw {
+		zm, ok := z.(map[string]any)
+		if !ok {
+			continue
+		}
+		if c, ok := zm["coordinates"]; ok && c != nil {
+			out[name] = map[string]any{"coordinates": c}
+		}
+	}
+	return out
+}
+
+// manifestZones freezes each exported camera's Frigate zones, keyed by our camera id. A camera
+// whose zones cannot be read is omitted (with a warning); it never fails the export.
+func (m *ExportJobManager) manifestZones(ctx context.Context, jobID uuid.UUID, items []activeItemRow) map[string]any {
+	if m.Adapters == nil {
+		return map[string]any{}
+	}
+	seen := map[uuid.UUID]bool{}
+	var cams []zoneCamera
+	for _, it := range items {
+		if !seen[it.cameraID] {
+			seen[it.cameraID] = true
+			cams = append(cams, zoneCamera{id: it.cameraID, remoteName: it.remoteName, server: it.serverRow})
+		}
+	}
+	return collectZones(ctx, cams, zoneLookupConcurrency, zoneLookupTimeout,
+		func(zctx context.Context, c zoneCamera) (map[string]any, error) {
+			a, err := m.Adapters.Get(zctx, c.server)
+			if err != nil {
+				return nil, err
+			}
+			cfg, err := a.CameraConfig(zctx, c.remoteName, false)
+			if err != nil {
+				return nil, err
+			}
+			return zonesForManifest(cfg), nil
+		},
+		func(c zoneCamera, err error) {
+			m.Log.WarnContext(ctx, "export manager: camera zones not loaded", "job_id", jobID, "camera_id", c.id, "err", err)
+		})
+}
+
+const (
+	// zoneLookupConcurrency bounds parallel Frigate config reads per export so a large
+	// multi-camera job does not flood one server.
+	zoneLookupConcurrency = 8
+	// zoneLookupTimeout caps each camera's lookup; with lookups in parallel, the manifest
+	// waits roughly one timeout per batch instead of one per camera.
+	zoneLookupTimeout = 15 * time.Second
+)
+
+type zoneCamera struct {
+	id         uuid.UUID
+	remoteName string
+	server     db.FrigateServer
+}
+
+// collectZones runs fetch for each camera with at most limit lookups in flight, each under
+// its own timeout. Cameras that fail are reported through onErr and omitted; cameras
+// without zones are omitted silently.
+func collectZones(ctx context.Context, cams []zoneCamera, limit int, timeout time.Duration,
+	fetch func(context.Context, zoneCamera) (map[string]any, error), onErr func(zoneCamera, error)) map[string]any {
+	out := map[string]any{}
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, max(limit, 1))
+	for _, c := range cams {
+		wg.Add(1)
+		go func(c zoneCamera) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			zctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			z, err := fetch(zctx, c)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				if onErr != nil {
+					onErr(c, err)
+				}
+				return
+			}
+			if len(z) > 0 {
+				out[c.id.String()] = z
+			}
+		}(c)
+	}
+	wg.Wait()
+	return out
 }
 
 func (m *ExportJobManager) failItem(ctx context.Context, itemID uuid.UUID, errMsg string) {
