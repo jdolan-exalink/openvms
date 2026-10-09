@@ -3,7 +3,6 @@ package compose
 import (
 	"crypto/x509"
 	"encoding/pem"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -96,17 +95,8 @@ func TestAPIIsInternalOnlyAndUsesNoHostPortPublication(t *testing.T) {
 	}
 	services := asMap(t, document["services"])
 	api := asMap(t, services["api"])
-	// Only the gRPC control plane (9090) may be published for edge agents;
-	// the HTTP API on 8080 must stay private behind the web proxy.
-	if ports, ok := api["ports"].([]any); ok {
-		for _, port := range ports {
-			if text, isString := port.(string); isString && strings.HasSuffix(text, ":8080") {
-				t.Fatalf("API HTTP must stay private; browser traffic reaches it through the web proxy, got %q", text)
-			}
-			if !strings.HasSuffix(fmt.Sprint(port), ":9090") {
-				t.Fatalf("API may only publish the gRPC control port, got %v", port)
-			}
-		}
+	if _, ok := api["ports"]; ok {
+		t.Fatal("API must stay private; browser traffic reaches it through the web proxy")
 	}
 	web := asMap(t, services["web"])
 	webEnv := asMap(t, web["environment"])
