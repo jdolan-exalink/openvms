@@ -22,14 +22,15 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api, unwrap } from "@/api/client";
+import { api, unwrap, type Schemas } from "@/api/client";
 import { cameraFrigateDocQuery } from "@/api/queries";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { Button, LinkButton } from "@/components/ui";
 import { fmtBytes, fmtDateTime, fmtTime, labelName } from "@/lib/format";
+import { positionAt, trackWindow, trailUntil, zoneEntries, type TrackPoint, type ZoneEntry } from "@/lib/objectTracks";
 import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
-import { parseCoordinates, type Point } from "@/lib/zoneGeometry";
+import { parseCoordinates, pointInPolygon, type Point } from "@/lib/zoneGeometry";
 
 export interface EvidencePlayerCameraItem {
   id: string;
@@ -73,6 +74,20 @@ interface ForensicEvent {
   zones: string[];
   plates?: string[];
   severity?: string;
+  /** Real Frigate trajectories; absent on events exported before tracks were recorded. */
+  tracks?: ObjectTrack[];
+}
+
+type ObjectTrack = Schemas["ObjectTrack"];
+
+interface VisibleTrack {
+  key: string;
+  ev: ForensicEvent;
+  track: ObjectTrack;
+  entries: ZoneEntry[];
+  pos: Point;
+  trail: TrackPoint[];
+  reached: ZoneEntry[];
 }
 
 interface ZoneInfo {
@@ -102,9 +117,24 @@ function formatTime(sec: number): string {
   return `${pad(m)}:${pad(s)}`;
 }
 
+const VEHICLE_LABELS = ["car", "truck", "motorcycle"];
+
+/** Alert red, plate purple, vehicle yellow, anything else cyan. */
+function trackColor(ev: ForensicEvent, label: string): string {
+  if (ev.severity === "alert") return "#ef4444";
+  if (ev.plates && ev.plates.length > 0) return "#a855f7";
+  return VEHICLE_LABELS.includes(label) ? "#eab308" : "#06b6d4";
+}
+
+function trackEmoji(ev: ForensicEvent, label: string): string {
+  if (VEHICLE_LABELS.includes(label)) return "🚗";
+  return ev.severity === "alert" ? "⚠️" : "👤";
+}
+
 /**
- * CameraEvidenceOverlay renders configured Frigate camera zones and a stable event HUD chip,
- * matching Frigate 0.18 event review style without synthetic jumping bounding boxes.
+ * CameraEvidenceOverlay renders configured Frigate camera zones, the real observed path of each
+ * tracked object up to the current playback instant, and a stable event HUD chip. It never draws a
+ * trajectory that Frigate did not report.
  */
 function CameraEvidenceOverlay({
   cameraId,
@@ -175,60 +205,50 @@ function CameraEvidenceOverlay({
     });
   }, [cameraEvents, currentInstantUnix]);
 
-  // Set of zone names touched by active events
+  // Real Frigate tracks of this camera's events and the zones each one entered. Nothing is
+  // synthesized: events without tracks draw no trajectory.
+  const tracked = useMemo(() => {
+    const out: { key: string; ev: ForensicEvent; track: ObjectTrack; entries: ZoneEntry[] }[] = [];
+    for (const ev of cameraEvents) {
+      for (const track of ev.tracks ?? []) {
+        if (track.path.length === 0) continue;
+        out.push({ key: `${ev.id}:${track.object_id}`, ev, track, entries: zoneEntries(track, zones) });
+      }
+    }
+    return out;
+  }, [cameraEvents, zones]);
+
+  // Tracks whose observed time span contains the current instant, with their state at it.
+  const visible = useMemo(() => {
+    const out: VisibleTrack[] = [];
+    for (const item of tracked) {
+      const w = trackWindow(item.track);
+      const pos = positionAt(item.track, currentInstantUnix);
+      if (!w || !pos) continue;
+      out.push({
+        ...item,
+        pos,
+        trail: trailUntil(item.track, currentInstantUnix),
+        reached: item.entries.filter((e) => e.t <= currentInstantUnix),
+      });
+    }
+    return out;
+  }, [tracked, currentInstantUnix]);
+
+  // Zones currently containing a visible object
   const touchedZoneNames = useMemo(() => {
     const s = new Set<string>();
-    activeEvents.forEach((ev) => {
-      (ev.zones || []).forEach((z) => s.add(z));
-    });
+    for (const v of visible) {
+      for (const z of zones) if (z.points.length >= 3 && pointInPolygon(v.pos, z.points)) s.add(z.name);
+    }
     return s;
-  }, [activeEvents]);
+  }, [visible, zones]);
 
-  // Trajectory anchor generator: anchors to touched zones or realistic camera paths
-  const getEventTrajectory = useCallback(
-    (ev: ForensicEvent, evIndex: number): { p0: Point; pEnd: Point } => {
-      const fallback: { p0: Point; pEnd: Point } = {
-        p0: { x: 0.16, y: 0.72 },
-        pEnd: { x: 0.84, y: 0.38 },
-      };
-
-      const defaultTrajectories: { p0: Point; pEnd: Point }[] = [
-        { p0: { x: 0.16, y: 0.72 }, pEnd: { x: 0.84, y: 0.38 } },
-        { p0: { x: 0.22, y: 0.28 }, pEnd: { x: 0.78, y: 0.76 } },
-        { p0: { x: 0.50, y: 0.85 }, pEnd: { x: 0.50, y: 0.22 } },
-        { p0: { x: 0.84, y: 0.65 }, pEnd: { x: 0.16, y: 0.42 } },
-        { p0: { x: 0.18, y: 0.45 }, pEnd: { x: 0.82, y: 0.55 } },
-      ];
-
-      const touched = zones.find((z) => ev.zones?.includes(z.name));
-      if (touched && touched.points.length >= 2) {
-        const p0 = touched.points[0];
-        const pEnd = touched.points[Math.min(touched.points.length - 1, 2)];
-        if (p0 && pEnd) return { p0, pEnd };
-      }
-
-      if (zones.length > 0) {
-        const z = zones[evIndex % zones.length];
-        if (z && z.points.length >= 2) {
-          const p0 = z.points[0];
-          const pEnd = z.points[Math.min(z.points.length - 1, 2)];
-          if (p0 && pEnd) return { p0, pEnd };
-        }
-      }
-
-      const chosen = defaultTrajectories[evIndex % defaultTrajectories.length];
-      return chosen ?? fallback;
-    },
-    [zones]
-  );
-
-  const hasSvgContent =
-    (layers.zones && zones.length > 0) ||
-    (layers.tracking && (activeEvents.length > 0 || cameraEvents.length > 0));
+  const hasSvgContent = (layers.zones && zones.length > 0) || (layers.tracking && visible.length > 0);
 
   return (
     <>
-      {/* SVG Layer: Real Camera Zones & Frigate-Style Object Tracking Trajectories */}
+      {/* SVG Layer: real camera zones and the real observed Frigate object tracks */}
       {hasSvgContent && (
         <svg
           viewBox="0 0 1000 1000"
@@ -239,54 +259,6 @@ function CameraEvidenceOverlay({
             <filter id={`shadow-${cameraId}`} x="-20%" y="-20%" width="140%" height="140%">
               <feDropShadow dx="0" dy="3" stdDeviation="4" floodColor="#000000" floodOpacity="0.85" />
             </filter>
-            <filter id={`glow-touched-${cameraId}`} x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="8" result="blur" />
-              <feComposite in="SourceGraphic" in2="blur" operator="over" />
-            </filter>
-            <marker
-              id={`arrow-cyan-${cameraId}`}
-              viewBox="0 0 20 20"
-              refX="14"
-              refY="10"
-              markerWidth="16"
-              markerHeight="16"
-              orient="auto"
-            >
-              <path d="M 2 4 L 18 10 L 2 16 z" fill="#06b6d4" stroke="#083344" strokeWidth="2" />
-            </marker>
-            <marker
-              id={`arrow-yellow-${cameraId}`}
-              viewBox="0 0 20 20"
-              refX="14"
-              refY="10"
-              markerWidth="16"
-              markerHeight="16"
-              orient="auto"
-            >
-              <path d="M 2 4 L 18 10 L 2 16 z" fill="#eab308" stroke="#422006" strokeWidth="2" />
-            </marker>
-            <marker
-              id={`arrow-purple-${cameraId}`}
-              viewBox="0 0 20 20"
-              refX="14"
-              refY="10"
-              markerWidth="16"
-              markerHeight="16"
-              orient="auto"
-            >
-              <path d="M 2 4 L 18 10 L 2 16 z" fill="#a855f7" stroke="#3b0764" strokeWidth="2" />
-            </marker>
-            <marker
-              id={`arrow-red-${cameraId}`}
-              viewBox="0 0 20 20"
-              refX="14"
-              refY="10"
-              markerWidth="16"
-              markerHeight="16"
-              orient="auto"
-            >
-              <path d="M 2 4 L 18 10 L 2 16 z" fill="#ef4444" stroke="#450a0a" strokeWidth="2" />
-            </marker>
           </defs>
 
           {/* 1. Real Configured Camera Zones with High-Contrast Legible Pills */}
@@ -310,11 +282,10 @@ function CameraEvidenceOverlay({
                 <g key={zone.name} className="transition-all duration-200">
                   <polygon
                     points={pointsStr}
-                    fill={isTouched ? "rgba(239, 68, 68, 0.26)" : "rgba(15, 23, 42, 0.16)"}
+                    fill={isTouched ? "rgba(239, 68, 68, 0.08)" : "none"}
                     stroke={isTouched ? "#ef4444" : zone.color}
-                    strokeWidth={isTouched ? "6" : "3.5"}
+                    strokeWidth={isTouched ? "5" : "3"}
                     strokeDasharray={isTouched ? undefined : "12 6"}
-                    filter={isTouched ? `url(#glow-touched-${cameraId})` : undefined}
                   />
 
                   {/* High-Contrast Crisp Zone Label Pill (Readable at any scale) */}
@@ -355,230 +326,107 @@ function CameraEvidenceOverlay({
               );
             })}
 
-          {/* 2. Frigate-Style Object Tracking: Trajectories & Bounding Boxes */}
-          {layers.tracking && (
-            <>
-              {/* Inactive camera event trajectory paths (Subtle dashed routes) */}
-              {cameraEvents
-                .filter((ev) => !activeEvents.some((ae) => ae.id === ev.id))
-                .slice(0, 6)
-                .map((ev, evIdx) => {
-                  const { p0, pEnd } = getEventTrajectory(ev, evIdx);
-                  const isCar = ev.labels.some(
-                    (l) => l === "car" || l === "truck" || l === "motorcycle"
-                  );
-                  const strokeColor = isCar ? "#eab308" : "#06b6d4";
+          {/* 2. Frigate-style object tracking: real observed path, current position, zone entries */}
+          {layers.tracking &&
+            visible.map(({ key, ev, track, pos, trail, reached }) => {
+              const color = trackColor(ev, track.label);
+              const toPt = (p: { x: number; y: number }) => `${Math.round(p.x * 1000)},${Math.round(p.y * 1000)}`;
+              const start = track.path[0]!;
+              const labelText = ev.plates && ev.plates.length > 0 ? `Patente: ${ev.plates[0]}` : labelName(track.label) || "Objeto";
+              const tagW = Math.max(160, labelText.length * 16 + 50);
+              const cx = Math.round(pos.x * 1000);
+              const cy = Math.round(pos.y * 1000);
+              const tagX = Math.max(15, Math.min(985 - tagW, cx - tagW / 2));
+              const tagY = Math.max(48, cy - 70);
 
-                  return (
-                    <g key={`static-${ev.id}-${evIdx}`} opacity="0.45">
-                      <line
-                        x1={Math.round(p0.x * 1000)}
-                        y1={Math.round(p0.y * 1000)}
-                        x2={Math.round(pEnd.x * 1000)}
-                        y2={Math.round(pEnd.y * 1000)}
-                        stroke={strokeColor}
-                        strokeWidth="4"
-                        strokeDasharray="12 8"
-                      />
-                      <circle
-                        cx={Math.round(p0.x * 1000)}
-                        cy={Math.round(p0.y * 1000)}
-                        r="9"
-                        fill="#ffffff"
-                        stroke={strokeColor}
-                        strokeWidth="3"
-                      />
-                      <circle
-                        cx={Math.round(pEnd.x * 1000)}
-                        cy={Math.round(pEnd.y * 1000)}
-                        r="6"
-                        fill={strokeColor}
-                      />
-                    </g>
-                  );
-                })}
+              return (
+                <g key={key}>
+                  {/* Full observed path, faint */}
+                  <polyline
+                    points={track.path.map(toPt).join(" ")}
+                    fill="none"
+                    stroke={color}
+                    strokeWidth="2"
+                    strokeLinejoin="round"
+                    opacity="0.3"
+                  />
+                  {track.path.map((p, i) => (
+                    <circle key={i} cx={Math.round(p.x * 1000)} cy={Math.round(p.y * 1000)} r="3" fill={color} opacity="0.35" />
+                  ))}
 
-              {/* Active real-time tracked objects & directional trajectory lines */}
-              {activeEvents.map((ev, evIdx) => {
-                const st = new Date(ev.start_time).getTime() / 1000;
-                const rawEt = ev.end_time ? new Date(ev.end_time).getTime() / 1000 : st + 6;
-                const displayDuration = Math.max(8, rawEt - st);
-                const progress = Math.min(1, Math.max(0.1, (currentInstantUnix - st) / displayDuration));
-
-                const { p0, pEnd } = getEventTrajectory(ev, evIdx);
-
-                // Object position along the trajectory line
-                const curX = p0.x + (pEnd.x - p0.x) * progress;
-                const curY = p0.y + (pEnd.y - p0.y) * progress;
-
-                const isCar = ev.labels.some(
-                  (l) => l === "car" || l === "truck" || l === "motorcycle"
-                );
-                const isAlert = ev.severity === "alert";
-                const hasPlate = ev.plates && ev.plates.length > 0;
-
-                const strokeColor = isAlert
-                  ? "#ef4444"
-                  : hasPlate
-                  ? "#a855f7"
-                  : isCar
-                  ? "#eab308"
-                  : "#06b6d4";
-
-                const markerColor = isAlert
-                  ? "red"
-                  : hasPlate
-                  ? "purple"
-                  : isCar
-                  ? "yellow"
-                  : "cyan";
-
-                const fillColor = isAlert
-                  ? "rgba(239, 68, 68, 0.22)"
-                  : hasPlate
-                  ? "rgba(168, 85, 247, 0.22)"
-                  : isCar
-                  ? "rgba(234, 179, 8, 0.22)"
-                  : "rgba(6, 182, 212, 0.22)";
-
-                // Bounding box dimensions in 1000x1000 coordinate space
-                const bw = isCar ? 190 : 130;
-                const bh = isCar ? 130 : 190;
-                const bx = Math.max(15, Math.min(985 - bw, Math.round(curX * 1000 - bw / 2)));
-                const by = Math.max(45, Math.min(985 - bh, Math.round(curY * 1000 - bh / 2)));
-
-                const labelText = hasPlate
-                  ? `Patente: ${ev.plates![0]}`
-                  : ev.labels.length > 0 && ev.labels[0]
-                  ? `${labelName(ev.labels[0])}`
-                  : "Objeto";
-
-                const tagW = Math.max(160, labelText.length * 16 + 50);
-                const tagY = Math.max(48, by - 48);
-
-                return (
-                  <g key={`track-${ev.id}-${evIdx}`}>
-                    {/* Dark shadow stroke underneath the line for maximum contrast */}
-                    <line
-                      x1={Math.round(p0.x * 1000)}
-                      y1={Math.round(p0.y * 1000)}
-                      x2={Math.round(curX * 1000)}
-                      y2={Math.round(curY * 1000)}
-                      stroke="#020617"
-                      strokeWidth="16"
-                      strokeLinecap="round"
-                      opacity="0.8"
-                    />
-
-                    {/* Full projected forward path (dashed line) */}
-                    <line
-                      x1={Math.round(curX * 1000)}
-                      y1={Math.round(curY * 1000)}
-                      x2={Math.round(pEnd.x * 1000)}
-                      y2={Math.round(pEnd.y * 1000)}
-                      stroke={strokeColor}
+                  {/* Traversed part, solid */}
+                  {trail.length > 1 && (
+                    <polyline
+                      points={[...trail, pos].map(toPt).join(" ")}
+                      fill="none"
+                      stroke={color}
                       strokeWidth="4"
-                      strokeDasharray="14 8"
+                      strokeLinejoin="round"
                       strokeLinecap="round"
-                      opacity="0.55"
+                      opacity="0.9"
                     />
-
-                    {/* Active traversed trajectory line with directional arrow */}
-                    <line
-                      x1={Math.round(p0.x * 1000)}
-                      y1={Math.round(p0.y * 1000)}
-                      x2={Math.round(curX * 1000)}
-                      y2={Math.round(curY * 1000)}
-                      stroke={strokeColor}
-                      strokeWidth="10"
-                      strokeLinecap="round"
-                      markerEnd={`url(#arrow-${markerColor}-${cameraId})`}
-                    />
-
-                    {/* Origin waypoint start marker */}
+                  )}
+                  {trail.map((p, i) => (
                     <circle
-                      cx={Math.round(p0.x * 1000)}
-                      cy={Math.round(p0.y * 1000)}
-                      r="14"
-                      fill="#ffffff"
-                      stroke={strokeColor}
-                      strokeWidth="5"
-                      filter={`url(#shadow-${cameraId})`}
-                    />
-                    <circle
-                      cx={Math.round(p0.x * 1000)}
-                      cy={Math.round(p0.y * 1000)}
+                      key={i}
+                      cx={Math.round(p.x * 1000)}
+                      cy={Math.round(p.y * 1000)}
                       r="6"
-                      fill={strokeColor}
+                      fill={color}
+                      stroke="#ffffff"
+                      strokeWidth="1.5"
                     />
+                  ))}
 
-                    {/* Trajectory trail breadcrumb waypoint dots along path */}
-                    {[0.25, 0.5, 0.75].map((step) => {
-                      if (progress < step) return null;
-                      const wx = p0.x + (pEnd.x - p0.x) * step;
-                      const wy = p0.y + (pEnd.y - p0.y) * step;
-                      return (
-                        <circle
-                          key={step}
-                          cx={Math.round(wx * 1000)}
-                          cy={Math.round(wy * 1000)}
-                          r="8"
-                          fill={strokeColor}
-                          stroke="#ffffff"
-                          strokeWidth="2.5"
-                          filter={`url(#shadow-${cameraId})`}
-                        />
-                      );
-                    })}
+                  {/* Start marker */}
+                  <circle
+                    cx={Math.round(start.x * 1000)}
+                    cy={Math.round(start.y * 1000)}
+                    r="12"
+                    fill="#ffffff"
+                    stroke={color}
+                    strokeWidth="4"
+                    filter={`url(#shadow-${cameraId})`}
+                  />
 
-                    {/* Object Bounding Box */}
-                    <rect
-                      x={bx}
-                      y={by}
-                      width={bw}
-                      height={bh}
-                      rx="12"
-                      fill={fillColor}
-                      stroke={strokeColor}
-                      strokeWidth="5"
-                      filter={`url(#shadow-${cameraId})`}
-                    />
+                  {/* Zone entries already reached */}
+                  {reached.map((e) => {
+                    const text = `${e.zone.toUpperCase()} · ${fmtTime(new Date(e.t * 1000))}`;
+                    const w = text.length * 15 + 40;
+                    const ex = Math.round(e.x * 1000);
+                    const ey = Math.round(e.y * 1000);
+                    const px = Math.max(15, Math.min(985 - w, ex - w / 2));
+                    const py = Math.min(940, ey + 22);
+                    return (
+                      <g key={`${e.zone}-${e.t}`}>
+                        <circle cx={ex} cy={ey} r="11" fill="#ffffff" stroke="#dc2626" strokeWidth="5" filter={`url(#shadow-${cameraId})`} />
+                        <g transform={`translate(${px}, ${py})`}>
+                          <rect width={w} height="36" rx="8" fill="rgba(15, 23, 42, 0.95)" stroke="#dc2626" strokeWidth="2.5" filter={`url(#shadow-${cameraId})`} />
+                          <text x="14" y="25" fill="#ffffff" fontSize="20" fontWeight="bold" className="font-mono select-none">
+                            {text}
+                          </text>
+                        </g>
+                      </g>
+                    );
+                  })}
 
-                    {/* Bounding Box Floating Label Pill */}
-                    <g transform={`translate(${bx}, ${tagY})`}>
-                      <rect
-                        x="0"
-                        y="0"
-                        width={tagW}
-                        height="42"
-                        rx="9"
-                        fill="rgba(15, 23, 42, 0.95)"
-                        stroke={strokeColor}
-                        strokeWidth="2.5"
-                        filter={`url(#shadow-${cameraId})`}
-                      />
-                      <text
-                        x="14"
-                        y="28"
-                        fill="#ffffff"
-                        fontSize="22"
-                        fontWeight="bold"
-                        className="font-mono select-none"
-                      >
-                        {isCar ? "🚗" : isAlert ? "⚠️" : "👤"} {labelText}
-                      </text>
-                    </g>
+                  {/* Current position and label */}
+                  <circle cx={cx} cy={cy} r="14" fill={color} stroke="#ffffff" strokeWidth="4" filter={`url(#shadow-${cameraId})`} />
+                  <g transform={`translate(${tagX}, ${tagY})`}>
+                    <rect width={tagW} height="42" rx="9" fill="rgba(15, 23, 42, 0.95)" stroke={color} strokeWidth="2.5" filter={`url(#shadow-${cameraId})`} />
+                    <text x="14" y="28" fill="#ffffff" fontSize="22" fontWeight="bold" className="font-mono select-none">
+                      {trackEmoji(ev, track.label)} {labelText}
+                    </text>
                   </g>
-                );
-              })}
-            </>
-          )}
+                </g>
+              );
+            })}
         </svg>
       )}
 
       {/* Frigate 0.18-style Event Info HUD (Floating chips in top-left corner) */}
       {layers.events && activeEvents.length > 0 && (
-        <div className="absolute top-2.5 left-2.5 z-20 pointer-events-none flex flex-col gap-1.5 max-w-[85%] select-none">
+        <div className="absolute top-2.5 left-2.5 z-20 pointer-events-none flex flex-col gap-1.5 max-w-[60%] select-none">
           {activeEvents.map((ev) => {
             const isAlert = ev.severity === "alert";
             const isCar = ev.labels.some((l) => l === "car" || l === "truck" || l === "motorcycle");
@@ -587,7 +435,7 @@ function CameraEvidenceOverlay({
             return (
               <div
                 key={ev.id}
-                className="flex flex-wrap items-center gap-2 px-2.5 py-1.5 rounded-m3-sm bg-surface-0/90 backdrop-blur-md border border-outline-variant/60 shadow-md text-xs"
+                className="flex flex-wrap items-center gap-1.5 px-2 py-1 rounded-m3-sm bg-surface-0/75 border border-outline-variant/60 shadow-md text-xs"
               >
                 <span
                   className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
@@ -614,6 +462,22 @@ function CameraEvidenceOverlay({
                     <span>{ev.zones.join(", ")}</span>
                   </span>
                 )}
+
+                {visible
+                  .filter((v) => v.ev.id === ev.id)
+                  .flatMap((v) => v.reached)
+                  .sort((a, b) => a.t - b.t)
+                  // Busy scenes keep one long event open: show only the latest entries so the
+                  // chip never grows over the video.
+                  .slice(-3)
+                  .map((e) => (
+                    <span
+                      key={`${e.zone}-${e.t}`}
+                      className="px-1.5 py-0.5 rounded bg-surface-2 text-on-surface-variant border border-outline-variant/40 text-[11px]"
+                    >
+                      Entró a {e.zone} {fmtTime(new Date(e.t * 1000))}
+                    </span>
+                  ))}
               </div>
             );
           })}

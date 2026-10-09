@@ -25,9 +25,9 @@ Frigate already provides `data.path_data` (`[[x,y], unix_ts]`, normalized, botto
 - TDD: Strict TDD enabled (source: user global CLAUDE.md). Runners: `go test ./internal/frigate/...` (unit), `go test -race -tags integration ./internal/events/...` (integration, Docker), `pnpm --dir apps/web test` (vitest).
 
 ## Tasks
-- [ ] T1 Ingest: adapter decodes `box`/`path_data`; migration `00039_object_tracks.sql`; syncer upserts tracks for known cameras and holds back the object cursor for open objects. Route: delegated direct (writer trigger: 3+ non-trivial files).
-- [ ] T2 API + manifest: `Event.tracks` in openapi + `make generate`; aggregated subquery in `eventColumns`/`scanEvent`; `toEvent`; export manifest copies tracks. Route: delegated direct (writer trigger).
-- [ ] T3 Player: pure helper `apps/web/src/lib/objectTracks.ts` (trail up to t, current position, zone entries via point-in-polygon) with vitest; replace synthetic overlay. Route: delegated direct (writer trigger).
+- [x] T1 Ingest (commit `5683e09`; integration test run pending): adapter decodes `box`/`path_data`; migration `00039_object_tracks.sql`; syncer upserts tracks for known cameras and holds back the object cursor for open objects. Route: delegated direct (writer trigger: 3+ non-trivial files).
+- [x] T2 API + manifest: `Event.tracks` in openapi + `make generate`; aggregated subquery in `eventColumns`/`scanEvent`; `toEvent`; export manifest copies tracks. Route: delegated direct (writer trigger).
+- [x] T3 Player: pure helper `apps/web/src/lib/objectTracks.ts` (trail up to t, current position, zone entries via point-in-polygon) with vitest; replace synthetic overlay. Route: delegated direct (writer trigger).
 
 ## Acceptance criteria
 - A tracked object's path_data/box from Frigate is stored and updated until the object ends.
@@ -50,5 +50,17 @@ Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); 
   - `go build ./...`, `go vet`, `go test ./internal/frigate/... ./migrations/...`: ok.
   - Integration: BLOCKED. Pre-existing bug: every integration run fails at migration 00033 (`incompatible server_agent_tls constraints`). Line 107 compares against `length(ca_pem)` after stripping parentheses. Verified by reading the file. Fixing 00033 needs user authorization (writer edit was denied by the permission classifier).
 
+- 00033 fixed with user authorization: commit `31ae85d` (`fix(store)`).
+- T1 committed: `5683e09` (`feat(events)`). Integration test run PENDING (Docker test run denied by permission classifier; user asked to run it). Integration RED was never observed (written while blocked).
+- Deployed to local stack (`make up`), user-requested: migration 39 applied; real Frigate data ingested: 574 tracks, 568 with path, 4 open. Sample rows verified (box `[x,y,w,h]`, path `{x,y,t}`).
+- RDD assess T1 range `3383496..5683e09`: medium, review_due (slice_budget_reached, 431 lines). Consent relayed to user.
+
+- RDD consent: user declined T1 commits review (`declined_this_candidate`, target `sha256:43b1…`) and the uncommitted-workspace candidate (`sha256:fa7e…`, mostly user's maps WIP). Off-path tier medium: writer self-verification (full model) plus parent spot check (build and unit tests re-run). Done.
+- T2+T3 delegated to one writer (sequential).
+- T2: `Event.tracks` (`ObjectTrack`, `TrackPoint`, double floats), `events.TracksSubquery` shared with the export manifest, and `toObjectTracks`. Go RED: `undefined: parseTracks`; GREEN: `TestParseTracks*`, `TestToEventMapsTracks`, `TestToEventTracksNeverNil` pass. Deviation: regenerating `api.gen.go` (it was stale against the spec) forced `UpdateExportJob` onto the strict handler, and the manual chi route was removed. Same logic; errors map through the router's strict error handler. sqlc `models.go` drift was reverted (unrelated).
+- SQL verified against the live DB: 148/812 events from the last 2h carry tracks (ingest started at deploy). EXPLAIN: PK index scan, 31 ms for 300 events.
+- T3: `objectTracks.ts` (`trailUntil`, `positionAt`, `zoneEntries`, `trackWindow`) with 14 vitest tests (RED: module missing; GREEN: 14 passed). Synthetic trajectories removed; real dots, trail, current marker, zone-entry pills, and a touched-zone highlight driven by the interpolated position. No render test for the overlay (typecheck and helper tests only).
+- Checks: `go build`, `go vet`, `go test ./internal/... ./migrations/...` ok; typecheck clean; vitest 942 passed, 2 failed in `Exports.test.tsx`, which fail the same way at HEAD (pre-existing); lint shows no new issues in touched files.
+
 ## Next step
-Resolve the 00033 blocker, run `TestObjectTracksSync` (RED/GREEN), commit T1. Chain strategy still pending.
+Commit T2/T3, redeploy, then the user tests the player. Integration tests pending (user-run). Chain strategy still pending.
