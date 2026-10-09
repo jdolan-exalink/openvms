@@ -26,7 +26,7 @@ Integrate the 7 unmerged commits of `feat/maps-phase2` into `main` through a rev
 
 - [x] M1 Resolve the 8 conflicts, renumber the migration, regenerate code, commit the merge. Route: delegated direct (writer trigger: 7 non-trivial files).
 - [x] M2 Run Go build/vet/tests, web typecheck and suite, and integration tests touching migrations.
-- [ ] M3 Deploy locally with `make up` and smoke the stack, including the new relay service.
+- [x] M3 Deploy locally with `make up` and smoke the stack, including the new relay service.
 - [ ] M4 Push the branch and open the PR against `main`.
 
 ## Acceptance criteria
@@ -54,6 +54,8 @@ Integrate the 7 unmerged commits of `feat/maps-phase2` into `main` through a rev
 - M2: `go test -tags integration ./...` all pass except `TestMapsHierarchyPrivatePlanLifecycle`, which fails identically on `main` (pre-existing). Unit/web results from M1 stand.
 - Notable advisories for follow-up: `GET /api/v1/system/connections` is mounted outside the strict authenticated handler (`internal/api/router.go`); default edge node ID collides across agents; relay sessions unbounded and upstream has no timeout; ticker interval 0 can panic in `internal/mediasession/session.go`.
 
+- M3: first `make up` failed: the live database already had an identical, empty `event_counts_hourly` from an earlier phase2 deploy, so version 40 hit 42P07 and the API crash-looped. Fix `c705d53` makes the migration idempotent (`IF NOT EXISTS`, drop-then-create policy). After redeploy: goose at 40, api/web/worker/relay up, no ERROR logs, web 200, analytics 1d total=2613 and 30d total=32416 (long window now returns data). `GET /api/v1/system/connections` returns 401 unauthenticated, so the review advisory about it is lower risk than flagged. RDD for `c705d53`: medium, under budget (6 lines), pending in slice.
+
 ## Next step
 
-M3: deploy locally (applies migration 00040 on the v39 database) and smoke.
+M4: push and open the PR against `main`.
