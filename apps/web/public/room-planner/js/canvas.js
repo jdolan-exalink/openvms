@@ -980,22 +980,21 @@ const CanvasRenderer = (() => {
   function exportPNG(fitFirst = false) {
     // Always export with light theme for print-friendliness
     const prevTheme = currentTheme;
-    const prevZoom = zoom;
-    const prevOffsetX = offsetX;
-    const prevOffsetY = offsetY;
-    setTheme('light');
-    if (fitFirst) {
-      fitToView();
+    const prevView = { zoom, offsetX, offsetY };
+    try {
+      setTheme('light');
+      if (fitFirst) {
+        fitToView();
+      }
+      render();
+      return canvas.toDataURL('image/png');
+    } finally {
+      // Restore the user's theme and view even when rendering or toDataURL throws
+      // (e.g. a tainted canvas), so a failed export never leaves the editor reframed.
+      setTheme(prevTheme);
+      ({ zoom, offsetX, offsetY } = prevView);
+      render();
     }
-    render();
-    const dataUrl = canvas.toDataURL('image/png');
-    // Restore previous theme and view
-    setTheme(prevTheme);
-    zoom = prevZoom;
-    offsetX = prevOffsetX;
-    offsetY = prevOffsetY;
-    render();
-    return dataUrl;
   }
 
   return {
