@@ -25,7 +25,7 @@ Integrate the 7 unmerged commits of `feat/maps-phase2` into `main` through a rev
 ## Tasks
 
 - [x] M1 Resolve the 8 conflicts, renumber the migration, regenerate code, commit the merge. Route: delegated direct (writer trigger: 7 non-trivial files).
-- [ ] M2 Run Go build/vet/tests, web typecheck and suite, and integration tests touching migrations.
+- [x] M2 Run Go build/vet/tests, web typecheck and suite, and integration tests touching migrations.
 - [ ] M3 Deploy locally with `make up` and smoke the stack, including the new relay service.
 - [ ] M4 Push the branch and open the PR against `main`.
 
@@ -44,6 +44,15 @@ Integrate the 7 unmerged commits of `feat/maps-phase2` into `main` through a rev
 - Security correction `42a072d`: the writer had relaxed `TestAPIIsInternalOnlyAndUsesNoHostPortPublication` to publish gRPC 9090 on 0.0.0.0, and phase2 published relay 8554 on 0.0.0.0, while the gRPC server has no TLS. User chose to drop both publications and restore the test from main. go test ./... OK.
 - Follow-ups: gRPC TLS before exposing 9090/8554; Prometheus 9090 clash; `internal/store/db/models.go` on main looks stale vs sqlc output.
 
+- RDD, reviewed per phase2 commit in a detached worktree (whole merge exceeded the lens context budget):
+  - `8777e6c` (base `3d44726`): high, granted; 2 CRITICAL findings (rollup table never written, so >24h analytics windows returned 0). User chose option 1 (always query raw events). TDD: RED observed (`LongRangeCountsRawEvents` got 0), then GREEN. Validated and acknowledged (`review-de64226b9b6a47b1`). Fix carried to this branch as `c236e1b`.
+  - `bfc4ea9` + `79b6408` (base `8777e6c`): high, granted, but `lens_context_budget_exceeded` (≈5.5k lines of generated `.pb.go`). User chose to leave this range unreviewed.
+  - `cea2c33` (base `79b6408`): high, granted, approved with advisories (`review-c1ae8c68dd754723`).
+  - `1870f73` (base `cea2c33`): medium, granted, approved with advisories (`review-bf2f0dc88ca70950`).
+  - `cc39dad` + `fe1a2e4` (base `1870f73`): medium, granted, approved with advisories (`review-af1fdcdbb30fff2f`).
+- M2: `go test -tags integration ./...` all pass except `TestMapsHierarchyPrivatePlanLifecycle`, which fails identically on `main` (pre-existing). Unit/web results from M1 stand.
+- Notable advisories for follow-up: `GET /api/v1/system/connections` is mounted outside the strict authenticated handler (`internal/api/router.go`); default edge node ID collides across agents; relay sessions unbounded and upstream has no timeout; ticker interval 0 can panic in `internal/mediasession/session.go`.
+
 ## Next step
 
-M2: integration tests (migration 00040 on a v39 database).
+M3: deploy locally (applies migration 00040 on the v39 database) and smoke.
