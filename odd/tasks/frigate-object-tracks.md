@@ -30,7 +30,7 @@ Frigate already provides `data.path_data` (`[[x,y], unix_ts]`, normalized, botto
 - [x] T3 Player: pure helper `apps/web/src/lib/objectTracks.ts` (trail up to t, current position, zone entries via point-in-polygon) with vitest; replace synthetic overlay. Route: delegated direct (writer trigger).
 - [x] T4 Syncer closes stale open reviews: re-check reviews open > 1h against Frigate and close them (Frigate end_time, or last known activity when Frigate no longer has them). Bounded per pull. Route: delegated direct (writer trigger, with T5).
 - [x] T5 Live fallback overlap: `/api/v1/events` optional `overlap=true` matches events overlapping `[from,to)` with the same stale-open rule as the manifest; the player fallback uses it. Route: delegated direct (with T4).
-- [ ] T6 (BLOCKED: local DB lacks `export_shares`; user declined manual 00037 apply) Public share links carry tracks: create a share for export `9c39d37c`, open the public endpoint, and confirm the manifest/tracks reach the public player. Route: inline (verification).
+- [x] T6 Public share links carry tracks: create a share for export `9c39d37c`, open the public endpoint, and confirm the manifest/tracks reach the public player. Route: inline (verification).
 
 ## Acceptance criteria
 - A tracked object's path_data/box from Frigate is stored and updated until the object ends.
@@ -77,5 +77,7 @@ Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); 
 - T6: creating a share returns 500, `relation "export_shares" does not exist`. goose v37 is marked applied at 12:59, but `00037_export_shares.sql` was committed at 13:23 (`553c6b9`): local DB drift. User declined applying it manually.
 - RDD: user declined review for `c175f22..5d0e64e` and the uncommitted workspace candidate.
 
+- T6 unblocked: on user request, applied the `00037_export_shares.sql` Up block manually to the local DB in one transaction (table, indexes, RLS policy; `openvms_app` has INSERT). Temporary 1h share on export `9c39d37c`: public endpoint 200, `job.manifest.events` = 1 with 452 tracks, items = 1. Share revoked afterwards (204; public then 410).
+
 ## Next step
-Pending: integration tests (user-run); PATCH export smoke test; T6 once the local `export_shares` table exists; optional backfill and overlay render test; PR chain strategy.
+Pending: integration tests (user-run); PATCH export smoke test; optional backfill and overlay render test; PR chain strategy.
