@@ -678,7 +678,7 @@
       }
       let pngDataUrl = '';
       try {
-        pngDataUrl = CanvasRenderer.exportPNG();
+        pngDataUrl = CanvasRenderer.exportPNG(true);
       } catch (err) {
         console.error('Error exporting PNG:', err);
       }

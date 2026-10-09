@@ -10,6 +10,17 @@ interface RoomPlannerModalProps {
   onClose: () => void;
 }
 
+function dataUrlToFile(dataUrl: string, filename: string): File {
+  const [header, base64] = dataUrl.split(",");
+  const mime = header?.match(/:(.*?);/)?.[1] || "image/png";
+  const binary = atob(base64 || "");
+  const array = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    array[i] = binary.charCodeAt(i);
+  }
+  return new File([array], filename, { type: mime });
+}
+
 export function RoomPlannerModal({
   initialState,
   mapName,
@@ -48,29 +59,46 @@ export function RoomPlannerModal({
         setError(undefined);
 
         try {
-          let file: File;
-          if (svg && typeof svg === "string" && svg.includes("<svg")) {
+          let file: File | undefined;
+          // Prefer canonical PNG directly from canvas renderer as OpenVMS plan API natively expects PNG,
+          // avoiding SVG browser rasterization quirks or security limits.
+          if (pngDataUrl && typeof pngDataUrl === "string" && pngDataUrl.startsWith("data:image/")) {
+            file = dataUrlToFile(pngDataUrl, `${mapName || "room-plan"}.png`);
+          } else if (svg && typeof svg === "string" && svg.includes("<svg")) {
             const blob = new Blob([svg], { type: "image/svg+xml" });
             file = new File([blob], `${mapName || "room-plan"}.svg`, {
               type: "image/svg+xml",
             });
-          } else if (pngDataUrl && typeof pngDataUrl === "string") {
-            const res = await fetch(pngDataUrl);
-            const blob = await res.blob();
-            file = new File([blob], `${mapName || "room-plan"}.png`, {
-              type: "image/png",
-            });
-          } else {
+          }
+
+          if (!file) {
             throw new Error("No se pudo obtener el gráfico del plano.");
           }
 
-          await onSave(file, state);
+          try {
+            await onSave(file, state);
+          } catch (primaryErr) {
+            // If primary format failed and alternative is available, try fallback
+            if (file.type === "image/png" && svg && typeof svg === "string" && svg.includes("<svg")) {
+              const svgBlob = new Blob([svg], { type: "image/svg+xml" });
+              const svgFile = new File([svgBlob], `${mapName || "room-plan"}.svg`, {
+                type: "image/svg+xml",
+              });
+              await onSave(svgFile, state);
+            } else if (file.type === "image/svg+xml" && pngDataUrl && typeof pngDataUrl === "string" && pngDataUrl.startsWith("data:image/")) {
+              const pngFile = dataUrlToFile(pngDataUrl, `${mapName || "room-plan"}.png`);
+              await onSave(pngFile, state);
+            } else {
+              throw primaryErr;
+            }
+          }
         } catch (cause) {
           setError(
             cause instanceof Error
               ? cause.message
               : "No se pudo guardar el plano diseñado."
           );
+        } finally {
           setSaving(false);
         }
       }

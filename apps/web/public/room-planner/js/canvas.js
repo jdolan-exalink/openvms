@@ -977,14 +977,23 @@ const CanvasRenderer = (() => {
     render();
   }
 
-  function exportPNG() {
+  function exportPNG(fitFirst = false) {
     // Always export with light theme for print-friendliness
     const prevTheme = currentTheme;
+    const prevZoom = zoom;
+    const prevOffsetX = offsetX;
+    const prevOffsetY = offsetY;
     setTheme('light');
+    if (fitFirst) {
+      fitToView();
+    }
     render();
     const dataUrl = canvas.toDataURL('image/png');
-    // Restore previous theme
+    // Restore previous theme and view
     setTheme(prevTheme);
+    zoom = prevZoom;
+    offsetX = prevOffsetX;
+    offsetY = prevOffsetY;
     render();
     return dataUrl;
   }
