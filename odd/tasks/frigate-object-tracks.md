@@ -46,7 +46,18 @@ Frigate already provides `data.path_data` (`[[x,y], unix_ts]`, normalized, botto
 - `go vet ./...`, `pnpm --dir apps/web typecheck`, `pnpm --dir apps/web test`, `pnpm --dir apps/web lint`
 
 ## Delivery
-Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); chain strategy pending user choice before first commit.
+Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk; chain strategy: stacked to the default branch `feat/maps` (origin has no `main`; user chose this). 69 unpushed base commits and 39 local `main` commits ship first as size:exception PRs.
+Slices (PR: head, range, authored lines):
+- #1 `stack/phone-live-and-maps` `origin/feat/maps..3d44726` (10997, exception)
+- #2 `stack/onvif-foundation` `3d44726..f3c89d5` (6210, exception)
+- #3 `stack/agent-tls-provisioning` `f3c89d5..91a1521` (12854, exception)
+- #4 `stack/exports-evidence-player` `91a1521..6cd0c62` (6344, exception)
+- #5 `stack/maps-room-planner` `6cd0c62..3383496` (5444, exception)
+- #6 `feat/object-tracks-1-ingest` `3383496..5683e09` (431)
+- #7 `feat/object-tracks-2-api` `5683e09..b0aa3f2` (232)
+- #8 `feat/object-tracks-3-player` `b0aa3f2..e4965f6` (682, overlay rewrite)
+- #9 `feat/object-tracks-4-stale-reviews` `e4965f6..5d0e64e` (537)
+- #10 `feat/frigate-object-tracks` `5d0e64e..HEAD` (439+)
 
 ## Progress
 - Exploration done (mapper handoff). Branch created.
@@ -87,4 +98,4 @@ Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); 
 - User's maps WIP review: a CRITICAL finding (`revision ?? 1` fabricated an optimistic-concurrency token). With the user's approval, the original guard was restored as the single native correction. Approved and acknowledged (`review-1367d88769009e7d`).
 
 ## Next step
-Pending: PR chain strategy (user decision); optional backfill, overlay render test, and review advisories.
+Pending: review and merge PRs #1-#10 in order, retargeting each child to `feat/maps` after its parent merges; optional backfill, overlay render test, and review advisories.
