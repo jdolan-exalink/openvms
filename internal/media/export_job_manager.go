@@ -604,6 +604,8 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 		}
 	}
 
+	manifestZones := m.manifestZones(ctx, j.id, items)
+
 	manifestObj := map[string]any{
 		"export_id":           j.id.String(),
 		"name":                j.name,
@@ -615,6 +617,7 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 		"protected":           j.protected,
 		"cameras":             camList,
 		"events":              manifestEvents,
+		"zones":               manifestZones,
 		"total_bytes":         totalBytes,
 		"hashes":              hashes,
 		"integrity_algorithm": "SHA-256",
@@ -634,6 +637,53 @@ WHERE id = $1`, j.id, jobDir, bJSON, totalBytes)
 		return err
 	})
 	m.Log.InfoContext(ctx, "export manager: job finalized", "job_id", j.id, "cameras", len(items), "bytes", totalBytes)
+}
+
+// zonesForManifest keeps only the polygon coordinates of each zone in a Frigate camera config
+// section, exactly as Frigate returns them (comma-separated string or list), so frozen manifests
+// carry no other config. Zones without coordinates are dropped.
+func zonesForManifest(cfg map[string]any) map[string]any {
+	raw, _ := cfg["zones"].(map[string]any)
+	out := map[string]any{}
+	for name, z := range raw {
+		zm, ok := z.(map[string]any)
+		if !ok {
+			continue
+		}
+		if c, ok := zm["coordinates"]; ok && c != nil {
+			out[name] = map[string]any{"coordinates": c}
+		}
+	}
+	return out
+}
+
+// manifestZones freezes each exported camera's Frigate zones, keyed by our camera id. A camera
+// whose zones cannot be read is omitted (with a warning); it never fails the export.
+func (m *ExportJobManager) manifestZones(ctx context.Context, jobID uuid.UUID, items []activeItemRow) map[string]any {
+	out := map[string]any{}
+	if m.Adapters == nil {
+		return out
+	}
+	for _, it := range items {
+		if _, done := out[it.cameraID.String()]; done {
+			continue
+		}
+		zctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		a, err := m.Adapters.Get(zctx, it.serverRow)
+		if err == nil {
+			var cfg map[string]any
+			if cfg, err = a.CameraConfig(zctx, it.remoteName, false); err == nil {
+				if z := zonesForManifest(cfg); len(z) > 0 {
+					out[it.cameraID.String()] = z
+				}
+			}
+		}
+		cancel()
+		if err != nil {
+			m.Log.WarnContext(ctx, "export manager: camera zones not loaded", "job_id", jobID, "camera_id", it.cameraID, "err", err)
+		}
+	}
+	return out
 }
 
 func (m *ExportJobManager) failItem(ctx context.Context, itemID uuid.UUID, errMsg string) {
