@@ -19,6 +19,8 @@ type Adapter interface {
 	Capabilities(ctx context.Context) (Capabilities, error)
 	ListCameras(ctx context.Context) ([]Camera, error)
 	Reviews(ctx context.Context, q ReviewQuery) ([]Review, error)
+	// Review reads one review item (GET /api/review/{id}); ErrNotFound when Frigate no longer has it.
+	Review(ctx context.Context, id string) (Review, error)
 	// TrackedObjects lists Frigate "events" (tracked objects), which carry plate reads.
 	TrackedObjects(ctx context.Context, q ObjectQuery) ([]TrackedObject, error)
 	// ReviewThumbnail downloads the thumbnail of a review item.

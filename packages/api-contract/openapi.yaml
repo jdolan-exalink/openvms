@@ -1415,6 +1415,7 @@ paths:
         - { name: plate, in: query, schema: { type: string, maxLength: 20 } }
         - { name: from, in: query, schema: { type: string, format: date-time } }
         - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: overlap, in: query, schema: { type: boolean, default: false }, description: "When true, from/to select events overlapping [from, to) instead of events starting inside it. An event without end_time counts only if it started within one hour before from (older open rows are stale)." }
         - { name: reviewed, in: query, schema: { type: boolean } }
         - { name: has_snapshot, in: query, schema: { type: boolean }, description: "Only events Frigate reported a saved snapshot for on at least one detection." }
         - { name: has_preview, in: query, schema: { type: boolean }, description: "Only events whose preview clip has been copied to central storage." }

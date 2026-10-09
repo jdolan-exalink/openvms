@@ -69,6 +69,13 @@ func (s *Store) Put(r Review) {
 	}
 }
 
+// Delete removes a review, as Frigate does after a restart or retention purge.
+func (s *Store) Delete(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.reviews, id)
+}
+
 func (s *Store) Get(id string) (Review, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -98,7 +98,7 @@ func (h *Handlers) ListEvents(ctx context.Context, r gen.ListEventsRequestObject
 	f := events.Filter{
 		SiteIDs: uuids(p.SiteId), ServerIDs: uuids(p.ServerId), CameraIDs: uuids(p.CameraId),
 		CameraGroupIDs: uuids(p.CameraGroupId),
-		Plate:          deref(p.Plate), From: p.From, To: p.To, Reviewed: p.Reviewed,
+		Plate:          deref(p.Plate), From: p.From, To: p.To, Overlap: deref(p.Overlap), Reviewed: p.Reviewed,
 		HasSnapshot: p.HasSnapshot, HasPreview: p.HasPreview,
 		Cursor: deref(p.Cursor), Limit: deref(p.Limit),
 	}

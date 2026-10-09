@@ -544,6 +544,7 @@ export function EvidencePlayerModal({
             camera_id: cameraIds,
             from: job.start_time,
             to: job.end_time,
+            overlap: true,
             limit: 300,
           },
         },
