@@ -157,9 +157,12 @@ type Filter struct {
 	VehicleColors  []string
 	Severity       string
 	// Plate matches events with a plate containing this text (normalized).
-	Plate       string
-	From        *time.Time
-	To          *time.Time
+	Plate string
+	From  *time.Time
+	To    *time.Time
+	// Overlap makes From/To select events overlapping [From, To) instead of events that start
+	// inside it. Open events count by the StaleOpenWindow rule.
+	Overlap     bool
 	Reviewed    *bool
 	HasSnapshot *bool
 	HasPreview  *bool
@@ -205,6 +208,39 @@ func limit(n int) int {
 		return 500
 	}
 	return n
+}
+
+// StaleOpenWindow is how long an event without end_time is still believed to be running. The
+// syncer stops re-reading reviews open longer than this (see syncReviews and closeStaleReviews), so an older open row is stale and must not match every
+// later time window. The export manifest and the overlap filter of ListEvents share it.
+const StaleOpenWindow = time.Hour
+
+// AliveAtOrAfter is the SQL condition (table alias e) for "the event was running at or after
+// fromExpr", a timestamptz expression: it ended then or later, or it is still open and started
+// within StaleOpenWindow before it.
+func AliveAtOrAfter(fromExpr string) string {
+	return fmt.Sprintf("(e.end_time >= %[1]s OR (e.end_time IS NULL AND e.start_time >= %[1]s::timestamptz - interval '%d seconds'))",
+		fromExpr, int(StaleOpenWindow.Seconds()))
+}
+
+// addTimeFilter applies From/To: events starting inside [From, To), or with Overlap the events
+// overlapping it. The keyset cursor (start_time, id) is unaffected: both modes only filter rows.
+func addTimeFilter(b *sqlArgs, f Filter) {
+	if f.Overlap {
+		if f.From != nil {
+			b.add(AliveAtOrAfter("?"), *f.From)
+		}
+		if f.To != nil {
+			b.add("e.start_time < ?", *f.To)
+		}
+		return
+	}
+	if f.From != nil {
+		b.add("e.start_time >= ?", *f.From)
+	}
+	if f.To != nil {
+		b.add("e.start_time < ?", *f.To)
+	}
 }
 
 // sqlArgs builds a WHERE clause with positional parameters.
@@ -374,12 +410,7 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 		if f.Severity != "" {
 			b.add("e.severity = ?", f.Severity)
 		}
-		if f.From != nil {
-			b.add("e.start_time >= ?", *f.From)
-		}
-		if f.To != nil {
-			b.add("e.start_time < ?", *f.To)
-		}
+		addTimeFilter(&b, f)
 		if f.Reviewed != nil {
 			b.add("e.reviewed = ?", *f.Reviewed)
 		}

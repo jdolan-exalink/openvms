@@ -558,16 +558,17 @@ func (m *ExportJobManager) finalizeJob(ctx context.Context, j activeJobRow, item
 	manifestEvents := []eventManifestItem{}
 
 	if len(camIDs) > 0 {
-		// An event still open is only taken when it started within an hour of the window: the
-		// syncer stops re-reading reviews open longer than that (Frigate restarted mid-review and
-		// never closed them), so older open rows are stale and would leak into every export.
+		// An event still open is only taken when it started within events.StaleOpenWindow of the
+		// window: the syncer stops re-reading reviews open longer than that (Frigate restarted
+		// mid-review and never closed them), so older open rows are stale and would leak into
+		// every export.
 		err := m.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 			rows, qerr := tx.Query(ctx, `
 SELECT e.id, e.camera_id, e.start_time, COALESCE(e.end_time, e.start_time), e.labels, e.zones, e.plates, e.severity,
 `+events.TracksSubquery+`
 FROM events e
 WHERE e.camera_id = ANY($1) AND e.start_time <= $3
-  AND (e.end_time >= $2 OR (e.end_time IS NULL AND e.start_time >= $2::timestamptz - interval '1 hour'))
+  AND `+events.AliveAtOrAfter("$2")+`
 ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 			if qerr != nil {
 				return qerr

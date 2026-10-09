@@ -6406,6 +6406,8 @@ export interface operations {
                 plate?: string;
                 from?: string;
                 to?: string;
+                /** @description When true, from/to select events overlapping [from, to) instead of events starting inside it. An event without end_time counts only if it started within one hour before from (older open rows are stale). */
+                overlap?: boolean;
                 reviewed?: boolean;
                 /** @description Only events Frigate reported a saved snapshot for on at least one detection. */
                 has_snapshot?: boolean;
