@@ -186,6 +186,9 @@ func (s *Syncer) SyncServer(ctx context.Context, srv db.FrigateServer) error {
 		s.recordError(ctx, srv, syncErr)
 		return syncErr
 	}
+	// Last, so a review closed for lack of a Frigate record sees the freshest track activity.
+	// Failures are logged inside; they never fail the pull.
+	s.closeStaleReviews(ctx, srv, a, cams)
 	s.copyThumbnails(ctx, srv, a)
 	return nil
 }
@@ -258,7 +261,7 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	// and never closed them) do not hold the cursor back.
 	var next time.Time
 	var openFrom *time.Time
-	stale := s.clock().Add(-time.Hour)
+	stale := s.clock().Add(-StaleOpenWindow)
 	for _, r := range all {
 		t := fromUnix(r.StartTime)
 		if t.After(next) {

@@ -232,6 +232,12 @@ func (a *v017) Reviews(ctx context.Context, q ReviewQuery) ([]Review, error) {
 	return out, err
 }
 
+func (a *v017) Review(ctx context.Context, id string) (Review, error) {
+	var out Review
+	err := a.c.getJSON(ctx, "/api/review/"+url.PathEscape(id), nil, &out)
+	return out, err
+}
+
 type statsResponse struct {
 	Cameras map[string]struct {
 		CameraFPS    float64 `json:"camera_fps"`

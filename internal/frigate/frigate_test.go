@@ -277,3 +277,29 @@ func TestRestart(t *testing.T) {
 		t.Fatalf("restart failed: %v", err)
 	}
 }
+
+func TestReviewByID(t *testing.T) {
+	cams, _ := frigatemock.ParseCameras("plaza:centro")
+	store := frigatemock.NewStore(10)
+	end := float64(1700000100)
+	store.Put(frigatemock.Review{ID: "r1", Camera: "plaza", StartTime: 1700000000, EndTime: &end, Severity: "alert",
+		Data: frigatemock.ReviewData{Detections: []string{"d1"}, Objects: []string{"person"}}})
+	srv := &frigatemock.Server{Version: "0.17.2-mock", Cameras: cams, Store: store, User: "vms", Password: "pw", RequireAuth: true, StartedAt: time.Now()}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	ctx := context.Background()
+	a, err := Connect(ctx, ConnInfo{BaseURL: ts.URL, Username: "vms", Password: "pw"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := a.Review(ctx, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != "r1" || got.EndTime == nil || *got.EndTime != end || len(got.Data.Detections) != 1 {
+		t.Errorf("decoded review: %+v", got)
+	}
+	if _, err := a.Review(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing review: want ErrNotFound, got %v", err)
+	}
+}
