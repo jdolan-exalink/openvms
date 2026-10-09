@@ -80,6 +80,8 @@ Forecast: ~900 authored changed lines (> 400). Strategy: ask-on-risk (default); 
 - RDD: user declined review for `c175f22..5d0e64e` and the uncommitted workspace candidate.
 
 - T6 unblocked: on user request, applied the `00037_export_shares.sql` Up block manually to the local DB in one transaction (table, indexes, RLS policy; `openvms_app` has INSERT). Temporary 1h share on export `9c39d37c`: public endpoint 200, `job.manifest.events` = 1 with 452 tracks, items = 1. Share revoked afterwards (204; public then 410).
+- T8 `065588a`: share password validated once via POST; HttpOnly, SameSite=Strict cookie scoped to the share path, HMAC keyed by the password hash, 1h capped at share expiry; `?password=` removed. Cookie unit RED (`undefined: shareCookieExpiry`) then GREEN. Deployed smoke: no cookie 401, `?password=` 401, wrong 403, right 200 + cookie, video 206/401, revoked 410. Web suite 943 passed, 2 pre-existing failures.
+- RDD: range `5d0e64e..065588a` medium (slice_budget_reached, 432 lines). User granted; native review approved and acknowledged (`review-6b62d8c8771e93de`). Advisory follow-ups: handler cookie flow and `GetPublicShare` auth switch lack tests; manifest zone lookups run serially (15s each); public page loses the password on retry; test stubs a global without restore. User's maps WIP also reviewed on their grant: approved and acknowledged.
 
 ## Next step
 Pending: integration tests (user-run); PATCH export smoke test; optional backfill and overlay render test; PR chain strategy.
