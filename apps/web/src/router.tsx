@@ -31,12 +31,14 @@ const Channels = lazyRouteComponent(() => import("./routes/Channels"), "Channels
 const Servers = lazyRouteComponent(() => import("./routes/Servers"), "Servers");
 const Sites = lazyRouteComponent(() => import("./routes/Sites"), "Sites");
 const Users = lazyRouteComponent(() => import("./routes/Users"), "Users");
+const PublicEvidenceShare = lazyRouteComponent(() => import("./routes/PublicEvidenceShare"), "PublicEvidenceShare");
 
 export type RouterContext = { queryClient: QueryClient };
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({ component: Outlet });
 
 const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: "/login", component: Login });
+const shareRoute = createRoute({ getParentRoute: () => rootRoute, path: "/share/$token", component: PublicEvidenceShare });
 
 // Everything else needs a session (or an API token); the API still authorizes each request.
 const appRoute = createRoute({
@@ -175,6 +177,7 @@ const cameraFrigateRoute = createRoute({ getParentRoute: () => settingsRoute, pa
 
 export const routeTree = rootRoute.addChildren([
   loginRoute,
+  shareRoute,
   appRoute.addChildren([
     indexRoute,
     liveRoute,

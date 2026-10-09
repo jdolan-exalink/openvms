@@ -2128,6 +2128,123 @@ paths:
         "204": { description: Removed }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/export-jobs:
+    get:
+      tags: [playback]
+      operationId: listExportJobs
+      summary: List multi-camera export jobs
+      responses:
+        "200":
+          description: Export jobs, newest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ExportJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    post:
+      tags: [playback]
+      operationId: createExportJob
+      summary: Create an asynchronous multi-camera export job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateExportJobInput" }
+      responses:
+        "201":
+          description: Started
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportJob" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/export-jobs/{jobId}:
+    parameters:
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [playback]
+      operationId: getExportJob
+      summary: Get details of an export job
+      responses:
+        "200":
+          description: Export job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [playback]
+      operationId: updateExportJob
+      summary: Update an export job (rename or toggle protected)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                protected: { type: boolean }
+      responses:
+        "200":
+          description: Updated export job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportJob" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [playback]
+      operationId: deleteExportJob
+      summary: Delete an export job
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/export-jobs/{jobId}/cancel:
+    parameters:
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [playback]
+      operationId: cancelExportJob
+      summary: Cancel an in-progress export job
+      responses:
+        "200":
+          description: Cancelled export job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/export-jobs/{jobId}/retry:
+    parameters:
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [playback]
+      operationId: retryExportJob
+      summary: Retry a failed export job
+      responses:
+        "200":
+          description: Retried export job
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/alarms:
     get:
       tags: [alarms]
@@ -4481,6 +4598,75 @@ components:
         error: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ExportJobStatus:
+      type: string
+      enum: [queued, preparing, transferring, processing, ready, failed, cancelled, expired]
+    ExportJobItemStatus:
+      type: string
+      enum: [queued, preparing, transferring, processing, ready, failed, cancelled]
+    ExportJobItem:
+      type: object
+      required: [id, job_id, tenant_id, camera_id, camera_name, server_id, server_name, status, progress, error, total_bytes, transferred_bytes, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        job_id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        remote_export_id: { type: string }
+        status: { $ref: "#/components/schemas/ExportJobItemStatus" }
+        progress: { type: number, description: 0 to 100. }
+        error: { type: string }
+        total_bytes: { type: integer, format: int64 }
+        transferred_bytes: { type: integer, format: int64 }
+        remote_path: { type: string }
+        local_path: { type: string }
+        sha256_hash: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ExportJob:
+      type: object
+      required: [id, tenant_id, requested_by, requested_by_name, name, start_time, end_time, status, progress, error, total_bytes, transferred_bytes, speed_bps, eta_seconds, camera_count, protected, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        requested_by: { type: string, format: uuid }
+        requested_by_name: { type: string }
+        name: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        status: { $ref: "#/components/schemas/ExportJobStatus" }
+        progress: { type: number, description: 0 to 100. }
+        error: { type: string }
+        total_bytes: { type: integer, format: int64 }
+        transferred_bytes: { type: integer, format: int64 }
+        speed_bps: { type: number }
+        eta_seconds: { type: integer }
+        camera_count: { type: integer }
+        local_path: { type: string }
+        manifest: { type: object, additionalProperties: true }
+        protected: { type: boolean }
+        expires_at: { type: string, format: date-time }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/ExportJobItem" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateExportJobInput:
+      type: object
+      required: [camera_ids, start_time, end_time]
+      properties:
+        camera_ids:
+          type: array
+          items: { type: string, format: uuid }
+          minItems: 1
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        name: { type: string, maxLength: 200 }
+        protected: { type: boolean }
     AlarmStatus:
       type: string
       enum: [open, acknowledged, assigned, investigating, resolved, closed]

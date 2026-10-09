@@ -189,6 +189,26 @@ export const exportsQuery = queryOptions({
   refetchInterval: (q) => (q.state.data?.some((e) => e.status === "running" || e.status === "pending") ? 3_000 : 30_000),
 });
 
+export const exportJobsQuery = queryOptions({
+  queryKey: ["export-jobs"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/export-jobs")).items,
+  refetchInterval: (q) =>
+    q.state.data?.some((j) => ["queued", "preparing", "transferring", "processing"].includes(j.status))
+      ? 2_000
+      : 30_000,
+});
+
+export const exportJobQuery = (id: string) =>
+  queryOptions({
+    queryKey: ["export-jobs", id],
+    queryFn: async () => unwrap(await api.GET("/api/v1/export-jobs/{jobId}", { params: { path: { jobId: id } } })),
+    enabled: !!id,
+    refetchInterval: (q) =>
+      q.state.data && ["queued", "preparing", "transferring", "processing"].includes(q.state.data.status)
+        ? 2_000
+        : false,
+  });
+
 export const recordingsQuery = (cameraId: string, from: string, to: string) =>
   queryOptions({
     queryKey: ["recordings", cameraId, from, to],
