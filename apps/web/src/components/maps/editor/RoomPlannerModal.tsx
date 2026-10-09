@@ -11,15 +11,27 @@ interface RoomPlannerModalProps {
   onClose: () => void;
 }
 
+// Decodes `data:<mime>[;params][;base64],<payload>`. The payload is base64 only when the
+// header says so; otherwise it is percent-encoded text (RFC 2397).
 function dataUrlToFile(dataUrl: string, filename: string): File {
-  const [header, base64] = dataUrl.split(",");
-  const mime = header?.match(/:(.*?);/)?.[1] || "image/png";
-  const binary = atob(base64 || "");
-  const array = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    array[i] = binary.charCodeAt(i);
+  const comma = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:") || comma < 0) {
+    throw new Error("El gráfico del plano no es un data URL válido.");
   }
-  return new File([array], filename, { type: mime });
+  const params = dataUrl.slice("data:".length, comma).split(";");
+  const mime = params[0] || "image/png";
+  const payload = dataUrl.slice(comma + 1);
+  let bytes: Uint8Array<ArrayBuffer>;
+  if (params.slice(1).some((p) => p.toLowerCase() === "base64")) {
+    const binary = atob(payload);
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+  } else {
+    bytes = new TextEncoder().encode(decodeURIComponent(payload)) as Uint8Array<ArrayBuffer>;
+  }
+  return new File([bytes], filename, { type: mime });
 }
 
 // Only a failure to convert the chosen format justifies retrying with the other one. Server

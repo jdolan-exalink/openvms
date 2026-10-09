@@ -6,13 +6,43 @@ import { RoomPlannerModal } from "./RoomPlannerModal";
 const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>';
 const PNG = "data:image/png;base64,iVBORw0KGgo=";
 
-function savePlan() {
+function savePlan(pngDataUrl = PNG) {
   act(() => {
     window.dispatchEvent(
-      new MessageEvent("message", { data: { type: "OPENVMS_SAVE_PLAN", svg: SVG, pngDataUrl: PNG, state: {} } }),
+      new MessageEvent("message", { data: { type: "OPENVMS_SAVE_PLAN", svg: SVG, pngDataUrl, state: {} } }),
     );
   });
 }
+
+async function bytesOf(file: File): Promise<number[]> {
+  return Array.from(new Uint8Array(await file.arrayBuffer()));
+}
+
+describe("RoomPlannerModal data URL decoding", () => {
+  it("decodes a base64 data URL into the file bytes", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<RoomPlannerModal mapName="Floor" onSave={onSave} onClose={() => {}} />);
+
+    savePlan();
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const file = onSave.mock.calls[0]?.[0] as File;
+    expect(file.type).toBe("image/png");
+    expect(await bytesOf(file)).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  });
+
+  it("decodes a percent-encoded data URL instead of treating it as base64", async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    render(<RoomPlannerModal mapName="Floor" onSave={onSave} onClose={() => {}} />);
+
+    savePlan("data:image/svg+xml;charset=utf-8,%3Csvg%3E%C3%B1%3C%2Fsvg%3E");
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    const file = onSave.mock.calls[0]?.[0] as File;
+    expect(file.type).toBe("image/svg+xml");
+    expect(await bytesOf(file)).toEqual(Array.from(new TextEncoder().encode("<svg>ñ</svg>")));
+  });
+});
 
 describe("RoomPlannerModal save fallback", () => {
   it("shows the server error instead of a retry error after a conflict", async () => {
