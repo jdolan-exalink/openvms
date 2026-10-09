@@ -55,10 +55,36 @@ type Service struct {
 	Binary func() ([]byte, error)
 
 	// Authorization and transport seams prove probe denial before secret access or outbound calls.
-	requireServerManage        func(context.Context, authz.Actor, uuid.UUID) error
-	requireServerConfigSecrets func(context.Context, authz.Actor, uuid.UUID) error
-	loadProbeAgent             func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error)
-	probeRoundTripper          http.RoundTripper
+	requireServerManage            func(context.Context, authz.Actor, uuid.UUID) error
+	requireServerConfigSecrets     func(context.Context, authz.Actor, uuid.UUID) error
+	requireLocalAgentPermissions   func(context.Context, authz.Actor, uuid.UUID) error
+	localAgentTx                   localAgentTx
+	loadProbeAgent                 func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error)
+	probeRoundTripper              http.RoundTripper
+	requireAgentInstallPermissions func(context.Context, authz.Actor, uuid.UUID) error
+	agentInstallExists             func(context.Context, authz.Actor, uuid.UUID) (bool, error)
+	agentInstallBinary             func() ([]byte, error)
+	agentInstallCredentials        func(string) (string, []byte, []byte, error)
+	agentInstallRun                func(context.Context, AgentInstallRequest, func(string)) error
+	agentInstallRegister           func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error
+	agentSSHHostKeyPersist         func(context.Context, authz.Actor, uuid.UUID, string, uint16, string) error
+	agentStatusArtifactLoader      func() (AgentArtifact, error)
+	agentStatusRoundTripper        http.RoundTripper
+	agentStatusArtifactOnce        sync.Once
+	cachedAgentArtifact            AgentArtifact
+	cachedAgentArtifactErr         error
+	agentInstallJobs               map[uuid.UUID]*agentInstallJob
+	agentInstallByServer           map[uuid.UUID]uuid.UUID
+	requireAgentUpdatePermissions  func(context.Context, authz.Actor, uuid.UUID) error
+	loadAgentUpdateRegistration    func(context.Context, authz.Actor, uuid.UUID) (db.ServerAgent, string, error)
+	agentUpdateTLSExists           func(context.Context, authz.Actor, uuid.UUID) (bool, error)
+	agentUpdateTLSConfig           func(context.Context, authz.Actor, uuid.UUID) (AgentTLSConfig, error)
+	agentUpdateBinary              func() ([]byte, error)
+	agentUpdateCredentials         func(string) ([]byte, []byte, error)
+	agentUpdateRun                 func(context.Context, AgentUpdateRequest, func(string)) error
+	agentUpdatePersistTLS          func(context.Context, authz.Actor, db.ServerAgent, uint16, []byte) error
+	agentUpdateVerifyTLS           func(context.Context, authz.Actor, db.ServerAgent, AgentTLSConfig) error
+	agentUpdatePreflightHealth     func(context.Context, string, uint16, string, AgentTLSConfig) error
 
 	mu   sync.Mutex
 	jobs map[uuid.UUID]*job
@@ -74,6 +100,7 @@ func New(inv *inventory.Service, st *store.Store, sealer *secrets.Sealer, log *s
 		Inv: inv, Store: st, Sealer: sealer, Log: log,
 		Dial: dialSSH, Binary: LoadBinary,
 		jobs: map[uuid.UUID]*job{}, byIP: map[string]uuid.UUID{},
+		agentInstallJobs: map[uuid.UUID]*agentInstallJob{}, agentInstallByServer: map[uuid.UUID]uuid.UUID{},
 	}
 }
 

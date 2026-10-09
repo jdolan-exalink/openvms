@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/runtime/types"
 
+	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
@@ -41,6 +42,111 @@ func (h *Handlers) GetServerProvision(ctx context.Context, r gen.GetServerProvis
 		return nil, err
 	}
 	return gen.GetServerProvision200JSONResponse(serverProvision(snap)), nil
+}
+
+func (h *Handlers) InstallServerAgent(ctx context.Context, r gen.InstallServerAgentRequestObject) (gen.InstallServerAgentResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || r.Body.SshPassword == nil {
+		return nil, &provision.ValidationError{Msg: "agent install request is required"}
+	}
+	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
+		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
+	}
+	job, err := h.Provision.StartServerAgentInstall(ctx, a, uuid.UUID(r.ServerId), provision.AgentInstallStartRequest{
+		Host: r.Body.SshHost, Port: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gen.InstallServerAgent202JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func (h *Handlers) GetServerAgentInstallJob(ctx context.Context, r gen.GetServerAgentInstallJobRequestObject) (gen.GetServerAgentInstallJobResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, uuid.UUID(r.ServerId), uuid.UUID(r.JobId))
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetServerAgentInstallJob200JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func (h *Handlers) UpdateServerAgentOverSsh(ctx context.Context, r gen.UpdateServerAgentOverSshRequestObject) (gen.UpdateServerAgentOverSshResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || r.Body.SshPassword == nil {
+		return nil, &provision.ValidationError{Msg: "agent update request is required"}
+	}
+	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
+		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
+	}
+	job, err := h.Provision.StartServerAgentUpdate(ctx, a, uuid.UUID(r.ServerId), provision.AgentUpdateStartRequest{
+		SSHPort: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gen.UpdateServerAgentOverSsh202JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func (h *Handlers) GetServerAgentUpdateJob(ctx context.Context, r gen.GetServerAgentUpdateJobRequestObject) (gen.GetServerAgentUpdateJobResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, uuid.UUID(r.ServerId), uuid.UUID(r.JobId))
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetServerAgentUpdateJob200JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func (h *Handlers) UninstallServerAgentOverSsh(ctx context.Context, r gen.UninstallServerAgentOverSshRequestObject) (gen.UninstallServerAgentOverSshResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || r.Body.SshPassword == nil {
+		return nil, &provision.ValidationError{Msg: "agent uninstall request is required"}
+	}
+	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
+		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
+	}
+	job, err := h.Provision.StartServerAgentUninstall(ctx, a, uuid.UUID(r.ServerId), provision.AgentUninstallStartRequest{
+		SSHPort: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return gen.UninstallServerAgentOverSsh202JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func (h *Handlers) GetServerAgentUninstallJob(ctx context.Context, r gen.GetServerAgentUninstallJobRequestObject) (gen.GetServerAgentUninstallJobResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, uuid.UUID(r.ServerId), uuid.UUID(r.JobId))
+	if err != nil {
+		return nil, err
+	}
+	return gen.GetServerAgentUninstallJob200JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func serverAgentInstallJob(in provision.AgentInstallJob) gen.ServerAgentInstallJob {
+	out := gen.ServerAgentInstallJob{Id: types.UUID(in.ID), Status: gen.ServerAgentInstallJobStatus(in.Status), Stage: gen.ServerAgentInstallJobStage(in.Stage)}
+	if in.Message != "" {
+		message := in.Message
+		out.Message = &message
+	}
+	return out
 }
 
 func (h *Handlers) GetServerAgent(ctx context.Context, r gen.GetServerAgentRequestObject) (gen.GetServerAgentResponseObject, error) {
@@ -98,7 +204,33 @@ func serverProvision(s provision.Snapshot) gen.ServerProvision {
 }
 
 func serverAgent(s provision.AgentView) gen.ServerAgent {
-	out := gen.ServerAgent{Installed: s.Installed, Version: s.Version, CurrentVersion: s.Current, Outdated: s.Outdated, CpuPercent: float32ptr(float32(s.CPUPercent)), MemoryTotalBytes: int64ptr(s.MemoryTotal), MemoryAvailableBytes: int64ptr(s.MemoryAvailable), CctvTotalBytes: int64ptr(s.CCTVTotal), CctvFreeBytes: int64ptr(s.CCTVFree), DatabaseTotalBytes: int64ptr(s.DatabaseTotal), DatabaseFreeBytes: int64ptr(s.DatabaseFree), Coral: boolptr(s.Coral), GpuPresent: boolptr(s.GPUPresent)}
+	out := gen.ServerAgent{Installed: s.Installed, Version: s.Version, CurrentVersion: s.Current, Outdated: s.Outdated, BinaryStatus: gen.ServerAgentBinaryStatus(s.BinaryStatus), BinaryUpgradeAvailable: s.BinaryUpgradeAvailable, MemoryTotalBytes: int64ptr(s.MemoryTotal), MemoryAvailableBytes: int64ptr(s.MemoryAvailable), CctvTotalBytes: int64ptr(s.CCTVTotal), CctvFreeBytes: int64ptr(s.CCTVFree), DatabaseTotalBytes: int64ptr(s.DatabaseTotal), DatabaseFreeBytes: int64ptr(s.DatabaseFree), Coral: boolptr(s.Coral), GpuPresent: boolptr(s.GPUPresent)}
+	if s.CPUAvailable {
+		out.CpuPercent = float32ptr(float32(s.CPUPercent))
+	}
+	if len(s.NetworkInterfaces) > 0 {
+		interfaces := make([]gen.ServerAgentNetworkInterface, 0, len(s.NetworkInterfaces))
+		for _, network := range s.NetworkInterfaces {
+			interfaces = append(interfaces, gen.ServerAgentNetworkInterface{
+				Name: network.Name, RxBytesPerSecond: float32(network.RXBytesPerSecond), TxBytesPerSecond: float32(network.TXBytesPerSecond),
+			})
+		}
+		out.NetworkInterfaces = &interfaces
+	}
+	if s.NetworkSampledAt != nil {
+		out.NetworkSampledAt = s.NetworkSampledAt
+	}
+	if s.BinaryAvailable != nil {
+		identity := serverAgentBinaryIdentity(*s.BinaryAvailable)
+		out.BinaryAvailable = &identity
+	}
+	if s.BinaryObserved != nil {
+		identity := serverAgentBinaryIdentity(*s.BinaryObserved)
+		out.BinaryObserved = &identity
+	}
+	if s.BinaryOutdated != nil {
+		out.BinaryOutdated = s.BinaryOutdated
+	}
 	if s.Variant != "" {
 		out.Variant = &s.Variant
 	}
@@ -113,6 +245,17 @@ func serverAgent(s provision.AgentView) gen.ServerAgent {
 	}
 	if s.Error != "" {
 		out.Error = &s.Error
+	}
+	return out
+}
+
+func serverAgentBinaryIdentity(in agent.BinaryIdentity) gen.ServerAgentBinaryIdentity {
+	out := gen.ServerAgentBinaryIdentity{Sha256: in.SHA256, Architecture: in.Architecture}
+	if in.Version != "" {
+		out.Version = &in.Version
+	}
+	if in.Commit != "" {
+		out.Commit = &in.Commit
 	}
 	return out
 }

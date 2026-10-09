@@ -15,40 +15,55 @@ import (
 
 // AgentView is the live reading shown on the servers screen.
 type AgentView struct {
-	Installed       bool
-	Version         string
-	Current         string
-	Outdated        bool
-	Variant         string
-	NTP             string
-	CPUPercent      float64
-	MemoryTotal     int64
-	MemoryAvailable int64
-	Coral           bool
-	GPUPresent      bool
-	GPUVendor       string
-	GPUName         string
-	CCTVTotal       int64
-	CCTVFree        int64
-	DatabaseTotal   int64
-	DatabaseFree    int64
-	Error           string
+	Installed              bool
+	Version                string
+	Current                string
+	Outdated               bool
+	BinaryStatus           AgentBinaryStatus
+	BinaryAvailable        *agent.BinaryIdentity
+	BinaryObserved         *agent.BinaryIdentity
+	BinaryOutdated         *bool
+	BinaryUpgradeAvailable bool
+	Variant                string
+	NTP                    string
+	CPUPercent             float64
+	CPUAvailable           bool
+	NetworkInterfaces      []agent.NetworkInterface
+	NetworkSampledAt       *time.Time
+	MemoryTotal            int64
+	MemoryAvailable        int64
+	Coral                  bool
+	GPUPresent             bool
+	GPUVendor              string
+	GPUName                string
+	CCTVTotal              int64
+	CCTVFree               int64
+	DatabaseTotal          int64
+	DatabaseFree           int64
+	Error                  string
 }
 
 // AgentStatus polls the edge agent. Servers without one are outdated.
 func (s *Service) AgentStatus(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (AgentView, error) {
-	out := AgentView{Current: agent.Version, Outdated: true}
+	out := AgentView{Current: agent.Version, Outdated: true, BinaryStatus: AgentBinaryNotInstalled}
 	if _, err := s.Inv.GetServer(ctx, actor, serverID); err != nil {
 		return AgentView{}, err
 	}
+	if artifact, err := s.desiredAgentArtifact(); err == nil && validAgentBinaryIdentity(artifact.Identity) {
+		identity := artifact.Identity
+		out.BinaryAvailable = &identity
+		out.BinaryUpgradeAvailable = true
+	}
 	row, err := s.agentRow(ctx, actor, serverID)
 	if errors.Is(err, store.ErrNotFound) {
+		out.BinaryUpgradeAvailable = false
 		return out, nil
 	}
 	if err != nil {
 		return AgentView{}, err
 	}
 	out.Installed = true
+	out.BinaryStatus = AgentBinaryUnknown
 	out.Variant = row.Variant
 	out.Version = row.Version
 	token, err := s.Sealer.Open(row.TokenSealed, row.ServerID[:])
@@ -60,9 +75,19 @@ func (s *Service) AgentStatus(ctx context.Context, actor authz.Actor, serverID u
 	if err != nil {
 		out.Error = err.Error()
 		out.Outdated = true
+		status := classifyAgentBinaryStatus(true, out.BinaryAvailable, nil, true)
+		out.BinaryStatus, out.BinaryOutdated, out.BinaryUpgradeAvailable = status.Status, status.Outdated, status.UpgradeAvailable
 		return out, nil
 	}
 	applySnapshot(&out, snap)
+	if identity, healthErr := s.verifiedAgentBinaryIdentity(ctx, actor, row, string(token)); healthErr == nil {
+		out.BinaryObserved = &identity
+		status := classifyAgentBinaryStatus(true, out.BinaryAvailable, out.BinaryObserved, false)
+		out.BinaryStatus, out.BinaryOutdated, out.BinaryUpgradeAvailable = status.Status, status.Outdated, status.UpgradeAvailable
+	} else {
+		status := classifyAgentBinaryStatus(true, out.BinaryAvailable, nil, errors.Is(healthErr, errAgentHealthUnreachable))
+		out.BinaryStatus, out.BinaryOutdated, out.BinaryUpgradeAvailable = status.Status, status.Outdated, status.UpgradeAvailable
+	}
 	if snap.Version != "" && snap.Version != row.Version {
 		_ = s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 			return q.UpdateServerAgentVersion(ctx, db.UpdateServerAgentVersionParams{ServerID: serverID, Version: snap.Version})
@@ -84,7 +109,7 @@ func (s *Service) UpdateAgent(ctx context.Context, actor authz.Actor, serverID u
 	if err != nil {
 		return AgentView{}, err
 	}
-	binary, err := s.Binary()
+	binary, err := s.loadLegacyAgentUpdateBinary()
 	if err != nil {
 		return AgentView{}, err
 	}
@@ -126,7 +151,15 @@ func applySnapshot(out *AgentView, snap agent.Snapshot) {
 		out.Variant = snap.Variant
 	}
 	out.NTP = snap.NTP
-	out.CPUPercent = snap.CPUPercent
+	if snap.CPUPercent != nil {
+		out.CPUPercent = *snap.CPUPercent
+		out.CPUAvailable = true
+	}
+	out.NetworkInterfaces = append([]agent.NetworkInterface(nil), snap.Network...)
+	if snap.NetworkSampledAt != nil {
+		sampledAt := *snap.NetworkSampledAt
+		out.NetworkSampledAt = &sampledAt
+	}
 	out.MemoryTotal = int64(snap.MemoryTotal)
 	out.MemoryAvailable = int64(snap.MemoryAvailable)
 	out.Coral = snap.Coral

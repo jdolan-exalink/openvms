@@ -3,8 +3,10 @@ package config
 
 import (
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -29,6 +31,8 @@ type Config struct {
 
 	// TrustForwardedFor takes the client IP from X-Forwarded-For (API behind Caddy).
 	TrustForwardedFor bool
+	// CredentialTrustedProxyCIDRs is the explicit peer allowlist for forwarded HTTPS on credential-bearing routes.
+	CredentialTrustedProxyCIDRs []netip.Prefix
 	// HealthInterval is how often the worker polls each Frigate server.
 	HealthInterval time.Duration
 	// EventSyncInterval is how often the worker pulls review items from each Frigate.
@@ -77,30 +81,35 @@ type S3Config struct {
 
 // Load reads the environment. service names the binary for logs and traces.
 func Load(service string) (Config, error) {
+	trustedProxyCIDRs, err := parseCredentialTrustedProxyCIDRs(os.Getenv("CREDENTIAL_TRUSTED_PROXY_CIDRS"))
+	if err != nil {
+		return Config{}, fmt.Errorf("CREDENTIAL_TRUSTED_PROXY_CIDRS is invalid: %w", err)
+	}
 	c := Config{
-		Service:                 service,
-		LogLevel:                str("LOG_LEVEL", "info"),
-		HTTPAddr:                str("HTTP_ADDR", ":8080"),
-		DatabaseURL:             str("DATABASE_URL", ""),
-		MigrateOnStart:          boolean("MIGRATE_ON_START", true),
-		ValkeyAddr:              str("VALKEY_ADDR", "localhost:6379"),
-		NATSURL:                 str("NATS_URL", "nats://localhost:4222"),
-		ShutdownTimeout:         duration("SHUTDOWN_TIMEOUT", 15*time.Second),
-		WorkerURL:               str("WORKER_URL", "http://worker:8081"),
-		TrustForwardedFor:       boolean("TRUST_FORWARDED_FOR", false),
-		HealthInterval:          duration("HEALTH_INTERVAL", 30*time.Second),
-		EventSyncInterval:       duration("EVENT_SYNC_INTERVAL", 5*time.Second),
-		EventBackfill:           duration("EVENT_BACKFILL", 24*time.Hour),
-		SessionTTL:              duration("SESSION_TTL", 12*time.Hour),
-		SessionIdle:             duration("SESSION_IDLE", 2*time.Hour),
-		LoginMaxFailures:        integer("LOGIN_MAX_FAILURES", 5),
-		LoginLockout:            duration("LOGIN_LOCKOUT", 15*time.Minute),
-		LiveAuditWindow:         duration("LIVE_AUDIT_WINDOW", 5*time.Minute),
-		LiveRevalidateInterval:  duration("LIVE_REVALIDATE_INTERVAL", 30*time.Second),
-		LivePingInterval:        duration("LIVE_PING_INTERVAL", 20*time.Second),
-		LivePongWait:            duration("LIVE_PONG_WAIT", 60*time.Second),
-		NotifyDeliveryRetention: duration("NOTIFY_DELIVERY_RETENTION", 30*24*time.Hour),
-		NotifyReadRetention:     duration("NOTIFY_READ_RETENTION", 90*24*time.Hour),
+		CredentialTrustedProxyCIDRs: trustedProxyCIDRs,
+		Service:                     service,
+		LogLevel:                    str("LOG_LEVEL", "info"),
+		HTTPAddr:                    str("HTTP_ADDR", ":8080"),
+		DatabaseURL:                 str("DATABASE_URL", ""),
+		MigrateOnStart:              boolean("MIGRATE_ON_START", true),
+		ValkeyAddr:                  str("VALKEY_ADDR", "localhost:6379"),
+		NATSURL:                     str("NATS_URL", "nats://localhost:4222"),
+		ShutdownTimeout:             duration("SHUTDOWN_TIMEOUT", 15*time.Second),
+		WorkerURL:                   str("WORKER_URL", "http://worker:8081"),
+		TrustForwardedFor:           boolean("TRUST_FORWARDED_FOR", false),
+		HealthInterval:              duration("HEALTH_INTERVAL", 30*time.Second),
+		EventSyncInterval:           duration("EVENT_SYNC_INTERVAL", 5*time.Second),
+		EventBackfill:               duration("EVENT_BACKFILL", 24*time.Hour),
+		SessionTTL:                  duration("SESSION_TTL", 12*time.Hour),
+		SessionIdle:                 duration("SESSION_IDLE", 2*time.Hour),
+		LoginMaxFailures:            integer("LOGIN_MAX_FAILURES", 5),
+		LoginLockout:                duration("LOGIN_LOCKOUT", 15*time.Minute),
+		LiveAuditWindow:             duration("LIVE_AUDIT_WINDOW", 5*time.Minute),
+		LiveRevalidateInterval:      duration("LIVE_REVALIDATE_INTERVAL", 30*time.Second),
+		LivePingInterval:            duration("LIVE_PING_INTERVAL", 20*time.Second),
+		LivePongWait:                duration("LIVE_PONG_WAIT", 60*time.Second),
+		NotifyDeliveryRetention:     duration("NOTIFY_DELIVERY_RETENTION", 30*24*time.Hour),
+		NotifyReadRetention:         duration("NOTIFY_READ_RETENTION", 90*24*time.Hour),
 		Waha: WahaConfig{
 			BaseURL: str("WAHA_BASE_URL", "http://waha:3000"),
 			APIKey:  str("WAHA_API_KEY", ""),
@@ -150,4 +159,32 @@ func integer(key string, def int) int {
 		return def
 	}
 	return v
+}
+
+// parseCredentialTrustedProxyCIDRs parses an explicit, fail-closed allowlist.
+// Empty configuration means no forwarded scheme headers are trusted.
+func parseCredentialTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]netip.Prefix, 0, len(parts))
+	seen := make(map[netip.Prefix]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("empty CIDR entry")
+		}
+		prefix, err := netip.ParsePrefix(part)
+		if err != nil || prefix.Addr().Is4In6() {
+			return nil, fmt.Errorf("invalid CIDR entry")
+		}
+		prefix = prefix.Masked()
+		if _, ok := seen[prefix]; ok {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		out = append(out, prefix)
+	}
+	return out, nil
 }

@@ -21,6 +21,7 @@ type Snapshot struct {
 	CPUModel     string
 	CPUOnline    int
 	CPUPercent   float64
+	CPUAvailable bool
 	MemTotal     uint64
 	MemAvailable uint64
 	DiskPath     string
@@ -51,7 +52,7 @@ func Read(roots Roots) Snapshot {
 	out := Snapshot{DiskPath: roots.Disk}
 	out.CPUModel = cpuModel(roots.Proc)
 	out.CPUOnline = cpuOnline(roots.Proc)
-	out.CPUPercent = cpuPercent(roots.Proc)
+	out.CPUPercent, out.CPUAvailable = cpuPercent(roots.Proc)
 	out.MemTotal, out.MemAvailable = memInfo(roots.Proc)
 	out.DiskTotal, out.DiskFree = disk(roots.Disk)
 	out.GPUs = gpus(roots.DRM)
@@ -91,48 +92,60 @@ func cpuOnline(proc string) int {
 	return n
 }
 
-func cpuPercent(proc string) float64 {
-	a := cpuTimes(proc)
+func cpuPercent(proc string) (float64, bool) {
+	a, ok := cpuTimes(proc)
+	if !ok {
+		return 0, false
+	}
 	time.Sleep(200 * time.Millisecond)
-	b := cpuTimes(proc)
+	b, ok := cpuTimes(proc)
+	if !ok || b.total <= a.total || b.idle < a.idle {
+		return 0, false
+	}
 	idle := b.idle - a.idle
 	total := b.total - a.total
-	if total <= 0 {
-		return 0
+	if idle > total {
+		return 0, false
 	}
 	used := float64(total-idle) / float64(total) * 100
 	if used < 0 {
-		return 0
+		return 0, false
 	}
 	if used > 100 {
-		return 100
+		return 100, true
 	}
-	return used
+	return used, true
 }
 
 type cpuSample struct{ idle, total uint64 }
 
-func cpuTimes(proc string) cpuSample {
+func cpuTimes(proc string) (cpuSample, bool) {
 	b, err := os.ReadFile(filepath.Join(proc, "stat"))
 	if err != nil {
-		return cpuSample{}
+		return cpuSample{}, false
 	}
 	for _, line := range strings.Split(string(b), "\n") {
 		if !strings.HasPrefix(line, "cpu ") {
 			continue
 		}
 		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			return cpuSample{}, false
+		}
 		var total, idle uint64
 		for i := 1; i < len(fields); i++ {
-			v, _ := strconv.ParseUint(fields[i], 10, 64)
+			v, err := strconv.ParseUint(fields[i], 10, 64)
+			if err != nil {
+				return cpuSample{}, false
+			}
 			total += v
 			if i == 4 || i == 5 {
 				idle += v
 			}
 		}
-		return cpuSample{idle: idle, total: total}
+		return cpuSample{idle: idle, total: total}, total > 0
 	}
-	return cpuSample{}
+	return cpuSample{}, false
 }
 
 func memInfo(proc string) (total, available uint64) {

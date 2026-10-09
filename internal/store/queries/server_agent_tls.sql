@@ -15,3 +15,10 @@ ON CONFLICT (server_id) DO UPDATE SET
 
 -- name: DeleteServerAgentTLS :execrows
 DELETE FROM server_agent_tls WHERE server_id = @server_id;
+
+
+-- name: RegisterServerAgentTLSIfAbsent :execrows
+-- SSH agent installation must never overwrite an existing trust anchor.
+INSERT INTO server_agent_tls (server_id, tenant_id, secure_port, trust_mode, ca_pem)
+VALUES (@server_id, @tenant_id, @secure_port, @trust_mode, @ca_pem)
+ON CONFLICT (server_id) DO NOTHING;

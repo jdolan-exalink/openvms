@@ -11,6 +11,7 @@
 FROM golang:1.26-alpine AS build
 ARG APP
 ARG VERSION=dev
+ARG AGENT_VERSION=0.1.1
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 WORKDIR /src
@@ -26,7 +27,15 @@ RUN CGO_ENABLED=0 go build -trimpath \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Commit=${COMMIT} \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
     -o /out/app ./apps/${APP} \
- && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/edge-agent ./apps/edge-agent \
+ && CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Version=${AGENT_VERSION} \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Commit=${COMMIT} \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
+    -o /out/edge-agent ./apps/edge-agent \
+ && sha256sum /out/edge-agent | awk '{print $1}' > /out/edge-agent.sha256 \
+ && go env GOARCH > /out/edge-agent.goarch \
+ && printf '%s' "${AGENT_VERSION}" > /out/edge-agent.version \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/vmsctl ./apps/vmsctl
 
 # The worker links onnxruntime and ships the vehicle-body model. The API stays
@@ -71,5 +80,8 @@ FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 COPY --from=build /out/app /app
 COPY --from=build /out/vmsctl /vmsctl
 COPY --from=build /out/edge-agent /opt/openvms/edge-agent
+COPY --from=build /out/edge-agent.sha256 /opt/openvms/edge-agent.sha256
+COPY --from=build /out/edge-agent.goarch /opt/openvms/edge-agent.goarch
+COPY --from=build /out/edge-agent.version /opt/openvms/edge-agent.version
 USER nonroot:nonroot
 ENTRYPOINT ["/app"]

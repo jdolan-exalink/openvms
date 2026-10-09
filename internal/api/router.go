@@ -9,7 +9,9 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -30,6 +32,8 @@ type Options struct {
 	Queries *db.Queries
 	// TrustForwardedFor takes the client IP from X-Forwarded-For (API behind Caddy).
 	TrustForwardedFor bool
+	// CredentialTrustedProxyCIDRs explicitly authenticates peers allowed to assert forwarded HTTPS for credential install routes.
+	CredentialTrustedProxyCIDRs []netip.Prefix
 	// SessionIdle ends browser sessions after this long without requests.
 	SessionIdle time.Duration
 	// Media serves /media/v1 (live, recordings, snapshots, downloads) behind the same
@@ -51,8 +55,8 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 	}
 
 	r := chi.NewRouter()
-	r.Use(httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
-	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody)
+	r.Use(credentialInstallHTTPS(opts.CredentialTrustedProxyCIDRs), httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
+	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody, validateAgentUpdateBody)
 	if opts.Queries != nil {
 		r.Use(Authenticate(opts.Queries, AuthOptions{IdleTimeout: opts.SessionIdle}))
 	}
@@ -112,6 +116,48 @@ func serveDocs(w http.ResponseWriter, _ *http.Request) {
 <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference@1"></script></body></html>`))
 }
 
+// credentialInstallHTTPS gates only SSH-password installation POSTs. Unlike the
+// global browser cookie helper, this trusts forwarded HTTPS only from an explicitly
+// configured immediate proxy peer and never from the forwarded chain itself.
+func credentialInstallHTTPS(trusted []netip.Prefix) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+			targeted := r.Method == http.MethodPost && len(parts) == 6 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "servers" && parts[4] == "agent" && (parts[5] == "install" || parts[5] == "update-ssh" || parts[5] == "uninstall")
+			if targeted && !credentialInstallHTTPSAllowed(r, trusted) {
+				writeError(w, r, http.StatusForbidden, "secure_transport_required", "agent installation requires HTTPS")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func credentialInstallHTTPSAllowed(r *http.Request, trusted []netip.Prefix) bool {
+	if r.TLS != nil {
+		return true
+	}
+	values := r.Header.Values("X-Forwarded-Proto")
+	if len(values) != 1 || values[0] != "https" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return false
+	}
+	peer, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	peer = peer.Unmap()
+	for _, prefix := range trusted {
+		if prefix.Contains(peer) {
+			return true
+		}
+	}
+	return false
+}
+
 // validateOnvifDiscoveryBody enforces the narrow request contract at runtime; generated
 // OpenAPI decoders do not enforce additionalProperties or body-size limits themselves.
 func validateOnvifDiscoveryBody(next http.Handler) http.Handler {
@@ -168,6 +214,57 @@ const (
 	agentTLSRequestMaxBytes   = 128 << 10
 	onvifProbeRequestMaxBytes = 4096
 )
+
+const agentInstallRequestMaxBytes = 8192
+
+func validateAgentUpdateBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method != http.MethodPost || len(parts) != 6 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "servers" || parts[4] != "agent" || (parts[5] != "update-ssh" && parts[5] != "uninstall") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		limited, err := io.ReadAll(io.LimitReader(r.Body, agentInstallRequestMaxBytes+1))
+		if err != nil || len(limited) > agentInstallRequestMaxBytes {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "agent update request exceeds the size limit")
+			return
+		}
+		dec := json.NewDecoder(bytes.NewReader(limited))
+		dec.DisallowUnknownFields()
+		var body gen.ServerAgentUpdateRequest
+		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF || body.SshPassword == nil || *body.SshPassword == "" || body.SshPort < 1 || body.SshPort > 65535 {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent update request")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(limited))
+		next.ServeHTTP(w, r)
+	})
+}
+
+// validateAgentInstallBody enforces strict bounded JSON. It does not log or retain the body.
+func validateAgentInstallBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		if r.Method != http.MethodPost || len(parts) != 6 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "servers" || parts[4] != "agent" || parts[5] != "install" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		limited, err := io.ReadAll(io.LimitReader(r.Body, agentInstallRequestMaxBytes+1))
+		if err != nil || len(limited) > agentInstallRequestMaxBytes {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "agent install request exceeds the size limit")
+			return
+		}
+		dec := json.NewDecoder(bytes.NewReader(limited))
+		dec.DisallowUnknownFields()
+		var body gen.ServerAgentInstallRequest
+		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent install request")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(limited))
+		next.ServeHTTP(w, r)
+	})
+}
 
 // validateAgentTLSConfigBody bounds and strictly decodes public trust configuration.
 func validateAgentTLSConfigBody(next http.Handler) http.Handler {

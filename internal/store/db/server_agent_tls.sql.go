@@ -43,6 +43,35 @@ func (q *Queries) GetServerAgentTLS(ctx context.Context, serverID uuid.UUID) (Se
 	return i, err
 }
 
+const registerServerAgentTLSIfAbsent = `-- name: RegisterServerAgentTLSIfAbsent :execrows
+INSERT INTO server_agent_tls (server_id, tenant_id, secure_port, trust_mode, ca_pem)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (server_id) DO NOTHING
+`
+
+type RegisterServerAgentTLSIfAbsentParams struct {
+	ServerID   uuid.UUID
+	TenantID   uuid.UUID
+	SecurePort int32
+	TrustMode  string
+	CaPem      *string
+}
+
+// SSH agent installation must never overwrite an existing trust anchor.
+func (q *Queries) RegisterServerAgentTLSIfAbsent(ctx context.Context, arg RegisterServerAgentTLSIfAbsentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, registerServerAgentTLSIfAbsent,
+		arg.ServerID,
+		arg.TenantID,
+		arg.SecurePort,
+		arg.TrustMode,
+		arg.CaPem,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const upsertServerAgentTLS = `-- name: UpsertServerAgentTLS :exec
 INSERT INTO server_agent_tls (server_id, tenant_id, secure_port, trust_mode, ca_pem)
 VALUES ($1, $2, $3, $4, $5)

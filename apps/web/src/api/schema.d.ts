@@ -545,6 +545,141 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/install": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Install the OpenVMS edge agent over SSH
+         * @description Requires servers.manage and servers.config.secrets. The API accepts this password only over direct HTTPS or HTTPS asserted by an explicitly allowlisted immediate proxy. The SSH target and password are transient and never stored or returned. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. Existing agent registrations cannot be replaced.
+         */
+        post: operations["installServerAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/install/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read transient agent install progress
+         * @description Requires both server-scoped permissions. Jobs live only in API memory; missing jobs after process restart have an unknown outcome and are never treated as success.
+         */
+        get: operations["getServerAgentInstallJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/update-ssh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update an existing registered agent and configure HTTPS
+         * @description Requires servers.manage and servers.config.secrets. The registered agent IPv4 and existing bearer are fixed by server registration. The root SSH password is transient. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. HTTPS health is verified before public trust metadata is recorded. Existing TLS-enabled agents are not replaced by this operation.
+         */
+        post: operations["updateServerAgentOverSsh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/update-ssh/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read transient existing-agent update progress
+         * @description Requires both server-scoped permissions. Update jobs live only in API memory; progress contains no credentials or remote command output.
+         */
+        get: operations["getServerAgentUpdateJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/uninstall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Uninstall a registered agent from the host over SSH
+         * @description Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
+         */
+        post: operations["uninstallServerAgentOverSsh"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/servers/{serverId}/agent/uninstall/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Read transient existing-agent uninstall progress
+         * @description Requires both server-scoped permissions. Uninstall jobs live only in API memory; progress contains no credentials or remote command output.
+         */
+        get: operations["getServerAgentUninstallJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/onvif/discover": {
         parameters: {
             query?: never;
@@ -2598,6 +2733,32 @@ export interface components {
             /** @description SHA256 fingerprint seen on first SSH contact. */
             host_key?: string;
         };
+        /** @description The first observed SSH host key is stored for this server, IPv4 and port before password authentication; future changes are rejected. First-use trust-on-first-use does not independently verify server identity. */
+        ServerAgentInstallRequest: {
+            /**
+             * Format: ipv4
+             * @description Explicit SSH target IPv4 literal; never inferred from Frigate URL.
+             */
+            ssh_host: string;
+            ssh_port: number;
+            /** @description Transient root SSH password; never persisted or echoed. */
+            ssh_password: string;
+        };
+        /** @description The first observed SSH host key is stored for this registered server IPv4 and port before password authentication; future changes are rejected. First-use trust-on-first-use does not independently verify server identity. */
+        ServerAgentUpdateRequest: {
+            ssh_port: number;
+            /** @description Transient root SSH password; never persisted or echoed. */
+            ssh_password: string;
+        };
+        ServerAgentInstallJob: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "queued" | "running" | "succeeded" | "failed";
+            /** @enum {string} */
+            stage: "validating" | "connecting" | "transferring" | "activating" | "registering" | "complete" | "failed";
+            message?: string;
+        };
         ServerAgentTLSConfig: {
             secure_port: number;
             /** @enum {string} */
@@ -2665,9 +2826,23 @@ export interface components {
             version: string;
             current_version: string;
             outdated: boolean;
+            binary_status: components["schemas"]["ServerAgentBinaryStatus"];
+            binary_available?: components["schemas"]["ServerAgentBinaryIdentity"];
+            binary_observed?: components["schemas"]["ServerAgentBinaryIdentity"];
+            /** @description Present only when both exact binary digests were verified. */
+            binary_outdated?: boolean;
+            /** @description A user-triggered install or upgrade path is available; this does not imply a known binary mismatch. */
+            binary_upgrade_available: boolean;
             variant?: string;
             ntp?: string;
             cpu_percent?: number;
+            /** @description Per-interface rates; absent for legacy agents or when no valid counter interval is available. Loopback is excluded. */
+            network_interfaces?: components["schemas"]["ServerAgentNetworkInterface"][];
+            /**
+             * Format: date-time
+             * @description UTC time of the latest valid network rate sample.
+             */
+            network_sampled_at?: string;
             /** Format: int64 */
             memory_total_bytes?: number;
             /** Format: int64 */
@@ -2685,6 +2860,24 @@ export interface components {
             /** Format: int64 */
             database_free_bytes?: number;
             error?: string;
+        };
+        ServerAgentNetworkInterface: {
+            name: string;
+            rx_bytes_per_second: number;
+            tx_bytes_per_second: number;
+        };
+        /**
+         * @description Binary lifecycle state; separate from protocol version and the legacy protocol outdated flag.
+         * @enum {string}
+         */
+        ServerAgentBinaryStatus: "not_installed" | "current" | "update_available" | "unknown" | "unreachable";
+        ServerAgentBinaryIdentity: {
+            sha256: string;
+            architecture: string;
+            /** @description Go binary release label; omitted when development or unavailable. */
+            version?: string;
+            /** @description Go VCS revision embedded in these exact binary bytes, when available. */
+            commit?: string;
         };
         Camera: {
             /** Format: uuid */
@@ -5085,6 +5278,177 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    installServerAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentInstallRequest"];
+            };
+        };
+        responses: {
+            /** @description Ephemeral in-memory install job accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getServerAgentInstallJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Install status without credentials or remote output */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateServerAgentOverSsh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Ephemeral in-memory update job accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getServerAgentUpdateJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Update progress without credentials */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uninstallServerAgentOverSsh: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Ephemeral in-memory uninstall job accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getServerAgentUninstallJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Uninstall progress without credentials */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentInstallJob"];
+                };
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];

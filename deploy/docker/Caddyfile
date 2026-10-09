@@ -1,13 +1,20 @@
-# SITE_ADDRESS=":80" serves plain HTTP for local development.
-# Set it to the public hostname (e.g. vms.example.com) and Caddy obtains a TLS certificate.
-{$SITE_ADDRESS::80} {
+# SITE_ADDRESS=:80 keeps the existing local HTTP listener.
+# The separately configured HTTPS listener is available on host port 8443 and
+# uses the operator-bootstrapped certificate for HTTPS_SITE_ADDRESS.
+{
+	auto_https disable_redirects
+	# IP-literal HTTPS clients omit SNI. Select the configured IP-SAN certificate
+	# for those handshakes without weakening certificate verification.
+	default_sni {$HTTPS_SITE_ADDRESS:10.1.1.24}
+}
+
+(openvms_site_routes) {
 	encode zstd gzip
 
 	header {
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
 		X-Frame-Options DENY
-		# /docs loads the API reference renderer from jsdelivr; everything else is same-origin.
 		# /docs loads the API reference renderer from jsdelivr; vector tiles, sprites and
 		# glyphs come from OpenFreeMap (one host; a CSP wildcard does not match the bare
 		# host, so OSM raster fallback keeps both spellings).
@@ -18,6 +25,13 @@
 	@api path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs
 	handle @api {
 		reverse_proxy {$API_UPSTREAM:api:8080}
+	}
+
+	@https_port_hint path /.well-known/openvms-https-port
+	handle @https_port_hint {
+		header Cache-Control no-store
+		header Content-Type text/plain
+		respond {$OPENVMS_WEB_HTTPS_PORT:8443} 200
 	}
 
 	handle {
@@ -38,4 +52,20 @@
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+# Preserve HTTP :80 (host default 8000) for existing local workflows. It does not
+# redirect; credentialed UI actions refuse to submit from this origin.
+{$SITE_ADDRESS::80} {
+	import openvms_site_routes
+}
+
+# Manual TLS prevents Caddy from creating certificates or redirecting the HTTP site.
+# The explicit self-signed/IP-SAN cert must be provisioned out of band and trusted by
+# the operator's browser. TLS is restricted to modern protocol versions.
+{$HTTPS_SITE_ADDRESS:10.1.1.24}:443 {
+	tls /etc/caddy/tls.crt /etc/caddy/tls.key {
+		protocols tls1.2 tls1.3
+	}
+	import openvms_site_routes
 }

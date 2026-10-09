@@ -50,6 +50,12 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", pve.Msg
 	case errors.Is(err, provision.ErrAgentTLSNotConfigured):
 		return http.StatusNotFound, "agent_tls_not_configured", "agent TLS is not configured"
+	case errors.Is(err, provision.ErrAgentInstallJobNotFound):
+		return http.StatusNotFound, "not_found", "agent install job not found"
+	case errors.Is(err, provision.ErrAgentInstallBusy), errors.Is(err, provision.ErrAgentAlreadyProvisioned):
+		return http.StatusConflict, "conflict", "agent is already registered or an install is active"
+	case errors.Is(err, provision.ErrAgentUpdateTLSAlreadyConfigured):
+		return http.StatusConflict, "conflict", "agent TLS configuration changed; refresh server state before retrying"
 	case errors.Is(err, provision.ErrAgentUnprovisioned):
 		return http.StatusNotFound, "agent_unprovisioned", "server has no registered agent"
 	case errors.Is(err, provision.ErrAgentDiscoveryUnsupported):

@@ -713,6 +713,132 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/install:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: installServerAgent
+      summary: Install the OpenVMS edge agent over SSH
+      description: Requires servers.manage and servers.config.secrets. The API accepts this password only over direct HTTPS or HTTPS asserted by an explicitly allowlisted immediate proxy. The SSH target and password are transient and never stored or returned. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. Existing agent registrations cannot be replaced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerAgentInstallRequest" }
+      responses:
+        "202":
+          description: Ephemeral in-memory install job accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/servers/{serverId}/agent/install/{jobId}:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgentInstallJob
+      summary: Read transient agent install progress
+      description: Requires both server-scoped permissions. Jobs live only in API memory; missing jobs after process restart have an unknown outcome and are never treated as success.
+      responses:
+        "200":
+          description: Install status without credentials or remote output
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/update-ssh:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: updateServerAgentOverSsh
+      summary: Update an existing registered agent and configure HTTPS
+      description: Requires servers.manage and servers.config.secrets. The registered agent IPv4 and existing bearer are fixed by server registration. The root SSH password is transient. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. HTTPS health is verified before public trust metadata is recorded. Existing TLS-enabled agents are not replaced by this operation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerAgentUpdateRequest" }
+      responses:
+        "202":
+          description: Ephemeral in-memory update job accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/servers/{serverId}/agent/update-ssh/{jobId}:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgentUpdateJob
+      summary: Read transient existing-agent update progress
+      description: Requires both server-scoped permissions. Update jobs live only in API memory; progress contains no credentials or remote command output.
+      responses:
+        "200":
+          description: Update progress without credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/uninstall:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: uninstallServerAgentOverSsh
+      summary: Uninstall a registered agent from the host over SSH
+      description: Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerAgentUpdateRequest" }
+      responses:
+        "202":
+          description: Ephemeral in-memory uninstall job accepted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/servers/{serverId}/agent/uninstall/{jobId}:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [servers]
+      operationId: getServerAgentUninstallJob
+      summary: Read transient existing-agent uninstall progress
+      description: Requires both server-scoped permissions. Uninstall jobs live only in API memory; progress contains no credentials or remote command output.
+      responses:
+        "200":
+          description: Uninstall progress without credentials
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerAgentInstallJob" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/servers/{serverId}/onvif/discover:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3539,6 +3665,32 @@ components:
         server_id: { type: string, format: uuid }
         error: { type: string }
         host_key: { type: string, description: SHA256 fingerprint seen on first SSH contact. }
+    ServerAgentInstallRequest:
+      type: object
+      additionalProperties: false
+      description: The first observed SSH host key is stored for this server, IPv4 and port before password authentication; future changes are rejected. First-use trust-on-first-use does not independently verify server identity.
+      required: [ssh_host, ssh_port, ssh_password]
+      properties:
+        ssh_host: { type: string, format: ipv4, maxLength: 15, description: Explicit SSH target IPv4 literal; never inferred from Frigate URL. }
+        ssh_port: { type: integer, minimum: 1, maximum: 65535 }
+        ssh_password: { type: string, minLength: 1, maxLength: 4096, writeOnly: true, description: Transient root SSH password; never persisted or echoed. }
+    ServerAgentUpdateRequest:
+      type: object
+      additionalProperties: false
+      description: The first observed SSH host key is stored for this registered server IPv4 and port before password authentication; future changes are rejected. First-use trust-on-first-use does not independently verify server identity.
+      required: [ssh_port, ssh_password]
+      properties:
+        ssh_port: { type: integer, minimum: 1, maximum: 65535 }
+        ssh_password: { type: string, minLength: 1, maxLength: 4096, writeOnly: true, description: Transient root SSH password; never persisted or echoed. }
+    ServerAgentInstallJob:
+      type: object
+      additionalProperties: false
+      required: [id, status, stage]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [queued, running, succeeded, failed] }
+        stage: { type: string, enum: [validating, connecting, transferring, activating, registering, complete, failed] }
+        message: { type: string, maxLength: 200 }
     ServerAgentTLSConfig:
       type: object
       additionalProperties: false
@@ -3639,15 +3791,26 @@ components:
         day: { type: integer, minimum: 0, maximum: 31 }
     ServerAgent:
       type: object
-      required: [installed, version, current_version, outdated]
+      required: [installed, version, current_version, outdated, binary_status, binary_upgrade_available]
       properties:
         installed: { type: boolean }
         version: { type: string }
         current_version: { type: string }
         outdated: { type: boolean }
+        binary_status: { $ref: "#/components/schemas/ServerAgentBinaryStatus" }
+        binary_available: { $ref: "#/components/schemas/ServerAgentBinaryIdentity" }
+        binary_observed: { $ref: "#/components/schemas/ServerAgentBinaryIdentity" }
+        binary_outdated: { type: boolean, description: "Present only when both exact binary digests were verified." }
+        binary_upgrade_available: { type: boolean, description: "A user-triggered install or upgrade path is available; this does not imply a known binary mismatch." }
         variant: { type: string }
         ntp: { type: string }
         cpu_percent: { type: number }
+        network_interfaces:
+          type: array
+          maxItems: 256
+          items: { $ref: "#/components/schemas/ServerAgentNetworkInterface" }
+          description: "Per-interface rates; absent for legacy agents or when no valid counter interval is available. Loopback is excluded."
+        network_sampled_at: { type: string, format: date-time, description: "UTC time of the latest valid network rate sample." }
         memory_total_bytes: { type: integer, format: int64 }
         memory_available_bytes: { type: integer, format: int64 }
         coral: { type: boolean }
@@ -3659,6 +3822,25 @@ components:
         database_total_bytes: { type: integer, format: int64 }
         database_free_bytes: { type: integer, format: int64 }
         error: { type: string }
+    ServerAgentNetworkInterface:
+      type: object
+      required: [name, rx_bytes_per_second, tx_bytes_per_second]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        rx_bytes_per_second: { type: number, minimum: 0 }
+        tx_bytes_per_second: { type: number, minimum: 0 }
+    ServerAgentBinaryStatus:
+      type: string
+      enum: [not_installed, current, update_available, unknown, unreachable]
+      description: "Binary lifecycle state; separate from protocol version and the legacy protocol outdated flag."
+    ServerAgentBinaryIdentity:
+      type: object
+      required: [sha256, architecture]
+      properties:
+        sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+        architecture: { type: string, maxLength: 32 }
+        version: { type: string, maxLength: 256, description: "Go binary release label; omitted when development or unavailable." }
+        commit: { type: string, maxLength: 256, description: "Go VCS revision embedded in these exact binary bytes, when available." }
     Camera:
       type: object
       required: [id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, status, group_ids, folder_id, sort_order, default_live_quality, description, location, tags, created_at, updated_at]
