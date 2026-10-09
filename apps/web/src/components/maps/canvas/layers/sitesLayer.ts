@@ -99,6 +99,7 @@ export function buildSiteLayers(): LayerSpecification[] {
     source: SITES_SOURCE_ID,
     layout: {
       "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Regular"],
       "text-offset": [0, 2],
       "text-anchor": "top",
       "text-size": 12,

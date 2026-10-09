@@ -15,9 +15,11 @@ import {
   rebasePlacement,
   updateStagedPosition,
   stagePlacement,
+  unstagePlacement,
   type DraftPlacement,
   type DraftState,
 } from "@/lib/maps/placementDraft";
+import { unplaceFloorCamera } from "@/lib/maps/floorEditor";
 import { canvasDropPoint } from "@/lib/maps/editorInteractions";
 import { frameCameras, loadGeoView, MAP_SIDEBAR_PADDING, saveGeoView } from "@/lib/maps/mapView";
 import { savePlacements } from "@/lib/maps/placements";
@@ -392,6 +394,28 @@ function MapShellContent({
       (next, entityId) => rebasePlacement(next, entityId, fresh.entities.find((e) => e.id === entityId)?.revision),
       prev,
     ));
+  };
+
+  const handleUnplaceCamera = async (cameraId: string) => {
+    if (!currentSite) return;
+    setSaveError(undefined);
+    if (draft.entries[cameraId]) {
+      setDraft((prev) => unstagePlacement(prev, cameraId));
+      if (activeDraftId === cameraId) setActiveDraftId(undefined);
+      if (armedCameraId === cameraId) setArmedCameraId(undefined);
+    }
+    const placed = baseCameras.find((c) => c.id === cameraId);
+    if (placed) {
+      try {
+        await unplaceFloorCamera(cameraId, placed.revision);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["maps", "sites", currentSite.id, "entities"] }),
+          queryClient.invalidateQueries({ queryKey: ["maps", "unplaced", currentSite.id] }),
+        ]);
+      } catch (err) {
+        setSaveError(err instanceof Error ? err.message : String(err));
+      }
+    }
   };
 
   // --- Zone editor (M-W9) --------------------------------------------------------------
@@ -965,7 +989,7 @@ function MapShellContent({
             </div>
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="min-h-0 flex-1 p-2">
-                <MapEditSidebar cameras={editCameras} folders={treeFolders} servers={treeServers} armedId={armedCameraId} onArm={setArmedCameraId} />
+                <MapEditSidebar cameras={editCameras} folders={treeFolders} servers={treeServers} armedId={armedCameraId} onArm={setArmedCameraId} onUnplace={handleUnplaceCamera} />
               </div>
               <div className="max-h-[48%] shrink-0 overflow-auto bg-surface-2">
                 <ZonesPanel

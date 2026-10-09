@@ -77,6 +77,7 @@ export function buildCameraLayers(): LayerSpecification[] {
     filter: ["has", "point_count"],
     layout: {
       "text-field": "{point_count_abbreviated}",
+      "text-font": ["Noto Sans Bold"],
       "text-size": 12,
       "text-offset": [0, 0.65],
       "text-allow-overlap": true,
@@ -94,6 +95,7 @@ export function buildCameraLayers(): LayerSpecification[] {
     filter: ["all", ["has", "point_count"], [">", ["get", "alarms"], 0]],
     layout: {
       "text-field": ["concat", "!", ["to-string", ["get", "alarms"]]],
+      "text-font": ["Noto Sans Bold"],
       "text-size": 10,
       "text-offset": [1.4, -1.4],
       "text-allow-overlap": true,
@@ -183,6 +185,7 @@ export function buildCameraLayers(): LayerSpecification[] {
     filter: ["!", ["has", "point_count"]],
     layout: {
       "text-field": ["get", "name"],
+      "text-font": ["Noto Sans Regular"],
       "text-offset": [0, 1.8],
       "text-anchor": "top",
       "text-size": 11,
@@ -213,6 +216,7 @@ export function buildCameraLayers(): LayerSpecification[] {
     filter: ["all", ["!", ["has", "point_count"]], [">", ["get", "alarms"], 0]],
     layout: {
       "text-field": ["concat", "!", ["to-string", ["get", "alarms"]]],
+      "text-font": ["Noto Sans Bold"],
       "text-size": 10, "text-offset": [-1.4, -1.4], "text-allow-overlap": true,
     },
     paint: { "text-color": palette.onMarker, "text-halo-color": palette.bad, "text-halo-width": 3 },

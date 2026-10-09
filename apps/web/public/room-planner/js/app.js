@@ -1,0 +1,732 @@
+/**
+ * app.js - Entry point. Initializes everything, wires up events and UI.
+ */
+
+(function () {
+  'use strict';
+
+  // ===== DOM References =====
+  const canvas = document.getElementById('planner-canvas');
+  const canvasContainer = document.getElementById('canvas-container');
+  const propsContent = document.getElementById('props-content');
+  const roomsList = document.getElementById('rooms-list');
+  const roomsSummary = document.getElementById('rooms-summary');
+  const fileInput = document.getElementById('file-input');
+  const snapCheckbox = document.getElementById('snap-enabled');
+
+  // ===== Theme =====
+  const THEME_KEY = 'roomPlanner_theme'; // localStorage key
+
+  /** Determine the effective theme based on saved preference or OS setting. */
+  function getEffectiveTheme() {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved === 'dark' || saved === 'light') return saved;
+    // Follow OS preference
+    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  /** Apply theme to DOM and canvas renderer. */
+  function applyTheme(theme) {
+    const root = document.documentElement;
+    const saved = localStorage.getItem(THEME_KEY);
+    if (saved) {
+      // Explicit user preference — set data-theme so it overrides the media query
+      root.setAttribute('data-theme', theme);
+    } else {
+      // No explicit preference — remove data-theme so CSS media query drives it
+      root.removeAttribute('data-theme');
+    }
+    CanvasRenderer.setTheme(theme);
+    Model.setRoomPalette(theme === 'dark' ? Model.ROOM_COLORS_DARK : Model.ROOM_COLORS);
+    Model.recalcRooms();
+    CanvasRenderer.render();
+  }
+
+  /** Toggle between light and dark and persist the choice. */
+  function toggleTheme() {
+    const current = getEffectiveTheme();
+    const next = current === 'dark' ? 'light' : 'dark';
+    localStorage.setItem(THEME_KEY, next);
+    applyTheme(next);
+  }
+
+  // Listen for OS theme changes (only affects users who haven't explicitly toggled)
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (!saved) {
+      applyTheme(getEffectiveTheme());
+    }
+  });
+
+  // ===== Init modules =====
+  CanvasRenderer.init(canvas);
+
+  // Apply theme immediately after canvas init (before first render)
+  applyTheme(getEffectiveTheme());
+
+  function requestRender() {
+    CanvasRenderer.render();
+  }
+
+  Tools.init(requestRender);
+
+  // Load saved state
+  const loaded = Storage.load();
+  if (!loaded) {
+    // Push initial empty state to history
+    History.push();
+  }
+
+  // ===== Canvas Event Binding =====
+  // Use pointer events for reliable pan/drag in modern browsers (Chrome, Edge, etc.)
+  canvasContainer.addEventListener('pointerdown', (e) => Tools.onMouseDown(e));
+  canvasContainer.addEventListener('pointermove', (e) => Tools.onMouseMove(e));
+  canvasContainer.addEventListener('pointerup', (e) => Tools.onMouseUp(e));
+  canvasContainer.addEventListener('wheel', (e) => Tools.onWheel(e), { passive: false });
+  canvasContainer.addEventListener('dblclick', (e) => Tools.onDblClick(e));
+  canvasContainer.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  // Prevent Chrome auto-scroll on middle-click
+  canvasContainer.addEventListener('mousedown', (e) => {
+    if (e.button === 1) e.preventDefault();
+  });
+
+  // Window-level events for key, pointer move (pan outside canvas) and pointer up.
+  // The pointermove handler only forwards events that originate outside the canvas
+  // container, so that normal in-canvas moves aren't processed twice.
+  window.addEventListener('pointermove', (e) => {
+    if (!canvasContainer.contains(e.target)) Tools.onMouseMove(e);
+  });
+  window.addEventListener('pointerup', (e) => Tools.onMouseUp(e));
+  window.addEventListener('keydown', (e) => handleKeyDown(e));
+  window.addEventListener('keyup', (e) => Tools.onKeyUp(e));
+
+  // Resize handler
+  window.addEventListener('resize', () => {
+    CanvasRenderer.resize();
+    requestRender();
+  });
+
+  // ===== Toolbar Buttons =====
+
+  // Tool buttons
+  document.querySelectorAll('.tool-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tool = btn.dataset.tool;
+      Tools.setTool(tool);
+    });
+  });
+
+  // Tool change callback - update active button
+  Tools.onToolChange((tool) => {
+    document.querySelectorAll('.tool-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tool === tool);
+    });
+    updateCursorClass(tool);
+  });
+
+  function updateCursorClass(tool) {
+    canvasContainer.className = '';
+    canvasContainer.classList.add('cursor-' + tool);
+  }
+
+  // Selection change callback - update properties panel
+  Tools.onSelectionChange((sel) => {
+    updatePropertiesPanel(sel);
+  });
+
+  // Model change callback - update rooms list
+  Tools.onModelChange(() => {
+    updateRoomsList();
+  });
+
+  // Undo/Redo
+  document.getElementById('btn-undo').addEventListener('click', () => {
+    History.undo();
+    requestRender();
+    updateRoomsList();
+  });
+
+  document.getElementById('btn-redo').addEventListener('click', () => {
+    History.redo();
+    requestRender();
+    updateRoomsList();
+  });
+
+  // Save/Load/Export
+  document.getElementById('btn-save').addEventListener('click', () => {
+    Storage.exportJSON();
+    showToast('Plan exported as JSON');
+  });
+
+  document.getElementById('btn-load').addEventListener('click', () => {
+    fileInput.click();
+  });
+
+  fileInput.addEventListener('change', async (e) => {
+    if (e.target.files.length > 0) {
+      try {
+        await Storage.importJSON(e.target.files[0]);
+        requestRender();
+        updateRoomsList();
+        showToast('Plan loaded successfully');
+      } catch (err) {
+        showToast('Failed to load file: ' + err.message);
+      }
+      fileInput.value = ''; // Reset
+    }
+  });
+
+  document.getElementById('btn-export-png').addEventListener('click', () => {
+    Storage.exportPNG();
+    showToast('Plan exported as PNG');
+  });
+
+  document.getElementById('btn-export-svg').addEventListener('click', () => {
+    SvgExport.exportSVG();
+    showToast('Plan exported as SVG');
+  });
+
+  document.getElementById('btn-fit-view').addEventListener('click', () => {
+    CanvasRenderer.fitToView();
+    document.getElementById('zoom-display').textContent =
+      Math.round(CanvasRenderer.getZoom() * 100) + '%';
+  });
+
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    if (confirm('Clear the entire plan? This cannot be undone.')) {
+      History.push();
+      Model.clear();
+      History.clear();
+      Storage.clearStorage();
+      Storage.setBaseName(null);
+      Tools.select(null);
+      requestRender();
+      updatePropertiesPanel(null);
+      updateRoomsList();
+      showToast('Plan cleared');
+    }
+  });
+
+  // Snap toggle
+  snapCheckbox.addEventListener('change', () => {
+    Tools.setSnapEnabled(snapCheckbox.checked);
+  });
+
+  // Theme toggle
+  document.getElementById('btn-theme-toggle').addEventListener('click', toggleTheme);
+
+  // Collapsible shortcuts panel
+  const SHORTCUTS_KEY = 'roomPlanner_shortcutsCollapsed';
+  const shortcutsToggle = document.getElementById('shortcuts-toggle');
+  const shortcutsList = shortcutsToggle.nextElementSibling;
+
+  function setShortcutsCollapsed(collapsed) {
+    shortcutsToggle.classList.toggle('collapsed', collapsed);
+    shortcutsList.classList.toggle('collapsed', collapsed);
+    localStorage.setItem(SHORTCUTS_KEY, collapsed ? '1' : '0');
+  }
+
+  // Restore state: default to collapsed if no saved preference
+  {
+    const saved = localStorage.getItem(SHORTCUTS_KEY);
+    const collapsed = saved === null ? true : saved === '1';
+    setShortcutsCollapsed(collapsed);
+  }
+
+  shortcutsToggle.addEventListener('click', () => {
+    setShortcutsCollapsed(!shortcutsToggle.classList.contains('collapsed'));
+  });
+
+  // History change callback
+  History.onChange(() => {
+    updateRoomsList();
+    Storage.autoSave();
+  });
+
+  // ===== Keyboard Shortcuts =====
+
+  function handleKeyDown(e) {
+    // Don't handle shortcuts when typing in an input
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+      return;
+    }
+
+    // Pass to tools for Space key
+    Tools.onKeyDown(e);
+
+    // Ctrl shortcuts
+    if (e.ctrlKey || e.metaKey) {
+      switch (e.key.toLowerCase()) {
+        case 'z':
+          e.preventDefault();
+          History.undo();
+          requestRender();
+          updateRoomsList();
+          return;
+        case 'y':
+          e.preventDefault();
+          History.redo();
+          requestRender();
+          updateRoomsList();
+          return;
+        case 's':
+          e.preventDefault();
+          Storage.exportJSON();
+          showToast('Plan exported as JSON');
+          return;
+      }
+    }
+
+    switch (e.key.toLowerCase()) {
+      case 'v':
+        Tools.setTool('select');
+        break;
+      case 'h':
+        Tools.setTool('grab');
+        break;
+      case 'w':
+        Tools.setTool('wall');
+        break;
+      case 'd':
+        Tools.setTool('door');
+        break;
+      case 'n':
+        Tools.setTool('window');
+        break;
+      case 'l':
+        Tools.setTool('label');
+        break;
+      case 'f':
+        CanvasRenderer.fitToView();
+        document.getElementById('zoom-display').textContent =
+          Math.round(CanvasRenderer.getZoom() * 100) + '%';
+        break;
+      case 'g':
+        snapCheckbox.checked = !snapCheckbox.checked;
+        Tools.setSnapEnabled(snapCheckbox.checked);
+        showToast('Snap ' + (snapCheckbox.checked ? 'enabled' : 'disabled'));
+        break;
+      case 'escape':
+        Tools.cancelCurrentAction();
+        Tools.select(null);
+        requestRender();
+        updatePropertiesPanel(null);
+        break;
+      case 'delete':
+      case 'backspace':
+        if (e.target === document.body) {
+          e.preventDefault();
+          Tools.deleteSelected();
+          updatePropertiesPanel(null);
+          updateRoomsList();
+        }
+        break;
+    }
+  }
+
+  // ===== Properties Panel =====
+
+  function updatePropertiesPanel(sel) {
+    if (!sel) {
+      propsContent.innerHTML = '<p class="props-hint">Select an element to edit its properties, or use a tool to start drawing.</p>';
+      return;
+    }
+
+    let html = '';
+
+    switch (sel.type) {
+      case 'wall': {
+        const wall = Model.getWall(sel.id);
+        if (!wall) break;
+        const len = Geometry.segmentLength(wall.x1, wall.y1, wall.x2, wall.y2);
+        html = `
+          <div class="prop-field"><label>Type</label><span class="prop-value">Wall</span></div>
+          <div class="prop-field"><label>Length</label><span class="prop-value">${(len / 100).toFixed(2)} m</span></div>
+          <div class="prop-field">
+            <label>Thickness</label>
+            <input type="number" id="prop-thickness" value="${wall.thickness}" min="5" max="100" step="5">
+            <span class="prop-unit">cm</span>
+          </div>
+          <div class="prop-field">
+            <label>Color</label>
+            <input type="color" id="prop-wall-color" value="${escapeHtml(wall.color)}">
+          </div>
+          <div class="prop-field">
+            <label></label>
+            <button class="prop-btn danger" id="prop-delete">Delete Wall</button>
+          </div>
+        `;
+        break;
+      }
+      case 'door': {
+        const door = Model.getDoor(sel.id);
+        if (!door) break;
+        html = `
+          <div class="prop-field"><label>Type</label><span class="prop-value">Door</span></div>
+          <div class="prop-field">
+            <label>Width</label>
+            <input type="number" id="prop-door-width" value="${door.width}" min="40" max="200" step="5">
+            <span class="prop-unit">cm</span>
+          </div>
+          <div class="prop-field">
+            <label>Swing</label>
+            <select id="prop-door-direction">
+              <option value="left" ${door.openDirection === 'left' ? 'selected' : ''}>Left</option>
+              <option value="right" ${door.openDirection === 'right' ? 'selected' : ''}>Right</option>
+            </select>
+          </div>
+          <div class="prop-field">
+            <label></label>
+            <button class="prop-btn danger" id="prop-delete">Delete Door</button>
+          </div>
+        `;
+        break;
+      }
+      case 'window': {
+        const win = Model.getWindow(sel.id);
+        if (!win) break;
+        html = `
+          <div class="prop-field"><label>Type</label><span class="prop-value">Window</span></div>
+          <div class="prop-field">
+            <label>Width</label>
+            <input type="number" id="prop-win-width" value="${win.width}" min="30" max="300" step="10">
+            <span class="prop-unit">cm</span>
+          </div>
+          <div class="prop-field">
+            <label></label>
+            <button class="prop-btn danger" id="prop-delete">Delete Window</button>
+          </div>
+        `;
+        break;
+      }
+      case 'label': {
+        const label = Model.getLabel(sel.id);
+        if (!label) break;
+        html = `
+          <div class="prop-field"><label>Type</label><span class="prop-value">Label</span></div>
+          <div class="prop-field">
+            <label>Text</label>
+            <input type="text" id="prop-label-text" value="${escapeHtml(label.text)}">
+          </div>
+          <div class="prop-field">
+            <label>Size</label>
+            <input type="number" id="prop-label-size" value="${label.fontSize}" min="8" max="48" step="1">
+            <span class="prop-unit">px</span>
+          </div>
+          <div class="prop-field">
+            <label>Color</label>
+            <input type="color" id="prop-label-color" value="${escapeHtml(label.color)}">
+          </div>
+          <div class="prop-field">
+            <label></label>
+            <button class="prop-btn danger" id="prop-delete">Delete Label</button>
+          </div>
+        `;
+        break;
+      }
+      case 'room': {
+        const room = Model.rooms.find(r => r.key === sel.key);
+        if (!room) break;
+        const areaSqM = room.area / 10000;
+        html = `
+          <div class="prop-field"><label>Type</label><span class="prop-value">Room</span></div>
+          <div class="prop-field"><label>Area</label><span class="prop-value">${areaSqM.toFixed(1)} m&sup2;</span></div>
+          <div class="prop-field">
+            <label>Name</label>
+            <input type="text" id="prop-room-label" value="${escapeHtml(room.label || '')}">
+          </div>
+          <div class="prop-field">
+            <label>Color</label>
+            <input type="color" id="prop-room-color" value="${escapeHtml(room.color)}">
+          </div>
+        `;
+        break;
+      }
+    }
+
+    propsContent.innerHTML = html;
+
+    // Bind property change events
+    bindPropertyEvents(sel);
+  }
+
+  function bindPropertyEvents(sel) {
+    // Delete button
+    const delBtn = document.getElementById('prop-delete');
+    if (delBtn) {
+      delBtn.addEventListener('click', () => {
+        Tools.deleteSelected();
+        updatePropertiesPanel(null);
+        updateRoomsList();
+      });
+    }
+
+    switch (sel.type) {
+      case 'wall': {
+        bindInput('prop-thickness', (v, commit) => {
+          if (commit) History.push();
+          Model.updateWall(sel.id, { thickness: safeInt(v, Model.getWall(sel.id)?.thickness ?? 20) });
+          Storage.autoSave();
+          requestRender();
+        });
+        bindInput('prop-wall-color', (v, commit) => {
+          if (commit) History.push();
+          Model.updateWall(sel.id, { color: v });
+          Storage.autoSave();
+          requestRender();
+        });
+        break;
+      }
+      case 'door': {
+        bindInput('prop-door-width', (v, commit) => {
+          if (commit) History.push();
+          Model.updateDoor(sel.id, { width: safeInt(v, Model.getDoor(sel.id)?.width ?? 80) });
+          Storage.autoSave();
+          requestRender();
+        });
+        bindInput('prop-door-direction', (v, commit) => {
+          if (commit) History.push();
+          Model.updateDoor(sel.id, { openDirection: v });
+          Storage.autoSave();
+          requestRender();
+        });
+        break;
+      }
+      case 'window': {
+        bindInput('prop-win-width', (v, commit) => {
+          if (commit) History.push();
+          Model.updateWindow(sel.id, { width: safeInt(v, Model.getWindow(sel.id)?.width ?? 100) });
+          Storage.autoSave();
+          requestRender();
+        });
+        break;
+      }
+      case 'label': {
+        bindInput('prop-label-text', (v, commit) => {
+          if (commit) History.push();
+          Model.updateLabel(sel.id, { text: v });
+          Storage.autoSave();
+          requestRender();
+        });
+        bindInput('prop-label-size', (v, commit) => {
+          if (commit) History.push();
+          Model.updateLabel(sel.id, { fontSize: safeInt(v, Model.getLabel(sel.id)?.fontSize ?? 14) });
+          Storage.autoSave();
+          requestRender();
+        });
+        bindInput('prop-label-color', (v, commit) => {
+          if (commit) History.push();
+          Model.updateLabel(sel.id, { color: v });
+          Storage.autoSave();
+          requestRender();
+        });
+        break;
+      }
+      case 'room': {
+        bindInput('prop-room-label', (v, commit) => {
+          if (commit) History.push();
+          Model.updateRoomMeta(sel.key, { label: v });
+          Storage.autoSave();
+          requestRender();
+          updateRoomsList();
+        });
+        bindInput('prop-room-color', (v, commit) => {
+          if (commit) History.push();
+          Model.updateRoomMeta(sel.key, { color: v });
+          Storage.autoSave();
+          requestRender();
+          updateRoomsList();
+        });
+        break;
+      }
+    }
+  }
+
+  function bindInput(id, onChange) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (el.type === 'color') {
+      // Live preview on 'input' (no history push), commit on 'change'.
+      // Push history snapshot on the FIRST input event (before the model is modified),
+      // so that undo restores the state prior to the entire color drag.
+      let dirty = false;
+      el.addEventListener('input', () => {
+        if (!dirty) {
+          History.push(); // snapshot pre-edit state once
+          dirty = true;
+        }
+        onChange(el.value, false);
+      });
+      el.addEventListener('change', () => {
+        if (!dirty) {
+          // change fired without prior input (e.g. some mobile browsers) —
+          // push history and update the model so the change isn't lost.
+          History.push();
+          onChange(el.value, false);
+        }
+        Storage.autoSave();
+        dirty = false;
+      });
+    } else {
+      // For text, number, select: only commit on 'change' (blur/Enter)
+      el.addEventListener('change', () => onChange(el.value, true));
+    }
+  }
+
+  // ===== Rooms List =====
+
+  function updateRoomsList() {
+    const rooms = Model.rooms;
+    if (rooms.length === 0) {
+      roomsList.innerHTML = '<p class="props-hint">Closed wall shapes will appear here as rooms.</p>';
+      updateRoomsSummary(rooms);
+      return;
+    }
+
+    let html = '';
+    rooms.forEach((room, i) => {
+      const areaSqM = room.area / 10000;
+      const sel = CanvasRenderer.getSelection();
+      const isSelected = sel && sel.type === 'room' && sel.key === room.key;
+      const name = room.label || `Room ${i + 1}`;
+      html += `
+        <div class="room-item${isSelected ? ' selected' : ''}" data-room-key="${escapeHtml(room.key)}">
+          <div class="room-color-swatch" style="background: ${escapeHtml(room.color)}"></div>
+          <span class="room-name">${escapeHtml(name)}</span>
+          <span class="room-area">${areaSqM.toFixed(1)} m&sup2;</span>
+        </div>
+      `;
+    });
+    roomsList.innerHTML = html;
+
+    // Bind click
+    roomsList.querySelectorAll('.room-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const key = item.dataset.roomKey;
+        Tools.select({ type: 'room', key });
+        updatePropertiesPanel({ type: 'room', key });
+        updateRoomsList();
+        requestRender();
+      });
+    });
+
+    updateRoomsSummary(rooms);
+  }
+
+  function updateRoomsSummary(rooms) {
+    // Nothing to show if no rooms exist
+    if (rooms.length === 0) {
+      roomsSummary.innerHTML = '';
+      return;
+    }
+
+    const totalArea = rooms.reduce((sum, r) => sum + r.area, 0) / 10000;
+    roomsSummary.innerHTML = `
+      <div class="summary-row">
+        <span class="summary-label">Total</span>
+        <span class="summary-value">${totalArea.toFixed(1)} m&sup2;</span>
+      </div>
+    `;
+  }
+
+  // ===== Toast =====
+
+  function showToast(message) {
+    // Remove existing toast
+    const existing = document.querySelector('.toast');
+    if (existing) existing.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    requestAnimationFrame(() => {
+      toast.classList.add('show');
+    });
+
+    setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => toast.remove(), 300);
+    }, 2000);
+  }
+
+  // ===== Utility =====
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  /** Parse an integer, returning fallback if the result is NaN */
+  function safeInt(value, fallback) {
+    const n = parseInt(value, 10);
+    return isNaN(n) ? fallback : n;
+  }
+
+  // ===== OpenVMS Integration =====
+  const btnSaveOpenVMS = document.getElementById('btn-save-openvms');
+  if (btnSaveOpenVMS) {
+    btnSaveOpenVMS.addEventListener('click', () => {
+      let svg = '';
+      try {
+        svg = SvgExport.buildSVG();
+      } catch (err) {
+        console.error('Error building SVG:', err);
+      }
+      let pngDataUrl = '';
+      try {
+        pngDataUrl = CanvasRenderer.exportPNG();
+      } catch (err) {
+        console.error('Error exporting PNG:', err);
+      }
+      const state = Model.getState();
+      showToast('Aplicando plano a OpenVMS...');
+      window.parent.postMessage({
+        type: 'OPENVMS_SAVE_PLAN',
+        svg: svg,
+        pngDataUrl: pngDataUrl,
+        state: state
+      }, '*');
+    });
+  }
+
+  const btnCloseOpenVMS = document.getElementById('btn-close-openvms');
+  if (btnCloseOpenVMS) {
+    btnCloseOpenVMS.addEventListener('click', () => {
+      window.parent.postMessage({ type: 'OPENVMS_CLOSE_PLANNER' }, '*');
+    });
+  }
+
+  window.addEventListener('message', (event) => {
+    if (event.data && event.data.type === 'OPENVMS_LOAD_PLAN') {
+      if (event.data.state && typeof event.data.state === 'object') {
+        try {
+          Model.setState(event.data.state);
+          History.push();
+          requestRender();
+          setTimeout(() => {
+            CanvasRenderer.fitToView();
+            requestRender();
+          }, 50);
+          showToast('Plano previo cargado');
+        } catch (err) {
+          console.warn('Error loading plan from parent:', err);
+        }
+      }
+    }
+  });
+
+  // Signal parent that planner is initialized and ready
+  try {
+    window.parent.postMessage({ type: 'OPENVMS_PLANNER_READY' }, '*');
+  } catch (_) {}
+
+  // ===== Initial Render =====
+  updateCursorClass('select');
+  updateRoomsList();
+  requestRender();
+
+})();

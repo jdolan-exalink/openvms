@@ -248,6 +248,7 @@ export function buildMapStyle(provider: MapProviderConfig, theme: ThemeColors = 
         "source-layer": "places",
         layout: {
           "text-field": ["get", "name"],
+          "text-font": ["Noto Sans Regular"],
           "text-size": 11,
           "text-max-width": 8,
         },
