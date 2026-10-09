@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2, Minimize2, X } from "lucide-react";
+import { ApiError } from "@/api/client";
 import { Button } from "@/components/ui";
 
 interface RoomPlannerModalProps {
@@ -19,6 +20,15 @@ function dataUrlToFile(dataUrl: string, filename: string): File {
     array[i] = binary.charCodeAt(i);
   }
   return new File([array], filename, { type: mime });
+}
+
+// Only a failure to convert the chosen format justifies retrying with the other one. Server
+// responses (revision conflicts, permissions), network failures and aborts would fail the same
+// way again, and retrying a conflict could hide it behind a second, unrelated error.
+function canRetryInOtherFormat(cause: unknown): boolean {
+  if (cause instanceof ApiError || cause instanceof TypeError) return false;
+  if (cause instanceof DOMException && cause.name === "AbortError") return false;
+  return true;
 }
 
 export function RoomPlannerModal({
@@ -78,7 +88,9 @@ export function RoomPlannerModal({
           try {
             await onSave(file, state);
           } catch (primaryErr) {
-            // If primary format failed and alternative is available, try fallback
+            if (!canRetryInOtherFormat(primaryErr)) {
+              throw primaryErr;
+            }
             if (file.type === "image/png" && svg && typeof svg === "string" && svg.includes("<svg")) {
               const svgBlob = new Blob([svg], { type: "image/svg+xml" });
               const svgFile = new File([svgBlob], `${mapName || "room-plan"}.svg`, {
