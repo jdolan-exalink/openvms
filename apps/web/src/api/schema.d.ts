@@ -2813,11 +2813,24 @@ export interface components {
             uptime_seconds?: number | null;
             storage?: components["schemas"]["ServerStorage"];
             camera_count: number;
+            /**
+             * Format: date-time
+             * @description When an enrolled edge agent last sent a heartbeat to the agent listener (database clock). Absent until the first heartbeat; compare with the current time to decide whether the agent is still reporting.
+             */
+            agent_last_seen_at?: string | null;
+            /** @description Version the agent reported in its last heartbeat. Absent until the first heartbeat. */
+            agent_version?: string;
+            agent_status?: components["schemas"]["AgentStatus"];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
+        /**
+         * @description Operational status the agent reported in its last heartbeat. It is what the agent said, not whether the agent is still alive; use agent_last_seen_at for that.
+         * @enum {string}
+         */
+        AgentStatus: "unknown" | "online" | "degraded" | "offline" | "maintenance";
         SyncResult: {
             server: components["schemas"]["Server"];
             added: number;

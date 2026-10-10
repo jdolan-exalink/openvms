@@ -372,32 +372,38 @@ func (q *Queries) GetCameraGroup(ctx context.Context, id uuid.UUID) (CameraGroup
 
 const getServer = `-- name: GetServer :one
 SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode,
-    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count
-FROM frigate_servers fs WHERE fs.id = $1 AND fs.deleted_at IS NULL
+    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
+    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status
+FROM frigate_servers fs
+LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
+WHERE fs.id = $1 AND fs.deleted_at IS NULL
 `
 
 type GetServerRow struct {
-	ID             uuid.UUID
-	TenantID       uuid.UUID
-	SiteID         uuid.UUID
-	Name           string
-	BaseUrl        string
-	Username       string
-	PasswordSealed []byte
-	TlsSkipVerify  bool
-	FrigateVersion string
-	Capabilities   json.RawMessage
-	Status         string
-	LastSeenAt     *time.Time
-	LastCheckedAt  *time.Time
-	LastError      string
-	Stats          json.RawMessage
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	DeletedAt      *time.Time
-	DeletedBy      *uuid.UUID
-	AuthMode       string
-	CameraCount    int32
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	SiteID          uuid.UUID
+	Name            string
+	BaseUrl         string
+	Username        string
+	PasswordSealed  []byte
+	TlsSkipVerify   bool
+	FrigateVersion  string
+	Capabilities    json.RawMessage
+	Status          string
+	LastSeenAt      *time.Time
+	LastCheckedAt   *time.Time
+	LastError       string
+	Stats           json.RawMessage
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
+	DeletedBy       *uuid.UUID
+	AuthMode        string
+	CameraCount     int32
+	AgentLastSeenAt *time.Time
+	AgentVersion    *string
+	AgentStatus     *string
 }
 
 func (q *Queries) GetServer(ctx context.Context, id uuid.UUID) (GetServerRow, error) {
@@ -425,39 +431,48 @@ func (q *Queries) GetServer(ctx context.Context, id uuid.UUID) (GetServerRow, er
 		&i.DeletedBy,
 		&i.AuthMode,
 		&i.CameraCount,
+		&i.AgentLastSeenAt,
+		&i.AgentVersion,
+		&i.AgentStatus,
 	)
 	return i, err
 }
 
 const getServerForUpdate = `-- name: GetServerForUpdate :one
 SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode,
-    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count
-FROM frigate_servers fs WHERE fs.id = $1 AND fs.deleted_at IS NULL
+    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
+    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status
+FROM frigate_servers fs
+LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
+WHERE fs.id = $1 AND fs.deleted_at IS NULL
 FOR UPDATE OF fs
 `
 
 type GetServerForUpdateRow struct {
-	ID             uuid.UUID
-	TenantID       uuid.UUID
-	SiteID         uuid.UUID
-	Name           string
-	BaseUrl        string
-	Username       string
-	PasswordSealed []byte
-	TlsSkipVerify  bool
-	FrigateVersion string
-	Capabilities   json.RawMessage
-	Status         string
-	LastSeenAt     *time.Time
-	LastCheckedAt  *time.Time
-	LastError      string
-	Stats          json.RawMessage
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	DeletedAt      *time.Time
-	DeletedBy      *uuid.UUID
-	AuthMode       string
-	CameraCount    int32
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	SiteID          uuid.UUID
+	Name            string
+	BaseUrl         string
+	Username        string
+	PasswordSealed  []byte
+	TlsSkipVerify   bool
+	FrigateVersion  string
+	Capabilities    json.RawMessage
+	Status          string
+	LastSeenAt      *time.Time
+	LastCheckedAt   *time.Time
+	LastError       string
+	Stats           json.RawMessage
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
+	DeletedBy       *uuid.UUID
+	AuthMode        string
+	CameraCount     int32
+	AgentLastSeenAt *time.Time
+	AgentVersion    *string
+	AgentStatus     *string
 }
 
 func (q *Queries) GetServerForUpdate(ctx context.Context, id uuid.UUID) (GetServerForUpdateRow, error) {
@@ -485,6 +500,9 @@ func (q *Queries) GetServerForUpdate(ctx context.Context, id uuid.UUID) (GetServ
 		&i.DeletedBy,
 		&i.AuthMode,
 		&i.CameraCount,
+		&i.AgentLastSeenAt,
+		&i.AgentVersion,
+		&i.AgentStatus,
 	)
 	return i, err
 }
@@ -946,8 +964,10 @@ func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]
 
 const listServers = `-- name: ListServers :many
 SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode,
-    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count
+    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
+    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status
 FROM frigate_servers fs
+LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
 WHERE fs.deleted_at IS NULL
   AND fs.id = ANY($1::uuid[])
   AND ($2::uuid IS NULL OR fs.site_id = $2)
@@ -960,27 +980,30 @@ type ListServersParams struct {
 }
 
 type ListServersRow struct {
-	ID             uuid.UUID
-	TenantID       uuid.UUID
-	SiteID         uuid.UUID
-	Name           string
-	BaseUrl        string
-	Username       string
-	PasswordSealed []byte
-	TlsSkipVerify  bool
-	FrigateVersion string
-	Capabilities   json.RawMessage
-	Status         string
-	LastSeenAt     *time.Time
-	LastCheckedAt  *time.Time
-	LastError      string
-	Stats          json.RawMessage
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	DeletedAt      *time.Time
-	DeletedBy      *uuid.UUID
-	AuthMode       string
-	CameraCount    int32
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	SiteID          uuid.UUID
+	Name            string
+	BaseUrl         string
+	Username        string
+	PasswordSealed  []byte
+	TlsSkipVerify   bool
+	FrigateVersion  string
+	Capabilities    json.RawMessage
+	Status          string
+	LastSeenAt      *time.Time
+	LastCheckedAt   *time.Time
+	LastError       string
+	Stats           json.RawMessage
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       *time.Time
+	DeletedBy       *uuid.UUID
+	AuthMode        string
+	CameraCount     int32
+	AgentLastSeenAt *time.Time
+	AgentVersion    *string
+	AgentStatus     *string
 }
 
 func (q *Queries) ListServers(ctx context.Context, arg ListServersParams) ([]ListServersRow, error) {
@@ -1014,6 +1037,9 @@ func (q *Queries) ListServers(ctx context.Context, arg ListServersParams) ([]Lis
 			&i.DeletedBy,
 			&i.AuthMode,
 			&i.CameraCount,
+			&i.AgentLastSeenAt,
+			&i.AgentVersion,
+			&i.AgentStatus,
 		); err != nil {
 			return nil, err
 		}

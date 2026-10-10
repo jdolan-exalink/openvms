@@ -47,8 +47,10 @@ SELECT count(*)::int FROM sites WHERE tenant_id = @tenant_id AND deleted_at IS N
 
 -- name: ListServers :many
 SELECT fs.*,
-    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count
+    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
+    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status
 FROM frigate_servers fs
+LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
 WHERE fs.deleted_at IS NULL
   AND fs.id = ANY(@ids::uuid[])
   AND (sqlc.narg('site_id')::uuid IS NULL OR fs.site_id = sqlc.narg('site_id'))
@@ -59,13 +61,19 @@ SELECT * FROM frigate_servers WHERE deleted_at IS NULL ORDER BY id;
 
 -- name: GetServer :one
 SELECT fs.*,
-    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count
-FROM frigate_servers fs WHERE fs.id = @id AND fs.deleted_at IS NULL;
+    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
+    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status
+FROM frigate_servers fs
+LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
+WHERE fs.id = @id AND fs.deleted_at IS NULL;
 
 -- name: GetServerForUpdate :one
 SELECT fs.*,
-    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count
-FROM frigate_servers fs WHERE fs.id = @id AND fs.deleted_at IS NULL
+    (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
+    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status
+FROM frigate_servers fs
+LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
+WHERE fs.id = @id AND fs.deleted_at IS NULL
 FOR UPDATE OF fs;
 
 -- name: CreateServer :exec

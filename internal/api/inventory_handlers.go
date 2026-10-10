@@ -227,6 +227,11 @@ func toServer(s inventory.ServerView) gen.Server {
 		Status: gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,
 		LastError: s.LastError, CameraCount: int(s.CameraCount), CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
+	out.AgentLastSeenAt, out.AgentVersion = s.AgentLastSeenAt, s.AgentVersion
+	if s.AgentStatus != nil {
+		st := gen.AgentStatus(*s.AgentStatus)
+		out.AgentStatus = &st
+	}
 	hs := s.HealthStats()
 	if s.LastSeenAt != nil {
 		up := int(hs.UptimeSeconds)

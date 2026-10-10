@@ -3806,8 +3806,19 @@ components:
         uptime_seconds: { type: integer, nullable: true }
         storage: { $ref: "#/components/schemas/ServerStorage" }
         camera_count: { type: integer }
+        agent_last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When an enrolled edge agent last sent a heartbeat to the agent listener (database clock). Absent until the first heartbeat; compare with the current time to decide whether the agent is still reporting.
+        agent_version: { type: string, description: Version the agent reported in its last heartbeat. Absent until the first heartbeat. }
+        agent_status: { $ref: "#/components/schemas/AgentStatus" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AgentStatus:
+      type: string
+      enum: [unknown, online, degraded, offline, maintenance]
+      description: Operational status the agent reported in its last heartbeat. It is what the agent said, not whether the agent is still alive; use agent_last_seen_at for that.
     SyncResult:
       type: object
       required: [server, added, updated, missing]
