@@ -14,6 +14,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,6 +38,7 @@ func (a allowAll) RequireServerManageAndConfigSecrets(context.Context, authz.Act
 
 type env struct {
 	pool   *pgxpool.Pool
+	url    string // superuser URL, for fault injection only
 	st     *store.Store
 	svc    *agentenroll.Service
 	tenant uuid.UUID
@@ -46,7 +48,7 @@ type env struct {
 
 func setup(t *testing.T) *env {
 	t.Helper()
-	pool, _ := pgtest.Migrated(t)
+	pool, url := pgtest.Migrated(t)
 	st := &store.Store{Pool: pool}
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
@@ -56,7 +58,7 @@ func setup(t *testing.T) *env {
 	}
 	tenant, server, user := seedServer(t, st)
 	return &env{
-		pool: pool, st: st, tenant: tenant, server: server,
+		pool: pool, url: url, st: st, tenant: tenant, server: server,
 		actor: authz.Actor{UserID: user, Username: "op", TenantID: &tenant},
 		svc: &agentenroll.Service{
 			Store: st, Authz: allowAll{},
@@ -211,6 +213,121 @@ func TestEnrollIssuesCertificateForTheTokensServer(t *testing.T) {
 	e.scan(t, "SELECT count(*) FROM audit_log WHERE action = 'SERVER_AGENT_ENROLLED' AND target_id = $1", []any{e.server}, &audits)
 	if audits != 1 {
 		t.Fatalf("enrolled audit rows = %d; want 1", audits)
+	}
+	// Both events target the server (a uuid column) under the same target type; the
+	// issued certificate is identified in the details.
+	var targetType, serial string
+	e.scan(t, "SELECT target_type, details->>'serial' FROM audit_log WHERE action = 'SERVER_AGENT_ENROLLED'", nil, &targetType, &serial)
+	if targetType != "server_agent" || serial != res.Issued.Serial {
+		t.Fatalf("enrolled audit target_type=%q serial=%q; want server_agent and %q", targetType, serial, res.Issued.Serial)
+	}
+	e.scan(t, "SELECT target_type FROM audit_log WHERE action = 'SERVER_AGENT_ENROLL_TOKEN_CREATED' AND target_id = $1", []any{e.server}, &targetType)
+	if targetType != "server_agent" {
+		t.Fatalf("token audit target_type=%q; want server_agent", targetType)
+	}
+}
+
+// admin runs sql as the superuser: the application role may not create functions or
+// triggers, and fault injection must not go through the code under test.
+func (e *env) admin(t *testing.T, sql string) {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, e.url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	if _, err := conn.Exec(ctx, sql); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// failOn makes every INSERT into table raise, standing in for a database fault at that step
+// of the enrollment transaction.
+func (e *env) failOn(t *testing.T, table string) {
+	t.Helper()
+	e.admin(t, "CREATE OR REPLACE FUNCTION fail_insert() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected failure'; END $$")
+	e.admin(t, "CREATE TRIGGER fail_insert BEFORE INSERT ON "+table+" FOR EACH ROW EXECUTE FUNCTION fail_insert()")
+}
+
+func (e *env) clearFailure(t *testing.T, table string) {
+	t.Helper()
+	e.admin(t, "DROP TRIGGER fail_insert ON "+table)
+}
+
+// An enrollment is all or nothing: when the certificate insert or the audit insert fails,
+// no certificate exists, the token is not burned and the agent can retry with the same token.
+func TestEnrollIsAtomicWhenAStepFails(t *testing.T) {
+	for _, tc := range []struct{ name, table string }{
+		{"audit insert fails", "audit_log"},
+		{"certificate insert fails", "agent_certificates"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := setup(t)
+			ctx := context.Background()
+			tok := e.createToken(t)
+			e.failOn(t, tc.table)
+			if _, err := e.svc.Enroll(ctx, tok.Value, csr(t)); err == nil {
+				t.Fatal("enroll succeeded despite the injected failure")
+			} else if errors.Is(err, agentenroll.ErrInvalidToken) {
+				t.Fatalf("a database fault must not look like a bad token: %v", err)
+			}
+			var certs, used int
+			e.scan(t, "SELECT count(*) FROM agent_certificates", nil, &certs)
+			e.scan(t, "SELECT count(*) FROM agent_enroll_tokens WHERE used_at IS NOT NULL", nil, &used)
+			if certs != 0 || used != 0 {
+				t.Fatalf("after a failed enrollment: %d certificates, %d consumed tokens; want 0 and 0", certs, used)
+			}
+			e.clearFailure(t, tc.table)
+			if _, err := e.svc.Enroll(ctx, tok.Value, csr(t)); err != nil {
+				t.Fatalf("retry with the same token: %v", err)
+			}
+			e.scan(t, "SELECT count(*) FROM agent_certificates", nil, &certs)
+			if certs != 1 {
+				t.Fatalf("%d certificates after the retry, want 1", certs)
+			}
+		})
+	}
+}
+
+// Concurrent token creation for one server leaves exactly one live token, and it redeems.
+func TestConcurrentCreateTokenLeavesOneLiveToken(t *testing.T) {
+	e := setup(t)
+	const n = 8
+	toks := make([]agentenroll.Token, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range toks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			toks[i], errs[i] = e.svc.CreateToken(context.Background(), e.actor, e.server)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("CreateToken #%d: %v", i, err)
+		}
+	}
+	var live int
+	e.scan(t, "SELECT count(*) FROM agent_enroll_tokens WHERE server_id = $1 AND used_at IS NULL", []any{e.server}, &live)
+	if live != 1 {
+		t.Fatalf("%d live tokens after %d concurrent creations, want exactly 1", live, n)
+	}
+	redeemed := 0
+	for _, tok := range toks {
+		if _, err := e.svc.Enroll(context.Background(), tok.Value, csr(t)); err == nil {
+			redeemed++
+		} else if !errors.Is(err, agentenroll.ErrInvalidToken) {
+			t.Fatal(err)
+		}
+	}
+	if redeemed != 1 {
+		t.Fatalf("%d of the returned tokens redeemed, want exactly 1", redeemed)
 	}
 }
 

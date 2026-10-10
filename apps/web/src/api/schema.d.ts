@@ -2895,7 +2895,7 @@ export interface components {
             ssh_password: string;
         };
         AgentEnrollToken: {
-            /** @description One-time secret */
+            /** @description One-time secret, shown only in this response. */
             token: string;
             /** Format: date-time */
             expires_at: string;

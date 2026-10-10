@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,9 +37,10 @@ type Authorizer interface {
 	RequireServerManageAndConfigSecrets(ctx context.Context, actor authz.Actor, serverID uuid.UUID) error
 }
 
-// Issuer signs a CSR for an identity (agentca.Service).
+// Issuer signs a CSR for an identity in memory (agentca.Service). Enroll persists the
+// certificate itself, inside its own transaction.
 type Issuer interface {
-	Issue(ctx context.Context, csrPEM []byte, id agentca.Identity) (*agentca.Issuance, error)
+	Sign(ctx context.Context, csrPEM []byte, id agentca.Identity) (*agentca.Issuance, error)
 }
 
 // Service owns token creation and redemption.
@@ -46,8 +48,7 @@ type Service struct {
 	Store *store.Store
 	Authz Authorizer
 	CA    Issuer
-	TTL   time.Duration    // defaults to DefaultTTL
-	Now   func() time.Time // defaults to time.Now
+	TTL   time.Duration // defaults to DefaultTTL
 }
 
 // Token is a freshly created enrollment token. Value is shown once and never stored.
@@ -56,18 +57,12 @@ type Token struct {
 	ExpiresAt time.Time
 }
 
-func (s *Service) now() time.Time {
-	if s.Now != nil {
-		return s.Now()
-	}
-	return time.Now()
-}
-
 // hash is how tokens are stored: the hex SHA-256 of the token string.
 func hash(token string) string { return hex.EncodeToString(identity.HashToken(token)) }
 
-// CreateToken mints a token bound to serverID and drops the server's older unused ones, so
-// a server has at most one live token.
+// CreateToken mints a token bound to serverID and replaces the server's unused one in a
+// single upsert, so a server has exactly one live token even under concurrent calls (the
+// newest wins). The expiry is computed by the database, whose clock also decides redemption.
 func (s *Service) CreateToken(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (Token, error) {
 	if err := s.Authz.RequireServerManageAndConfigSecrets(ctx, actor, serverID); err != nil {
 		return Token{}, err
@@ -81,20 +76,17 @@ func (s *Service) CreateToken(ctx context.Context, actor authz.Actor, serverID u
 	if ttl == 0 {
 		ttl = DefaultTTL
 	}
-	tok.ExpiresAt = s.now().Add(ttl)
 	// The server is visible to the actor (checked above), so its tenant is the actor's.
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		srv, err := q.GetServer(ctx, serverID)
 		if err != nil {
 			return err
 		}
-		if err := q.DeleteUnusedAgentEnrollTokensByServer(ctx, serverID); err != nil {
-			return err
-		}
-		if err := q.InsertAgentEnrollToken(ctx, db.InsertAgentEnrollTokenParams{
+		tok.ExpiresAt, err = q.UpsertAgentEnrollToken(ctx, db.UpsertAgentEnrollTokenParams{
 			TenantID: srv.TenantID, ServerID: serverID, TokenHash: hash(tok.Value),
-			ExpiresAt: tok.ExpiresAt, CreatedBy: &actor.UserID,
-		}); err != nil {
+			TtlSeconds: ttl.Seconds(), CreatedBy: &actor.UserID,
+		})
+		if err != nil {
 			return err
 		}
 		return audit(ctx, q, &actor, srv.TenantID, serverID, "SERVER_AGENT_ENROLL_TOKEN_CREATED",
@@ -107,22 +99,32 @@ func (s *Service) CreateToken(ctx context.Context, actor authz.Actor, serverID u
 }
 
 // Enroll exchanges a token and a CSR for a client certificate. The CSR is validated before
-// the token is touched so a malformed request does not burn it. The token is then consumed
-// in one statement; if issuance fails afterwards the token stays consumed (fail closed) and
-// the operator creates a new one. Any token problem is ErrInvalidToken.
+// any database work so a malformed request does not touch the token. Consuming the token,
+// recording the certificate and writing the audit row then happen in one transaction: if any
+// step fails everything rolls back, the token stays redeemable and no certificate was
+// released (the signed certificate only leaves this function after the commit). Any token
+// problem is ErrInvalidToken.
 func (s *Service) Enroll(ctx context.Context, token string, csrPEM []byte) (*agentca.Issuance, error) {
 	if err := agentca.ValidateCSR(csrPEM); err != nil {
 		return nil, err
 	}
-	var id agentca.Identity
-	// The tenant is unknown until the token resolves, hence the all-tenants scope.
+	var res *agentca.Issuance
+	// The tenant is unknown until the token resolves, hence the all-tenants scope. That scope
+	// also satisfies the tenant-scoped certificate and audit inserts below.
 	err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		row, err := q.ConsumeAgentEnrollToken(ctx, hash(token))
 		if err != nil {
 			return err
 		}
-		id = agentca.Identity{TenantID: row.TenantID, ServerID: row.ServerID}
-		return nil
+		res, err = s.CA.Sign(ctx, csrPEM, agentca.Identity{TenantID: row.TenantID, ServerID: row.ServerID})
+		if err != nil {
+			return err
+		}
+		if err := agentca.RecordCertificate(ctx, q, res.Record); err != nil {
+			return fmt.Errorf("agentca: record certificate: %w", err)
+		}
+		return audit(ctx, q, nil, row.TenantID, row.ServerID, "SERVER_AGENT_ENROLLED",
+			map[string]any{"serial": res.Issued.Serial, "fingerprint": res.Issued.Fingerprint, "not_after": res.Issued.NotAfter})
 	})
 	if errors.Is(store.Classify(err), store.ErrNotFound) {
 		return nil, ErrInvalidToken
@@ -130,21 +132,12 @@ func (s *Service) Enroll(ctx context.Context, token string, csrPEM []byte) (*age
 	if err != nil {
 		return nil, err
 	}
-	res, err := s.CA.Issue(ctx, csrPEM, id)
-	if err != nil {
-		return nil, err
-	}
-	err = s.Store.Tx(ctx, store.TenantScope{TenantID: id.TenantID}, func(q *db.Queries) error {
-		return audit(ctx, q, nil, id.TenantID, id.ServerID, "SERVER_AGENT_ENROLLED",
-			map[string]any{"serial": res.Issued.Serial, "not_after": res.Issued.NotAfter})
-	})
-	if err != nil {
-		return nil, err
-	}
 	return res, nil
 }
 
-// audit records an enrollment event; actor is nil for the agent's own redemption.
+// audit records an enrollment event. audit_log.target_id is a uuid, so both events target the
+// server under "server_agent" (as the other agent events do); the issued certificate is
+// identified in details. actor is nil for the agent's own redemption.
 func audit(ctx context.Context, q *db.Queries, actor *authz.Actor, tenantID, serverID uuid.UUID, action string, details map[string]any) error {
 	data, err := json.Marshal(details)
 	if err != nil {
@@ -152,7 +145,7 @@ func audit(ctx context.Context, q *db.Queries, actor *authz.Actor, tenantID, ser
 	}
 	p := db.InsertAuditParams{
 		TenantID: &tenantID, ActorName: "agent", Action: action,
-		TargetType: "server_agent_enroll_token", TargetID: &serverID,
+		TargetType: "server_agent", TargetID: &serverID,
 		RequestID: logging.RequestID(ctx), Ip: httpx.ClientIP(ctx), Details: data,
 	}
 	if actor != nil {

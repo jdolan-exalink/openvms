@@ -32,37 +32,35 @@ func (q *Queries) ConsumeAgentEnrollToken(ctx context.Context, tokenHash string)
 	return i, err
 }
 
-const deleteUnusedAgentEnrollTokensByServer = `-- name: DeleteUnusedAgentEnrollTokensByServer :exec
-DELETE FROM agent_enroll_tokens
-WHERE server_id = $1 AND used_at IS NULL
-`
-
-// A server keeps one live token: creating a new one drops the older unused ones.
-func (q *Queries) DeleteUnusedAgentEnrollTokensByServer(ctx context.Context, serverID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteUnusedAgentEnrollTokensByServer, serverID)
-	return err
-}
-
-const insertAgentEnrollToken = `-- name: InsertAgentEnrollToken :exec
+const upsertAgentEnrollToken = `-- name: UpsertAgentEnrollToken :one
 INSERT INTO agent_enroll_tokens (tenant_id, server_id, token_hash, expires_at, created_by)
-VALUES ($1, $2, $3, $4, $5)
+VALUES ($1, $2, $3, now() + make_interval(secs => $4::float8), $5)
+ON CONFLICT (server_id) WHERE used_at IS NULL DO UPDATE
+SET token_hash = EXCLUDED.token_hash, expires_at = EXCLUDED.expires_at,
+    created_by = EXCLUDED.created_by, created_at = now()
+RETURNING expires_at
 `
 
-type InsertAgentEnrollTokenParams struct {
-	TenantID  uuid.UUID
-	ServerID  uuid.UUID
-	TokenHash string
-	ExpiresAt time.Time
-	CreatedBy *uuid.UUID
+type UpsertAgentEnrollTokenParams struct {
+	TenantID   uuid.UUID
+	ServerID   uuid.UUID
+	TokenHash  string
+	TtlSeconds float64
+	CreatedBy  *uuid.UUID
 }
 
-func (q *Queries) InsertAgentEnrollToken(ctx context.Context, arg InsertAgentEnrollTokenParams) error {
-	_, err := q.db.Exec(ctx, insertAgentEnrollToken,
+// A server keeps one live token: the partial unique index makes a concurrent or repeated
+// creation replace the unused row instead of adding a second. expires_at comes from the
+// database clock, the same one ConsumeAgentEnrollToken checks it against.
+func (q *Queries) UpsertAgentEnrollToken(ctx context.Context, arg UpsertAgentEnrollTokenParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, upsertAgentEnrollToken,
 		arg.TenantID,
 		arg.ServerID,
 		arg.TokenHash,
-		arg.ExpiresAt,
+		arg.TtlSeconds,
 		arg.CreatedBy,
 	)
-	return err
+	var expires_at time.Time
+	err := row.Scan(&expires_at)
+	return expires_at, err
 }

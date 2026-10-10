@@ -3892,7 +3892,7 @@ components:
       type: object
       required: [token, expires_at]
       properties:
-        token: { type: string, description: One-time secret, shown only in this response. }
+        token: { type: string, description: "One-time secret, shown only in this response." }
         expires_at: { type: string, format: date-time }
     AgentEnrollRequest:
       type: object

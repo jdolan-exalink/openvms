@@ -60,6 +60,8 @@ type Service struct {
 type Issuance struct {
 	Issued *Issued
 	CAPEM  []byte
+	// Record is the row to persist for the certificate; Sign leaves that to the caller.
+	Record Certificate
 }
 
 func (s *Service) now() time.Time {
@@ -119,9 +121,10 @@ func (s *Service) createCA(ctx context.Context) (*CARecord, error) {
 	return s.Repo.GetCA(ctx)
 }
 
-// Issue signs a CSR for id and records the certificate. It returns the CA certificate
-// alongside so the agent can pin the trust root it will use for the API.
-func (s *Service) Issue(ctx context.Context, csrPEM []byte, id Identity) (*Issuance, error) {
+// Sign signs a CSR for id in memory and persists nothing. A caller that must record the
+// certificate together with other writes persists Issuance.Record (see RecordCertificate)
+// and releases the certificate only after that commit.
+func (s *Service) Sign(ctx context.Context, csrPEM []byte, id Identity) (*Issuance, error) {
 	ca, err := s.LoadOrCreateCA(ctx)
 	if err != nil {
 		return nil, err
@@ -134,15 +137,25 @@ func (s *Service) Issue(ctx context.Context, csrPEM []byte, id Identity) (*Issua
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Repo.InsertCertificate(ctx, Certificate{
+	return &Issuance{Issued: issued, CAPEM: ca.CertPEM, Record: Certificate{
 		Serial:      issued.Serial,
 		TenantID:    id.TenantID,
 		ServerID:    id.ServerID,
 		Fingerprint: issued.Fingerprint,
 		NotBefore:   issued.NotBefore,
 		NotAfter:    issued.NotAfter,
-	}); err != nil {
+	}}, nil
+}
+
+// Issue signs a CSR for id and records the certificate. It returns the CA certificate
+// alongside so the agent can pin the trust root it will use for the API.
+func (s *Service) Issue(ctx context.Context, csrPEM []byte, id Identity) (*Issuance, error) {
+	res, err := s.Sign(ctx, csrPEM, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Repo.InsertCertificate(ctx, res.Record); err != nil {
 		return nil, fmt.Errorf("agentca: record certificate: %w", err)
 	}
-	return &Issuance{Issued: issued, CAPEM: ca.CertPEM}, nil
+	return res, nil
 }

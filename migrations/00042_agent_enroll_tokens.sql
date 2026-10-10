@@ -19,7 +19,9 @@ CREATE TABLE agent_enroll_tokens (
         REFERENCES frigate_servers (id, tenant_id) ON DELETE CASCADE
 );
 
-CREATE INDEX agent_enroll_tokens_server_idx ON agent_enroll_tokens (server_id) WHERE used_at IS NULL;
+-- A server has at most one live (unused) token. Creating a new one replaces the live row with
+-- an upsert on this index, so concurrent creations cannot leave two redeemable tokens.
+CREATE UNIQUE INDEX agent_enroll_tokens_server_live_idx ON agent_enroll_tokens (server_id) WHERE used_at IS NULL;
 
 ALTER TABLE agent_enroll_tokens ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_enroll_tokens FORCE ROW LEVEL SECURITY;
