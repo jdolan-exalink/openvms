@@ -755,6 +755,49 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/enroll-token:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: createServerAgentEnrollToken
+      summary: Create a one-time agent enrollment token
+      description: Requires servers.manage and servers.config.secrets. The token is returned once, is valid for 15 minutes, can be redeemed a single time and is stored only as a hash. Creating a new token invalidates the server's older unused ones.
+      responses:
+        "201":
+          description: Enrollment token; this is the only time it is shown
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEnrollToken" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/agent/enroll:
+    post:
+      tags: [servers]
+      operationId: enrollAgent
+      summary: Exchange an enrollment token and a CSR for an agent client certificate
+      security: []
+      description: |
+        Called by an edge agent, which has no user session. The agent generates its own key
+        and sends only the CSR, so private keys never reach the API. The token is single use
+        and the CSR is validated before the token is consumed. Every token problem (unknown,
+        used, expired) answers the same 401 so tokens cannot be probed. The certificate
+        identity (tenant and server) comes from the token, never from the CSR. If issuance
+        fails after the token was consumed, the token stays consumed and a new one is needed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentEnrollRequest" }
+      responses:
+        "200":
+          description: Signed client certificate and the CA bundle the agent must trust
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEnrollment" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/servers/{serverId}/agent/update-ssh:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3845,6 +3888,26 @@ components:
       properties:
         ssh_port: { type: integer, minimum: 1, maximum: 65535 }
         ssh_password: { type: string, minLength: 1, maxLength: 4096, writeOnly: true, description: Transient root SSH password; never persisted or echoed. }
+    AgentEnrollToken:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token: { type: string, description: One-time secret, shown only in this response. }
+        expires_at: { type: string, format: date-time }
+    AgentEnrollRequest:
+      type: object
+      required: [token, csr_pem]
+      additionalProperties: false
+      properties:
+        token: { type: string, minLength: 1, maxLength: 256 }
+        csr_pem: { type: string, minLength: 1, maxLength: 8192, description: PEM PKCS#10 certificate request. Its subject and SANs are ignored. }
+    AgentEnrollment:
+      type: object
+      required: [certificate_pem, ca_pem, not_after]
+      properties:
+        certificate_pem: { type: string }
+        ca_pem: { type: string, description: Public CA certificate the agent pins for the API. }
+        not_after: { type: string, format: date-time }
     ServerAgentInstallJob:
       type: object
       additionalProperties: false

@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
+	"github.com/jdolan-exalink/openvms/internal/agentca"
+	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
@@ -82,6 +84,11 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "invalid_transition", err.Error()
 	case errors.Is(err, events.ErrInvalidCursor):
 		return http.StatusBadRequest, "invalid_cursor", "the pagination cursor is not valid"
+	case errors.Is(err, agentenroll.ErrInvalidToken):
+		// One answer for unknown, used and expired tokens, so tokens cannot be probed.
+		return http.StatusUnauthorized, "unauthorized", "invalid enrollment token"
+	case errors.Is(err, agentca.ErrInvalidCSR):
+		return http.StatusBadRequest, "invalid_csr", "the certificate request is not valid"
 	case errors.Is(err, errUnauthenticated):
 		return http.StatusUnauthorized, "unauthorized", "authentication required"
 	case errors.Is(err, access.ErrForbidden):

@@ -28,6 +28,8 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/jdolan-exalink/openvms/internal/agentca"
+	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/branding"
@@ -145,8 +147,12 @@ func run() error {
 	// OPENVMS_MAPS_CENTER override); the lookup is best-effort and never blocks startup.
 	mapsSvc.Config.DefaultCenter = maps.DetectServerCenter(ctx, log)
 	handlers := &api.Handlers{
-		Inv:           inv,
-		Provision:     provision.New(inv, st, sealer, log),
+		Inv:       inv,
+		Provision: provision.New(inv, st, sealer, log),
+		AgentEnroll: &agentenroll.Service{
+			Store: st, Authz: inv,
+			CA: &agentca.Service{Repo: &agentca.PgRepo{Store: st}, Sealer: sealer},
+		},
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Alarms:        alarmsSvc,
 		Media:         mediaSvc,
