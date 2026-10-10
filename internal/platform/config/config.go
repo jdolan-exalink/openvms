@@ -15,6 +15,9 @@ type Config struct {
 	LogLevel string
 	HTTPAddr string
 	GRPCAddr string
+	// GRPCTLSCertFile and GRPCTLSKeyFile enable TLS on the gRPC control channel; both or neither.
+	GRPCTLSCertFile string
+	GRPCTLSKeyFile  string
 
 	DatabaseURL    string
 	MigrateOnStart bool
@@ -97,6 +100,8 @@ func Load(service string) (Config, error) {
 		LogLevel:                    str("LOG_LEVEL", "info"),
 		HTTPAddr:                    str("HTTP_ADDR", ":8080"),
 		GRPCAddr:                    str("GRPC_ADDR", ":9090"),
+		GRPCTLSCertFile:             str("GRPC_TLS_CERT_FILE", ""),
+		GRPCTLSKeyFile:              str("GRPC_TLS_KEY_FILE", ""),
 		DatabaseURL:                 str("DATABASE_URL", ""),
 		MigrateOnStart:              boolean("MIGRATE_ON_START", true),
 		ValkeyAddr:                  str("VALKEY_ADDR", "localhost:6379"),
@@ -134,10 +139,18 @@ func Load(service string) (Config, error) {
 			UsePathStyle: boolean("S3_USE_PATH_STYLE", true),
 		},
 	}
+	if (c.GRPCTLSCertFile == "") != (c.GRPCTLSKeyFile == "") {
+		return c, fmt.Errorf("GRPC_TLS_CERT_FILE and GRPC_TLS_KEY_FILE must be set together")
+	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL is required")
 	}
 	return c, nil
+}
+
+// GRPCTLSEnabled reports whether the gRPC control channel should serve TLS.
+func (c Config) GRPCTLSEnabled() bool {
+	return c.GRPCTLSCertFile != "" && c.GRPCTLSKeyFile != ""
 }
 
 func str(key, def string) string {

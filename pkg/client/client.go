@@ -8,10 +8,12 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
+	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 )
 
 // Config configures the OpenVMS Desktop Client.
@@ -22,8 +24,15 @@ type Config struct {
 	Platform      string
 	Architecture  string
 	AppVersion    string
-	Insecure      bool
 	Timeout       time.Duration
+
+	// TLS dials the control plane over TLS and verifies the server certificate.
+	// Plaintext is the default.
+	TLS bool
+	// TLSCAFile is a PEM bundle trusted for the server certificate; empty uses system roots.
+	TLSCAFile string
+	// TLSServerName overrides the name verified against the server certificate.
+	TLSServerName string
 }
 
 // Client provides enterprise connectivity for OpenVMS Desktop applications.
@@ -53,8 +62,19 @@ func New(cfg Config) (*Client, error) {
 		cfg.AppVersion = "1.0.0"
 	}
 
+	creds := credentials.TransportCredentials(insecure.NewCredentials())
+	if cfg.TLS {
+		var err error
+		creds, err = grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: cfg.TLSCAFile, ServerName: cfg.TLSServerName})
+		if err != nil {
+			return nil, fmt.Errorf("control plane TLS: %w", err)
+		}
+	} else if cfg.TLSCAFile != "" || cfg.TLSServerName != "" {
+		return nil, fmt.Errorf("TLSCAFile and TLSServerName require TLS to be enabled")
+	}
+
 	opts := []grpc.DialOption{
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	}
 
 	conn, err := grpc.NewClient(cfg.ServerAddress, opts...)

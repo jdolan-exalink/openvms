@@ -7,9 +7,11 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
+	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 )
 
 // WorkerConfig defines registration and telemetry parameters for the Node Agent.
@@ -19,6 +21,12 @@ type WorkerConfig struct {
 	HeartbeatInterval time.Duration
 	Sampler           *Sampler
 	Log               *slog.Logger
+	// TLS dials the control server over TLS, verifying its certificate. Plaintext otherwise.
+	TLS bool
+	// TLSCAFile is a PEM bundle trusted for the server certificate; empty uses system roots.
+	TLSCAFile string
+	// TLSServerName overrides the name verified against the server certificate.
+	TLSServerName string
 }
 
 // Worker periodically transmits telemetry and heartbeats to the central OpenVMS Control Server.
@@ -52,10 +60,19 @@ func (w *Worker) Run(ctx context.Context) error {
 		"control_addr", w.cfg.ControlGRPCAddr,
 	)
 
+	creds := credentials.TransportCredentials(insecure.NewCredentials())
+	if w.cfg.TLS {
+		var err error
+		creds, err = grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: w.cfg.TLSCAFile, ServerName: w.cfg.TLSServerName})
+		if err != nil {
+			return fmt.Errorf("control server TLS: %w", err)
+		}
+	}
+
 	// Dial control plane with automatic reconnection
 	conn, err := grpc.NewClient(
 		w.cfg.ControlGRPCAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	)
 	if err != nil {
 		return fmt.Errorf("failed to dial control server: %w", err)

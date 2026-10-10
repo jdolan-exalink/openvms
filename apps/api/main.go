@@ -26,6 +26,7 @@ import (
 	_ "time/tzdata"
 
 	"github.com/nats-io/nats.go/jetstream"
+	"google.golang.org/grpc/credentials"
 
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api"
@@ -42,6 +43,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 	"github.com/jdolan-exalink/openvms/internal/platform/config"
+	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
 	"github.com/jdolan-exalink/openvms/internal/platform/natsx"
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
@@ -188,14 +190,25 @@ func run() error {
 	sessionsMgr := mediasession.NewManager(15 * time.Minute)
 	defer sessionsMgr.Close()
 
+	var grpcCreds credentials.TransportCredentials
+	if cfg.GRPCTLSEnabled() {
+		grpcCreds, err = grpctls.ServerCredentials(cfg.GRPCTLSCertFile, cfg.GRPCTLSKeyFile)
+		if err != nil {
+			return fmt.Errorf("grpc tls: %w", err)
+		}
+		log.Info("gRPC control channel TLS enabled")
+	} else {
+		log.Warn("gRPC control channel is plaintext; set GRPC_TLS_CERT_FILE and GRPC_TLS_KEY_FILE to enable TLS")
+	}
 	grpcCtrl := control.NewServer(control.Config{
-		Addr:      cfg.GRPCAddr,
-		Identity:  handlers.Identity,
-		Inventory: inv,
-		Realtime:  rtHub,
-		Sessions:  sessionsMgr,
-		Log:       log,
-		Features:  cfg.Features.EnabledList(),
+		Addr:        cfg.GRPCAddr,
+		Identity:    handlers.Identity,
+		Inventory:   inv,
+		Realtime:    rtHub,
+		Sessions:    sessionsMgr,
+		Log:         log,
+		Features:    cfg.Features.EnabledList(),
+		Credentials: grpcCreds,
 	})
 	go func() {
 		if err := grpcCtrl.Start(cfg.GRPCAddr); err != nil {

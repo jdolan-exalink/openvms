@@ -6,12 +6,14 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -20,6 +22,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/onvif"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
+	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 )
 
 func main() {
@@ -76,11 +79,19 @@ func main() {
 	serverAddr := env("OPENVMS_SERVER_ADDR", env("OPENVMS_CONTROL_ADDR", ""))
 	if serverAddr != "" {
 		nodeID := env("OPENVMS_NODE_ID", "node-auto")
+		controlTLS, controlCA, controlServerName, err := controlTLSFromEnv(os.Getenv)
+		if err != nil {
+			log.Error("invalid control channel TLS configuration", "error", err)
+			os.Exit(1)
+		}
 		worker := agent.NewWorker(agent.WorkerConfig{
 			NodeID:          nodeID,
 			ControlGRPCAddr: serverAddr,
 			Sampler:         sampler,
 			Log:             log,
+			TLS:             controlTLS,
+			TLSCAFile:       controlCA,
+			TLSServerName:   controlServerName,
 		})
 		go func() {
 			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
@@ -274,6 +285,31 @@ func restart() {
 	time.Sleep(400 * time.Millisecond)
 	cmd := exec.Command("systemctl", "restart", "openvms-agent")
 	_ = cmd.Start()
+}
+
+// controlTLSFromEnv reads the opt-in TLS settings for the gRPC control channel.
+// A CA file or server name without OPENVMS_CONTROL_TLS is rejected so a typo
+// cannot silently leave the channel in plaintext. The CA bundle is loaded here
+// so a missing or broken file stops the agent at startup instead of only
+// failing later inside the background heartbeat worker.
+func controlTLSFromEnv(getenv func(string) string) (enabled bool, caFile, serverName string, err error) {
+	if v := strings.TrimSpace(getenv("OPENVMS_CONTROL_TLS")); v != "" {
+		enabled, err = strconv.ParseBool(v)
+		if err != nil {
+			return false, "", "", fmt.Errorf("OPENVMS_CONTROL_TLS must be a boolean: %w", err)
+		}
+	}
+	caFile = strings.TrimSpace(getenv("OPENVMS_CONTROL_TLS_CA_FILE"))
+	serverName = strings.TrimSpace(getenv("OPENVMS_CONTROL_TLS_SERVER_NAME"))
+	if !enabled && (caFile != "" || serverName != "") {
+		return false, "", "", errors.New("OPENVMS_CONTROL_TLS_CA_FILE and OPENVMS_CONTROL_TLS_SERVER_NAME require OPENVMS_CONTROL_TLS=true")
+	}
+	if enabled {
+		if _, err := grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: caFile, ServerName: serverName}); err != nil {
+			return false, "", "", fmt.Errorf("control channel TLS: %w", err)
+		}
+	}
+	return enabled, caFile, serverName, nil
 }
 
 func env(key, fallback string) string {
