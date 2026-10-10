@@ -43,6 +43,14 @@ type AgentEnrollToken struct {
 	CreatedAt time.Time
 }
 
+type AgentHeartbeat struct {
+	ServerID   uuid.UUID
+	TenantID   uuid.UUID
+	LastSeenAt time.Time
+	Version    string
+	Status     string
+}
+
 type Alarm struct {
 	ID             uuid.UUID
 	TenantID       uuid.UUID

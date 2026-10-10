@@ -32,6 +32,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/agentauth"
 	"github.com/jdolan-exalink/openvms/internal/agentca"
 	"github.com/jdolan-exalink/openvms/internal/agentenroll"
+	"github.com/jdolan-exalink/openvms/internal/agentstatus"
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/branding"
@@ -244,6 +245,7 @@ func run() error {
 		grpcAgent, err = control.NewAgentServer(control.AgentConfig{
 			Credentials: agentCreds,
 			Verifier:    &agentauth.Verifier{Certs: &agentca.PgRepo{Store: st}, Log: log},
+			Heartbeats:  &agentstatus.Recorder{Store: st},
 			Renewer:     agentEnroll,
 			Log:         log,
 		})
