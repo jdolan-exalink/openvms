@@ -12,6 +12,24 @@ import (
 	"github.com/google/uuid"
 )
 
+type AgentCa struct {
+	ID        int16
+	CertPem   string
+	KeySealed []byte
+	CreatedAt time.Time
+}
+
+type AgentCertificate struct {
+	Serial      string
+	TenantID    uuid.UUID
+	ServerID    uuid.UUID
+	Fingerprint string
+	NotBefore   time.Time
+	NotAfter    time.Time
+	RevokedAt   *time.Time
+	CreatedAt   time.Time
+}
+
 type Alarm struct {
 	ID             uuid.UUID
 	TenantID       uuid.UUID
