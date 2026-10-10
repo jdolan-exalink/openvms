@@ -182,6 +182,14 @@ func (ca *CA) SignCSR(csrPEM []byte, id Identity, now time.Time, validity time.D
 	if err := checkPublicKey(csr.PublicKey); err != nil {
 		return nil, err
 	}
+	if !now.Before(ca.Cert.NotAfter) {
+		return nil, errors.New("agentca: CA certificate has expired")
+	}
+	// A leaf that outlives its CA would stop verifying the moment the CA expires.
+	notAfter := now.Add(validity)
+	if notAfter.After(ca.Cert.NotAfter) {
+		notAfter = ca.Cert.NotAfter
+	}
 	serial, err := randomSerial()
 	if err != nil {
 		return nil, err
@@ -191,7 +199,7 @@ func (ca *CA) SignCSR(csrPEM []byte, id Identity, now time.Time, validity time.D
 		Subject:               pkix.Name{CommonName: id.ServerID.String()},
 		URIs:                  []*url.URL{id.URI()},
 		NotBefore:             now.Add(-clockSkew),
-		NotAfter:              now.Add(validity),
+		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 		BasicConstraintsValid: true,

@@ -286,3 +286,27 @@ func TestIdentityFromCertRejectsForeignShapes(t *testing.T) {
 		t.Fatalf("good = %+v, %v", id, err)
 	}
 }
+
+// Leaves never outlive the CA: near the end of the CA lifetime the validity is cut
+// short, and an expired CA refuses to sign.
+func TestSignCSRNeverOutlivesCA(t *testing.T) {
+	ca, err := GenerateCA(testNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csr := newCSR(t, p256(t), &x509.CertificateRequest{})
+	nearEnd := ca.Cert.NotAfter.Add(-24 * time.Hour)
+	issued, err := ca.SignCSR(csr, Identity{TenantID: uuid.New(), ServerID: uuid.New()}, nearEnd, DefaultLeafValidity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issued.NotAfter.After(ca.Cert.NotAfter) {
+		t.Fatalf("leaf NotAfter %v outlives CA NotAfter %v", issued.NotAfter, ca.Cert.NotAfter)
+	}
+	if leaf := parseLeaf(t, issued.CertPEM); leaf.NotAfter.After(ca.Cert.NotAfter) {
+		t.Fatalf("certificate NotAfter %v outlives CA NotAfter %v", leaf.NotAfter, ca.Cert.NotAfter)
+	}
+	if _, err := ca.SignCSR(csr, Identity{TenantID: uuid.New(), ServerID: uuid.New()}, ca.Cert.NotAfter.Add(time.Minute), DefaultLeafValidity); err == nil {
+		t.Fatal("expired CA signed a certificate")
+	}
+}

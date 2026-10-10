@@ -110,6 +110,15 @@ func TestPgRepoCAAndCertificates(t *testing.T) {
 		t.Fatal("tenant B inserted a certificate for tenant A")
 	}
 
+	// A server can only be issued under the tenant that owns it.
+	if _, err := svc.Issue(ctx, csrPEM(t), agentca.Identity{TenantID: tenantB, ServerID: serverA}); err == nil {
+		t.Fatal("issued a certificate for tenant A's server under tenant B")
+	}
+	var crossed int
+	if err := pool.QueryRow(ctx, "SELECT count(*) FROM agent_certificates WHERE tenant_id = $1", tenantB).Scan(&crossed); err != nil || crossed != 0 {
+		t.Fatalf("cross-tenant certificates = %d, %v; want 0", crossed, err)
+	}
+
 	if _, err := repo.GetCertificate(ctx, "does-not-exist"); err == nil {
 		t.Fatal("expected not found")
 	}
