@@ -53,8 +53,9 @@ Edge agents get a unique, revocable identity from the internal agent CA (enrollm
 
 - It reuses `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE` as its server certificate. `GRPC_AGENT_ADDR` without them makes the API fail to start.
 - TLS 1.2 or newer, and a client certificate signed by the agent CA is required (`RequireAndVerifyClientCert`). The CA is created or loaded at API startup; a CA or master-key problem stops the API.
-- It serves only what agents need, today the node `Heartbeat`. User-facing methods are not registered there. Persisting heartbeats is a later change.
+- It serves only what agents need: the node `Heartbeat` and `AgentService.RenewCertificate`. User-facing methods are not registered there.
 - The agent's server id comes from the certificate (URI SAN `spiffe://openvms/tenant/<tenant>/server/<server>`), never from the request. A `Heartbeat` whose `node_id` is another server is `PermissionDenied`.
+- Each accepted heartbeat is stored (see [Heartbeat persistence](#heartbeat-persistence)).
 
 ### Revocation and validity
 
@@ -75,6 +76,12 @@ There is no cache: revoking takes effect on the next call (an RPC already runnin
 
 Clocks: validity windows are checked against the API process clock; revocation, first use and the minimum age use the database clock.
 
+### Heartbeat persistence
+
+Every accepted `Heartbeat` upserts one row per server in `agent_heartbeats` (migration 00044): `last_seen_at` (the database clock, never the agent's), `version` (at most 64 bytes) and `status` (`unknown`, `online`, `degraded`, `offline` or `maintenance`). The write runs in a transaction scoped to the certificate's tenant, under row-level security, with a 3 second bound; if it fails the heartbeat is `Unavailable` and the agent retries on its next tick. It is one small indexed write per heartbeat per server (every 10 seconds per agent by default); if that ever matters, skip the write when nothing changed and `last_seen_at` is recent.
+
+The server read APIs (`GET /api/v1/servers`, `GET /api/v1/servers/{serverId}`) return `agent_last_seen_at`, `agent_version` and `agent_status`. They are absent until the first heartbeat. `agent_status` is what the agent reported, not liveness: decide whether an agent is still reporting by comparing `agent_last_seen_at` with the current time.
+
 ### Rollout
 
 Opt-in and additive, nothing changes until `GRPC_AGENT_ADDR` is set:
@@ -82,3 +89,40 @@ Opt-in and additive, nothing changes until `GRPC_AGENT_ADDR` is set:
 1. Keep (or set) the server TLS variables and set `GRPC_AGENT_ADDR`, then restart the API. Publish the port only after this.
 2. Enroll each agent and move it to the agent port. Existing agents on `GRPC_ADDR` keep working until migrated.
 3. To roll back, unset `GRPC_AGENT_ADDR`.
+
+## Edge agent with mutual TLS
+
+The agent uses mTLS when `OPENVMS_AGENT_GRPC_ADDR` is set; without it nothing below applies and the agent behaves as before.
+
+| Variable | Meaning |
+| --- | --- |
+| `OPENVMS_AGENT_GRPC_ADDR` | `host:port` of the API's agent listener (`GRPC_AGENT_ADDR`). Enables mTLS and takes precedence over `OPENVMS_SERVER_ADDR` / `OPENVMS_CONTROL_ADDR`, which are then ignored (a warning is logged). |
+| `OPENVMS_ENROLL_TOKEN` or `OPENVMS_ENROLL_TOKEN_FILE` | The one-time enrollment token (a file keeps it out of the process environment). Only needed until a certificate is stored; setting both is an error. |
+| `OPENVMS_API_URL` | `https` base URL of the API, for the enrollment call. Plain `http` is refused because the token is a secret. |
+| `OPENVMS_API_CA_FILE` | Optional PEM bundle trusted for the API's HTTPS certificate. Empty uses the system roots. There is no skip-verify option. |
+| `OPENVMS_AGENT_STATE_DIR` | State directory, default `/var/lib/openvms-agent`. Credentials live in `<state>/agent-mtls/`. |
+| `OPENVMS_CONTROL_TLS_CA_FILE`, `OPENVMS_CONTROL_TLS_SERVER_NAME` | Verify the agent listener's server certificate (the API's `GRPC_TLS_CERT_FILE`), as for the control channel. TLS is implied; `OPENVMS_CONTROL_TLS=false` is an error. |
+
+The token, API, state and token-file variables without `OPENVMS_AGENT_GRPC_ADDR` stop the agent at startup, so a typo cannot silently leave it unenrolled.
+
+### Enrollment
+
+1. An operator creates a token for the server (`POST /api/v1/servers/{serverId}/agent/enroll-token`, valid 15 minutes, single use) and gives it to the agent.
+2. On start, if `<state>/agent-mtls/` holds no certificate, the agent generates an ECDSA P-256 key locally, sends only a CSR with the token to `POST {OPENVMS_API_URL}/api/v1/agent/enroll`, and checks that the returned certificate matches its key, carries an agent identity and chains to the returned CA. The private key never leaves the agent.
+3. It stores `key.pem` (0600), `cert.pem`, `ca.pem` and a hash of the spent token (`enroll-token.sha256`) by writing temporary files and renaming them, so a crash never leaves a half-written file. A renewal interrupted between its two renames is finished on the next start.
+
+Stored credentials always win: a token left in the environment after enrollment is ignored, and a corrupt state directory is an error, never a reason to enroll again (the token is gone). A rejected token (unknown, used or expired, all answered `401`) stops the agent with a message asking for a new token; the token is never logged. The one exception is a stored certificate that has already expired together with a token that differs from the spent one: the operator issued a fresh token to recover the agent, so it enrolls again.
+
+The agent then dials `OPENVMS_AGENT_GRPC_ADDR` with its certificate and heartbeats with the server id from that certificate (the configured `OPENVMS_NODE_ID` is ignored).
+
+### Renewal
+
+The agent renews once two thirds of the certificate's lifetime have passed (about day 20 of 30; the server accepts renewals from half, so the agent never trips the minimum age), over mTLS with `RenewCertificate`, using a fresh key. A `FailedPrecondition` answer (too early, for example after a clock correction) is not an error: the agent logs it and retries later with the same backoff. The new certificate is verified (same identity, matches the new key, chains to the CA) and persisted before the agent starts using it. The old certificate stays valid until the new one is first used, so there is no deadline to switch: the worker reconnects on its next heartbeat tick (10 seconds by default), and that first call revokes the old certificate. If the response is lost, the agent still has its old certificate, keeps heartbeating with it and renews again after the usual backoff; the server replaces the unused successor of the first attempt. Only if the old certificate itself expires without a successful renewal is a new enrollment token needed.
+
+A failed attempt is retried with exponential backoff (30 seconds up to 15 minutes), and the loop re-reads the clock at least hourly so a suspended host or corrected clock does not delay renewal. If the certificate expires without a successful renewal it can no longer authenticate, so renewal cannot work any more; the agent logs an error saying so on every attempt and at startup. Recovery is a new enrollment token and a restart (the expired-certificate exception above).
+
+### Rollout for agents
+
+1. Enable the agent listener on the API (see above) and publish its port.
+2. For each agent, create a token and set `OPENVMS_AGENT_GRPC_ADDR`, `OPENVMS_ENROLL_TOKEN` (or the file), `OPENVMS_API_URL` and the control CA settings, then restart the agent. It enrolls on first start and moves to the agent port.
+3. To roll an agent back, unset `OPENVMS_AGENT_GRPC_ADDR` and restart; it returns to `OPENVMS_SERVER_ADDR`. Its issued certificates stay in the database until they expire or are revoked. Uninstalling an agent should also remove `<state>/agent-mtls/` (the SSH install and uninstall wiring is a later change).
