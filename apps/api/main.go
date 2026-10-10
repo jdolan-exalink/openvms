@@ -155,10 +155,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("agent CA: %w", err)
 	}
+	agentEnroll := &agentenroll.Service{Store: st, Authz: inv, CA: agentCA}
 	handlers := &api.Handlers{
 		Inv:           inv,
 		Provision:     provision.New(inv, st, sealer, log),
-		AgentEnroll:   &agentenroll.Service{Store: st, Authz: inv, CA: agentCA},
+		AgentEnroll:   agentEnroll,
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Alarms:        alarmsSvc,
 		Media:         mediaSvc,
@@ -243,6 +244,7 @@ func run() error {
 		grpcAgent, err = control.NewAgentServer(control.AgentConfig{
 			Credentials: agentCreds,
 			Verifier:    &agentauth.Verifier{Certs: &agentca.PgRepo{Store: st}, Log: log},
+			Renewer:     agentEnroll,
 			Log:         log,
 		})
 		if err != nil {

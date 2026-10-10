@@ -60,13 +60,18 @@ func (r *PgRepo) InsertCertificate(ctx context.Context, c Certificate) error {
 // RecordCertificate inserts c using q, so the caller controls the transaction and the
 // tenant scope (which must cover c.TenantID).
 func RecordCertificate(ctx context.Context, q *db.Queries, c Certificate) error {
+	var parent *string
+	if c.ParentSerial != "" {
+		parent = &c.ParentSerial
+	}
 	if err := q.InsertAgentCertificate(ctx, db.InsertAgentCertificateParams{
-		Serial:      c.Serial,
-		TenantID:    c.TenantID,
-		ServerID:    c.ServerID,
-		Fingerprint: c.Fingerprint,
-		NotBefore:   c.NotBefore,
-		NotAfter:    c.NotAfter,
+		Serial:       c.Serial,
+		TenantID:     c.TenantID,
+		ServerID:     c.ServerID,
+		Fingerprint:  c.Fingerprint,
+		NotBefore:    c.NotBefore,
+		NotAfter:     c.NotAfter,
+		ParentSerial: parent,
 	}); err != nil {
 		return fmt.Errorf("agentca: record certificate: %w", err)
 	}
@@ -84,6 +89,10 @@ func (r *PgRepo) GetCertificate(ctx context.Context, serial string) (Certificate
 		out = Certificate{
 			Serial: row.Serial, TenantID: row.TenantID, ServerID: row.ServerID,
 			Fingerprint: row.Fingerprint, NotBefore: row.NotBefore, NotAfter: row.NotAfter, RevokedAt: row.RevokedAt,
+			FirstUsedAt: row.FirstUsedAt,
+		}
+		if row.ParentSerial != nil {
+			out.ParentSerial = *row.ParentSerial
 		}
 		return nil
 	})
@@ -118,4 +127,43 @@ func (r *PgRepo) RevokeServerCertificates(ctx context.Context, serverID uuid.UUI
 		return err
 	})
 	return n, err
+}
+
+// ActivateCertificate records the first use of rec's certificate and revokes every other live
+// certificate of its server, in one tenant-scoped transaction that first takes the server's
+// certificate lock (the one renewals take), so it cannot interleave with a renewal. This is how
+// a renewal supersedes the certificate it replaced: not when the new one is issued, but when the
+// agent first authenticates with it. Clocks are the database's.
+//
+// It is idempotent: a certificate already used returns nil without changing anything. A
+// certificate revoked in the meantime (a newer renewal replaced it while its first call was in
+// flight) returns ErrCertificateRevoked; so does a serial with no row at all, which a listener
+// can only meet if the row was deleted after it looked the certificate up, and which must be
+// refused like a revocation.
+func (r *PgRepo) ActivateCertificate(ctx context.Context, rec Certificate) error {
+	return r.Store.Tx(ctx, store.TenantScope{TenantID: rec.TenantID}, func(q *db.Queries) error {
+		if err := q.LockAgentServerCertificates(ctx, rec.ServerID.String()); err != nil {
+			return err
+		}
+		cur, err := q.GetAgentCertificate(ctx, rec.Serial)
+		if errors.Is(store.Classify(err), store.ErrNotFound) {
+			return ErrCertificateRevoked
+		}
+		if err != nil {
+			return err
+		}
+		if cur.RevokedAt != nil {
+			return ErrCertificateRevoked
+		}
+		if cur.FirstUsedAt != nil {
+			return nil
+		}
+		if _, err := q.MarkAgentCertificateUsed(ctx, rec.Serial); err != nil {
+			return err
+		}
+		_, err = q.RevokeOtherAgentCertificates(ctx, db.RevokeOtherAgentCertificatesParams{
+			ServerID: rec.ServerID, TenantID: rec.TenantID, KeepSerial: rec.Serial,
+		})
+		return err
+	})
 }

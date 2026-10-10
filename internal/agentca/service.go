@@ -19,6 +19,20 @@ var ErrNoCA = errors.New("agentca: no CA")
 // the serial, in the same vocabulary as ErrNoCA.
 var ErrCertificateNotFound = errors.New("agentca: certificate not found")
 
+// ErrCertificateRevoked is returned when a certificate could not be activated because it is
+// revoked, for example a renewal replaced it while its first call was in flight, or because its
+// row no longer exists.
+var ErrCertificateRevoked = errors.New("agentca: certificate is revoked")
+
+// ErrNotRenewable is returned when the certificate presented for a renewal cannot be renewed:
+// it is unknown for that server and tenant, revoked (including superseded by a successor that
+// was already used), or has a used successor.
+var ErrNotRenewable = errors.New("agentca: certificate cannot be renewed")
+
+// ErrRenewalTooEarly is returned when an agent asks to renew a certificate that has not yet
+// passed the minimum age for renewal (half of its lifetime).
+var ErrRenewalTooEarly = errors.New("agentca: certificate is too new to renew")
+
 // caKeyAAD binds the sealed CA key to its purpose, so a sealed value copied from another
 // table or column does not open as the CA key.
 var caKeyAAD = []byte("openvms/agent-ca/key/v1")
@@ -38,6 +52,11 @@ type Certificate struct {
 	NotBefore   time.Time
 	NotAfter    time.Time
 	RevokedAt   *time.Time
+	// ParentSerial is the certificate this one renewed; empty for an enrollment.
+	ParentSerial string
+	// FirstUsedAt is when the certificate first authenticated a call, nil until then. Using a
+	// certificate revokes the server's other certificates (see PgRepo.ActivateCertificate).
+	FirstUsedAt *time.Time
 }
 
 // Repository is the persistence port of the service.

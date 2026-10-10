@@ -16,6 +16,10 @@ type ClientOptions struct {
 	CAFile string
 	// ServerName overrides the name verified against the server certificate. Empty uses the dial target host.
 	ServerName string
+	// GetClientCertificate supplies the client certificate for mutual TLS. It is called on
+	// every handshake, so a provider that returns the current certificate lets a renewed one
+	// apply to new connections without rebuilding the credentials. Nil presents none.
+	GetClientCertificate func(*tls.CertificateRequestInfo) (*tls.Certificate, error)
 }
 
 // ServerCredentials loads a PEM certificate/key pair for a TLS gRPC server (TLS 1.2+).
@@ -56,6 +60,8 @@ func ClientCredentials(opts ClientOptions) (credentials.TransportCredentials, er
 	cfg := &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		ServerName: opts.ServerName,
+
+		GetClientCertificate: opts.GetClientCertificate,
 	}
 	if opts.CAFile != "" {
 		pem, err := os.ReadFile(opts.CAFile)

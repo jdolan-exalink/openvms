@@ -58,9 +58,22 @@ Edge agents get a unique, revocable identity from the internal agent CA (enrollm
 
 ### Revocation and validity
 
-Every call, not only the handshake, is checked against `agent_certificates`: the serial must be recorded, the fingerprint, tenant and server must match the certificate, the current time must be inside the recorded validity window, and `revoked_at` must be empty. A refusal is `Unauthenticated` with a single generic message (the reason is logged by the API); a failed lookup is `Unavailable`, so the call fails closed and the agent retries.
+Every call, not only the handshake, is checked against `agent_certificates`: the serial must be recorded, the fingerprint, tenant and server must match the certificate, the current time must be inside the recorded validity window, and `revoked_at` must be empty. A certificate's first accepted call also activates it (see [Certificate renewal](#certificate-renewal)). A refusal is `Unauthenticated` with a single generic message (the reason is logged by the API); a failed lookup is `Unavailable`, so the call fails closed and the agent retries.
 
 There is no cache: revoking takes effect on the next call (an RPC already running finishes). A revoked agent can keep its TCP connection open but cannot use it. Revoking is a database operation today (`agentca.PgRepo.RevokeCertificate` for one serial, `RevokeServerCertificates` for every live certificate of a server); an admin endpoint is a follow-up.
+
+### Certificate renewal
+
+`AgentService.RenewCertificate(csr_pem) -> certificate_pem, ca_pem` is served on the agent listener only. The caller is the client certificate it presents (it must pass the checks above): the server id and tenant of the new certificate come from that certificate, never from the request, and the CSR's subject and SANs are ignored. The CSR is validated (`agentca.ValidateCSR`, at most 8192 bytes) and signed with the loaded CA. Recording the certificate and its audit row (`SERVER_AGENT_CERT_RENEWED`, target `server_agent`, with the serial, the previous serial and how many unused successors were replaced) happen in one tenant-scoped transaction.
+
+- **Minimum age.** A certificate can be renewed only after half of its lifetime has passed (`not_before + (not_after - not_before) / 2`, database clock). Earlier requests fail with `FailedPrecondition` ("certificate renewal not allowed yet") and write nothing. Agents renew at two thirds, so normal operation is unaffected.
+- **Supersede on first use.** Renewing does not revoke the old certificate. The new certificate is recorded with `parent_serial` set and `first_used_at` empty, and the old one keeps working. When the agent first authenticates a call with the new certificate, the listener (in one transaction, with a per-server lock shared with renewals) sets `first_used_at` and revokes every other live certificate of the server, so the old one stops working exactly when the agent proves it has the new one. This happens once per certificate, not per call; a failure to record it makes that call `Unavailable` (fail closed) and the agent retries.
+- **Lost response.** If the agent never receives the renewal response it still holds a working old certificate, and renews again. Each renewal revokes the presenting certificate's own unused successors (the pending successors of its earlier attempts), so there is at most one pending successor per presenting certificate, and the agent is never locked out by a lost response. Other unused certificates of the server, such as a fresh re-enrollment, are left alone; whichever certificate is used first revokes the rest.
+- **Stolen old key.** Once the legitimate agent has used its new certificate, the old one is revoked, so a copy of the old key can neither call nor renew (a renewal from a revoked certificate is refused as `Unauthenticated`), and it cannot push the legitimate agent's certificate out. Until the agent switches, the old key and the agent are indistinguishable, which is inherent to a renewal chain; the minimum age bounds how often it can be abused.
+- **Concurrency.** Renewals and first uses of one server take the same advisory lock, so a pending successor's first call racing a retry from its parent has exactly one winner.
+- **Compromised key.** Revoke the whole server (`agentca.PgRepo.RevokeServerCertificates`): it ends every certificate of the server immediately and so cuts the whole renewal chain. The agent must then enroll again with a new token.
+
+Clocks: validity windows are checked against the API process clock; revocation, first use and the minimum age use the database clock.
 
 ### Rollout
 

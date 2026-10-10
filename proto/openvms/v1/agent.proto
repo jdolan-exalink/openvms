@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package openvms.v1;
+
+option go_package = "github.com/jdolan-exalink/openvms/gen/go/openvms/v1;openvmsv1";
+
+// AgentService is served only on the agent listener (mutual TLS). The caller's identity is
+// the client certificate it presents; nothing in a request names the agent.
+service AgentService {
+  // RenewCertificate issues a fresh client certificate for the calling agent's own
+  // identity. The agent generates a new key and sends only the CSR. The previous
+  // certificate stays valid until it expires or is revoked.
+  rpc RenewCertificate(RenewCertificateRequest) returns (RenewCertificateResponse);
+}
+
+message RenewCertificateRequest {
+  // PEM PKCS#10 certificate request. Its subject and SANs are ignored.
+  string csr_pem = 1;
+}
+
+message RenewCertificateResponse {
+  string certificate_pem = 1;
+  // Public CA certificate the agent trusts for the API.
+  string ca_pem = 2;
+}

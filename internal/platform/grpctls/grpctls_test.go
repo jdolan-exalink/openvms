@@ -2,17 +2,21 @@ package grpctls_test
 
 import (
 	"context"
+	"crypto/tls"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/jdolan-exalink/openvms/internal/agentauth/agentauthtest"
+	"github.com/jdolan-exalink/openvms/internal/agentca"
 	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 	"github.com/jdolan-exalink/openvms/internal/platform/grpctls/grpctlstest"
 )
@@ -118,4 +122,45 @@ func TestClientCredentialsErrors(t *testing.T) {
 	if _, err := grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: empty}); err == nil {
 		t.Fatal("expected error for CA file without certificates")
 	}
+}
+
+func TestClientCredentialsPresentTheClientCertificate(t *testing.T) {
+	certFile, keyFile := grpctlstest.WriteSelfSigned(t)
+	pki := agentauthtest.NewPKI(t)
+	clientPair := pki.Issue(t, agentca.Identity{TenantID: uuid.New(), ServerID: uuid.New()}, time.Now(), time.Hour).TLS
+	pool := pki.Pool
+	creds, err := grpctls.ServerMTLSCredentials(certFile, keyFile, pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := startServer(t, grpc.Creds(creds))
+
+	t.Run("without a client certificate the handshake fails", func(t *testing.T) {
+		cc, err := grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: certFile})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := check(addr, grpc.WithTransportCredentials(cc)); err == nil {
+			t.Fatal("a client without a certificate reached an mTLS server")
+		}
+	})
+	t.Run("a certificate provider is consulted for each handshake", func(t *testing.T) {
+		calls := 0
+		cc, err := grpctls.ClientCredentials(grpctls.ClientOptions{
+			CAFile: certFile,
+			GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+				calls++
+				return &clientPair, nil
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := check(addr, grpc.WithTransportCredentials(cc)); err != nil {
+			t.Fatalf("client with a certificate: %v", err)
+		}
+		if calls == 0 {
+			t.Fatal("GetClientCertificate was never called")
+		}
+	})
 }

@@ -24,6 +24,9 @@ type Store struct {
 	certs map[string]agentca.Certificate
 	// Err, when set, is returned by every lookup (a database outage).
 	Err error
+	// ActivateErr, when set, is returned by every activation.
+	ActivateErr error
+	activations int
 }
 
 func (s *Store) GetCertificate(_ context.Context, serial string) (agentca.Certificate, error) {
@@ -37,6 +40,40 @@ func (s *Store) GetCertificate(_ context.Context, serial string) (agentca.Certif
 		return agentca.Certificate{}, agentca.ErrCertificateNotFound
 	}
 	return c, nil
+}
+
+// ActivateCertificate mirrors agentca.PgRepo.ActivateCertificate in memory.
+func (s *Store) ActivateCertificate(_ context.Context, rec agentca.Certificate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ActivateErr != nil {
+		return s.ActivateErr
+	}
+	cur, ok := s.certs[rec.Serial]
+	if !ok || cur.RevokedAt != nil {
+		return agentca.ErrCertificateRevoked
+	}
+	if cur.FirstUsedAt != nil {
+		return nil
+	}
+	now := time.Now()
+	cur.FirstUsedAt = &now
+	s.certs[rec.Serial] = cur
+	for serial, c := range s.certs {
+		if serial != rec.Serial && c.ServerID == cur.ServerID && c.TenantID == cur.TenantID && c.RevokedAt == nil {
+			c.RevokedAt = &now
+			s.certs[serial] = c
+		}
+	}
+	s.activations++
+	return nil
+}
+
+// Activations is how many certificates were activated (first uses) so far.
+func (s *Store) Activations() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activations
 }
 
 // Put stores or replaces a record.
@@ -75,6 +112,15 @@ func NewPKI(t testing.TB) *PKI {
 	pool := x509.NewCertPool()
 	pool.AddCert(ca.Cert)
 	return &PKI{CA: ca, Pool: pool, Store: &Store{}}
+}
+
+// IssueChild is Issue for a renewal: the certificate records parent as its parent serial.
+func (p *PKI) IssueChild(t testing.TB, id agentca.Identity, parent string, now time.Time, validity time.Duration) Client {
+	t.Helper()
+	c := p.IssueUnrecorded(t, p.CA, id, now, validity)
+	c.Record.ParentSerial = parent
+	p.Store.Put(c.Record)
+	return c
 }
 
 // Client is an issued client certificate with its private key.

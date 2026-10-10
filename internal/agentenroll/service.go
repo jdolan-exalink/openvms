@@ -151,6 +151,80 @@ func (s *Service) Enroll(ctx context.Context, token string, csrPEM []byte) (*age
 	return res, nil
 }
 
+// Renew issues a replacement certificate for an agent that authenticated with previousSerial.
+// id must come from the verified client certificate, never from a request field.
+//
+// A renewal never revokes the certificate it replaces. That certificate keeps working until the
+// agent first authenticates with the new one (agentca.PgRepo.ActivateCertificate revokes the
+// server's other certificates at that moment), so an agent that lost the response can ask again
+// with the old certificate. Each renewal revokes the presenting certificate's own unused
+// successors (the pending results of its earlier attempts), so a certificate has at most one
+// pending successor. Other unused certificates, such as a fresh re-enrollment, are left alone.
+//
+// Everything runs in one transaction scoped to the agent's tenant, after taking the server's
+// certificate lock, which serializes all renewals and first uses of a server (a row lock on the
+// presenting certificate alone would not, since concurrent renewals may present different
+// certificates). It checks, on the database clock, that the presenting certificate belongs to the
+// server and tenant and is not revoked, that it has passed half of its lifetime (earlier fails
+// with agentca.ErrRenewalTooEarly, so a looping or stolen client cannot mint certificates), and
+// that no successor of it was used yet. Any other failure of those checks is
+// agentca.ErrNotRenewable. The signed certificate is released only after the commit.
+//
+// A compromised key is handled by revoking the whole server
+// (agentca.PgRepo.RevokeServerCertificates), which ends every certificate of the chain.
+func (s *Service) Renew(ctx context.Context, id agentca.Identity, previousSerial string, csrPEM []byte) (*agentca.Issuance, error) {
+	if err := agentca.ValidateCSR(csrPEM); err != nil {
+		return nil, err
+	}
+	ca, err := s.CA.LoadOrCreateCA(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var res *agentca.Issuance
+	err = s.Store.Tx(ctx, store.TenantScope{TenantID: id.TenantID}, func(q *db.Queries) error {
+		if err := q.LockAgentServerCertificates(ctx, id.ServerID.String()); err != nil {
+			return err
+		}
+		row, err := q.GetAgentCertificateForRenewal(ctx, db.GetAgentCertificateForRenewalParams{
+			Serial: previousSerial, ServerID: id.ServerID, TenantID: id.TenantID,
+		})
+		if errors.Is(store.Classify(err), store.ErrNotFound) {
+			return agentca.ErrNotRenewable
+		}
+		if err != nil {
+			return err
+		}
+		if row.UsedSuccessor {
+			return agentca.ErrNotRenewable
+		}
+		if !row.Renewable {
+			return agentca.ErrRenewalTooEarly
+		}
+		replaced, err := q.RevokeUnusedAgentSuccessors(ctx, db.RevokeUnusedAgentSuccessorsParams{
+			ParentSerial: &previousSerial, ServerID: id.ServerID, TenantID: id.TenantID,
+		})
+		if err != nil {
+			return err
+		}
+		res, err = s.CA.Sign(ca, csrPEM, id)
+		if err != nil {
+			return err
+		}
+		res.Record.ParentSerial = previousSerial
+		if err := agentca.RecordCertificate(ctx, q, res.Record); err != nil {
+			return err
+		}
+		return audit(ctx, q, nil, id.TenantID, id.ServerID, "SERVER_AGENT_CERT_RENEWED", map[string]any{
+			"serial": res.Issued.Serial, "previous_serial": previousSerial, "replaced_unused": replaced,
+			"fingerprint": res.Issued.Fingerprint, "not_after": res.Issued.NotAfter,
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 // audit records an enrollment event. audit_log.target_id is a uuid, so both events target the
 // server under "server_agent" (as the other agent events do); the issued certificate is
 // identified in details. actor is nil for the agent's own redemption.

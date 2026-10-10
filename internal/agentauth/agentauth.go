@@ -29,6 +29,10 @@ import (
 type CertificateStore interface {
 	// GetCertificate returns agentca.ErrCertificateNotFound for an unknown serial.
 	GetCertificate(ctx context.Context, serial string) (agentca.Certificate, error)
+	// ActivateCertificate records the certificate's first use and revokes the server's other
+	// certificates, atomically. It returns agentca.ErrCertificateRevoked if the certificate was
+	// revoked in the meantime. Idempotent for a certificate already activated.
+	ActivateCertificate(ctx context.Context, rec agentca.Certificate) error
 }
 
 // Verifier checks the peer certificate of each call.
@@ -53,12 +57,30 @@ var (
 	errUnavailable = status.Error(codes.Unavailable, "client certificate check unavailable")
 )
 
-type ctxKey struct{}
+type (
+	ctxKey       struct{}
+	serialCtxKey struct{}
+)
 
 // IdentityFromContext returns the agent identity the interceptors authenticated.
 func IdentityFromContext(ctx context.Context) (agentca.Identity, bool) {
 	id, ok := ctx.Value(ctxKey{}).(agentca.Identity)
 	return id, ok
+}
+
+// SerialFromContext returns the serial (lowercase hex) of the certificate the interceptors
+// authenticated, for handlers that act on that specific certificate, such as renewal.
+func SerialFromContext(ctx context.Context) (string, bool) {
+	serial, ok := ctx.Value(serialCtxKey{}).(string)
+	return serial, ok
+}
+
+// withAuthenticated records the authenticated identity and certificate serial in ctx.
+func withAuthenticated(ctx context.Context, id agentca.Identity) context.Context {
+	if leaf := verifiedLeaf(ctx); leaf != nil {
+		ctx = context.WithValue(ctx, serialCtxKey{}, leaf.SerialNumber.Text(16))
+	}
+	return context.WithValue(ctx, ctxKey{}, id)
 }
 
 func (v *Verifier) log() *slog.Logger {
@@ -78,7 +100,13 @@ func (v *Verifier) now() time.Time {
 // Authenticate verifies the peer certificate of ctx and returns the agent identity. A
 // certificate is accepted only if it was verified against the agent CA by the TLS layer,
 // carries an agent identity, is recorded, matches the recorded fingerprint, tenant and
-// server, is inside the recorded validity window and is not revoked. A refusal is
+// server, is inside the recorded validity window and is not revoked. A certificate's first
+// accepted call activates it: the store marks it used and revokes the server's other
+// certificates, which is how a renewal supersedes the certificate it replaced (never earlier,
+// so an agent that lost the renewal response keeps working with its old certificate).
+//
+// Clocks: the validity window is checked against this process's clock (Now), while
+// revocation and first use are decided by the database clock inside the store. A refusal is
 // Unauthenticated; a failed lookup is Unavailable (fail closed, and the agent retries).
 func (v *Verifier) Authenticate(ctx context.Context) (agentca.Identity, error) {
 	leaf := verifiedLeaf(ctx)
@@ -118,6 +146,16 @@ func (v *Verifier) Authenticate(ctx context.Context) (agentca.Identity, error) {
 	case now.Before(rec.NotBefore) || now.After(rec.NotAfter):
 		v.log().Warn("agent certificate is outside its validity window", "serial", serial)
 	default:
+		if rec.FirstUsedAt == nil {
+			if err := v.Certs.ActivateCertificate(lookupCtx, rec); errors.Is(err, agentca.ErrCertificateRevoked) {
+				v.log().Warn("agent certificate was revoked while being activated", "serial", serial)
+				return agentca.Identity{}, ErrRejected
+			} else if err != nil {
+				v.log().Error("agent certificate activation failed", "serial", serial, "error", err)
+				return agentca.Identity{}, errUnavailable
+			}
+			v.log().Info("agent certificate activated", "serial", serial, "server_id", id.ServerID)
+		}
 		return id, nil
 	}
 	return agentca.Identity{}, ErrRejected
@@ -143,7 +181,7 @@ func (v *Verifier) UnaryInterceptor() grpc.UnaryServerInterceptor {
 		if err != nil {
 			return nil, err
 		}
-		return handler(context.WithValue(ctx, ctxKey{}, id), req)
+		return handler(withAuthenticated(ctx, id), req)
 	}
 }
 
@@ -155,7 +193,7 @@ func (v *Verifier) StreamInterceptor() grpc.StreamServerInterceptor {
 		if err != nil {
 			return err
 		}
-		return handler(srv, &identityStream{ServerStream: ss, ctx: context.WithValue(ss.Context(), ctxKey{}, id)})
+		return handler(srv, &identityStream{ServerStream: ss, ctx: withAuthenticated(ss.Context(), id)})
 	}
 }
 

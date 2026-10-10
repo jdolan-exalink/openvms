@@ -20,14 +20,16 @@ type AgentCa struct {
 }
 
 type AgentCertificate struct {
-	Serial      string
-	TenantID    uuid.UUID
-	ServerID    uuid.UUID
-	Fingerprint string
-	NotBefore   time.Time
-	NotAfter    time.Time
-	RevokedAt   *time.Time
-	CreatedAt   time.Time
+	Serial       string
+	TenantID     uuid.UUID
+	ServerID     uuid.UUID
+	Fingerprint  string
+	NotBefore    time.Time
+	NotAfter     time.Time
+	RevokedAt    *time.Time
+	CreatedAt    time.Time
+	ParentSerial *string
+	FirstUsedAt  *time.Time
 }
 
 type AgentEnrollToken struct {
