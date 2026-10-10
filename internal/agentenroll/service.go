@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,9 +36,12 @@ type Authorizer interface {
 	RequireServerManageAndConfigSecrets(ctx context.Context, actor authz.Actor, serverID uuid.UUID) error
 }
 
-// Issuer signs a CSR for an identity in memory (agentca.Service). Enroll persists the
-// certificate itself, inside its own transaction.
+// Issuer signs CSRs (agentca.Service). Sign produces the certificate but does not record it:
+// Enroll persists agentca.Issuance.Record itself, inside its transaction. LoadOrCreateCA may
+// create and persist the CA through the issuer's own repository (its own pool connection),
+// so Enroll calls it before opening the transaction; Sign never joins the caller's tx.
 type Issuer interface {
+	LoadOrCreateCA(ctx context.Context) (*agentca.CA, error)
 	Sign(ctx context.Context, csrPEM []byte, id agentca.Identity) (*agentca.Issuance, error)
 }
 
@@ -108,12 +110,22 @@ func (s *Service) Enroll(ctx context.Context, token string, csrPEM []byte) (*age
 	if err := agentca.ValidateCSR(csrPEM); err != nil {
 		return nil, err
 	}
+	// Load (or create) the CA first: on a cold cache that takes its own pool connection, which
+	// must not happen while the transaction below holds one and the token row lock.
+	if _, err := s.CA.LoadOrCreateCA(ctx); err != nil {
+		return nil, err
+	}
 	var res *agentca.Issuance
+	// errTokenNotFound marks the consume step only; a not-found from any later step is internal.
+	var errTokenNotFound = errors.New("token not found")
 	// The tenant is unknown until the token resolves, hence the all-tenants scope. That scope
 	// also satisfies the tenant-scoped certificate and audit inserts below.
 	err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		row, err := q.ConsumeAgentEnrollToken(ctx, hash(token))
 		if err != nil {
+			if errors.Is(store.Classify(err), store.ErrNotFound) {
+				return errTokenNotFound
+			}
 			return err
 		}
 		res, err = s.CA.Sign(ctx, csrPEM, agentca.Identity{TenantID: row.TenantID, ServerID: row.ServerID})
@@ -121,12 +133,12 @@ func (s *Service) Enroll(ctx context.Context, token string, csrPEM []byte) (*age
 			return err
 		}
 		if err := agentca.RecordCertificate(ctx, q, res.Record); err != nil {
-			return fmt.Errorf("agentca: record certificate: %w", err)
+			return err
 		}
 		return audit(ctx, q, nil, row.TenantID, row.ServerID, "SERVER_AGENT_ENROLLED",
 			map[string]any{"serial": res.Issued.Serial, "fingerprint": res.Issued.Fingerprint, "not_after": res.Issued.NotAfter})
 	})
-	if errors.Is(store.Classify(err), store.ErrNotFound) {
+	if errors.Is(err, errTokenNotFound) {
 		return nil, ErrInvalidToken
 	}
 	if err != nil {

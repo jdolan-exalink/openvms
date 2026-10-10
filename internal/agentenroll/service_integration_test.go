@@ -13,6 +13,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/agentca"
 	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/platform/postgres"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
@@ -392,5 +394,128 @@ func TestMalformedCSRIsReportedBeforeTheTokenIsChecked(t *testing.T) {
 	e := setup(t)
 	if _, err := e.svc.Enroll(context.Background(), "nope", []byte("junk")); !errors.Is(err, agentca.ErrInvalidCSR) {
 		t.Fatalf("err = %v, want ErrInvalidCSR", err)
+	}
+}
+
+// notFoundIssuer signs through the real CA but then fails with an error that wraps
+// store.ErrNotFound, the way a lookup deep inside signing or recording could.
+type notFoundIssuer struct{ *agentca.Service }
+
+func (notFoundIssuer) Sign(context.Context, []byte, agentca.Identity) (*agentca.Issuance, error) {
+	return nil, fmt.Errorf("a later step: %w", store.ErrNotFound)
+}
+
+// Only the token lookup means "invalid token". A not-found raised by a later step is an
+// internal error: it must not be reported as a bad token, and it must not burn the token.
+func TestNotFoundAfterConsumeIsNotAnInvalidToken(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	tok := e.createToken(t)
+	real := e.svc.CA
+	e.svc.CA = notFoundIssuer{real.(*agentca.Service)}
+	_, err := e.svc.Enroll(ctx, tok.Value, csr(t))
+	if err == nil || errors.Is(err, agentenroll.ErrInvalidToken) {
+		t.Fatalf("err = %v, want an internal error that is not ErrInvalidToken", err)
+	}
+	e.svc.CA = real
+	if _, err := e.svc.Enroll(ctx, tok.Value, csr(t)); err != nil {
+		t.Fatalf("token after the rolled-back attempt: %v", err)
+	}
+}
+
+// With a cold CA cache and a tiny pool, concurrent first enrollments must not need a second
+// pool connection while the enrollment transaction holds one.
+func TestConcurrentFirstEnrollmentsDoNotExhaustThePool(t *testing.T) {
+	e := setup(t)
+	const n = 4
+	toks := make([]agentenroll.Token, n)
+	for i := range toks {
+		// One live token per server, so give each enrollment its own server.
+		if i == 0 {
+			toks[i] = e.createToken(t)
+			continue
+		}
+		toks[i] = e.createTokenForNewServer(t)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	small, err := postgres.Connect(ctx, e.url+"&pool_max_conns=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer small.Close()
+	st := &store.Store{Pool: small}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	sealer, _ := secrets.NewSealer(key)
+	svc := &agentenroll.Service{Store: st, Authz: allowAll{},
+		CA: &agentca.Service{Repo: &agentca.PgRepo{Store: st}, Sealer: sealer}}
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range toks {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = svc.Enroll(ctx, toks[i].Value, csr(t))
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("enrollment #%d: %v", i, err)
+		}
+	}
+}
+
+func (e *env) createTokenForNewServer(t *testing.T) agentenroll.Token {
+	t.Helper()
+	ctx := context.Background()
+	server, site := uuid.New(), uuid.New()
+	err := e.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "INSERT INTO sites (id, tenant_id, name) VALUES ($1, $2, $3)", site, e.tenant, site.String()); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, "INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, username, password_sealed) VALUES ($1, $2, $3, $4, 'http://x', 'u', '\\x00')",
+			server, e.tenant, site, server.String())
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := e.svc.CreateToken(ctx, e.actor, server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tok
+}
+
+// The expiry comes from the database clock, and replacing the live token refreshes its
+// expiry, creator and creation time.
+func TestCreateTokenExpiryAndReplacementRefreshTheRow(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.svc.TTL = time.Hour
+	first := e.createToken(t)
+	if d := time.Until(first.ExpiresAt); d < 59*time.Minute || d > 61*time.Minute {
+		t.Fatalf("expires in %s, want ~1h", d)
+	}
+	var firstCreatedAt time.Time
+	e.scan(t, "SELECT created_at FROM agent_enroll_tokens WHERE server_id = $1", []any{e.server}, &firstCreatedAt)
+
+	other := uuid.New()
+	e.exec(t, "INSERT INTO users (id, tenant_id, username, display_name) VALUES ('"+other.String()+"', '"+e.tenant.String()+"', 'op2', 'op2')")
+	e.svc.TTL = 2 * time.Hour
+	second, err := e.svc.CreateToken(ctx, authz.Actor{UserID: other, Username: "op2", TenantID: &e.tenant}, e.server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows int
+	var expires, createdAt time.Time
+	var createdBy uuid.UUID
+	e.scan(t, "SELECT count(*), max(expires_at), max(created_at), max(created_by::text)::uuid FROM agent_enroll_tokens WHERE server_id = $1 AND used_at IS NULL",
+		[]any{e.server}, &rows, &expires, &createdAt, &createdBy)
+	if rows != 1 || createdBy != other || !createdAt.After(firstCreatedAt) || expires.Sub(first.ExpiresAt) < 59*time.Minute || !expires.Equal(second.ExpiresAt) {
+		t.Fatalf("rows=%d created_by=%s (want %s) created_at refreshed=%v expires=%s (first %s, returned %s)",
+			rows, createdBy, other, createdAt.After(firstCreatedAt), expires, first.ExpiresAt, second.ExpiresAt)
 	}
 }

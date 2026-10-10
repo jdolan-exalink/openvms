@@ -121,9 +121,10 @@ func (s *Service) createCA(ctx context.Context) (*CARecord, error) {
 	return s.Repo.GetCA(ctx)
 }
 
-// Sign signs a CSR for id in memory and persists nothing. A caller that must record the
-// certificate together with other writes persists Issuance.Record (see RecordCertificate)
-// and releases the certificate only after that commit.
+// Sign signs a CSR for id and does not record the certificate. It may load or create the CA
+// (and so persist it) through the service's own repository, never through a caller's
+// transaction. A caller that must record the certificate together with other writes persists
+// Issuance.Record (see RecordCertificate) and releases the certificate only after that commit.
 func (s *Service) Sign(ctx context.Context, csrPEM []byte, id Identity) (*Issuance, error) {
 	ca, err := s.LoadOrCreateCA(ctx)
 	if err != nil {
@@ -155,7 +156,7 @@ func (s *Service) Issue(ctx context.Context, csrPEM []byte, id Identity) (*Issua
 		return nil, err
 	}
 	if err := s.Repo.InsertCertificate(ctx, res.Record); err != nil {
-		return nil, fmt.Errorf("agentca: record certificate: %w", err)
+		return nil, err
 	}
 	return res, nil
 }
