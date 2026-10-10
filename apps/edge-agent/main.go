@@ -76,8 +76,32 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
+	// Mutual TLS is opt-in (OPENVMS_AGENT_GRPC_ADDR). When on, the worker dials the agent
+	// listener with the enrolled certificate instead of the control address below.
+	mtlsCfg, err := loadMTLS(ctx, os.Getenv, log, time.Now)
+	if err != nil {
+		log.Error("invalid agent mTLS configuration", "error", err)
+		os.Exit(1)
+	}
 	serverAddr := env("OPENVMS_SERVER_ADDR", env("OPENVMS_CONTROL_ADDR", ""))
-	if serverAddr != "" {
+	if mtlsCfg != nil {
+		if serverAddr != "" {
+			log.Warn("OPENVMS_AGENT_GRPC_ADDR is set: ignoring OPENVMS_SERVER_ADDR / OPENVMS_CONTROL_ADDR", "ignored", serverAddr)
+		}
+		worker := agent.NewWorker(agent.WorkerConfig{
+			ControlGRPCAddr: mtlsCfg.Addr,
+			Sampler:         sampler,
+			Log:             log,
+			TLSCAFile:       mtlsCfg.CAFile,
+			TLSServerName:   mtlsCfg.ServerName,
+			MTLS:            mtlsCfg.Manager,
+		})
+		go func() {
+			if err := worker.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				log.Warn("heartbeat worker stopped", "error", err)
+			}
+		}()
+	} else if serverAddr != "" {
 		nodeID := env("OPENVMS_NODE_ID", "node-auto")
 		controlTLS, controlCA, controlServerName, err := controlTLSFromEnv(os.Getenv)
 		if err != nil {
