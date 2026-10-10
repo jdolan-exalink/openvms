@@ -38,6 +38,7 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 - [x] M2 Enrollment: migration for one-time tokens, API endpoint to create a token (`servers.manage`), unauthenticated enroll endpoint (token + CSR → cert + CA bundle), hashing, TTL, single use; tests.
 - [x] M2-fix Review advisories (user approved): enrollment (token consume, cert insert, audit) in one transaction; YAML `token` description quoted; audit target type/id consistent; one live token per server enforced atomically (partial unique index + upsert); stale RLS note corrected; tests for the rollback path.
 - [ ] M3 Agent listener: separate gRPC listener requiring client certs, revocation check, peer identity in context, Heartbeat bound to the cert identity; tests.
+  - Carried from the M2 follow-up review (lineage `review-c44234da612a1311`, approved with advisories, user deferred to M3): pass the loaded CA into `Sign` so it cannot reach the repository inside the enrollment transaction (today safe only because the CA cache never evicts); create the CA at startup or by an admin action instead of on an unauthenticated enroll; fix the `notFoundIssuer` doc comment; build CSRs before the goroutines in the pool test (no `t.Fatal` off the test goroutine) and check the sealer error; package-level `errTokenNotFound`; rename the `real` test variable; make the `Issue` error-context contract explicit; unify the not-found vocabulary.
 - [ ] M4 Agent side: edge agent enroll command/flow, key + cert persistence, worker dials the agent port with its cert, renewal at 2/3 lifetime; tests.
 - [ ] M5 Persistent heartbeat: store last seen, version, status; surface it where server status is read; tests.
 - [ ] M6 SSH install + docs: install writes the enroll token and control settings; docs for the whole flow and rollout.
@@ -68,4 +69,4 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 
 ## Next step
 
-Review and PR2 for M2 (`feat/agent-mtls-enroll`), then M3 agent listener.
+PR2 for M2 (`feat/agent-mtls-enroll`) open; then M3 agent listener with the carried advisories.
