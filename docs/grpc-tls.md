@@ -1,6 +1,6 @@
 # gRPC control channel TLS
 
-The API serves its gRPC control channel on `GRPC_ADDR` (default `:9090`). It can be served over server-side TLS: the channel is encrypted and clients verify the server certificate. Client certificates (mTLS) are not required or checked; mTLS and agent identity are a separate feature.
+The API serves its gRPC control channel on `GRPC_ADDR` (default `:9090`). It can be served over server-side TLS: the channel is encrypted and clients verify the server certificate. Client certificates are not required on this listener. Edge agents can use a separate mutual-TLS listener instead; see [Agent listener](#agent-listener-mutual-tls).
 
 ## Server (API)
 
@@ -28,6 +28,8 @@ The API serves its gRPC control channel on `GRPC_ADDR` (default `:9090`). It can
 
 `client.Config` gains `TLS`, `TLSCAFile`, and `TLSServerName` with the same meaning. `TLSCAFile` or `TLSServerName` without `TLS` makes `client.New` return an error.
 
+`client.Config.Insecure` was removed. It was never read, so it implied a secure channel it did not provide. This is a compile-time break for external callers that set it; use `TLS` (and `TLSCAFile` / `TLSServerName` when needed) instead.
+
 The server certificate is always verified; there is no option to skip verification. The certificate must carry a SAN matching the dial host (or `TLSServerName`).
 
 ## Rollout
@@ -40,3 +42,30 @@ A TLS server rejects plaintext clients and a plaintext server rejects TLS client
 To avoid a gap, switch clients during the same maintenance window as the server. Rolling back is the reverse: unset the server variables and clients' TLS settings.
 
 Publishing port 9090 beyond the host (for example in compose) is not part of this change and should happen only after TLS is enabled.
+
+## Agent listener (mutual TLS)
+
+Edge agents get a unique, revocable identity from the internal agent CA (enrollment: `POST /api/v1/agent/enroll`) and present it on a separate listener. The user and SDK port above is unchanged.
+
+| Variable | Meaning |
+| --- | --- |
+| `GRPC_AGENT_ADDR` | Listen address of the agent listener, for example `:9443`. Empty (the default) disables it. |
+
+- It reuses `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE` as its server certificate. `GRPC_AGENT_ADDR` without them makes the API fail to start.
+- TLS 1.2 or newer, and a client certificate signed by the agent CA is required (`RequireAndVerifyClientCert`). The CA is created or loaded at API startup; a CA or master-key problem stops the API.
+- It serves only what agents need, today the node `Heartbeat`. User-facing methods are not registered there. Persisting heartbeats is a later change.
+- The agent's server id comes from the certificate (URI SAN `spiffe://openvms/tenant/<tenant>/server/<server>`), never from the request. A `Heartbeat` whose `node_id` is another server is `PermissionDenied`.
+
+### Revocation and validity
+
+Every call, not only the handshake, is checked against `agent_certificates`: the serial must be recorded, the fingerprint, tenant and server must match the certificate, the current time must be inside the recorded validity window, and `revoked_at` must be empty. A refusal is `Unauthenticated` with a single generic message (the reason is logged by the API); a failed lookup is `Unavailable`, so the call fails closed and the agent retries.
+
+There is no cache: revoking takes effect on the next call (an RPC already running finishes). A revoked agent can keep its TCP connection open but cannot use it. Revoking is a database operation today (`agentca.PgRepo.RevokeCertificate` for one serial, `RevokeServerCertificates` for every live certificate of a server); an admin endpoint is a follow-up.
+
+### Rollout
+
+Opt-in and additive, nothing changes until `GRPC_AGENT_ADDR` is set:
+
+1. Keep (or set) the server TLS variables and set `GRPC_AGENT_ADDR`, then restart the API. Publish the port only after this.
+2. Enroll each agent and move it to the agent port. Existing agents on `GRPC_ADDR` keep working until migrated.
+3. To roll back, unset `GRPC_AGENT_ADDR`.
