@@ -29,7 +29,7 @@ User chose server-side TLS now (option A) over full mTLS (option B, the target i
 ## Tasks
 
 - [x] T1 Shared TLS credential builders (server from cert/key files; client from CA file / system roots + server name), with tests using a generated self-signed cert. Route: delegated direct (writer trigger: T1–T4 span 2+ non-trivial files).
-- [ ] T2 API server: config fields `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE`, wire into `control.NewServer`, validation (one-without-the-other fails), plaintext warning; TLS handshake test against the control server.
+- [x] T2 API server: config fields `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE`, wire into `control.NewServer`, validation (one-without-the-other fails), plaintext warning; TLS handshake test against the control server.
 - [ ] T3 Edge-agent worker: `OPENVMS_CONTROL_TLS`, `OPENVMS_CONTROL_TLS_CA_FILE`, `OPENVMS_CONTROL_TLS_SERVER_NAME`; worker dials with TLS when enabled; test against a TLS server.
 - [ ] T4 Desktop SDK `pkg/client`: TLS options in `Config`; test against a TLS server.
 - [ ] T5 Docs for the settings and the rollout note (enable on server, then clients).
@@ -45,7 +45,8 @@ User chose server-side TLS now (option A) over full mTLS (option B, the target i
 
 - Exploration done (control server, clients, existing TLS infra, relay, tests, docs). No reusable CA; `server_agent_tls` is for the API→agent HTTPS direction.
 - T1 done (commit see `git log`): `internal/platform/grpctls` (ServerCredentials, ClientCredentials) + `grpctlstest.WriteSelfSigned`. pkg/client is in the same module, so it may import `internal/platform/grpctls` (no duplication). RED: `no non-test Go files in .../internal/platform/grpctls` / `[build failed]`; GREEN: `ok .../grpctls`. Checks: build, vet, test (below).
+- T2 done: config `GRPC_TLS_CERT_FILE`/`GRPC_TLS_KEY_FILE` (Load errors if only one), `control.Config.Credentials`, wiring + plaintext warning in `apps/api/main.go`. RED: `unknown field Credentials in struct literal` / `cfg.GRPCTLSEnabled undefined`; GREEN: `ok internal/control`, `ok internal/platform/config`.
 
 ## Next step
 
-T2.
+T3.

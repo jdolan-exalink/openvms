@@ -9,6 +9,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/stats"
@@ -55,6 +56,8 @@ type Config struct {
 	Sessions  *mediasession.Manager
 	Log       *slog.Logger
 	Features  []string
+	// Credentials enables TLS when set; nil serves plaintext.
+	Credentials credentials.TransportCredentials
 }
 
 // Server coordinates all OpenVMS gRPC services.
@@ -93,6 +96,10 @@ func NewServer(cfg Config) *Server {
 		}),
 		grpc.UnaryInterceptor(unaryLoggingInterceptor(cfg.Log)),
 		grpc.StreamInterceptor(streamLoggingInterceptor(cfg.Log)),
+	}
+
+	if cfg.Credentials != nil {
+		opts = append(opts, grpc.Creds(cfg.Credentials))
 	}
 
 	s := grpc.NewServer(opts...)
