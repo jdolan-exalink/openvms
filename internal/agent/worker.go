@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/grpc"
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
+	"github.com/jdolan-exalink/openvms/internal/agent/mtls"
 	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 )
 
@@ -27,13 +29,19 @@ type WorkerConfig struct {
 	TLSCAFile string
 	// TLSServerName overrides the name verified against the server certificate.
 	TLSServerName string
+	// MTLS, when set, dials the agent listener with the managed client certificate. TLS is
+	// always on then (TLSCAFile and TLSServerName still select how the server is verified),
+	// the node id is the server id in the certificate, and the worker renews the certificate
+	// and reconnects with the new one. Nil keeps the unauthenticated behavior.
+	MTLS *mtls.Manager
 }
 
 // Worker periodically transmits telemetry and heartbeats to the central OpenVMS Control Server.
 type Worker struct {
 	cfg        WorkerConfig
 	nodeClient openvmsv1.NodeServiceClient
-	conn       *grpc.ClientConn
+	conn       *swapConn
+	acked      atomic.Int64
 }
 
 // NewWorker initializes a node agent background worker.
@@ -47,10 +55,38 @@ func NewWorker(cfg WorkerConfig) *Worker {
 	if cfg.Sampler == nil {
 		cfg.Sampler = NewSampler(Paths{})
 	}
+	if cfg.MTLS != nil {
+		// The listener accepts only the server id the certificate was issued for.
+		cfg.NodeID = cfg.MTLS.Current().Identity.ServerID.String()
+	}
 
 	return &Worker{
 		cfg: cfg,
 	}
+}
+
+// HeartbeatsAcknowledged is how many heartbeats the control server has acknowledged.
+func (w *Worker) HeartbeatsAcknowledged() int64 { return w.acked.Load() }
+
+func (w *Worker) dial() (*grpc.ClientConn, error) {
+	creds := credentials.TransportCredentials(insecure.NewCredentials())
+	if w.cfg.TLS || w.cfg.MTLS != nil {
+		opts := grpctls.ClientOptions{CAFile: w.cfg.TLSCAFile, ServerName: w.cfg.TLSServerName}
+		if w.cfg.MTLS != nil {
+			opts.GetClientCertificate = w.cfg.MTLS.GetClientCertificate
+		}
+		var err error
+		creds, err = grpctls.ClientCredentials(opts)
+		if err != nil {
+			return nil, fmt.Errorf("control server TLS: %w", err)
+		}
+	}
+	// grpc.NewClient reconnects automatically.
+	conn, err := grpc.NewClient(w.cfg.ControlGRPCAddr, grpc.WithTransportCredentials(creds))
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial control server: %w", err)
+	}
+	return conn, nil
 }
 
 // Run executes the heartbeat loop until ctx is canceled.
@@ -58,29 +94,28 @@ func (w *Worker) Run(ctx context.Context) error {
 	w.cfg.Log.Info("starting node agent heartbeat worker",
 		"node_id", w.cfg.NodeID,
 		"control_addr", w.cfg.ControlGRPCAddr,
+		"mtls", w.cfg.MTLS != nil,
 	)
 
-	creds := credentials.TransportCredentials(insecure.NewCredentials())
-	if w.cfg.TLS {
-		var err error
-		creds, err = grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: w.cfg.TLSCAFile, ServerName: w.cfg.TLSServerName})
-		if err != nil {
-			return fmt.Errorf("control server TLS: %w", err)
-		}
-	}
-
-	// Dial control plane with automatic reconnection
-	conn, err := grpc.NewClient(
-		w.cfg.ControlGRPCAddr,
-		grpc.WithTransportCredentials(creds),
-	)
+	conn, err := w.dial()
 	if err != nil {
-		return fmt.Errorf("failed to dial control server: %w", err)
+		return err
 	}
-	w.conn = conn
-	defer conn.Close()
+	w.conn = &swapConn{}
+	w.conn.p.Store(conn)
+	defer func() { _ = w.conn.p.Load().Close() }()
 
-	w.nodeClient = openvmsv1.NewNodeServiceClient(conn)
+	w.nodeClient = openvmsv1.NewNodeServiceClient(w.conn)
+
+	// Under mTLS the certificate is renewed here, over the same authenticated channel, and
+	// connections are re-established with the renewed certificate.
+	generation := uint64(0)
+	if w.cfg.MTLS != nil {
+		generation = w.cfg.MTLS.Generation()
+		renewCtx, stopRenewal := context.WithCancel(ctx)
+		defer stopRenewal()
+		go w.cfg.MTLS.Run(renewCtx, mtls.GRPCRenew(w.conn))
+	}
 
 	ticker := time.NewTicker(w.cfg.HeartbeatInterval)
 	defer ticker.Stop()
@@ -96,11 +131,45 @@ func (w *Worker) Run(ctx context.Context) error {
 			w.cfg.Log.Info("node agent worker stopping")
 			return ctx.Err()
 		case <-ticker.C:
+			if w.cfg.MTLS != nil && w.cfg.MTLS.Generation() != generation {
+				generation = w.reconnect(generation)
+			}
 			if err := w.sendHeartbeat(ctx); err != nil {
 				w.cfg.Log.Warn("heartbeat failed", "error", err)
 			}
 		}
 	}
+}
+
+// reconnect replaces the connection with one that handshakes with the renewed certificate and
+// returns the credentials generation it now uses. The old connection is closed after a grace
+// period so a call in flight on it can finish. If the dial fails the old connection stays, and
+// the next tick tries again.
+func (w *Worker) reconnect(current uint64) uint64 {
+	next := w.cfg.MTLS.Generation()
+	conn, err := w.dial()
+	if err != nil {
+		w.cfg.Log.Warn("reconnect with the renewed certificate failed", "error", err)
+		return current
+	}
+	old := w.conn.p.Swap(conn)
+	w.cfg.Log.Info("reconnected with the renewed agent certificate")
+	time.AfterFunc(5*time.Second, func() { _ = old.Close() })
+	return next
+}
+
+// swapConn lets the heartbeat and renewal clients keep one handle while the underlying
+// connection is replaced after a certificate renewal.
+type swapConn struct {
+	p atomic.Pointer[grpc.ClientConn]
+}
+
+func (s *swapConn) Invoke(ctx context.Context, method string, args, reply any, opts ...grpc.CallOption) error {
+	return s.p.Load().Invoke(ctx, method, args, reply, opts...)
+}
+
+func (s *swapConn) NewStream(ctx context.Context, desc *grpc.StreamDesc, method string, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	return s.p.Load().NewStream(ctx, desc, method, opts...)
 }
 
 func (w *Worker) sendHeartbeat(ctx context.Context) error {
@@ -150,6 +219,9 @@ func (w *Worker) sendHeartbeat(ctx context.Context) error {
 		return err
 	}
 
+	if resp.Acknowledged {
+		w.acked.Add(1)
+	}
 	if resp.Command != "" {
 		w.cfg.Log.Info("received command from control server", "command", resp.Command)
 	}
