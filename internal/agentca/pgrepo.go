@@ -137,7 +137,9 @@ func (r *PgRepo) RevokeServerCertificates(ctx context.Context, serverID uuid.UUI
 //
 // It is idempotent: a certificate already used returns nil without changing anything. A
 // certificate revoked in the meantime (a newer renewal replaced it while its first call was in
-// flight) returns ErrCertificateRevoked.
+// flight) returns ErrCertificateRevoked; so does a serial with no row at all, which a listener
+// can only meet if the row was deleted after it looked the certificate up, and which must be
+// refused like a revocation.
 func (r *PgRepo) ActivateCertificate(ctx context.Context, rec Certificate) error {
 	return r.Store.Tx(ctx, store.TenantScope{TenantID: rec.TenantID}, func(q *db.Queries) error {
 		if err := q.LockAgentServerCertificates(ctx, rec.ServerID.String()); err != nil {

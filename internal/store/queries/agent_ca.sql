@@ -46,11 +46,13 @@ SELECT (now() >= p.not_before + (p.not_after - p.not_before) / 2)::boolean AS re
 FROM agent_certificates p
 WHERE p.serial = @serial AND p.server_id = @server_id AND p.tenant_id = @tenant_id AND p.revoked_at IS NULL;
 
--- name: RevokeUnusedAgentCertificates :execrows
--- Revokes the server's live certificates that never authenticated a call, except keep_serial:
--- the pending successor of an earlier renewal whose response may have been lost.
+-- name: RevokeUnusedAgentSuccessors :execrows
+-- Revokes the presenting certificate's own pending successors: certificates renewed from
+-- parent_serial that never authenticated a call (the result of an earlier attempt whose response
+-- may have been lost). Certificates with another parent, or none (a fresh re-enrollment), are
+-- not touched; they supersede the old chain by themselves on their first use.
 UPDATE agent_certificates SET revoked_at = now()
-WHERE server_id = @server_id AND tenant_id = @tenant_id AND serial <> @keep_serial
+WHERE parent_serial = @parent_serial AND server_id = @server_id AND tenant_id = @tenant_id
   AND revoked_at IS NULL AND first_used_at IS NULL;
 
 -- name: MarkAgentCertificateUsed :execrows

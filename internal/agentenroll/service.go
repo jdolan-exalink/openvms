@@ -157,8 +157,9 @@ func (s *Service) Enroll(ctx context.Context, token string, csrPEM []byte) (*age
 // A renewal never revokes the certificate it replaces. That certificate keeps working until the
 // agent first authenticates with the new one (agentca.PgRepo.ActivateCertificate revokes the
 // server's other certificates at that moment), so an agent that lost the response can ask again
-// with the old certificate. Each renewal revokes the server's unused certificates (the pending
-// successors of earlier renewals), so there is at most one pending successor per server.
+// with the old certificate. Each renewal revokes the presenting certificate's own unused
+// successors (the pending results of its earlier attempts), so a certificate has at most one
+// pending successor. Other unused certificates, such as a fresh re-enrollment, are left alone.
 //
 // Everything runs in one transaction scoped to the agent's tenant, after taking the server's
 // certificate lock, which serializes all renewals and first uses of a server (a row lock on the
@@ -199,8 +200,8 @@ func (s *Service) Renew(ctx context.Context, id agentca.Identity, previousSerial
 		if !row.Renewable {
 			return agentca.ErrRenewalTooEarly
 		}
-		replaced, err := q.RevokeUnusedAgentCertificates(ctx, db.RevokeUnusedAgentCertificatesParams{
-			ServerID: id.ServerID, TenantID: id.TenantID, KeepSerial: previousSerial,
+		replaced, err := q.RevokeUnusedAgentSuccessors(ctx, db.RevokeUnusedAgentSuccessorsParams{
+			ParentSerial: &previousSerial, ServerID: id.ServerID, TenantID: id.TenantID,
 		})
 		if err != nil {
 			return err

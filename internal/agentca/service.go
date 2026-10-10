@@ -19,8 +19,9 @@ var ErrNoCA = errors.New("agentca: no CA")
 // the serial, in the same vocabulary as ErrNoCA.
 var ErrCertificateNotFound = errors.New("agentca: certificate not found")
 
-// ErrCertificateRevoked is returned when a certificate was revoked before it could be
-// activated (a renewal replaced it while its first call was in flight).
+// ErrCertificateRevoked is returned when a certificate could not be activated because it is
+// revoked, for example a renewal replaced it while its first call was in flight, or because its
+// row no longer exists.
 var ErrCertificateRevoked = errors.New("agentca: certificate is revoked")
 
 // ErrNotRenewable is returned when the certificate presented for a renewal cannot be renewed:

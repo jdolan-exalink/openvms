@@ -237,22 +237,24 @@ func (q *Queries) RevokeOtherAgentCertificates(ctx context.Context, arg RevokeOt
 	return result.RowsAffected(), nil
 }
 
-const revokeUnusedAgentCertificates = `-- name: RevokeUnusedAgentCertificates :execrows
+const revokeUnusedAgentSuccessors = `-- name: RevokeUnusedAgentSuccessors :execrows
 UPDATE agent_certificates SET revoked_at = now()
-WHERE server_id = $1 AND tenant_id = $2 AND serial <> $3
+WHERE parent_serial = $1 AND server_id = $2 AND tenant_id = $3
   AND revoked_at IS NULL AND first_used_at IS NULL
 `
 
-type RevokeUnusedAgentCertificatesParams struct {
-	ServerID   uuid.UUID
-	TenantID   uuid.UUID
-	KeepSerial string
+type RevokeUnusedAgentSuccessorsParams struct {
+	ParentSerial *string
+	ServerID     uuid.UUID
+	TenantID     uuid.UUID
 }
 
-// Revokes the server's live certificates that never authenticated a call, except keep_serial:
-// the pending successor of an earlier renewal whose response may have been lost.
-func (q *Queries) RevokeUnusedAgentCertificates(ctx context.Context, arg RevokeUnusedAgentCertificatesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, revokeUnusedAgentCertificates, arg.ServerID, arg.TenantID, arg.KeepSerial)
+// Revokes the presenting certificate's own pending successors: certificates renewed from
+// parent_serial that never authenticated a call (the result of an earlier attempt whose response
+// may have been lost). Certificates with another parent, or none (a fresh re-enrollment), are
+// not touched; they supersede the old chain by themselves on their first use.
+func (q *Queries) RevokeUnusedAgentSuccessors(ctx context.Context, arg RevokeUnusedAgentSuccessorsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeUnusedAgentSuccessors, arg.ParentSerial, arg.ServerID, arg.TenantID)
 	if err != nil {
 		return 0, err
 	}

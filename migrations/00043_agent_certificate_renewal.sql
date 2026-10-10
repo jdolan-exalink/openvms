@@ -9,8 +9,11 @@ ALTER TABLE agent_certificates
     ADD COLUMN parent_serial text,
     ADD COLUMN first_used_at timestamptz;
 
--- Renewals look for a server's certificates that are still live and have never been used.
+-- Live (unrevoked) certificates of a server: scanned when a first use revokes the server's other
+-- certificates, and by the renewal's lookups of the presenting certificate.
 CREATE INDEX agent_certificates_live_idx ON agent_certificates (server_id, tenant_id) WHERE revoked_at IS NULL;
+-- A renewal revokes its presenting certificate's unused successors: parent_serial = P AND
+-- first_used_at IS NULL AND revoked_at IS NULL.
 CREATE INDEX agent_certificates_parent_idx ON agent_certificates (parent_serial) WHERE parent_serial IS NOT NULL;
 
 -- +goose Down

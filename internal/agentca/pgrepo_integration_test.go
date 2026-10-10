@@ -274,6 +274,12 @@ func TestActivateCertificateRevokesTheServersOtherCertificates(t *testing.T) {
 	if !got(a).FirstUsedAt.Equal(first) {
 		t.Fatal("a second activation moved first_used_at")
 	}
+	// A serial with no row is refused like a revoked certificate.
+	ghost := a
+	ghost.Serial = "ffffffff"
+	if err := repo.ActivateCertificate(ctx, ghost); !errors.Is(err, agentca.ErrCertificateRevoked) {
+		t.Fatalf("activating an unknown serial: %v, want ErrCertificateRevoked", err)
+	}
 	// A revoked certificate cannot be activated.
 	if err := repo.ActivateCertificate(ctx, b); !errors.Is(err, agentca.ErrCertificateRevoked) {
 		t.Fatalf("activating a revoked certificate: %v, want ErrCertificateRevoked", err)
