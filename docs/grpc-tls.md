@@ -58,9 +58,17 @@ Edge agents get a unique, revocable identity from the internal agent CA (enrollm
 
 ### Revocation and validity
 
-Every call, not only the handshake, is checked against `agent_certificates`: the serial must be recorded, the fingerprint, tenant and server must match the certificate, the current time must be inside the recorded validity window, and `revoked_at` must be empty. A refusal is `Unauthenticated` with a single generic message (the reason is logged by the API); a failed lookup is `Unavailable`, so the call fails closed and the agent retries.
+Every call, not only the handshake, is checked against `agent_certificates`: the serial must be recorded, the fingerprint, tenant and server must match the certificate, the current time must be inside the recorded validity window, and `revoked_at` must be empty or still in the future (a certificate superseded by a renewal keeps working until then, see below). A refusal is `Unauthenticated` with a single generic message (the reason is logged by the API); a failed lookup is `Unavailable`, so the call fails closed and the agent retries.
 
-There is no cache: revoking takes effect on the next call (an RPC already running finishes). A revoked agent can keep its TCP connection open but cannot use it. Revoking is a database operation today (`agentca.PgRepo.RevokeCertificate` for one serial, `RevokeServerCertificates` for every live certificate of a server); an admin endpoint is a follow-up.
+There is no cache: revoking takes effect on the next call (an RPC already running finishes). A revoked agent can keep its TCP connection open but cannot use it. Revoking is a database operation today (`agentca.PgRepo.RevokeCertificate` for one serial, `RevokeServerCertificates` for every live certificate of a server; both also end a grace period at once); an admin endpoint is a follow-up.
+
+### Certificate renewal
+
+`AgentService.RenewCertificate(csr_pem) -> certificate_pem, ca_pem` is served on the agent listener only. The caller is the client certificate it presents (it must pass the checks above, so a revoked or expired certificate cannot renew): the server id and tenant of the new certificate come from that certificate, never from the request, and the CSR's subject and SANs are ignored. The CSR is validated (`agentca.ValidateCSR`, at most 8192 bytes) and signed with the loaded CA.
+
+- **Minimum age.** A certificate can be renewed only after half of its lifetime has passed (`not_before + (not_after - not_before) / 2`, database clock). Earlier requests fail with `FailedPrecondition` ("certificate renewal not allowed yet") and write nothing. Agents renew at two thirds, so normal operation is unaffected; the limit stops a looping or stolen client from minting certificates at will.
+- **Supersede with grace.** In the same transaction that records the new certificate and its audit row (`SERVER_AGENT_CERT_RENEWED`, target `server_agent`, with the serials and how many certificates were superseded), every other live certificate of the server is set to be revoked 10 minutes from now (`agentenroll.SupersedeGrace`), unless it already ends sooner. During that grace period the old certificate still authenticates, so an agent that lost the response can retry, and connections that still use it keep working while the agent reconnects; afterwards it is rejected like any revoked certificate. A server therefore has the newest certificate plus those still inside their grace period, never an unbounded chain.
+- **Compromised key.** Revoke the whole server (`agentca.PgRepo.RevokeServerCertificates`): it ends every certificate of the server immediately, grace periods included, and so cuts the whole renewal chain. The agent must then enroll again with a new token.
 
 ### Rollout
 

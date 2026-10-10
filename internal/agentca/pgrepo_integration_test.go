@@ -13,6 +13,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -205,5 +206,60 @@ func TestRevokeCertificateAndServer(t *testing.T) {
 	}
 	if c, _ := repo.GetCertificate(ctx, first); !c.RevokedAt.Equal(revokedAt) {
 		t.Fatalf("revocation date of an already revoked certificate moved: %s -> %s", revokedAt, c.RevokedAt)
+	}
+}
+
+// A certificate superseded by a renewal has a revocation time in the future (grace period).
+// An explicit revocation, by serial or by server, must end that grace period immediately.
+func TestRevocationEndsAGracePeriod(t *testing.T) {
+	ctx := context.Background()
+	pool, _ := pgtest.Migrated(t)
+	st := &store.Store{Pool: pool}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	sealer, err := secrets.NewSealer(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &agentca.PgRepo{Store: st}
+	svc := &agentca.Service{Repo: repo, Sealer: sealer}
+	tenant, server := seedServer(t, ctx, st, "g")
+	id := agentca.Identity{TenantID: tenant, ServerID: server}
+	var serials []string
+	for range 2 {
+		res, err := svc.Issue(ctx, csrPEM(t), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		serials = append(serials, res.Issued.Serial)
+	}
+	err = st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE agent_certificates SET revoked_at = now() + interval '10 minutes' WHERE server_id = $1", server)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inGrace := func(serial string) bool {
+		c, err := repo.GetCertificate(ctx, serial)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.RevokedAt.After(time.Now())
+	}
+	if !inGrace(serials[0]) || !inGrace(serials[1]) {
+		t.Fatal("setup: certificates are not in a grace period")
+	}
+	if ok, err := repo.RevokeCertificate(ctx, serials[0]); err != nil || !ok {
+		t.Fatalf("RevokeCertificate in grace = %v, %v; want true", ok, err)
+	}
+	if inGrace(serials[0]) {
+		t.Fatal("revoking by serial left the grace period running")
+	}
+	if n, err := repo.RevokeServerCertificates(ctx, server); err != nil || n != 1 {
+		t.Fatalf("RevokeServerCertificates = %d, %v; want the 1 certificate still in grace", n, err)
+	}
+	if inGrace(serials[1]) {
+		t.Fatal("revoking the server left a grace period running")
 	}
 }

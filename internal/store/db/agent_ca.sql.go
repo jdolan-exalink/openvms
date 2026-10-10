@@ -134,11 +134,38 @@ func (q *Queries) ListAgentCertificatesByServer(ctx context.Context, serverID uu
 	return items, nil
 }
 
-const revokeAgentCertificate = `-- name: RevokeAgentCertificate :execrows
-UPDATE agent_certificates SET revoked_at = now()
-WHERE serial = $1 AND revoked_at IS NULL
+const lockRenewableAgentCertificate = `-- name: LockRenewableAgentCertificate :one
+SELECT (now() >= not_before + (not_after - not_before) / 2)::boolean AS renewable
+FROM agent_certificates
+WHERE serial = $1 AND server_id = $2 AND tenant_id = $3
+  AND (revoked_at IS NULL OR revoked_at > now())
+FOR UPDATE
 `
 
+type LockRenewableAgentCertificateParams struct {
+	Serial   string
+	ServerID uuid.UUID
+	TenantID uuid.UUID
+}
+
+// The certificate an agent presents to renew: it must belong to the server and tenant, and not
+// be revoked yet (a revocation in the future is a grace period and still counts). Locked so
+// concurrent renewals with the same certificate run one after the other. renewable is the
+// database-clock test for the minimum age: half of the certificate's lifetime has passed.
+func (q *Queries) LockRenewableAgentCertificate(ctx context.Context, arg LockRenewableAgentCertificateParams) (bool, error) {
+	row := q.db.QueryRow(ctx, lockRenewableAgentCertificate, arg.Serial, arg.ServerID, arg.TenantID)
+	var renewable bool
+	err := row.Scan(&renewable)
+	return renewable, err
+}
+
+const revokeAgentCertificate = `-- name: RevokeAgentCertificate :execrows
+UPDATE agent_certificates SET revoked_at = now()
+WHERE serial = $1 AND (revoked_at IS NULL OR revoked_at > now())
+`
+
+// A revoked_at in the future is a grace period after a renewal; revoking ends it now. A date
+// already in the past keeps its first value.
 func (q *Queries) RevokeAgentCertificate(ctx context.Context, serial string) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeAgentCertificate, serial)
 	if err != nil {
@@ -149,11 +176,40 @@ func (q *Queries) RevokeAgentCertificate(ctx context.Context, serial string) (in
 
 const revokeAgentCertificatesByServer = `-- name: RevokeAgentCertificatesByServer :execrows
 UPDATE agent_certificates SET revoked_at = now()
-WHERE server_id = $1 AND revoked_at IS NULL
+WHERE server_id = $1 AND (revoked_at IS NULL OR revoked_at > now())
 `
 
 func (q *Queries) RevokeAgentCertificatesByServer(ctx context.Context, serverID uuid.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeAgentCertificatesByServer, serverID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const supersedeAgentCertificates = `-- name: SupersedeAgentCertificates :execrows
+UPDATE agent_certificates SET revoked_at = now() + make_interval(secs => $1::float8)
+WHERE server_id = $2 AND tenant_id = $3 AND serial <> $4
+  AND not_after > now()
+  AND (revoked_at IS NULL OR revoked_at > now() + make_interval(secs => $1::float8))
+`
+
+type SupersedeAgentCertificatesParams struct {
+	GraceSeconds float64
+	ServerID     uuid.UUID
+	TenantID     uuid.UUID
+	KeepSerial   string
+}
+
+// Ends the server's other live certificates grace seconds from now, unless they already end
+// sooner. Expired ones are left alone.
+func (q *Queries) SupersedeAgentCertificates(ctx context.Context, arg SupersedeAgentCertificatesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, supersedeAgentCertificates,
+		arg.GraceSeconds,
+		arg.ServerID,
+		arg.TenantID,
+		arg.KeepSerial,
+	)
 	if err != nil {
 		return 0, err
 	}

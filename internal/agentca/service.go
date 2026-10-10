@@ -19,6 +19,10 @@ var ErrNoCA = errors.New("agentca: no CA")
 // the serial, in the same vocabulary as ErrNoCA.
 var ErrCertificateNotFound = errors.New("agentca: certificate not found")
 
+// ErrRenewalTooEarly is returned when an agent asks to renew a certificate that has not yet
+// passed the minimum age for renewal (half of its lifetime).
+var ErrRenewalTooEarly = errors.New("agentca: certificate is too new to renew")
+
 // caKeyAAD binds the sealed CA key to its purpose, so a sealed value copied from another
 // table or column does not open as the CA key.
 var caKeyAAD = []byte("openvms/agent-ca/key/v1")

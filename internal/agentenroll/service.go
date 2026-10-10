@@ -151,15 +151,28 @@ func (s *Service) Enroll(ctx context.Context, token string, csrPEM []byte) (*age
 	return res, nil
 }
 
+// SupersedeGrace is how long a certificate keeps working after a renewal replaced it. It
+// covers an agent that did not receive the response and asks again with the old certificate,
+// and open connections that still use it while the worker reconnects. Past it the old
+// certificate is revoked, so each server has at most the newest certificate plus those still
+// inside their grace.
+const SupersedeGrace = 10 * time.Minute
+
 // Renew issues a replacement certificate for an agent that authenticated with previousSerial.
-// id must come from the verified client certificate, never from a request field. Like Enroll,
-// recording the certificate and the audit row happen in one transaction and the signed
-// certificate is released only after the commit. The transaction is scoped to the agent's own
-// tenant, so even a bug that passed the wrong server id could not reach another tenant's rows.
+// id must come from the verified client certificate, never from a request field.
 //
-// The previous certificate is neither revoked nor shortened: it stays valid until it expires
-// (or an operator revokes it), which keeps an agent that lost the response from the
-// server able to renew again and bounds the overlap to the remaining lifetime.
+// A certificate may be renewed only once half of its lifetime has passed (agents renew at two
+// thirds), so a stolen or looping client cannot mint certificates at will; earlier requests
+// fail with agentca.ErrRenewalTooEarly. Like Enroll, the check, recording the certificate,
+// superseding the server's other certificates and the audit row happen in one transaction and
+// the signed certificate is released only after the commit. Every check uses the database
+// clock. The transaction is scoped to the agent's own tenant, so even a bug that passed the
+// wrong server id could not reach another tenant's rows.
+//
+// The other live certificates of the server are not revoked at once but set to be revoked
+// SupersedeGrace from now, so a retry with the old certificate still works for a while. An
+// operator who suspects a key revokes the whole server (agentca.PgRepo.RevokeServerCertificates),
+// which ends every certificate in the chain immediately, grace periods included.
 func (s *Service) Renew(ctx context.Context, id agentca.Identity, previousSerial string, csrPEM []byte) (*agentca.Issuance, error) {
 	if err := agentca.ValidateCSR(csrPEM); err != nil {
 		return nil, err
@@ -170,7 +183,18 @@ func (s *Service) Renew(ctx context.Context, id agentca.Identity, previousSerial
 	}
 	var res *agentca.Issuance
 	err = s.Store.Tx(ctx, store.TenantScope{TenantID: id.TenantID}, func(q *db.Queries) error {
-		var err error
+		renewable, err := q.LockRenewableAgentCertificate(ctx, db.LockRenewableAgentCertificateParams{
+			Serial: previousSerial, ServerID: id.ServerID, TenantID: id.TenantID,
+		})
+		if errors.Is(store.Classify(err), store.ErrNotFound) {
+			return agentca.ErrCertificateNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if !renewable {
+			return agentca.ErrRenewalTooEarly
+		}
 		res, err = s.CA.Sign(ca, csrPEM, id)
 		if err != nil {
 			return err
@@ -178,8 +202,14 @@ func (s *Service) Renew(ctx context.Context, id agentca.Identity, previousSerial
 		if err := agentca.RecordCertificate(ctx, q, res.Record); err != nil {
 			return err
 		}
+		superseded, err := q.SupersedeAgentCertificates(ctx, db.SupersedeAgentCertificatesParams{
+			ServerID: id.ServerID, TenantID: id.TenantID, KeepSerial: res.Issued.Serial, GraceSeconds: SupersedeGrace.Seconds(),
+		})
+		if err != nil {
+			return err
+		}
 		return audit(ctx, q, nil, id.TenantID, id.ServerID, "SERVER_AGENT_CERT_RENEWED", map[string]any{
-			"serial": res.Issued.Serial, "previous_serial": previousSerial,
+			"serial": res.Issued.Serial, "previous_serial": previousSerial, "superseded": superseded,
 			"fingerprint": res.Issued.Fingerprint, "not_after": res.Issued.NotAfter,
 		})
 	})

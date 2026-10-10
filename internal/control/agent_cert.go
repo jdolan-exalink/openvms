@@ -17,6 +17,8 @@ import (
 // endpoint caps its PEM at the same size.
 const maxRenewCSRBytes = 8192
 
+var errCSRSize = status.Errorf(codes.InvalidArgument, "csr_pem is required and must be at most %d bytes", maxRenewCSRBytes)
+
 // CertificateRenewer issues a replacement certificate for an authenticated agent
 // (agentenroll.Service). previousSerial is the certificate the agent authenticated with.
 type CertificateRenewer interface {
@@ -41,11 +43,14 @@ func (s *AgentCertServer) RenewCertificate(ctx context.Context, req *openvmsv1.R
 		return nil, agentauth.ErrRejected
 	}
 	if len(req.CsrPem) == 0 || len(req.CsrPem) > maxRenewCSRBytes {
-		return nil, status.Error(codes.InvalidArgument, "csr_pem is required and must be at most 8 KiB")
+		return nil, errCSRSize
 	}
 	res, err := s.Renewer.Renew(ctx, id, serial, []byte(req.CsrPem))
 	if errors.Is(err, agentca.ErrInvalidCSR) {
 		return nil, status.Error(codes.InvalidArgument, "invalid certificate request")
+	}
+	if errors.Is(err, agentca.ErrRenewalTooEarly) {
+		return nil, status.Error(codes.FailedPrecondition, "certificate renewal not allowed yet")
 	}
 	if err != nil {
 		s.log().Error("agent certificate renewal failed", "server_id", id.ServerID, "serial", serial, "error", err)

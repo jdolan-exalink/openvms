@@ -96,7 +96,9 @@ func (v *Verifier) now() time.Time {
 // Authenticate verifies the peer certificate of ctx and returns the agent identity. A
 // certificate is accepted only if it was verified against the agent CA by the TLS layer,
 // carries an agent identity, is recorded, matches the recorded fingerprint, tenant and
-// server, is inside the recorded validity window and is not revoked. A refusal is
+// server, is inside the recorded validity window and is not revoked. A revocation time in
+// the future is a grace period (a certificate superseded by a renewal): it still
+// authenticates until then. A refusal is
 // Unauthenticated; a failed lookup is Unavailable (fail closed, and the agent retries).
 func (v *Verifier) Authenticate(ctx context.Context) (agentca.Identity, error) {
 	leaf := verifiedLeaf(ctx)
@@ -127,7 +129,7 @@ func (v *Verifier) Authenticate(ctx context.Context) (agentca.Identity, error) {
 	}
 	now := v.now()
 	switch {
-	case rec.RevokedAt != nil:
+	case rec.RevokedAt != nil && !rec.RevokedAt.After(now):
 		v.log().Warn("agent certificate is revoked", "serial", serial, "server_id", id.ServerID)
 	case rec.TenantID != id.TenantID || rec.ServerID != id.ServerID:
 		v.log().Warn("agent certificate identity differs from its record", "serial", serial)

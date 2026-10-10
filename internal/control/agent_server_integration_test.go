@@ -13,6 +13,7 @@ import (
 	"encoding/pem"
 	"net"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -21,6 +22,7 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/agentauth"
 	"github.com/jdolan-exalink/openvms/internal/agentca"
+	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 	"github.com/jdolan-exalink/openvms/internal/platform/grpctls/grpctlstest"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
@@ -88,7 +90,7 @@ func TestAgentListener_RealCertificatesAndRevocation(t *testing.T) {
 
 	first, firstSerial := issue()
 	second, _ := issue()
-	c1, c2 := h.dial(t, &first), h.dial(t, &second)
+	c1, c2 := h.nodes(t, &first), h.nodes(t, &second)
 	if _, err := heartbeat(c1, server.String()); err != nil {
 		t.Fatalf("first certificate: %v", err)
 	}
@@ -133,4 +135,104 @@ func seedAgentServer(t *testing.T, ctx context.Context, st *store.Store) (tenant
 		t.Fatal(err)
 	}
 	return tenant, server
+}
+
+// Renewal against Postgres, end to end over mutual TLS: the renewed certificate works, the one
+// it replaced keeps working inside its grace period and is refused once that ends, and a
+// certificate that is too young cannot renew.
+func TestAgentListener_RenewalSupersedesWithGrace(t *testing.T) {
+	ctx := context.Background()
+	pool, _ := pgtest.Migrated(t)
+	st := &store.Store{Pool: pool}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	sealer, err := secrets.NewSealer(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &agentca.PgRepo{Store: st}
+	svc := &agentca.Service{Repo: repo, Sealer: sealer}
+	ca, err := svc.LoadOrCreateCA(ctx) // created with the real clock
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenant, server := seedAgentServer(t, ctx, st)
+	id := agentca.Identity{TenantID: tenant, ServerID: server}
+
+	// A certificate already 20 of 30 days old, so it may renew; a fresh one may not.
+	issueAt := func(age time.Duration) (tls.Certificate, string) {
+		svc.Now = func() time.Time { return time.Now().Add(-age) }
+		defer func() { svc.Now = nil }()
+		keyPair, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		csrDER, _ := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: pkix.Name{CommonName: "agent"}}, keyPair)
+		res, err := svc.Issue(ctx, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keyDER, _ := x509.MarshalECPrivateKey(keyPair)
+		pair, err := tls.X509KeyPair(res.Issued.CertPEM, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pair, res.Issued.Serial
+	}
+	old, oldSerial := issueAt(20 * 24 * time.Hour)
+	young, _ := issueAt(0)
+
+	clientCAs := x509.NewCertPool()
+	clientCAs.AddCert(ca.Cert)
+	certFile, keyFile := grpctlstest.WriteSelfSigned(t)
+	creds, err := grpctls.ServerMTLSCredentials(certFile, keyFile, clientCAs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv, err := NewAgentServer(AgentConfig{
+		Credentials: creds, Verifier: &agentauth.Verifier{Certs: repo},
+		Renewer: &agentenroll.Service{Store: st, CA: svc},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = srv.GRPCServer().Serve(lis) }()
+	t.Cleanup(srv.Stop)
+	h := &agentHarness{addr: lis.Addr().String(), serverCA: certFile}
+
+	// Too young: FailedPrecondition, not an internal error.
+	csr, newKey := newCSR(t)
+	_, err = renew(h, t, &young, csr)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("young certificate: code = %s (%v), want FailedPrecondition", status.Code(err), err)
+	}
+
+	resp, err := renew(h, t, &old, csr)
+	if err != nil {
+		t.Fatalf("old enough certificate: %v", err)
+	}
+	block, _ := pem.Decode([]byte(resp.CertificatePem))
+	renewed := tls.Certificate{Certificate: [][]byte{block.Bytes}, PrivateKey: newKey}
+	if _, err := heartbeat(h.nodes(t, &renewed), server.String()); err != nil {
+		t.Fatalf("renewed certificate: %v", err)
+	}
+	// The replaced certificate still works during its grace period...
+	if _, err := heartbeat(h.nodes(t, &old), server.String()); err != nil {
+		t.Fatalf("superseded certificate inside its grace period: %v", err)
+	}
+	// ...and not after it.
+	err = st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, "UPDATE agent_certificates SET revoked_at = now() - interval '1 second' WHERE serial = $1", oldSerial)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := heartbeat(h.nodes(t, &old), server.String()); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("superseded certificate after its grace period: code = %s (%v), want Unauthenticated", status.Code(err), err)
+	}
+	if _, err := heartbeat(h.nodes(t, &renewed), server.String()); err != nil {
+		t.Fatalf("the renewed certificate must be unaffected: %v", err)
+	}
 }

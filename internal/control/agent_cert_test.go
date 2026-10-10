@@ -10,6 +10,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -54,6 +55,19 @@ func (f *fakeRenewer) Renew(_ context.Context, id agentca.Identity, previousSeri
 	}
 	f.pki.Store.Put(res.Record)
 	return res, nil
+}
+
+// recorded returns a copy of the calls made so far.
+func (f *fakeRenewer) recorded() []renewCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]renewCall(nil), f.calls...)
+}
+
+func (f *fakeRenewer) failWith(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
 }
 
 func newCSR(t *testing.T) (csrPEM []byte, key *ecdsa.PrivateKey) {
@@ -116,8 +130,8 @@ func TestAgentListener_RenewalIssuesACertificateForTheCallersOwnIdentity(t *test
 	if resp.CaPem == "" {
 		t.Fatal("response carries no CA certificate")
 	}
-	if len(renewer.calls) != 1 || renewer.calls[0].id != agentID || renewer.calls[0].serial != c.Serial {
-		t.Fatalf("renewer calls = %+v, want one for %+v renewing serial %s", renewer.calls, agentID, c.Serial)
+	if calls := renewer.recorded(); len(calls) != 1 || calls[0].id != agentID || calls[0].serial != c.Serial {
+		t.Fatalf("renewer calls = %+v, want one for %+v renewing serial %s", calls, agentID, c.Serial)
 	}
 	// The renewed certificate works on the same listener.
 	next := tls.Certificate{Certificate: [][]byte{block.Bytes}, PrivateKey: key}
@@ -137,12 +151,12 @@ func TestAgentListener_RenewalRefusals(t *testing.T) {
 	t.Run("revoked certificate cannot renew", func(t *testing.T) {
 		c := h.pki.Issue(t, agentID, time.Now(), time.Hour)
 		h.pki.Store.Update(c.Serial, func(r *agentca.Certificate) { n := time.Now(); r.RevokedAt = &n })
-		before := len(renewer.calls)
+		before := len(renewer.recorded())
 		_, err := renew(h, t, &c.TLS, csr)
 		if status.Code(err) != codes.Unauthenticated {
 			t.Fatalf("code = %s (%v), want Unauthenticated", status.Code(err), err)
 		}
-		if len(renewer.calls) != before {
+		if len(renewer.recorded()) != before {
 			t.Fatal("a revoked certificate reached the renewer")
 		}
 	})
@@ -159,9 +173,7 @@ func TestAgentListener_RenewalRefusals(t *testing.T) {
 		}
 	})
 	t.Run("renewer failure is not leaked", func(t *testing.T) {
-		renewer.mu.Lock()
-		renewer.err = errors.New("pq: connection to 10.0.0.5 refused")
-		renewer.mu.Unlock()
+		renewer.failWith(errors.New("pq: connection to 10.0.0.5 refused"))
 		_, err := renew(h, t, &good.TLS, csr)
 		if status.Code(err) != codes.Internal {
 			t.Fatalf("code = %s (%v), want Internal", status.Code(err), err)
@@ -170,6 +182,20 @@ func TestAgentListener_RenewalRefusals(t *testing.T) {
 			t.Fatalf("message = %q leaks the cause", msg)
 		}
 	})
+}
+
+func TestAgentListener_RenewalTooEarlyIsAFailedPrecondition(t *testing.T) {
+	h, renewer := startRenewalServer(t)
+	c := h.pki.Issue(t, agentID, time.Now(), time.Hour)
+	csr, _ := newCSR(t)
+	renewer.failWith(fmt.Errorf("agentenroll: %w", agentca.ErrRenewalTooEarly))
+	_, err := renew(h, t, &c.TLS, csr)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %s (%v), want FailedPrecondition so the agent retries later", status.Code(err), err)
+	}
+	if msg := status.Convert(err).Message(); msg != "certificate renewal not allowed yet" {
+		t.Fatalf("message = %q, want the generic one", msg)
+	}
 }
 
 func TestAgentListener_RenewalIsUnavailableWithoutARenewer(t *testing.T) {

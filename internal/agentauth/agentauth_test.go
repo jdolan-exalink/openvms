@@ -190,3 +190,22 @@ func TestRejectedIsTheSharedRefusal(t *testing.T) {
 		t.Fatalf("ErrRejected = %v", agentauth.ErrRejected)
 	}
 }
+
+// A certificate superseded by a renewal carries a revocation time in the future (its grace
+// period): it still authenticates until then and not after.
+func TestAuthenticateRevocationInTheFutureIsAGracePeriod(t *testing.T) {
+	pki := agentauthtest.NewPKI(t)
+	now := time.Now()
+	c := pki.Issue(t, id, now, time.Hour)
+	clock := now
+	v := &agentauth.Verifier{Certs: pki.Store, Now: func() time.Time { return clock }}
+
+	pki.Store.Update(c.Serial, func(r *agentca.Certificate) { at := now.Add(10 * time.Minute); r.RevokedAt = &at })
+	if _, err := v.Authenticate(peerCtx(c.Leaf, true)); err != nil {
+		t.Fatalf("inside the grace period: %v", err)
+	}
+	clock = now.Add(10*time.Minute + time.Second)
+	if _, err := v.Authenticate(peerCtx(c.Leaf, true)); code(err) != codes.Unauthenticated {
+		t.Fatalf("after the grace period: code %s (%v), want Unauthenticated", code(err), err)
+	}
+}
