@@ -397,11 +397,11 @@ func TestMalformedCSRIsReportedBeforeTheTokenIsChecked(t *testing.T) {
 	}
 }
 
-// notFoundIssuer signs through the real CA but then fails with an error that wraps
-// store.ErrNotFound, the way a lookup deep inside signing or recording could.
+// notFoundIssuer loads the CA through the real service but fails every Sign with an error
+// that wraps store.ErrNotFound, the way a lookup deep inside signing or recording could.
 type notFoundIssuer struct{ *agentca.Service }
 
-func (notFoundIssuer) Sign(context.Context, []byte, agentca.Identity) (*agentca.Issuance, error) {
+func (notFoundIssuer) Sign(*agentca.CA, []byte, agentca.Identity) (*agentca.Issuance, error) {
 	return nil, fmt.Errorf("a later step: %w", store.ErrNotFound)
 }
 
@@ -411,13 +411,13 @@ func TestNotFoundAfterConsumeIsNotAnInvalidToken(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	tok := e.createToken(t)
-	real := e.svc.CA
-	e.svc.CA = notFoundIssuer{real.(*agentca.Service)}
+	genuine := e.svc.CA
+	e.svc.CA = notFoundIssuer{genuine.(*agentca.Service)}
 	_, err := e.svc.Enroll(ctx, tok.Value, csr(t))
 	if err == nil || errors.Is(err, agentenroll.ErrInvalidToken) {
 		t.Fatalf("err = %v, want an internal error that is not ErrInvalidToken", err)
 	}
-	e.svc.CA = real
+	e.svc.CA = genuine
 	if _, err := e.svc.Enroll(ctx, tok.Value, csr(t)); err != nil {
 		t.Fatalf("token after the rolled-back attempt: %v", err)
 	}
@@ -447,16 +447,24 @@ func TestConcurrentFirstEnrollmentsDoNotExhaustThePool(t *testing.T) {
 	st := &store.Store{Pool: small}
 	key := make([]byte, 32)
 	_, _ = rand.Read(key)
-	sealer, _ := secrets.NewSealer(key)
+	sealer, err := secrets.NewSealer(key)
+	if err != nil {
+		t.Fatal(err)
+	}
 	svc := &agentenroll.Service{Store: st, Authz: allowAll{},
 		CA: &agentca.Service{Repo: &agentca.PgRepo{Store: st}, Sealer: sealer}}
+	// Built here: t.Fatal must not run on a goroutine other than the test's.
+	csrs := make([][]byte, n)
+	for i := range csrs {
+		csrs[i] = csr(t)
+	}
 	errs := make([]error, n)
 	var wg sync.WaitGroup
 	for i := range toks {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, errs[i] = svc.Enroll(ctx, toks[i].Value, csr(t))
+			_, errs[i] = svc.Enroll(ctx, toks[i].Value, csrs[i])
 		}()
 	}
 	wg.Wait()

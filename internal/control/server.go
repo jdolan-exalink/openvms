@@ -83,17 +83,8 @@ func NewServer(cfg Config) *Server {
 
 	opts := []grpc.ServerOption{
 		grpc.StatsHandler(&connStatsHandler{activeConns: &server.activeConns}),
-		grpc.KeepaliveParams(keepalive.ServerParameters{
-			MaxConnectionIdle:     15 * time.Minute,
-			MaxConnectionAge:      2 * time.Hour,
-			MaxConnectionAgeGrace: 5 * time.Minute,
-			Time:                  1 * time.Minute,
-			Timeout:               20 * time.Second,
-		}),
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             30 * time.Second,
-			PermitWithoutStream: true,
-		}),
+		keepaliveParams(),
+		keepaliveEnforcement(),
 		grpc.UnaryInterceptor(unaryLoggingInterceptor(cfg.Log)),
 		grpc.StreamInterceptor(streamLoggingInterceptor(cfg.Log)),
 	}
@@ -145,6 +136,23 @@ func NewServer(cfg Config) *Server {
 	return server
 }
 
+func keepaliveParams() grpc.ServerOption {
+	return grpc.KeepaliveParams(keepalive.ServerParameters{
+		MaxConnectionIdle:     15 * time.Minute,
+		MaxConnectionAge:      2 * time.Hour,
+		MaxConnectionAgeGrace: 5 * time.Minute,
+		Time:                  1 * time.Minute,
+		Timeout:               20 * time.Second,
+	})
+}
+
+func keepaliveEnforcement() grpc.ServerOption {
+	return grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+		MinTime:             30 * time.Second,
+		PermitWithoutStream: true,
+	})
+}
+
 // ActiveConnections returns the number of active gRPC TCP connections.
 func (s *Server) ActiveConnections() int {
 	n := s.activeConns.Load()
@@ -156,25 +164,39 @@ func (s *Server) ActiveConnections() int {
 
 // Start listens on the given address and serves gRPC requests.
 func (s *Server) Start(addr string) error {
+	if err := s.Bind(addr); err != nil {
+		return err
+	}
+	return s.Serve()
+}
+
+// Bind opens the listening socket without serving, so a caller can fail startup on a bad or
+// busy address before launching Serve in the background.
+func (s *Server) Bind(addr string) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	s.listener = lis
 	s.cfg.Log.Info("openvms gRPC control server listening", "addr", addr)
-	return s.grpcServer.Serve(lis)
+	return nil
+}
+
+// Serve serves on the socket opened by Bind and blocks until the server stops.
+func (s *Server) Serve() error {
+	return s.grpcServer.Serve(s.listener)
 }
 
 // GracefulStop gracefully shuts down the gRPC server.
 func (s *Server) GracefulStop() {
-	if s.grpcServer != nil {
+	if s != nil && s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
 }
 
 // Stop terminates the gRPC server immediately.
 func (s *Server) Stop() {
-	if s.grpcServer != nil {
+	if s != nil && s.grpcServer != nil {
 		s.grpcServer.Stop()
 	}
 }

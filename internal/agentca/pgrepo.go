@@ -2,7 +2,10 @@ package agentca
 
 import (
 	"context"
+	"errors"
 	"fmt"
+
+	"github.com/google/uuid"
 
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
@@ -70,7 +73,7 @@ func RecordCertificate(ctx context.Context, q *db.Queries, c Certificate) error 
 	return nil
 }
 
-// GetCertificate returns the record for a serial, or store.ErrNotFound.
+// GetCertificate returns the record for a serial, or ErrCertificateNotFound.
 func (r *PgRepo) GetCertificate(ctx context.Context, serial string) (Certificate, error) {
 	var out Certificate
 	err := r.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
@@ -84,5 +87,35 @@ func (r *PgRepo) GetCertificate(ctx context.Context, serial string) (Certificate
 		}
 		return nil
 	})
-	return out, store.Classify(err)
+	if err != nil {
+		err = store.Classify(err)
+		if errors.Is(err, store.ErrNotFound) {
+			return Certificate{}, ErrCertificateNotFound
+		}
+		return Certificate{}, err
+	}
+	return out, nil
+}
+
+// RevokeCertificate marks one certificate revoked and reports whether it did: false means
+// the serial is unknown or was already revoked (the first revocation date is kept). The
+// listener rejects the certificate from its next call on.
+func (r *PgRepo) RevokeCertificate(ctx context.Context, serial string) (bool, error) {
+	var n int64
+	err := r.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) (err error) {
+		n, err = q.RevokeAgentCertificate(ctx, serial)
+		return err
+	})
+	return n > 0, err
+}
+
+// RevokeServerCertificates revokes every live certificate of a server and returns how many
+// it revoked, for a decommissioned or compromised agent.
+func (r *PgRepo) RevokeServerCertificates(ctx context.Context, serverID uuid.UUID) (int64, error) {
+	var n int64
+	err := r.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) (err error) {
+		n, err = q.RevokeAgentCertificatesByServer(ctx, serverID)
+		return err
+	})
+	return n, err
 }

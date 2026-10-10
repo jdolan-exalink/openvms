@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"sync"
 	"testing"
 
@@ -129,8 +130,8 @@ func TestPgRepoCAAndCertificates(t *testing.T) {
 		t.Fatalf("cross-tenant certificates = %d, %v; want 0", crossed, err)
 	}
 
-	if _, err := repo.GetCertificate(ctx, "does-not-exist"); err == nil {
-		t.Fatal("expected not found")
+	if _, err := repo.GetCertificate(ctx, "does-not-exist"); !errors.Is(err, agentca.ErrCertificateNotFound) {
+		t.Fatalf("err = %v, want ErrCertificateNotFound", err)
 	}
 }
 
@@ -153,4 +154,56 @@ func seedServer(t *testing.T, ctx context.Context, st *store.Store, name string)
 		t.Fatal(err)
 	}
 	return tenant, server
+}
+
+func TestRevokeCertificateAndServer(t *testing.T) {
+	ctx := context.Background()
+	pool, _ := pgtest.Migrated(t)
+	st := &store.Store{Pool: pool}
+	key := make([]byte, 32)
+	_, _ = rand.Read(key)
+	sealer, err := secrets.NewSealer(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &agentca.PgRepo{Store: st}
+	svc := &agentca.Service{Repo: repo, Sealer: sealer}
+	tenant, server := seedServer(t, ctx, st, "r")
+	id := agentca.Identity{TenantID: tenant, ServerID: server}
+	issue := func() string {
+		res, err := svc.Issue(ctx, csrPEM(t), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res.Issued.Serial
+	}
+
+	first, second, third := issue(), issue(), issue()
+	if ok, err := repo.RevokeCertificate(ctx, first); err != nil || !ok {
+		t.Fatalf("RevokeCertificate = %v, %v; want true", ok, err)
+	}
+	got, err := repo.GetCertificate(ctx, first)
+	if err != nil || got.RevokedAt == nil {
+		t.Fatalf("after revoke: %+v, %v", got, err)
+	}
+	revokedAt := *got.RevokedAt
+	if ok, err := repo.RevokeCertificate(ctx, first); err != nil || ok {
+		t.Fatalf("second revoke = %v, %v; want false (already revoked)", ok, err)
+	}
+	if ok, err := repo.RevokeCertificate(ctx, "unknown"); err != nil || ok {
+		t.Fatalf("revoking an unknown serial = %v, %v; want false", ok, err)
+	}
+	// Revoking the server revokes the remaining live certificates and keeps the first date.
+	n, err := repo.RevokeServerCertificates(ctx, server)
+	if err != nil || n != 2 {
+		t.Fatalf("RevokeServerCertificates = %d, %v; want 2", n, err)
+	}
+	for _, serial := range []string{second, third} {
+		if c, err := repo.GetCertificate(ctx, serial); err != nil || c.RevokedAt == nil {
+			t.Fatalf("serial %s not revoked: %+v, %v", serial, c, err)
+		}
+	}
+	if c, _ := repo.GetCertificate(ctx, first); !c.RevokedAt.Equal(revokedAt) {
+		t.Fatalf("revocation date of an already revoked certificate moved: %s -> %s", revokedAt, c.RevokedAt)
+	}
 }

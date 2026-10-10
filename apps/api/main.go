@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/jdolan-exalink/openvms/internal/agentauth"
 	"github.com/jdolan-exalink/openvms/internal/agentca"
 	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/alarms"
@@ -146,13 +148,17 @@ func run() error {
 	// Land the default view where the server actually is (public-IP geolocation, with an
 	// OPENVMS_MAPS_CENTER override); the lookup is best-effort and never blocks startup.
 	mapsSvc.Config.DefaultCenter = maps.DetectServerCenter(ctx, log)
+	// The agent CA is created or loaded here, not on the first (unauthenticated) enroll request:
+	// a broken CA or master key stops the API at startup instead of surfacing as enroll errors.
+	agentCA := &agentca.Service{Repo: &agentca.PgRepo{Store: st}, Sealer: sealer}
+	caCert, err := agentCA.LoadOrCreateCA(ctx)
+	if err != nil {
+		return fmt.Errorf("agent CA: %w", err)
+	}
 	handlers := &api.Handlers{
-		Inv:       inv,
-		Provision: provision.New(inv, st, sealer, log),
-		AgentEnroll: &agentenroll.Service{
-			Store: st, Authz: inv,
-			CA: &agentca.Service{Repo: &agentca.PgRepo{Store: st}, Sealer: sealer},
-		},
+		Inv:           inv,
+		Provision:     provision.New(inv, st, sealer, log),
+		AgentEnroll:   &agentenroll.Service{Store: st, Authz: inv, CA: agentCA},
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Alarms:        alarmsSvc,
 		Media:         mediaSvc,
@@ -222,6 +228,37 @@ func run() error {
 		}
 	}()
 
+	// The agent listener is opt-in. config.Load already refused GRPC_AGENT_ADDR without server
+	// TLS. The socket is bound here, before serving, so a busy or invalid address stops the
+	// API at startup; later serve errors reach the shutdown path through agentErrCh.
+	var grpcAgent *control.Server
+	agentErrCh := make(chan error, 1)
+	if cfg.GRPCAgentAddr != "" {
+		clientCAs := x509.NewCertPool()
+		clientCAs.AddCert(caCert.Cert)
+		agentCreds, err := grpctls.ServerMTLSCredentials(cfg.GRPCTLSCertFile, cfg.GRPCTLSKeyFile, clientCAs)
+		if err != nil {
+			return fmt.Errorf("agent listener tls: %w", err)
+		}
+		grpcAgent, err = control.NewAgentServer(control.AgentConfig{
+			Credentials: agentCreds,
+			Verifier:    &agentauth.Verifier{Certs: &agentca.PgRepo{Store: st}, Log: log},
+			Log:         log,
+		})
+		if err != nil {
+			return fmt.Errorf("agent listener: %w", err)
+		}
+		if err := grpcAgent.Bind(cfg.GRPCAgentAddr); err != nil {
+			return fmt.Errorf("agent listener bind %s: %w", cfg.GRPCAgentAddr, err)
+		}
+		go func() {
+			if err := grpcAgent.Serve(); err != nil {
+				agentErrCh <- fmt.Errorf("grpc agent server: %w", err)
+			}
+		}()
+		log.Info("gRPC agent listener enabled (mutual TLS)", "addr", cfg.GRPCAgentAddr)
+	}
+
 	handlers.RealtimeTracker = rtHub
 	handlers.GRPCTracker = grpcCtrl
 	handlers.SessionsTracker = sessionsMgr
@@ -261,11 +298,16 @@ func run() error {
 	select {
 	case err := <-errCh:
 		grpcCtrl.GracefulStop()
+		grpcAgent.GracefulStop()
+		return err
+	case err := <-agentErrCh:
+		grpcCtrl.GracefulStop()
 		return err
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
 	grpcCtrl.GracefulStop()
+	grpcAgent.GracefulStop()
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	return srv.Shutdown(sctx)

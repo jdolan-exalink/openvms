@@ -56,6 +56,16 @@ func (r *fakeRepo) InsertCertificate(_ context.Context, c Certificate) error {
 	return nil
 }
 
+func (r *fakeRepo) GetCertificate(_ context.Context, serial string) (Certificate, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	c, ok := r.certs[serial]
+	if !ok {
+		return Certificate{}, ErrCertificateNotFound
+	}
+	return c, nil
+}
+
 func newService(t *testing.T, repo Repository) *Service {
 	t.Helper()
 	key := make([]byte, 32)
@@ -139,6 +149,26 @@ func TestIssueSignsAndRecordsCertificate(t *testing.T) {
 	leaf := parseLeaf(t, res.Issued.CertPEM)
 	if _, err := leaf.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: testNow, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
 		t.Fatalf("returned CA bundle does not verify the leaf: %v", err)
+	}
+}
+
+func TestSignUsesTheGivenCAWithoutTouchingTheRepository(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := newService(t, repo)
+	ca, err := svc.LoadOrCreateCA(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	loads := repo.getCalls
+	res, err := svc.Sign(ca, newCSR(t, p256(t), &x509.CertificateRequest{}), testIdentity())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.getCalls != loads || len(repo.certs) != 0 {
+		t.Fatalf("Sign touched the repository: GetCA calls %d -> %d, %d certificates recorded", loads, repo.getCalls, len(repo.certs))
+	}
+	if res.Record.Serial != res.Issued.Serial {
+		t.Fatalf("record %+v does not describe the issued certificate", res.Record)
 	}
 }
 

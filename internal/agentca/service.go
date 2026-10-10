@@ -15,6 +15,10 @@ import (
 // ErrNoCA is returned by Repository.GetCA when the CA has not been created yet.
 var ErrNoCA = errors.New("agentca: no CA")
 
+// ErrCertificateNotFound is returned by Repository.GetCertificate when no certificate has
+// the serial, in the same vocabulary as ErrNoCA.
+var ErrCertificateNotFound = errors.New("agentca: certificate not found")
+
 // caKeyAAD binds the sealed CA key to its purpose, so a sealed value copied from another
 // table or column does not open as the CA key.
 var caKeyAAD = []byte("openvms/agent-ca/key/v1")
@@ -43,6 +47,8 @@ type Repository interface {
 	// InsertCAIfAbsent stores rec only when no CA exists and reports whether it did.
 	InsertCAIfAbsent(ctx context.Context, rec CARecord) (bool, error)
 	InsertCertificate(ctx context.Context, c Certificate) error
+	// GetCertificate returns the record for a serial, or ErrCertificateNotFound.
+	GetCertificate(ctx context.Context, serial string) (Certificate, error)
 }
 
 // Service owns the CA lifecycle and certificate issuance.
@@ -121,15 +127,12 @@ func (s *Service) createCA(ctx context.Context) (*CARecord, error) {
 	return s.Repo.GetCA(ctx)
 }
 
-// Sign signs a CSR for id and does not record the certificate. It may load or create the CA
-// (and so persist it) through the service's own repository, never through a caller's
-// transaction. A caller that must record the certificate together with other writes persists
-// Issuance.Record (see RecordCertificate) and releases the certificate only after that commit.
-func (s *Service) Sign(ctx context.Context, csrPEM []byte, id Identity) (*Issuance, error) {
-	ca, err := s.LoadOrCreateCA(ctx)
-	if err != nil {
-		return nil, err
-	}
+// Sign signs a CSR for id with ca and does not record the certificate. It takes the CA
+// explicitly (see LoadOrCreateCA) and has no context: it never reaches the repository, so a
+// caller can use it inside a database transaction without a second connection. A caller that
+// must record the certificate together with other writes persists Issuance.Record (see
+// RecordCertificate) and releases the certificate only after that commit.
+func (s *Service) Sign(ca *CA, csrPEM []byte, id Identity) (*Issuance, error) {
 	validity := s.Validity
 	if validity == 0 {
 		validity = DefaultLeafValidity
@@ -150,8 +153,17 @@ func (s *Service) Sign(ctx context.Context, csrPEM []byte, id Identity) (*Issuan
 
 // Issue signs a CSR for id and records the certificate. It returns the CA certificate
 // alongside so the agent can pin the trust root it will use for the API.
+//
+// Errors are returned exactly as their source produced them, with no context added by Issue:
+// a CA load failure, ErrInvalidCSR or
+// another signing error, or the repository's error from InsertCertificate. Callers can match
+// them with errors.Is.
 func (s *Service) Issue(ctx context.Context, csrPEM []byte, id Identity) (*Issuance, error) {
-	res, err := s.Sign(ctx, csrPEM, id)
+	ca, err := s.LoadOrCreateCA(ctx)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.Sign(ca, csrPEM, id)
 	if err != nil {
 		return nil, err
 	}
