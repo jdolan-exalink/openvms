@@ -10,6 +10,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"sync"
 	"testing"
 
@@ -129,8 +130,8 @@ func TestPgRepoCAAndCertificates(t *testing.T) {
 		t.Fatalf("cross-tenant certificates = %d, %v; want 0", crossed, err)
 	}
 
-	if _, err := repo.GetCertificate(ctx, "does-not-exist"); err == nil {
-		t.Fatal("expected not found")
+	if _, err := repo.GetCertificate(ctx, "does-not-exist"); !errors.Is(err, agentca.ErrCertificateNotFound) {
+		t.Fatalf("err = %v, want ErrCertificateNotFound", err)
 	}
 }
 

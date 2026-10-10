@@ -70,7 +70,7 @@ func RecordCertificate(ctx context.Context, q *db.Queries, c Certificate) error 
 	return nil
 }
 
-// GetCertificate returns the record for a serial, or store.ErrNotFound.
+// GetCertificate returns the record for a serial, or ErrCertificateNotFound.
 func (r *PgRepo) GetCertificate(ctx context.Context, serial string) (Certificate, error) {
 	var out Certificate
 	err := r.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
@@ -84,5 +84,11 @@ func (r *PgRepo) GetCertificate(ctx context.Context, serial string) (Certificate
 		}
 		return nil
 	})
-	return out, store.Classify(err)
+	if err != nil {
+		if store.Classify(err) == store.ErrNotFound {
+			return Certificate{}, ErrCertificateNotFound
+		}
+		return Certificate{}, err
+	}
+	return out, nil
 }

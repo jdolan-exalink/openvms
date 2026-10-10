@@ -146,13 +146,16 @@ func run() error {
 	// Land the default view where the server actually is (public-IP geolocation, with an
 	// OPENVMS_MAPS_CENTER override); the lookup is best-effort and never blocks startup.
 	mapsSvc.Config.DefaultCenter = maps.DetectServerCenter(ctx, log)
+	// The agent CA is created or loaded here, not on the first (unauthenticated) enroll request:
+	// a broken CA or master key stops the API at startup instead of surfacing as enroll errors.
+	agentCA := &agentca.Service{Repo: &agentca.PgRepo{Store: st}, Sealer: sealer}
+	if _, err := agentCA.LoadOrCreateCA(ctx); err != nil {
+		return fmt.Errorf("agent CA: %w", err)
+	}
 	handlers := &api.Handlers{
-		Inv:       inv,
-		Provision: provision.New(inv, st, sealer, log),
-		AgentEnroll: &agentenroll.Service{
-			Store: st, Authz: inv,
-			CA: &agentca.Service{Repo: &agentca.PgRepo{Store: st}, Sealer: sealer},
-		},
+		Inv:           inv,
+		Provision:     provision.New(inv, st, sealer, log),
+		AgentEnroll:   &agentenroll.Service{Store: st, Authz: inv, CA: agentCA},
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Alarms:        alarmsSvc,
 		Media:         mediaSvc,
