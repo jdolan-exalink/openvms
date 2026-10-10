@@ -164,13 +164,27 @@ func (s *Server) ActiveConnections() int {
 
 // Start listens on the given address and serves gRPC requests.
 func (s *Server) Start(addr string) error {
+	if err := s.Bind(addr); err != nil {
+		return err
+	}
+	return s.Serve()
+}
+
+// Bind opens the listening socket without serving, so a caller can fail startup on a bad or
+// busy address before launching Serve in the background.
+func (s *Server) Bind(addr string) error {
 	lis, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	s.listener = lis
 	s.cfg.Log.Info("openvms gRPC control server listening", "addr", addr)
-	return s.grpcServer.Serve(lis)
+	return nil
+}
+
+// Serve serves on the socket opened by Bind and blocks until the server stops.
+func (s *Server) Serve() error {
+	return s.grpcServer.Serve(s.listener)
 }
 
 // GracefulStop gracefully shuts down the gRPC server.

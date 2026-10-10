@@ -151,7 +151,8 @@ func run() error {
 	// The agent CA is created or loaded here, not on the first (unauthenticated) enroll request:
 	// a broken CA or master key stops the API at startup instead of surfacing as enroll errors.
 	agentCA := &agentca.Service{Repo: &agentca.PgRepo{Store: st}, Sealer: sealer}
-	if _, err := agentCA.LoadOrCreateCA(ctx); err != nil {
+	caCert, err := agentCA.LoadOrCreateCA(ctx)
+	if err != nil {
 		return fmt.Errorf("agent CA: %w", err)
 	}
 	handlers := &api.Handlers{
@@ -228,13 +229,11 @@ func run() error {
 	}()
 
 	// The agent listener is opt-in. config.Load already refused GRPC_AGENT_ADDR without server
-	// TLS, and the agent CA was loaded above, so this only wires what is configured.
+	// TLS. The socket is bound here, before serving, so a busy or invalid address stops the
+	// API at startup; later serve errors reach the shutdown path through agentErrCh.
 	var grpcAgent *control.Server
+	agentErrCh := make(chan error, 1)
 	if cfg.GRPCAgentAddr != "" {
-		caCert, err := agentCA.LoadOrCreateCA(ctx)
-		if err != nil {
-			return fmt.Errorf("agent listener: %w", err)
-		}
 		clientCAs := x509.NewCertPool()
 		clientCAs.AddCert(caCert.Cert)
 		agentCreds, err := grpctls.ServerMTLSCredentials(cfg.GRPCTLSCertFile, cfg.GRPCTLSKeyFile, clientCAs)
@@ -249,9 +248,12 @@ func run() error {
 		if err != nil {
 			return fmt.Errorf("agent listener: %w", err)
 		}
+		if err := grpcAgent.Bind(cfg.GRPCAgentAddr); err != nil {
+			return fmt.Errorf("agent listener bind %s: %w", cfg.GRPCAgentAddr, err)
+		}
 		go func() {
-			if err := grpcAgent.Start(cfg.GRPCAgentAddr); err != nil {
-				log.Warn("grpc agent server stopped", "error", err)
+			if err := grpcAgent.Serve(); err != nil {
+				agentErrCh <- fmt.Errorf("grpc agent server: %w", err)
 			}
 		}()
 		log.Info("gRPC agent listener enabled (mutual TLS)", "addr", cfg.GRPCAgentAddr)
@@ -297,6 +299,9 @@ func run() error {
 	case err := <-errCh:
 		grpcCtrl.GracefulStop()
 		grpcAgent.GracefulStop()
+		return err
+	case err := <-agentErrCh:
+		grpcCtrl.GracefulStop()
 		return err
 	case <-ctx.Done():
 	}
