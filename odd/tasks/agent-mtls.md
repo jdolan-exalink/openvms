@@ -34,7 +34,7 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 
 ## Tasks
 
-- [ ] M1 CA + issuance: migration (CA, issued certs), sealed CA key, `internal/agentca` (or similar) generating the CA and signing CSRs with the identity SANs; tests.
+- [x] M1 CA + issuance: migration (CA, issued certs), sealed CA key, `internal/agentca` (or similar) generating the CA and signing CSRs with the identity SANs; tests.
 - [ ] M2 Enrollment: migration for one-time tokens, API endpoint to create a token (`servers.manage`), unauthenticated enroll endpoint (token + CSR → cert + CA bundle), hashing, TTL, single use; tests.
 - [ ] M3 Agent listener: separate gRPC listener requiring client certs, revocation check, peer identity in context, Heartbeat bound to the cert identity; tests.
 - [ ] M4 Agent side: edge agent enroll command/flow, key + cert persistence, worker dials the agent port with its cert, renewal at 2/3 lifetime; tests.
@@ -53,7 +53,8 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 ## Progress
 
 - Exploration done: identity is `server_id`; SSH push provisioning; sealed-secret pattern via `internal/secrets`; Heartbeat is a stub; PRD §71–72 intent.
+- M1 done (route: delegated direct, writer trigger: 3+ non-trivial files). Commits 28c92e6 (migration 00041, sqlc queries), 05f45eb (`internal/agentca`). RED: `undefined: Identity` (ca_test), `undefined: CARecord` (service_test), `undefined: agentca.PgRepo` (integration vet). GREEN: `go test ./internal/agentca` ok; `go test -tags integration ./internal/store/... ./internal/agentca/...` ok (concurrent get-or-create, sealed key, RLS isolation). Checks: go build, go vet, go test ./... all pass. Global CA (`agent_ca` singleton, no RLS); `agent_certificates` tenant-scoped with RLS. Stale sqlc models (ExportJob, ExportJobItem, ExportShare, ObjectTrack) left out of the commit as unrelated.
 
 ## Next step
 
-M1 on `feat/agent-mtls-ca`.
+M2 enrollment (PR2, new branch stacked on `feat/agent-mtls-ca`).
