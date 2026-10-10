@@ -13,7 +13,6 @@ import (
 	"errors"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -209,10 +208,8 @@ func TestRevokeCertificateAndServer(t *testing.T) {
 	}
 }
 
-// A certificate superseded by a renewal has a revocation time in the future (grace period).
-// An explicit revocation, by serial or by server, must end that grace period immediately.
-func TestRevocationEndsAGracePeriod(t *testing.T) {
-	ctx := context.Background()
+func newRepo(t *testing.T) (*store.Store, *agentca.PgRepo, *agentca.Service) {
+	t.Helper()
 	pool, _ := pgtest.Migrated(t)
 	st := &store.Store{Pool: pool}
 	key := make([]byte, 32)
@@ -222,44 +219,87 @@ func TestRevocationEndsAGracePeriod(t *testing.T) {
 		t.Fatal(err)
 	}
 	repo := &agentca.PgRepo{Store: st}
-	svc := &agentca.Service{Repo: repo, Sealer: sealer}
-	tenant, server := seedServer(t, ctx, st, "g")
+	return st, repo, &agentca.Service{Repo: repo, Sealer: sealer}
+}
+
+// ActivateCertificate is the first-use hook: it marks the certificate used and revokes every
+// other live certificate of the server, once, and leaves other servers alone.
+func TestActivateCertificateRevokesTheServersOtherCertificates(t *testing.T) {
+	ctx := context.Background()
+	st, repo, svc := newRepo(t)
+	tenant, server := seedServer(t, ctx, st, "act")
+	otherTenant, otherServer := seedServer(t, ctx, st, "act2")
 	id := agentca.Identity{TenantID: tenant, ServerID: server}
-	var serials []string
-	for range 2 {
+	issue := func(id agentca.Identity) agentca.Certificate {
 		res, err := svc.Issue(ctx, csrPEM(t), id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		serials = append(serials, res.Issued.Serial)
+		c, err := repo.GetCertificate(ctx, res.Issued.Serial)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
 	}
-	err = st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, "UPDATE agent_certificates SET revoked_at = now() + interval '10 minutes' WHERE server_id = $1", server)
-		return err
+	a, b := issue(id), issue(id)
+	other := issue(agentca.Identity{TenantID: otherTenant, ServerID: otherServer})
+	if a.FirstUsedAt != nil || a.ParentSerial != "" {
+		t.Fatalf("a new certificate = %+v, want unused and parentless", a)
+	}
+
+	if err := repo.ActivateCertificate(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	got := func(c agentca.Certificate) agentca.Certificate {
+		r, err := repo.GetCertificate(ctx, c.Serial)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	if g := got(a); g.FirstUsedAt == nil || g.RevokedAt != nil {
+		t.Fatalf("activated certificate = %+v, want used and live", g)
+	}
+	if g := got(b); g.RevokedAt == nil {
+		t.Fatal("activation left the server's other certificate live")
+	}
+	if g := got(other); g.RevokedAt != nil {
+		t.Fatal("activation revoked another server's certificate")
+	}
+	// Idempotent: a second activation changes nothing.
+	first := *got(a).FirstUsedAt
+	if err := repo.ActivateCertificate(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if !got(a).FirstUsedAt.Equal(first) {
+		t.Fatal("a second activation moved first_used_at")
+	}
+	// A revoked certificate cannot be activated.
+	if err := repo.ActivateCertificate(ctx, b); !errors.Is(err, agentca.ErrCertificateRevoked) {
+		t.Fatalf("activating a revoked certificate: %v, want ErrCertificateRevoked", err)
+	}
+	// Explicit revocation still works on an activated certificate.
+	if ok, err := repo.RevokeCertificate(ctx, a.Serial); err != nil || !ok {
+		t.Fatalf("RevokeCertificate = %v, %v", ok, err)
+	}
+}
+
+// The migration adds the renewal columns and leaves row-level security in force.
+func TestRenewalColumnsAndRLS(t *testing.T) {
+	ctx := context.Background()
+	st, _, _ := newRepo(t)
+	var cols int
+	var rls, forced bool
+	err := st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM information_schema.columns WHERE table_name = 'agent_certificates' AND column_name IN ('parent_serial', 'first_used_at')").Scan(&cols); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'agent_certificates'").Scan(&rls, &forced)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	inGrace := func(serial string) bool {
-		c, err := repo.GetCertificate(ctx, serial)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return c.RevokedAt.After(time.Now())
-	}
-	if !inGrace(serials[0]) || !inGrace(serials[1]) {
-		t.Fatal("setup: certificates are not in a grace period")
-	}
-	if ok, err := repo.RevokeCertificate(ctx, serials[0]); err != nil || !ok {
-		t.Fatalf("RevokeCertificate in grace = %v, %v; want true", ok, err)
-	}
-	if inGrace(serials[0]) {
-		t.Fatal("revoking by serial left the grace period running")
-	}
-	if n, err := repo.RevokeServerCertificates(ctx, server); err != nil || n != 1 {
-		t.Fatalf("RevokeServerCertificates = %d, %v; want the 1 certificate still in grace", n, err)
-	}
-	if inGrace(serials[1]) {
-		t.Fatal("revoking the server left a grace period running")
+	if cols != 2 || !rls || !forced {
+		t.Fatalf("columns=%d rls=%v forced=%v; want both columns with RLS enabled and forced", cols, rls, forced)
 	}
 }

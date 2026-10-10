@@ -88,26 +88,25 @@ func TestAgentListener_RealCertificatesAndRevocation(t *testing.T) {
 	t.Cleanup(srv.Stop)
 	h := &agentHarness{addr: lis.Addr().String(), serverCA: certFile}
 
+	// A server has one live certificate once the agent uses it (a certificate's first call revokes
+	// the server's others; renewal is covered below). Revoking works on a used certificate.
 	first, firstSerial := issue()
-	second, _ := issue()
-	c1, c2 := h.nodes(t, &first), h.nodes(t, &second)
+	c1 := h.nodes(t, &first)
 	if _, err := heartbeat(c1, server.String()); err != nil {
 		t.Fatalf("first certificate: %v", err)
 	}
-	if _, err := heartbeat(c2, server.String()); err != nil {
-		t.Fatalf("second certificate: %v", err)
-	}
-
 	if ok, err := repo.RevokeCertificate(ctx, firstSerial); err != nil || !ok {
 		t.Fatalf("revoke = %v, %v", ok, err)
 	}
 	if _, err := heartbeat(c1, server.String()); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("revoked certificate: code = %s (%v), want Unauthenticated", status.Code(err), err)
 	}
-	if _, err := heartbeat(c2, server.String()); err != nil {
-		t.Fatalf("revoking one certificate must not affect the other: %v", err)
-	}
 
+	second, _ := issue()
+	c2 := h.nodes(t, &second)
+	if _, err := heartbeat(c2, server.String()); err != nil {
+		t.Fatalf("a new certificate after the first was revoked: %v", err)
+	}
 	if n, err := repo.RevokeServerCertificates(ctx, server); err != nil || n != 1 {
 		t.Fatalf("revoke server = %d, %v; want 1 live certificate", n, err)
 	}
@@ -121,7 +120,7 @@ func seedAgentServer(t *testing.T, ctx context.Context, st *store.Store) (tenant
 	tenant, server = uuid.New(), uuid.New()
 	site := uuid.New()
 	err := st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "INSERT INTO tenants (id, name, slug) VALUES ($1, 'a', 'a')", tenant); err != nil {
+		if _, err := tx.Exec(ctx, "INSERT INTO tenants (id, name, slug) VALUES ($1, $2, $2)", tenant, tenant.String()); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, "INSERT INTO sites (id, tenant_id, name) VALUES ($1, $2, 'a')", site, tenant); err != nil {
@@ -137,10 +136,14 @@ func seedAgentServer(t *testing.T, ctx context.Context, st *store.Store) (tenant
 	return tenant, server
 }
 
-// Renewal against Postgres, end to end over mutual TLS: the renewed certificate works, the one
-// it replaced keeps working inside its grace period and is refused once that ends, and a
-// certificate that is too young cannot renew.
-func TestAgentListener_RenewalSupersedesWithGrace(t *testing.T) {
+// Renewal against Postgres, end to end over mutual TLS. A renewal supersedes the old certificate
+// only when the agent first uses the new one:
+//   - a lost response leaves the old certificate working, and renewing again replaces the unused
+//     successor;
+//   - the successor's first call revokes its parent and every other certificate of the server;
+//   - after that the parent (a stolen copy of the old key) can neither call nor renew, and the
+//     legitimate agent is unaffected.
+func TestAgentListener_RenewalSupersedesOnFirstUse(t *testing.T) {
 	ctx := context.Background()
 	pool, _ := pgtest.Migrated(t)
 	st := &store.Store{Pool: pool}
@@ -160,7 +163,7 @@ func TestAgentListener_RenewalSupersedesWithGrace(t *testing.T) {
 	id := agentca.Identity{TenantID: tenant, ServerID: server}
 
 	// A certificate already 20 of 30 days old, so it may renew; a fresh one may not.
-	issueAt := func(age time.Duration) (tls.Certificate, string) {
+	issueAt := func(id agentca.Identity, age time.Duration) (tls.Certificate, string) {
 		svc.Now = func() time.Time { return time.Now().Add(-age) }
 		defer func() { svc.Now = nil }()
 		keyPair, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -176,8 +179,7 @@ func TestAgentListener_RenewalSupersedesWithGrace(t *testing.T) {
 		}
 		return pair, res.Issued.Serial
 	}
-	old, oldSerial := issueAt(20 * 24 * time.Hour)
-	young, _ := issueAt(0)
+	old, _ := issueAt(id, 20*24*time.Hour)
 
 	clientCAs := x509.NewCertPool()
 	clientCAs.AddCert(ca.Cert)
@@ -201,38 +203,57 @@ func TestAgentListener_RenewalSupersedesWithGrace(t *testing.T) {
 	t.Cleanup(srv.Stop)
 	h := &agentHarness{addr: lis.Addr().String(), serverCA: certFile}
 
-	// Too young: FailedPrecondition, not an internal error.
-	csr, newKey := newCSR(t)
-	_, err = renew(h, t, &young, csr)
-	if status.Code(err) != codes.FailedPrecondition {
+	renewWith := func(from tls.Certificate) (tls.Certificate, error) {
+		csr, newKey := newCSR(t)
+		resp, err := renew(h, t, &from, csr)
+		if err != nil {
+			return tls.Certificate{}, err
+		}
+		block, _ := pem.Decode([]byte(resp.CertificatePem))
+		return tls.Certificate{Certificate: [][]byte{block.Bytes}, PrivateKey: newKey}, nil
+	}
+	alive := func(c tls.Certificate) error { _, err := heartbeat(h.nodes(t, &c), server.String()); return err }
+
+	// The old certificate's first call activates it (it is the agent's current identity).
+	if err := alive(old); err != nil {
+		t.Fatalf("old certificate: %v", err)
+	}
+	// Too young: a fresh certificate (of another server, so it does not supersede the old one)
+	// cannot renew yet.
+	tenant2, server2 := seedAgentServer(t, ctx, st)
+	young, _ := issueAt(agentca.Identity{TenantID: tenant2, ServerID: server2}, 0)
+	if _, err := renewWith(young); status.Code(err) != codes.FailedPrecondition {
 		t.Fatalf("young certificate: code = %s (%v), want FailedPrecondition", status.Code(err), err)
 	}
 
-	resp, err := renew(h, t, &old, csr)
+	// Lost response: the agent never learns of c1 and renews again from the old certificate.
+	c1, err := renewWith(old)
 	if err != nil {
-		t.Fatalf("old enough certificate: %v", err)
+		t.Fatalf("renewal: %v", err)
 	}
-	block, _ := pem.Decode([]byte(resp.CertificatePem))
-	renewed := tls.Certificate{Certificate: [][]byte{block.Bytes}, PrivateKey: newKey}
-	if _, err := heartbeat(h.nodes(t, &renewed), server.String()); err != nil {
-		t.Fatalf("renewed certificate: %v", err)
+	if err := alive(old); err != nil {
+		t.Fatalf("old certificate while its successor is unused: %v", err)
 	}
-	// The replaced certificate still works during its grace period...
-	if _, err := heartbeat(h.nodes(t, &old), server.String()); err != nil {
-		t.Fatalf("superseded certificate inside its grace period: %v", err)
-	}
-	// ...and not after it.
-	err = st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, "UPDATE agent_certificates SET revoked_at = now() - interval '1 second' WHERE serial = $1", oldSerial)
-		return err
-	})
+	c2, err := renewWith(old)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("renewal retry from the old certificate: %v", err)
 	}
-	if _, err := heartbeat(h.nodes(t, &old), server.String()); status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("superseded certificate after its grace period: code = %s (%v), want Unauthenticated", status.Code(err), err)
+	if err := alive(c1); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("the replaced unused successor: code = %s (%v), want Unauthenticated", status.Code(err), err)
 	}
-	if _, err := heartbeat(h.nodes(t, &renewed), server.String()); err != nil {
-		t.Fatalf("the renewed certificate must be unaffected: %v", err)
+
+	// The agent switches to c2. Its first call revokes the old certificate.
+	if err := alive(c2); err != nil {
+		t.Fatalf("new certificate: %v", err)
+	}
+	if err := alive(old); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("old certificate after the successor was used: code = %s (%v), want Unauthenticated", status.Code(err), err)
+	}
+	// A stolen copy of the old key can no longer renew, and nothing it does touches c2.
+	if _, err := renewWith(old); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("renewal from the superseded certificate: code = %s (%v), want Unauthenticated", status.Code(err), err)
+	}
+	if err := alive(c2); err != nil {
+		t.Fatalf("the legitimate agent must be unaffected: %v", err)
 	}
 }

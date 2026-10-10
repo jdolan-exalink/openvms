@@ -191,21 +191,60 @@ func TestRejectedIsTheSharedRefusal(t *testing.T) {
 	}
 }
 
-// A certificate superseded by a renewal carries a revocation time in the future (its grace
-// period): it still authenticates until then and not after.
-func TestAuthenticateRevocationInTheFutureIsAGracePeriod(t *testing.T) {
+// The first successful use of a certificate activates it: the store marks it used and revokes
+// the server's other certificates (its parent after a renewal). That happens once, not per call.
+func TestAuthenticateActivatesACertificateOnFirstUse(t *testing.T) {
 	pki := agentauthtest.NewPKI(t)
 	now := time.Now()
-	c := pki.Issue(t, id, now, time.Hour)
-	clock := now
-	v := &agentauth.Verifier{Certs: pki.Store, Now: func() time.Time { return clock }}
+	parent := pki.Issue(t, id, now, time.Hour)
+	v := &agentauth.Verifier{Certs: pki.Store}
 
-	pki.Store.Update(c.Serial, func(r *agentca.Certificate) { at := now.Add(10 * time.Minute); r.RevokedAt = &at })
-	if _, err := v.Authenticate(peerCtx(c.Leaf, true)); err != nil {
-		t.Fatalf("inside the grace period: %v", err)
+	if _, err := v.Authenticate(peerCtx(parent.Leaf, true)); err != nil {
+		t.Fatal(err)
 	}
-	clock = now.Add(10*time.Minute + time.Second)
+	// A renewal (which needs the parent to have authenticated) issues the successor.
+	child := pki.IssueChild(t, id, parent.Serial, now, time.Hour)
+	// Before the child is used the parent keeps working.
+	if _, err := v.Authenticate(peerCtx(parent.Leaf, true)); err != nil {
+		t.Fatalf("parent before the successor was used: %v", err)
+	}
+	if n := pki.Store.Activations(); n != 1 {
+		t.Fatalf("%d activations after two calls with one certificate, want 1 (once per certificate)", n)
+	}
+	// The child's first call revokes the parent; the child keeps working.
+	if _, err := v.Authenticate(peerCtx(child.Leaf, true)); err != nil {
+		t.Fatalf("successor: %v", err)
+	}
+	if _, err := v.Authenticate(peerCtx(parent.Leaf, true)); code(err) != codes.Unauthenticated {
+		t.Fatalf("parent after the successor was used: code %s (%v), want Unauthenticated", code(err), err)
+	}
+	if _, err := v.Authenticate(peerCtx(child.Leaf, true)); err != nil {
+		t.Fatalf("successor after revoking its parent: %v", err)
+	}
+}
+
+func TestAuthenticateFailsClosedWhenActivationFails(t *testing.T) {
+	pki := agentauthtest.NewPKI(t)
+	c := pki.Issue(t, id, time.Now(), time.Hour)
+	pki.Store.ActivateErr = errors.New("db down")
+	v := &agentauth.Verifier{Certs: pki.Store}
+	_, err := v.Authenticate(peerCtx(c.Leaf, true))
+	if code(err) != codes.Unavailable {
+		t.Fatalf("code = %s (%v), want Unavailable", code(err), err)
+	}
+	pki.Store.ActivateErr = nil
+	if _, err := v.Authenticate(peerCtx(c.Leaf, true)); err != nil {
+		t.Fatalf("after the store recovered: %v", err)
+	}
+}
+
+// A certificate revoked while it was being activated (a renewal replaced it) is rejected.
+func TestAuthenticateRejectsACertificateRevokedDuringActivation(t *testing.T) {
+	pki := agentauthtest.NewPKI(t)
+	c := pki.Issue(t, id, time.Now(), time.Hour)
+	pki.Store.ActivateErr = agentca.ErrCertificateRevoked
+	v := &agentauth.Verifier{Certs: pki.Store}
 	if _, err := v.Authenticate(peerCtx(c.Leaf, true)); code(err) != codes.Unauthenticated {
-		t.Fatalf("after the grace period: code %s (%v), want Unauthenticated", code(err), err)
+		t.Fatalf("code = %s (%v), want Unauthenticated", code(err), err)
 	}
 }

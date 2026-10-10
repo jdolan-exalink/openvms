@@ -49,6 +49,12 @@ func (s *AgentCertServer) RenewCertificate(ctx context.Context, req *openvmsv1.R
 	if errors.Is(err, agentca.ErrInvalidCSR) {
 		return nil, status.Error(codes.InvalidArgument, "invalid certificate request")
 	}
+	if errors.Is(err, agentca.ErrNotRenewable) {
+		// The presenting certificate was revoked or superseded between the listener's check and
+		// the renewal: the same refusal as any invalid certificate, not a server fault.
+		s.log().Warn("agent certificate renewal refused", "server_id", id.ServerID, "serial", serial, "error", err)
+		return nil, agentauth.ErrRejected
+	}
 	if errors.Is(err, agentca.ErrRenewalTooEarly) {
 		return nil, status.Error(codes.FailedPrecondition, "certificate renewal not allowed yet")
 	}

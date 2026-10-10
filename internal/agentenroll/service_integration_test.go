@@ -544,7 +544,7 @@ func (e *env) identity() agentca.Identity {
 	return agentca.Identity{TenantID: e.tenant, ServerID: e.server}
 }
 
-// liveCertificates counts the server's unexpired certificates that are not revoked at all.
+// unrevoked counts the server's certificates that are not revoked.
 func (e *env) unrevoked(t *testing.T) int {
 	t.Helper()
 	var n int
@@ -552,10 +552,33 @@ func (e *env) unrevoked(t *testing.T) int {
 	return n
 }
 
-func TestRenewIssuesAFreshCertificateAndSupersedesThePreviousOne(t *testing.T) {
+// pending counts the server's unrevoked certificates that were never used.
+func (e *env) pending(t *testing.T) int {
+	t.Helper()
+	var n int
+	e.scan(t, "SELECT count(*) FROM agent_certificates WHERE server_id = $1 AND revoked_at IS NULL AND first_used_at IS NULL", []any{e.server}, &n)
+	return n
+}
+
+// markUsed stands in for the listener's first-use activation of one certificate (without the
+// revocation of the others, which has its own tests), so a test can renew from it.
+func (e *env) markUsed(t *testing.T, serial string) {
+	t.Helper()
+	e.exec(t, "UPDATE agent_certificates SET first_used_at = now() WHERE serial = '"+serial+"'")
+}
+
+func (e *env) revokedAt(t *testing.T, serial string) *time.Time {
+	t.Helper()
+	var at *time.Time
+	e.scan(t, "SELECT revoked_at FROM agent_certificates WHERE serial = $1", []any{serial}, &at)
+	return at
+}
+
+func TestRenewIssuesAChildAndLeavesTheParentWorking(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	first := e.enrollAged(t, 20*24*time.Hour)
+	e.markUsed(t, first.Issued.Serial)
 
 	res, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t))
 	if err != nil {
@@ -569,28 +592,22 @@ func TestRenewIssuesAFreshCertificateAndSupersedesThePreviousOne(t *testing.T) {
 	if got, err := agentca.IdentityFromCert(leaf); err != nil || got != e.identity() {
 		t.Fatalf("renewed identity = %+v, %v; want %+v", got, err, e.identity())
 	}
-	if res.Issued.Serial == first.Issued.Serial {
-		t.Fatal("renewal reused the serial")
+	// The parent is NOT revoked: it works until the child is first used.
+	if e.revokedAt(t, first.Issued.Serial) != nil {
+		t.Fatal("renewal revoked the certificate it replaces")
 	}
-
-	// The new certificate is unrevoked; the old one is revoked from now + grace, not at once.
-	var certs int
-	e.scan(t, "SELECT count(*) FROM agent_certificates WHERE server_id = $1", []any{e.server}, &certs)
-	if certs != 2 || e.unrevoked(t) != 1 {
-		t.Fatalf("%d certificates, %d unrevoked; want 2 and 1", certs, e.unrevoked(t))
-	}
-	var untilRevoked float64
-	e.scan(t, "SELECT extract(epoch FROM revoked_at - now()) FROM agent_certificates WHERE serial = $1", []any{first.Issued.Serial}, &untilRevoked)
-	grace := agentenroll.SupersedeGrace.Seconds()
-	if untilRevoked < grace-60 || untilRevoked > grace {
-		t.Fatalf("old certificate is revoked in %.0fs, want about the %.0fs grace", untilRevoked, grace)
+	var parent *string
+	var used *time.Time
+	e.scan(t, "SELECT parent_serial, first_used_at FROM agent_certificates WHERE serial = $1", []any{res.Issued.Serial}, &parent, &used)
+	if parent == nil || *parent != first.Issued.Serial || used != nil {
+		t.Fatalf("child parent_serial=%v first_used_at=%v; want %s and unused", parent, used, first.Issued.Serial)
 	}
 	var targetType, renewed, previous string
-	var superseded int
-	e.scan(t, "SELECT target_type, details->>'serial', details->>'previous_serial', (details->>'superseded')::int FROM audit_log WHERE action = 'SERVER_AGENT_CERT_RENEWED' AND target_id = $1",
-		[]any{e.server}, &targetType, &renewed, &previous, &superseded)
-	if targetType != "server_agent" || renewed != res.Issued.Serial || previous != first.Issued.Serial || superseded != 1 {
-		t.Fatalf("audit = %q serial %q previous %q superseded %d; want server_agent %q %q 1", targetType, renewed, previous, superseded, res.Issued.Serial, first.Issued.Serial)
+	var replaced int
+	e.scan(t, "SELECT target_type, details->>'serial', details->>'previous_serial', (details->>'replaced_unused')::int FROM audit_log WHERE action = 'SERVER_AGENT_CERT_RENEWED' AND target_id = $1",
+		[]any{e.server}, &targetType, &renewed, &previous, &replaced)
+	if targetType != "server_agent" || renewed != res.Issued.Serial || previous != first.Issued.Serial || replaced != 0 {
+		t.Fatalf("audit = %q serial %q previous %q replaced %d; want server_agent %q %q 0", targetType, renewed, previous, replaced, res.Issued.Serial, first.Issued.Serial)
 	}
 }
 
@@ -619,32 +636,94 @@ func TestRenewRefusesBeforeHalfTheLifetime(t *testing.T) {
 	}
 }
 
-func TestRenewRetryWithinGraceSucceedsAndBoundsTheLiveCertificates(t *testing.T) {
+// The renewal response was lost: the agent still holds the parent and asks again. The unused
+// successor of the first attempt is replaced, so there is never more than one pending successor.
+func TestRenewAfterALostResponseReplacesThePendingSuccessor(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	first := e.enrollAged(t, 20*24*time.Hour)
-	if _, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t)); err != nil {
+	e.markUsed(t, first.Issued.Serial)
+
+	lost, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t))
+	if err != nil {
 		t.Fatal(err)
 	}
-	// The response was lost: the agent still holds the first certificate, which is in its grace
-	// period, and asks again.
-	second, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t))
+	retry, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t))
 	if err != nil {
-		t.Fatalf("retry within the grace period: %v", err)
+		t.Fatalf("retry from the parent: %v", err)
 	}
-	// Exactly one certificate is unrevoked (the newest); everything else ends within the grace.
-	var certs, beyondGrace int
-	e.scan(t, "SELECT count(*), count(*) FILTER (WHERE revoked_at > now() + make_interval(secs => $2)) FROM agent_certificates WHERE server_id = $1",
-		[]any{e.server, agentenroll.SupersedeGrace.Seconds() + 1}, &certs, &beyondGrace)
-	var unrevokedSerial string
-	e.scan(t, "SELECT serial FROM agent_certificates WHERE server_id = $1 AND revoked_at IS NULL", []any{e.server}, &unrevokedSerial)
-	if certs != 3 || beyondGrace != 0 || unrevokedSerial != second.Issued.Serial {
-		t.Fatalf("%d certificates, %d beyond the grace, unrevoked %s; want 3, 0 and the newest %s", certs, beyondGrace, unrevokedSerial, second.Issued.Serial)
+	if e.revokedAt(t, lost.Issued.Serial) == nil {
+		t.Fatal("the unused successor of the lost response was not revoked")
 	}
-	// Once the grace is over, the old certificate can no longer renew.
-	e.exec(t, "UPDATE agent_certificates SET revoked_at = now() - interval '1 second' WHERE serial = '"+first.Issued.Serial+"'")
-	if _, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t)); !errors.Is(err, agentca.ErrCertificateNotFound) {
-		t.Fatalf("renewing with a revoked certificate: %v, want ErrCertificateNotFound", err)
+	if e.revokedAt(t, retry.Issued.Serial) != nil || e.revokedAt(t, first.Issued.Serial) != nil {
+		t.Fatal("the new successor and the parent must stay live")
+	}
+	if e.unrevoked(t) != 2 || e.pending(t) != 1 {
+		t.Fatalf("%d unrevoked, %d pending; want the parent plus exactly one pending successor", e.unrevoked(t), e.pending(t))
+	}
+	var replaced int
+	e.scan(t, "SELECT (details->>'replaced_unused')::int FROM audit_log WHERE action = 'SERVER_AGENT_CERT_RENEWED' AND details->>'serial' = $1", []any{retry.Issued.Serial}, &replaced)
+	if replaced != 1 {
+		t.Fatalf("audit replaced_unused = %d, want 1", replaced)
+	}
+}
+
+func TestRenewRefusesACertificateThatIsRevokedOrSuperseded(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	first := e.enrollAged(t, 20*24*time.Hour)
+	e.markUsed(t, first.Issued.Serial)
+
+	// A successor that was used means the agent moved on: renewing from the parent is refused
+	// even if (defensively) the parent is somehow still unrevoked.
+	child, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.markUsed(t, child.Issued.Serial)
+	if _, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t)); !errors.Is(err, agentca.ErrNotRenewable) {
+		t.Fatalf("renewing from a parent whose successor was used: %v, want ErrNotRenewable", err)
+	}
+	// Revoked.
+	e.exec(t, "UPDATE agent_certificates SET revoked_at = now() WHERE serial = '"+first.Issued.Serial+"'")
+	if _, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t)); !errors.Is(err, agentca.ErrNotRenewable) {
+		t.Fatalf("renewing with a revoked certificate: %v, want ErrNotRenewable", err)
+	}
+	// Unknown.
+	if _, err := e.svc.Renew(ctx, e.identity(), "deadbeef", csr(t)); !errors.Is(err, agentca.ErrNotRenewable) {
+		t.Fatalf("renewing with an unknown serial: %v, want ErrNotRenewable", err)
+	}
+}
+
+// Two live certificates of one server (an old one and, say, a re-enrolled one) renewing at the
+// same time must not leave two pending successors: renewals of a server run one after another.
+func TestConcurrentRenewalsOfOneServerLeaveOnePendingSuccessor(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	p1 := e.enrollAged(t, 20*24*time.Hour)
+	p2 := e.enrollAged(t, 21*24*time.Hour)
+	e.markUsed(t, p1.Issued.Serial)
+	e.markUsed(t, p2.Issued.Serial)
+
+	csrs := [][]byte{csr(t), csr(t), csr(t), csr(t)}
+	parents := []string{p1.Issued.Serial, p2.Issued.Serial, p1.Issued.Serial, p2.Issued.Serial}
+	errs := make([]error, len(parents))
+	var wg sync.WaitGroup
+	for i := range parents {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, errs[i] = e.svc.Renew(ctx, e.identity(), parents[i], csrs[i])
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("renewal %d: %v", i, err)
+		}
+	}
+	if n := e.pending(t); n != 1 {
+		t.Fatalf("%d pending successors after concurrent renewals, want exactly 1", n)
 	}
 }
 
@@ -661,43 +740,50 @@ func TestRenewRejectsABadCSRWithoutSideEffects(t *testing.T) {
 	}
 }
 
-// Renewal is all or nothing, like enrollment: a failed audit write leaves no new certificate
-// and does not supersede the old one.
+// Renewal is all or nothing, like enrollment: a failed audit write leaves no new certificate and
+// does not revoke the pending successor of an earlier attempt.
 func TestRenewIsAtomicWhenTheAuditFails(t *testing.T) {
 	e := setup(t)
+	ctx := context.Background()
 	first := e.enrollAged(t, 20*24*time.Hour)
+	e.markUsed(t, first.Issued.Serial)
+	pending, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t))
+	if err != nil {
+		t.Fatal(err)
+	}
 	e.failOn(t, "audit_log")
-	_, err := e.svc.Renew(context.Background(), e.identity(), first.Issued.Serial, csr(t))
+	_, err = e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t))
 	if err == nil || !strings.Contains(err.Error(), "injected failure") {
 		t.Fatalf("err = %v, want the injected audit failure", err)
 	}
 	var certs int
 	e.scan(t, "SELECT count(*) FROM agent_certificates", nil, &certs)
-	if certs != 1 || e.unrevoked(t) != 1 {
-		t.Fatalf("%d certificates, %d unrevoked after a failed renewal; want 1 and 1 (nothing superseded)", certs, e.unrevoked(t))
+	if certs != 2 || e.revokedAt(t, pending.Issued.Serial) != nil {
+		t.Fatalf("%d certificates, pending successor revoked=%v; want 2 and the earlier successor untouched", certs, e.revokedAt(t, pending.Issued.Serial) != nil)
 	}
 	// Positive control: without the fault the same renewal works.
 	e.clearFailure(t, "audit_log")
-	if _, err := e.svc.Renew(context.Background(), e.identity(), first.Issued.Serial, csr(t)); err != nil {
+	if _, err := e.svc.Renew(ctx, e.identity(), first.Issued.Serial, csr(t)); err != nil {
 		t.Fatalf("renewal without the fault: %v", err)
 	}
 }
 
 // A certificate cannot be renewed into another tenant's server: the presenting certificate must
-// belong to the identity's own server, and nothing is written otherwise.
+// belong to the identity's own server and tenant, and nothing is written otherwise.
 func TestRenewCannotCrossTenants(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	first := e.enrollAged(t, 20*24*time.Hour)
+	e.markUsed(t, first.Issued.Serial)
 	otherTenant, otherServer := seedOtherTenant(t, e)
 
 	crossed := agentca.Identity{TenantID: e.tenant, ServerID: otherServer}
-	if _, err := e.svc.Renew(ctx, crossed, first.Issued.Serial, csr(t)); !errors.Is(err, agentca.ErrCertificateNotFound) {
-		t.Fatalf("crossed server: %v, want ErrCertificateNotFound", err)
+	if _, err := e.svc.Renew(ctx, crossed, first.Issued.Serial, csr(t)); !errors.Is(err, agentca.ErrNotRenewable) {
+		t.Fatalf("crossed server: %v, want ErrNotRenewable", err)
 	}
 	foreign := agentca.Identity{TenantID: otherTenant, ServerID: e.server}
-	if _, err := e.svc.Renew(ctx, foreign, first.Issued.Serial, csr(t)); !errors.Is(err, agentca.ErrCertificateNotFound) {
-		t.Fatalf("foreign tenant: %v, want ErrCertificateNotFound", err)
+	if _, err := e.svc.Renew(ctx, foreign, first.Issued.Serial, csr(t)); !errors.Is(err, agentca.ErrNotRenewable) {
+		t.Fatalf("foreign tenant: %v, want ErrNotRenewable", err)
 	}
 	var certs int
 	e.scan(t, "SELECT count(*) FROM agent_certificates", nil, &certs)

@@ -198,6 +198,22 @@ func TestAgentListener_RenewalTooEarlyIsAFailedPrecondition(t *testing.T) {
 	}
 }
 
+// A certificate revoked or superseded between the listener's check and the renewal is refused
+// like any invalid certificate, not as a server fault.
+func TestAgentListener_RenewalOfASupersededCertificateIsUnauthenticated(t *testing.T) {
+	h, renewer := startRenewalServer(t)
+	c := h.pki.Issue(t, agentID, time.Now(), time.Hour)
+	csr, _ := newCSR(t)
+	renewer.failWith(fmt.Errorf("agentenroll: %w", agentca.ErrNotRenewable))
+	_, err := renew(h, t, &c.TLS, csr)
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("code = %s (%v), want Unauthenticated", status.Code(err), err)
+	}
+	if msg := status.Convert(err).Message(); msg != "invalid client certificate" {
+		t.Fatalf("message = %q, want the generic refusal", msg)
+	}
+}
+
 func TestAgentListener_RenewalIsUnavailableWithoutARenewer(t *testing.T) {
 	h := startAgentServer(t)
 	c := h.pki.Issue(t, agentID, time.Now(), time.Hour)

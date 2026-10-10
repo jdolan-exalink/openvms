@@ -29,6 +29,10 @@ import (
 type CertificateStore interface {
 	// GetCertificate returns agentca.ErrCertificateNotFound for an unknown serial.
 	GetCertificate(ctx context.Context, serial string) (agentca.Certificate, error)
+	// ActivateCertificate records the certificate's first use and revokes the server's other
+	// certificates, atomically. It returns agentca.ErrCertificateRevoked if the certificate was
+	// revoked in the meantime. Idempotent for a certificate already activated.
+	ActivateCertificate(ctx context.Context, rec agentca.Certificate) error
 }
 
 // Verifier checks the peer certificate of each call.
@@ -96,9 +100,13 @@ func (v *Verifier) now() time.Time {
 // Authenticate verifies the peer certificate of ctx and returns the agent identity. A
 // certificate is accepted only if it was verified against the agent CA by the TLS layer,
 // carries an agent identity, is recorded, matches the recorded fingerprint, tenant and
-// server, is inside the recorded validity window and is not revoked. A revocation time in
-// the future is a grace period (a certificate superseded by a renewal): it still
-// authenticates until then. A refusal is
+// server, is inside the recorded validity window and is not revoked. A certificate's first
+// accepted call activates it: the store marks it used and revokes the server's other
+// certificates, which is how a renewal supersedes the certificate it replaced (never earlier,
+// so an agent that lost the renewal response keeps working with its old certificate).
+//
+// Clocks: the validity window is checked against this process's clock (Now), while
+// revocation and first use are decided by the database clock inside the store. A refusal is
 // Unauthenticated; a failed lookup is Unavailable (fail closed, and the agent retries).
 func (v *Verifier) Authenticate(ctx context.Context) (agentca.Identity, error) {
 	leaf := verifiedLeaf(ctx)
@@ -129,7 +137,7 @@ func (v *Verifier) Authenticate(ctx context.Context) (agentca.Identity, error) {
 	}
 	now := v.now()
 	switch {
-	case rec.RevokedAt != nil && !rec.RevokedAt.After(now):
+	case rec.RevokedAt != nil:
 		v.log().Warn("agent certificate is revoked", "serial", serial, "server_id", id.ServerID)
 	case rec.TenantID != id.TenantID || rec.ServerID != id.ServerID:
 		v.log().Warn("agent certificate identity differs from its record", "serial", serial)
@@ -138,6 +146,16 @@ func (v *Verifier) Authenticate(ctx context.Context) (agentca.Identity, error) {
 	case now.Before(rec.NotBefore) || now.After(rec.NotAfter):
 		v.log().Warn("agent certificate is outside its validity window", "serial", serial)
 	default:
+		if rec.FirstUsedAt == nil {
+			if err := v.Certs.ActivateCertificate(lookupCtx, rec); errors.Is(err, agentca.ErrCertificateRevoked) {
+				v.log().Warn("agent certificate was revoked while being activated", "serial", serial)
+				return agentca.Identity{}, ErrRejected
+			} else if err != nil {
+				v.log().Error("agent certificate activation failed", "serial", serial, "error", err)
+				return agentca.Identity{}, errUnavailable
+			}
+			v.log().Info("agent certificate activated", "serial", serial, "server_id", id.ServerID)
+		}
 		return id, nil
 	}
 	return agentca.Identity{}, ErrRejected

@@ -31,7 +31,7 @@ func (q *Queries) GetAgentCA(ctx context.Context) (AgentCa, error) {
 }
 
 const getAgentCertificate = `-- name: GetAgentCertificate :one
-SELECT serial, tenant_id, server_id, fingerprint, not_before, not_after, revoked_at, created_at
+SELECT serial, tenant_id, server_id, fingerprint, not_before, not_after, revoked_at, created_at, parent_serial, first_used_at
 FROM agent_certificates
 WHERE serial = $1
 `
@@ -48,7 +48,37 @@ func (q *Queries) GetAgentCertificate(ctx context.Context, serial string) (Agent
 		&i.NotAfter,
 		&i.RevokedAt,
 		&i.CreatedAt,
+		&i.ParentSerial,
+		&i.FirstUsedAt,
 	)
+	return i, err
+}
+
+const getAgentCertificateForRenewal = `-- name: GetAgentCertificateForRenewal :one
+SELECT (now() >= p.not_before + (p.not_after - p.not_before) / 2)::boolean AS renewable,
+    EXISTS (SELECT 1 FROM agent_certificates c WHERE c.parent_serial = p.serial AND c.first_used_at IS NOT NULL)::boolean AS used_successor
+FROM agent_certificates p
+WHERE p.serial = $1 AND p.server_id = $2 AND p.tenant_id = $3 AND p.revoked_at IS NULL
+`
+
+type GetAgentCertificateForRenewalParams struct {
+	Serial   string
+	ServerID uuid.UUID
+	TenantID uuid.UUID
+}
+
+type GetAgentCertificateForRenewalRow struct {
+	Renewable     bool
+	UsedSuccessor bool
+}
+
+// The certificate an agent presents to renew: it must belong to the server and tenant and not be
+// revoked. renewable is the database-clock test for the minimum age (half of the lifetime);
+// used_successor is true when a certificate renewed from it has already been used.
+func (q *Queries) GetAgentCertificateForRenewal(ctx context.Context, arg GetAgentCertificateForRenewalParams) (GetAgentCertificateForRenewalRow, error) {
+	row := q.db.QueryRow(ctx, getAgentCertificateForRenewal, arg.Serial, arg.ServerID, arg.TenantID)
+	var i GetAgentCertificateForRenewalRow
+	err := row.Scan(&i.Renewable, &i.UsedSuccessor)
 	return i, err
 }
 
@@ -73,17 +103,18 @@ func (q *Queries) InsertAgentCAIfAbsent(ctx context.Context, arg InsertAgentCAIf
 }
 
 const insertAgentCertificate = `-- name: InsertAgentCertificate :exec
-INSERT INTO agent_certificates (serial, tenant_id, server_id, fingerprint, not_before, not_after)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO agent_certificates (serial, tenant_id, server_id, fingerprint, not_before, not_after, parent_serial)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type InsertAgentCertificateParams struct {
-	Serial      string
-	TenantID    uuid.UUID
-	ServerID    uuid.UUID
-	Fingerprint string
-	NotBefore   time.Time
-	NotAfter    time.Time
+	Serial       string
+	TenantID     uuid.UUID
+	ServerID     uuid.UUID
+	Fingerprint  string
+	NotBefore    time.Time
+	NotAfter     time.Time
+	ParentSerial *string
 }
 
 func (q *Queries) InsertAgentCertificate(ctx context.Context, arg InsertAgentCertificateParams) error {
@@ -94,12 +125,13 @@ func (q *Queries) InsertAgentCertificate(ctx context.Context, arg InsertAgentCer
 		arg.Fingerprint,
 		arg.NotBefore,
 		arg.NotAfter,
+		arg.ParentSerial,
 	)
 	return err
 }
 
 const listAgentCertificatesByServer = `-- name: ListAgentCertificatesByServer :many
-SELECT serial, tenant_id, server_id, fingerprint, not_before, not_after, revoked_at, created_at
+SELECT serial, tenant_id, server_id, fingerprint, not_before, not_after, revoked_at, created_at, parent_serial, first_used_at
 FROM agent_certificates
 WHERE server_id = $1
 ORDER BY not_after DESC
@@ -123,6 +155,8 @@ func (q *Queries) ListAgentCertificatesByServer(ctx context.Context, serverID uu
 			&i.NotAfter,
 			&i.RevokedAt,
 			&i.CreatedAt,
+			&i.ParentSerial,
+			&i.FirstUsedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -134,38 +168,35 @@ func (q *Queries) ListAgentCertificatesByServer(ctx context.Context, serverID uu
 	return items, nil
 }
 
-const lockRenewableAgentCertificate = `-- name: LockRenewableAgentCertificate :one
-SELECT (now() >= not_before + (not_after - not_before) / 2)::boolean AS renewable
-FROM agent_certificates
-WHERE serial = $1 AND server_id = $2 AND tenant_id = $3
-  AND (revoked_at IS NULL OR revoked_at > now())
-FOR UPDATE
+const lockAgentServerCertificates = `-- name: LockAgentServerCertificates :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `
 
-type LockRenewableAgentCertificateParams struct {
-	Serial   string
-	ServerID uuid.UUID
-	TenantID uuid.UUID
+// Serializes everything that changes the set of live certificates of one server (renewals and
+// first uses) for the rest of the transaction.
+func (q *Queries) LockAgentServerCertificates(ctx context.Context, serverID string) error {
+	_, err := q.db.Exec(ctx, lockAgentServerCertificates, serverID)
+	return err
 }
 
-// The certificate an agent presents to renew: it must belong to the server and tenant, and not
-// be revoked yet (a revocation in the future is a grace period and still counts). Locked so
-// concurrent renewals with the same certificate run one after the other. renewable is the
-// database-clock test for the minimum age: half of the certificate's lifetime has passed.
-func (q *Queries) LockRenewableAgentCertificate(ctx context.Context, arg LockRenewableAgentCertificateParams) (bool, error) {
-	row := q.db.QueryRow(ctx, lockRenewableAgentCertificate, arg.Serial, arg.ServerID, arg.TenantID)
-	var renewable bool
-	err := row.Scan(&renewable)
-	return renewable, err
+const markAgentCertificateUsed = `-- name: MarkAgentCertificateUsed :execrows
+UPDATE agent_certificates SET first_used_at = now()
+WHERE serial = $1 AND first_used_at IS NULL AND revoked_at IS NULL
+`
+
+func (q *Queries) MarkAgentCertificateUsed(ctx context.Context, serial string) (int64, error) {
+	result, err := q.db.Exec(ctx, markAgentCertificateUsed, serial)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeAgentCertificate = `-- name: RevokeAgentCertificate :execrows
 UPDATE agent_certificates SET revoked_at = now()
-WHERE serial = $1 AND (revoked_at IS NULL OR revoked_at > now())
+WHERE serial = $1 AND revoked_at IS NULL
 `
 
-// A revoked_at in the future is a grace period after a renewal; revoking ends it now. A date
-// already in the past keeps its first value.
 func (q *Queries) RevokeAgentCertificate(ctx context.Context, serial string) (int64, error) {
 	result, err := q.db.Exec(ctx, revokeAgentCertificate, serial)
 	if err != nil {
@@ -176,7 +207,7 @@ func (q *Queries) RevokeAgentCertificate(ctx context.Context, serial string) (in
 
 const revokeAgentCertificatesByServer = `-- name: RevokeAgentCertificatesByServer :execrows
 UPDATE agent_certificates SET revoked_at = now()
-WHERE server_id = $1 AND (revoked_at IS NULL OR revoked_at > now())
+WHERE server_id = $1 AND revoked_at IS NULL
 `
 
 func (q *Queries) RevokeAgentCertificatesByServer(ctx context.Context, serverID uuid.UUID) (int64, error) {
@@ -187,29 +218,41 @@ func (q *Queries) RevokeAgentCertificatesByServer(ctx context.Context, serverID 
 	return result.RowsAffected(), nil
 }
 
-const supersedeAgentCertificates = `-- name: SupersedeAgentCertificates :execrows
-UPDATE agent_certificates SET revoked_at = now() + make_interval(secs => $1::float8)
-WHERE server_id = $2 AND tenant_id = $3 AND serial <> $4
-  AND not_after > now()
-  AND (revoked_at IS NULL OR revoked_at > now() + make_interval(secs => $1::float8))
+const revokeOtherAgentCertificates = `-- name: RevokeOtherAgentCertificates :execrows
+UPDATE agent_certificates SET revoked_at = now()
+WHERE server_id = $1 AND tenant_id = $2 AND serial <> $3 AND revoked_at IS NULL
 `
 
-type SupersedeAgentCertificatesParams struct {
-	GraceSeconds float64
-	ServerID     uuid.UUID
-	TenantID     uuid.UUID
-	KeepSerial   string
+type RevokeOtherAgentCertificatesParams struct {
+	ServerID   uuid.UUID
+	TenantID   uuid.UUID
+	KeepSerial string
 }
 
-// Ends the server's other live certificates grace seconds from now, unless they already end
-// sooner. Expired ones are left alone.
-func (q *Queries) SupersedeAgentCertificates(ctx context.Context, arg SupersedeAgentCertificatesParams) (int64, error) {
-	result, err := q.db.Exec(ctx, supersedeAgentCertificates,
-		arg.GraceSeconds,
-		arg.ServerID,
-		arg.TenantID,
-		arg.KeepSerial,
-	)
+func (q *Queries) RevokeOtherAgentCertificates(ctx context.Context, arg RevokeOtherAgentCertificatesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeOtherAgentCertificates, arg.ServerID, arg.TenantID, arg.KeepSerial)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const revokeUnusedAgentCertificates = `-- name: RevokeUnusedAgentCertificates :execrows
+UPDATE agent_certificates SET revoked_at = now()
+WHERE server_id = $1 AND tenant_id = $2 AND serial <> $3
+  AND revoked_at IS NULL AND first_used_at IS NULL
+`
+
+type RevokeUnusedAgentCertificatesParams struct {
+	ServerID   uuid.UUID
+	TenantID   uuid.UUID
+	KeepSerial string
+}
+
+// Revokes the server's live certificates that never authenticated a call, except keep_serial:
+// the pending successor of an earlier renewal whose response may have been lost.
+func (q *Queries) RevokeUnusedAgentCertificates(ctx context.Context, arg RevokeUnusedAgentCertificatesParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeUnusedAgentCertificates, arg.ServerID, arg.TenantID, arg.KeepSerial)
 	if err != nil {
 		return 0, err
 	}
