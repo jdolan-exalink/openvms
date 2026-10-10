@@ -22,7 +22,7 @@ The API serves its gRPC control channel on `GRPC_ADDR` (default `:9090`). It can
 | `OPENVMS_CONTROL_TLS_CA_FILE` | Optional PEM bundle that signed the server certificate. Empty uses the system roots. |
 | `OPENVMS_CONTROL_TLS_SERVER_NAME` | Optional name to verify instead of the dial host (for example when dialing by IP). |
 
-`OPENVMS_CONTROL_TLS_CA_FILE` and `OPENVMS_CONTROL_TLS_SERVER_NAME` without `OPENVMS_CONTROL_TLS=true` stop the agent at startup, so a typo cannot silently leave the channel in plaintext.
+`OPENVMS_CONTROL_TLS_CA_FILE` and `OPENVMS_CONTROL_TLS_SERVER_NAME` without `OPENVMS_CONTROL_TLS=true` stop the agent at startup, so a typo cannot silently leave the channel in plaintext. With TLS enabled, the CA bundle is also loaded at startup: a missing file or one without certificates stops the agent instead of leaving it running without a control channel.
 
 ## Desktop SDK (`pkg/client`)
 

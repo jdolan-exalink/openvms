@@ -50,6 +50,12 @@ User chose server-side TLS now (option A) over full mTLS (option B, the target i
 - T4 done: `pkg/client.Config{TLS,TLSCAFile,TLSServerName}`; CA/name without TLS is an error in `New`. RED: `unknown field TLS in struct literal of type Config`; GREEN: `ok pkg/client`.
 - T5 done: `docs/grpc-tls.md` (no existing env-var doc hub; `.env.example` unreadable to the writer, not edited).
 
+- Parent spot check: focused `go test -count=1 ./internal/control/ ./internal/platform/grpctls/` OK; no AI attribution in commits.
+- RDD: range `main..ff5e15b` high risk, granted, 4 lenses, approved with advisories, acknowledged (`review-f94a64a2d81f7e56`). Warnings: a bad `OPENVMS_CONTROL_TLS_CA_FILE` only fails inside the background worker, so the edge agent keeps running without a control channel (contradicts the docs; flagged by resilience and reliability); `client.Config.Insecure` is unused next to the new `TLS` field. Suggestions: duplicated TLS option validation, cert expiry observability, worker TLS test timing.
+- Size: 16 files, +712/−9 (about 600 authored code + tests).
+
+- CA startup fix (user approved): `controlTLSFromEnv` now loads the CA bundle via `grpctls.ClientCredentials`, so a missing or certificate-less `OPENVMS_CONTROL_TLS_CA_FILE` exits at startup. RED: `missing_CA_file_fails: err = <nil>, wantErr true` (and the no-certificates case); GREEN: `ok apps/edge-agent`. Checks: `go build ./...`, `go vet`, `go test ./...` OK. Docs updated.
+
 ## Next step
 
-Final verification and delivery decision (parent).
+Delivery (size above the 400-line heuristic: ask-on-risk).

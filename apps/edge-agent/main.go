@@ -22,6 +22,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/onvif"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
+	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 )
 
 func main() {
@@ -288,7 +289,9 @@ func restart() {
 
 // controlTLSFromEnv reads the opt-in TLS settings for the gRPC control channel.
 // A CA file or server name without OPENVMS_CONTROL_TLS is rejected so a typo
-// cannot silently leave the channel in plaintext.
+// cannot silently leave the channel in plaintext. The CA bundle is loaded here
+// so a missing or broken file stops the agent at startup instead of only
+// failing later inside the background heartbeat worker.
 func controlTLSFromEnv(getenv func(string) string) (enabled bool, caFile, serverName string, err error) {
 	if v := strings.TrimSpace(getenv("OPENVMS_CONTROL_TLS")); v != "" {
 		enabled, err = strconv.ParseBool(v)
@@ -300,6 +303,11 @@ func controlTLSFromEnv(getenv func(string) string) (enabled bool, caFile, server
 	serverName = strings.TrimSpace(getenv("OPENVMS_CONTROL_TLS_SERVER_NAME"))
 	if !enabled && (caFile != "" || serverName != "") {
 		return false, "", "", errors.New("OPENVMS_CONTROL_TLS_CA_FILE and OPENVMS_CONTROL_TLS_SERVER_NAME require OPENVMS_CONTROL_TLS=true")
+	}
+	if enabled {
+		if _, err := grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: caFile, ServerName: serverName}); err != nil {
+			return false, "", "", fmt.Errorf("control channel TLS: %w", err)
+		}
 	}
 	return enabled, caFile, serverName, nil
 }
