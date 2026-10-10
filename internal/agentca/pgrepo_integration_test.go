@@ -114,8 +114,18 @@ func TestPgRepoCAAndCertificates(t *testing.T) {
 	if _, err := svc.Issue(ctx, csrPEM(t), agentca.Identity{TenantID: tenantB, ServerID: serverA}); err == nil {
 		t.Fatal("issued a certificate for tenant A's server under tenant B")
 	}
-	var crossed int
-	if err := pool.QueryRow(ctx, "SELECT count(*) FROM agent_certificates WHERE tenant_id = $1", tenantB).Scan(&crossed); err != nil || crossed != 0 {
+	// Count across all tenants: a bare pool query would see nothing under FORCE RLS.
+	var crossed, own int
+	err = st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, "SELECT count(*) FROM agent_certificates WHERE tenant_id = $1", tenantA).Scan(&own); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, "SELECT count(*) FROM agent_certificates WHERE tenant_id = $1", tenantB).Scan(&crossed)
+	})
+	if err != nil || own != 1 {
+		t.Fatalf("tenant A certificates = %d, %v; want 1 (the count must see rows)", own, err)
+	}
+	if crossed != 0 {
 		t.Fatalf("cross-tenant certificates = %d, %v; want 0", crossed, err)
 	}
 
