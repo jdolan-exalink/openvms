@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -28,6 +29,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/jdolan-exalink/openvms/internal/agentauth"
 	"github.com/jdolan-exalink/openvms/internal/agentca"
 	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/alarms"
@@ -225,6 +227,36 @@ func run() error {
 		}
 	}()
 
+	// The agent listener is opt-in. config.Load already refused GRPC_AGENT_ADDR without server
+	// TLS, and the agent CA was loaded above, so this only wires what is configured.
+	var grpcAgent *control.Server
+	if cfg.GRPCAgentAddr != "" {
+		caCert, err := agentCA.LoadOrCreateCA(ctx)
+		if err != nil {
+			return fmt.Errorf("agent listener: %w", err)
+		}
+		clientCAs := x509.NewCertPool()
+		clientCAs.AddCert(caCert.Cert)
+		agentCreds, err := grpctls.ServerMTLSCredentials(cfg.GRPCTLSCertFile, cfg.GRPCTLSKeyFile, clientCAs)
+		if err != nil {
+			return fmt.Errorf("agent listener tls: %w", err)
+		}
+		grpcAgent, err = control.NewAgentServer(control.AgentConfig{
+			Credentials: agentCreds,
+			Verifier:    &agentauth.Verifier{Certs: &agentca.PgRepo{Store: st}, Log: log},
+			Log:         log,
+		})
+		if err != nil {
+			return fmt.Errorf("agent listener: %w", err)
+		}
+		go func() {
+			if err := grpcAgent.Start(cfg.GRPCAgentAddr); err != nil {
+				log.Warn("grpc agent server stopped", "error", err)
+			}
+		}()
+		log.Info("gRPC agent listener enabled (mutual TLS)", "addr", cfg.GRPCAgentAddr)
+	}
+
 	handlers.RealtimeTracker = rtHub
 	handlers.GRPCTracker = grpcCtrl
 	handlers.SessionsTracker = sessionsMgr
@@ -264,11 +296,13 @@ func run() error {
 	select {
 	case err := <-errCh:
 		grpcCtrl.GracefulStop()
+		grpcAgent.GracefulStop()
 		return err
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
 	grpcCtrl.GracefulStop()
+	grpcAgent.GracefulStop()
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	return srv.Shutdown(sctx)

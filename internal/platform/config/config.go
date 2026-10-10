@@ -18,6 +18,10 @@ type Config struct {
 	// GRPCTLSCertFile and GRPCTLSKeyFile enable TLS on the gRPC control channel; both or neither.
 	GRPCTLSCertFile string
 	GRPCTLSKeyFile  string
+	// GRPCAgentAddr is the listen address of the separate agent gRPC listener, which requires
+	// a client certificate issued by the agent CA. Empty (the default) disables it; setting it
+	// requires server TLS (GRPC_TLS_CERT_FILE / GRPC_TLS_KEY_FILE).
+	GRPCAgentAddr string
 
 	DatabaseURL    string
 	MigrateOnStart bool
@@ -102,6 +106,7 @@ func Load(service string) (Config, error) {
 		GRPCAddr:                    str("GRPC_ADDR", ":9090"),
 		GRPCTLSCertFile:             str("GRPC_TLS_CERT_FILE", ""),
 		GRPCTLSKeyFile:              str("GRPC_TLS_KEY_FILE", ""),
+		GRPCAgentAddr:               str("GRPC_AGENT_ADDR", ""),
 		DatabaseURL:                 str("DATABASE_URL", ""),
 		MigrateOnStart:              boolean("MIGRATE_ON_START", true),
 		ValkeyAddr:                  str("VALKEY_ADDR", "localhost:6379"),
@@ -141,6 +146,9 @@ func Load(service string) (Config, error) {
 	}
 	if (c.GRPCTLSCertFile == "") != (c.GRPCTLSKeyFile == "") {
 		return c, fmt.Errorf("GRPC_TLS_CERT_FILE and GRPC_TLS_KEY_FILE must be set together")
+	}
+	if c.GRPCAgentAddr != "" && !c.GRPCTLSEnabled() {
+		return c, fmt.Errorf("GRPC_AGENT_ADDR requires GRPC_TLS_CERT_FILE and GRPC_TLS_KEY_FILE")
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL is required")
