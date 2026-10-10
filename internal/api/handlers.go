@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/branding"
@@ -42,6 +43,7 @@ type SessionConnTracker interface {
 type Handlers struct {
 	Inv             *inventory.Service
 	Provision       *provision.Service
+	AgentEnroll     *agentenroll.Service
 	Events          *events.Service
 	Alarms          *alarms.Service
 	Identity        *identity.Service

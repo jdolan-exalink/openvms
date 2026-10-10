@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"net/url"
 	"testing"
 	"time"
@@ -189,6 +190,29 @@ func TestSignCSRRejectsGarbageAndNilIdentity(t *testing.T) {
 	}
 	if _, err := ca.SignCSR(csr, testIdentity(), testNow, 0); err == nil {
 		t.Fatal("accepted a zero validity")
+	}
+}
+
+func TestValidateCSRFlagsEveryCSRProblemAsInvalidCSR(t *testing.T) {
+	good := newCSR(t, p256(t), &x509.CertificateRequest{})
+	if err := ValidateCSR(good); err != nil {
+		t.Fatalf("valid CSR rejected: %v", err)
+	}
+	bad, _ := pem.Decode(good)
+	bad.Bytes[len(bad.Bytes)-1] ^= 0xff
+	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	for name, in := range map[string][]byte{
+		"garbage":       []byte("not pem"),
+		"bad signature": pem.EncodeToMemory(bad),
+		"key policy":    newCSR(t, p384, &x509.CertificateRequest{}),
+	} {
+		if err := ValidateCSR(in); !errors.Is(err, ErrInvalidCSR) {
+			t.Errorf("%s: err = %v, want ErrInvalidCSR", name, err)
+		}
+	}
+	ca, _ := GenerateCA(testNow)
+	if _, err := ca.SignCSR([]byte("not pem"), testIdentity(), testNow, DefaultLeafValidity); !errors.Is(err, ErrInvalidCSR) {
+		t.Errorf("SignCSR garbage err = %v, want ErrInvalidCSR", err)
 	}
 }
 

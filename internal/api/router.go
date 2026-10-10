@@ -56,7 +56,7 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 
 	r := chi.NewRouter()
 	r.Use(credentialInstallHTTPS(opts.CredentialTrustedProxyCIDRs), httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
-	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody, validateAgentUpdateBody)
+	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody, validateAgentUpdateBody, limitAgentEnrollBody)
 	if opts.Queries != nil {
 		r.Use(Authenticate(opts.Queries, AuthOptions{IdleTimeout: opts.SessionIdle}))
 	}
@@ -162,6 +162,20 @@ func credentialInstallHTTPSAllowed(r *http.Request, trusted []netip.Prefix) bool
 		}
 	}
 	return false
+}
+
+// agentEnrollRequestMaxBytes bounds the public enroll body: a token and one PEM CSR.
+const agentEnrollRequestMaxBytes = 16 << 10
+
+// limitAgentEnrollBody caps the unauthenticated enroll body before it is decoded. An
+// oversized body fails the decode, which answers 400.
+func limitAgentEnrollBody(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/api/v1/agent/enroll" {
+			r.Body = http.MaxBytesReader(w, r.Body, agentEnrollRequestMaxBytes)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // validateOnvifDiscoveryBody enforces the narrow request contract at runtime; generated

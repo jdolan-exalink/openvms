@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,12 +51,17 @@ type Service struct {
 	Sealer   *secrets.Sealer
 	Now      func() time.Time // defaults to time.Now
 	Validity time.Duration    // leaf lifetime; defaults to DefaultLeafValidity
+
+	mu sync.Mutex
+	ca *CA // parsed CA, kept after the first successful load
 }
 
 // Issuance is a signed certificate and the CA certificate the agent must trust.
 type Issuance struct {
 	Issued *Issued
 	CAPEM  []byte
+	// Record is the row to persist for the certificate; Sign leaves that to the caller.
+	Record Certificate
 }
 
 func (s *Service) now() time.Time {
@@ -67,8 +73,15 @@ func (s *Service) now() time.Time {
 
 // LoadOrCreateCA returns the installation CA, generating and persisting it on first use.
 // Concurrent first callers each generate a CA but only one insert wins; the others
-// discard theirs and use the stored one.
+// discard theirs and use the stored one. The parsed CA is cached after the first success,
+// so issuance does not reread and reopen the sealed key on every request; the CA is
+// immutable once stored (rotation is out of scope).
 func (s *Service) LoadOrCreateCA(ctx context.Context) (*CA, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ca != nil {
+		return s.ca, nil
+	}
 	rec, err := s.Repo.GetCA(ctx)
 	if errors.Is(err, ErrNoCA) {
 		rec, err = s.createCA(ctx)
@@ -80,7 +93,12 @@ func (s *Service) LoadOrCreateCA(ctx context.Context) (*CA, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agentca: open CA key: %w", err)
 	}
-	return ParseCA([]byte(rec.CertPEM), keyDER)
+	ca, err := ParseCA([]byte(rec.CertPEM), keyDER)
+	if err != nil {
+		return nil, err
+	}
+	s.ca = ca
+	return ca, nil
 }
 
 func (s *Service) createCA(ctx context.Context) (*CARecord, error) {
@@ -103,9 +121,11 @@ func (s *Service) createCA(ctx context.Context) (*CARecord, error) {
 	return s.Repo.GetCA(ctx)
 }
 
-// Issue signs a CSR for id and records the certificate. It returns the CA certificate
-// alongside so the agent can pin the trust root it will use for the API.
-func (s *Service) Issue(ctx context.Context, csrPEM []byte, id Identity) (*Issuance, error) {
+// Sign signs a CSR for id and does not record the certificate. It may load or create the CA
+// (and so persist it) through the service's own repository, never through a caller's
+// transaction. A caller that must record the certificate together with other writes persists
+// Issuance.Record (see RecordCertificate) and releases the certificate only after that commit.
+func (s *Service) Sign(ctx context.Context, csrPEM []byte, id Identity) (*Issuance, error) {
 	ca, err := s.LoadOrCreateCA(ctx)
 	if err != nil {
 		return nil, err
@@ -118,15 +138,25 @@ func (s *Service) Issue(ctx context.Context, csrPEM []byte, id Identity) (*Issua
 	if err != nil {
 		return nil, err
 	}
-	if err := s.Repo.InsertCertificate(ctx, Certificate{
+	return &Issuance{Issued: issued, CAPEM: ca.CertPEM, Record: Certificate{
 		Serial:      issued.Serial,
 		TenantID:    id.TenantID,
 		ServerID:    id.ServerID,
 		Fingerprint: issued.Fingerprint,
 		NotBefore:   issued.NotBefore,
 		NotAfter:    issued.NotAfter,
-	}); err != nil {
-		return nil, fmt.Errorf("agentca: record certificate: %w", err)
+	}}, nil
+}
+
+// Issue signs a CSR for id and records the certificate. It returns the CA certificate
+// alongside so the agent can pin the trust root it will use for the API.
+func (s *Service) Issue(ctx context.Context, csrPEM []byte, id Identity) (*Issuance, error) {
+	res, err := s.Sign(ctx, csrPEM, id)
+	if err != nil {
+		return nil, err
 	}
-	return &Issuance{Issued: issued, CAPEM: ca.CertPEM}, nil
+	if err := s.Repo.InsertCertificate(ctx, res.Record); err != nil {
+		return nil, err
+	}
+	return res, nil
 }

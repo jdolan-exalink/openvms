@@ -168,18 +168,8 @@ func (ca *CA) SignCSR(csrPEM []byte, id Identity, now time.Time, validity time.D
 	if validity <= 0 {
 		return nil, errors.New("agentca: validity must be positive")
 	}
-	b, _ := pem.Decode(csrPEM)
-	if b == nil || b.Type != "CERTIFICATE REQUEST" {
-		return nil, errors.New("agentca: CSR is not PEM")
-	}
-	csr, err := x509.ParseCertificateRequest(b.Bytes)
+	csr, err := parseCSR(csrPEM)
 	if err != nil {
-		return nil, fmt.Errorf("agentca: parse CSR: %w", err)
-	}
-	if err := csr.CheckSignature(); err != nil {
-		return nil, fmt.Errorf("agentca: CSR signature: %w", err)
-	}
-	if err := checkPublicKey(csr.PublicKey); err != nil {
 		return nil, err
 	}
 	if !now.Before(ca.Cert.NotAfter) {
@@ -219,6 +209,35 @@ func (ca *CA) SignCSR(csrPEM []byte, id Identity, now time.Time, validity time.D
 		NotBefore:   leaf.NotBefore,
 		NotAfter:    leaf.NotAfter,
 	}, nil
+}
+
+// ErrInvalidCSR wraps every reason a CSR is refused (not PEM, malformed, bad signature,
+// key policy), so callers can tell a bad request from an infrastructure failure.
+var ErrInvalidCSR = errors.New("agentca: invalid CSR")
+
+// ValidateCSR reports whether csrPEM would be accepted for signing: well-formed, a valid
+// proof-of-possession signature and an allowed key. It signs nothing and stores nothing.
+func ValidateCSR(csrPEM []byte) error {
+	_, err := parseCSR(csrPEM)
+	return err
+}
+
+func parseCSR(csrPEM []byte) (*x509.CertificateRequest, error) {
+	b, _ := pem.Decode(csrPEM)
+	if b == nil || b.Type != "CERTIFICATE REQUEST" {
+		return nil, fmt.Errorf("%w: not PEM", ErrInvalidCSR)
+	}
+	csr, err := x509.ParseCertificateRequest(b.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("%w: parse: %v", ErrInvalidCSR, err)
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return nil, fmt.Errorf("%w: signature: %v", ErrInvalidCSR, err)
+	}
+	if err := checkPublicKey(csr.PublicKey); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidCSR, err)
+	}
+	return csr, nil
 }
 
 // Fingerprint is the lowercase hex SHA-256 of the DER certificate.

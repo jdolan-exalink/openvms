@@ -590,6 +590,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/enroll-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a one-time agent enrollment token
+         * @description Requires servers.manage and servers.config.secrets. The token is returned once, is valid for 15 minutes, can be redeemed a single time and is stored only as a hash. Creating a new token invalidates the server's older unused ones.
+         */
+        post: operations["createServerAgentEnrollToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Exchange an enrollment token and a CSR for an agent client certificate
+         * @description Called by an edge agent, which has no user session. The agent generates its own key
+         *     and sends only the CSR, so private keys never reach the API. The token is single use
+         *     and the CSR is validated before the token is consumed. Every token problem (unknown,
+         *     used, expired) answers the same 401 so tokens cannot be probed. The certificate
+         *     identity (tenant and server) comes from the token, never from the CSR. If issuance
+         *     fails after the token was consumed, the token stays consumed and a new one is needed.
+         */
+        post: operations["enrollAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/agent/update-ssh": {
         parameters: {
             query?: never;
@@ -2846,6 +2893,24 @@ export interface components {
             ssh_port: number;
             /** @description Transient root SSH password; never persisted or echoed. */
             ssh_password: string;
+        };
+        AgentEnrollToken: {
+            /** @description One-time secret, shown only in this response. */
+            token: string;
+            /** Format: date-time */
+            expires_at: string;
+        };
+        AgentEnrollRequest: {
+            token: string;
+            /** @description PEM PKCS#10 certificate request. Its subject and SANs are ignored. */
+            csr_pem: string;
+        };
+        AgentEnrollment: {
+            certificate_pem: string;
+            /** @description Public CA certificate the agent pins for the API. */
+            ca_pem: string;
+            /** Format: date-time */
+            not_after: string;
         };
         ServerAgentInstallJob: {
             /** Format: uuid */
@@ -5571,6 +5636,57 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    createServerAgentEnrollToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Enrollment token; this is the only time it is shown */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentEnrollToken"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    enrollAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentEnrollRequest"];
+            };
+        };
+        responses: {
+            /** @description Signed client certificate and the CA bundle the agent must trust */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentEnrollment"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
         };
     };
     updateServerAgentOverSsh: {

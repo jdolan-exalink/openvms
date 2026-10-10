@@ -70,6 +70,8 @@ const CSRFHeader = "X-OpenVMS-Request"
 var publicPaths = map[string]bool{
 	"/api/v1/system/info": true,
 	"/api/v1/auth/login":  true,
+	// The agent holds no session; its one-time enrollment token is the credential.
+	"/api/v1/agent/enroll": true,
 }
 
 // AuthOptions configure Authenticate.

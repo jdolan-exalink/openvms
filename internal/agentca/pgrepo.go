@@ -2,6 +2,7 @@ package agentca
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
@@ -49,15 +50,24 @@ func (r *PgRepo) InsertCAIfAbsent(ctx context.Context, rec CARecord) (bool, erro
 
 func (r *PgRepo) InsertCertificate(ctx context.Context, c Certificate) error {
 	return r.Store.Tx(ctx, store.TenantScope{TenantID: c.TenantID}, func(q *db.Queries) error {
-		return q.InsertAgentCertificate(ctx, db.InsertAgentCertificateParams{
-			Serial:      c.Serial,
-			TenantID:    c.TenantID,
-			ServerID:    c.ServerID,
-			Fingerprint: c.Fingerprint,
-			NotBefore:   c.NotBefore,
-			NotAfter:    c.NotAfter,
-		})
+		return RecordCertificate(ctx, q, c)
 	})
+}
+
+// RecordCertificate inserts c using q, so the caller controls the transaction and the
+// tenant scope (which must cover c.TenantID).
+func RecordCertificate(ctx context.Context, q *db.Queries, c Certificate) error {
+	if err := q.InsertAgentCertificate(ctx, db.InsertAgentCertificateParams{
+		Serial:      c.Serial,
+		TenantID:    c.TenantID,
+		ServerID:    c.ServerID,
+		Fingerprint: c.Fingerprint,
+		NotBefore:   c.NotBefore,
+		NotAfter:    c.NotAfter,
+	}); err != nil {
+		return fmt.Errorf("agentca: record certificate: %w", err)
+	}
+	return nil
 }
 
 // GetCertificate returns the record for a serial, or store.ErrNotFound.
