@@ -162,6 +162,9 @@ func TestLoadMTLSGuidesTheOperatorOnABadToken(t *testing.T) {
 	if !errors.Is(err, mtls.ErrTokenRejected) {
 		t.Fatalf("err = %v, want ErrTokenRejected", err)
 	}
+	if !strings.Contains(err.Error(), "OPENVMS_ENROLL_TOKEN") {
+		t.Fatalf("the agent's error gives no guidance: %v", err)
+	}
 	if strings.Contains(err.Error(), "expired-or-used") {
 		t.Fatal("the error echoes the token")
 	}

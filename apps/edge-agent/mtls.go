@@ -93,6 +93,9 @@ func loadMTLS(ctx context.Context, getenv func(string) string, log *slog.Logger,
 		return mtls.Enroll(ctx, hc, url, token)
 	}
 	creds, err := mtls.Ensure(ctx, store, token, enroll, now)
+	if errors.Is(err, mtls.ErrTokenRejected) {
+		return nil, fmt.Errorf("%w; tokens are single use and short-lived, so create a new token for this server and set OPENVMS_ENROLL_TOKEN (or OPENVMS_ENROLL_TOKEN_FILE) again", err)
+	}
 	if err != nil {
 		return nil, err
 	}

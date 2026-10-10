@@ -16,6 +16,14 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 )
 
+// heartbeatTimeout bounds one Heartbeat call.
+const heartbeatTimeout = 5 * time.Second
+
+// oldConnGrace is how long a connection replaced after a certificate renewal stays open. A call
+// that started on it can run for as long as the longest call the worker makes (the renewal RPC
+// or a heartbeat), so the old connection outlives that by a margin instead of cutting it off.
+const oldConnGrace = max(mtls.RenewTimeout, heartbeatTimeout) + 10*time.Second
+
 // WorkerConfig defines registration and telemetry parameters for the Node Agent.
 type WorkerConfig struct {
 	NodeID            string
@@ -154,7 +162,7 @@ func (w *Worker) reconnect(current uint64) uint64 {
 	}
 	old := w.conn.p.Swap(conn)
 	w.cfg.Log.Info("reconnected with the renewed agent certificate")
-	time.AfterFunc(5*time.Second, func() { _ = old.Close() })
+	time.AfterFunc(oldConnGrace, func() { _ = old.Close() })
 	return next
 }
 
@@ -211,7 +219,7 @@ func (w *Worker) sendHeartbeat(ctx context.Context) error {
 		Timestamp:  time.Now().Unix(),
 	}
 
-	hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	hctx, cancel := context.WithTimeout(ctx, heartbeatTimeout)
 	defer cancel()
 
 	resp, err := w.nodeClient.Heartbeat(hctx, req)

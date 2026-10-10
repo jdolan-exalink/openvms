@@ -18,7 +18,7 @@ import (
 
 // ErrTokenRejected is returned when the API refuses the enrollment token: it is unknown, was
 // already used or has expired (the API answers all three the same way).
-var ErrTokenRejected = errors.New("the API rejected the enrollment token: it is invalid, already used or expired (tokens are single use and last 15 minutes); create a new token for this server and set OPENVMS_ENROLL_TOKEN again")
+var ErrTokenRejected = errors.New("the API rejected the enrollment token: it is invalid, already used or expired")
 
 const (
 	enrollPath       = "/api/v1/agent/enroll"
@@ -46,7 +46,10 @@ func NewAPIClient(caFile string) (*http.Client, error) {
 	}
 	tr := http.DefaultTransport.(*http.Transport).Clone()
 	tr.TLSClientConfig = cfg
-	return &http.Client{Transport: tr, Timeout: enrollTimeout}, nil
+	return &http.Client{
+		Transport: tr, Timeout: enrollTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}, nil
 }
 
 // EnrollURL validates the API base URL and returns the enrollment endpoint. A token must not
@@ -76,6 +79,11 @@ func Enroll(ctx context.Context, hc *http.Client, enrollURL, token string) (*Cre
 	if err != nil {
 		return nil, err
 	}
+	// Never follow a redirect: a 307/308 would re-send the token to the redirect target, possibly
+	// over another scheme. Any client passed in is copied with that policy.
+	noRedirect := *hc
+	noRedirect.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	hc = &noRedirect
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, enrollURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -93,6 +101,8 @@ func Enroll(ctx context.Context, hc *http.Client, enrollURL, token string) (*Cre
 	switch {
 	case resp.StatusCode == http.StatusUnauthorized:
 		return nil, ErrTokenRejected
+	case resp.StatusCode >= 300 && resp.StatusCode < 400:
+		return nil, fmt.Errorf("the enrollment endpoint redirected (HTTP %d); the token is not sent to redirect targets, so set the API URL to the final address", resp.StatusCode)
 	case resp.StatusCode != http.StatusOK:
 		return nil, fmt.Errorf("enrollment failed: HTTP %d: %s", resp.StatusCode, echo(reply))
 	}
@@ -131,17 +141,21 @@ func redactURLError(err error) error {
 // replaced by an enrollment, so the single-use token is never redeemed twice. The one
 // exception is a stored certificate that has already expired together with a token that is
 // not the one it was enrolled with: the operator issued a fresh token to recover the agent.
-// Without stored credentials a token is required.
+// Without stored credentials a token is required. The state directory is checked before the
+// token is redeemed, so a directory that cannot hold the credentials does not spend it.
 func Ensure(ctx context.Context, store Store, token string, enroll func(ctx context.Context, token string) (*Credentials, error), now func() time.Time) (*Credentials, error) {
 	stored, err := store.Load()
 	if err != nil && !errors.Is(err, ErrNoCredentials) {
 		return nil, err
 	}
-	if stored != nil && !(stored.Expired(now()) && token != "" && !store.TokenUsed(token)) {
+	if stored != nil && !isRecoveryToken(store, stored, token, now()) {
 		return stored, nil
 	}
 	if token == "" {
 		return nil, errors.New("no stored mTLS credentials and no enrollment token: create a token for this server in the OpenVMS API and set OPENVMS_ENROLL_TOKEN (or OPENVMS_ENROLL_TOKEN_FILE) with OPENVMS_API_URL")
+	}
+	if err := store.CheckWritable(); err != nil {
+		return nil, err
 	}
 	creds, err := enroll(ctx, token)
 	if err != nil {
@@ -154,4 +168,10 @@ func Ensure(ctx context.Context, store Store, token string, enroll func(ctx cont
 		return nil, fmt.Errorf("record the spent enrollment token: %w", err)
 	}
 	return creds, nil
+}
+
+// isRecoveryToken reports whether token should replace the stored credentials: the stored
+// certificate has expired and token is a fresh one, not the token it was enrolled with.
+func isRecoveryToken(store Store, stored *Credentials, token string, now time.Time) bool {
+	return stored.Expired(now) && token != "" && !store.TokenUsed(token)
 }

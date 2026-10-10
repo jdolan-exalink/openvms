@@ -22,7 +22,8 @@ const (
 	// maxIdleWait caps a single sleep so the loop re-reads the clock regularly: a laptop
 	// that was suspended or a clock that was corrected does not delay renewal by days.
 	maxIdleWait = time.Hour
-	renewRPC    = 30 * time.Second
+	// RenewTimeout bounds one RenewCertificate call.
+	RenewTimeout = 30 * time.Second
 )
 
 // RenewFunc exchanges a CSR for a new certificate over an authenticated connection and
@@ -34,7 +35,7 @@ type RenewFunc func(ctx context.Context, csrPEM []byte) (certPEM, caPEM []byte, 
 func GRPCRenew(conn grpc.ClientConnInterface) RenewFunc {
 	client := openvmsv1.NewAgentServiceClient(conn)
 	return func(ctx context.Context, csrPEM []byte) ([]byte, []byte, error) {
-		ctx, cancel := context.WithTimeout(ctx, renewRPC)
+		ctx, cancel := context.WithTimeout(ctx, RenewTimeout)
 		defer cancel()
 		resp, err := client.RenewCertificate(ctx, &openvmsv1.RenewCertificateRequest{CsrPem: string(csrPEM)})
 		if err != nil {

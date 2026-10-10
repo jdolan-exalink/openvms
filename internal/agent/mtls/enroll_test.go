@@ -98,9 +98,6 @@ func TestEnrollTokenRejected(t *testing.T) {
 	if strings.Contains(err.Error(), "wrong-token") {
 		t.Fatal("the error echoes the token")
 	}
-	if !strings.Contains(err.Error(), "create a new token") {
-		t.Fatalf("error gives no guidance: %v", err)
-	}
 }
 
 func TestEnrollRefusesAnUntrustworthyReply(t *testing.T) {
@@ -356,5 +353,66 @@ func TestRenewalDueIsTwoThirdsOfTheLifetime(t *testing.T) {
 	}
 	if d := creds.RenewalDue().Sub(creds.NotBefore()); d < 19*24*time.Hour || d > 21*24*time.Hour {
 		t.Fatalf("renewal due %v after NotBefore, want about 20 days of 30", d)
+	}
+}
+
+// A redirect would re-send the token (in the request body, for 307/308) to wherever the
+// redirect points, possibly over a weaker scheme. Enroll refuses to follow redirects.
+func TestEnrollNeverFollowsARedirect(t *testing.T) {
+	var gotToken atomic.Int32
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotToken.Add(1)
+		http.Error(w, "should never be reached", http.StatusTeapot)
+	}))
+	defer target.Close()
+	for _, code := range []int{http.StatusMovedPermanently, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		first := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, target.URL+"/api/v1/agent/enroll", code)
+		}))
+		_, err := Enroll(context.Background(), first.Client(), first.URL+"/api/v1/agent/enroll", "secret-token")
+		first.Close()
+		if err == nil || !strings.Contains(err.Error(), "redirect") {
+			t.Fatalf("HTTP %d: err = %v, want a redirect error", code, err)
+		}
+		if strings.Contains(err.Error(), "secret-token") {
+			t.Fatal("the error echoes the token")
+		}
+	}
+	if n := gotToken.Load(); n != 0 {
+		t.Fatalf("the redirect target received %d requests carrying the token", n)
+	}
+}
+
+// The state directory is checked before the one-time token is redeemed: a read-only or
+// otherwise unusable directory must not burn the token.
+func TestEnsureChecksTheStateDirectoryBeforeRedeemingTheToken(t *testing.T) {
+	api := newFakeAPI(t)
+	var requests atomic.Int32
+	enroll := func(ctx context.Context, token string) (*Credentials, error) {
+		requests.Add(1)
+		return api.enroll(ctx, token)
+	}
+	// A regular file where the directory should be: MkdirAll fails whoever runs the test.
+	blocker := filepath.Join(t.TempDir(), "state")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := Store{Dir: filepath.Join(blocker, "agent-mtls")}
+	_, err := Ensure(context.Background(), store, "good-token", enroll, time.Now)
+	if err == nil || !strings.Contains(err.Error(), "state directory") {
+		t.Fatalf("err = %v, want a clear state directory error", err)
+	}
+	if requests.Load() != 0 || api.enrolls.Load() != 0 {
+		t.Fatal("the enroll endpoint was called although the credentials could not be stored")
+	}
+	if store.TokenUsed("good-token") {
+		t.Fatal("the token was recorded as used")
+	}
+}
+
+func TestErrTokenRejectedIsLibraryNeutral(t *testing.T) {
+	msg := ErrTokenRejected.Error()
+	if strings.Contains(msg, "OPENVMS_") || strings.Contains(msg, "15 minutes") {
+		t.Fatalf("the library error hardcodes deployment details: %q", msg)
 	}
 }

@@ -262,3 +262,11 @@ func TestWorker_MTLSRecoversFromALostRenewalResponse(t *testing.T) {
 		t.Fatalf("stored credentials = %v, %v; want the certificate in use", loaded, err)
 	}
 }
+
+// A call that started on the replaced connection must be able to finish: the grace outlives both
+// the renewal RPC and a heartbeat.
+func TestOldConnectionGraceOutlivesTheLongestCall(t *testing.T) {
+	if oldConnGrace <= mtls.RenewTimeout || oldConnGrace <= heartbeatTimeout {
+		t.Fatalf("oldConnGrace = %v must exceed the renewal timeout %v and the heartbeat timeout %v", oldConnGrace, mtls.RenewTimeout, heartbeatTimeout)
+	}
+}
