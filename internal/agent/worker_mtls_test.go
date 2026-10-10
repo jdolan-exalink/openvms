@@ -5,8 +5,10 @@ import (
 	"crypto/ecdsa"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,18 +41,24 @@ func (r *recordingStore) GetCertificate(ctx context.Context, serial string) (age
 	return r.inner.GetCertificate(ctx, serial)
 }
 
+func (r *recordingStore) ActivateCertificate(ctx context.Context, rec agentca.Certificate) error {
+	return r.inner.ActivateCertificate(ctx, rec)
+}
+
 func (r *recordingStore) seen(serial string) int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.serial[serial]
 }
 
-// renewer signs with the PKI CA and records the certificate, like agentenroll.Service.Renew.
+// renewer signs with the PKI CA and records the certificate with its parent, like
+// agentenroll.Service.Renew: it does not revoke the old certificate (the listener does that when
+// the new one is first used). When dropResponse is set, the first renewal is recorded and then
+// reported as failed, as if its response had been lost on the way to the agent.
 type renewer struct {
-	pki      *agentauthtest.PKI
-	validity time.Duration
-	// grace is how long the superseded certificate keeps working, like agentenroll.SupersedeGrace.
-	grace time.Duration
+	pki          *agentauthtest.PKI
+	validity     time.Duration
+	dropResponse *atomic.Bool
 }
 
 func (r renewer) Renew(_ context.Context, id agentca.Identity, previousSerial string, csrPEM []byte) (*agentca.Issuance, error) {
@@ -58,9 +66,11 @@ func (r renewer) Renew(_ context.Context, id agentca.Identity, previousSerial st
 	if err != nil {
 		return nil, err
 	}
+	res.Record.ParentSerial = previousSerial
 	r.pki.Store.Put(res.Record)
-	end := time.Now().Add(r.grace)
-	r.pki.Store.Update(previousSerial, func(c *agentca.Certificate) { c.RevokedAt = &end })
+	if r.dropResponse != nil && r.dropResponse.CompareAndSwap(true, false) {
+		return nil, errors.New("response lost")
+	}
 	return res, nil
 }
 
@@ -75,6 +85,12 @@ type mtlsEnv struct {
 // startAgentListener runs the real agent listener (verifier, revocation, renewal) on loopback.
 func startAgentListener(t *testing.T) *mtlsEnv {
 	t.Helper()
+	return startAgentListenerDropping(t, nil)
+}
+
+// startAgentListenerDropping is startAgentListener whose renewer loses its first response when drop is set.
+func startAgentListenerDropping(t *testing.T, drop *atomic.Bool) *mtlsEnv {
+	t.Helper()
 	pki := agentauthtest.NewPKI(t)
 	rec := &recordingStore{inner: pki.Store}
 	certFile, keyFile := grpctlstest.WriteSelfSigned(t)
@@ -85,7 +101,7 @@ func startAgentListener(t *testing.T) *mtlsEnv {
 	srv, err := control.NewAgentServer(control.AgentConfig{
 		Credentials: creds,
 		Verifier:    &agentauth.Verifier{Certs: rec},
-		Renewer:     renewer{pki: pki, validity: time.Hour, grace: time.Second},
+		Renewer:     renewer{pki: pki, validity: time.Hour, dropResponse: drop},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -196,22 +212,53 @@ func TestWorker_MTLSRenewsAndReconnectsWithTheNewCertificate(t *testing.T) {
 	}
 }
 
-// The superseded certificate works only for the grace period (one second here, ten minutes in
-// production). The worker must be on the renewed certificate before that ends: heartbeats keep
-// being acknowledged afterwards, which they cannot be on a connection that still uses the old one.
-func TestWorker_MTLSSwitchesToTheRenewedCertificateWithinTheGrace(t *testing.T) {
+// The renewed certificate supersedes the old one when it is first used, not before: once the
+// worker has reconnected with it, the old certificate is revoked and heartbeats keep being
+// acknowledged, which they could not be on a connection still using the old one.
+func TestWorker_MTLSRevokesTheOldCertificateOnceTheRenewedOneIsUsed(t *testing.T) {
 	e := startAgentListener(t)
 	mgr, old := e.manager(t, time.Minute)
 	w, _ := e.run(t, WorkerConfig{MTLS: mgr})
 
 	eventually(t, "a renewed certificate", func() bool { return mgr.Current().Leaf.SerialNumber.Text(16) != old.Serial })
 	renewed := mgr.Current().Leaf.SerialNumber.Text(16)
-	eventually(t, "a heartbeat with the renewed certificate", func() bool { return e.store.seen(renewed) > 0 })
-
-	time.Sleep(1500 * time.Millisecond) // the old certificate's grace is over
+	eventually(t, "the old certificate to be revoked by the renewed one's first use", func() bool {
+		rec, err := e.pki.Store.GetCertificate(context.Background(), old.Serial)
+		return err == nil && rec.RevokedAt != nil
+	})
+	if e.store.seen(renewed) == 0 {
+		t.Fatal("the old certificate was revoked but the renewed one never authenticated")
+	}
 	before := w.HeartbeatsAcknowledged()
-	time.Sleep(300 * time.Millisecond)
-	if after := w.HeartbeatsAcknowledged(); after-before < 3 {
-		t.Fatalf("only %d heartbeats acknowledged after the grace period ended; the worker is still on the old certificate", after-before)
+	eventually(t, "heartbeats on the renewed certificate", func() bool { return w.HeartbeatsAcknowledged()-before >= 3 })
+}
+
+// The renewal response is lost: the server issued a certificate the agent never saw. The agent
+// still holds a working old certificate, retries from it, and ends up on a certificate that works.
+func TestWorker_MTLSRecoversFromALostRenewalResponse(t *testing.T) {
+	drop := &atomic.Bool{}
+	drop.Store(true)
+	e := startAgentListenerDropping(t, drop)
+	mgr, old := e.manager(t, time.Minute)
+	mgr.MinBackoff, mgr.MaxBackoff = 50*time.Millisecond, 50*time.Millisecond
+	w, _ := e.run(t, WorkerConfig{MTLS: mgr})
+
+	eventually(t, "a renewed certificate after the lost response", func() bool { return mgr.Current().Leaf.SerialNumber.Text(16) != old.Serial })
+	if drop.Load() {
+		t.Fatal("the first renewal response was never dropped")
+	}
+	renewed := mgr.Current().Leaf.SerialNumber.Text(16)
+	eventually(t, "the old certificate to be revoked", func() bool {
+		rec, err := e.pki.Store.GetCertificate(context.Background(), old.Serial)
+		return err == nil && rec.RevokedAt != nil
+	})
+	before := w.HeartbeatsAcknowledged()
+	eventually(t, "heartbeats on the renewed certificate", func() bool {
+		return w.HeartbeatsAcknowledged()-before >= 3 && e.store.seen(renewed) > 1
+	})
+	// The agent persisted what it uses.
+	loaded, err := mgr.Store.Load()
+	if err != nil || loaded.Leaf.SerialNumber.Text(16) != renewed {
+		t.Fatalf("stored credentials = %v, %v; want the certificate in use", loaded, err)
 	}
 }
