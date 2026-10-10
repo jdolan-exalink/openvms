@@ -57,6 +57,8 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 
 - RDD M1 (`main..5edca78`, 11 files, 1353 lines): high, granted, 4 lenses, approved with advisories, acknowledged (`review-54339a27e90e1950`). Fixed after review (user approved): leaves are capped at the CA NotAfter and an expired CA refuses to sign; `agent_certificates` uses a composite FK `(server_id, tenant_id) -> frigate_servers (id, tenant_id)` so a cert cannot pair a server with a foreign tenant (00041 edited in place: unmerged, never deployed). RED: `leaf NotAfter 2036-01-29 ... outlives CA NotAfter 2035-12-31` and `issued a certificate for tenant A's server under tenant B`; GREEN: unit + integration `ok internal/agentca`, `go build`, `go vet`, `go test ./...` OK. Remaining suggestions: GetCertificate not-found vocabulary vs ErrNoCA (settle in M3), unused InsertCAIfAbsent bool, revocation queries reserved for M3, cache the parsed CA.
 
+- PR1 (#16, M1): second review over the whole slice (`main..60b7139`, 1401 lines) high, granted, approved with suggestions only, acknowledged (`review-d69ab1430684d7ae`). Merged as `96814e7` with a size exception (~1150 authored, half tests).
+
 ## Next step
 
-M2 enrollment (PR2, new branch stacked on `feat/agent-mtls-ca`).
+M2 on `feat/agent-mtls-enroll` (PR2).

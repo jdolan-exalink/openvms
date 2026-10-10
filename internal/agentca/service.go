@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -50,6 +51,9 @@ type Service struct {
 	Sealer   *secrets.Sealer
 	Now      func() time.Time // defaults to time.Now
 	Validity time.Duration    // leaf lifetime; defaults to DefaultLeafValidity
+
+	mu sync.Mutex
+	ca *CA // parsed CA, kept after the first successful load
 }
 
 // Issuance is a signed certificate and the CA certificate the agent must trust.
@@ -67,8 +71,15 @@ func (s *Service) now() time.Time {
 
 // LoadOrCreateCA returns the installation CA, generating and persisting it on first use.
 // Concurrent first callers each generate a CA but only one insert wins; the others
-// discard theirs and use the stored one.
+// discard theirs and use the stored one. The parsed CA is cached after the first success,
+// so issuance does not reread and reopen the sealed key on every request; the CA is
+// immutable once stored (rotation is out of scope).
 func (s *Service) LoadOrCreateCA(ctx context.Context) (*CA, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ca != nil {
+		return s.ca, nil
+	}
 	rec, err := s.Repo.GetCA(ctx)
 	if errors.Is(err, ErrNoCA) {
 		rec, err = s.createCA(ctx)
@@ -80,7 +91,12 @@ func (s *Service) LoadOrCreateCA(ctx context.Context) (*CA, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agentca: open CA key: %w", err)
 	}
-	return ParseCA([]byte(rec.CertPEM), keyDER)
+	ca, err := ParseCA([]byte(rec.CertPEM), keyDER)
+	if err != nil {
+		return nil, err
+	}
+	s.ca = ca
+	return ca, nil
 }
 
 func (s *Service) createCA(ctx context.Context) (*CARecord, error) {

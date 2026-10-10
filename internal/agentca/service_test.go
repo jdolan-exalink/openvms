@@ -18,11 +18,13 @@ type fakeRepo struct {
 	certs map[string]Certificate
 	// beforeInsert runs once just before the CA insert, to simulate a concurrent winner.
 	beforeInsert func(r *fakeRepo)
+	getCalls     int
 }
 
 func (r *fakeRepo) GetCA(context.Context) (*CARecord, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.getCalls++
 	if r.ca == nil {
 		return nil, ErrNoCA
 	}
@@ -137,6 +139,22 @@ func TestIssueSignsAndRecordsCertificate(t *testing.T) {
 	leaf := parseLeaf(t, res.Issued.CertPEM)
 	if _, err := leaf.Verify(x509.VerifyOptions{Roots: pool, CurrentTime: testNow, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}}); err != nil {
 		t.Fatalf("returned CA bundle does not verify the leaf: %v", err)
+	}
+}
+
+func TestIssueCachesTheParsedCA(t *testing.T) {
+	repo := &fakeRepo{}
+	svc := newService(t, repo)
+	csr := newCSR(t, p256(t), &x509.CertificateRequest{})
+	if _, err := svc.Issue(context.Background(), csr, testIdentity()); err != nil {
+		t.Fatal(err)
+	}
+	loads := repo.getCalls
+	if _, err := svc.Issue(context.Background(), csr, testIdentity()); err != nil {
+		t.Fatal(err)
+	}
+	if repo.getCalls != loads {
+		t.Fatalf("second Issue read the CA from the repository again (%d -> %d GetCA calls)", loads, repo.getCalls)
 	}
 }
 
