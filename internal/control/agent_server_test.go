@@ -107,9 +107,17 @@ func TestAgentListener_RejectsWithoutAValidCertificate(t *testing.T) {
 	h := startAgentServer(t)
 	now := time.Now()
 
+	// Positive control on the same harness: a down server would make every rejection below
+	// pass for the wrong reason.
+	good := h.pki.Issue(t, agentID, now, time.Hour)
+	if _, err := heartbeat(h.dial(t, &good.TLS), agentID.ServerID.String()); err != nil {
+		t.Fatalf("positive control: %v", err)
+	}
+
 	t.Run("no client certificate", func(t *testing.T) {
-		if _, err := heartbeat(h.dial(t, nil), agentID.ServerID.String()); err == nil {
-			t.Fatal("a client without a certificate reached the agent listener")
+		_, err := heartbeat(h.dial(t, nil), agentID.ServerID.String())
+		if status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %s (%v), want Unavailable (failed handshake)", status.Code(err), err)
 		}
 	})
 	t.Run("plaintext client", func(t *testing.T) {
@@ -118,22 +126,33 @@ func TestAgentListener_RejectsWithoutAValidCertificate(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer conn.Close()
-		if _, err := heartbeat(openvmsv1.NewNodeServiceClient(conn), agentID.ServerID.String()); err == nil {
-			t.Fatal("a plaintext client reached the agent listener")
+		_, err = heartbeat(openvmsv1.NewNodeServiceClient(conn), agentID.ServerID.String())
+		if status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %s (%v), want Unavailable (failed handshake)", status.Code(err), err)
 		}
 	})
 	t.Run("certificate from another CA", func(t *testing.T) {
 		other := agentauthtest.NewPKI(t)
 		c := other.Issue(t, agentID, now, time.Hour)
 		h.pki.Store.Put(c.Record) // even a recorded serial must not help
-		if _, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String()); err == nil {
-			t.Fatal("a certificate from a foreign CA was accepted")
+		_, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String())
+		if status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %s (%v), want Unavailable (failed handshake)", status.Code(err), err)
 		}
 	})
 	t.Run("expired certificate", func(t *testing.T) {
 		c := h.pki.Issue(t, agentID, now.Add(-48*time.Hour), time.Hour)
-		if _, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String()); err == nil {
-			t.Fatal("an expired certificate was accepted")
+		_, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String())
+		if status.Code(err) != codes.Unavailable {
+			t.Fatalf("code = %s (%v), want Unavailable (failed handshake)", status.Code(err), err)
+		}
+	})
+	t.Run("record expired, certificate still valid for TLS", func(t *testing.T) {
+		c := h.pki.Issue(t, agentID, now, time.Hour)
+		h.pki.Store.Update(c.Serial, func(r *agentca.Certificate) { r.NotAfter = now.Add(-time.Second) })
+		_, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String())
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("code = %s (%v), want Unauthenticated", status.Code(err), err)
 		}
 	})
 	t.Run("serial not issued by this installation", func(t *testing.T) {
@@ -200,5 +219,29 @@ func TestNewAgentServerRefusesToRunWithoutMutualTLSOrVerifier(t *testing.T) {
 	}
 	if _, err := NewAgentServer(AgentConfig{Credentials: creds}); err == nil {
 		t.Fatal("started without a verifier")
+	}
+}
+
+func TestAgentServerBindFailsWhenTheAddressIsTaken(t *testing.T) {
+	pki := agentauthtest.NewPKI(t)
+	certFile, keyFile := grpctlstest.WriteSelfSigned(t)
+	creds, err := grpctls.ServerMTLSCredentials(certFile, keyFile, pki.Pool)
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer busy.Close()
+	srv, err := NewAgentServer(AgentConfig{Credentials: creds, Verifier: &agentauth.Verifier{Certs: pki.Store}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Bind(busy.Addr().String()); err == nil {
+		t.Fatal("Bind succeeded on an address already in use")
+	}
+	if err := srv.Bind("not an address"); err == nil {
+		t.Fatal("Bind succeeded on a malformed address")
 	}
 }

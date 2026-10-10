@@ -36,12 +36,20 @@ type Verifier struct {
 	Certs CertificateStore
 	Log   *slog.Logger     // defaults to slog.Default()
 	Now   func() time.Time // defaults to time.Now
+	// LookupTimeout bounds the certificate lookup of each call; a lookup that takes longer
+	// fails closed as Unavailable. Defaults to DefaultLookupTimeout.
+	LookupTimeout time.Duration
 }
+
+// DefaultLookupTimeout is how long a call waits for the certificate lookup.
+const DefaultLookupTimeout = 3 * time.Second
 
 // The client sees one message for every way a certificate can be refused, so it learns
 // nothing about which certificates exist; the reason goes to the log.
 var (
-	errRejected    = status.Error(codes.Unauthenticated, "invalid client certificate")
+	// ErrRejected is the refusal for any unacceptable client certificate. Handlers that find
+	// no authenticated identity return it too, so the message is the same everywhere.
+	ErrRejected    = status.Error(codes.Unauthenticated, "invalid client certificate")
 	errUnavailable = status.Error(codes.Unavailable, "client certificate check unavailable")
 )
 
@@ -76,18 +84,24 @@ func (v *Verifier) Authenticate(ctx context.Context) (agentca.Identity, error) {
 	leaf := verifiedLeaf(ctx)
 	if leaf == nil {
 		v.log().Warn("agent call without a verified client certificate")
-		return agentca.Identity{}, errRejected
+		return agentca.Identity{}, ErrRejected
 	}
 	serial := leaf.SerialNumber.Text(16)
 	id, err := agentca.IdentityFromCert(leaf)
 	if err != nil {
 		v.log().Warn("agent certificate has no valid identity", "serial", serial, "error", err)
-		return agentca.Identity{}, errRejected
+		return agentca.Identity{}, ErrRejected
 	}
-	rec, err := v.Certs.GetCertificate(ctx, serial)
+	timeout := v.LookupTimeout
+	if timeout <= 0 {
+		timeout = DefaultLookupTimeout
+	}
+	lookupCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	rec, err := v.Certs.GetCertificate(lookupCtx, serial)
 	if errors.Is(err, agentca.ErrCertificateNotFound) {
 		v.log().Warn("agent certificate is not recorded", "serial", serial)
-		return agentca.Identity{}, errRejected
+		return agentca.Identity{}, ErrRejected
 	}
 	if err != nil {
 		v.log().Error("agent certificate lookup failed", "serial", serial, "error", err)
@@ -106,7 +120,7 @@ func (v *Verifier) Authenticate(ctx context.Context) (agentca.Identity, error) {
 	default:
 		return id, nil
 	}
-	return agentca.Identity{}, errRejected
+	return agentca.Identity{}, ErrRejected
 }
 
 // verifiedLeaf is the peer's leaf certificate, only when the TLS layer verified its chain.

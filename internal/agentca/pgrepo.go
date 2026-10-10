@@ -2,6 +2,7 @@ package agentca
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -87,7 +88,8 @@ func (r *PgRepo) GetCertificate(ctx context.Context, serial string) (Certificate
 		return nil
 	})
 	if err != nil {
-		if store.Classify(err) == store.ErrNotFound {
+		err = store.Classify(err)
+		if errors.Is(err, store.ErrNotFound) {
 			return Certificate{}, ErrCertificateNotFound
 		}
 		return Certificate{}, err

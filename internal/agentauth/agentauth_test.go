@@ -166,3 +166,27 @@ func TestStreamInterceptor(t *testing.T) {
 		t.Fatalf("stream without a peer: %v", err)
 	}
 }
+
+type slowStore struct{ agentauth.CertificateStore }
+
+func (slowStore) GetCertificate(ctx context.Context, _ string) (agentca.Certificate, error) {
+	<-ctx.Done()
+	return agentca.Certificate{}, ctx.Err()
+}
+
+func TestAuthenticateBoundsTheLookup(t *testing.T) {
+	pki := agentauthtest.NewPKI(t)
+	good := pki.Issue(t, id, time.Now(), time.Hour)
+	v := &agentauth.Verifier{Certs: slowStore{}, LookupTimeout: 50 * time.Millisecond}
+	start := time.Now()
+	_, err := v.Authenticate(peerCtx(good.Leaf, true))
+	if code(err) != codes.Unavailable || time.Since(start) > 2*time.Second {
+		t.Fatalf("code = %s (%v) after %s, want Unavailable within the timeout", code(err), err, time.Since(start))
+	}
+}
+
+func TestRejectedIsTheSharedRefusal(t *testing.T) {
+	if code(agentauth.ErrRejected) != codes.Unauthenticated || status.Convert(agentauth.ErrRejected).Message() != "invalid client certificate" {
+		t.Fatalf("ErrRejected = %v", agentauth.ErrRejected)
+	}
+}

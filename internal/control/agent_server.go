@@ -67,7 +67,7 @@ type AgentNodeServer struct {
 func (s *AgentNodeServer) Heartbeat(ctx context.Context, req *openvmsv1.NodeHeartbeatRequest) (*openvmsv1.NodeHeartbeatResponse, error) {
 	id, ok := agentauth.IdentityFromContext(ctx)
 	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "invalid client certificate")
+		return nil, agentauth.ErrRejected
 	}
 	if req.NodeId == "" {
 		return nil, status.Error(codes.InvalidArgument, "node_id is required")
