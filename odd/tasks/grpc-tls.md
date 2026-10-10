@@ -31,7 +31,7 @@ User chose server-side TLS now (option A) over full mTLS (option B, the target i
 - [x] T1 Shared TLS credential builders (server from cert/key files; client from CA file / system roots + server name), with tests using a generated self-signed cert. Route: delegated direct (writer trigger: T1–T4 span 2+ non-trivial files).
 - [x] T2 API server: config fields `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE`, wire into `control.NewServer`, validation (one-without-the-other fails), plaintext warning; TLS handshake test against the control server.
 - [x] T3 Edge-agent worker: `OPENVMS_CONTROL_TLS`, `OPENVMS_CONTROL_TLS_CA_FILE`, `OPENVMS_CONTROL_TLS_SERVER_NAME`; worker dials with TLS when enabled; test against a TLS server.
-- [ ] T4 Desktop SDK `pkg/client`: TLS options in `Config`; test against a TLS server.
+- [x] T4 Desktop SDK `pkg/client`: TLS options in `Config`; test against a TLS server.
 - [ ] T5 Docs for the settings and the rollout note (enable on server, then clients).
 
 ## Acceptance criteria
@@ -47,7 +47,8 @@ User chose server-side TLS now (option A) over full mTLS (option B, the target i
 - T1 done (commit see `git log`): `internal/platform/grpctls` (ServerCredentials, ClientCredentials) + `grpctlstest.WriteSelfSigned`. pkg/client is in the same module, so it may import `internal/platform/grpctls` (no duplication). RED: `no non-test Go files in .../internal/platform/grpctls` / `[build failed]`; GREEN: `ok .../grpctls`. Checks: build, vet, test (below).
 - T2 done: config `GRPC_TLS_CERT_FILE`/`GRPC_TLS_KEY_FILE` (Load errors if only one), `control.Config.Credentials`, wiring + plaintext warning in `apps/api/main.go`. RED: `unknown field Credentials in struct literal` / `cfg.GRPCTLSEnabled undefined`; GREEN: `ok internal/control`, `ok internal/platform/config`.
 - T3 done: `WorkerConfig.TLS/TLSCAFile/TLSServerName`, `controlTLSFromEnv` (CA/name without TLS = startup error). RED: `unknown field TLS in struct literal of type WorkerConfig` / `undefined: controlTLSFromEnv`; GREEN: `ok internal/agent`, `ok apps/edge-agent`.
+- T4 done: `pkg/client.Config{TLS,TLSCAFile,TLSServerName}`; CA/name without TLS is an error in `New`. RED: `unknown field TLS in struct literal of type Config`; GREEN: `ok pkg/client`.
 
 ## Next step
 
-T4.
+T5.
