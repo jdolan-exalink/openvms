@@ -3,16 +3,13 @@ package control
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"net"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 
@@ -30,7 +27,9 @@ type agentHarness struct {
 	pki      *agentauthtest.PKI
 }
 
-func startAgentServer(t *testing.T) *agentHarness {
+// startAgentServer runs the agent listener on loopback. configure, when given, may set
+// optional AgentConfig fields (it receives the harness PKI).
+func startAgentServer(t *testing.T, configure ...func(*AgentConfig, *agentauthtest.PKI)) *agentHarness {
 	t.Helper()
 	pki := agentauthtest.NewPKI(t)
 	certFile, keyFile := grpctlstest.WriteSelfSigned(t)
@@ -38,7 +37,11 @@ func startAgentServer(t *testing.T) *agentHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv, err := NewAgentServer(AgentConfig{Credentials: creds, Verifier: &agentauth.Verifier{Certs: pki.Store}})
+	cfg := AgentConfig{Credentials: creds, Verifier: &agentauth.Verifier{Certs: pki.Store}}
+	for _, f := range configure {
+		f(&cfg, pki)
+	}
+	srv, err := NewAgentServer(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,38 +55,28 @@ func startAgentServer(t *testing.T) *agentHarness {
 }
 
 // dial connects with the given client certificate (none when nil), trusting the server cert.
-func (h *agentHarness) dial(t *testing.T, client *tls.Certificate) openvmsv1.NodeServiceClient {
+func (h *agentHarness) dial(t *testing.T, client *tls.Certificate) *grpc.ClientConn {
 	t.Helper()
-	var creds credentials.TransportCredentials
+	opts := grpctls.ClientOptions{CAFile: h.serverCA}
 	if client != nil {
-		// ClientCredentials has no client-certificate option (agents get one in a later
-		// task), so the test builds the client TLS config itself.
-		creds = clientTLS(t, h.serverCA, *client)
-	} else {
-		var err error
-		if creds, err = grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: h.serverCA}); err != nil {
-			t.Fatal(err)
-		}
+		opts.GetClientCertificate = func(*tls.CertificateRequestInfo) (*tls.Certificate, error) { return client, nil }
+	}
+	creds, err := grpctls.ClientCredentials(opts)
+	if err != nil {
+		t.Fatal(err)
 	}
 	conn, err := grpc.NewClient(h.addr, grpc.WithTransportCredentials(creds))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = conn.Close() })
-	return openvmsv1.NewNodeServiceClient(conn)
+	return conn
 }
 
-func clientTLS(t *testing.T, serverCAFile string, cert tls.Certificate) credentials.TransportCredentials {
+// nodes is dial plus the NodeService client.
+func (h *agentHarness) nodes(t *testing.T, client *tls.Certificate) openvmsv1.NodeServiceClient {
 	t.Helper()
-	pemBytes, err := os.ReadFile(serverCAFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pemBytes) {
-		t.Fatal("server certificate is not PEM")
-	}
-	return credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: pool, Certificates: []tls.Certificate{cert}})
+	return openvmsv1.NewNodeServiceClient(h.dial(t, client))
 }
 
 func heartbeat(c openvmsv1.NodeServiceClient, nodeID string) (*openvmsv1.NodeHeartbeatResponse, error) {
@@ -97,7 +90,7 @@ var agentID = agentca.Identity{TenantID: uuid.New(), ServerID: uuid.New()}
 func TestAgentListener_ValidCertHeartbeats(t *testing.T) {
 	h := startAgentServer(t)
 	c := h.pki.Issue(t, agentID, time.Now(), time.Hour)
-	resp, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String())
+	resp, err := heartbeat(h.nodes(t, &c.TLS), agentID.ServerID.String())
 	if err != nil || !resp.Acknowledged {
 		t.Fatalf("Heartbeat = %+v, %v", resp, err)
 	}
@@ -110,12 +103,12 @@ func TestAgentListener_RejectsWithoutAValidCertificate(t *testing.T) {
 	// Positive control on the same harness: a down server would make every rejection below
 	// pass for the wrong reason.
 	good := h.pki.Issue(t, agentID, now, time.Hour)
-	if _, err := heartbeat(h.dial(t, &good.TLS), agentID.ServerID.String()); err != nil {
+	if _, err := heartbeat(h.nodes(t, &good.TLS), agentID.ServerID.String()); err != nil {
 		t.Fatalf("positive control: %v", err)
 	}
 
 	t.Run("no client certificate", func(t *testing.T) {
-		_, err := heartbeat(h.dial(t, nil), agentID.ServerID.String())
+		_, err := heartbeat(h.nodes(t, nil), agentID.ServerID.String())
 		if status.Code(err) != codes.Unavailable {
 			t.Fatalf("code = %s (%v), want Unavailable (failed handshake)", status.Code(err), err)
 		}
@@ -135,14 +128,14 @@ func TestAgentListener_RejectsWithoutAValidCertificate(t *testing.T) {
 		other := agentauthtest.NewPKI(t)
 		c := other.Issue(t, agentID, now, time.Hour)
 		h.pki.Store.Put(c.Record) // even a recorded serial must not help
-		_, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String())
+		_, err := heartbeat(h.nodes(t, &c.TLS), agentID.ServerID.String())
 		if status.Code(err) != codes.Unavailable {
 			t.Fatalf("code = %s (%v), want Unavailable (failed handshake)", status.Code(err), err)
 		}
 	})
 	t.Run("expired certificate", func(t *testing.T) {
 		c := h.pki.Issue(t, agentID, now.Add(-48*time.Hour), time.Hour)
-		_, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String())
+		_, err := heartbeat(h.nodes(t, &c.TLS), agentID.ServerID.String())
 		if status.Code(err) != codes.Unavailable {
 			t.Fatalf("code = %s (%v), want Unavailable (failed handshake)", status.Code(err), err)
 		}
@@ -150,14 +143,14 @@ func TestAgentListener_RejectsWithoutAValidCertificate(t *testing.T) {
 	t.Run("record expired, certificate still valid for TLS", func(t *testing.T) {
 		c := h.pki.Issue(t, agentID, now, time.Hour)
 		h.pki.Store.Update(c.Serial, func(r *agentca.Certificate) { r.NotAfter = now.Add(-time.Second) })
-		_, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String())
+		_, err := heartbeat(h.nodes(t, &c.TLS), agentID.ServerID.String())
 		if status.Code(err) != codes.Unauthenticated {
 			t.Fatalf("code = %s (%v), want Unauthenticated", status.Code(err), err)
 		}
 	})
 	t.Run("serial not issued by this installation", func(t *testing.T) {
 		c := h.pki.IssueUnrecorded(t, h.pki.CA, agentID, now, time.Hour)
-		_, err := heartbeat(h.dial(t, &c.TLS), agentID.ServerID.String())
+		_, err := heartbeat(h.nodes(t, &c.TLS), agentID.ServerID.String())
 		if status.Code(err) != codes.Unauthenticated {
 			t.Fatalf("code = %s (%v), want Unauthenticated", status.Code(err), err)
 		}
@@ -167,7 +160,7 @@ func TestAgentListener_RejectsWithoutAValidCertificate(t *testing.T) {
 func TestAgentListener_RevocationAppliesToTheNextCallOnAnOpenConnection(t *testing.T) {
 	h := startAgentServer(t)
 	c := h.pki.Issue(t, agentID, time.Now(), time.Hour)
-	client := h.dial(t, &c.TLS)
+	client := h.nodes(t, &c.TLS)
 	if _, err := heartbeat(client, agentID.ServerID.String()); err != nil {
 		t.Fatalf("before revocation: %v", err)
 	}
@@ -181,7 +174,7 @@ func TestAgentListener_RevocationAppliesToTheNextCallOnAnOpenConnection(t *testi
 func TestAgentListener_HeartbeatIsBoundToTheCertificateIdentity(t *testing.T) {
 	h := startAgentServer(t)
 	c := h.pki.Issue(t, agentID, time.Now(), time.Hour)
-	client := h.dial(t, &c.TLS)
+	client := h.nodes(t, &c.TLS)
 
 	_, err := heartbeat(client, uuid.NewString())
 	if status.Code(err) != codes.PermissionDenied {
@@ -198,7 +191,7 @@ func TestAgentListener_HeartbeatIsBoundToTheCertificateIdentity(t *testing.T) {
 func TestAgentListener_ServesOnlyWhatAgentsNeed(t *testing.T) {
 	h := startAgentServer(t)
 	c := h.pki.Issue(t, agentID, time.Now(), time.Hour)
-	client := h.dial(t, &c.TLS)
+	client := h.nodes(t, &c.TLS)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_, err := client.ListNodes(ctx, &openvmsv1.ListNodesRequest{})

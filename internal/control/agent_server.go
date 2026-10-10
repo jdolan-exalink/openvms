@@ -23,7 +23,9 @@ type AgentConfig struct {
 	Credentials credentials.TransportCredentials
 	// Verifier checks every call's certificate against the issued-certificate table.
 	Verifier *agentauth.Verifier
-	Log      *slog.Logger
+	// Renewer enables AgentService.RenewCertificate; nil leaves the method Unimplemented.
+	Renewer CertificateRenewer
+	Log     *slog.Logger
 }
 
 // NewAgentServer builds the agent listener's gRPC server. It serves only what agents need
@@ -51,6 +53,9 @@ func NewAgentServer(cfg AgentConfig) (*Server, error) {
 		grpc.ChainStreamInterceptor(streamLoggingInterceptor(cfg.Log), cfg.Verifier.StreamInterceptor()),
 	)
 	openvmsv1.RegisterNodeServiceServer(s, &AgentNodeServer{})
+	if cfg.Renewer != nil {
+		openvmsv1.RegisterAgentServiceServer(s, &AgentCertServer{Renewer: cfg.Renewer, Log: cfg.Log})
+	}
 	server.grpcServer = s
 	return server, nil
 }

@@ -53,12 +53,30 @@ var (
 	errUnavailable = status.Error(codes.Unavailable, "client certificate check unavailable")
 )
 
-type ctxKey struct{}
+type (
+	ctxKey       struct{}
+	serialCtxKey struct{}
+)
 
 // IdentityFromContext returns the agent identity the interceptors authenticated.
 func IdentityFromContext(ctx context.Context) (agentca.Identity, bool) {
 	id, ok := ctx.Value(ctxKey{}).(agentca.Identity)
 	return id, ok
+}
+
+// SerialFromContext returns the serial (lowercase hex) of the certificate the interceptors
+// authenticated, for handlers that act on that specific certificate, such as renewal.
+func SerialFromContext(ctx context.Context) (string, bool) {
+	serial, ok := ctx.Value(serialCtxKey{}).(string)
+	return serial, ok
+}
+
+// withAuthenticated records the authenticated identity and certificate serial in ctx.
+func withAuthenticated(ctx context.Context, id agentca.Identity) context.Context {
+	if leaf := verifiedLeaf(ctx); leaf != nil {
+		ctx = context.WithValue(ctx, serialCtxKey{}, leaf.SerialNumber.Text(16))
+	}
+	return context.WithValue(ctx, ctxKey{}, id)
 }
 
 func (v *Verifier) log() *slog.Logger {
@@ -143,7 +161,7 @@ func (v *Verifier) UnaryInterceptor() grpc.UnaryServerInterceptor {
 		if err != nil {
 			return nil, err
 		}
-		return handler(context.WithValue(ctx, ctxKey{}, id), req)
+		return handler(withAuthenticated(ctx, id), req)
 	}
 }
 
@@ -155,7 +173,7 @@ func (v *Verifier) StreamInterceptor() grpc.StreamServerInterceptor {
 		if err != nil {
 			return err
 		}
-		return handler(srv, &identityStream{ServerStream: ss, ctx: context.WithValue(ss.Context(), ctxKey{}, id)})
+		return handler(srv, &identityStream{ServerStream: ss, ctx: withAuthenticated(ss.Context(), id)})
 	}
 }
 

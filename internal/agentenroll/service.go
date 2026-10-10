@@ -151,6 +151,44 @@ func (s *Service) Enroll(ctx context.Context, token string, csrPEM []byte) (*age
 	return res, nil
 }
 
+// Renew issues a replacement certificate for an agent that authenticated with previousSerial.
+// id must come from the verified client certificate, never from a request field. Like Enroll,
+// recording the certificate and the audit row happen in one transaction and the signed
+// certificate is released only after the commit. The transaction is scoped to the agent's own
+// tenant, so even a bug that passed the wrong server id could not reach another tenant's rows.
+//
+// The previous certificate is neither revoked nor shortened: it stays valid until it expires
+// (or an operator revokes it), which keeps an agent that lost the response from the
+// server able to renew again and bounds the overlap to the remaining lifetime.
+func (s *Service) Renew(ctx context.Context, id agentca.Identity, previousSerial string, csrPEM []byte) (*agentca.Issuance, error) {
+	if err := agentca.ValidateCSR(csrPEM); err != nil {
+		return nil, err
+	}
+	ca, err := s.CA.LoadOrCreateCA(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var res *agentca.Issuance
+	err = s.Store.Tx(ctx, store.TenantScope{TenantID: id.TenantID}, func(q *db.Queries) error {
+		var err error
+		res, err = s.CA.Sign(ca, csrPEM, id)
+		if err != nil {
+			return err
+		}
+		if err := agentca.RecordCertificate(ctx, q, res.Record); err != nil {
+			return err
+		}
+		return audit(ctx, q, nil, id.TenantID, id.ServerID, "SERVER_AGENT_CERT_RENEWED", map[string]any{
+			"serial": res.Issued.Serial, "previous_serial": previousSerial,
+			"fingerprint": res.Issued.Fingerprint, "not_after": res.Issued.NotAfter,
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 // audit records an enrollment event. audit_log.target_id is a uuid, so both events target the
 // server under "server_agent" (as the other agent events do); the issued certificate is
 // identified in details. actor is nil for the agent's own redemption.

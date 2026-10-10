@@ -527,3 +527,108 @@ func TestCreateTokenExpiryAndReplacementRefreshTheRow(t *testing.T) {
 			rows, createdBy, other, createdAt.After(firstCreatedAt), expires, first.ExpiresAt, second.ExpiresAt)
 	}
 }
+
+func TestRenewIssuesAFreshCertificateForTheCallersIdentity(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	first, err := e.svc.Enroll(ctx, e.createToken(t).Value, csr(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := agentca.Identity{TenantID: e.tenant, ServerID: e.server}
+
+	res, err := e.svc.Renew(ctx, id, first.Issued.Serial, csr(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := pem.Decode(res.Issued.CertPEM)
+	leaf, err := x509.ParseCertificate(b.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := agentca.IdentityFromCert(leaf); err != nil || got != id {
+		t.Fatalf("renewed identity = %+v, %v; want %+v", got, err, id)
+	}
+	if res.Issued.Serial == first.Issued.Serial {
+		t.Fatal("renewal reused the serial")
+	}
+
+	// The new certificate is recorded and live; the old one is left to expire, not revoked.
+	var certs, revoked int
+	e.scan(t, "SELECT count(*), count(revoked_at) FROM agent_certificates WHERE server_id = $1", []any{e.server}, &certs, &revoked)
+	if certs != 2 || revoked != 0 {
+		t.Fatalf("%d certificates, %d revoked; want 2 and 0", certs, revoked)
+	}
+	var targetType, renewed, previous string
+	e.scan(t, "SELECT target_type, details->>'serial', details->>'previous_serial' FROM audit_log WHERE action = 'SERVER_AGENT_CERT_RENEWED' AND target_id = $1",
+		[]any{e.server}, &targetType, &renewed, &previous)
+	if targetType != "server_agent" || renewed != res.Issued.Serial || previous != first.Issued.Serial {
+		t.Fatalf("audit = %q serial %q previous %q; want server_agent %q %q", targetType, renewed, previous, res.Issued.Serial, first.Issued.Serial)
+	}
+}
+
+func TestRenewRejectsABadCSRWithoutSideEffects(t *testing.T) {
+	e := setup(t)
+	id := agentca.Identity{TenantID: e.tenant, ServerID: e.server}
+	if _, err := e.svc.Renew(context.Background(), id, "ab", []byte("not a csr")); !errors.Is(err, agentca.ErrInvalidCSR) {
+		t.Fatalf("err = %v, want ErrInvalidCSR", err)
+	}
+	var certs, audits int
+	e.scan(t, "SELECT count(*) FROM agent_certificates", nil, &certs)
+	e.scan(t, "SELECT count(*) FROM audit_log WHERE action = 'SERVER_AGENT_CERT_RENEWED'", nil, &audits)
+	if certs != 0 || audits != 0 {
+		t.Fatalf("%d certificates, %d audits after a refused renewal; want 0", certs, audits)
+	}
+}
+
+// Renewal is all or nothing, like enrollment: a failed audit write leaves no certificate.
+func TestRenewIsAtomicWhenTheAuditFails(t *testing.T) {
+	e := setup(t)
+	id := agentca.Identity{TenantID: e.tenant, ServerID: e.server}
+	e.failOn(t, "audit_log")
+	if _, err := e.svc.Renew(context.Background(), id, "ab", csr(t)); err == nil {
+		t.Fatal("renewal succeeded despite the injected failure")
+	}
+	var certs int
+	e.scan(t, "SELECT count(*) FROM agent_certificates", nil, &certs)
+	if certs != 0 {
+		t.Fatalf("%d certificates after a failed renewal, want 0", certs)
+	}
+}
+
+// A certificate cannot be renewed into another tenant's server: the identity is the caller's,
+// and the tenant-scoped transaction plus the composite foreign key refuse a mismatch.
+func TestRenewCannotCrossTenants(t *testing.T) {
+	e := setup(t)
+	_, otherServer, _ := seedOtherTenant(t, e)
+	id := agentca.Identity{TenantID: e.tenant, ServerID: otherServer}
+	if _, err := e.svc.Renew(context.Background(), id, "ab", csr(t)); err == nil {
+		t.Fatal("renewed a certificate for another tenant's server")
+	}
+	var certs int
+	e.scan(t, "SELECT count(*) FROM agent_certificates", nil, &certs)
+	if certs != 0 {
+		t.Fatalf("%d certificates recorded, want 0", certs)
+	}
+}
+
+func seedOtherTenant(t *testing.T, e *env) (tenant, server, user uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	tenant, server, site := uuid.New(), uuid.New(), uuid.New()
+	err := e.st.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "INSERT INTO tenants (id, name, slug) VALUES ($1, 'b', 'b')", tenant); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, "INSERT INTO sites (id, tenant_id, name) VALUES ($1, $2, 'b')", site, tenant); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, "INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, username, password_sealed) VALUES ($1, $2, $3, 'b', 'http://y', 'u', '\\x00')",
+			server, tenant, site)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tenant, server, uuid.Nil
+}
