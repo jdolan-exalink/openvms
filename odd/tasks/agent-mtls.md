@@ -35,7 +35,7 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 ## Tasks
 
 - [x] M1 CA + issuance: migration (CA, issued certs), sealed CA key, `internal/agentca` (or similar) generating the CA and signing CSRs with the identity SANs; tests.
-- [ ] M2 Enrollment: migration for one-time tokens, API endpoint to create a token (`servers.manage`), unauthenticated enroll endpoint (token + CSR → cert + CA bundle), hashing, TTL, single use; tests.
+- [x] M2 Enrollment: migration for one-time tokens, API endpoint to create a token (`servers.manage`), unauthenticated enroll endpoint (token + CSR → cert + CA bundle), hashing, TTL, single use; tests.
 - [ ] M3 Agent listener: separate gRPC listener requiring client certs, revocation check, peer identity in context, Heartbeat bound to the cert identity; tests.
 - [ ] M4 Agent side: edge agent enroll command/flow, key + cert persistence, worker dials the agent port with its cert, renewal at 2/3 lifetime; tests.
 - [ ] M5 Persistent heartbeat: store last seen, version, status; surface it where server status is read; tests.
@@ -59,6 +59,8 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 
 - PR1 (#16, M1): second review over the whole slice (`main..60b7139`, 1401 lines) high, granted, approved with suggestions only, acknowledged (`review-d69ab1430684d7ae`). Merged as `96814e7` with a size exception (~1150 authored, half tests).
 
+- M2 done (route: delegated direct, writer trigger: 2+ non-trivial files). Commits 90747c3 (`perf(agentca)`: parsed-CA cache), cb8e8a1 (`agentca.ValidateCSR` + `ErrInvalidCSR`), 127f5a0 (migration 00042, sqlc queries, `internal/agentenroll`), 856542f (OpenAPI `createServerAgentEnrollToken` + `enrollAgent`, handlers, wiring). RED: `getCalls` test `second Issue read the CA from the repository again (2 -> 3 GetCA calls)`; `undefined: ValidateCSR`; `no non-test Go files in internal/agentenroll`; `*Handlers does not implement gen.StrictServerInterface (missing method CreateServerAgentEnrollToken)`. GREEN: `go test ./internal/agentca`, `go test -tags integration ./internal/agentenroll ./internal/agentca ./internal/store ./internal/api` (only the known `TestMapsHierarchyPrivatePlanLifecycle` fails), `go build`, `go vet`, `go test ./...`, web `tsc --noEmit` clean. Decisions: token hash is hex SHA-256 via `identity.HashToken`; CSR validated before the token is consumed, issuance failure after consume leaves the token consumed (fail closed); `/api/v1/agent/enroll` added to `publicPaths` (CSRF only guards cookie auth, so the agent needs no header); body capped at 16 KiB; no HTTP rate limiter exists (only per-account login lockout), so none added: enroll relies on 256-bit tokens, flag for M6/ops; token creation and enrollment are audited (`SERVER_AGENT_ENROLL_TOKEN_CREATED`, `SERVER_AGENT_ENROLLED`). Note: the `crossed == 0` RLS check in `internal/agentca/pgrepo_integration_test.go` queries a bare pool and passes vacuously under FORCE RLS.
+
 ## Next step
 
-M2 on `feat/agent-mtls-enroll` (PR2).
+Review and PR2 for M2 (`feat/agent-mtls-enroll`), then M3 agent listener.
