@@ -24,7 +24,6 @@ type Config struct {
 	Platform      string
 	Architecture  string
 	AppVersion    string
-	Insecure      bool
 	Timeout       time.Duration
 
 	// TLS dials the control plane over TLS and verifies the server certificate.

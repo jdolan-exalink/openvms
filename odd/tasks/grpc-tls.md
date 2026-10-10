@@ -56,6 +56,10 @@ User chose server-side TLS now (option A) over full mTLS (option B, the target i
 
 - CA startup fix (user approved): `controlTLSFromEnv` now loads the CA bundle via `grpctls.ClientCredentials`, so a missing or certificate-less `OPENVMS_CONTROL_TLS_CA_FILE` exits at startup. RED: `missing_CA_file_fails: err = <nil>, wantErr true` (and the no-certificates case); GREEN: `ok apps/edge-agent`. Checks: `go build ./...`, `go vet`, `go test ./...` OK. Docs updated.
 
+- RDD whole branch `main..ad8989a` (16 files, 772 lines): high, granted, 4 lenses, approved with advisories, acknowledged (`review-a3ea7763054504c4`). Remaining warning: `client.Config.Insecure` unused next to `TLS`. Suggestions: CA loaded twice (startup check, then worker), duplicated requires-TLS rule, cert expiry observability, no dual-mode rollout, worker TLS test timing, untested SDK server-name guard.
+
+- `Insecure` removed from `pkg/client.Config` (user approved): it was never read, so it misled callers into expecting a secure channel. No other references in the repo. TDD not applicable (pure removal, no new behavior); checks: `go build ./...`, `go vet`, `go test ./...` OK.
+
 ## Next step
 
 Delivery (size above the 400-line heuristic: ask-on-risk).
