@@ -60,6 +60,10 @@ User chose server-side TLS now (option A) over full mTLS (option B, the target i
 
 - `Insecure` removed from `pkg/client.Config` (user approved): it was never read, so it misled callers into expecting a secure channel. No other references in the repo. TDD not applicable (pure removal, no new behavior); checks: `go build ./...`, `go vet`, `go test ./...` OK.
 
+- RDD whole branch `main..1126ec3` (16 files, 777 lines): high, granted, 4 lenses, approved with advisories, acknowledged (`review-a3752924a33b7d69`). Warnings: the `Insecure` removal is a compile-time break for external SDK callers and must be called out in the PR (no in-repo callers); the cert is loaded once (already documented: restart to pick up a renewed cert). Suggestions unchanged from the previous pass.
+
+- Delivery: user chose a single PR (size exception: about 775 lines, roughly half tests; server TLS is not useful without the clients).
+
 ## Next step
 
-Delivery (size above the 400-line heuristic: ask-on-risk).
+Open the PR; merge stays with the user.
