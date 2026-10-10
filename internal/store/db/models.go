@@ -30,6 +30,17 @@ type AgentCertificate struct {
 	CreatedAt   time.Time
 }
 
+type AgentEnrollToken struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	ServerID  uuid.UUID
+	TokenHash string
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	CreatedBy *uuid.UUID
+	CreatedAt time.Time
+}
+
 type Alarm struct {
 	ID             uuid.UUID
 	TenantID       uuid.UUID
