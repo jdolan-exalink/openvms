@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/jdolan-exalink/openvms/internal/agentca"
 )
@@ -250,5 +252,39 @@ func TestRunDoesNotSpinWhenTheNewCertificateIsAlreadyDue(t *testing.T) {
 		if w < time.Minute {
 			t.Fatalf("waited only %v between renewals, want at least the minimum backoff; waits=%v", w, e.clock.waits)
 		}
+	}
+}
+
+// The server refuses renewals before half of the lifetime (FailedPrecondition). That is a
+// "retry later" answer: no error log, no expiry alarm, and the retries are spaced by the backoff
+// instead of looping.
+func TestRunTreatsTooEarlyAsRetryLater(t *testing.T) {
+	e := newManagerEnv(t, 0)
+	e.mgr.MinBackoff, e.mgr.MaxBackoff = time.Minute, 4*time.Minute
+	e.clock.now = e.mgr.Current().RenewalDue()
+	e.fail = func(call int) error {
+		if call <= 3 {
+			return status.Error(codes.FailedPrecondition, "certificate renewal not allowed yet")
+		}
+		e.clock.cancel()
+		return nil
+	}
+	e.mgr.Run(e.ctx, e.renewFunc())
+
+	if e.calls != 4 {
+		t.Fatalf("%d attempts, want 4 (three refusals, then success)", e.calls)
+	}
+	want := []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute}
+	if len(e.clock.waits) < 3 {
+		t.Fatalf("waits = %v", e.clock.waits)
+	}
+	for i, w := range want {
+		if e.clock.waits[i] != w {
+			t.Fatalf("waits = %v, want the backoff %v", e.clock.waits, want)
+		}
+	}
+	logs := e.log.String()
+	if strings.Contains(logs, "level=ERROR") || strings.Contains(logs, "level=WARN") || !strings.Contains(logs, "not allowed yet") {
+		t.Fatalf("a too-early refusal must log at info, not as a failure:\n%s", logs)
 	}
 }

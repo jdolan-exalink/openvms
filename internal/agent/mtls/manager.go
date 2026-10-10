@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
 )
@@ -172,7 +174,11 @@ func (m *Manager) Run(ctx context.Context, fn RenewFunc) {
 			}
 			failures++
 			wait = m.backoff(failures)
-			if cur.Expired(now) {
+			if status.Code(err) == codes.FailedPrecondition {
+				// The server's minimum age for renewals has not passed (for example the agent's
+				// clock runs ahead). Not a fault: try again later.
+				m.log().Info("agent certificate renewal not allowed yet; will retry", "error", err, "retry_in", wait)
+			} else if cur.Expired(now) {
 				m.log().Error("agent certificate has expired and could not be renewed; the agent cannot reach the API over mTLS until it is enrolled again: create a new enrollment token for this server and restart the agent with OPENVMS_ENROLL_TOKEN",
 					"not_after", cur.NotAfter(), "error", err, "retry_in", wait)
 			} else {

@@ -49,14 +49,18 @@ func (r *recordingStore) seen(serial string) int {
 type renewer struct {
 	pki      *agentauthtest.PKI
 	validity time.Duration
+	// grace is how long the superseded certificate keeps working, like agentenroll.SupersedeGrace.
+	grace time.Duration
 }
 
-func (r renewer) Renew(_ context.Context, id agentca.Identity, _ string, csrPEM []byte) (*agentca.Issuance, error) {
+func (r renewer) Renew(_ context.Context, id agentca.Identity, previousSerial string, csrPEM []byte) (*agentca.Issuance, error) {
 	res, err := (&agentca.Service{Validity: r.validity}).Sign(r.pki.CA, csrPEM, id)
 	if err != nil {
 		return nil, err
 	}
 	r.pki.Store.Put(res.Record)
+	end := time.Now().Add(r.grace)
+	r.pki.Store.Update(previousSerial, func(c *agentca.Certificate) { c.RevokedAt = &end })
 	return res, nil
 }
 
@@ -81,7 +85,7 @@ func startAgentListener(t *testing.T) *mtlsEnv {
 	srv, err := control.NewAgentServer(control.AgentConfig{
 		Credentials: creds,
 		Verifier:    &agentauth.Verifier{Certs: rec},
-		Renewer:     renewer{pki: pki, validity: time.Hour},
+		Renewer:     renewer{pki: pki, validity: time.Hour, grace: time.Second},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -189,5 +193,25 @@ func TestWorker_MTLSRenewsAndReconnectsWithTheNewCertificate(t *testing.T) {
 	loaded, err := mgr.Store.Load()
 	if err != nil || loaded.Leaf.SerialNumber.Text(16) != renewed {
 		t.Fatalf("stored credentials = %v, %v; want the renewed certificate", loaded, err)
+	}
+}
+
+// The superseded certificate works only for the grace period (one second here, ten minutes in
+// production). The worker must be on the renewed certificate before that ends: heartbeats keep
+// being acknowledged afterwards, which they cannot be on a connection that still uses the old one.
+func TestWorker_MTLSSwitchesToTheRenewedCertificateWithinTheGrace(t *testing.T) {
+	e := startAgentListener(t)
+	mgr, old := e.manager(t, time.Minute)
+	w, _ := e.run(t, WorkerConfig{MTLS: mgr})
+
+	eventually(t, "a renewed certificate", func() bool { return mgr.Current().Leaf.SerialNumber.Text(16) != old.Serial })
+	renewed := mgr.Current().Leaf.SerialNumber.Text(16)
+	eventually(t, "a heartbeat with the renewed certificate", func() bool { return e.store.seen(renewed) > 0 })
+
+	time.Sleep(1500 * time.Millisecond) // the old certificate's grace is over
+	before := w.HeartbeatsAcknowledged()
+	time.Sleep(300 * time.Millisecond)
+	if after := w.HeartbeatsAcknowledged(); after-before < 3 {
+		t.Fatalf("only %d heartbeats acknowledged after the grace period ended; the worker is still on the old certificate", after-before)
 	}
 }
