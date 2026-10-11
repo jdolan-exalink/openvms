@@ -30,7 +30,7 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 - Conventional Commits, no AI attribution.
 - TDD: on (source: global `Strict TDD Mode: enabled`). Runner: `go test ./...` (integration: `go test -tags integration ./...`, known pre-existing failure `TestMapsHierarchyPrivatePlanLifecycle`). RED before GREEN per task.
 - New tables are tenant-scoped with RLS (`app_tenant_visible`), goose migrations from 00041.
-- Delivery: `ask-on-risk`. Forecast > 2000 authored changed lines. Chain strategy: `stacked-to-main` (user choice). Slices: PR1 M1 (`feat/agent-mtls-ca`), PR2 M2, PR3 M3, PR4 M4+M5, PR5 M6 (adjust if a slice exceeds ~400 lines).
+- Delivery: `ask-on-risk`. Forecast > 2000 authored changed lines. Chain strategy: `stacked-to-main` (user choice). Slices: PR1 M1 (`feat/agent-mtls-ca`), PR2 M2, PR3 M3, PR4 M4+M5, PR5 M6 (adjust if a slice exceeds ~400 lines). Update 2026-10-11 (user choice): everything left after #20 ships as ONE PR from `feat/agent-mtls-agent` (`single-pr` for the remainder, size exception), with native review per work-unit commit.
 
 ## Tasks
 
@@ -41,7 +41,14 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
   - Carried from the M2 follow-up review (lineage `review-c44234da612a1311`, approved with advisories, user deferred to M3): pass the loaded CA into `Sign` so it cannot reach the repository inside the enrollment transaction (today safe only because the CA cache never evicts); create the CA at startup or by an admin action instead of on an unauthenticated enroll; fix the `notFoundIssuer` doc comment; build CSRs before the goroutines in the pool test (no `t.Fatal` off the test goroutine) and check the sealer error; package-level `errTokenNotFound`; rename the `real` test variable; make the `Issue` error-context contract explicit; unify the not-found vocabulary.
 - [x] M4 Agent side: edge agent enroll command/flow, key + cert persistence, worker dials the agent port with its cert, renewal at 2/3 lifetime; tests.
 - [x] M5 Persistent heartbeat: store last seen, version, status; surface it where server status is read; tests.
-- [ ] M6 SSH install + docs: install writes the enroll token and control settings; docs for the whole flow and rollout.
+- [ ] M5-fix 4c review advisories (review-85bc4d01aca09aef): one shared agent-status vocabulary used by the recorder, the control mapping, the migration CHECK and the OpenAPI enum (with a test that keeps them in sync); fix the `Statuses` doc comment; check the version limit once; rate-limit the repeated heartbeat persistence error log and map permanent errors away from `Unavailable`; test `ErrInvalid` -> `InvalidArgument`; test `MaxVersionLen`; bound the recorder test against the DB clock (no local clock skew); fix the stale ODD lines (migration 00043 and the grace design).
+- [ ] M6 SSH install + docs: install creates an enroll token for the server and writes the agent mTLS settings (`OPENVMS_AGENT_GRPC_ADDR`, `OPENVMS_ENROLL_TOKEN_FILE`, `OPENVMS_API_URL`, CA files) when the agent listener is configured; uninstall removes `<state>/agent-mtls/` and the token file; docs for the whole flow and rollout.
+- [ ] F1 Admin revocation: HTTP endpoint to revoke a server's agent certificates (`servers.manage`, audited, wraps `RevokeServerCertificates`), OpenAPI + generated types.
+- [ ] F2 Enrollment rate limiting: per client IP limit on `POST /api/v1/agent/enroll` (429); renewal stays bounded by the minimum age.
+- [ ] F3 Certificate expiry visibility: expose the live agent certificate expiry on the servers API and log a warning on the agent when renewal keeps failing close to expiry.
+- [ ] F4 Cross-tenant test: two tenants, each with an enrolled agent; heartbeats and server reads stay isolated.
+- [ ] F5 Agent store hardening: clean up stale `.new` files after promotion, fsync the directory after renames, tests modeling the exact first-save windows.
+- [ ] F6 Earlier TLS follow-ups: dedup the requires-TLS validation, fixed-timing worker tests, SDK server-name test.
 
 ## Acceptance criteria
 
@@ -97,4 +104,4 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 
 ## Next step
 
-Open PR4a (`feat/agent-mtls-renew-rpc`), PR4b and PR4c as stacked PRs (4c is `feat/agent-mtls-agent`), then M6 (SSH install wiring and final docs). Follow-up: admin endpoint to revoke an agent's certificates.
+PRs #16-#20 are merged. 4c (heartbeats, API fields, docs) is reviewed and approved (review-85bc4d01aca09aef). Next: M5-fix, M6, F1-F6 on `feat/agent-mtls-agent`, one work-unit commit each with per-commit native review, then one PR for everything. Deployment is a separate, user-authorized step.
