@@ -267,6 +267,63 @@ type Export struct {
 	DeletedAt   *time.Time
 }
 
+type ExportJob struct {
+	ID               uuid.UUID
+	TenantID         uuid.UUID
+	SiteID           *uuid.UUID
+	RequestedBy      uuid.UUID
+	Name             string
+	StartTime        time.Time
+	EndTime          time.Time
+	Status           string
+	Progress         float32
+	Error            string
+	TotalBytes       int64
+	TransferredBytes int64
+	SpeedBps         float32
+	EtaSeconds       int32
+	LocalPath        string
+	Manifest         json.RawMessage
+	Protected        bool
+	ExpiresAt        *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	DeletedAt        *time.Time
+}
+
+type ExportJobItem struct {
+	ID               uuid.UUID
+	JobID            uuid.UUID
+	TenantID         uuid.UUID
+	CameraID         uuid.UUID
+	ServerID         uuid.UUID
+	RemoteExportID   string
+	Status           string
+	Progress         float32
+	Error            string
+	TotalBytes       int64
+	TransferredBytes int64
+	RemotePath       string
+	LocalPath        string
+	Sha256Hash       string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type ExportShare struct {
+	ID           uuid.UUID
+	TenantID     uuid.UUID
+	JobID        uuid.UUID
+	ShareToken   string
+	CreatedBy    uuid.UUID
+	ExpiresAt    *time.Time
+	PasswordHash string
+	ViewsCount   int32
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	RevokedAt    *time.Time
+}
+
 type FrigateConfigRevision struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID
@@ -488,6 +545,20 @@ type ObjectSnapshot struct {
 	TenantID       uuid.UUID
 	RemoteObjectID string
 	SeenAt         time.Time
+}
+
+type ObjectTrack struct {
+	ServerID       uuid.UUID
+	TenantID       uuid.UUID
+	CameraID       uuid.UUID
+	RemoteObjectID string
+	Label          string
+	Zones          []string
+	Box            []byte
+	Path           json.RawMessage
+	StartTime      time.Time
+	EndTime        *time.Time
+	UpdatedAt      time.Time
 }
 
 type PermissionGrant struct {
