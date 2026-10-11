@@ -131,6 +131,10 @@ A failed attempt is retried with exponential backoff (30 seconds up to 15 minute
 
 `POST /api/v1/servers/{serverId}/agent/revoke-certificates` (needs `servers.manage`) revokes every certificate of the server's agent that is not revoked yet and returns `{"revoked": N}`. The listener refuses those certificates from the next call and the agent cannot renew, so the whole renewal chain ends and the agent has to enroll again with a new token. It is audited (`SERVER_AGENT_CERTS_REVOKED`, target `server_agent`, with the count), runs in one transaction scoped to the caller's tenants, and a second call returns zero. It does not delete pending enrollment tokens; create a new token (which replaces the old one) to re-enroll.
 
+### Enrollment rate limit
+
+`POST /api/v1/agent/enroll` is public, so it is limited per client IP: a burst of 10 requests, then one every 6 seconds; beyond that the API answers `429` with `Retry-After`. The key is the address recorded for the audit log (the right-most `X-Forwarded-For` entry when `TRUST_FORWARDED_FOR` is on, so a client cannot dodge the limit with its own header). The limiter is in memory and per API process, bounds its own table, and does not protect the 256-bit tokens (they are not guessable); it bounds the CSR and database work an anonymous caller can cause. Renewal is bounded separately by the minimum age.
+
 ## SSH install with mutual TLS
 
 When the API runs the agent listener and knows how agents reach it, the SSH agent install (`POST /api/v1/servers/{serverId}/agent/install`) enrolls the new agent for mutual TLS by itself. Without these settings installs behave exactly as before.

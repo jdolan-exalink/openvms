@@ -4559,6 +4559,17 @@ export interface components {
         };
     };
     responses: {
+        /** @description Too many requests from this client address; retry after the number of seconds in Retry-After */
+        TooManyRequests: {
+            headers: {
+                /** @description Seconds until a request is accepted again */
+                "Retry-After"?: number;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description The request is invalid */
         BadRequest: {
             headers: {
@@ -5751,6 +5762,7 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
     updateServerAgentOverSsh: {

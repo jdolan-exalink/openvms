@@ -815,6 +815,7 @@ paths:
               schema: { $ref: "#/components/schemas/AgentEnrollment" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
   /api/v1/servers/{serverId}/agent/update-ssh:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3551,6 +3552,13 @@ components:
       name: openvms_session
       description: Browser session. State-changing requests must also send the X-OpenVMS-Request header.
   responses:
+    TooManyRequests:
+      description: Too many requests from this client address; retry after the number of seconds in Retry-After
+      headers:
+        Retry-After: { schema: { type: integer }, description: Seconds until a request is accepted again }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     BadRequest:
       description: The request is invalid
       content:

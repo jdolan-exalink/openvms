@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,9 @@ type Options struct {
 	CredentialTrustedProxyCIDRs []netip.Prefix
 	// SessionIdle ends browser sessions after this long without requests.
 	SessionIdle time.Duration
+	// AgentEnrollLimiter limits POST /api/v1/agent/enroll per client IP; nil uses the default
+	// (burst 10, one more every 6 seconds).
+	AgentEnrollLimiter *httpx.RateLimiter
 	// Media serves /media/v1 (live, recordings, snapshots, downloads) behind the same
 	// authentication as the API. Nil disables it.
 	Media http.Handler
@@ -45,6 +49,10 @@ type Options struct {
 }
 
 func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error) {
+	enrollLimiter := opts.AgentEnrollLimiter
+	if enrollLimiter == nil {
+		enrollLimiter = httpx.NewRateLimiter(agentEnrollBurst, agentEnrollRefill, nil)
+	}
 	spec, err := gen.GetSpec()
 	if err != nil {
 		return nil, err
@@ -56,7 +64,7 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 
 	r := chi.NewRouter()
 	r.Use(credentialInstallHTTPS(opts.CredentialTrustedProxyCIDRs), httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
-	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody, validateAgentUpdateBody, limitAgentEnrollBody)
+	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody, validateAgentUpdateBody, limitAgentEnroll(enrollLimiter), limitAgentEnrollBody)
 	if opts.Queries != nil {
 		r.Use(Authenticate(opts.Queries, AuthOptions{IdleTimeout: opts.SessionIdle}))
 	}
@@ -176,6 +184,38 @@ func limitAgentEnrollBody(next http.Handler) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// Default limit for the unauthenticated enroll endpoint, per client IP: a burst of 10, then one
+// every 6 seconds. Tokens are 256-bit, so this is not what protects them; it bounds the CSR
+// parsing and database work an anonymous caller can cause.
+const (
+	agentEnrollBurst  = 10
+	agentEnrollRefill = 6 * time.Second
+)
+
+// limitAgentEnroll answers 429 to a client IP that enrolls too often. The IP is the one
+// httpx.ClientAddr recorded (the proxy-appended X-Forwarded-For entry when TrustForwardedFor is
+// set); a request whose address is unknown shares one bucket.
+func limitAgentEnroll(l *httpx.RateLimiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/api/v1/agent/enroll" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			key := "unknown"
+			if ip := httpx.ClientIP(r.Context()); ip != nil {
+				key = ip.String()
+			}
+			if ok, retry := l.Allow(key); !ok {
+				w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
+				writeError(w, r, http.StatusTooManyRequests, "rate_limited", "too many enrollment requests; retry later")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 // validateOnvifDiscoveryBody enforces the narrow request contract at runtime; generated
