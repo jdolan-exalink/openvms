@@ -47,7 +47,7 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 - [x] F2 Enrollment rate limiting: per client IP limit on `POST /api/v1/agent/enroll` (429); renewal stays bounded by the minimum age.
 - [x] F3 Certificate expiry visibility: expose the live agent certificate expiry on the servers API and log a warning on the agent when renewal keeps failing close to expiry.
 - [x] F4 Cross-tenant test: two tenants, each with an enrolled agent; heartbeats and server reads stay isolated.
-- [ ] F5 Agent store hardening: clean up stale `.new` files after promotion, fsync the directory after renames, tests modeling the exact first-save windows.
+- [x] F5 Agent store hardening: clean up stale `.new` files after promotion, fsync the directory after renames, tests modeling the exact first-save windows.
 - [ ] F6 Earlier TLS follow-ups: dedup the requires-TLS validation, fixed-timing worker tests, SDK server-name test.
 
 ## Acceptance criteria
@@ -111,6 +111,8 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 - F3 done. Servers API: `agent_cert_expires_at` = `max(not_after)` over the server's certificates that are used (`first_used_at` set) and not revoked, so a pending unused successor never misreports; absent before the first mTLS connection and after revocation; a past value signals an expired agent certificate (documented). Implementation note: sqlc cannot type a nullable aggregate, so the left-joined subquery is `COALESCE(..., to_timestamp(0))` and the handler maps the epoch to absent. Agent: `Manager.Run` logs a distinct Warn ("close to expiry and renewal keeps failing", with `remaining`) when at least two renewals failed and less than 1/6 of the lifetime is left (injected clock tests: warns near expiry, silent with time left, silent after a single failure, never an ERROR before expiry). RED: warning test failed (no such log); API e2e covers absent -> present == enrolled NotAfter -> list endpoint. GREEN: mtls unit, api integration, web `tsc`.
 
 - F4 done. `TestTwoTenantsAgentsStayIsolated` (api integration): two tenants (demo tenant and a new one with a seeded server), one enrolled agent each on one real agent listener with a tenant user holding `servers.view`/`servers.manage` per tenant. Covers: each tenant reads only its own server with its own `agent_version`/`agent_status`/`agent_cert_expires_at`; cross-reads are 404 without agent state; lists never contain the other tenant's server; an agent heartbeating as the other tenant's server gets `PermissionDenied` and changes nothing; tenant A cannot revoke tenant B's agent (404), revoking its own ends only A's certificates (B keeps heartbeating, A's expiry disappears). No RED: it tests existing behavior; sensitivity shown by mutation (disabling the node_id check fails it with `agent A heartbeating as server B: <nil>, want PermissionDenied`).
+
+- F5 done. `Store.Load` removes every stale `.new` file once a valid set is in place and syncs the directory after promoting staged files; `Save` syncs the directory after staging (staged files are durable before the first rename) and after the renames. Tests model the exact windows through the real `Save` with an injected rename that fails after k renames (first save: 0..3 renames; renewal with a CA change: 0..2) and a counting sync seam: every window loads the complete new set, never `ErrNoCredentials`, and leaves no `.new` file. RED: compile level (`unknown field rename in struct literal of type Store`). GREEN: mtls unit tests.
 
 ## Next step
 
