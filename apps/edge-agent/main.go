@@ -299,6 +299,7 @@ func replaceBinary(r *http.Request) error {
 		return err
 	}
 	next := exe + ".new"
+	// #nosec G306 -- the staged binary must retain executable permissions after replacement.
 	if err := os.WriteFile(next, data, 0o755); err != nil {
 		return err
 	}
@@ -307,8 +308,19 @@ func replaceBinary(r *http.Request) error {
 
 func restart() {
 	time.Sleep(400 * time.Millisecond)
-	cmd := exec.Command("systemctl", "restart", "openvms-agent")
-	_ = cmd.Start()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	cmd := exec.CommandContext(ctx, "systemctl", "restart", "openvms-agent")
+	if err := cmd.Start(); err != nil {
+		cancel()
+		slog.Error("failed to start agent restart", "error", err)
+		return
+	}
+	go func() {
+		defer cancel()
+		if err := cmd.Wait(); err != nil {
+			slog.Error("agent restart failed", "error", err)
+		}
+	}()
 }
 
 // controlTLSFromEnv reads the opt-in TLS settings for the gRPC control channel.

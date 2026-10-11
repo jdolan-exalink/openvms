@@ -64,7 +64,7 @@ func (h *StreamHandle) Profile() string {
 }
 
 // SetProfile adapts the stream resolution dynamically (e.g. grid tile click to fullscreen).
-func (h *StreamHandle) SetProfile(ctx context.Context, newProfile string) error {
+func (h *StreamHandle) SetProfile(_ context.Context, newProfile string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
@@ -77,7 +77,7 @@ func (h *StreamHandle) SetProfile(ctx context.Context, newProfile string) error 
 }
 
 // Migrate seamlessly switches network routes without destroying the video player.
-func (h *StreamHandle) Migrate(ctx context.Context, newCandidate *openvmsv1.ConnectionCandidate) error {
+func (h *StreamHandle) Migrate(_ context.Context, newCandidate *openvmsv1.ConnectionCandidate) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 

@@ -41,17 +41,17 @@ func leadingBody(logits []float32) (string, float32, bool) {
 		return "", 0, false
 	}
 	scaled := make([]float32, len(logits))
-	max := float32(math.Inf(-1))
+	maximum := float32(math.Inf(-1))
 	for i, v := range logits {
 		scaled[i] = v / bodyTemperature
-		if scaled[i] > max {
-			max = scaled[i]
+		if scaled[i] > maximum {
+			maximum = scaled[i]
 		}
 	}
 	probs := make([]float64, len(scaled))
 	var sum float64
 	for i, v := range scaled {
-		p := math.Exp(float64(v - max))
+		p := math.Exp(float64(v - maximum))
 		probs[i] = p
 		sum += p
 	}

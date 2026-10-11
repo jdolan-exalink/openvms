@@ -75,6 +75,7 @@ func (s *Service) StartServerAgentUninstall(ctx context.Context, actor authz.Act
 		return AgentInstallJob{}, ErrAgentUpdateUnavailable
 	}
 
+	// #nosec G118 -- durable uninstall job must outlive the HTTP request.
 	go s.runServerAgentUninstall(context.Background(), actor, job, row, in)
 	reservationOwned = false
 	return job.read(), nil

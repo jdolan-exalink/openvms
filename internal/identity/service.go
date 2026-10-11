@@ -949,4 +949,3 @@ func (s *Service) CountActiveClients(ctx context.Context, window time.Duration) 
 
 	return counts, nil
 }
-

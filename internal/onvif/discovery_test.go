@@ -199,7 +199,7 @@ func xmlValue(t *testing.T, data []byte, local string) string {
 	for {
 		tok, err := dec.Token()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			t.Fatal(err)

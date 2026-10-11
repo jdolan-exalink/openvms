@@ -3917,14 +3917,14 @@ type UpdateServerJSONRequestBody = ServerUpdate
 // InstallServerAgentJSONRequestBody defines body for InstallServerAgent for application/json ContentType.
 type InstallServerAgentJSONRequestBody = ServerAgentInstallRequest
 
-// SetServerAgentTlsConfigJSONRequestBody defines body for SetServerAgentTlsConfig for application/json ContentType.
-type SetServerAgentTlsConfigJSONRequestBody = ServerAgentTLSConfig
+// SetServerAgentTLSConfigJSONRequestBody defines body for SetServerAgentTLSConfig for application/json ContentType.
+type SetServerAgentTLSConfigJSONRequestBody = ServerAgentTLSConfig
 
-// UninstallServerAgentOverSshJSONRequestBody defines body for UninstallServerAgentOverSsh for application/json ContentType.
-type UninstallServerAgentOverSshJSONRequestBody = ServerAgentUpdateRequest
+// UninstallServerAgentOverSSHJSONRequestBody defines body for UninstallServerAgentOverSSH for application/json ContentType.
+type UninstallServerAgentOverSSHJSONRequestBody = ServerAgentUpdateRequest
 
-// UpdateServerAgentOverSshJSONRequestBody defines body for UpdateServerAgentOverSsh for application/json ContentType.
-type UpdateServerAgentOverSshJSONRequestBody = ServerAgentUpdateRequest
+// UpdateServerAgentOverSSHJSONRequestBody defines body for UpdateServerAgentOverSSH for application/json ContentType.
+type UpdateServerAgentOverSSHJSONRequestBody = ServerAgentUpdateRequest
 
 // SetServerBodyClassifyJSONRequestBody defines body for SetServerBodyClassify for application/json ContentType.
 type SetServerBodyClassifyJSONRequestBody = BodyClassifyInput
@@ -4348,27 +4348,27 @@ type ServerInterface interface {
 	// RevokeServerAgentCertificates Revoke every certificate of the server's agent
 	// (POST /api/v1/servers/{serverId}/agent/revoke-certificates)
 	RevokeServerAgentCertificates(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
-	// DeleteServerAgentTlsConfig Disable registered agent TLS configuration
+	// DeleteServerAgentTLSConfig Disable registered agent TLS configuration
 	// (DELETE /api/v1/servers/{serverId}/agent/tls)
-	DeleteServerAgentTlsConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
-	// GetServerAgentTlsConfig Read registered agent TLS trust configuration
+	DeleteServerAgentTLSConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
+	// GetServerAgentTLSConfig Read registered agent TLS trust configuration
 	// (GET /api/v1/servers/{serverId}/agent/tls)
-	GetServerAgentTlsConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
-	// SetServerAgentTlsConfig Configure registered agent TLS trust
+	GetServerAgentTLSConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
+	// SetServerAgentTLSConfig Configure registered agent TLS trust
 	// (PUT /api/v1/servers/{serverId}/agent/tls)
-	SetServerAgentTlsConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
-	// UninstallServerAgentOverSsh Uninstall a registered agent from the host over SSH
+	SetServerAgentTLSConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
+	// UninstallServerAgentOverSSH Uninstall a registered agent from the host over SSH
 	// (POST /api/v1/servers/{serverId}/agent/uninstall)
-	UninstallServerAgentOverSsh(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
+	UninstallServerAgentOverSSH(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
 	// GetServerAgentUninstallJob Read transient existing-agent uninstall progress
 	// (GET /api/v1/servers/{serverId}/agent/uninstall/{jobId})
 	GetServerAgentUninstallJob(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, jobId openapi_types.UUID)
 	// UpdateServerAgent Replace the edge agent with the current build
 	// (POST /api/v1/servers/{serverId}/agent/update)
 	UpdateServerAgent(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
-	// UpdateServerAgentOverSsh Update an existing registered agent and configure HTTPS
+	// UpdateServerAgentOverSSH Update an existing registered agent and configure HTTPS
 	// (POST /api/v1/servers/{serverId}/agent/update-ssh)
-	UpdateServerAgentOverSsh(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
+	UpdateServerAgentOverSSH(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID)
 	// GetServerAgentUpdateJob Read transient existing-agent update progress
 	// (GET /api/v1/servers/{serverId}/agent/update-ssh/{jobId})
 	GetServerAgentUpdateJob(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID, jobId openapi_types.UUID)
@@ -5248,27 +5248,27 @@ func (_ Unimplemented) RevokeServerAgentCertificates(w http.ResponseWriter, r *h
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// DeleteServerAgentTlsConfig Disable registered agent TLS configuration
+// DeleteServerAgentTLSConfig Disable registered agent TLS configuration
 // (DELETE /api/v1/servers/{serverId}/agent/tls)
-func (_ Unimplemented) DeleteServerAgentTlsConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+func (_ Unimplemented) DeleteServerAgentTLSConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// GetServerAgentTlsConfig Read registered agent TLS trust configuration
+// GetServerAgentTLSConfig Read registered agent TLS trust configuration
 // (GET /api/v1/servers/{serverId}/agent/tls)
-func (_ Unimplemented) GetServerAgentTlsConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+func (_ Unimplemented) GetServerAgentTLSConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// SetServerAgentTlsConfig Configure registered agent TLS trust
+// SetServerAgentTLSConfig Configure registered agent TLS trust
 // (PUT /api/v1/servers/{serverId}/agent/tls)
-func (_ Unimplemented) SetServerAgentTlsConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+func (_ Unimplemented) SetServerAgentTLSConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// UninstallServerAgentOverSsh Uninstall a registered agent from the host over SSH
+// UninstallServerAgentOverSSH Uninstall a registered agent from the host over SSH
 // (POST /api/v1/servers/{serverId}/agent/uninstall)
-func (_ Unimplemented) UninstallServerAgentOverSsh(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+func (_ Unimplemented) UninstallServerAgentOverSSH(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5284,9 +5284,9 @@ func (_ Unimplemented) UpdateServerAgent(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// UpdateServerAgentOverSsh Update an existing registered agent and configure HTTPS
+// UpdateServerAgentOverSSH Update an existing registered agent and configure HTTPS
 // (POST /api/v1/servers/{serverId}/agent/update-ssh)
-func (_ Unimplemented) UpdateServerAgentOverSsh(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+func (_ Unimplemented) UpdateServerAgentOverSSH(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9565,8 +9565,8 @@ func (siw *ServerInterfaceWrapper) RevokeServerAgentCertificates(w http.Response
 	handler.ServeHTTP(w, r)
 }
 
-// DeleteServerAgentTlsConfig operation middleware
-func (siw *ServerInterfaceWrapper) DeleteServerAgentTlsConfig(w http.ResponseWriter, r *http.Request) {
+// DeleteServerAgentTLSConfig operation middleware
+func (siw *ServerInterfaceWrapper) DeleteServerAgentTLSConfig(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -9581,7 +9581,7 @@ func (siw *ServerInterfaceWrapper) DeleteServerAgentTlsConfig(w http.ResponseWri
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.DeleteServerAgentTlsConfig(w, r, serverId)
+		siw.Handler.DeleteServerAgentTLSConfig(w, r, serverId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9591,8 +9591,8 @@ func (siw *ServerInterfaceWrapper) DeleteServerAgentTlsConfig(w http.ResponseWri
 	handler.ServeHTTP(w, r)
 }
 
-// GetServerAgentTlsConfig operation middleware
-func (siw *ServerInterfaceWrapper) GetServerAgentTlsConfig(w http.ResponseWriter, r *http.Request) {
+// GetServerAgentTLSConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetServerAgentTLSConfig(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -9607,7 +9607,7 @@ func (siw *ServerInterfaceWrapper) GetServerAgentTlsConfig(w http.ResponseWriter
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetServerAgentTlsConfig(w, r, serverId)
+		siw.Handler.GetServerAgentTLSConfig(w, r, serverId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9617,8 +9617,8 @@ func (siw *ServerInterfaceWrapper) GetServerAgentTlsConfig(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// SetServerAgentTlsConfig operation middleware
-func (siw *ServerInterfaceWrapper) SetServerAgentTlsConfig(w http.ResponseWriter, r *http.Request) {
+// SetServerAgentTLSConfig operation middleware
+func (siw *ServerInterfaceWrapper) SetServerAgentTLSConfig(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -9633,7 +9633,7 @@ func (siw *ServerInterfaceWrapper) SetServerAgentTlsConfig(w http.ResponseWriter
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.SetServerAgentTlsConfig(w, r, serverId)
+		siw.Handler.SetServerAgentTLSConfig(w, r, serverId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9643,8 +9643,8 @@ func (siw *ServerInterfaceWrapper) SetServerAgentTlsConfig(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
-// UninstallServerAgentOverSsh operation middleware
-func (siw *ServerInterfaceWrapper) UninstallServerAgentOverSsh(w http.ResponseWriter, r *http.Request) {
+// UninstallServerAgentOverSSH operation middleware
+func (siw *ServerInterfaceWrapper) UninstallServerAgentOverSSH(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -9659,7 +9659,7 @@ func (siw *ServerInterfaceWrapper) UninstallServerAgentOverSsh(w http.ResponseWr
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UninstallServerAgentOverSsh(w, r, serverId)
+		siw.Handler.UninstallServerAgentOverSSH(w, r, serverId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9730,8 +9730,8 @@ func (siw *ServerInterfaceWrapper) UpdateServerAgent(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
-// UpdateServerAgentOverSsh operation middleware
-func (siw *ServerInterfaceWrapper) UpdateServerAgentOverSsh(w http.ResponseWriter, r *http.Request) {
+// UpdateServerAgentOverSSH operation middleware
+func (siw *ServerInterfaceWrapper) UpdateServerAgentOverSSH(w http.ResponseWriter, r *http.Request) {
 
 	var err error
 	_ = err
@@ -9746,7 +9746,7 @@ func (siw *ServerInterfaceWrapper) UpdateServerAgentOverSsh(w http.ResponseWrite
 	}
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.UpdateServerAgentOverSsh(w, r, serverId)
+		siw.Handler.UpdateServerAgentOverSSH(w, r, serverId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10923,13 +10923,13 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/servers/{serverId}/restart", wrapper.RestartServer)
 	})
 	r.Group(func(r chi.Router) {
-		r.Delete(options.BaseURL+"/api/v1/servers/{serverId}/agent/tls", wrapper.DeleteServerAgentTlsConfig)
+		r.Delete(options.BaseURL+"/api/v1/servers/{serverId}/agent/tls", wrapper.DeleteServerAgentTLSConfig)
 	})
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/api/v1/servers/{serverId}/agent/tls", wrapper.GetServerAgentTlsConfig)
+		r.Get(options.BaseURL+"/api/v1/servers/{serverId}/agent/tls", wrapper.GetServerAgentTLSConfig)
 	})
 	r.Group(func(r chi.Router) {
-		r.Put(options.BaseURL+"/api/v1/servers/{serverId}/agent/tls", wrapper.SetServerAgentTlsConfig)
+		r.Put(options.BaseURL+"/api/v1/servers/{serverId}/agent/tls", wrapper.SetServerAgentTLSConfig)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/api/v1/servers/{serverId}/agent/install", wrapper.InstallServerAgent)
@@ -10947,13 +10947,13 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/api/v1/agent/enroll", wrapper.EnrollAgent)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/api/v1/servers/{serverId}/agent/update-ssh", wrapper.UpdateServerAgentOverSsh)
+		r.Post(options.BaseURL+"/api/v1/servers/{serverId}/agent/update-ssh", wrapper.UpdateServerAgentOverSSH)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/servers/{serverId}/agent/update-ssh/{jobId}", wrapper.GetServerAgentUpdateJob)
 	})
 	r.Group(func(r chi.Router) {
-		r.Post(options.BaseURL+"/api/v1/servers/{serverId}/agent/uninstall", wrapper.UninstallServerAgentOverSsh)
+		r.Post(options.BaseURL+"/api/v1/servers/{serverId}/agent/uninstall", wrapper.UninstallServerAgentOverSSH)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api/v1/servers/{serverId}/agent/uninstall/{jobId}", wrapper.GetServerAgentUninstallJob)
@@ -19895,89 +19895,25 @@ func (response RevokeServerAgentCertificates404JSONResponse) VisitRevokeServerAg
 	return err
 }
 
-type DeleteServerAgentTlsConfigRequestObject struct {
+type DeleteServerAgentTLSConfigRequestObject struct {
 	ServerId openapi_types.UUID `json:"serverId"`
 }
 
-type DeleteServerAgentTlsConfigResponseObject interface {
-	VisitDeleteServerAgentTlsConfigResponse(w http.ResponseWriter) error
+type DeleteServerAgentTLSConfigResponseObject interface {
+	VisitDeleteServerAgentTLSConfigResponse(w http.ResponseWriter) error
 }
 
-type DeleteServerAgentTlsConfig204Response struct {
+type DeleteServerAgentTLSConfig204Response struct {
 }
 
-func (response DeleteServerAgentTlsConfig204Response) VisitDeleteServerAgentTlsConfigResponse(w http.ResponseWriter) error {
+func (response DeleteServerAgentTLSConfig204Response) VisitDeleteServerAgentTLSConfigResponse(w http.ResponseWriter) error {
 	w.WriteHeader(204)
 	return nil
 }
 
-type DeleteServerAgentTlsConfig401JSONResponse struct{ UnauthorizedJSONResponse }
+type DeleteServerAgentTLSConfig401JSONResponse struct{ UnauthorizedJSONResponse }
 
-func (response DeleteServerAgentTlsConfig401JSONResponse) VisitDeleteServerAgentTlsConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type DeleteServerAgentTlsConfig403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response DeleteServerAgentTlsConfig403JSONResponse) VisitDeleteServerAgentTlsConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type DeleteServerAgentTlsConfig404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response DeleteServerAgentTlsConfig404JSONResponse) VisitDeleteServerAgentTlsConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetServerAgentTlsConfigRequestObject struct {
-	ServerId openapi_types.UUID `json:"serverId"`
-}
-
-type GetServerAgentTlsConfigResponseObject interface {
-	VisitGetServerAgentTlsConfigResponse(w http.ResponseWriter) error
-}
-
-type GetServerAgentTlsConfig200JSONResponse ServerAgentTLSConfig
-
-func (response GetServerAgentTlsConfig200JSONResponse) VisitGetServerAgentTlsConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type GetServerAgentTlsConfig401JSONResponse struct{ UnauthorizedJSONResponse }
-
-func (response GetServerAgentTlsConfig401JSONResponse) VisitGetServerAgentTlsConfigResponse(w http.ResponseWriter) error {
+func (response DeleteServerAgentTLSConfig401JSONResponse) VisitDeleteServerAgentTLSConfigResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -19989,9 +19925,9 @@ func (response GetServerAgentTlsConfig401JSONResponse) VisitGetServerAgentTlsCon
 	return err
 }
 
-type GetServerAgentTlsConfig403JSONResponse struct{ ForbiddenJSONResponse }
+type DeleteServerAgentTLSConfig403JSONResponse struct{ ForbiddenJSONResponse }
 
-func (response GetServerAgentTlsConfig403JSONResponse) VisitGetServerAgentTlsConfigResponse(w http.ResponseWriter) error {
+func (response DeleteServerAgentTLSConfig403JSONResponse) VisitDeleteServerAgentTLSConfigResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20003,9 +19939,9 @@ func (response GetServerAgentTlsConfig403JSONResponse) VisitGetServerAgentTlsCon
 	return err
 }
 
-type GetServerAgentTlsConfig404JSONResponse struct{ NotFoundJSONResponse }
+type DeleteServerAgentTLSConfig404JSONResponse struct{ NotFoundJSONResponse }
 
-func (response GetServerAgentTlsConfig404JSONResponse) VisitGetServerAgentTlsConfigResponse(w http.ResponseWriter) error {
+func (response DeleteServerAgentTLSConfig404JSONResponse) VisitDeleteServerAgentTLSConfigResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20017,18 +19953,17 @@ func (response GetServerAgentTlsConfig404JSONResponse) VisitGetServerAgentTlsCon
 	return err
 }
 
-type SetServerAgentTlsConfigRequestObject struct {
+type GetServerAgentTLSConfigRequestObject struct {
 	ServerId openapi_types.UUID `json:"serverId"`
-	Body     *SetServerAgentTlsConfigJSONRequestBody
 }
 
-type SetServerAgentTlsConfigResponseObject interface {
-	VisitSetServerAgentTlsConfigResponse(w http.ResponseWriter) error
+type GetServerAgentTLSConfigResponseObject interface {
+	VisitGetServerAgentTLSConfigResponse(w http.ResponseWriter) error
 }
 
-type SetServerAgentTlsConfig200JSONResponse ServerAgentTLSConfig
+type GetServerAgentTLSConfig200JSONResponse ServerAgentTLSConfig
 
-func (response SetServerAgentTlsConfig200JSONResponse) VisitSetServerAgentTlsConfigResponse(w http.ResponseWriter) error {
+func (response GetServerAgentTLSConfig200JSONResponse) VisitGetServerAgentTLSConfigResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20040,9 +19975,74 @@ func (response SetServerAgentTlsConfig200JSONResponse) VisitSetServerAgentTlsCon
 	return err
 }
 
-type SetServerAgentTlsConfig400JSONResponse struct{ BadRequestJSONResponse }
+type GetServerAgentTLSConfig401JSONResponse struct{ UnauthorizedJSONResponse }
 
-func (response SetServerAgentTlsConfig400JSONResponse) VisitSetServerAgentTlsConfigResponse(w http.ResponseWriter) error {
+func (response GetServerAgentTLSConfig401JSONResponse) VisitGetServerAgentTLSConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerAgentTLSConfig403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetServerAgentTLSConfig403JSONResponse) VisitGetServerAgentTLSConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetServerAgentTLSConfig404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetServerAgentTLSConfig404JSONResponse) VisitGetServerAgentTLSConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetServerAgentTLSConfigRequestObject struct {
+	ServerId openapi_types.UUID `json:"serverId"`
+	Body     *SetServerAgentTLSConfigJSONRequestBody
+}
+
+type SetServerAgentTLSConfigResponseObject interface {
+	VisitSetServerAgentTLSConfigResponse(w http.ResponseWriter) error
+}
+
+type SetServerAgentTLSConfig200JSONResponse ServerAgentTLSConfig
+
+func (response SetServerAgentTLSConfig200JSONResponse) VisitSetServerAgentTLSConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetServerAgentTLSConfig400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetServerAgentTLSConfig400JSONResponse) VisitSetServerAgentTLSConfigResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20054,9 +20054,9 @@ func (response SetServerAgentTlsConfig400JSONResponse) VisitSetServerAgentTlsCon
 	return err
 }
 
-type SetServerAgentTlsConfig401JSONResponse struct{ UnauthorizedJSONResponse }
+type SetServerAgentTLSConfig401JSONResponse struct{ UnauthorizedJSONResponse }
 
-func (response SetServerAgentTlsConfig401JSONResponse) VisitSetServerAgentTlsConfigResponse(w http.ResponseWriter) error {
+func (response SetServerAgentTLSConfig401JSONResponse) VisitSetServerAgentTLSConfigResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20068,9 +20068,9 @@ func (response SetServerAgentTlsConfig401JSONResponse) VisitSetServerAgentTlsCon
 	return err
 }
 
-type SetServerAgentTlsConfig403JSONResponse struct{ ForbiddenJSONResponse }
+type SetServerAgentTLSConfig403JSONResponse struct{ ForbiddenJSONResponse }
 
-func (response SetServerAgentTlsConfig403JSONResponse) VisitSetServerAgentTlsConfigResponse(w http.ResponseWriter) error {
+func (response SetServerAgentTLSConfig403JSONResponse) VisitSetServerAgentTLSConfigResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20082,9 +20082,9 @@ func (response SetServerAgentTlsConfig403JSONResponse) VisitSetServerAgentTlsCon
 	return err
 }
 
-type SetServerAgentTlsConfig404JSONResponse struct{ NotFoundJSONResponse }
+type SetServerAgentTLSConfig404JSONResponse struct{ NotFoundJSONResponse }
 
-func (response SetServerAgentTlsConfig404JSONResponse) VisitSetServerAgentTlsConfigResponse(w http.ResponseWriter) error {
+func (response SetServerAgentTLSConfig404JSONResponse) VisitSetServerAgentTLSConfigResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20096,18 +20096,18 @@ func (response SetServerAgentTlsConfig404JSONResponse) VisitSetServerAgentTlsCon
 	return err
 }
 
-type UninstallServerAgentOverSshRequestObject struct {
+type UninstallServerAgentOverSSHRequestObject struct {
 	ServerId openapi_types.UUID `json:"serverId"`
-	Body     *UninstallServerAgentOverSshJSONRequestBody
+	Body     *UninstallServerAgentOverSSHJSONRequestBody
 }
 
-type UninstallServerAgentOverSshResponseObject interface {
-	VisitUninstallServerAgentOverSshResponse(w http.ResponseWriter) error
+type UninstallServerAgentOverSSHResponseObject interface {
+	VisitUninstallServerAgentOverSSHResponse(w http.ResponseWriter) error
 }
 
-type UninstallServerAgentOverSsh202JSONResponse ServerAgentInstallJob
+type UninstallServerAgentOverSSH202JSONResponse ServerAgentInstallJob
 
-func (response UninstallServerAgentOverSsh202JSONResponse) VisitUninstallServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UninstallServerAgentOverSSH202JSONResponse) VisitUninstallServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20119,9 +20119,9 @@ func (response UninstallServerAgentOverSsh202JSONResponse) VisitUninstallServerA
 	return err
 }
 
-type UninstallServerAgentOverSsh400JSONResponse struct{ BadRequestJSONResponse }
+type UninstallServerAgentOverSSH400JSONResponse struct{ BadRequestJSONResponse }
 
-func (response UninstallServerAgentOverSsh400JSONResponse) VisitUninstallServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UninstallServerAgentOverSSH400JSONResponse) VisitUninstallServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20133,9 +20133,9 @@ func (response UninstallServerAgentOverSsh400JSONResponse) VisitUninstallServerA
 	return err
 }
 
-type UninstallServerAgentOverSsh401JSONResponse struct{ UnauthorizedJSONResponse }
+type UninstallServerAgentOverSSH401JSONResponse struct{ UnauthorizedJSONResponse }
 
-func (response UninstallServerAgentOverSsh401JSONResponse) VisitUninstallServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UninstallServerAgentOverSSH401JSONResponse) VisitUninstallServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20147,9 +20147,9 @@ func (response UninstallServerAgentOverSsh401JSONResponse) VisitUninstallServerA
 	return err
 }
 
-type UninstallServerAgentOverSsh403JSONResponse struct{ ForbiddenJSONResponse }
+type UninstallServerAgentOverSSH403JSONResponse struct{ ForbiddenJSONResponse }
 
-func (response UninstallServerAgentOverSsh403JSONResponse) VisitUninstallServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UninstallServerAgentOverSSH403JSONResponse) VisitUninstallServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20161,9 +20161,9 @@ func (response UninstallServerAgentOverSsh403JSONResponse) VisitUninstallServerA
 	return err
 }
 
-type UninstallServerAgentOverSsh404JSONResponse struct{ NotFoundJSONResponse }
+type UninstallServerAgentOverSSH404JSONResponse struct{ NotFoundJSONResponse }
 
-func (response UninstallServerAgentOverSsh404JSONResponse) VisitUninstallServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UninstallServerAgentOverSSH404JSONResponse) VisitUninstallServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20175,9 +20175,9 @@ func (response UninstallServerAgentOverSsh404JSONResponse) VisitUninstallServerA
 	return err
 }
 
-type UninstallServerAgentOverSsh409JSONResponse struct{ ConflictJSONResponse }
+type UninstallServerAgentOverSSH409JSONResponse struct{ ConflictJSONResponse }
 
-func (response UninstallServerAgentOverSsh409JSONResponse) VisitUninstallServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UninstallServerAgentOverSSH409JSONResponse) VisitUninstallServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20332,18 +20332,18 @@ func (response UpdateServerAgent502JSONResponse) VisitUpdateServerAgentResponse(
 	return err
 }
 
-type UpdateServerAgentOverSshRequestObject struct {
+type UpdateServerAgentOverSSHRequestObject struct {
 	ServerId openapi_types.UUID `json:"serverId"`
-	Body     *UpdateServerAgentOverSshJSONRequestBody
+	Body     *UpdateServerAgentOverSSHJSONRequestBody
 }
 
-type UpdateServerAgentOverSshResponseObject interface {
-	VisitUpdateServerAgentOverSshResponse(w http.ResponseWriter) error
+type UpdateServerAgentOverSSHResponseObject interface {
+	VisitUpdateServerAgentOverSSHResponse(w http.ResponseWriter) error
 }
 
-type UpdateServerAgentOverSsh202JSONResponse ServerAgentInstallJob
+type UpdateServerAgentOverSSH202JSONResponse ServerAgentInstallJob
 
-func (response UpdateServerAgentOverSsh202JSONResponse) VisitUpdateServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UpdateServerAgentOverSSH202JSONResponse) VisitUpdateServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20355,9 +20355,9 @@ func (response UpdateServerAgentOverSsh202JSONResponse) VisitUpdateServerAgentOv
 	return err
 }
 
-type UpdateServerAgentOverSsh400JSONResponse struct{ BadRequestJSONResponse }
+type UpdateServerAgentOverSSH400JSONResponse struct{ BadRequestJSONResponse }
 
-func (response UpdateServerAgentOverSsh400JSONResponse) VisitUpdateServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UpdateServerAgentOverSSH400JSONResponse) VisitUpdateServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20369,9 +20369,9 @@ func (response UpdateServerAgentOverSsh400JSONResponse) VisitUpdateServerAgentOv
 	return err
 }
 
-type UpdateServerAgentOverSsh401JSONResponse struct{ UnauthorizedJSONResponse }
+type UpdateServerAgentOverSSH401JSONResponse struct{ UnauthorizedJSONResponse }
 
-func (response UpdateServerAgentOverSsh401JSONResponse) VisitUpdateServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UpdateServerAgentOverSSH401JSONResponse) VisitUpdateServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20383,9 +20383,9 @@ func (response UpdateServerAgentOverSsh401JSONResponse) VisitUpdateServerAgentOv
 	return err
 }
 
-type UpdateServerAgentOverSsh403JSONResponse struct{ ForbiddenJSONResponse }
+type UpdateServerAgentOverSSH403JSONResponse struct{ ForbiddenJSONResponse }
 
-func (response UpdateServerAgentOverSsh403JSONResponse) VisitUpdateServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UpdateServerAgentOverSSH403JSONResponse) VisitUpdateServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20397,9 +20397,9 @@ func (response UpdateServerAgentOverSsh403JSONResponse) VisitUpdateServerAgentOv
 	return err
 }
 
-type UpdateServerAgentOverSsh404JSONResponse struct{ NotFoundJSONResponse }
+type UpdateServerAgentOverSSH404JSONResponse struct{ NotFoundJSONResponse }
 
-func (response UpdateServerAgentOverSsh404JSONResponse) VisitUpdateServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UpdateServerAgentOverSSH404JSONResponse) VisitUpdateServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -20411,9 +20411,9 @@ func (response UpdateServerAgentOverSsh404JSONResponse) VisitUpdateServerAgentOv
 	return err
 }
 
-type UpdateServerAgentOverSsh409JSONResponse struct{ ConflictJSONResponse }
+type UpdateServerAgentOverSSH409JSONResponse struct{ ConflictJSONResponse }
 
-func (response UpdateServerAgentOverSsh409JSONResponse) VisitUpdateServerAgentOverSshResponse(w http.ResponseWriter) error {
+func (response UpdateServerAgentOverSSH409JSONResponse) VisitUpdateServerAgentOverSSHResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -23260,27 +23260,27 @@ type StrictServerInterface interface {
 	// RevokeServerAgentCertificates Revoke every certificate of the server's agent
 	// (POST /api/v1/servers/{serverId}/agent/revoke-certificates)
 	RevokeServerAgentCertificates(ctx context.Context, request RevokeServerAgentCertificatesRequestObject) (RevokeServerAgentCertificatesResponseObject, error)
-	// DeleteServerAgentTlsConfig Disable registered agent TLS configuration
+	// DeleteServerAgentTLSConfig Disable registered agent TLS configuration
 	// (DELETE /api/v1/servers/{serverId}/agent/tls)
-	DeleteServerAgentTlsConfig(ctx context.Context, request DeleteServerAgentTlsConfigRequestObject) (DeleteServerAgentTlsConfigResponseObject, error)
-	// GetServerAgentTlsConfig Read registered agent TLS trust configuration
+	DeleteServerAgentTLSConfig(ctx context.Context, request DeleteServerAgentTLSConfigRequestObject) (DeleteServerAgentTLSConfigResponseObject, error)
+	// GetServerAgentTLSConfig Read registered agent TLS trust configuration
 	// (GET /api/v1/servers/{serverId}/agent/tls)
-	GetServerAgentTlsConfig(ctx context.Context, request GetServerAgentTlsConfigRequestObject) (GetServerAgentTlsConfigResponseObject, error)
-	// SetServerAgentTlsConfig Configure registered agent TLS trust
+	GetServerAgentTLSConfig(ctx context.Context, request GetServerAgentTLSConfigRequestObject) (GetServerAgentTLSConfigResponseObject, error)
+	// SetServerAgentTLSConfig Configure registered agent TLS trust
 	// (PUT /api/v1/servers/{serverId}/agent/tls)
-	SetServerAgentTlsConfig(ctx context.Context, request SetServerAgentTlsConfigRequestObject) (SetServerAgentTlsConfigResponseObject, error)
-	// UninstallServerAgentOverSsh Uninstall a registered agent from the host over SSH
+	SetServerAgentTLSConfig(ctx context.Context, request SetServerAgentTLSConfigRequestObject) (SetServerAgentTLSConfigResponseObject, error)
+	// UninstallServerAgentOverSSH Uninstall a registered agent from the host over SSH
 	// (POST /api/v1/servers/{serverId}/agent/uninstall)
-	UninstallServerAgentOverSsh(ctx context.Context, request UninstallServerAgentOverSshRequestObject) (UninstallServerAgentOverSshResponseObject, error)
+	UninstallServerAgentOverSSH(ctx context.Context, request UninstallServerAgentOverSSHRequestObject) (UninstallServerAgentOverSSHResponseObject, error)
 	// GetServerAgentUninstallJob Read transient existing-agent uninstall progress
 	// (GET /api/v1/servers/{serverId}/agent/uninstall/{jobId})
 	GetServerAgentUninstallJob(ctx context.Context, request GetServerAgentUninstallJobRequestObject) (GetServerAgentUninstallJobResponseObject, error)
 	// UpdateServerAgent Replace the edge agent with the current build
 	// (POST /api/v1/servers/{serverId}/agent/update)
 	UpdateServerAgent(ctx context.Context, request UpdateServerAgentRequestObject) (UpdateServerAgentResponseObject, error)
-	// UpdateServerAgentOverSsh Update an existing registered agent and configure HTTPS
+	// UpdateServerAgentOverSSH Update an existing registered agent and configure HTTPS
 	// (POST /api/v1/servers/{serverId}/agent/update-ssh)
-	UpdateServerAgentOverSsh(ctx context.Context, request UpdateServerAgentOverSshRequestObject) (UpdateServerAgentOverSshResponseObject, error)
+	UpdateServerAgentOverSSH(ctx context.Context, request UpdateServerAgentOverSSHRequestObject) (UpdateServerAgentOverSSHResponseObject, error)
 	// GetServerAgentUpdateJob Read transient existing-agent update progress
 	// (GET /api/v1/servers/{serverId}/agent/update-ssh/{jobId})
 	GetServerAgentUpdateJob(ctx context.Context, request GetServerAgentUpdateJobRequestObject) (GetServerAgentUpdateJobResponseObject, error)
@@ -27002,25 +27002,25 @@ func (sh *strictHandler) RevokeServerAgentCertificates(w http.ResponseWriter, r 
 	}
 }
 
-// DeleteServerAgentTlsConfig operation middleware
-func (sh *strictHandler) DeleteServerAgentTlsConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
-	var request DeleteServerAgentTlsConfigRequestObject
+// DeleteServerAgentTLSConfig operation middleware
+func (sh *strictHandler) DeleteServerAgentTLSConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+	var request DeleteServerAgentTLSConfigRequestObject
 
 	request.ServerId = serverId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.DeleteServerAgentTlsConfig(ctx, request.(DeleteServerAgentTlsConfigRequestObject))
+		return sh.ssi.DeleteServerAgentTLSConfig(ctx, request.(DeleteServerAgentTLSConfigRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "DeleteServerAgentTlsConfig")
+		handler = middleware(handler, "DeleteServerAgentTLSConfig")
 	}
 
 	response, err := handler(r.Context(), w, r, request)
 
 	if err != nil {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(DeleteServerAgentTlsConfigResponseObject); ok {
-		if err := validResponse.VisitDeleteServerAgentTlsConfigResponse(w); err != nil {
+	} else if validResponse, ok := response.(DeleteServerAgentTLSConfigResponseObject); ok {
+		if err := validResponse.VisitDeleteServerAgentTLSConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -27028,25 +27028,25 @@ func (sh *strictHandler) DeleteServerAgentTlsConfig(w http.ResponseWriter, r *ht
 	}
 }
 
-// GetServerAgentTlsConfig operation middleware
-func (sh *strictHandler) GetServerAgentTlsConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
-	var request GetServerAgentTlsConfigRequestObject
+// GetServerAgentTLSConfig operation middleware
+func (sh *strictHandler) GetServerAgentTLSConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+	var request GetServerAgentTLSConfigRequestObject
 
 	request.ServerId = serverId
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.GetServerAgentTlsConfig(ctx, request.(GetServerAgentTlsConfigRequestObject))
+		return sh.ssi.GetServerAgentTLSConfig(ctx, request.(GetServerAgentTLSConfigRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "GetServerAgentTlsConfig")
+		handler = middleware(handler, "GetServerAgentTLSConfig")
 	}
 
 	response, err := handler(r.Context(), w, r, request)
 
 	if err != nil {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(GetServerAgentTlsConfigResponseObject); ok {
-		if err := validResponse.VisitGetServerAgentTlsConfigResponse(w); err != nil {
+	} else if validResponse, ok := response.(GetServerAgentTLSConfigResponseObject); ok {
+		if err := validResponse.VisitGetServerAgentTLSConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -27054,13 +27054,13 @@ func (sh *strictHandler) GetServerAgentTlsConfig(w http.ResponseWriter, r *http.
 	}
 }
 
-// SetServerAgentTlsConfig operation middleware
-func (sh *strictHandler) SetServerAgentTlsConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
-	var request SetServerAgentTlsConfigRequestObject
+// SetServerAgentTLSConfig operation middleware
+func (sh *strictHandler) SetServerAgentTLSConfig(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+	var request SetServerAgentTLSConfigRequestObject
 
 	request.ServerId = serverId
 
-	var body SetServerAgentTlsConfigJSONRequestBody
+	var body SetServerAgentTLSConfigJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
 		return
@@ -27068,18 +27068,18 @@ func (sh *strictHandler) SetServerAgentTlsConfig(w http.ResponseWriter, r *http.
 	request.Body = &body
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.SetServerAgentTlsConfig(ctx, request.(SetServerAgentTlsConfigRequestObject))
+		return sh.ssi.SetServerAgentTLSConfig(ctx, request.(SetServerAgentTLSConfigRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "SetServerAgentTlsConfig")
+		handler = middleware(handler, "SetServerAgentTLSConfig")
 	}
 
 	response, err := handler(r.Context(), w, r, request)
 
 	if err != nil {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(SetServerAgentTlsConfigResponseObject); ok {
-		if err := validResponse.VisitSetServerAgentTlsConfigResponse(w); err != nil {
+	} else if validResponse, ok := response.(SetServerAgentTLSConfigResponseObject); ok {
+		if err := validResponse.VisitSetServerAgentTLSConfigResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -27087,13 +27087,13 @@ func (sh *strictHandler) SetServerAgentTlsConfig(w http.ResponseWriter, r *http.
 	}
 }
 
-// UninstallServerAgentOverSsh operation middleware
-func (sh *strictHandler) UninstallServerAgentOverSsh(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
-	var request UninstallServerAgentOverSshRequestObject
+// UninstallServerAgentOverSSH operation middleware
+func (sh *strictHandler) UninstallServerAgentOverSSH(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+	var request UninstallServerAgentOverSSHRequestObject
 
 	request.ServerId = serverId
 
-	var body UninstallServerAgentOverSshJSONRequestBody
+	var body UninstallServerAgentOverSSHJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
 		return
@@ -27101,18 +27101,18 @@ func (sh *strictHandler) UninstallServerAgentOverSsh(w http.ResponseWriter, r *h
 	request.Body = &body
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.UninstallServerAgentOverSsh(ctx, request.(UninstallServerAgentOverSshRequestObject))
+		return sh.ssi.UninstallServerAgentOverSSH(ctx, request.(UninstallServerAgentOverSSHRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "UninstallServerAgentOverSsh")
+		handler = middleware(handler, "UninstallServerAgentOverSSH")
 	}
 
 	response, err := handler(r.Context(), w, r, request)
 
 	if err != nil {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(UninstallServerAgentOverSshResponseObject); ok {
-		if err := validResponse.VisitUninstallServerAgentOverSshResponse(w); err != nil {
+	} else if validResponse, ok := response.(UninstallServerAgentOverSSHResponseObject); ok {
+		if err := validResponse.VisitUninstallServerAgentOverSSHResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -27173,13 +27173,13 @@ func (sh *strictHandler) UpdateServerAgent(w http.ResponseWriter, r *http.Reques
 	}
 }
 
-// UpdateServerAgentOverSsh operation middleware
-func (sh *strictHandler) UpdateServerAgentOverSsh(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
-	var request UpdateServerAgentOverSshRequestObject
+// UpdateServerAgentOverSSH operation middleware
+func (sh *strictHandler) UpdateServerAgentOverSSH(w http.ResponseWriter, r *http.Request, serverId openapi_types.UUID) {
+	var request UpdateServerAgentOverSSHRequestObject
 
 	request.ServerId = serverId
 
-	var body UpdateServerAgentOverSshJSONRequestBody
+	var body UpdateServerAgentOverSSHJSONRequestBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
 		return
@@ -27187,18 +27187,18 @@ func (sh *strictHandler) UpdateServerAgentOverSsh(w http.ResponseWriter, r *http
 	request.Body = &body
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.UpdateServerAgentOverSsh(ctx, request.(UpdateServerAgentOverSshRequestObject))
+		return sh.ssi.UpdateServerAgentOverSSH(ctx, request.(UpdateServerAgentOverSSHRequestObject))
 	}
 	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "UpdateServerAgentOverSsh")
+		handler = middleware(handler, "UpdateServerAgentOverSSH")
 	}
 
 	response, err := handler(r.Context(), w, r, request)
 
 	if err != nil {
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(UpdateServerAgentOverSshResponseObject); ok {
-		if err := validResponse.VisitUpdateServerAgentOverSshResponse(w); err != nil {
+	} else if validResponse, ok := response.(UpdateServerAgentOverSSHResponseObject); ok {
+		if err := validResponse.VisitUpdateServerAgentOverSSHResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
@@ -28659,69 +28659,69 @@ var swaggerSpec = []string{
 	"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",
-	"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",
-	"9x9//ycAAP//",
+	"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",
+	"7/8EAAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

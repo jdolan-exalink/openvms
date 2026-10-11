@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"math"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -11,12 +12,39 @@ import (
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
 )
 
+func TestSignedBytesSaturatesValuesOutsideProtoRange(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   uint64
+		want int64
+	}{
+		{name: "zero", in: 0, want: 0},
+		{name: "maximum signed value", in: math.MaxInt64, want: math.MaxInt64},
+		{name: "unsigned overflow", in: math.MaxUint64, want: math.MaxInt64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := signedBytes(tc.in); got != tc.want {
+				t.Fatalf("signedBytes(%d) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUsedBytesDoesNotUnderflowWhenFreeExceedsTotal(t *testing.T) {
+	if got := usedBytes(10, 11); got != 0 {
+		t.Fatalf("usedBytes(10, 11) = %d, want 0", got)
+	}
+	if got := usedBytes(10, 3); got != 7 {
+		t.Fatalf("usedBytes(10, 3) = %d, want 7", got)
+	}
+}
+
 type mockNodeServer struct {
 	openvmsv1.UnimplementedNodeServiceServer
 	heartbeatCount atomic.Int32
 }
 
-func (m *mockNodeServer) Heartbeat(ctx context.Context, req *openvmsv1.NodeHeartbeatRequest) (*openvmsv1.NodeHeartbeatResponse, error) {
+func (m *mockNodeServer) Heartbeat(_ context.Context, _ *openvmsv1.NodeHeartbeatRequest) (*openvmsv1.NodeHeartbeatResponse, error) {
 	m.heartbeatCount.Add(1)
 	return &openvmsv1.NodeHeartbeatResponse{
 		Acknowledged: true,

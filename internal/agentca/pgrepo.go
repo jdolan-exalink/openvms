@@ -34,7 +34,7 @@ func (r *PgRepo) GetCA(ctx context.Context) (*CARecord, error) {
 		return nil
 	})
 	if err != nil {
-		if store.Classify(err) == store.ErrNotFound {
+		if errors.Is(store.Classify(err), store.ErrNotFound) {
 			return nil, ErrNoCA
 		}
 		return nil, err

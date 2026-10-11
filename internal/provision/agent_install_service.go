@@ -168,6 +168,7 @@ func (s *Service) StartServerAgentInstall(ctx context.Context, actor authz.Actor
 	request.hostKeyTrust = func(ctx context.Context, fingerprint string) error {
 		return s.trustAgentSSHHostKey(ctx, actor, serverID, in.Host, in.Port, fingerprint)
 	}
+	// #nosec G118 -- durable install job must outlive the HTTP request without inheriting request-scoped secrets.
 	go s.runServerAgentInstall(context.Background(), actor, job, request, token, certificate)
 	reservationOwned = false
 	return job.read(), nil

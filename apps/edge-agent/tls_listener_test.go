@@ -238,8 +238,8 @@ func TestAgentTLSServerRequiresTLS12(t *testing.T) {
 }
 
 func TestAgentListenerFailureShutsDownBothServers(t *testing.T) {
-	plain := &http.Server{Addr: "plain"}
-	tlsServer := &http.Server{Addr: "tls", TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
+	plain := &http.Server{Addr: "plain", ReadHeaderTimeout: 5 * time.Second}
+	tlsServer := &http.Server{Addr: "tls", ReadHeaderTimeout: 5 * time.Second, TLSConfig: &tls.Config{MinVersion: tls.VersionTLS12}}
 	stop := make(chan struct{})
 	serveCalls := make(chan *http.Server, 2)
 	wantErr := errors.New("injected listen failure")

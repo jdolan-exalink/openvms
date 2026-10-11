@@ -54,8 +54,9 @@ func TestProbeHandlerProjectsOnlyBoundedSanitizedResults(t *testing.T) {
 		gotEndpoint, gotUsername, gotPassword = endpoint.String(), username, password
 		return ProbeResult{
 			Information: onvif.DeviceInformation{Manufacturer: long + pass, Model: "model-" + pass, SerialNumber: "serial-" + user, HardwareID: "hw-agent-secret"},
-			Services:    []onvif.Service{{Namespace: "namespace-" + pass, Endpoint: "http://192.0.2.11:8080/sensitive-path"}, {Endpoint: "http://198.51.100.4:80/private"}, {Endpoint: "http://camera.example/device"}, {Endpoint: "http://user:pass@192.0.2.12/device"}},
-			Clock:       onvif.DeviceClock{DateTimeType: "NTP", UTC: onvif.DateTimeValue{Time: onvif.CalendarTime{Hour: 12}}},
+			// #nosec G101 -- literal URL credentials are rejection fixtures, not secrets.
+			Services: []onvif.Service{{Namespace: "namespace-" + pass, Endpoint: "http://192.0.2.11:8080/sensitive-path"}, {Endpoint: "http://198.51.100.4:80/private"}, {Endpoint: "http://camera.example/device"}, {Endpoint: "http://user:pass@192.0.2.12/device"}},
+			Clock:    onvif.DeviceClock{DateTimeType: "NTP", UTC: onvif.DateTimeValue{Time: onvif.CalendarTime{Hour: 12}}},
 		}, nil
 	})
 	if err != nil {
@@ -109,6 +110,7 @@ func TestProbeHandlerRejectsInvalidRequestsBeforeProbe(t *testing.T) {
 		{name: "DNS hostname", body: `{"endpoint":"http://camera.example/device","username":"u","password":"p"}`, status: http.StatusBadRequest},
 		{name: "IPv6 literal", body: `{"endpoint":"http://[2001:db8::1]/device","username":"u","password":"p"}`, status: http.StatusBadRequest},
 		{name: "outside allowed CIDR", body: `{"endpoint":"http://198.51.100.4/device","username":"u","password":"p"}`, status: http.StatusForbidden},
+		// #nosec G101 -- literal URL credentials are a rejection fixture.
 		{name: "endpoint userinfo", body: `{"endpoint":"http://user:pass@192.0.2.10/device","username":"u","password":"p"}`, status: http.StatusBadRequest},
 		{name: "endpoint query", body: `{"endpoint":"http://192.0.2.10/device?token=secret","username":"u","password":"p"}`, status: http.StatusBadRequest},
 		{name: "endpoint fragment", body: `{"endpoint":"http://192.0.2.10/device#secret","username":"u","password":"p"}`, status: http.StatusBadRequest},
@@ -207,9 +209,7 @@ func TestProbeHandlerBoundsOverallProbeAndReadOnlyCalls(t *testing.T) {
 	var targetScheme, targetHost string
 	var overallDeadline time.Time
 	prober := NewDeviceProbe(roundTripFunc(func(r *http.Request) (*http.Response, error) {
-		if deadline, ok := r.Context().Deadline(); ok && time.Until(deadline) <= probeOperationTimeout {
-			// The ONVIF client adds the per-operation bound to the handler's outer budget.
-		} else {
+		if deadline, ok := r.Context().Deadline(); !ok || time.Until(deadline) > probeOperationTimeout {
 			t.Errorf("missing per-operation timeout deadline")
 		}
 		targetScheme, targetHost = r.URL.Scheme, r.URL.Host

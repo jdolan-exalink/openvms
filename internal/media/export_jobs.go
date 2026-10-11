@@ -230,7 +230,7 @@ func scanExportJob(row pgx.Row) (ExportJob, error) {
 
 func (s *Service) ListExportJobs(ctx context.Context, actor authz.Actor) ([]ExportJob, error) {
 	var out []ExportJob
-	err := s.rawTx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
+	err := s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
 		rows, err := tx.Query(ctx, `
 SELECT `+exportJobColumns+`
 FROM export_jobs j
@@ -299,7 +299,7 @@ ORDER BY i.created_at ASC`, jobIDs)
 
 func (s *Service) GetExportJob(ctx context.Context, actor authz.Actor, id uuid.UUID) (ExportJob, error) {
 	var job ExportJob
-	err := s.rawTx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
+	err := s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
 		row := tx.QueryRow(ctx, `
 SELECT `+exportJobColumns+`
 FROM export_jobs j
@@ -349,7 +349,7 @@ func (s *Service) CancelExportJob(ctx context.Context, actor authz.Actor, id uui
 	if err != nil {
 		return ExportJob{}, err
 	}
-	err = s.rawTx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
+	err = s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
 		tag, err := tx.Exec(ctx, `
 UPDATE export_jobs SET status = 'cancelled', updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL AND status IN ('queued', 'preparing', 'transferring', 'processing')`, id)
@@ -388,7 +388,7 @@ func (s *Service) RetryExportJob(ctx context.Context, actor authz.Actor, id uuid
 	if err != nil {
 		return ExportJob{}, err
 	}
-	err = s.rawTx(ctx, actor, func(tx pgx.Tx, c *access.Checker) error {
+	err = s.rawTx(ctx, actor, func(tx pgx.Tx, _ *access.Checker) error {
 		tag, err := tx.Exec(ctx, `
 UPDATE export_jobs SET status = 'queued', error = '', progress = 0, updated_at = now()
 WHERE id = $1 AND deleted_at IS NULL AND status IN ('failed', 'cancelled')`, id)

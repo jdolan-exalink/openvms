@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"math"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -21,6 +22,26 @@ import (
 )
 
 var eventSeq atomic.Int64
+
+func incrementEventSequence(current int64) (int64, bool) {
+	if current < 0 || current == math.MaxInt64 {
+		return 0, false
+	}
+	return current + 1, true
+}
+
+func nextEventSequence() (int64, bool) {
+	for {
+		current := eventSeq.Load()
+		next, ok := incrementEventSequence(current)
+		if !ok {
+			return 0, false
+		}
+		if eventSeq.CompareAndSwap(current, next) {
+			return next, true
+		}
+	}
+}
 
 // EventServer implements openvmsv1.EventServiceServer.
 type EventServer struct {
@@ -136,7 +157,10 @@ func (s *EventServer) PublishEvent(ctx context.Context, req *openvmsv1.OpenVMSEv
 		return nil, err
 	}
 
-	seq := eventSeq.Add(1)
+	seq, ok := nextEventSequence()
+	if !ok {
+		return nil, status.Error(codes.ResourceExhausted, "event sequence exhausted")
+	}
 	req.SequenceId = seq
 	if req.TimestampUnixNano == 0 {
 		req.TimestampUnixNano = time.Now().UnixNano()
@@ -178,6 +202,7 @@ func (s *EventServer) PublishEvent(ctx context.Context, req *openvmsv1.OpenVMSEv
 	}
 
 	s.Hub.Publish(realtime.Message{
+		// #nosec G115 -- nextEventSequence returns a positive int64 and refuses overflow.
 		Seq:      uint64(seq),
 		Envelope: env,
 	})
@@ -211,7 +236,10 @@ func mapEnvelopeToProto(env realtime.Envelope) *openvmsv1.OpenVMSEvent {
 		tsNano = time.Now().UnixNano()
 	}
 
-	seq := eventSeq.Add(1)
+	seq, ok := nextEventSequence()
+	if !ok {
+		seq = math.MaxInt64
+	}
 
 	return &openvmsv1.OpenVMSEvent{
 		Id:                env.ID,

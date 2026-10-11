@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync/atomic"
 	"time"
 
@@ -222,11 +223,11 @@ func (w *Worker) sendHeartbeat(ctx context.Context) error {
 	}
 	specs := &openvmsv1.NodeSpecs{
 		CpuUsagePct:       cpuPct,
-		RamTotalBytes:     int64(snap.MemoryTotal),
-		RamUsedBytes:      int64(snap.MemoryTotal - snap.MemoryAvailable),
+		RamTotalBytes:     signedBytes(snap.MemoryTotal),
+		RamUsedBytes:      usedBytes(snap.MemoryTotal, snap.MemoryAvailable),
 		GpuName:           snap.GPUName,
-		StorageTotalBytes: int64(snap.CCTVTotal),
-		StorageUsedBytes:  int64(snap.CCTVTotal - snap.CCTVFree),
+		StorageTotalBytes: signedBytes(snap.CCTVTotal),
+		StorageUsedBytes:  usedBytes(snap.CCTVTotal, snap.CCTVFree),
 	}
 
 	req := &openvmsv1.NodeHeartbeatRequest{
@@ -254,4 +255,18 @@ func (w *Worker) sendHeartbeat(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func signedBytes(value uint64) int64 {
+	if value > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(value)
+}
+
+func usedBytes(total, free uint64) int64 {
+	if free > total {
+		return 0
+	}
+	return signedBytes(total - free)
 }

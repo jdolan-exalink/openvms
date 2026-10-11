@@ -596,6 +596,7 @@ func (g *Gateway) exportJobDownload(w http.ResponseWriter, r *http.Request) {
 	defer zw.Close()
 
 	manifestFile := filepath.Join(job.LocalPath, "manifest.json")
+	// #nosec G304 -- export path is stored by the worker after authorization and is not client supplied.
 	if mData, err := os.ReadFile(manifestFile); err == nil {
 		if fw, err := zw.Create("manifest.json"); err == nil {
 			_, _ = fw.Write(mData)
@@ -872,6 +873,7 @@ func (g *Gateway) publicShareDownload(w http.ResponseWriter, r *http.Request) {
 	defer zw.Close()
 
 	manifestFile := filepath.Join(job.LocalPath, "manifest.json")
+	// #nosec G304 -- export path is stored by the worker after authorization and is not client supplied.
 	if mData, err := os.ReadFile(manifestFile); err == nil {
 		if fw, err := zw.Create("manifest.json"); err == nil {
 			_, _ = fw.Write(mData)

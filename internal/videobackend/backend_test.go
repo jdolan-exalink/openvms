@@ -21,7 +21,7 @@ func (m *mockFrigateAdapter) Version() string {
 	return "0.14.1"
 }
 
-func (m *mockFrigateAdapter) ListCameras(ctx context.Context) ([]frigate.Camera, error) {
+func (m *mockFrigateAdapter) ListCameras(_ context.Context) ([]frigate.Camera, error) {
 	return []frigate.Camera{
 		{
 			Name:       "front_gate",
@@ -34,7 +34,7 @@ func (m *mockFrigateAdapter) ListCameras(ctx context.Context) ([]frigate.Camera,
 	}, nil
 }
 
-func (m *mockFrigateAdapter) Recordings(ctx context.Context, camera string, after, before float64) ([]frigate.RecordingSegment, error) {
+func (m *mockFrigateAdapter) Recordings(_ context.Context, _ string, after, _ float64) ([]frigate.RecordingSegment, error) {
 	return []frigate.RecordingSegment{
 		{
 			StartTime: after,
@@ -45,7 +45,7 @@ func (m *mockFrigateAdapter) Recordings(ctx context.Context, camera string, afte
 	}, nil
 }
 
-func (m *mockFrigateAdapter) Reviews(ctx context.Context, q frigate.ReviewQuery) ([]frigate.Review, error) {
+func (m *mockFrigateAdapter) Reviews(_ context.Context, q frigate.ReviewQuery) ([]frigate.Review, error) {
 	end := q.After + 15
 	return []frigate.Review{
 		{
@@ -61,7 +61,7 @@ func (m *mockFrigateAdapter) Reviews(ctx context.Context, q frigate.ReviewQuery)
 	}, nil
 }
 
-func (m *mockFrigateAdapter) Capabilities(ctx context.Context) (frigate.Capabilities, error) {
+func (m *mockFrigateAdapter) Capabilities(_ context.Context) (frigate.Capabilities, error) {
 	return frigate.Capabilities{
 		PTZ:             true,
 		Audio:           true,

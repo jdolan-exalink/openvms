@@ -2,7 +2,6 @@ package control
 
 import (
 	"context"
-	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -58,7 +57,7 @@ func (s *NodeServer) ListNodes(ctx context.Context, req *openvmsv1.ListNodesRequ
 		Nodes: nodes,
 		Pagination: &openvmsv1.Pagination{
 			Page:       1,
-			PageSize:   int32(len(nodes)),
+			PageSize:   count32(len(nodes)),
 			TotalItems: int64(len(nodes)),
 			TotalPages: 1,
 		},
@@ -90,7 +89,7 @@ func (s *NodeServer) GetNode(ctx context.Context, req *openvmsv1.GetNodeRequest)
 	}, nil
 }
 
-func (s *NodeServer) Heartbeat(ctx context.Context, req *openvmsv1.NodeHeartbeatRequest) (*openvmsv1.NodeHeartbeatResponse, error) {
+func (s *NodeServer) Heartbeat(_ context.Context, req *openvmsv1.NodeHeartbeatRequest) (*openvmsv1.NodeHeartbeatResponse, error) {
 	if req.NodeId == "" {
 		return nil, status.Error(codes.InvalidArgument, "node_id is required")
 	}
@@ -191,16 +190,9 @@ func parseHostPort(rawURL string) (string, int32) {
 		return host, 80
 	}
 	p, err := strconv.Atoi(portStr)
-	if err != nil {
+	if err != nil || p < 1 || p > 65535 {
 		return host, 0
 	}
+	// #nosec G109 -- parsed port is validated in the inclusive 1..65535 range above.
 	return host, int32(p)
-}
-
-func isPrivateIP(ipStr string) bool {
-	ip := net.ParseIP(ipStr)
-	if ip == nil {
-		return false
-	}
-	return ip.IsPrivate() || ip.IsLoopback()
 }

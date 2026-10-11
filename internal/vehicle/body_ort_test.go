@@ -67,6 +67,7 @@ func TestBodyModelOnSampleCrops(t *testing.T) {
 		if entry.IsDir() {
 			continue
 		}
+		// #nosec G304 G703 -- test fixture path is derived from t.TempDir.
 		body, err := os.ReadFile(dir + "/" + entry.Name())
 		if err != nil {
 			t.Fatal(err)

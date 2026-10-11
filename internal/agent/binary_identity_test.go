@@ -18,6 +18,7 @@ func TestRunningBinaryIdentityUsesBoundedCurrentExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
@@ -40,6 +41,7 @@ func TestIdentityFromBinaryUsesEmbeddedBuildMetadataAndDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)

@@ -262,19 +262,29 @@ func (h *Handler) serve(ctx context.Context, conn *websocket.Conn, sub *Subscrip
 				return
 			}
 			batch := []Envelope{res.env}
+			batchWindow := time.NewTimer(100 * time.Millisecond)
+		collectBatch:
 			for len(batch) < 100 {
 				select {
 				case next := <-msgs:
 					if next.err != nil {
+						batchWindow.Stop()
 						h.closeWith(conn, next.err, writeTimeout)
 						return
 					}
 					batch = append(batch, next.env)
-				default:
-					goto drained
+				case <-batchWindow.C:
+					break collectBatch
+				case <-ctx.Done():
+					batchWindow.Stop()
+					return
+				case err := <-ended:
+					batchWindow.Stop()
+					h.closeWith(conn, err, writeTimeout)
+					return
 				}
 			}
-		drained:
+			batchWindow.Stop()
 			if len(batch) > 50 {
 				if err := writeJSON(BatchFrame{Op: OpBatch, Frames: batch}); err != nil {
 					return

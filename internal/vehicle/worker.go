@@ -5,12 +5,15 @@ import (
 	"context"
 	"errors"
 	"image"
+	"log/slog"
+	"time"
+
+	// Register image formats used by camera thumbnails.
 	_ "image/jpeg"
 	_ "image/png"
 
+	// Register WebP decoding for camera thumbnails.
 	_ "golang.org/x/image/webp"
-	"log/slog"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"

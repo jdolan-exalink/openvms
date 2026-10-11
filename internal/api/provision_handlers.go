@@ -3,9 +3,6 @@ package api
 import (
 	"context"
 
-	"github.com/google/uuid"
-	"github.com/oapi-codegen/runtime/types"
-
 	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/provision"
@@ -25,7 +22,7 @@ func (h *Handlers) StartServerProvision(ctx context.Context, r gen.StartServerPr
 	if r.Body.HostKey != nil {
 		hostKey = *r.Body.HostKey
 	}
-	snap, err := h.Provision.Start(ctx, a, provision.Request{SiteID: uuid.UUID(r.Body.SiteId), IP: r.Body.Ip, ServerName: r.Body.ServerName, User: r.Body.SshUser, Password: *r.Body.SshPassword, HostKey: hostKey, TrustOnFirstUse: trustOnFirstUse, AllowSystemDisk: allowSystemDisk})
+	snap, err := h.Provision.Start(ctx, a, provision.Request{SiteID: r.Body.SiteId, IP: r.Body.Ip, ServerName: r.Body.ServerName, User: r.Body.SshUser, Password: *r.Body.SshPassword, HostKey: hostKey, TrustOnFirstUse: trustOnFirstUse, AllowSystemDisk: allowSystemDisk})
 	if err != nil {
 		return nil, err
 	}
@@ -37,7 +34,7 @@ func (h *Handlers) GetServerProvision(ctx context.Context, r gen.GetServerProvis
 	if err != nil {
 		return nil, err
 	}
-	snap, err := h.Provision.Get(a, uuid.UUID(r.JobId))
+	snap, err := h.Provision.Get(a, r.JobId)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +52,7 @@ func (h *Handlers) InstallServerAgent(ctx context.Context, r gen.InstallServerAg
 	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
 		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
 	}
-	job, err := h.Provision.StartServerAgentInstall(ctx, a, uuid.UUID(r.ServerId), provision.AgentInstallStartRequest{
+	job, err := h.Provision.StartServerAgentInstall(ctx, a, r.ServerId, provision.AgentInstallStartRequest{
 		Host: r.Body.SshHost, Port: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
 	})
 	if err != nil {
@@ -69,14 +66,14 @@ func (h *Handlers) GetServerAgentInstallJob(ctx context.Context, r gen.GetServer
 	if err != nil {
 		return nil, err
 	}
-	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, uuid.UUID(r.ServerId), uuid.UUID(r.JobId))
+	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, r.ServerId, r.JobId)
 	if err != nil {
 		return nil, err
 	}
 	return gen.GetServerAgentInstallJob200JSONResponse(serverAgentInstallJob(job)), nil
 }
 
-func (h *Handlers) UpdateServerAgentOverSsh(ctx context.Context, r gen.UpdateServerAgentOverSshRequestObject) (gen.UpdateServerAgentOverSshResponseObject, error) {
+func (h *Handlers) UpdateServerAgentOverSSH(ctx context.Context, r gen.UpdateServerAgentOverSSHRequestObject) (gen.UpdateServerAgentOverSSHResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
@@ -87,13 +84,13 @@ func (h *Handlers) UpdateServerAgentOverSsh(ctx context.Context, r gen.UpdateSer
 	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
 		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
 	}
-	job, err := h.Provision.StartServerAgentUpdate(ctx, a, uuid.UUID(r.ServerId), provision.AgentUpdateStartRequest{
+	job, err := h.Provision.StartServerAgentUpdate(ctx, a, r.ServerId, provision.AgentUpdateStartRequest{
 		SSHPort: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return gen.UpdateServerAgentOverSsh202JSONResponse(serverAgentInstallJob(job)), nil
+	return gen.UpdateServerAgentOverSSH202JSONResponse(serverAgentInstallJob(job)), nil
 }
 
 func (h *Handlers) GetServerAgentUpdateJob(ctx context.Context, r gen.GetServerAgentUpdateJobRequestObject) (gen.GetServerAgentUpdateJobResponseObject, error) {
@@ -101,14 +98,14 @@ func (h *Handlers) GetServerAgentUpdateJob(ctx context.Context, r gen.GetServerA
 	if err != nil {
 		return nil, err
 	}
-	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, uuid.UUID(r.ServerId), uuid.UUID(r.JobId))
+	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, r.ServerId, r.JobId)
 	if err != nil {
 		return nil, err
 	}
 	return gen.GetServerAgentUpdateJob200JSONResponse(serverAgentInstallJob(job)), nil
 }
 
-func (h *Handlers) UninstallServerAgentOverSsh(ctx context.Context, r gen.UninstallServerAgentOverSshRequestObject) (gen.UninstallServerAgentOverSshResponseObject, error) {
+func (h *Handlers) UninstallServerAgentOverSSH(ctx context.Context, r gen.UninstallServerAgentOverSSHRequestObject) (gen.UninstallServerAgentOverSSHResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
@@ -119,13 +116,13 @@ func (h *Handlers) UninstallServerAgentOverSsh(ctx context.Context, r gen.Uninst
 	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
 		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
 	}
-	job, err := h.Provision.StartServerAgentUninstall(ctx, a, uuid.UUID(r.ServerId), provision.AgentUninstallStartRequest{
+	job, err := h.Provision.StartServerAgentUninstall(ctx, a, r.ServerId, provision.AgentUninstallStartRequest{
 		SSHPort: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return gen.UninstallServerAgentOverSsh202JSONResponse(serverAgentInstallJob(job)), nil
+	return gen.UninstallServerAgentOverSSH202JSONResponse(serverAgentInstallJob(job)), nil
 }
 
 func (h *Handlers) GetServerAgentUninstallJob(ctx context.Context, r gen.GetServerAgentUninstallJobRequestObject) (gen.GetServerAgentUninstallJobResponseObject, error) {
@@ -133,7 +130,7 @@ func (h *Handlers) GetServerAgentUninstallJob(ctx context.Context, r gen.GetServ
 	if err != nil {
 		return nil, err
 	}
-	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, uuid.UUID(r.ServerId), uuid.UUID(r.JobId))
+	job, err := h.Provision.GetServerAgentInstallJob(ctx, a, r.ServerId, r.JobId)
 	if err != nil {
 		return nil, err
 	}
@@ -141,7 +138,7 @@ func (h *Handlers) GetServerAgentUninstallJob(ctx context.Context, r gen.GetServ
 }
 
 func serverAgentInstallJob(in provision.AgentInstallJob) gen.ServerAgentInstallJob {
-	out := gen.ServerAgentInstallJob{Id: types.UUID(in.ID), Status: gen.ServerAgentInstallJobStatus(in.Status), Stage: gen.ServerAgentInstallJobStage(in.Stage)}
+	out := gen.ServerAgentInstallJob{Id: in.ID, Status: gen.ServerAgentInstallJobStatus(in.Status), Stage: gen.ServerAgentInstallJobStage(in.Stage)}
 	if in.Message != "" {
 		message := in.Message
 		out.Message = &message
@@ -154,7 +151,7 @@ func (h *Handlers) GetServerAgent(ctx context.Context, r gen.GetServerAgentReque
 	if err != nil {
 		return nil, err
 	}
-	view, err := h.Provision.AgentStatus(ctx, a, uuid.UUID(r.ServerId))
+	view, err := h.Provision.AgentStatus(ctx, a, r.ServerId)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +163,7 @@ func (h *Handlers) UpdateServerAgent(ctx context.Context, r gen.UpdateServerAgen
 	if err != nil {
 		return nil, err
 	}
-	view, err := h.Provision.UpdateAgent(ctx, a, uuid.UUID(r.ServerId))
+	view, err := h.Provision.UpdateAgent(ctx, a, r.ServerId)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +171,7 @@ func (h *Handlers) UpdateServerAgent(ctx context.Context, r gen.UpdateServerAgen
 }
 
 func serverProvision(s provision.Snapshot) gen.ServerProvision {
-	out := gen.ServerProvision{Id: types.UUID(s.ID), Status: gen.ServerProvisionStatus(s.Status)}
+	out := gen.ServerProvision{Id: s.ID, Status: gen.ServerProvisionStatus(s.Status)}
 	if s.Error != "" {
 		out.Error = &s.Error
 	}
@@ -187,7 +184,7 @@ func serverProvision(s provision.Snapshot) gen.ServerProvision {
 		out.Variant = &v
 	}
 	if s.ServerID != nil {
-		id := types.UUID(*s.ServerID)
+		id := *s.ServerID
 		out.ServerId = &id
 	}
 	if s.HostKey != "" {
@@ -271,7 +268,7 @@ func (h *Handlers) DiscoverServerOnvif(ctx context.Context, r gen.DiscoverServer
 	if r.Body == nil || len(r.Body.InterfaceName) == 0 || len(r.Body.InterfaceName) > 64 {
 		return nil, &provision.ValidationError{Msg: "interface_name is required and must be at most 64 characters"}
 	}
-	result, err := h.Provision.Discover(ctx, a, uuid.UUID(r.ServerId), r.Body.InterfaceName)
+	result, err := h.Provision.Discover(ctx, a, r.ServerId, r.Body.InterfaceName)
 	if err != nil {
 		return nil, err
 	}
@@ -297,7 +294,7 @@ func (h *Handlers) ProbeServerOnvif(ctx context.Context, r gen.ProbeServerOnvifR
 	if r.Body.Password != nil {
 		input.Password = *r.Body.Password
 	}
-	result, err := h.Provision.ProbeOnvif(ctx, a, uuid.UUID(r.ServerId), input)
+	result, err := h.Provision.ProbeOnvif(ctx, a, r.ServerId, input)
 	if err != nil {
 		return nil, err
 	}

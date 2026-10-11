@@ -94,7 +94,7 @@ func validateAgentInstallRequest(request AgentInstallRequest) error {
 		return errInvalidAgentInstall
 	}
 	for _, r := range request.Token {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
 			return errInvalidAgentInstall
 		}
 	}

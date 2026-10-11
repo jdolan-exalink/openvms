@@ -11,8 +11,6 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-const discoveryMulticastAddress = "239.255.255.250:3702"
-
 type udpInterfaceResolver func(string) (net.Interface, net.IP, error)
 type udpPacketConn interface {
 	SetMulticastInterface(*net.Interface) error

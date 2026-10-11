@@ -130,7 +130,7 @@ func TestEnrollRefusesAnUntrustworthyReply(t *testing.T) {
 }
 
 func TestEnrollServerError(t *testing.T) {
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	defer srv.Close()
@@ -265,7 +265,7 @@ func TestEnsureCorruptStateIsAnErrorNotAReEnrollment(t *testing.T) {
 	if _, err := Ensure(context.Background(), store, "good-token", api.enroll, time.Now); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(store.Dir, "cert.pem"), []byte("garbage"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(store.Dir, "cert.pem"), []byte("garbage"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Ensure(context.Background(), store, "good-token", api.enroll, time.Now); err == nil {
@@ -325,7 +325,7 @@ func TestStoreLoadFinishesAnInterruptedSave(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(store.Dir, "key.pem"), next.KeyPEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(store.Dir, "cert.pem.new"), next.CertPEM, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(store.Dir, "cert.pem.new"), next.CertPEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got, err := store.Load()
@@ -360,7 +360,7 @@ func TestRenewalDueIsTwoThirdsOfTheLifetime(t *testing.T) {
 // redirect points, possibly over a weaker scheme. Enroll refuses to follow redirects.
 func TestEnrollNeverFollowsARedirect(t *testing.T) {
 	var gotToken atomic.Int32
-	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		gotToken.Add(1)
 		http.Error(w, "should never be reached", http.StatusTeapot)
 	}))

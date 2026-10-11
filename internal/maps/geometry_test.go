@@ -223,4 +223,3 @@ func TestPointInPolygon(t *testing.T) {
 		t.Fatal("expected (-1, -1) to be outside polygon")
 	}
 }
-

@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -134,6 +135,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// #nosec G704 -- The upstream address comes only from a trusted in-memory authorized session, not request input.
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		s.cfg.Log.Warn("relay upstream connect failed", "target", targetURL.String(), "error", err)
@@ -157,13 +159,19 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 
 // Start begins serving relay connections.
 func (s *Server) Start(addr string) error {
-	lis, err := net.Listen("tcp", addr)
+	return s.StartContext(context.Background(), addr)
+}
+
+// StartContext opens the relay listener with cancellation support for startup callers.
+func (s *Server) StartContext(ctx context.Context, addr string) error {
+	var listenConfig net.ListenConfig
+	lis, err := listenConfig.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}
 	s.listener = lis
 	s.cfg.Log.Info("openvms media relay server listening", "addr", addr)
-	srv := &http.Server{Handler: s.Handler()}
+	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 5 * time.Second}
 	return srv.Serve(lis)
 }
 

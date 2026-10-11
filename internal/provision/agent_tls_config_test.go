@@ -9,7 +9,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
+
+func TestConfigFromRowRejectsInvalidStoredPort(t *testing.T) {
+	for _, port := range []int32{-1, 0, 65536} {
+		if got := configFromRow(db.ServerAgentTl{SecurePort: port}); got.SecurePort != 0 {
+			t.Errorf("stored port %d became %d, want invalid zero", port, got.SecurePort)
+		}
+	}
+}
 
 func TestAgentTLSConfigValidation(t *testing.T) {
 	cert, _ := testCA(t, "test", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))

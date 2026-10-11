@@ -49,6 +49,7 @@ func TestLocalAgentFilesKeepCredentialsOutOfOutput(t *testing.T) {
 	if err := os.WriteFile(tokenPath, []byte(token+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G306 -- test fixture deliberately uses public or executable permissions.
 	if err := os.WriteFile(caPath, ca, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -82,6 +83,7 @@ func TestLocalAgentTokenFileRequiresPrivateRegularFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	weak := filepath.Join(root, "weak.token")
+	// #nosec G306 -- test fixture deliberately uses public or executable permissions.
 	if err := os.WriteFile(weak, []byte(strings.Repeat("c", 64)), 0o644); err != nil {
 		t.Fatal(err)
 	}

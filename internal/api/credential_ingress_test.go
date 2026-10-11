@@ -102,7 +102,7 @@ func TestAgentInstallBodyRejectsUnknownTrailingAndOversizedJSON(t *testing.T) {
 func TestAgentUpdateHTTPSIngressAndBodyBounds(t *testing.T) {
 	trusted := []netip.Prefix{netip.MustParsePrefix("10.20.0.7/32")}
 	calls := 0
-	handler := credentialInstallHTTPS(trusted)(validateAgentUpdateBody(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := credentialInstallHTTPS(trusted)(validateAgentUpdateBody(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusNoContent)
 	})))

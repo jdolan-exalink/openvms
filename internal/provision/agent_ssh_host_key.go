@@ -30,7 +30,7 @@ type agentSSHHostKeyCheckerLoader func(context.Context, db.GetServerForUpdateRow
 // compares it with the existing key, before the SSH client proceeds to password
 // authentication. The unique key makes concurrent first contacts converge on one
 // stored fingerprint; a losing connection must match that winner.
-func persistAgentSSHHostKeyInTransaction(ctx context.Context, q agentSSHHostKeyTxQueries, loadChecker agentSSHHostKeyCheckerLoader, actor authz.Actor, serverID uuid.UUID, host string, port uint16, fingerprint string) error {
+func persistAgentSSHHostKeyInTransaction(ctx context.Context, q agentSSHHostKeyTxQueries, loadChecker agentSSHHostKeyCheckerLoader, _ authz.Actor, serverID uuid.UUID, host string, port uint16, fingerprint string) error {
 	ip, err := netip.ParseAddr(host)
 	if err != nil || !ip.Is4() || ip.String() != host || serverID == uuid.Nil || port == 0 || !validFingerprint(fingerprint) {
 		return &ValidationError{Msg: "invalid SSH host-key trust target"}

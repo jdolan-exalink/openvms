@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,16 +10,38 @@ import (
 	"time"
 )
 
+func TestFilesystemBytesRejectsInvalidBlockSizesAndSaturatesOverflow(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		blocks uint64
+		size   int64
+		want   uint64
+	}{
+		{name: "negative block size", blocks: 10, size: -1, want: 0},
+		{name: "zero block size", blocks: 10, size: 0, want: 0},
+		{name: "normal", blocks: 5, size: 4096, want: 20480},
+		{name: "overflow saturates", blocks: math.MaxUint64, size: 2, want: math.MaxUint64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := filesystemBytes(tc.blocks, tc.size); got != tc.want {
+				t.Fatalf("filesystemBytes(%d, %d) = %d, want %d", tc.blocks, tc.size, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCoralPresentFromSysfs(t *testing.T) {
 	root := t.TempDir()
 	dev := filepath.Join(root, "dev")
 	usb := filepath.Join(root, "usb", "1-1")
-	if err := os.MkdirAll(usb, 0o755); err != nil {
+	if err := os.MkdirAll(usb, 0o750); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G306 -- test fixture deliberately uses public or executable permissions.
 	if err := os.WriteFile(filepath.Join(usb, "idVendor"), []byte("18d1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G306 -- test fixture deliberately uses public or executable permissions.
 	if err := os.WriteFile(filepath.Join(usb, "idProduct"), []byte("9302\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -31,6 +54,7 @@ func TestNTPPort(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "udp")
 	body := "  sl  local_address rem_address\n   1: 00000000:007B 00000000:0000 07\n"
+	// #nosec G306 -- test fixture deliberately uses public or executable permissions.
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

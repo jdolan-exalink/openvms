@@ -706,4 +706,3 @@ func (h *Handlers) GetMapAnalytics(ctx context.Context, req gen.GetMapAnalyticsR
 		MaxCount: res.MaxCount,
 	}, nil
 }
-

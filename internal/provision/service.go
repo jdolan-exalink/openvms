@@ -257,7 +257,7 @@ func validFingerprint(value string) bool {
 		return false
 	}
 	for _, r := range value[len("SHA256:"):] {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '+' || r == '/') {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '+' && r != '/' {
 			return false
 		}
 	}

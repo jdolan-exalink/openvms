@@ -164,7 +164,7 @@ func TestStartAgentUpdateRefusesExistingTLSAndSharesInstallReservation(t *testin
 			return nil
 		},
 	}
-	if _, err := svc.StartServerAgentUpdate(context.Background(), actor, serverID, validAgentUpdateStartRequest()); err != ErrAgentUpdateTLSAlreadyConfigured {
+	if _, err := svc.StartServerAgentUpdate(context.Background(), actor, serverID, validAgentUpdateStartRequest()); !errors.Is(err, ErrAgentUpdateTLSAlreadyConfigured) {
 		t.Fatalf("existing TLS update error = %v", err)
 	}
 	if artifactReads != 0 {
@@ -176,7 +176,7 @@ func TestStartAgentUpdateRefusesExistingTLSAndSharesInstallReservation(t *testin
 		t.Fatal(err)
 	}
 	defer svc.releaseAgentInstallJob(job, true)
-	if _, err := svc.StartServerAgentUpdate(context.Background(), actor, serverID, validAgentUpdateStartRequest()); err != ErrAgentInstallBusy {
+	if _, err := svc.StartServerAgentUpdate(context.Background(), actor, serverID, validAgentUpdateStartRequest()); !errors.Is(err, ErrAgentInstallBusy) {
 		t.Fatalf("update did not share install reservation: %v", err)
 	}
 }
@@ -197,6 +197,7 @@ func TestStartAgentUpdatePreservesRegisteredTLSAndTrust(t *testing.T) {
 			return cloneAgentTLSConfig(registeredTLS), nil
 		},
 		agentUpdatePreflightHealth: func(_ context.Context, host string, port uint16, token string, got AgentTLSConfig) error {
+			// #nosec G115 -- test port is a fixed valid value or the OS-assigned TCP listener port.
 			if host != "192.0.2.44" || port != uint16(registeredTLS.SecurePort) || token != "existing-token-value-0123456789" || !sameAgentTLSConfig(got, registeredTLS) {
 				t.Fatal("pre-update health check did not use registered HTTPS trust, port, and token")
 			}
@@ -231,6 +232,7 @@ func TestStartAgentUpdatePreservesRegisteredTLSAndTrust(t *testing.T) {
 	if final.Status != "succeeded" || generatedTLS != 0 || persistedTLS != 1 {
 		t.Fatalf("job=%+v generated_tls=%d checked_trust=%d", final, generatedTLS, persistedTLS)
 	}
+	// #nosec G115 -- test port is a fixed valid value or the OS-assigned TCP listener port.
 	if !runRequest.PreserveTLS || runRequest.TLSMode != registeredTLS.TrustMode || runRequest.SecurePort != uint16(registeredTLS.SecurePort) || !bytes.Equal(runRequest.TLSCertificate, ca) || len(runRequest.TLSPrivateKey) != 0 || runRequest.AgentToken != "existing-token-value-0123456789" {
 		t.Fatal("runner did not receive existing public trust, endpoint, and bearer without private key")
 	}
@@ -296,7 +298,7 @@ func TestStartAgentUpdateRejectsRegistrationForDifferentServerBeforeArtifact(t *
 		},
 		agentUpdateBinary: func() ([]byte, error) { artifactReads++; return []byte("binary"), nil },
 	}
-	if _, err := svc.StartServerAgentUpdate(context.Background(), actor, serverID, validAgentUpdateStartRequest()); err != ErrAgentUpdateUnavailable {
+	if _, err := svc.StartServerAgentUpdate(context.Background(), actor, serverID, validAgentUpdateStartRequest()); !errors.Is(err, ErrAgentUpdateUnavailable) {
 		t.Fatalf("mismatched registration error = %v", err)
 	}
 	if artifactReads != 0 {

@@ -222,4 +222,3 @@ func TestSystemConnectionsEndpoint(t *testing.T) {
 		t.Errorf("want total 6, got %d", body.Total)
 	}
 }
-

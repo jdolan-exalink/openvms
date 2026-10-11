@@ -36,7 +36,7 @@ func (h *connStatsHandler) TagConn(ctx context.Context, _ *stats.ConnTagInfo) co
 	return ctx
 }
 
-func (h *connStatsHandler) HandleConn(ctx context.Context, s stats.ConnStats) {
+func (h *connStatsHandler) HandleConn(_ context.Context, s stats.ConnStats) {
 	switch s.(type) {
 	case *stats.ConnBegin:
 		h.activeConns.Add(1)
@@ -173,7 +173,13 @@ func (s *Server) Start(addr string) error {
 // Bind opens the listening socket without serving, so a caller can fail startup on a bad or
 // busy address before launching Serve in the background.
 func (s *Server) Bind(addr string) error {
-	lis, err := net.Listen("tcp", addr)
+	return s.BindContext(context.Background(), addr)
+}
+
+// BindContext opens the listener with cancellation support for startup callers.
+func (s *Server) BindContext(ctx context.Context, addr string) error {
+	var listenConfig net.ListenConfig
+	lis, err := listenConfig.Listen(ctx, "tcp", addr)
 	if err != nil {
 		return err
 	}

@@ -33,7 +33,9 @@ func TestDetectCenter(t *testing.T) {
 
 	// A float/number latitude (freeipapi shape) resolves to the server's position.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"ipAddress":"203.0.113.7","latitude":-31.42,"longitude":-64.18,"countryCode":"AR"}`))
+		if _, err := w.Write([]byte(`{"ipAddress":"203.0.113.7","latitude":-31.42,"longitude":-64.18,"countryCode":"AR"}`)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	}))
 	defer srv.Close()
 	c, err := detectCenter(ctx, client, srv.URL)
@@ -46,7 +48,9 @@ func TestDetectCenter(t *testing.T) {
 
 	// Some services report coordinates as strings.
 	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`{"latitude":"-12.5","longitude":"-77.0"}`))
+		if _, err := w.Write([]byte(`{"latitude":"-12.5","longitude":"-77.0"}`)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	}))
 	defer srv2.Close()
 	if c, err = detectCenter(ctx, client, srv2.URL); err != nil || c.Lat != -12.5 || c.Lng != -77.0 {
@@ -63,7 +67,9 @@ func TestDetectCenter(t *testing.T) {
 		t.Fatal("expected an error on 503")
 	}
 	srv4 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Write([]byte(`<html>not json</html>`))
+		if _, err := w.Write([]byte(`<html>not json</html>`)); err != nil {
+			t.Errorf("write response: %v", err)
+		}
 	}))
 	defer srv4.Close()
 	if _, err := detectCenter(ctx, client, srv4.URL); err == nil {

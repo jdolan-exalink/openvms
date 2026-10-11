@@ -193,6 +193,7 @@ func run() error {
 	}
 	capacity := &atomic.Value{}
 	capacity.Store(bodyReport{Measuring: false, Ready: false})
+	// #nosec G703 -- model path comes from trusted deployment configuration, not an HTTP request.
 	if _, err := os.Stat(modelPath); err == nil {
 		libraryPath := os.Getenv("ONNXRUNTIME_SHARED_LIBRARY")
 		if libraryPath == "" {

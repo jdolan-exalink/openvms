@@ -3,8 +3,6 @@ package api
 import (
 	"context"
 
-	"github.com/google/uuid"
-
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
@@ -15,7 +13,7 @@ func (h *Handlers) CreateServerAgentEnrollToken(ctx context.Context, r gen.Creat
 	if err != nil {
 		return nil, err
 	}
-	tok, err := h.AgentEnroll.CreateToken(ctx, a, uuid.UUID(r.ServerId))
+	tok, err := h.AgentEnroll.CreateToken(ctx, a, r.ServerId)
 	if err != nil {
 		return nil, err
 	}

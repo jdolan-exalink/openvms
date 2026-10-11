@@ -95,11 +95,11 @@ func TestStoreLoadRefusesAStagedMismatch(t *testing.T) {
 	a, b := twoCredentials(t)
 	dir := filepath.Join(t.TempDir(), "agent-mtls")
 	writeState(t, dir, map[string][]byte{"key.pem.new": a.KeyPEM, "cert.pem.new": b.CertPEM, "ca.pem.new": b.CAPEM})
-	if _, err := (Store{Dir: dir}).Load(); err == nil || err == ErrNoCredentials {
+	if _, err := (Store{Dir: dir}).Load(); err == nil || errors.Is(err, ErrNoCredentials) {
 		t.Fatalf("Load = %v, want an unusable-state error", err)
 	}
 	// Nothing at all is still "no credentials".
-	if _, err := (Store{Dir: filepath.Join(t.TempDir(), "empty")}).Load(); err != ErrNoCredentials {
+	if _, err := (Store{Dir: filepath.Join(t.TempDir(), "empty")}).Load(); !errors.Is(err, ErrNoCredentials) {
 		t.Fatalf("Load of an empty directory = %v, want ErrNoCredentials", err)
 	}
 }

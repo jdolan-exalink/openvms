@@ -671,7 +671,7 @@ paths:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       tags: [servers]
-      operationId: getServerAgentTlsConfig
+      operationId: getServerAgentTLSConfig
       summary: Read registered agent TLS trust configuration
       description: Requires servers.manage. Returns only the public custom CA bundle, never credentials or private keys.
       responses:
@@ -685,7 +685,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     put:
       tags: [servers]
-      operationId: setServerAgentTlsConfig
+      operationId: setServerAgentTLSConfig
       summary: Configure registered agent TLS trust
       description: Requires servers.manage. The CA bundle is public trust material; private keys and agent credentials are not accepted.
       requestBody:
@@ -705,7 +705,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [servers]
-      operationId: deleteServerAgentTlsConfig
+      operationId: deleteServerAgentTLSConfig
       summary: Disable registered agent TLS configuration
       description: Requires servers.manage. This only deletes trust metadata and does not issue an agent or camera request.
       responses:
@@ -821,7 +821,7 @@ paths:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       tags: [servers]
-      operationId: updateServerAgentOverSsh
+      operationId: updateServerAgentOverSSH
       summary: Update an existing registered agent and configure HTTPS
       description: Requires servers.manage and servers.config.secrets. The registered agent IPv4 and existing bearer are fixed by server registration. The root SSH password is transient. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. HTTPS health is verified before public trust metadata is recorded. Existing TLS-enabled agents are not replaced by this operation.
       requestBody:
@@ -863,7 +863,7 @@ paths:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       tags: [servers]
-      operationId: uninstallServerAgentOverSsh
+      operationId: uninstallServerAgentOverSSH
       summary: Uninstall a registered agent from the host over SSH
       description: Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
       requestBody:

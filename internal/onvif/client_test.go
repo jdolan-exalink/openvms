@@ -3,7 +3,7 @@ package onvif
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- verifies the protocol-mandated WS-Security SHA-1 digest.
 	"encoding/base64"
 	"encoding/json"
 	"encoding/xml"
@@ -134,18 +134,19 @@ func TestReadOnlyRetriesTransientHTTPAndReceiverFaults(t *testing.T) {
 	receiverFault := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><s:Fault><s:Code><s:Value>s:Receiver</s:Value></s:Code><s:Reason><s:Text>temporary</s:Text></s:Reason></s:Fault></s:Body></s:Envelope>`
 	for _, tc := range []struct {
 		name      string
-		first     *http.Response
+		firstCode int
+		firstBody string
 		wantCalls int
 	}{
-		{name: "http 503 with valid soap body", first: response(503, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), wantCalls: 2},
-		{name: "transient receiver fault", first: response(500, receiverFault), wantCalls: 2},
+		{name: "http 503 with valid soap body", firstCode: 503, firstBody: `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`, wantCalls: 2},
+		{name: "transient receiver fault", firstCode: 500, firstBody: receiverFault, wantCalls: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			calls := 0
 			c := NewClient(roundTripFunc(func(*http.Request) (*http.Response, error) {
 				calls++
 				if calls == 1 {
-					return tc.first, nil
+					return response(tc.firstCode, tc.firstBody), nil
 				}
 				return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), nil
 			}), Config{Timeout: time.Second, MaxAttempts: 2})
@@ -220,6 +221,7 @@ func TestUsernameTokenPasswordDigest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		// #nosec G401 -- Verifies the protocol-required ONVIF SHA-1 PasswordDigest.
 		h := sha1.New()
 		_, _ = h.Write(nonce)
 		_, _ = io.WriteString(h, token.Created)

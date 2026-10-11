@@ -51,7 +51,7 @@ func TestCollectZonesRunsLookupsConcurrently(t *testing.T) {
 	cams := zoneCams(6)
 	var inFlight, peak atomic.Int32
 	start := time.Now()
-	got := collectZones(context.Background(), cams, 3, time.Second, func(ctx context.Context, c zoneCamera) (map[string]any, error) {
+	got := collectZones(context.Background(), cams, 3, time.Second, func(_ context.Context, c zoneCamera) (map[string]any, error) {
 		n := inFlight.Add(1)
 		defer inFlight.Add(-1)
 		for {
@@ -89,7 +89,7 @@ func TestCollectZonesOmitsFailedAndTimedOutCameras(t *testing.T) {
 			return nil, ctx.Err()
 		}
 		return map[string]any{"porch": map[string]any{"coordinates": "0,0,1,1"}}, nil
-	}, func(c zoneCamera, err error) { failed = append(failed, c.id) })
+	}, func(c zoneCamera, _ error) { failed = append(failed, c.id) })
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("collectZones took %v with a 150ms per-camera timeout", elapsed)
 	}
@@ -104,7 +104,7 @@ func TestCollectZonesOmitsFailedAndTimedOutCameras(t *testing.T) {
 // Cameras without zones are left out of the manifest.
 func TestCollectZonesSkipsEmptyZones(t *testing.T) {
 	cams := zoneCams(2)
-	got := collectZones(context.Background(), cams, 2, time.Second, func(ctx context.Context, c zoneCamera) (map[string]any, error) {
+	got := collectZones(context.Background(), cams, 2, time.Second, func(_ context.Context, c zoneCamera) (map[string]any, error) {
 		if c.id == cams[0].id {
 			return map[string]any{}, nil
 		}

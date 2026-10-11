@@ -63,7 +63,7 @@ func TestShareCredentialIgnoresQueryPassword(t *testing.T) {
 	if c := shareCredentialFromRequest(r, "tok"); c.Password != "" || c.Cookie != "" {
 		t.Fatalf("query password leaked into credential: %+v", c)
 	}
-	r.AddCookie(&http.Cookie{Name: ShareCookieName, Value: "v"})
+	r.AddCookie(&http.Cookie{Name: ShareCookieName, Value: "v", Secure: true, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	if c := shareCredentialFromRequest(r, "tok"); c.Cookie != "v" || c.Password != "" {
 		t.Fatalf("cookie not read: %+v", c)
 	}

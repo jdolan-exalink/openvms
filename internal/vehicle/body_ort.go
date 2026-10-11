@@ -3,6 +3,7 @@
 package vehicle
 
 import (
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -24,10 +25,12 @@ type BodyClassifier struct {
 
 // OpenBodyClassifier loads the ONNX model. The shared library is onnxruntime
 // 1.29, which matches the headers in the Go binding.
-func OpenBodyClassifier(modelPath, libraryPath string) (*BodyClassifier, error) {
+func OpenBodyClassifier(modelPath, libraryPath string) (_ *BodyClassifier, retErr error) {
+	// #nosec G703 -- model path is trusted deployment configuration.
 	if _, err := os.Stat(modelPath); err != nil {
 		return nil, fmt.Errorf("vehicle body model: %w", err)
 	}
+	// #nosec G703 -- runtime library path is trusted deployment configuration.
 	if _, err := os.Stat(libraryPath); err != nil {
 		return nil, fmt.Errorf("onnxruntime: %w", err)
 	}
@@ -39,37 +42,60 @@ func OpenBodyClassifier(modelPath, libraryPath string) (*BodyClassifier, error) 
 	if err != nil {
 		return nil, err
 	}
-	output, err := ort.NewEmptyTensor[float32](ort.NewShape(1, int64(len(bodyLabels))))
+	var output *ort.Tensor[float32]
+	var opts *ort.SessionOptions
+	var session *ort.AdvancedSession
+	transferred := false
+	defer func() {
+		if transferred {
+			return
+		}
+		retErr = errors.Join(retErr, cleanupBodyClassifierResources(session, opts, output, input))
+	}()
+	output, err = ort.NewEmptyTensor[float32](ort.NewShape(1, int64(len(bodyLabels))))
 	if err != nil {
-		input.Destroy()
 		return nil, err
 	}
-	opts, err := ort.NewSessionOptions()
+	opts, err = ort.NewSessionOptions()
 	if err != nil {
-		input.Destroy()
-		output.Destroy()
 		return nil, err
 	}
-	defer opts.Destroy()
 	if err := opts.SetIntraOpNumThreads(2); err != nil {
-		input.Destroy()
-		output.Destroy()
 		return nil, err
 	}
 	if err := opts.SetInterOpNumThreads(1); err != nil {
-		input.Destroy()
-		output.Destroy()
 		return nil, err
 	}
-	session, err := ort.NewAdvancedSession(modelPath,
+	session, err = ort.NewAdvancedSession(modelPath,
 		[]string{"image"}, []string{"logits"},
 		[]ort.Value{input}, []ort.Value{output}, opts)
 	if err != nil {
-		input.Destroy()
-		output.Destroy()
 		return nil, err
 	}
+	if err := opts.Destroy(); err != nil {
+		opts = nil
+		return nil, fmt.Errorf("destroy ONNX session options: %w", err)
+	}
+	opts = nil
+	transferred = true
 	return &BodyClassifier{session: session, input: input, output: output}, nil
+}
+
+func cleanupBodyClassifierResources(session *ort.AdvancedSession, opts *ort.SessionOptions, output, input *ort.Tensor[float32]) error {
+	var cleanupErrors []error
+	if session != nil {
+		cleanupErrors = append(cleanupErrors, session.Destroy())
+	}
+	if opts != nil {
+		cleanupErrors = append(cleanupErrors, opts.Destroy())
+	}
+	if output != nil {
+		cleanupErrors = append(cleanupErrors, output.Destroy())
+	}
+	if input != nil {
+		cleanupErrors = append(cleanupErrors, input.Destroy())
+	}
+	return errors.Join(cleanupErrors...)
 }
 
 // logitsForTest runs one crop and returns the eight raw logits.

@@ -123,7 +123,8 @@ func TestVerifyAgentUpdateTLSInTransactionRequiresUnchangedTrustBindingAndPermis
 		return &fakeAgentUpdateTxQueries{
 			server: db.GetServerForUpdateRow{ID: serverID, TenantID: tenantID, SiteID: uuid.New()},
 			agent:  original,
-			tls:    db.ServerAgentTl{ServerID: serverID, TenantID: tenantID, SecurePort: int32(config.SecurePort), TrustMode: config.TrustMode, CaPem: nullCA(config)},
+			// #nosec G115 -- test port is a fixed valid value or the OS-assigned TCP listener port.
+			tls: db.ServerAgentTl{ServerID: serverID, TenantID: tenantID, SecurePort: int32(config.SecurePort), TrustMode: config.TrustMode, CaPem: nullCA(config)},
 		}
 	}
 	changed := cloneAgentTLSConfig(expected)

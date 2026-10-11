@@ -314,5 +314,3 @@ type AnalyticsQuery struct {
 	End        time.Time
 	Coverage   bool
 }
-
-

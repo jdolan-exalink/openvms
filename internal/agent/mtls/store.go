@@ -109,6 +109,7 @@ func (s Store) read(name string) (stored, error) {
 }
 
 func readOptional(path string) ([]byte, error) {
+	// #nosec G304 -- credential path is composed from operator-selected state directory and fixed filenames.
 	b, err := os.ReadFile(path)
 	// ENOTDIR: the state path runs through a regular file; there are no credentials there, and
 	// CheckWritable reports the real problem before a token is redeemed.
@@ -271,6 +272,7 @@ func writeFile(path string, data []byte, perm os.FileMode) error {
 }
 
 func syncDir(dir string) error {
+	// #nosec G304 -- credential path is composed from operator-selected state directory and fixed filenames.
 	d, err := os.Open(dir)
 	if err != nil {
 		return err

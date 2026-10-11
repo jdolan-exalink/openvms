@@ -67,7 +67,7 @@ func TestStartAgentInstallExistingAgentRefusedBeforeArtifactOrRunner(t *testing.
 		},
 	}
 	_, err := svc.StartServerAgentInstall(context.Background(), authz.Actor{UserID: uuid.New()}, uuid.New(), validAgentInstallStartRequest())
-	if err != ErrAgentAlreadyProvisioned {
+	if !errors.Is(err, ErrAgentAlreadyProvisioned) {
 		t.Fatalf("error = %v", err)
 	}
 	if !reflect.DeepEqual(order, []string{"permissions", "agent-row"}) {
@@ -212,6 +212,7 @@ type installContextSecretKey struct{}
 
 func TestStartAgentInstallDoesNotCarryRequestContextIntoWorker(t *testing.T) {
 	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+	// #nosec G101 -- test marker asserts request-scoped secrets are not copied into workers.
 	secret := "raw-browser-session-secret"
 	var gotContext context.Context
 	started := make(chan struct{})
@@ -258,7 +259,7 @@ func TestAgentInstallCapacityIsReservedBeforeArtifactOrCredentialPreparation(t *
 		credentialGenerations++
 		return "token", []byte("cert"), []byte("key"), nil
 	}
-	if _, err := svc.StartServerAgentInstall(context.Background(), authz.Actor{UserID: uuid.New()}, uuid.New(), validAgentInstallStartRequest()); err != ErrAgentInstallBusy {
+	if _, err := svc.StartServerAgentInstall(context.Background(), authz.Actor{UserID: uuid.New()}, uuid.New(), validAgentInstallStartRequest()); !errors.Is(err, ErrAgentInstallBusy) {
 		t.Fatalf("capacity error = %v", err)
 	}
 	if artifactReads != 0 || credentialGenerations != 0 {
@@ -281,7 +282,7 @@ func TestAgentInstallDuplicateServerIsRejectedBeforeArtifactOrCredentialPreparat
 		credentialGenerations++
 		return "token", []byte("cert"), []byte("key"), nil
 	}
-	if _, err := svc.StartServerAgentInstall(context.Background(), authz.Actor{UserID: uuid.New()}, serverID, validAgentInstallStartRequest()); err != ErrAgentInstallBusy {
+	if _, err := svc.StartServerAgentInstall(context.Background(), authz.Actor{UserID: uuid.New()}, serverID, validAgentInstallStartRequest()); !errors.Is(err, ErrAgentInstallBusy) {
 		t.Fatalf("duplicate error = %v", err)
 	}
 	if artifactReads != 0 || credentialGenerations != 0 {
@@ -335,6 +336,7 @@ func TestReadInstallArtifactEnforcesBoundAndRejectsSymlink(t *testing.T) {
 }
 
 func TestTrustedAgentArtifactRequiresManifestHashAndMatchingArchitecture(t *testing.T) {
+	// #nosec G703 -- test path is derived from t.TempDir or this test process executable.
 	binary, err := os.ReadFile(os.Args[0])
 	if err != nil {
 		t.Fatal(err)

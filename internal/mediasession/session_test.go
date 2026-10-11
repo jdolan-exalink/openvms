@@ -1,6 +1,7 @@
 package mediasession
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -79,16 +80,16 @@ func TestSessionManager_NonExistent(t *testing.T) {
 	mgr := NewManager(1 * time.Minute)
 	defer mgr.Close()
 
-	if err := mgr.UpdateProfile("invalid", ProfileMain); err != ErrSessionNotFound {
+	if err := mgr.UpdateProfile("invalid", ProfileMain); !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
-	if err := mgr.MigratePath("invalid", PathRelay, TransportWebRTC); err != ErrSessionNotFound {
+	if err := mgr.MigratePath("invalid", PathRelay, TransportWebRTC); !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
-	if err := mgr.RecordTelemetry("invalid", 100, 0, 1.0); err != ErrSessionNotFound {
+	if err := mgr.RecordTelemetry("invalid", 100, 0, 1.0); !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
-	if err := mgr.CloseSession("invalid"); err != ErrSessionNotFound {
+	if err := mgr.CloseSession("invalid"); !errors.Is(err, ErrSessionNotFound) {
 		t.Errorf("expected ErrSessionNotFound, got %v", err)
 	}
 }
