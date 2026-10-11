@@ -158,7 +158,11 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("agent CA: %w", err)
 	}
-	agentEnroll := &agentenroll.Service{Store: st, Authz: inv, CA: agentCA}
+	agentEnroll := &agentenroll.Service{Store: st, Authz: inv, CA: agentCA,
+		RequireManage: func(ctx context.Context, actor authz.Actor, id uuid.UUID) error {
+			_, err := inv.RequireServerManage(ctx, actor, id)
+			return err
+		}}
 	provisioner := provision.New(inv, st, sealer, log)
 	if err := configureAgentEnrollment(provisioner, cfg, agentEnroll); err != nil {
 		return err

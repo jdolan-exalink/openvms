@@ -56,6 +56,9 @@ type Service struct {
 	Authz Authorizer
 	CA    Issuer
 	TTL   time.Duration // defaults to DefaultTTL
+	// RequireManage decides whether an actor may manage a server (servers.manage), returning
+	// store.ErrNotFound for one the actor cannot see. Needed by RevokeServerCertificates.
+	RequireManage func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) error
 }
 
 // Token is a freshly created enrollment token. Value is shown once and never stored.
@@ -242,4 +245,35 @@ func audit(ctx context.Context, q *db.Queries, actor *authz.Actor, tenantID, ser
 		p.ActorID, p.ActorName = &actor.UserID, actor.Username
 	}
 	return q.InsertAudit(ctx, p)
+}
+
+// RevokeServerCertificates revokes every certificate of a server's agent that is not revoked yet
+// and returns how many it revoked, for a decommissioned or compromised agent. The agent listener
+// refuses those certificates from its next call on and the agent cannot renew, so the whole
+// renewal chain ends; it has to enroll again with a new token. The revocation and its audit row
+// (SERVER_AGENT_CERTS_REVOKED) are one transaction scoped to the actor's tenants, so an actor can
+// never reach another tenant's certificates even if the permission check were wrong.
+func (s *Service) RevokeServerCertificates(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (int64, error) {
+	if s.RequireManage == nil {
+		return 0, errors.New("agentenroll: server authorization is not configured")
+	}
+	if err := s.RequireManage(ctx, actor, serverID); err != nil {
+		return 0, err
+	}
+	var revoked int64
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		srv, err := q.GetServer(ctx, serverID)
+		if err != nil {
+			return err
+		}
+		revoked, err = q.RevokeAgentCertificatesByServer(ctx, serverID)
+		if err != nil {
+			return err
+		}
+		return audit(ctx, q, &actor, srv.TenantID, serverID, "SERVER_AGENT_CERTS_REVOKED", map[string]any{"revoked": revoked})
+	})
+	if err != nil {
+		return 0, store.Classify(err)
+	}
+	return revoked, nil
 }

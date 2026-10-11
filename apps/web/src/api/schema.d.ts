@@ -612,6 +612,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/revoke-certificates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke every certificate of the server's agent
+         * @description Requires servers.manage. Revokes all agent certificates of the server that are not revoked yet, so the agent listener refuses them from the next call and the agent cannot renew; the agent must enroll again with a new token. Use it for a decommissioned or compromised agent. Pending enrollment tokens are not touched. Audited as SERVER_AGENT_CERTS_REVOKED. Calling it again returns zero.
+         */
+        post: operations["revokeServerAgentCertificates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agent/enroll": {
         parameters: {
             query?: never;
@@ -2912,6 +2934,10 @@ export interface components {
             token: string;
             /** Format: date-time */
             expires_at: string;
+        };
+        AgentCertificatesRevoked: {
+            /** @description Certificates revoked by this call. */
+            revoked: number;
         };
         AgentEnrollRequest: {
             token: string;
@@ -5669,6 +5695,31 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentEnrollToken"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    revokeServerAgentCertificates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many certificates were revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCertificatesRevoked"];
                 };
             };
             401: components["responses"]["Unauthorized"];

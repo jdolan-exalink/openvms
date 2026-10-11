@@ -61,7 +61,7 @@ Edge agents get a unique, revocable identity from the internal agent CA (enrollm
 
 Every call, not only the handshake, is checked against `agent_certificates`: the serial must be recorded, the fingerprint, tenant and server must match the certificate, the current time must be inside the recorded validity window, and `revoked_at` must be empty. A certificate's first accepted call also activates it (see [Certificate renewal](#certificate-renewal)). A refusal is `Unauthenticated` with a single generic message (the reason is logged by the API); a failed lookup is `Unavailable`, so the call fails closed and the agent retries.
 
-There is no cache: revoking takes effect on the next call (an RPC already running finishes). A revoked agent can keep its TCP connection open but cannot use it. Revoking is a database operation today (`agentca.PgRepo.RevokeCertificate` for one serial, `RevokeServerCertificates` for every live certificate of a server); an admin endpoint is a follow-up.
+There is no cache: revoking takes effect on the next call (an RPC already running finishes). A revoked agent can keep its TCP connection open but cannot use it. Revoking is a database operation today (`agentca.PgRepo.RevokeCertificate` for one serial, `RevokeServerCertificates` for every live certificate of a server); operators use `POST /api/v1/servers/{serverId}/agent/revoke-certificates` (see below).
 
 ### Certificate renewal
 
@@ -126,6 +126,10 @@ A failed attempt is retried with exponential backoff (30 seconds up to 15 minute
 1. Enable the agent listener on the API (see above) and publish its port.
 2. For each agent, create a token and set `OPENVMS_AGENT_GRPC_ADDR`, `OPENVMS_ENROLL_TOKEN` (or the file), `OPENVMS_API_URL` and the control CA settings, then restart the agent. It enrolls on first start and moves to the agent port.
 3. To roll an agent back, unset `OPENVMS_AGENT_GRPC_ADDR` and restart; it returns to `OPENVMS_SERVER_ADDR`. Its issued certificates stay in the database until they expire or are revoked. Uninstalling an agent should also remove `<state>/agent-mtls/` (the SSH install and uninstall wiring is a later change).
+
+### Revoking an agent
+
+`POST /api/v1/servers/{serverId}/agent/revoke-certificates` (needs `servers.manage`) revokes every certificate of the server's agent that is not revoked yet and returns `{"revoked": N}`. The listener refuses those certificates from the next call and the agent cannot renew, so the whole renewal chain ends and the agent has to enroll again with a new token. It is audited (`SERVER_AGENT_CERTS_REVOKED`, target `server_agent`, with the count), runs in one transaction scoped to the caller's tenants, and a second call returns zero. It does not delete pending enrollment tokens; create a new token (which replaces the old one) to re-enroll.
 
 ## SSH install with mutual TLS
 

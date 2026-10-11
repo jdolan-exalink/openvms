@@ -772,6 +772,23 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/revoke-certificates:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: revokeServerAgentCertificates
+      summary: Revoke every certificate of the server's agent
+      description: Requires servers.manage. Revokes all agent certificates of the server that are not revoked yet, so the agent listener refuses them from the next call and the agent cannot renew; the agent must enroll again with a new token. Use it for a decommissioned or compromised agent. Pending enrollment tokens are not touched. Audited as SERVER_AGENT_CERTS_REVOKED. Calling it again returns zero.
+      responses:
+        "200":
+          description: How many certificates were revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentCertificatesRevoked" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/agent/enroll:
     post:
       tags: [servers]
@@ -3905,6 +3922,11 @@ components:
       properties:
         token: { type: string, description: "One-time secret, shown only in this response." }
         expires_at: { type: string, format: date-time }
+    AgentCertificatesRevoked:
+      type: object
+      required: [revoked]
+      properties:
+        revoked: { type: integer, minimum: 0, description: Certificates revoked by this call. }
     AgentEnrollRequest:
       type: object
       required: [token, csr_pem]
