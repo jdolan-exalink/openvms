@@ -325,13 +325,10 @@ func controlTLSFromEnv(getenv func(string) string) (enabled bool, caFile, server
 	}
 	caFile = strings.TrimSpace(getenv("OPENVMS_CONTROL_TLS_CA_FILE"))
 	serverName = strings.TrimSpace(getenv("OPENVMS_CONTROL_TLS_SERVER_NAME"))
-	if !enabled && (caFile != "" || serverName != "") {
+	if _, err := grpctls.TransportCredentials(enabled, grpctls.ClientOptions{CAFile: caFile, ServerName: serverName}); errors.Is(err, grpctls.ErrOptionsWithoutTLS) {
 		return false, "", "", errors.New("OPENVMS_CONTROL_TLS_CA_FILE and OPENVMS_CONTROL_TLS_SERVER_NAME require OPENVMS_CONTROL_TLS=true")
-	}
-	if enabled {
-		if _, err := grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: caFile, ServerName: serverName}); err != nil {
-			return false, "", "", fmt.Errorf("control channel TLS: %w", err)
-		}
+	} else if err != nil {
+		return false, "", "", fmt.Errorf("control channel TLS: %w", err)
 	}
 	return enabled, caFile, serverName, nil
 }

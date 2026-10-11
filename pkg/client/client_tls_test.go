@@ -71,3 +71,20 @@ func TestClient_TLSOptionsRequireTLS(t *testing.T) {
 		t.Fatal("expected New to reject TLSCAFile without TLS")
 	}
 }
+
+// The server certificate is verified against TLSServerName, not the dial address: the test
+// certificate is valid for localhost and 127.0.0.1 only.
+func TestClient_TLSServerName(t *testing.T) {
+	cert, key := grpctlstest.WriteSelfSigned(t)
+	addr := startTLSControl(t, cert, key)
+
+	if err := handshakeWith(t, Config{ServerAddress: addr, TLS: true, TLSCAFile: cert, TLSServerName: "localhost"}); err != nil {
+		t.Fatalf("a name the certificate carries was refused: %v", err)
+	}
+	if err := handshakeWith(t, Config{ServerAddress: addr, TLS: true, TLSCAFile: cert, TLSServerName: "other.example"}); err == nil {
+		t.Fatal("a name the certificate does not carry was accepted")
+	}
+	if _, err := New(Config{ServerAddress: addr, TLSServerName: "localhost"}); err == nil {
+		t.Fatal("expected New to reject TLSServerName without TLS")
+	}
+}

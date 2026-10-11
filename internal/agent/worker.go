@@ -8,8 +8,6 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
 	"github.com/jdolan-exalink/openvms/internal/agent/mtls"
@@ -42,6 +40,13 @@ type WorkerConfig struct {
 	// the node id is the server id in the certificate, and the worker renews the certificate
 	// and reconnects with the new one. Nil keeps the unauthenticated behavior.
 	MTLS *mtls.Manager
+
+	// NewTicker supplies the heartbeat ticks; nil uses a time.Ticker. Tests inject a channel they
+	// drive by hand, so heartbeat timing is deterministic. stop is called when Run returns.
+	NewTicker func(d time.Duration) (ticks <-chan time.Time, stop func())
+	// OnHeartbeat, when set, is called after every heartbeat attempt (the initial one included)
+	// with its error, nil when the control server acknowledged it.
+	OnHeartbeat func(err error)
 }
 
 // Worker periodically transmits telemetry and heartbeats to the central OpenVMS Control Server.
@@ -77,17 +82,13 @@ func NewWorker(cfg WorkerConfig) *Worker {
 func (w *Worker) HeartbeatsAcknowledged() int64 { return w.acked.Load() }
 
 func (w *Worker) dial() (*grpc.ClientConn, error) {
-	creds := credentials.TransportCredentials(insecure.NewCredentials())
-	if w.cfg.TLS || w.cfg.MTLS != nil {
-		opts := grpctls.ClientOptions{CAFile: w.cfg.TLSCAFile, ServerName: w.cfg.TLSServerName}
-		if w.cfg.MTLS != nil {
-			opts.GetClientCertificate = w.cfg.MTLS.GetClientCertificate
-		}
-		var err error
-		creds, err = grpctls.ClientCredentials(opts)
-		if err != nil {
-			return nil, fmt.Errorf("control server TLS: %w", err)
-		}
+	opts := grpctls.ClientOptions{CAFile: w.cfg.TLSCAFile, ServerName: w.cfg.TLSServerName}
+	if w.cfg.MTLS != nil {
+		opts.GetClientCertificate = w.cfg.MTLS.GetClientCertificate
+	}
+	creds, err := grpctls.TransportCredentials(w.cfg.TLS || w.cfg.MTLS != nil, opts)
+	if err != nil {
+		return nil, fmt.Errorf("control server TLS: %w", err)
 	}
 	// grpc.NewClient reconnects automatically.
 	conn, err := grpc.NewClient(w.cfg.ControlGRPCAddr, grpc.WithTransportCredentials(creds))
@@ -125,11 +126,11 @@ func (w *Worker) Run(ctx context.Context) error {
 		go w.cfg.MTLS.Run(renewCtx, mtls.GRPCRenew(w.conn))
 	}
 
-	ticker := time.NewTicker(w.cfg.HeartbeatInterval)
-	defer ticker.Stop()
+	ticks, stopTicker := w.cfg.ticker()
+	defer stopTicker()
 
 	// Initial immediate heartbeat
-	if err := w.sendHeartbeat(ctx); err != nil {
+	if err := w.heartbeat(ctx); err != nil {
 		w.cfg.Log.Warn("initial heartbeat failed", "error", err)
 	}
 
@@ -138,15 +139,33 @@ func (w *Worker) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			w.cfg.Log.Info("node agent worker stopping")
 			return ctx.Err()
-		case <-ticker.C:
+		case <-ticks:
 			if w.cfg.MTLS != nil && w.cfg.MTLS.Generation() != generation {
 				generation = w.reconnect(generation)
 			}
-			if err := w.sendHeartbeat(ctx); err != nil {
+			if err := w.heartbeat(ctx); err != nil {
 				w.cfg.Log.Warn("heartbeat failed", "error", err)
 			}
 		}
 	}
+}
+
+// ticker returns the heartbeat tick source and its stop function.
+func (c WorkerConfig) ticker() (<-chan time.Time, func()) {
+	if c.NewTicker != nil {
+		return c.NewTicker(c.HeartbeatInterval)
+	}
+	t := time.NewTicker(c.HeartbeatInterval)
+	return t.C, t.Stop
+}
+
+// heartbeat sends one heartbeat and reports its outcome to OnHeartbeat.
+func (w *Worker) heartbeat(ctx context.Context) error {
+	err := w.sendHeartbeat(ctx)
+	if w.cfg.OnHeartbeat != nil {
+		w.cfg.OnHeartbeat(err)
+	}
+	return err
 }
 
 // reconnect replaces the connection with one that handshakes with the renewed certificate and

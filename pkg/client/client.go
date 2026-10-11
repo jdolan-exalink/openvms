@@ -2,14 +2,13 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
@@ -62,15 +61,12 @@ func New(cfg Config) (*Client, error) {
 		cfg.AppVersion = "1.0.0"
 	}
 
-	creds := credentials.TransportCredentials(insecure.NewCredentials())
-	if cfg.TLS {
-		var err error
-		creds, err = grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: cfg.TLSCAFile, ServerName: cfg.TLSServerName})
-		if err != nil {
-			return nil, fmt.Errorf("control plane TLS: %w", err)
-		}
-	} else if cfg.TLSCAFile != "" || cfg.TLSServerName != "" {
+	creds, err := grpctls.TransportCredentials(cfg.TLS, grpctls.ClientOptions{CAFile: cfg.TLSCAFile, ServerName: cfg.TLSServerName})
+	if errors.Is(err, grpctls.ErrOptionsWithoutTLS) {
 		return nil, fmt.Errorf("TLSCAFile and TLSServerName require TLS to be enabled")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("control plane TLS: %w", err)
 	}
 
 	opts := []grpc.DialOption{

@@ -57,6 +57,8 @@ type Manager struct {
 	Wait func(ctx context.Context, d time.Duration) error
 	// MinBackoff and MaxBackoff bound the delay between failed renewals (30s and 15m by default).
 	MinBackoff, MaxBackoff time.Duration
+	// OnRenew, when set, is called after each successful renewal with the new credentials.
+	OnRenew func(*Credentials)
 
 	creds atomic.Pointer[Credentials]
 	gen   atomic.Uint64
@@ -155,6 +157,9 @@ func (m *Manager) Renew(ctx context.Context, fn RenewFunc) error {
 	}
 	m.creds.Store(next)
 	m.gen.Add(1)
+	if m.OnRenew != nil {
+		m.OnRenew(next)
+	}
 	m.log().Info("agent certificate renewed", "serial", next.Leaf.SerialNumber.Text(16), "not_after", next.NotAfter())
 	return nil
 }

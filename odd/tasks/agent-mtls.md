@@ -48,7 +48,7 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 - [x] F3 Certificate expiry visibility: expose the live agent certificate expiry on the servers API and log a warning on the agent when renewal keeps failing close to expiry.
 - [x] F4 Cross-tenant test: two tenants, each with an enrolled agent; heartbeats and server reads stay isolated.
 - [x] F5 Agent store hardening: clean up stale `.new` files after promotion, fsync the directory after renames, tests modeling the exact first-save windows.
-- [ ] F6 Earlier TLS follow-ups: dedup the requires-TLS validation, fixed-timing worker tests, SDK server-name test.
+- [x] F6 Earlier TLS follow-ups: dedup the requires-TLS validation, fixed-timing worker tests, SDK server-name test.
 
 ## Acceptance criteria
 
@@ -113,6 +113,8 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 - F4 done. `TestTwoTenantsAgentsStayIsolated` (api integration): two tenants (demo tenant and a new one with a seeded server), one enrolled agent each on one real agent listener with a tenant user holding `servers.view`/`servers.manage` per tenant. Covers: each tenant reads only its own server with its own `agent_version`/`agent_status`/`agent_cert_expires_at`; cross-reads are 404 without agent state; lists never contain the other tenant's server; an agent heartbeating as the other tenant's server gets `PermissionDenied` and changes nothing; tenant A cannot revoke tenant B's agent (404), revoking its own ends only A's certificates (B keeps heartbeating, A's expiry disappears). No RED: it tests existing behavior; sensitivity shown by mutation (disabling the node_id check fails it with `agent A heartbeating as server B: <nil>, want PermissionDenied`).
 
 - F5 done. `Store.Load` removes every stale `.new` file once a valid set is in place and syncs the directory after promoting staged files; `Save` syncs the directory after staging (staged files are durable before the first rename) and after the renames. Tests model the exact windows through the real `Save` with an injected rename that fails after k renames (first save: 0..3 renames; renewal with a CA change: 0..2) and a counting sync seam: every window loads the complete new set, never `ErrNoCredentials`, and leaves no `.new` file. RED: compile level (`unknown field rename in struct literal of type Store`). GREEN: mtls unit tests.
+
+- F6 done. (a) Dedup: the requires-TLS rule existed twice (edge agent `controlTLSFromEnv`, SDK `client.New`) plus the worker's own `if TLS` branch; all three now use `grpctls.TransportCredentials(enabled, opts)` (plaintext when off, verifying TLS otherwise, `ErrOptionsWithoutTLS` for a stray CA file or server name) and keep their own error wording. (b) Deterministic worker timing: the worker has `NewTicker` and `OnHeartbeat` seams and the manager an `OnRenew` hook; every worker test now drives ticks by hand and waits on events (a `failsafe` timeout only bounds a hung test), the retry waits use the manager's injected `Wait`; no `time.Sleep` or polling remains in the agent tests (15 runs with `-race` stable). The revoked-certificate test asserts three explicit attempts instead of sleeping, and the grace relation test is kept. (c) SDK server-name test added (accepted name, rejected name, name without TLS). Nothing skipped. RED: `undefined: grpctls.TransportCredentials`; the old polling tests were replaced rather than failing.
 
 ## Next step
 

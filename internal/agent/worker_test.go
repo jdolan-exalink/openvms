@@ -5,7 +5,6 @@ import (
 	"net"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc"
 
@@ -41,32 +40,28 @@ func TestWorker_HeartbeatIntegration(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	w := NewWorker(WorkerConfig{
-		NodeID:            "test-node-01",
-		ControlGRPCAddr:   lis.Addr().String(),
-		HeartbeatInterval: 50 * time.Millisecond,
-	})
+	d := newBeatDriver()
+	cfg := WorkerConfig{NodeID: "test-node-01", ControlGRPCAddr: lis.Addr().String()}
+	d.wire(&cfg)
+	w := NewWorker(cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	done := make(chan struct{})
+	go func() { _ = w.Run(ctx); close(done) }()
 
-	go func() {
-		_ = w.Run(ctx)
-	}()
-
-	// Wait for heartbeat with timeout
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if mockSrv.heartbeatCount.Load() > 0 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	if err := d.next(t); err != nil {
+		t.Fatalf("initial heartbeat: %v", err)
 	}
-
+	if err := d.tick(t); err != nil {
+		t.Fatalf("heartbeat on a tick: %v", err)
+	}
 	cancel()
+	<-done
 
-	count := mockSrv.heartbeatCount.Load()
-	if count < 1 {
-		t.Errorf("expected at least 1 heartbeat, got %d", count)
+	if count := mockSrv.heartbeatCount.Load(); count != 2 {
+		t.Errorf("control server saw %d heartbeats, want exactly the initial one and one tick", count)
+	}
+	if got := w.HeartbeatsAcknowledged(); got != 2 {
+		t.Errorf("worker counted %d acknowledged heartbeats, want 2", got)
 	}
 }
