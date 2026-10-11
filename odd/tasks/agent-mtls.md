@@ -118,4 +118,4 @@ Out: API→agent HTTPS/bearer changes, bearer token rotation, ConnectRPC/bidirec
 
 ## Next step
 
-PRs #16-#20 are merged. 4c (heartbeats, API fields, docs) is reviewed and approved (review-85bc4d01aca09aef). Next: M5-fix, M6, F1-F6 on `feat/agent-mtls-agent`, one work-unit commit each with per-commit native review, then one PR for everything. Deployment is a separate, user-authorized step.
+All tasks are done. Open the single PR for the remaining work (M5-fix, M6, F1-F6). Remaining ideas, not scheduled: revoke the server's certificates automatically on SSH uninstall; also drop pending enrollment tokens when revoking an agent; extend `update-ssh` to migrate an installed agent to mTLS.
