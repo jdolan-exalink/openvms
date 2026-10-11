@@ -2843,6 +2843,11 @@ export interface components {
             /** @description Version the agent reported in its last heartbeat. Absent until the first heartbeat. */
             agent_version?: string;
             agent_status?: components["schemas"]["AgentStatus"];
+            /**
+             * Format: date-time
+             * @description When the client certificate the agent is using expires (the latest not_after among its certificates that are in use and not revoked). Absent until the agent first connects with mTLS and after its certificates are revoked. A time in the past means the agent's certificate expired and it can only recover with a new enrollment token.
+             */
+            agent_cert_expires_at?: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */

@@ -74,7 +74,7 @@ func TestAgentHeartbeatIsPersistedAndSurfacedByTheServerAPI(t *testing.T) {
 	}
 
 	// Before any heartbeat the agent fields are absent, not zero values.
-	for _, k := range []string{"agent_last_seen_at", "agent_version", "agent_status"} {
+	for _, k := range []string{"agent_last_seen_at", "agent_version", "agent_status", "agent_cert_expires_at"} {
 		if _, present := readServer()[k]; present {
 			t.Fatalf("%s present before the agent ever reported", k)
 		}
@@ -91,6 +91,10 @@ func TestAgentHeartbeatIsPersistedAndSurfacedByTheServerAPI(t *testing.T) {
 	}
 	if creds.Identity.ServerID != server.ServerID {
 		t.Fatalf("enrolled for server %s, want %s", creds.Identity.ServerID, server.ServerID)
+	}
+	// Enrolled but never connected: the certificate is not in use yet, so no expiry is reported.
+	if _, present := readServer()["agent_cert_expires_at"]; present {
+		t.Fatal("agent_cert_expires_at reported for a certificate that was never used")
 	}
 	store := mtls.Store{Dir: t.TempDir()}
 	if err := store.Save(creds); err != nil {
@@ -153,6 +157,12 @@ func TestAgentHeartbeatIsPersistedAndSurfacedByTheServerAPI(t *testing.T) {
 		t.Fatalf("agent_version/agent_status = %v/%v, want %s/online", got["agent_version"], got["agent_status"], agent.Version)
 	}
 
+	// The expiry of the certificate the agent is using, to the second.
+	expires, err := time.Parse(time.RFC3339Nano, got["agent_cert_expires_at"].(string))
+	if err != nil || !expires.Truncate(time.Second).Equal(creds.NotAfter().Truncate(time.Second)) {
+		t.Fatalf("agent_cert_expires_at = %v (%v), want the enrolled certificate's NotAfter %v", got["agent_cert_expires_at"], err, creds.NotAfter())
+	}
+
 	// The list endpoint carries the same fields for that server.
 	code, body := get("/api/v1/servers", env.AdminToken)
 	if code != http.StatusOK {
@@ -165,8 +175,8 @@ func TestAgentHeartbeatIsPersistedAndSurfacedByTheServerAPI(t *testing.T) {
 	var listed int
 	for _, s := range list.Items {
 		hasAgent := s["agent_last_seen_at"] != nil
-		if (s["id"] == server.ServerID.String()) != hasAgent {
-			t.Errorf("server %v: agent_last_seen_at present = %v", s["id"], hasAgent)
+		if (s["id"] == server.ServerID.String()) != hasAgent || hasAgent != (s["agent_cert_expires_at"] != nil) {
+			t.Errorf("server %v: agent_last_seen_at present = %v, agent_cert_expires_at = %v", s["id"], hasAgent, s["agent_cert_expires_at"])
 		}
 		if hasAgent {
 			listed++
@@ -189,7 +199,7 @@ func TestAgentHeartbeatIsPersistedAndSurfacedByTheServerAPI(t *testing.T) {
 		t.Errorf("cross-tenant GET: %d %s, want 404 without agent state", code, body)
 	}
 	_, body = get("/api/v1/servers", tokenB)
-	if strings.Contains(string(body), "agent_last_seen_at") || strings.Contains(string(body), server.ServerID.String()) {
+	if strings.Contains(string(body), "agent_last_seen_at") || strings.Contains(string(body), "agent_cert_expires_at") || strings.Contains(string(body), server.ServerID.String()) {
 		t.Errorf("another tenant's list leaks the server or its agent state: %s", body)
 	}
 }

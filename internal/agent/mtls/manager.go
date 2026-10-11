@@ -22,6 +22,8 @@ const (
 	// maxIdleWait caps a single sleep so the loop re-reads the clock regularly: a laptop
 	// that was suspended or a clock that was corrected does not delay renewal by days.
 	maxIdleWait = time.Hour
+	// expiryWarnFraction: warn about a near expiry when less than 1/6 of the lifetime is left.
+	expiryWarnFraction = 6
 	// RenewTimeout bounds one RenewCertificate call.
 	RenewTimeout = 30 * time.Second
 )
@@ -182,6 +184,11 @@ func (m *Manager) Run(ctx context.Context, fn RenewFunc) {
 			} else if cur.Expired(now) {
 				m.log().Error("agent certificate has expired and could not be renewed; the agent cannot reach the API over mTLS until it is enrolled again: create a new enrollment token for this server and restart the agent with OPENVMS_ENROLL_TOKEN",
 					"not_after", cur.NotAfter(), "error", err, "retry_in", wait)
+			} else if remaining := cur.NotAfter().Sub(now); failures >= 2 && remaining < cur.NotAfter().Sub(cur.NotBefore())/expiryWarnFraction {
+				// Renewal has failed repeatedly and the certificate is in the last sixth of its
+				// life: an operator has to look at it before the agent loses its identity.
+				m.log().Warn("agent certificate is close to expiry and renewal keeps failing",
+					"error", err, "remaining", remaining.Round(time.Second), "not_after", cur.NotAfter(), "retry_in", wait)
 			} else {
 				m.log().Warn("agent certificate renewal failed", "error", err, "not_after", cur.NotAfter(), "retry_in", wait)
 			}

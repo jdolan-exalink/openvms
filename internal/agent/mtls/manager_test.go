@@ -288,3 +288,49 @@ func TestRunTreatsTooEarlyAsRetryLater(t *testing.T) {
 		t.Fatalf("a too-early refusal must log at info, not as a failure:\n%s", logs)
 	}
 }
+
+// When renewal keeps failing and less than a sixth of the lifetime is left, the agent says so
+// before the certificate expires, with the time left, so an operator can act in time.
+func TestRunWarnsWhenRenewalKeepsFailingCloseToExpiry(t *testing.T) {
+	e := newManagerEnv(t, 0)
+	e.mgr.MinBackoff, e.mgr.MaxBackoff = time.Minute, time.Minute
+	e.fail = func(int) error { return errors.New("server unreachable") }
+	cur := e.mgr.Current()
+	life := cur.NotAfter().Sub(cur.NotBefore())
+	e.clock.now = cur.NotAfter().Add(-life / 10) // 10% of the lifetime left
+	e.clock.stopAfter = 3
+	e.mgr.Run(e.ctx, e.renewFunc())
+
+	logs := e.log.String()
+	if !strings.Contains(logs, "close to expiry") || !strings.Contains(logs, "remaining=") {
+		t.Fatalf("no near-expiry warning after repeated failures:\n%s", logs)
+	}
+	if strings.Contains(logs, "level=ERROR") {
+		t.Fatalf("the certificate has not expired yet, so this must not be an error:\n%s", logs)
+	}
+}
+
+func TestRunDoesNotWarnAboutExpiryWhileThereIsPlentyOfTime(t *testing.T) {
+	e := newManagerEnv(t, 0)
+	e.mgr.MinBackoff, e.mgr.MaxBackoff = time.Minute, time.Minute
+	e.fail = func(int) error { return errors.New("server unreachable") }
+	e.clock.now = e.mgr.Current().RenewalDue() // a third of the lifetime left
+	e.clock.stopAfter = 4
+	e.mgr.Run(e.ctx, e.renewFunc())
+	if strings.Contains(e.log.String(), "close to expiry") {
+		t.Fatalf("premature near-expiry warning:\n%s", e.log.String())
+	}
+}
+
+func TestExpiryWarningNeedsMoreThanOneFailure(t *testing.T) {
+	e := newManagerEnv(t, 0)
+	e.mgr.MinBackoff, e.mgr.MaxBackoff = time.Minute, time.Minute
+	e.fail = func(int) error { return errors.New("server unreachable") }
+	cur := e.mgr.Current()
+	e.clock.now = cur.NotAfter().Add(-cur.NotAfter().Sub(cur.NotBefore()) / 10)
+	e.clock.stopAfter = 1 // one failed attempt only
+	e.mgr.Run(e.ctx, e.renewFunc())
+	if strings.Contains(e.log.String(), "close to expiry") {
+		t.Fatalf("a single failure already raised the expiry warning:\n%s", e.log.String())
+	}
+}

@@ -48,9 +48,16 @@ SELECT count(*)::int FROM sites WHERE tenant_id = @tenant_id AND deleted_at IS N
 -- name: ListServers :many
 SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
-    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status
+    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
+    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
 FROM frigate_servers fs
 LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
+LEFT JOIN (
+    SELECT server_id, max(not_after)::timestamptz AS expires
+    FROM agent_certificates
+    WHERE revoked_at IS NULL AND first_used_at IS NOT NULL
+    GROUP BY server_id
+) acx ON acx.server_id = fs.id
 WHERE fs.deleted_at IS NULL
   AND fs.id = ANY(@ids::uuid[])
   AND (sqlc.narg('site_id')::uuid IS NULL OR fs.site_id = sqlc.narg('site_id'))
@@ -62,17 +69,31 @@ SELECT * FROM frigate_servers WHERE deleted_at IS NULL ORDER BY id;
 -- name: GetServer :one
 SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
-    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status
+    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
+    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
 FROM frigate_servers fs
 LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
+LEFT JOIN (
+    SELECT server_id, max(not_after)::timestamptz AS expires
+    FROM agent_certificates
+    WHERE revoked_at IS NULL AND first_used_at IS NOT NULL
+    GROUP BY server_id
+) acx ON acx.server_id = fs.id
 WHERE fs.id = @id AND fs.deleted_at IS NULL;
 
 -- name: GetServerForUpdate :one
 SELECT fs.*,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
-    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status
+    ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
+    COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
 FROM frigate_servers fs
 LEFT JOIN agent_heartbeats ah ON ah.server_id = fs.id
+LEFT JOIN (
+    SELECT server_id, max(not_after)::timestamptz AS expires
+    FROM agent_certificates
+    WHERE revoked_at IS NULL AND first_used_at IS NOT NULL
+    GROUP BY server_id
+) acx ON acx.server_id = fs.id
 WHERE fs.id = @id AND fs.deleted_at IS NULL
 FOR UPDATE OF fs;
 
