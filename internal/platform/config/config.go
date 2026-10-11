@@ -3,7 +3,9 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -22,6 +24,8 @@ type Config struct {
 	// a client certificate issued by the agent CA. Empty (the default) disables it; setting it
 	// requires server TLS (GRPC_TLS_CERT_FILE / GRPC_TLS_KEY_FILE).
 	GRPCAgentAddr string
+	// AgentEnroll tells SSH installs how agents reach the API; see AgentEnrollConfig.
+	AgentEnroll AgentEnrollConfig
 
 	DatabaseURL    string
 	MigrateOnStart bool
@@ -76,6 +80,27 @@ type Config struct {
 	// WorkerURL is the worker probe address. The API reads ONNX throughput from it.
 	WorkerURL string
 }
+
+// AgentEnrollConfig is how an agent host reaches the API, used when the API installs an agent
+// over SSH with mutual TLS. The API cannot know its own public address, so it is explicit. All
+// empty (the default) leaves SSH installs exactly as before; GRPCAddr and APIURL are set together
+// and require the agent listener (GRPC_AGENT_ADDR).
+type AgentEnrollConfig struct {
+	// GRPCAddr (AGENT_GRPC_PUBLIC_ADDR) is host:port of the agent listener as the agent host sees it.
+	GRPCAddr string
+	// APIURL (AGENT_API_PUBLIC_URL) is the https base URL of the API as the agent host sees it.
+	APIURL string
+	// GRPCCAFile (AGENT_GRPC_CA_FILE) is a PEM bundle on the API host that signed the agent
+	// listener's server certificate, copied to agents; empty makes agents use their system roots.
+	GRPCCAFile string
+	// ServerName (AGENT_GRPC_SERVER_NAME) overrides the name agents verify on that certificate.
+	ServerName string
+	// APICAFile (AGENT_API_CA_FILE) is the same for the API's HTTPS certificate.
+	APICAFile string
+}
+
+// Enabled reports whether SSH installs enroll agents for mutual TLS.
+func (a AgentEnrollConfig) Enabled() bool { return a.GRPCAddr != "" && a.APIURL != "" }
 
 // WahaConfig locates the WAHA service. An empty BaseURL disables WhatsApp channels.
 type WahaConfig struct {
@@ -150,6 +175,9 @@ func Load(service string) (Config, error) {
 	if c.GRPCAgentAddr != "" && !c.GRPCTLSEnabled() {
 		return c, fmt.Errorf("GRPC_AGENT_ADDR requires GRPC_TLS_CERT_FILE and GRPC_TLS_KEY_FILE")
 	}
+	if err := c.loadAgentEnroll(); err != nil {
+		return c, err
+	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("DATABASE_URL is required")
 	}
@@ -218,4 +246,33 @@ func parseCredentialTrustedProxyCIDRs(raw string) ([]netip.Prefix, error) {
 		out = append(out, prefix)
 	}
 	return out, nil
+}
+
+func (c *Config) loadAgentEnroll() error {
+	c.AgentEnroll = AgentEnrollConfig{
+		GRPCAddr:   str("AGENT_GRPC_PUBLIC_ADDR", ""),
+		APIURL:     str("AGENT_API_PUBLIC_URL", ""),
+		GRPCCAFile: str("AGENT_GRPC_CA_FILE", ""),
+		ServerName: str("AGENT_GRPC_SERVER_NAME", ""),
+		APICAFile:  str("AGENT_API_CA_FILE", ""),
+	}
+	a := c.AgentEnroll
+	if a == (AgentEnrollConfig{}) {
+		return nil
+	}
+	if a.GRPCAddr == "" || a.APIURL == "" {
+		return fmt.Errorf("AGENT_GRPC_PUBLIC_ADDR and AGENT_API_PUBLIC_URL must be set together (the other AGENT_* install settings need both)")
+	}
+	if c.GRPCAgentAddr == "" {
+		return fmt.Errorf("AGENT_GRPC_PUBLIC_ADDR requires the agent listener (GRPC_AGENT_ADDR)")
+	}
+	host, port, err := net.SplitHostPort(a.GRPCAddr)
+	if p, perr := strconv.Atoi(port); err != nil || host == "" || perr != nil || p < 1 || p > 65535 {
+		return fmt.Errorf("AGENT_GRPC_PUBLIC_ADDR must be host:port")
+	}
+	u, err := url.Parse(a.APIURL)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+		return fmt.Errorf("AGENT_API_PUBLIC_URL must be an https URL without credentials (the enrollment token is a secret)")
+	}
+	return nil
 }

@@ -40,6 +40,8 @@ type AgentInstallRequest struct {
 	TLSListen       string `json:"-"`
 	TLSCertificate  []byte `json:"-"`
 	TLSPrivateKey   []byte `json:"-"`
+	// MTLS, when set, enrolls the agent for mutual TLS; see AgentMTLSInstall.
+	MTLS *AgentMTLSInstall `json:"-"`
 }
 
 // String deliberately exposes only non-secret connection metadata. This keeps
@@ -95,6 +97,9 @@ func validateAgentInstallRequest(request AgentInstallRequest) error {
 		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
 			return errInvalidAgentInstall
 		}
+	}
+	if request.MTLS != nil && !request.MTLS.valid() {
+		return errInvalidAgentInstall
 	}
 	if len(request.TLSCertificate) == 0 && len(request.TLSPrivateKey) == 0 && request.TLSListen == "" {
 		return nil
@@ -154,12 +159,15 @@ func agentInstallFiles(request AgentInstallRequest) ([]agentInstallFile, error) 
 	}
 	if request.TLSListen != "" {
 		env += "OPENVMS_AGENT_ONVIF_TLS_LISTEN=" + request.TLSListen + "\nTLS_CERT_FILE=/etc/openvms/agent.crt\nTLS_KEY_FILE=/etc/openvms/agent.key\n"
-		files[2].data = []byte(env)
 		files = append(files,
 			agentInstallFile{path: "/etc/openvms/agent.crt", mode: 0o600, data: request.TLSCertificate},
 			agentInstallFile{path: "/etc/openvms/agent.key", mode: 0o600, data: request.TLSPrivateKey},
 		)
 	}
+	if request.MTLS != nil {
+		env, files = request.MTLS.apply(env, files)
+	}
+	files[2].data = []byte(env)
 	return files, nil
 }
 

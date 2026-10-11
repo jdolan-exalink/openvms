@@ -126,3 +126,27 @@ A failed attempt is retried with exponential backoff (30 seconds up to 15 minute
 1. Enable the agent listener on the API (see above) and publish its port.
 2. For each agent, create a token and set `OPENVMS_AGENT_GRPC_ADDR`, `OPENVMS_ENROLL_TOKEN` (or the file), `OPENVMS_API_URL` and the control CA settings, then restart the agent. It enrolls on first start and moves to the agent port.
 3. To roll an agent back, unset `OPENVMS_AGENT_GRPC_ADDR` and restart; it returns to `OPENVMS_SERVER_ADDR`. Its issued certificates stay in the database until they expire or are revoked. Uninstalling an agent should also remove `<state>/agent-mtls/` (the SSH install and uninstall wiring is a later change).
+
+## SSH install with mutual TLS
+
+When the API runs the agent listener and knows how agents reach it, the SSH agent install (`POST /api/v1/servers/{serverId}/agent/install`) enrolls the new agent for mutual TLS by itself. Without these settings installs behave exactly as before.
+
+| API variable | Meaning |
+| --- | --- |
+| `AGENT_GRPC_PUBLIC_ADDR` | `host:port` of the agent listener (`GRPC_AGENT_ADDR`) as the agent host reaches it. Becomes the agent's `OPENVMS_AGENT_GRPC_ADDR`. |
+| `AGENT_API_PUBLIC_URL` | `https` base URL of the API as the agent host reaches it. Becomes `OPENVMS_API_URL`. |
+| `AGENT_GRPC_CA_FILE` | Optional PEM file on the API host with the CA that signed `GRPC_TLS_CERT_FILE`; copied to the agent as `OPENVMS_CONTROL_TLS_CA_FILE`. Empty makes agents use their system roots. |
+| `AGENT_GRPC_SERVER_NAME` | Optional name agents verify on that certificate (`OPENVMS_CONTROL_TLS_SERVER_NAME`). |
+| `AGENT_API_CA_FILE` | Optional PEM file with the CA of the API's HTTPS certificate, copied as `OPENVMS_API_CA_FILE`. |
+
+`AGENT_GRPC_PUBLIC_ADDR` and `AGENT_API_PUBLIC_URL` are set together and need `GRPC_AGENT_ADDR`; the API cannot know its own public address, so there is no default. The CA files are read at startup and a bad path stops the API.
+
+Flow of an install with these settings:
+
+1. The install job creates a one-time enrollment token for the server (the same call as `enroll-token`: it needs `servers.manage` and `servers.config.secrets` and is audited as `SERVER_AGENT_ENROLL_TOKEN_CREATED`), right before the SSH run because the token lives 15 minutes. If it cannot be created the job fails before touching the host.
+2. Over SFTP the installer writes `/etc/openvms/agent-enroll.token` (mode 0600; the token is never in `agent.env`, a command line or a log), the CA files (0644) and these lines in `/etc/openvms/agent.env` (0600): `OPENVMS_AGENT_GRPC_ADDR`, `OPENVMS_ENROLL_TOKEN_FILE`, `OPENVMS_API_URL`, `OPENVMS_AGENT_STATE_DIR=/var/lib/openvms-agent` and, when set, the CA and server-name lines. All values are validated before any SSH connection.
+3. The agent starts, enrolls once, keeps its key, certificate and CA under `/var/lib/openvms-agent/agent-mtls/` and heartbeats on the agent port. The token file can stay; stored credentials always win over a spent token.
+
+Uninstall removes the service, `/var/lib/openvms-agent/agent-mtls/`, the enrollment token file and `/etc/openvms`. It does not revoke the server's certificates; use the revocation endpoint (or `RevokeServerCertificates`) when an agent is decommissioned.
+
+Gradual rollout: only installs started after the settings are in place enroll. Agents already installed keep running on the control channel (`OPENVMS_SERVER_ADDR`) until moved. To move one by hand, create a token for its server and add `OPENVMS_AGENT_GRPC_ADDR`, `OPENVMS_ENROLL_TOKEN_FILE`, `OPENVMS_API_URL` (and the CA settings) to its `agent.env`, then restart it; to roll one back, remove `OPENVMS_AGENT_GRPC_ADDR` and restart. The update flow (`update-ssh`) does not change an agent's control settings.

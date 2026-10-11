@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/netip"
@@ -254,9 +255,25 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		request.Token = ""
 		request.TLSPrivateKey = nil
 		request.TLSCertificate = nil
+		request.MTLS = nil
 		request.Binary = nil
 		s.releaseAgentInstallJob(job, false)
 	}()
+	// With the agent listener configured, the agent is enrolled for mutual TLS: a one-time token
+	// is created for this server now, as close to its use as possible (it lives 15 minutes), and
+	// written to the host with the settings. Without that configuration nothing changes.
+	if s.AgentMTLS != nil && s.NewEnrollToken != nil {
+		enrollToken, err := s.NewEnrollToken(ctx, actor, job.serverID)
+		if err != nil {
+			s.logger().Warn("agent install: enrollment token not created", "server_id", job.serverID, "error", err)
+			job.update("failed", "failed", "Could not create the agent enrollment token; nothing was installed")
+			return
+		}
+		request.MTLS = &AgentMTLSInstall{
+			GRPCAddr: s.AgentMTLS.GRPCAddr, APIURL: s.AgentMTLS.APIURL, ServerName: s.AgentMTLS.ServerName,
+			GRPCCAPEM: s.AgentMTLS.GRPCCAPEM, APICAPEM: s.AgentMTLS.APICAPEM, EnrollToken: enrollToken,
+		}
+	}
 	job.update("running", "connecting", "Connecting to the SSH host with remembered first-use trust")
 	run := s.agentInstallRun
 	if run == nil {
@@ -550,4 +567,11 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 		return errors.New("agent install activation failed")
 	}
 	return nil
+}
+
+func (s *Service) logger() *slog.Logger {
+	if s.Log != nil {
+		return s.Log
+	}
+	return slog.Default()
 }

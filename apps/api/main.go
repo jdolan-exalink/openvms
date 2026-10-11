@@ -29,12 +29,14 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 	"google.golang.org/grpc/credentials"
 
+	"github.com/google/uuid"
 	"github.com/jdolan-exalink/openvms/internal/agentauth"
 	"github.com/jdolan-exalink/openvms/internal/agentca"
 	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/agentstatus"
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api"
+	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/control"
@@ -157,9 +159,13 @@ func run() error {
 		return fmt.Errorf("agent CA: %w", err)
 	}
 	agentEnroll := &agentenroll.Service{Store: st, Authz: inv, CA: agentCA}
+	provisioner := provision.New(inv, st, sealer, log)
+	if err := configureAgentEnrollment(provisioner, cfg, agentEnroll); err != nil {
+		return err
+	}
 	handlers := &api.Handlers{
 		Inv:           inv,
-		Provision:     provision.New(inv, st, sealer, log),
+		Provision:     provisioner,
 		AgentEnroll:   agentEnroll,
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Alarms:        alarmsSvc,
@@ -324,4 +330,40 @@ type jetstreamPublisher struct {
 func (p *jetstreamPublisher) Publish(ctx context.Context, subject string, data []byte) error {
 	_, err := p.js.Publish(ctx, subject, data)
 	return err
+}
+
+// configureAgentEnrollment makes SSH installs enroll agents for mutual TLS when the operator
+// has configured the agent listener and how agents reach the API. Otherwise installs are
+// unchanged. The CA bundles are read once here, so a bad path stops the API at startup instead
+// of failing every install.
+func configureAgentEnrollment(p *provision.Service, cfg config.Config, enroll *agentenroll.Service) error {
+	ac := cfg.AgentEnroll
+	if !ac.Enabled() {
+		return nil
+	}
+	m := &provision.AgentMTLS{GRPCAddr: ac.GRPCAddr, APIURL: ac.APIURL, ServerName: ac.ServerName}
+	for _, f := range []struct {
+		path string
+		dst  *[]byte
+		name string
+	}{{ac.GRPCCAFile, &m.GRPCCAPEM, "AGENT_GRPC_CA_FILE"}, {ac.APICAFile, &m.APICAPEM, "AGENT_API_CA_FILE"}} {
+		if f.path == "" {
+			continue
+		}
+		pem, err := os.ReadFile(f.path)
+		if err != nil {
+			return fmt.Errorf("%s: %w", f.name, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return fmt.Errorf("%s %q contains no valid certificates", f.name, f.path)
+		}
+		*f.dst = pem
+	}
+	p.AgentMTLS = m
+	p.NewEnrollToken = func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, error) {
+		tok, err := enroll.CreateToken(ctx, actor, serverID)
+		return tok.Value, err
+	}
+	return nil
 }
