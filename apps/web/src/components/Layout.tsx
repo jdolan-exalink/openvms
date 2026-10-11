@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { Search } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { clearToken } from "@/api/auth";
 import { api, type Schemas } from "@/api/client";
 import { meQuery } from "@/api/queries";
@@ -131,9 +131,10 @@ export function Layout() {
  * (overflow clips absolute children); it opens on hover after a short delay and immediately on
  * keyboard focus, and Escape dismisses it.
  */
-function RailTooltipTarget({ label, children }: { label: string; children: (props: { ref: (el: HTMLElement | null) => void; describedBy: string | undefined; handlers: Record<string, unknown> }) => ReactNode }) {
+function RailTooltipTarget({ label, to, accessibleLabel, active, className, children }: { label: string; to?: string; accessibleLabel: string; active: boolean; className: string; children: ReactNode }) {
   const id = useId();
   const el = useRef<HTMLElement | null>(null);
+  const setElement = useCallback((node: HTMLElement | null) => { el.current = node; }, []);
   const timer = useRef<number | undefined>(undefined);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const show = () => {
@@ -167,7 +168,15 @@ function RailTooltipTarget({ label, children }: { label: string; children: (prop
   };
   return (
     <>
-      {children({ ref: (node) => { el.current = node; }, describedBy: pos ? id : undefined, handlers })}
+      {to ? (
+        <Link ref={setElement} to={to} aria-label={accessibleLabel} aria-describedby={pos ? id : undefined} aria-current={active ? "page" : undefined} className={className} {...handlers}>
+          {children}
+        </Link>
+      ) : (
+        <span ref={setElement} tabIndex={0} aria-label={accessibleLabel} aria-describedby={pos ? id : undefined} className={className} {...handlers}>
+          {children}
+        </span>
+      )}
       {pos && (
         <span id={id} role="tooltip" style={{ top: pos.top, left: pos.left }} className="pointer-events-none fixed z-50 -translate-y-1/2 whitespace-nowrap rounded-m3-sm bg-surface-3 px-2 py-1 text-xs font-medium text-on-surface shadow-md animate-in fade-in duration-100 motion-reduce:animate-none">
           {label}
@@ -191,16 +200,15 @@ function NavGroupLinks({ group, me, pathname, features }: { group: NavGroup; me:
           !item.to && "cursor-default opacity-50",
         );
         return (
-          <RailTooltipTarget key={item.label} label={item.to ? label : t("nav.comingIn", { label, milestone: item.milestone ?? "" })}>
-            {({ ref, describedBy, handlers }) => item.to ? (
-              <Link ref={ref} to={item.to} aria-label={label} aria-describedby={describedBy} aria-current={active ? "page" : undefined} className={classes} {...handlers}>
-                {body}
-              </Link>
-            ) : (
-              <span ref={ref} tabIndex={0} aria-label={t("nav.comingSoon", { label })} aria-describedby={describedBy} className={classes} {...handlers}>
-                {body}
-              </span>
-            )}
+          <RailTooltipTarget
+            key={item.label}
+            label={item.to ? label : t("nav.comingIn", { label, milestone: item.milestone ?? "" })}
+            to={item.to}
+            accessibleLabel={item.to ? label : t("nav.comingSoon", { label })}
+            active={active}
+            className={classes}
+          >
+            {body}
           </RailTooltipTarget>
         );
       })}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2, Minimize2, X } from "lucide-react";
 import { ApiError } from "@/api/client";
@@ -55,7 +55,7 @@ export function RoomPlannerModal({
   const [isMaximized, setIsMaximized] = useState(true);
 
   // Send initial state to the planner when ready
-  const sendInitialState = () => {
+  const sendInitialState = useCallback(() => {
     if (initialState && iframeRef.current?.contentWindow) {
       iframeRef.current.contentWindow.postMessage(
         {
@@ -65,7 +65,7 @@ export function RoomPlannerModal({
         "*"
       );
     }
-  };
+  }, [initialState]);
 
   useEffect(() => {
     const handleMessage = async (event: MessageEvent) => {
@@ -132,7 +132,7 @@ export function RoomPlannerModal({
     return () => {
       window.removeEventListener("message", handleMessage);
     };
-  }, [initialState, mapName, onSave, onClose]);
+  }, [sendInitialState, mapName, onSave, onClose]);
 
   const modalContent = (
     <div

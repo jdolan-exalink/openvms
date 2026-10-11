@@ -144,9 +144,8 @@ export function LinkButton<const TFrom extends string = string, const TTo extend
   const { variant = "text", size = "md", className, children, ...rest } = props;
   const cls = buttonClass({ variant, size, className });
   if ("href" in rest && typeof rest.href === "string") {
-    const { to: _to, search: _search, params: _params, ...anchor } = rest as typeof rest & { to?: never; search?: never; params?: never };
     return (
-      <a className={cls} {...anchor}>
+      <a className={cls} {...rest}>
         {children}
       </a>
     );

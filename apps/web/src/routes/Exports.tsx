@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -22,7 +22,7 @@ import {
   Trash2,
   User,
 } from "lucide-react";
-import { api, unwrap } from "@/api/client";
+import { api, unwrap, type Schemas } from "@/api/client";
 import { exportJobsQuery, exportsQuery } from "@/api/queries";
 import { EditExportModal } from "@/components/EditExportModal";
 import { EvidencePlayerModal } from "@/components/EvidencePlayerModal";
@@ -74,10 +74,15 @@ export function Exports() {
   const t = useT();
   const qc = useQueryClient();
   const [expandedJobs, setExpandedJobs] = useState<Record<string, boolean>>({});
-  const [playbackJob, setPlaybackJob] = useState<any | null>(null);
-  const [shareJob, setShareJob] = useState<any | null>(null);
-  const [editJob, setEditJob] = useState<any | null>(null);
+  const [playbackJob, setPlaybackJob] = useState<Schemas["ExportJob"] | null>(null);
+  const [shareJob, setShareJob] = useState<Schemas["ExportJob"] | null>(null);
+  const [editJob, setEditJob] = useState<Schemas["ExportJob"] | null>(null);
   const [copiedHash, setCopiedHash] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   const jobs = useQuery(exportJobsQuery);
   const legacyExports = useQuery(exportsQuery);
@@ -174,7 +179,7 @@ export function Exports() {
                             {Math.max(
                               0,
                               Math.ceil(
-                                (new Date(job.expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+                                (new Date(job.expires_at).getTime() - now) / (1000 * 60 * 60 * 24)
                               )
                             )}{" "}
                             días

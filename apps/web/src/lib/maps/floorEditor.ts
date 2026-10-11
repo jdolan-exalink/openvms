@@ -25,7 +25,8 @@ export function stageFloor(draft: FloorDraft, id: string, point: Point, revision
   return { entries: { ...draft.entries, [id]: { ...point, revision: draft.entries[id]?.revision ?? revision } }, past: [...draft.past, draft.entries], future: [] };
 }
 export function unstageFloor(draft: FloorDraft, id: string): FloorDraft {
-  const { [id]: _, ...entries } = draft.entries;
+  const entries = { ...draft.entries };
+  delete entries[id];
   return { entries, past: [...draft.past, draft.entries], future: [] };
 }
 export function undoFloor(draft: FloorDraft): FloorDraft {

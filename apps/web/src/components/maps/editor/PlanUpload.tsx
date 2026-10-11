@@ -143,7 +143,9 @@ function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,s
             await uploadFloorPlan(siteId, floorId, revision, result.blob, controller.signal);
             try {
               localStorage.setItem(`openvms_floor_plan_${floorId}`, JSON.stringify(state));
-            } catch (_) {}
+            } catch {
+              // Plan state is optional when browser storage is unavailable.
+            }
             setDesignerOpen(false);
             onSaved();
           } catch (cause) {

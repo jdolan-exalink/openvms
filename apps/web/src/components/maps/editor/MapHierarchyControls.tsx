@@ -241,7 +241,9 @@ export function MapHierarchyControls({ site, activeFloor, disabled, onSaved, onC
               await uploadFloorPlan(site.id, plannerFloor.id, plannerFloor.revision, converted.blob);
               try {
                 localStorage.setItem(`openvms_floor_plan_${plannerFloor.id}`, JSON.stringify(state));
-              } catch (_) {}
+              } catch {
+                // Plan state is optional when browser storage is unavailable.
+              }
               onSaved();
               onCreated(plannerFloor.id);
               setPlannerFloor(undefined);

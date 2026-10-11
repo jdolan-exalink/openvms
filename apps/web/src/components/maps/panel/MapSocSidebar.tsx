@@ -144,13 +144,16 @@ function LprList({ siteId, onSelectCamera, onOpenRead }: { siteId?: string; onSe
   const [plate, setPlate] = useState("");
   const [vehicleType, setVehicleType] = useState("");
   const [vehicleColor, setVehicleColor] = useState("");
-  const [page, setPage] = useState(0);
+  const filterKey = JSON.stringify([plate, siteId, vehicleType, vehicleColor]);
+  const [pagination, setPagination] = useState({ key: filterKey, page: 0 });
+  if (pagination.key !== filterKey) setPagination({ key: filterKey, page: 0 });
+  const page = pagination.key === filterKey ? pagination.page : 0;
+  const setPage = (next: number) => setPagination({ key: filterKey, page: next });
   const day = useMemo(() => localDayBounds(), []);
   useEffect(() => {
     const timer = window.setTimeout(() => setPlate(draft.trim()), 300);
     return () => window.clearTimeout(timer);
   }, [draft]);
-  useEffect(() => setPage(0), [plate, siteId, vehicleType, vehicleColor]);
   const reads = useInfiniteQuery({
     ...platesQuery({
       site_id: siteId ? [siteId] : undefined,

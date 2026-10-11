@@ -35,7 +35,7 @@ import {
   type ZoneDraft,
 } from "@/lib/maps/zoneDraft";
 import { deleteZone, saveZone } from "@/lib/maps/zones";
-import { EMPTY_FILTERS, type CameraEntity, type LayerPreference, type MapFilters, type MapMode } from "@/lib/maps/types";
+import { EMPTY_FILTERS, type CameraEntity, type LayerPreference, type MapEntity, type MapFilters, type MapMode } from "@/lib/maps/types";
 import { MapRealtimeStore } from "@/lib/maps/mapRealtimeStore";
 import { IncidentFocus } from "@/lib/maps/incidentPolicy";
 import { MapOperationsPanel } from "./panel/MapOperationsPanel";
@@ -67,6 +67,11 @@ import { usePinnedMapWindows } from "./panel/usePinnedMapWindows";
 import { useFeatures } from "@/lib/features";
 import { Button, Checkbox, ErrorNote } from "../ui";
 import { Loader2 } from "lucide-react";
+
+const EMPTY_CAMERAS: CameraEntity[] = [];
+function selectBaseCameras(data: { entities: (CameraEntity | MapEntity)[] }): CameraEntity[] {
+  return data.entities.filter((entity): entity is CameraEntity => entity.type === "camera");
+}
 
 export interface MapShellProps {
   initialSiteId?: string;
@@ -145,14 +150,15 @@ function MapShellContent({
     setSelectedCameraId(initialCameraId);
   }
   const pinned = usePinnedMapWindows(me.data?.tenant_id ?? null, me.data?.id, `geo:${selectedSiteId ?? "overview"}`);
+  const { ready: pinnedReady, pin: pinCamera } = pinned;
   const seededWindow = useRef("");
   useEffect(() => {
-    if (!pinned.ready || !initialCameraId) return;
+    if (!pinnedReady || !initialCameraId) return;
     const token = `${selectedSiteId ?? ""}:${initialCameraId}`;
     if (seededWindow.current === token) return;
     seededWindow.current = token;
-    pinned.pin(initialCameraId);
-  }, [pinned.ready, pinned.pin, initialCameraId, selectedSiteId]);
+    pinCamera(initialCameraId);
+  }, [pinnedReady, pinCamera, initialCameraId, selectedSiteId]);
   const [contextMenu, setContextMenu] = useState<{ cameraId: string; x: number; y: number } | null>(null);
   const [hoverState, setHoverState] = useState<HoverIntentState>({
     cameraId: null,
@@ -523,10 +529,11 @@ function MapShellContent({
     }
   };
 
-  const baseCameras: CameraEntity[] = useMemo(() => {
-    if (!entitiesQuery.data) return [];
-    return entitiesQuery.data.entities.filter((e): e is CameraEntity => e.type === "camera");
-  }, [entitiesQuery.data]);
+  const baseCamerasQuery = useQuery({
+    ...siteEntitiesQuery(currentSite?.id ?? ""),
+    select: selectBaseCameras,
+  });
+  const baseCameras = baseCamerasQuery.data ?? EMPTY_CAMERAS;
 
   const alarms = useQuery({ ...alarmsQuery({ site_id: currentSite?.id, limit: 100 }),
     enabled: !!currentSite && can(me.data, "alarms.view") });

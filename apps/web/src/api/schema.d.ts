@@ -528,18 +528,18 @@ export interface paths {
          * Read registered agent TLS trust configuration
          * @description Requires servers.manage. Returns only the public custom CA bundle, never credentials or private keys.
          */
-        get: operations["getServerAgentTlsConfig"];
+        get: operations["getServerAgentTLSConfig"];
         /**
          * Configure registered agent TLS trust
          * @description Requires servers.manage. The CA bundle is public trust material; private keys and agent credentials are not accepted.
          */
-        put: operations["setServerAgentTlsConfig"];
+        put: operations["setServerAgentTLSConfig"];
         post?: never;
         /**
          * Disable registered agent TLS configuration
          * @description Requires servers.manage. This only deletes trust metadata and does not issue an agent or camera request.
          */
-        delete: operations["deleteServerAgentTlsConfig"];
+        delete: operations["deleteServerAgentTLSConfig"];
         options?: never;
         head?: never;
         patch?: never;
@@ -674,7 +674,7 @@ export interface paths {
          * Update an existing registered agent and configure HTTPS
          * @description Requires servers.manage and servers.config.secrets. The registered agent IPv4 and existing bearer are fixed by server registration. The root SSH password is transient. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. HTTPS health is verified before public trust metadata is recorded. Existing TLS-enabled agents are not replaced by this operation.
          */
-        post: operations["updateServerAgentOverSsh"];
+        post: operations["updateServerAgentOverSSH"];
         delete?: never;
         options?: never;
         head?: never;
@@ -719,7 +719,7 @@ export interface paths {
          * Uninstall a registered agent from the host over SSH
          * @description Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
          */
-        post: operations["uninstallServerAgentOverSsh"];
+        post: operations["uninstallServerAgentOverSSH"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5558,7 +5558,7 @@ export interface operations {
             502: components["responses"]["FrigateUnreachable"];
         };
     };
-    getServerAgentTlsConfig: {
+    getServerAgentTLSConfig: {
         parameters: {
             query?: never;
             header?: never;
@@ -5583,7 +5583,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    setServerAgentTlsConfig: {
+    setServerAgentTLSConfig: {
         parameters: {
             query?: never;
             header?: never;
@@ -5613,7 +5613,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    deleteServerAgentTlsConfig: {
+    deleteServerAgentTLSConfig: {
         parameters: {
             query?: never;
             header?: never;
@@ -5770,7 +5770,7 @@ export interface operations {
             429: components["responses"]["TooManyRequests"];
         };
     };
-    updateServerAgentOverSsh: {
+    updateServerAgentOverSSH: {
         parameters: {
             query?: never;
             header?: never;
@@ -5827,7 +5827,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    uninstallServerAgentOverSsh: {
+    uninstallServerAgentOverSSH: {
         parameters: {
             query?: never;
             header?: never;

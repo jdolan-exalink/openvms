@@ -13,31 +13,42 @@ import {
 
 /** Restores this map's open camera windows and writes them back after every change. */
 export function usePinnedMapWindows(tenantId: string | null | undefined, userId: string | undefined, scope: string) {
-  const [windows, setWindows] = useState<PinnedWindow[] | null>(null);
   const key = userId ? pinnedWindowsKey(tenantId ?? null, userId, scope) : "";
+  const [stored, setStored] = useState<{ key: string; windows: PinnedWindow[] }>(() => ({
+    key,
+    windows: key ? loadPinnedWindows(key) : [],
+  }));
+
+  // Discard a previous user's/map's windows in the same render, before they can be shown.
+  if (stored.key !== key) {
+    setStored({ key, windows: key ? loadPinnedWindows(key) : [] });
+  }
+  const windows = stored.key === key ? stored.windows : [];
 
   useEffect(() => {
+    if (key && stored.key === key) savePinnedWindows(key, stored.windows);
+  }, [key, stored]);
+
+  const update = useCallback((change: (windows: PinnedWindow[]) => PinnedWindow[]) => {
     if (!key) return;
-    setWindows(loadPinnedWindows(key));
+    setStored((current) => ({
+      key,
+      windows: change(current.key === key ? current.windows : loadPinnedWindows(key)),
+    }));
   }, [key]);
 
-  useEffect(() => {
-    if (!key || windows === null) return;
-    savePinnedWindows(key, windows);
-  }, [key, windows]);
-
   const pin = useCallback((id: string) => {
-    setWindows((current) => pinWindow(current ?? [], id, measureMapStage()));
-  }, []);
+    update((current) => pinWindow(current, id, measureMapStage()));
+  }, [update]);
   const unpin = useCallback((id: string) => {
-    setWindows((current) => unpinWindow(current ?? [], id));
-  }, []);
+    update((current) => unpinWindow(current, id));
+  }, [update]);
   const move = useCallback((id: string, x: number, y: number) => {
-    setWindows((current) => moveWindow(current ?? [], id, x, y, measureMapStage()));
-  }, []);
+    update((current) => moveWindow(current, id, x, y, measureMapStage()));
+  }, [update]);
   const arrange = useCallback(() => {
-    setWindows((current) => arrangeWindows(current ?? [], measureMapStage()));
-  }, []);
+    update((current) => arrangeWindows(current, measureMapStage()));
+  }, [update]);
 
-  return { windows: windows ?? [], ready: windows !== null, pin, unpin, move, arrange };
+  return { windows, ready: Boolean(key) && stored.key === key, pin, unpin, move, arrange };
 }

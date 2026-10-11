@@ -78,7 +78,7 @@ export function MapGrowFrame({
     card.style.transform = from;
   };
   const requestCloseRef = useRef(requestClose);
-  requestCloseRef.current = requestClose;
+  useLayoutEffect(() => { requestCloseRef.current = requestClose; });
   useLayoutEffect(() => {
     const card = cardRef.current;
     if (!card || reducedMotion()) return;
