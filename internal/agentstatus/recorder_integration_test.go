@@ -4,6 +4,8 @@ package agentstatus_test
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,13 +85,14 @@ func TestRecordHeartbeatUpsertsTheServersRow(t *testing.T) {
 	rec := &agentstatus.Recorder{Store: st}
 	ctx := context.Background()
 
-	before := time.Now().Add(-time.Second)
+	before := dbNow(t, st)
 	if err := rec.RecordHeartbeat(ctx, a.id(), agentstatus.Heartbeat{Version: "0.1.1", Status: "online"}); err != nil {
 		t.Fatal(err)
 	}
+	after := dbNow(t, st)
 	first := read(t, st, store.AllTenants)[a.server]
-	if first.Version != "0.1.1" || first.Status != "online" || first.LastSeen.Before(before) {
-		t.Fatalf("row = %+v, want version 0.1.1 online seen after %v", first, before)
+	if first.Version != "0.1.1" || first.Status != "online" || first.LastSeen.Before(before) || first.LastSeen.After(after) {
+		t.Fatalf("row = %+v, want version 0.1.1 online seen between the database times %v and %v", first, before, after)
 	}
 
 	time.Sleep(20 * time.Millisecond)
@@ -152,5 +155,49 @@ func TestRecordHeartbeatRejectsAnUnknownStatus(t *testing.T) {
 	rec := &agentstatus.Recorder{Store: st}
 	if err := rec.RecordHeartbeat(context.Background(), a.id(), agentstatus.Heartbeat{Status: "on fire"}); err == nil {
 		t.Fatal("accepted an unknown status")
+	}
+}
+
+// dbNow is the database clock, the one last_seen_at is written with, so the assertions do not
+// depend on the test host's clock agreeing with the database's.
+func dbNow(t *testing.T, st *store.Store) time.Time {
+	t.Helper()
+	var now time.Time
+	err := st.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), "SELECT clock_timestamp()").Scan(&now)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return now
+}
+
+func TestRecordHeartbeatEnforcesTheVersionLimit(t *testing.T) {
+	pool, _ := pgtest.Migrated(t)
+	st := &store.Store{Pool: pool}
+	a := seed(t, st, "a")
+	rec := &agentstatus.Recorder{Store: st}
+	ctx := context.Background()
+	exact := strings.Repeat("v", agentstatus.MaxVersionLen)
+	if err := rec.RecordHeartbeat(ctx, a.id(), agentstatus.Heartbeat{Version: exact, Status: "online"}); err != nil {
+		t.Fatalf("a version of exactly MaxVersionLen bytes: %v", err)
+	}
+	err := rec.RecordHeartbeat(ctx, a.id(), agentstatus.Heartbeat{Version: exact + "v", Status: "online"})
+	if !errors.Is(err, agentstatus.ErrInvalid) {
+		t.Fatalf("one byte over: err = %v, want ErrInvalid", err)
+	}
+	if got := read(t, st, store.AllTenants)[a.server]; got.Version != exact {
+		t.Fatalf("the refused heartbeat changed the stored version to %q", got.Version)
+	}
+}
+
+func TestRecordHeartbeatForAServerThatNoLongerExistsIsPermanent(t *testing.T) {
+	pool, _ := pgtest.Migrated(t)
+	st := &store.Store{Pool: pool}
+	a := seed(t, st, "a")
+	gone := agentca.Identity{TenantID: a.tenant, ServerID: uuid.New()}
+	err := (&agentstatus.Recorder{Store: st}).RecordHeartbeat(context.Background(), gone, agentstatus.Heartbeat{Status: "online"})
+	if !errors.Is(err, agentstatus.ErrUnknownServer) {
+		t.Fatalf("err = %v, want ErrUnknownServer", err)
 	}
 }

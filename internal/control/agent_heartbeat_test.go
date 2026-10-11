@@ -3,11 +3,13 @@ package control
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -34,8 +36,18 @@ func (f *fakeRecorder) RecordHeartbeat(_ context.Context, id agentca.Identity, h
 	if f.err != nil {
 		return f.err
 	}
+	// The real recorder validates; the handler relies on that and maps ErrInvalid.
+	if err := hb.Validate(); err != nil {
+		return err
+	}
 	f.got = append(f.got, recordedHeartbeat{id, hb})
 	return nil
+}
+
+func (f *fakeRecorder) failWith(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.err = err
 }
 
 func (f *fakeRecorder) recorded() []recordedHeartbeat {
@@ -137,5 +149,60 @@ func TestAgentListener_HeartbeatWithoutARecorderStillAcknowledges(t *testing.T) 
 	c := h.pki.Issue(t, agentID, time.Now(), time.Hour)
 	if err := send(t, h, c, &openvmsv1.NodeHeartbeatRequest{NodeId: agentID.ServerID.String()}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Every wire status maps into the shared vocabulary, and every non-default status is reachable.
+func TestStatusNameStaysInsideTheVocabulary(t *testing.T) {
+	reached := map[string]bool{}
+	for v := range openvmsv1.OperationalStatus_name {
+		name := statusName(openvmsv1.OperationalStatus(v))
+		if !agentstatus.Valid(name) {
+			t.Errorf("status %d maps to %q, outside agentstatus.Statuses", v, name)
+		}
+		reached[name] = true
+	}
+	for _, s := range agentstatus.Statuses {
+		if !reached[s] {
+			t.Errorf("no wire status maps to %q", s)
+		}
+	}
+}
+
+func TestAgentListener_InvalidHeartbeatContentIsInvalidArgumentNotUnavailable(t *testing.T) {
+	h, rec := startHeartbeatServer(t)
+	c := h.pki.Issue(t, agentID, time.Now(), time.Hour)
+	rec.failWith(fmt.Errorf("wrapped: %w", agentstatus.ErrInvalid))
+	err := send(t, h, c, &openvmsv1.NodeHeartbeatRequest{NodeId: agentID.ServerID.String()})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("code = %s (%v), want InvalidArgument", status.Code(err), err)
+	}
+	rec.failWith(fmt.Errorf("wrapped: %w", agentstatus.ErrUnknownServer))
+	err = send(t, h, c, &openvmsv1.NodeHeartbeatRequest{NodeId: agentID.ServerID.String()})
+	if status.Code(err) != codes.NotFound {
+		t.Fatalf("code = %s (%v), want NotFound for a server that no longer exists", status.Code(err), err)
+	}
+}
+
+// A database that stays down must not fill the log with one line per heartbeat per agent.
+func TestPersistenceErrorLogIsRateLimitedPerServer(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	l := &logLimiter{every: time.Minute, now: func() time.Time { return now }}
+	a, b := uuid.New(), uuid.New()
+	if ok, _ := l.allow(a); !ok {
+		t.Fatal("the first error for a server must be logged")
+	}
+	for range 5 {
+		if ok, _ := l.allow(a); ok {
+			t.Fatal("repeat inside the window was logged")
+		}
+	}
+	if ok, _ := l.allow(b); !ok {
+		t.Fatal("another server shares the window")
+	}
+	now = now.Add(61 * time.Second)
+	ok, suppressed := l.allow(a)
+	if !ok || suppressed != 5 {
+		t.Fatalf("after the window: ok=%v suppressed=%d; want true and the 5 skipped errors reported", ok, suppressed)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -83,6 +84,51 @@ type AgentNodeServer struct {
 	// Heartbeats, when set, stores each accepted heartbeat.
 	Heartbeats HeartbeatRecorder
 	Log        *slog.Logger
+
+	errLog logLimiter
+}
+
+// logLimiter allows one log line per key per window and counts what it suppressed.
+type logLimiter struct {
+	every time.Duration // defaults to a minute
+	now   func() time.Time
+
+	mu    sync.Mutex
+	state map[uuid.UUID]*limiterState
+}
+
+type limiterState struct {
+	last       time.Time
+	suppressed int
+}
+
+// allow reports whether to log now for key and, when it does, how many calls since the last
+// logged one were skipped.
+func (l *logLimiter) allow(key uuid.UUID) (ok bool, suppressed int) {
+	every, now := l.every, time.Now
+	if every <= 0 {
+		every = time.Minute
+	}
+	if l.now != nil {
+		now = l.now
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.state == nil {
+		l.state = map[uuid.UUID]*limiterState{}
+	}
+	t := now()
+	st := l.state[key]
+	if st == nil {
+		l.state[key] = &limiterState{last: t}
+		return true, 0
+	}
+	if t.Sub(st.last) < every {
+		st.suppressed++
+		return false, 0
+	}
+	suppressed, st.suppressed, st.last = st.suppressed, 0, t
+	return true, suppressed
 }
 
 // Heartbeat accepts a heartbeat only for the server the client certificate was issued to:
@@ -106,18 +152,23 @@ func (s *AgentNodeServer) Heartbeat(ctx context.Context, req *openvmsv1.NodeHear
 		return nil, status.Error(codes.PermissionDenied, "node_id does not match the client certificate")
 	}
 	version := strings.TrimSpace(req.Version)
-	if len(version) > agentstatus.MaxVersionLen {
-		return nil, status.Error(codes.InvalidArgument, "version is too long")
-	}
 	if s.Heartbeats != nil {
 		wctx, cancel := context.WithTimeout(ctx, heartbeatWriteTimeout)
 		defer cancel()
 		err := s.Heartbeats.RecordHeartbeat(wctx, id, agentstatus.Heartbeat{Version: version, Status: statusName(req.Status)})
-		if errors.Is(err, agentstatus.ErrInvalid) {
+		switch {
+		case err == nil:
+		case errors.Is(err, agentstatus.ErrInvalid):
+			// The agent sent something that can never be stored; retrying cannot help.
 			return nil, status.Error(codes.InvalidArgument, "invalid heartbeat")
-		}
-		if err != nil {
-			s.log().Error("agent heartbeat not recorded", "server_id", id.ServerID, "error", err)
+		case errors.Is(err, agentstatus.ErrUnknownServer):
+			return nil, status.Error(codes.NotFound, "server not found")
+		default:
+			// A real outage: Unavailable so the agent retries. Logged at most once a minute per
+			// server (with the number of suppressed errors), not once per heartbeat per agent.
+			if ok, suppressed := s.errLog.allow(id.ServerID); ok {
+				s.log().Error("agent heartbeat not recorded", "server_id", id.ServerID, "error", err, "suppressed", suppressed)
+			}
 			return nil, status.Error(codes.Unavailable, "heartbeat not recorded")
 		}
 	}
@@ -135,13 +186,13 @@ func (s *AgentNodeServer) log() *slog.Logger {
 func statusName(st openvmsv1.OperationalStatus) string {
 	switch st {
 	case openvmsv1.OperationalStatus_OPERATIONAL_STATUS_ONLINE:
-		return "online"
+		return agentstatus.Online
 	case openvmsv1.OperationalStatus_OPERATIONAL_STATUS_OFFLINE:
-		return "offline"
+		return agentstatus.Offline
 	case openvmsv1.OperationalStatus_OPERATIONAL_STATUS_DEGRADED:
-		return "degraded"
+		return agentstatus.Degraded
 	case openvmsv1.OperationalStatus_OPERATIONAL_STATUS_MAINTENANCE:
-		return "maintenance"
+		return agentstatus.Maintenance
 	}
-	return "unknown"
+	return agentstatus.Unknown
 }
