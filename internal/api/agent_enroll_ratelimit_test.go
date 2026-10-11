@@ -12,7 +12,7 @@ import (
 
 func enrollLimitHandler(l *httpx.RateLimiter, trustForwarded bool) (http.Handler, *int) {
 	reached := 0
-	final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached++; w.WriteHeader(http.StatusOK) })
+	final := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { reached++; w.WriteHeader(http.StatusOK) })
 	return httpx.ClientAddr(trustForwarded)(limitAgentEnroll(l)(final)), &reached
 }
 

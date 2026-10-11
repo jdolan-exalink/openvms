@@ -171,7 +171,7 @@ func TestServerAgentInstallRequestsAnEnrollTokenWhenMTLSIsConfigured(t *testing.
 
 func TestServerAgentInstallWithoutMTLSDoesNotTouchEnrollment(t *testing.T) {
 	called := false
-	var seen *AgentMTLSInstall = &AgentMTLSInstall{}
+	seen := &AgentMTLSInstall{}
 	svc := &Service{
 		NewEnrollToken: func(context.Context, authz.Actor, uuid.UUID) (string, error) { called = true; return "x", nil },
 		agentInstallRun: func(_ context.Context, request AgentInstallRequest, _ func(string)) error {

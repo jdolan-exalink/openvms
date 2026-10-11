@@ -2,8 +2,8 @@ package grpctls_test
 
 import (
 	"context"
-	"errors"
 	"crypto/tls"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"

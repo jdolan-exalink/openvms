@@ -44,7 +44,7 @@ func (h *Handlers) RevokeServerAgentCertificates(ctx context.Context, r gen.Revo
 	if err != nil {
 		return nil, err
 	}
-	n, err := h.AgentEnroll.RevokeServerCertificates(ctx, a, uuid.UUID(r.ServerId))
+	n, err := h.AgentEnroll.RevokeServerCertificates(ctx, a, r.ServerId)
 	if err != nil {
 		return nil, err
 	}

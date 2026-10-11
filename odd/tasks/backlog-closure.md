@@ -59,10 +59,10 @@ The list is an initial inventory; reconcile each tracker and current code before
 - From `apps/web`, `pnpm test` — PASS (130 files, 964 tests).
 - From `apps/web`, `pnpm build` — PASS (TypeScript and Vite/PWA build); Vite reported a chunk larger than 500 KB.
 - Scoped Go vet and typecheck — PASS (per parent verification report; no new full `go vet ./...` or `pnpm typecheck` run recorded here).
-- No new integration, lint, security, remote, hardware, or deployment checks were run. In particular, external acceptance remains unverified.
+- No integration, remote, hardware, or deployment acceptance was established. The remaining mTLS branch lint correction (BC01-L) is complete: candidate-diff Go lint passes; full Go lint before correction reported 130 findings total, and web lint reports unrelated existing failures (details in `odd/tasks/agent-mtls.md`).
 - BC-01 commit `5893d2e`: risk `passive`, reason `non_executable_only`; reviewed boundary advances to `5893d2e`.
 - Rollback boundary: this documentation-only reconciliation, removable by reverting the changes to `odd/tasks/backlog-closure.md` and `odd/tasks/agent-mtls.md`; no source behavior is involved.
 
 ## Next step
 
-Continue BC-02 by reconciling remaining trackers and SSH install/update checks. For mTLS, run local lint and assess isolated-database integration feasibility before preparing its candidate for delivery. PR creation/push/merge remain pending explicit authorization of destination, operation, and credential/session; BC-02 remains open while the wider tracker reconciliation is unfinished.
+Continue BC-02 by reconciling remaining trackers and SSH install/update checks; assess isolated-database integration feasibility for mTLS. PR creation/push/merge remain pending explicit authorization of destination, operation, and credential/session; BC-02 remains open while the wider tracker reconciliation is unfinished.

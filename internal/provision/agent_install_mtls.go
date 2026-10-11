@@ -9,6 +9,7 @@ import (
 
 // Paths on the agent host for the mutual-TLS enrollment settings.
 const (
+	// #nosec G101 -- This is the token file path, not a credential value.
 	agentEnrollTokenPath = "/etc/openvms/agent-enroll.token"
 	agentGRPCCAPath      = "/etc/openvms/agent-grpc-ca.pem"
 	agentAPICAPath       = "/etc/openvms/agent-api-ca.pem"
@@ -65,7 +66,7 @@ func validEnrollToken(t string) bool {
 		return false
 	}
 	for _, r := range t {
-		if !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-') {
+		if (r < 'A' || r > 'Z') && (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
 			return false
 		}
 	}

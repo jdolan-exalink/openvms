@@ -87,7 +87,7 @@ func (r *Recorder) RecordHeartbeat(ctx context.Context, id agentca.Identity, hb 
 	})
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-		return fmt.Errorf("%w: %v", ErrUnknownServer, err)
+		return fmt.Errorf("%w: %w", ErrUnknownServer, err)
 	}
 	return err
 }

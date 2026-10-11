@@ -47,21 +47,3 @@ func (d *beatDriver) tick(t *testing.T) error {
 	}
 	return d.next(t)
 }
-
-// signal returns a channel that receives one value per call of the returned function, and a
-// waiter for the next one.
-func signal[T any](t *testing.T) (notify func(T), wait func() T) {
-	t.Helper()
-	ch := make(chan T, 64)
-	return func(v T) { ch <- v }, func() T {
-		t.Helper()
-		select {
-		case v := <-ch:
-			return v
-		case <-time.After(failsafe):
-			t.Fatal("timed out waiting for an event")
-			var zero T
-			return zero
-		}
-	}
-}
