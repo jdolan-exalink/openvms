@@ -9,7 +9,7 @@ The user authorized liquidating the actual pending backlog, but prior task track
 ## Scope and constraints
 
 - Authorized outcome: implement all genuinely pending backlog and deliver independent PRs merged in order.
-- This initial bounded unit authorizes only this new document and local verification of the current branch. No source fixes, existing-document edits, commits, pushes, GitHub actions, remote commands, or deployments in this unit.
+- Initial authorization was limited to creating this recovery document and locally verifying the then-current branch; that was a historical boundary, not a restriction on later authorized backlog work. The user has since authorized all pending backlog implementation and independent PRs. Local source/documentation changes and work-unit commits are within scope; push, PR creation, merge, and any remote execution remain pending explicit credential/destination/operation confirmation as applicable.
 - Future implementation proceeds task-by-task; strict TDD is enabled by the user-provided AGENTS.md. Each source task must observe RED, then GREEN, then REFACTOR with its exact runner.
 - Route: delegated direct for substantial implementation; mapping/preparation and multi-file writers are delegated because those triggers apply. This unit itself is documentation-only; no model delegation in the initial bounded unit.
 - Delivery: `auto-chain`, `stacked-to-main`, based on the user's request for independent PRs merged in order. Make coherent feature boundaries, not artificial tiny slices. Existing mTLS remainder's prior size exception applies only to that remainder.
@@ -31,7 +31,7 @@ Record exact observed outcomes below. Failures are evidence, not authorization t
 
 The list is an initial inventory; reconcile each tracker and current code before checking off or starting implementation.
 
-- [x] BC-01 — Verify current mTLS/provisioning branch with the four local checks above; capture baseline failures and exact commands. Acceptance: outcomes recorded; no source changes. Evidence: all four commands passed after resolving sandbox-only module-cache and socket restrictions; see results below.
+- [x] BC-01 — Verify current mTLS/provisioning branch; capture baseline checks. Acceptance: outcomes recorded. Evidence: current branch verification at 5893d2e is recorded below; the initial baseline remains historical evidence.
 - [ ] BC-02 — Reconcile stale backlog trackers and SSH provisioning/install/update checks. Acceptance: stale P2/alarm claims and mTLS next-step text are reconciled; T2 build/deployment verification is either evidenced locally or explicitly blocked; no remote execution without authorization.
 - [ ] BC-03 — Maps acceptance and performance. Acceptance: resolve M-W27 performance and stale M-W20/alarm S2-3b–d states against current implementation and tests; record any remaining manual/browser acceptance separately.
 - [ ] BC-04 — ONVIF camera management, work units 02–19. Acceptance: derive cohesive independent PR slices from `odd/tasks/onvif-camera-management.md`, preserve its requirements and per-unit verification; do not assume readiness from roadmap checkboxes.
@@ -51,6 +51,18 @@ The list is an initial inventory; reconcile each tracker and current code before
   - No integration tests or remote/hardware checks were run.
 - PR order: stacked-to-main; define coherent boundaries after reconciliation. No PR/remote actions authorized in this initial unit.
 
+### Current verification (HEAD `5893d2e`, 2026-10-11)
+
+- Worktree was clean before this documentation update.
+- `GOCACHE=/tmp/openvms-go-build-cache go build ./...` — PASS.
+- `GOCACHE=/tmp/openvms-go-build-cache go test -race ./...` — PASS after an approved rerun; the initial sandboxed run was blocked by socket/netlink restrictions.
+- From `apps/web`, `pnpm test` — PASS (130 files, 964 tests).
+- From `apps/web`, `pnpm build` — PASS (TypeScript and Vite/PWA build); Vite reported a chunk larger than 500 KB.
+- Scoped Go vet and typecheck — PASS (per parent verification report; no new full `go vet ./...` or `pnpm typecheck` run recorded here).
+- No new integration, lint, security, remote, hardware, or deployment checks were run. In particular, external acceptance remains unverified.
+- BC-01 commit `5893d2e`: risk `passive`, reason `non_executable_only`; reviewed boundary advances to `5893d2e`.
+- Rollback boundary: this documentation-only reconciliation, removable by reverting the changes to `odd/tasks/backlog-closure.md` and `odd/tasks/agent-mtls.md`; no source behavior is involved.
+
 ## Next step
 
-Parent reads and mirrors this recovery document, then reconciles the actual remaining trackers before authorizing BC-02 and subsequent work units.
+Continue BC-02 by reconciling remaining trackers and SSH install/update checks. For mTLS, run local lint and assess isolated-database integration feasibility before preparing its candidate for delivery. PR creation/push/merge remain pending explicit authorization of destination, operation, and credential/session; BC-02 remains open while the wider tracker reconciliation is unfinished.
