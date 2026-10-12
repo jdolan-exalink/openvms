@@ -26,12 +26,14 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "@/api/client";
 import { cameraFrigateDocQuery } from "@/api/queries";
 import { EnhancementControl } from "@/components/EnhancementControl";
+import { ZoomFrame } from "@/components/DigitalZoom";
 import { ForensicComparisonModal } from "@/components/ForensicComparisonModal";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { Button, LinkButton } from "@/components/ui";
-import { FULL_FRAME_ROI } from "@/lib/enhancement/analysis";
+import { FULL_FRAME_ROI, extractRoiRect, type RoiRect } from "@/lib/enhancement/analysis";
 import { ImageEnhancementEngineImpl } from "@/lib/enhancement/engine";
+import { IDENTITY_ZOOM, type DigitalZoom } from "@/lib/live/digitalZoom";
 import {
   ForensicEnhancementEngine,
   type ForensicResult,
@@ -525,7 +527,11 @@ interface EvidenceVideoTileProps {
   onLoadedMetadata: (id: string, e: React.SyntheticEvent<HTMLVideoElement>) => void;
   onMasterEnded: () => void;
   copyToClipboard: (hash: string, id: string) => void;
-  onEnhanceCapture: (item: EvidencePlayerCameraItem, videoEl: HTMLVideoElement | null) => void;
+  onEnhanceCapture: (
+    item: EvidencePlayerCameraItem,
+    videoEl: HTMLVideoElement | null,
+    roi?: RoiRect,
+  ) => void;
 }
 
 function EvidenceVideoTile({
@@ -550,6 +556,7 @@ function EvidenceVideoTile({
   copyToClipboard,
   onEnhanceCapture,
 }: EvidenceVideoTileProps) {
+  const [zoom, setZoom] = useState<DigitalZoom>(IDENTITY_ZOOM);
   const [engine] = useState(() => new ImageEnhancementEngineImpl());
   const [enhancementMode, setEnhancementMode] = useState<EnhancementMode>("auto");
   const [adjustments, setAdjustments] = useState<EnhancementAdjustments>(() => engine.getAdjustments());
@@ -629,45 +636,58 @@ function EvidenceVideoTile({
         </div>
       </div>
 
-      {/* HTML5 Video Element & Overlay Canvas */}
-      <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
-        <video
-          ref={(el) => {
-            localVideoRef.current = el;
-            onVideoRef(item.id, el);
-          }}
-          src={videoSrc}
-          muted={isMuted}
-          playsInline
-          autoPlay
-          preload="auto"
-          style={videoFilterStyle}
-          onTimeUpdate={(e) => onTimeUpdate(item.id, e)}
-          onLoadedMetadata={(e) => onLoadedMetadata(item.id, e)}
-          onCanPlay={(e) => {
-            if (isPlaying) {
-              e.currentTarget.play().catch(() => {});
-            }
-          }}
-          onEnded={() => {
-            if (isMaster) {
-              onMasterEnded();
-            }
-          }}
-          className="w-full h-full object-cover"
-        />
+      {/* HTML5 Video Element with Avigilon-style digital zoom (wheel + pan) */}
+      <ZoomFrame
+        resetKey={`${item.id}:${videoSrc}`}
+        className="relative aspect-video bg-black flex items-center justify-center overflow-hidden"
+        onZoom={setZoom}
+        enhanceable={false}
+        picture={() => (
+          <>
+            <video
+              ref={(el) => {
+                localVideoRef.current = el;
+                onVideoRef(item.id, el);
+              }}
+              src={videoSrc}
+              muted={isMuted}
+              playsInline
+              autoPlay
+              preload="auto"
+              style={videoFilterStyle}
+              onTimeUpdate={(e) => onTimeUpdate(item.id, e)}
+              onLoadedMetadata={(e) => onLoadedMetadata(item.id, e)}
+              onCanPlay={(e) => {
+                if (isPlaying) {
+                  try {
+                    const res = e.currentTarget.play?.();
+                    if (res && typeof res.catch === "function") {
+                      res.catch(() => {});
+                    }
+                  } catch {}
+                }
+              }}
+              onEnded={() => {
+                if (isMaster) {
+                  onMasterEnded();
+                }
+              }}
+              className="w-full h-full object-cover"
+            />
 
-        {/* SVG Forensic Layer: Zones, Touched Zones, Tracking Lines */}
-        <CameraEvidenceOverlay
-          cameraId={item.camera_id}
-          currentTime={currentTime}
-          clipStartUnix={clipStartUnix}
-          cameraEvents={camEvents}
-          manifestZones={manifestZones}
-          isPublic={isPublic}
-          layers={layers}
-        />
-
+            {/* SVG Forensic Layer: Zones, Touched Zones, Tracking Lines */}
+            <CameraEvidenceOverlay
+              cameraId={item.camera_id}
+              currentTime={currentTime}
+              clipStartUnix={clipStartUnix}
+              cameraEvents={camEvents}
+              manifestZones={manifestZones}
+              isPublic={isPublic}
+              layers={layers}
+            />
+          </>
+        )}
+      >
         {/* Dynamic Visual Enhancement Controls */}
         <EnhancementControl
           mode={enhancementMode}
@@ -682,7 +702,13 @@ function EvidenceVideoTile({
         {!isPlaying && (
           <button
             type="button"
-            onClick={() => onEnhanceCapture(item, localVideoRef.current)}
+            onClick={() => {
+              const el = localVideoRef.current;
+              const width = el?.videoWidth || el?.clientWidth || 640;
+              const height = el?.videoHeight || el?.clientHeight || 480;
+              const roi = zoom.scale > 1 ? extractRoiRect(zoom, width, height) : undefined;
+              onEnhanceCapture(item, el, roi);
+            }}
             aria-label={`Mejorar captura de ${item.camera_name}`}
             className="absolute top-2 right-2 z-20 flex items-center gap-1.5 rounded-m3-md bg-primary hover:bg-primary/90 text-on-primary px-2.5 py-1 text-xs font-semibold shadow-lg backdrop-blur-md transition-all hover:scale-105"
             title="Mejorar detalle forense de la captura actual"
@@ -691,7 +717,7 @@ function EvidenceVideoTile({
             <span>Mejorar captura</span>
           </button>
         )}
-      </div>
+      </ZoomFrame>
 
       {/* Camera Forensic Integrity Footer */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-surface-1 border-t border-outline-variant/40 text-[11px] font-mono">
@@ -761,12 +787,17 @@ export function EvidencePlayerModal({
   }
 
   const handleEnhanceCapture = useCallback(
-    async (item: EvidencePlayerCameraItem, videoEl: HTMLVideoElement | null) => {
+    async (
+      item: EvidencePlayerCameraItem,
+      videoEl: HTMLVideoElement | null,
+      roi?: RoiRect,
+    ) => {
       setIsForensicOpen(true);
       setIsForensicLoading(true);
       try {
         const target = videoEl || document.createElement("canvas");
         const result = await forensicEngineRef.current!.enhanceFrame(target, {
+          roi,
           metadata: {
             cameraId: item.camera_id,
             cameraName: item.camera_name,
