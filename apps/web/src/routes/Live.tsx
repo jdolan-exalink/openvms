@@ -6,12 +6,14 @@ import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Camera, CircleCheck, CircleHelp, CircleX, History, Maximize2, Minimize2, X } from "lucide-react";
+import { Camera, CircleCheck, CircleHelp, CircleX, Compass, History, Maximize2, Minimize2, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { MsePlayer } from "@/components/MsePlayer";
+import { FisheyeViewer } from "@/components/fisheye/FisheyeViewer";
+import { getFisheyeConfig } from "@/lib/fisheye/storage";
 import { useFeatures } from "@/lib/features";
 import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { LiveRecDock } from "@/components/LiveRecDock";
@@ -100,6 +102,7 @@ function LiveDesktop() {
   const [treeNotice, setTreeNotice] = useState<string | null>(null);
   const [noticeTone, setNoticeTone] = useState<"ok" | "warn">("warn");
   const [deleteViewId, setDeleteViewId] = useState<string | null>(null);
+  const [fisheyeModalCameraId, setFisheyeModalCameraId] = useState<string | null>(null);
   const flash = (text: string, tone: "ok" | "warn" = "ok") => {
     setNoticeTone(tone);
     setTreeNotice(text);
@@ -648,6 +651,7 @@ function LiveDesktop() {
                       quality={persistentPlayers ? (t && "quality" in t ? t.quality : "sub") : focus === i || columns === 1 ? "main" : (t && "quality" in t ? t.quality : "sub")}
                       onSelect={() => setSelected(i)}
                       onToggleFocus={() => t && setFocus(focus === null ? i : null)}
+                      onOpenFisheye={(id) => setFisheyeModalCameraId(id)}
                       onRemove={() => {
                         setTiles((x) => x.map((v, j) => (j === i ? null : v)));
                         setFocus(null);
@@ -725,6 +729,20 @@ function LiveDesktop() {
           onClose={() => setPlaybackCameraId(null)}
         />
       )}
+      {fisheyeModalCameraId && camById.has(fisheyeModalCameraId) && (
+        <Modal
+          title={`Fisheye 360° Dewarping · ${camById.get(fisheyeModalCameraId)!.display_name}`}
+          onClose={() => setFisheyeModalCameraId(null)}
+          className="max-w-5xl"
+        >
+          <div className="w-full h-[68vh] min-h-[480px]">
+            <FisheyeViewer
+              cameraId={fisheyeModalCameraId}
+              videoSrc={`/media/v1/cameras/${fisheyeModalCameraId}/hls/live.m3u8`}
+            />
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
@@ -765,6 +783,7 @@ function GridTile({
   quality,
   onSelect,
   onToggleFocus,
+  onOpenFisheye,
   onRemove,
 }: {
   index: number;
@@ -789,6 +808,7 @@ function GridTile({
   quality: "sub" | "main";
   onSelect: () => void;
   onToggleFocus: () => void;
+  onOpenFisheye?: (cameraId: string) => void;
   onRemove: () => void;
 }) {
   const tr = useT();
@@ -860,6 +880,18 @@ function GridTile({
                 <Link to="/playback" search={{ camera: tile.camera_id }} title={tr("nav.recordings")} aria-label={tr("live.recordingsOf", { name: camera.display_name })} className={cn(tileAction, "m3-press inline-flex items-center justify-center focus-visible:outline-2 focus-visible:outline-primary")}>
                   <Icon icon={History} size="xs" />
                 </Link>
+              )}
+              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || getFisheyeConfig(tile.camera_id).enabled) && onOpenFisheye && (
+                <IconButton
+                  icon={Compass}
+                  title="Navegación y dewarping Fisheye 360°"
+                  aria-label="Fisheye 360°"
+                  className={cn(tileAction, "text-cyan-400 hover:text-cyan-300")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenFisheye(tile.camera_id);
+                  }}
+                />
               )}
               <IconButton
                 icon={isFocused ? Minimize2 : Maximize2}
