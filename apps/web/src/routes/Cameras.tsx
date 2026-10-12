@@ -151,12 +151,11 @@ export function Cameras() {
     });
   };
 
-  useEffect(() => {
-    setFilter((f) => {
-      if (f.site_id === search.site_id && f.server_id === search.server_id) return f;
-      return { ...f, site_id: search.site_id, server_id: search.server_id };
-    });
-  }, [search.site_id, search.server_id]);
+  const [prevSearch, setPrevSearch] = useState({ site_id: search.site_id, server_id: search.server_id });
+  if (prevSearch.site_id !== search.site_id || prevSearch.server_id !== search.server_id) {
+    setPrevSearch({ site_id: search.site_id, server_id: search.server_id });
+    setFilter((f) => ({ ...f, site_id: search.site_id, server_id: search.server_id }));
+  }
 
   const selectedDiscoveryServer = servers.data?.find((server) => server.id === discoveryServerId);
   const defaultInterface = filteredInterfaces.includes("eth0")

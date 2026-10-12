@@ -7,13 +7,14 @@ import (
 func TestExtractCameraStreamHosts(t *testing.T) {
 	rawPaths := map[string]any{
 		"go2rtc": map[string]any{
+			// #nosec G101 -- test dummy credentials in fixtures.
 			"streams": map[string]any{
 				"Portones_main": "rtsp://admin:Daytona1309@10.1.1.220:554#video=copy",
 				"Patio": []any{
 					"ffmpeg:Patio_main#video=h264",
 					"rtsp://admin:123456@10.1.1.224:554/profile1#video=copy",
 				},
-				"Cochera_sub": "rtsp://admin:Daytona1309*@10.1.1.225:554/profile1",
+				"Cochera_sub":   "rtsp://admin:Daytona1309*@10.1.1.225:554/profile1",
 				"LocalRestream": "rtsp://127.0.0.1:8554/cam",
 			},
 		},
@@ -29,6 +30,7 @@ func TestExtractCameraStreamHosts(t *testing.T) {
 				"ffmpeg": map[string]any{
 					"inputs": []any{
 						map[string]any{
+							// #nosec G101 -- test dummy credentials in fixtures.
 							"path": "rtsp://admin:daytona1309@10.1.1.227:554/Streaming/channels/101",
 						},
 					},

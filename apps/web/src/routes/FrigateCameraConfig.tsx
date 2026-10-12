@@ -135,7 +135,7 @@ export function FrigateCameraConfig() {
     const out: Record<string, string> = {};
     for (const s of dirty) validateTree(root, camProps[s] ?? {}, edits[s], [s], out);
     return out;
-  }, [root, camProps, edits, config, dirty]);
+  }, [root, camProps, edits, dirty]);
   const errorCount = Object.keys(errors).length;
 
   const buildSections = () => {
