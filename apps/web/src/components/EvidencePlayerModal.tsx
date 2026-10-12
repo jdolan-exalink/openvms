@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   SkipBack,
   SkipForward,
+  Sparkles,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -25,11 +26,16 @@ import { useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "@/api/client";
 import { cameraFrigateDocQuery } from "@/api/queries";
 import { EnhancementControl } from "@/components/EnhancementControl";
+import { ForensicComparisonModal } from "@/components/ForensicComparisonModal";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { Button, LinkButton } from "@/components/ui";
 import { FULL_FRAME_ROI } from "@/lib/enhancement/analysis";
 import { ImageEnhancementEngineImpl } from "@/lib/enhancement/engine";
+import {
+  ForensicEnhancementEngine,
+  type ForensicResult,
+} from "@/lib/enhancement/forensic";
 import {
   DEFAULT_ADJUSTMENTS,
   type EnhancementAdjustments,
@@ -519,6 +525,7 @@ interface EvidenceVideoTileProps {
   onLoadedMetadata: (id: string, e: React.SyntheticEvent<HTMLVideoElement>) => void;
   onMasterEnded: () => void;
   copyToClipboard: (hash: string, id: string) => void;
+  onEnhanceCapture: (item: EvidenceExportItem, videoEl: HTMLVideoElement | null) => void;
 }
 
 function EvidenceVideoTile({
@@ -541,6 +548,7 @@ function EvidenceVideoTile({
   onLoadedMetadata,
   onMasterEnded,
   copyToClipboard,
+  onEnhanceCapture,
 }: EvidenceVideoTileProps) {
   const [engine] = useState(() => new ImageEnhancementEngineImpl());
   const [enhancementMode, setEnhancementMode] = useState<EnhancementMode>("auto");
@@ -669,6 +677,20 @@ function EvidenceVideoTile({
           onReset={handleReset}
           className="absolute bottom-1.5 left-1.5 z-20"
         />
+
+        {/* On-Demand Forensic Enhancement Button (Visible when paused) */}
+        {!isPlaying && (
+          <button
+            type="button"
+            onClick={() => onEnhanceCapture(item, localVideoRef.current)}
+            aria-label={`Mejorar captura de ${item.camera_name}`}
+            className="absolute top-2 right-2 z-20 flex items-center gap-1.5 rounded-m3-md bg-primary hover:bg-primary/90 text-on-primary px-2.5 py-1 text-xs font-semibold shadow-lg backdrop-blur-md transition-all hover:scale-105"
+            title="Mejorar detalle forense de la captura actual"
+          >
+            <Sparkles className="size-3.5" />
+            <span>Mejorar captura</span>
+          </button>
+        )}
       </div>
 
       {/* Camera Forensic Integrity Footer */}
@@ -728,6 +750,38 @@ export function EvidencePlayerModal({
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const isSeekingRef = useRef(false);
   const masterKey = job.items?.[0]?.id || "";
+
+  // Forensic Enhancement State (On-Demand IA / Detail restoration)
+  const [forensicResult, setForensicResult] = useState<ForensicResult | null>(null);
+  const [isForensicOpen, setIsForensicOpen] = useState(false);
+  const [isForensicLoading, setIsForensicLoading] = useState(false);
+  const forensicEngineRef = useRef<ForensicEnhancementEngine | null>(null);
+  if (!forensicEngineRef.current) {
+    forensicEngineRef.current = new ForensicEnhancementEngine();
+  }
+
+  const handleEnhanceCapture = useCallback(
+    async (item: EvidenceExportItem, videoEl: HTMLVideoElement | null) => {
+      setIsForensicOpen(true);
+      setIsForensicLoading(true);
+      try {
+        const target = videoEl || document.createElement("canvas");
+        const result = await forensicEngineRef.current!.enhanceFrame(target, {
+          metadata: {
+            cameraId: item.camera_id,
+            cameraName: item.camera_name,
+            timestamp: Math.round(currentTime),
+          },
+        });
+        setForensicResult(result);
+      } catch (err) {
+        console.error("Forensic enhancement error:", err);
+      } finally {
+        setIsForensicLoading(false);
+      }
+    },
+    [currentTime],
+  );
 
   const items = useMemo(() => job.items ?? [], [job.items]);
   const cameraIds = useMemo(() => items.map((it) => it.camera_id).filter(Boolean), [items]);
@@ -814,7 +868,14 @@ export function EvidencePlayerModal({
   useEffect(() => {
     const timer = setTimeout(() => {
       videoRefs.current.forEach((v) => {
-        v.play().catch(() => {});
+        try {
+          const res = v.play?.();
+          if (res && typeof res.catch === "function") {
+            res.catch(() => {});
+          }
+        } catch {
+          // Ignore autoplay restriction
+        }
       });
     }, 100);
     return () => clearTimeout(timer);
@@ -1133,6 +1194,7 @@ export function EvidencePlayerModal({
             onLoadedMetadata={onLoadedMetadata}
             onMasterEnded={() => setIsPlaying(false)}
             copyToClipboard={copyToClipboard}
+            onEnhanceCapture={handleEnhanceCapture}
           />
         ))}
       </div>
@@ -1329,6 +1391,27 @@ export function EvidencePlayerModal({
               <span>{isPlaying ? "Pausar" : "Reproducir"}</span>
             </Button>
 
+            {!isPlaying && (
+              <Button
+                variant="tonal"
+                size="sm"
+                onClick={() => {
+                  const targetItem = maximizedCameraId
+                    ? items.find((it) => it.id === maximizedCameraId)
+                    : items[0];
+                  if (targetItem) {
+                    const el = videoRefs.current.get(targetItem.id) || null;
+                    handleEnhanceCapture(targetItem, el);
+                  }
+                }}
+                title="Mejorar detalle forense de la captura pausada"
+                className="bg-primary/20 text-primary border border-primary/30 hover:bg-primary/30"
+              >
+                <Icon icon={Sparkles} size="xs" />
+                <span>Mejorar captura</span>
+              </Button>
+            )}
+
             <Button
               variant="outlined"
               size="sm"
@@ -1410,6 +1493,19 @@ export function EvidencePlayerModal({
           </div>
         </div>
       </div>
+
+      {/* Forensic Detail Enhancement Comparison Modal */}
+      <ForensicComparisonModal
+        isOpen={isForensicOpen}
+        onClose={() => {
+          setIsForensicOpen(false);
+          setForensicResult(null);
+        }}
+        result={forensicResult}
+        isLoading={isForensicLoading}
+        cameraName={forensicResult?.metadata?.cameraName}
+        timestamp={forensicResult?.metadata?.timestamp}
+      />
     </Modal>
   );
 }

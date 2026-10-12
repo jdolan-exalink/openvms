@@ -35,11 +35,12 @@ CCTV operators frequently pause recorded evidence on critical moments (license p
   - TDD: RED test in `apps/web/src/components/ForensicComparisonModal.test.tsx` verifying slider interaction, downloads, and modal controls -> GREEN -> REFACTOR.
   - Verification: 8 vitest tests passing.
 
-- [ ] `TASK-3`: Integration into Export Player (`EvidencePlayerModal`)
-  - Route: Delegated writer.
+- [x] `TASK-3`: Integration into Export Player (`EvidencePlayerModal`)
+  - Route: Delegated writer / direct inline.
   - Add "Mejorar captura" action button when stream is paused in `EvidencePlayerModal.tsx`.
   - Wire frame capture, ROI extraction, enhancement execution, and comparison modal presentation.
   - TDD: Tests in `apps/web/src/components/EvidencePlayerModal.test.tsx` -> GREEN -> REFACTOR.
+  - Verification: 3 vitest tests passing in `EvidencePlayerModal.test.tsx`.
 
 - [ ] `TASK-4`: Final Verification, Build & Docker Deployment
   - Route: Direct inline.
@@ -47,7 +48,8 @@ CCTV operators frequently pause recorded evidence on critical moments (license p
 
 ## Progress & Verification Evidence
 - `TASK-1`: `forensic.ts` and `forensic.test.ts` completed with 6 passing tests. Committed in `6108405`.
-- `TASK-2`: `ForensicComparisonModal.tsx` and `ForensicComparisonModal.test.tsx` completed with 8 passing tests.
+- `TASK-2`: `ForensicComparisonModal.tsx` and `ForensicComparisonModal.test.tsx` completed with 8 passing tests. Committed in `b61c36c`.
+- `TASK-3`: Integrated into `EvidencePlayerModal.tsx` with paused button on video tiles and transport bar. All tests passing GREEN.
 
 ## Next Step
-Execute `TASK-3`: Integrate forensic enhancement trigger and comparison modal into `EvidencePlayerModal.tsx`.
+Execute `TASK-4`: Run full test suite, TypeScript check, Vite build, and deploy container.

@@ -350,8 +350,10 @@ export class ForensicEnhancementEngine {
     options: ForensicProcessOptions = {},
   ): Promise<ForensicResult> {
     const startTime = typeof performance !== "undefined" ? performance.now() : Date.now();
-    const sw = "videoWidth" in source ? (source.videoWidth as number) : source.width;
-    const sh = "videoHeight" in source ? (source.videoHeight as number) : source.height;
+    const rawW = "videoWidth" in source ? (source.videoWidth as number) : source.width;
+    const rawH = "videoHeight" in source ? (source.videoHeight as number) : source.height;
+    const sw = rawW > 0 ? rawW : (source.clientWidth || 640);
+    const sh = rawH > 0 ? rawH : (source.clientHeight || 480);
 
     const roi = options.roi ?? { x: 0, y: 0, width: 1, height: 1 };
     const sx = Math.max(0, Math.min(sw, roi.x * sw));

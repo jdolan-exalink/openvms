@@ -208,7 +208,7 @@ export function ForensicComparisonModal({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              aria-label="Cerrar"
+              aria-label="Cerrar mejora forense"
               onClick={onClose}
               className="m3-press inline-flex size-10 items-center justify-center rounded-full hover:bg-on-surface/8 text-on-surface-variant"
             >

@@ -109,7 +109,7 @@ describe("ForensicComparisonModal", () => {
       <ForensicComparisonModal isOpen={true} onClose={handleClose} result={mockResult} />,
     );
 
-    const closeBtn = screen.getByRole("button", { name: /cerrar/i });
+    const closeBtn = screen.getByRole("button", { name: /cerrar mejora forense/i });
     fireEvent.click(closeBtn);
     expect(handleClose).toHaveBeenCalledTimes(1);
   });

@@ -93,4 +93,34 @@ describe("EvidencePlayerModal Enhancement Integration", () => {
     // In auto mode with default adjustments, filter is none/cleared
     expect(video.style.filter).toBe("");
   });
+
+  it("renders 'Mejorar captura' button when paused and opens ForensicComparisonModal on click", async () => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <EvidencePlayerModal job={mockJob} onClose={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    // Pause playback so 'Mejorar captura' becomes active
+    const pauseBtn = screen.getByRole("button", { name: /Pausar/i });
+    fireEvent.click(pauseBtn);
+
+    // 'Mejorar captura' button should now be visible on paused tile and transport bar
+    const enhanceBtns = screen.getAllByRole("button", { name: /Mejorar captura/i });
+    expect(enhanceBtns.length).toBeGreaterThan(0);
+
+    // Click 'Mejorar captura' on first tile
+    fireEvent.click(enhanceBtns[0]);
+
+    // Forensic comparison modal should open
+    expect(await screen.findByText("Mejora de Detalle Forense")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /descargar original/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /descargar mejorada/i })).toBeInTheDocument();
+
+    // Close modal
+    const closeBtn = screen.getByRole("button", { name: /cerrar mejora forense/i });
+    fireEvent.click(closeBtn);
+    expect(screen.queryByText("Mejora de Detalle Forense")).not.toBeInTheDocument();
+  });
 });
+
