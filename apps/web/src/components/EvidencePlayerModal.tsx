@@ -50,7 +50,7 @@ export interface EvidencePlayerJob {
   end_time: string;
   camera_count: number;
   total_bytes: number;
-  manifest?: Record<string, any>;
+  manifest?: Record<string, unknown>;
   items?: EvidencePlayerCameraItem[];
   download_url?: string;
   protected?: boolean;
@@ -148,7 +148,7 @@ function CameraEvidenceOverlay({
   currentTime: number;
   clipStartUnix: number;
   cameraEvents: ForensicEvent[];
-  manifestZones?: Record<string, any>;
+  manifestZones?: Record<string, unknown>;
   isPublic?: boolean;
   layers: {
     zones: boolean;
@@ -165,15 +165,14 @@ function CameraEvidenceOverlay({
 
   // Resolved zones for this camera — only real configured zones, never fake dummy zones
   const zones: ZoneInfo[] = useMemo(() => {
-    const rawZones =
-      manifestZones?.[cameraId] ||
-      (configDoc.data?.config?.zones as Record<string, any> | undefined);
+    const rawZones: unknown =
+      manifestZones?.[cameraId] || configDoc.data?.config?.zones;
 
-    if (rawZones && typeof rawZones === "object") {
+    if (rawZones && typeof rawZones === "object" && !Array.isArray(rawZones)) {
       const list: ZoneInfo[] = [];
       let idx = 0;
       for (const [name, val] of Object.entries(rawZones)) {
-        const coords = (val as any)?.coordinates;
+        const coords = val && typeof val === "object" && "coordinates" in val ? val.coordinates : undefined;
         const pts = parseCoordinates(coords);
         if (pts.length >= 3) {
           list.push({
@@ -523,7 +522,7 @@ export function EvidencePlayerModal({
   const isSeekingRef = useRef(false);
   const masterKey = job.items?.[0]?.id || "";
 
-  const items = job.items || [];
+  const items = useMemo(() => job.items ?? [], [job.items]);
   const cameraIds = useMemo(() => items.map((it) => it.camera_id).filter(Boolean), [items]);
   const itemIds = useMemo(() => items.map((it) => it.id), [items]);
 
@@ -554,12 +553,12 @@ export function EvidencePlayerModal({
       !!job.id &&
       !isPublic &&
       cameraIds.length > 0 &&
-      (!job.manifest?.events || job.manifest.events.length === 0),
+      (!Array.isArray(job.manifest?.events) || job.manifest.events.length === 0),
   });
 
   const allEvents: ForensicEvent[] = useMemo(() => {
-    if (job.manifest?.events && Array.isArray(job.manifest.events) && job.manifest.events.length > 0) {
-      return job.manifest.events;
+    if (Array.isArray(job.manifest?.events) && job.manifest.events.length > 0) {
+      return job.manifest.events as ForensicEvent[];
     }
     return allEventsQuery.data || [];
   }, [job.manifest, allEventsQuery.data]);
@@ -606,7 +605,6 @@ export function EvidencePlayerModal({
 
   // Autoplay on mount: trigger play immediately
   useEffect(() => {
-    setIsPlaying(true);
     const timer = setTimeout(() => {
       videoRefs.current.forEach((v) => {
         v.play().catch(() => {});
@@ -664,16 +662,18 @@ export function EvidencePlayerModal({
     setIsPlaying(willPlay);
   }, [isPlaying]);
 
-  const seekTo = (sec: number) => {
+  const seekTo = useCallback((sec: number) => {
     const maxDur = duration > 0 ? duration : expectedDuration;
     const clamped = Math.max(0, Math.min(sec, maxDur));
     setCurrentTime(clamped);
     videoRefs.current.forEach((v) => {
       try {
         v.currentTime = clamped;
-      } catch {}
+      } catch {
+        // Some media elements reject seeking until metadata is loaded.
+      }
     });
-  };
+  }, [duration, expectedDuration]);
 
   const changeSpeed = (rate: number) => {
     setPlaybackRate(rate);
@@ -688,10 +688,6 @@ export function EvidencePlayerModal({
     videoRefs.current.forEach((v) => {
       v.muted = willMute;
     });
-  };
-
-  const stepTime = (delta: number) => {
-    seekTo(currentTime + delta);
   };
 
   const copyToClipboard = (text: string, id: string) => {
@@ -711,15 +707,15 @@ export function EvidencePlayerModal({
         togglePlay();
       } else if (e.code === "ArrowLeft") {
         e.preventDefault();
-        stepTime(-5);
+        seekTo(currentTime - 5);
       } else if (e.code === "ArrowRight") {
         e.preventDefault();
-        stepTime(5);
+        seekTo(currentTime + 5);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [togglePlay, currentTime, duration]);
+  }, [togglePlay, seekTo, currentTime]);
 
   const gridColsClass =
     items.length <= 1
@@ -969,7 +965,7 @@ export function EvidencePlayerModal({
                   currentTime={currentTime}
                   clipStartUnix={clipStartUnix}
                   cameraEvents={camEvents}
-                  manifestZones={job.manifest?.zones}
+                  manifestZones={job.manifest?.zones && typeof job.manifest.zones === "object" && !Array.isArray(job.manifest.zones) ? job.manifest.zones as Record<string, unknown> : undefined}
                   isPublic={isPublic}
                   layers={layers}
                 />
@@ -1192,7 +1188,7 @@ export function EvidencePlayerModal({
             <Button
               variant="outlined"
               size="sm"
-              onClick={() => stepTime(-10)}
+              onClick={() => seekTo(currentTime - 10)}
               title="Retroceder 10 segundos (Flecha izquierda)"
             >
               <Icon icon={Rewind} size="xs" />
@@ -1202,7 +1198,7 @@ export function EvidencePlayerModal({
             <Button
               variant="outlined"
               size="sm"
-              onClick={() => stepTime(10)}
+              onClick={() => seekTo(currentTime + 10)}
               title="Avanzar 10 segundos (Flecha derecha)"
             >
               <Icon icon={FastForward} size="xs" />

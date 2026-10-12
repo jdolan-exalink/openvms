@@ -299,6 +299,7 @@ func replaceBinary(r *http.Request) error {
 		return err
 	}
 	next := exe + ".new"
+	// #nosec G306 -- the staged binary must retain executable permissions after replacement.
 	if err := os.WriteFile(next, data, 0o755); err != nil {
 		return err
 	}
@@ -307,8 +308,19 @@ func replaceBinary(r *http.Request) error {
 
 func restart() {
 	time.Sleep(400 * time.Millisecond)
-	cmd := exec.Command("systemctl", "restart", "openvms-agent")
-	_ = cmd.Start()
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	cmd := exec.CommandContext(ctx, "systemctl", "restart", "openvms-agent")
+	if err := cmd.Start(); err != nil {
+		cancel()
+		slog.Error("failed to start agent restart", "error", err)
+		return
+	}
+	go func() {
+		defer cancel()
+		if err := cmd.Wait(); err != nil {
+			slog.Error("agent restart failed", "error", err)
+		}
+	}()
 }
 
 // controlTLSFromEnv reads the opt-in TLS settings for the gRPC control channel.
@@ -325,13 +337,10 @@ func controlTLSFromEnv(getenv func(string) string) (enabled bool, caFile, server
 	}
 	caFile = strings.TrimSpace(getenv("OPENVMS_CONTROL_TLS_CA_FILE"))
 	serverName = strings.TrimSpace(getenv("OPENVMS_CONTROL_TLS_SERVER_NAME"))
-	if !enabled && (caFile != "" || serverName != "") {
+	if _, err := grpctls.TransportCredentials(enabled, grpctls.ClientOptions{CAFile: caFile, ServerName: serverName}); errors.Is(err, grpctls.ErrOptionsWithoutTLS) {
 		return false, "", "", errors.New("OPENVMS_CONTROL_TLS_CA_FILE and OPENVMS_CONTROL_TLS_SERVER_NAME require OPENVMS_CONTROL_TLS=true")
-	}
-	if enabled {
-		if _, err := grpctls.ClientCredentials(grpctls.ClientOptions{CAFile: caFile, ServerName: serverName}); err != nil {
-			return false, "", "", fmt.Errorf("control channel TLS: %w", err)
-		}
+	} else if err != nil {
+		return false, "", "", fmt.Errorf("control channel TLS: %w", err)
 	}
 	return enabled, caFile, serverName, nil
 }

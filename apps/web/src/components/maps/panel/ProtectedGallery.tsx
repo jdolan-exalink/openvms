@@ -89,9 +89,13 @@ function ProtectedCard({ image, onOpen }: { image: ProtectedImage; onOpen: (url:
   const [url, setUrl] = useState("");
   useEffect(() => {
     const next = URL.createObjectURL(image.blob);
-    setUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [image]);
+    let active = true;
+    queueMicrotask(() => { if (active) setUrl(next); });
+    return () => {
+      active = false;
+      URL.revokeObjectURL(next);
+    };
+  }, [image.blob]);
   return (
     <li>
       <button

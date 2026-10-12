@@ -3,6 +3,7 @@ package grpctls_test
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
@@ -163,4 +164,28 @@ func TestClientCredentialsPresentTheClientCertificate(t *testing.T) {
 			t.Fatal("GetClientCertificate was never called")
 		}
 	})
+}
+
+func TestTransportCredentialsRejectsTLSOptionsWithoutTLS(t *testing.T) {
+	cert, _ := grpctlstest.WriteSelfSigned(t)
+	for name, opts := range map[string]grpctls.ClientOptions{
+		"CA file":     {CAFile: cert},
+		"server name": {ServerName: "vms.example"},
+	} {
+		if _, err := grpctls.TransportCredentials(false, opts); !errors.Is(err, grpctls.ErrOptionsWithoutTLS) {
+			t.Errorf("%s without TLS: err = %v, want ErrOptionsWithoutTLS", name, err)
+		}
+	}
+	creds, err := grpctls.TransportCredentials(false, grpctls.ClientOptions{})
+	if err != nil || creds.Info().SecurityProtocol != "insecure" {
+		t.Fatalf("no TLS, no options: %v, %v; want plaintext credentials", creds, err)
+	}
+	creds, err = grpctls.TransportCredentials(true, grpctls.ClientOptions{CAFile: cert, ServerName: "localhost"})
+	if err != nil || creds.Info().SecurityProtocol != "tls" {
+		t.Fatalf("TLS: %v, %v; want TLS credentials", creds, err)
+	}
+	// With TLS the CA is loaded now, so a broken file fails at configuration time.
+	if _, err := grpctls.TransportCredentials(true, grpctls.ClientOptions{CAFile: filepath.Join(t.TempDir(), "missing.pem")}); err == nil || errors.Is(err, grpctls.ErrOptionsWithoutTLS) {
+		t.Fatalf("missing CA with TLS: err = %v, want a load error", err)
+	}
 }

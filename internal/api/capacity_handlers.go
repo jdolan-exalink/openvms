@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"os"
 	"time"
@@ -14,6 +15,13 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/platform/hoststat"
 )
+
+func signedCapacityBytes(value uint64) int64 {
+	if value > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(value)
+}
 
 type workerCapacity struct {
 	Ready          bool    `json:"ready"`
@@ -39,11 +47,11 @@ func (h *Handlers) GetSystemCapacity(ctx context.Context, _ gen.GetSystemCapacit
 	body.Cpu.Model = snap.CPUModel
 	body.Cpu.Online = snap.CPUOnline
 	body.Cpu.Percent = float32(snap.CPUPercent)
-	body.Memory.TotalBytes = int64(snap.MemTotal)
-	body.Memory.AvailableBytes = int64(snap.MemAvailable)
+	body.Memory.TotalBytes = signedCapacityBytes(snap.MemTotal)
+	body.Memory.AvailableBytes = signedCapacityBytes(snap.MemAvailable)
 	body.Disk.Path = snap.DiskPath
-	body.Disk.TotalBytes = int64(snap.DiskTotal)
-	body.Disk.FreeBytes = int64(snap.DiskFree)
+	body.Disk.TotalBytes = signedCapacityBytes(snap.DiskTotal)
+	body.Disk.FreeBytes = signedCapacityBytes(snap.DiskFree)
 	if len(snap.GPUs) > 0 {
 		body.Gpu.Present = true
 		body.Gpu.Vendor = snap.GPUs[0].Vendor
@@ -121,30 +129,36 @@ func (h *Handlers) GetClassifyPolicy(ctx context.Context, _ gen.GetClassifyPolic
 	out := gen.ClassifyPolicy{}
 	for _, srv := range servers {
 		out.Servers = append(out.Servers, struct {
-			Enabled bool               `json:"enabled"`
-			Id      openapi_types.UUID `json:"id"`
+			Enabled bool `json:"enabled"`
+			//nolint:revive // Field name is dictated by the generated response type.
+			Id openapi_types.UUID `json:"id"`
 		}{Enabled: srv.Enabled, Id: srv.ID})
 	}
 	for _, cam := range cameras {
 		out.Cameras = append(out.Cameras, struct {
-			Effective bool               `json:"effective"`
-			Enabled   bool               `json:"enabled"`
-			Id        openapi_types.UUID `json:"id"`
-			ServerId  openapi_types.UUID `json:"server_id"`
+			Effective bool `json:"effective"`
+			Enabled   bool `json:"enabled"`
+			//nolint:revive // Field names are dictated by the generated response type.
+			Id openapi_types.UUID `json:"id"`
+			//nolint:revive // Field name is dictated by the generated response type.
+			ServerId openapi_types.UUID `json:"server_id"`
 		}{Effective: cam.Effective, Enabled: cam.Enabled, Id: cam.ID, ServerId: cam.ServerID})
 	}
 	if out.Servers == nil {
 		out.Servers = []struct {
-			Enabled bool               `json:"enabled"`
-			Id      openapi_types.UUID `json:"id"`
+			Enabled bool `json:"enabled"`
+			//nolint:revive // Field name is dictated by the generated response type.
+			Id openapi_types.UUID `json:"id"`
 		}{}
 	}
 	if out.Cameras == nil {
 		out.Cameras = []struct {
-			Effective bool               `json:"effective"`
-			Enabled   bool               `json:"enabled"`
-			Id        openapi_types.UUID `json:"id"`
-			ServerId  openapi_types.UUID `json:"server_id"`
+			Effective bool `json:"effective"`
+			Enabled   bool `json:"enabled"`
+			//nolint:revive // Field names are dictated by the generated response type.
+			Id openapi_types.UUID `json:"id"`
+			//nolint:revive // Field name is dictated by the generated response type.
+			ServerId openapi_types.UUID `json:"server_id"`
 		}{}
 	}
 	return gen.GetClassifyPolicy200JSONResponse(out), nil
@@ -248,4 +262,3 @@ func (h *Handlers) GetSystemConnectionsHandler(w http.ResponseWriter, r *http.Re
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
 }
-

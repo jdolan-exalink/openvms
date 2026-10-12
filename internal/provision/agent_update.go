@@ -239,7 +239,7 @@ func validateAgentUpdateRequest(request AgentUpdateRequest) error {
 		return errInvalidAgentInstall
 	}
 	for _, char := range request.AgentToken {
-		if !(char >= 'A' && char <= 'Z' || char >= 'a' && char <= 'z' || char >= '0' && char <= '9' || char == '_' || char == '-') {
+		if (char < 'A' || char > 'Z') && (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '_' && char != '-' {
 			return errInvalidAgentInstall
 		}
 	}
@@ -443,7 +443,7 @@ func rollbackAgentUpdate(conn AgentInstallConn, root string, preserveTLS bool) s
 }
 
 func checkRegisteredAgentUpdateHealth(ctx context.Context, host string, securePort uint16, token string, config AgentTLSConfig) error {
-	if uint16(config.SecurePort) != securePort || validateAgentTLSConfig(host, config) != nil {
+	if config.SecurePort != uint32(securePort) || validateAgentTLSConfig(host, config) != nil {
 		return errors.New("registered agent HTTPS health verification failed")
 	}
 	useSystemRoots := config.TrustMode == AgentTLSTrustSystem

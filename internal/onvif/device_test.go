@@ -33,7 +33,7 @@ func TestDeviceServicesAndSystemTime(t *testing.T) {
 		`<tds:GetSystemDateAndTimeResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:SystemDateAndTime><tt:DateTimeType xmlns:tt="http://www.onvif.org/ver10/schema">NTP</tt:DateTimeType><tt:UTCDateTime xmlns:tt="http://www.onvif.org/ver10/schema"><tt:Time><tt:Hour>12</tt:Hour><tt:Minute>34</tt:Minute><tt:Second>56</tt:Second></tt:Time><tt:Date><tt:Year>2025</tt:Year><tt:Month>1</tt:Month><tt:Day>2</tt:Day></tt:Date></tt:UTCDateTime></tds:SystemDateAndTime></tds:GetSystemDateAndTimeResponse>`,
 	}
 	calls := 0
-	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	transport := roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		calls++
 		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>`+responses[calls-1]+`</s:Body></s:Envelope>`), nil
 	})
@@ -58,6 +58,7 @@ func TestDeviceServicesAndSystemTime(t *testing.T) {
 }
 
 func TestServiceEndpointRejectsCredentialsAndQuery(t *testing.T) {
+	// #nosec G101 -- literal URL credentials verify rejection of unsafe endpoint.
 	svc := Service{Endpoint: "http://user:pass@camera.local/onvif/media?token=x"}
 	if _, err := svc.ValidatedEndpoint(); err == nil {
 		t.Fatal("unsafe service endpoint accepted")

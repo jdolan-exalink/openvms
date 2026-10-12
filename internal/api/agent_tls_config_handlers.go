@@ -3,24 +3,23 @@ package api
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
 
-func (h *Handlers) GetServerAgentTlsConfig(ctx context.Context, r gen.GetServerAgentTlsConfigRequestObject) (gen.GetServerAgentTlsConfigResponseObject, error) {
+func (h *Handlers) GetServerAgentTLSConfig(ctx context.Context, r gen.GetServerAgentTLSConfigRequestObject) (gen.GetServerAgentTLSConfigResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	config, err := h.Provision.GetAgentTLSConfig(ctx, a, uuid.UUID(r.ServerId))
+	config, err := h.Provision.GetAgentTLSConfig(ctx, a, r.ServerId)
 	if err != nil {
 		return nil, err
 	}
-	return gen.GetServerAgentTlsConfig200JSONResponse(agentTLSConfig(config)), nil
+	return gen.GetServerAgentTLSConfig200JSONResponse(agentTLSConfig(config)), nil
 }
 
-func (h *Handlers) SetServerAgentTlsConfig(ctx context.Context, r gen.SetServerAgentTlsConfigRequestObject) (gen.SetServerAgentTlsConfigResponseObject, error) {
+func (h *Handlers) SetServerAgentTLSConfig(ctx context.Context, r gen.SetServerAgentTLSConfigRequestObject) (gen.SetServerAgentTLSConfigResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
@@ -32,22 +31,22 @@ func (h *Handlers) SetServerAgentTlsConfig(ctx context.Context, r gen.SetServerA
 	if err != nil {
 		return nil, err
 	}
-	config, err = h.Provision.SetAgentTLSConfig(ctx, a, uuid.UUID(r.ServerId), config)
+	config, err = h.Provision.SetAgentTLSConfig(ctx, a, r.ServerId, config)
 	if err != nil {
 		return nil, err
 	}
-	return gen.SetServerAgentTlsConfig200JSONResponse(agentTLSConfig(config)), nil
+	return gen.SetServerAgentTLSConfig200JSONResponse(agentTLSConfig(config)), nil
 }
 
-func (h *Handlers) DeleteServerAgentTlsConfig(ctx context.Context, r gen.DeleteServerAgentTlsConfigRequestObject) (gen.DeleteServerAgentTlsConfigResponseObject, error) {
+func (h *Handlers) DeleteServerAgentTLSConfig(ctx context.Context, r gen.DeleteServerAgentTLSConfigRequestObject) (gen.DeleteServerAgentTLSConfigResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := h.Provision.DeleteAgentTLSConfig(ctx, a, uuid.UUID(r.ServerId)); err != nil {
+	if err := h.Provision.DeleteAgentTLSConfig(ctx, a, r.ServerId); err != nil {
 		return nil, err
 	}
-	return gen.DeleteServerAgentTlsConfig204Response{}, nil
+	return gen.DeleteServerAgentTLSConfig204Response{}, nil
 }
 
 func provisionAgentTLSConfig(in gen.ServerAgentTLSConfig) (provision.AgentTLSConfig, error) {

@@ -515,7 +515,7 @@ function useAgentJobLogs({
 
   useEffect(() => {
     if (!job && !isPending) {
-      setLogs([]);
+      queueMicrotask(() => setLogs([]));
       seenStagesRef.current.clear();
       seenStatusesRef.current.clear();
       pendingLoggedRef.current = false;
@@ -634,7 +634,9 @@ function useAgentJobLogs({
     }
 
     if (newEntries.length > 0) {
-      setLogs((prev) => [...prev, ...newEntries]);
+      // Keep the queued append even if another status arrives before it flushes: the
+      // seen-stage refs have already advanced, so cancelling it would lose log entries.
+      queueMicrotask(() => setLogs((prev) => [...prev, ...newEntries]));
     }
   }, [job, kind, t]);
 
@@ -1511,7 +1513,7 @@ export function LanNetworkMeters({
   sampledAt?: string;
 }) {
   const t = useT();
-  const [historyRevision, setHistoryRevision] = useState(0);
+  const [, setHistoryRevision] = useState(0);
 
   useEffect(() => {
     if (!sampledAt || interfaces.length === 0) return;
@@ -1520,8 +1522,10 @@ export function LanNetworkMeters({
         recordNetworkSample(`${serverId}:${iface.name}`, iface.rx_bytes_per_second, iface.tx_bytes_per_second);
       }
     }
-    setHistoryRevision((r) => r + 1);
-  }, [serverId, sampledAt]);
+    let active = true;
+    queueMicrotask(() => { if (active) setHistoryRevision((r) => r + 1); });
+    return () => { active = false; };
+  }, [serverId, sampledAt, interfaces]);
 
   const lanInterfaces = interfaces.filter((entry) => !!entry.name && isLanInterfaceName(entry.name));
 
@@ -1539,7 +1543,6 @@ export function LanNetworkMeters({
             key={iface.name}
             iface={iface}
             samples={samples}
-            revision={historyRevision}
           />
         );
       })}
@@ -1550,11 +1553,9 @@ export function LanNetworkMeters({
 function LanInterfaceCard({
   iface,
   samples,
-  revision: _revision,
 }: {
   iface: Schemas["ServerAgentNetworkInterface"];
   samples: readonly NetworkTrafficSample[];
-  revision: number;
 }) {
   const t = useT();
   const [isHovered, setIsHovered] = useState(false);
@@ -1574,7 +1575,7 @@ function LanInterfaceCard({
   const pointsTx: string[] = [];
 
   const effectiveSamples = samples.length < 2
-    ? [{ rx, tx, timestamp: Date.now() - 5000 }, { rx, tx, timestamp: Date.now() }]
+    ? [{ rx, tx }, { rx, tx }]
     : samples;
 
   effectiveSamples.forEach((sample, i) => {

@@ -17,10 +17,15 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
 	"github.com/jdolan-exalink/openvms/internal/agentca"
 	"github.com/jdolan-exalink/openvms/internal/agentenroll"
 	"github.com/jdolan-exalink/openvms/internal/api"
+	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/bootstrap"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
 	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
@@ -176,4 +181,92 @@ func TestAgentEnrollmentAPI(t *testing.T) {
 			t.Errorf("oversized enroll body: %d, want 400", code)
 		}
 	})
+}
+
+// F1: the operator endpoint that revokes every certificate of a server's agent.
+func TestRevokeServerAgentCertificatesAPI(t *testing.T) {
+	ctx := context.Background()
+	env := demofix.Setup(t)
+	enrollSvc := &agentenroll.Service{
+		Store: env.Store, Authz: env.Svc,
+		CA: &agentca.Service{Repo: &agentca.PgRepo{Store: env.Store}, Sealer: env.Sealer},
+		RequireManage: func(ctx context.Context, a authz.Actor, id uuid.UUID) error {
+			_, err := env.Svc.RequireServerManage(ctx, a, id)
+			return err
+		},
+	}
+	router, err := api.NewRouter(&api.Handlers{Inv: env.Svc, Log: pgtest.Discard(), AgentEnroll: enrollSvc}, pgtest.Discard(), api.Options{Queries: db.New(env.Pool)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+	do := func(path, bearer string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL+path, strings.NewReader(""))
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	server := env.Cameras["frigate-h01/acceso_norte"]
+	path := "/api/v1/servers/" + server.ServerID.String() + "/agent/revoke-certificates"
+
+	// Two live certificates for the server (a token enrolls one each time).
+	for range 2 {
+		tok, err := enrollSvc.CreateToken(ctx, env.Admin, server.ServerID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := enrollSvc.Enroll(ctx, tok.Value, []byte(enrollCSR(t))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	live := func() int {
+		var n int
+		if err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, "SELECT count(*) FROM agent_certificates WHERE server_id = $1 AND revoked_at IS NULL", server.ServerID).Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	if code, _ := do(path, ""); code != http.StatusUnauthorized {
+		t.Errorf("unauthenticated: %d, want 401", code)
+	}
+	if code, _ := do(path, env.Demo.Tokens["operador"]); code != http.StatusForbidden {
+		t.Errorf("operator without servers.manage: %d, want 403", code)
+	}
+	other, err := env.Svc.CreateTenant(ctx, env.Admin, "otra-muni-revoke", "Otra Municipalidad")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, tokenB, err := bootstrap.TenantUser(ctx, env.Store, other.ID, "owner-revoke-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _ := do(path, tokenB); code != http.StatusNotFound {
+		t.Errorf("another tenant: %d, want 404", code)
+	}
+	if n := live(); n != 2 {
+		t.Fatalf("%d live certificates after refused calls, want 2", n)
+	}
+
+	code, body := do(path, env.AdminToken)
+	if code != http.StatusOK || !strings.Contains(body, `"revoked":2`) {
+		t.Fatalf("admin revoke: %d %s, want 200 with revoked 2", code, body)
+	}
+	if n := live(); n != 0 {
+		t.Fatalf("%d live certificates after the revocation, want 0", n)
+	}
+	if code, body := do(path, env.AdminToken); code != http.StatusOK || !strings.Contains(body, `"revoked":0`) {
+		t.Fatalf("second revoke: %d %s, want 200 with revoked 0", code, body)
+	}
 }

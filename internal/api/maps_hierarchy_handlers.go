@@ -3,10 +3,11 @@ package api
 import (
 	"bytes"
 	"context"
+	"net/http"
+
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/maps"
 	"github.com/jdolan-exalink/openvms/internal/store"
-	"net/http"
 )
 
 func (h *Handlers) mapsEnabled() error {

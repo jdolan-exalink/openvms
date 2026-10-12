@@ -210,4 +210,3 @@ func PointInPolygon(pt Point, ring []Point) bool {
 	}
 	return inside
 }
-

@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -43,7 +42,7 @@ type AuthServer struct {
 	Features []string
 }
 
-func (s *AuthServer) Handshake(ctx context.Context, req *openvmsv1.HandshakeRequest) (*openvmsv1.HandshakeResponse, error) {
+func (s *AuthServer) Handshake(_ context.Context, req *openvmsv1.HandshakeRequest) (*openvmsv1.HandshakeResponse, error) {
 	if req.Client == nil {
 		return nil, status.Error(codes.InvalidArgument, "client info is required")
 	}
@@ -162,11 +161,7 @@ func (s *AuthServer) Logout(ctx context.Context, req *openvmsv1.LogoutRequest) (
 	return &openvmsv1.LogoutResponse{Success: true}, nil
 }
 
-func clientIPFromContext(ctx context.Context) (netip.Addr, error) {
+func clientIPFromContext(_ context.Context) (netip.Addr, error) {
 	// Defaults to localhost in direct call
 	return netip.ParseAddr("127.0.0.1")
-}
-
-func parseUUID(s string) (uuid.UUID, error) {
-	return uuid.Parse(strings.TrimSpace(s))
 }

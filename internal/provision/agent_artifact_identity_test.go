@@ -11,15 +11,18 @@ import (
 )
 
 func TestLoadTrustedAgentArtifactReturnsIdentityForValidatedBytes(t *testing.T) {
+	// #nosec G703 -- os.Args[0] identifies this test process's executable.
 	binary, err := os.ReadFile(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "edge-agent")
+	// #nosec G703 G306 -- this fixture must remain executable for artifact validation.
 	if err := os.WriteFile(path, binary, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(binary)
+	// #nosec G703 -- test path is derived from t.TempDir or this test process executable.
 	if err := os.WriteFile(path+".sha256", []byte(hex.EncodeToString(hash[:])+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -45,11 +48,13 @@ func TestLoadTrustedAgentArtifactReturnsIdentityForValidatedBytes(t *testing.T) 
 }
 
 func TestLoadTrustedAgentArtifactRejectsMalformedVersionManifest(t *testing.T) {
+	// #nosec G703 -- test path is derived from t.TempDir or this test process executable.
 	binary, err := os.ReadFile(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "edge-agent")
+	// #nosec G306 G703 -- executable fixture path is derived from t.TempDir.
 	if err := os.WriteFile(path, binary, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -69,11 +74,13 @@ func TestLoadTrustedAgentArtifactRejectsMalformedVersionManifest(t *testing.T) {
 }
 
 func TestLoadTrustedAgentArtifactRejectsManifestMismatch(t *testing.T) {
+	// #nosec G703 -- test path is derived from t.TempDir or this test process executable.
 	binary, err := os.ReadFile(os.Args[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "edge-agent")
+	// #nosec G306 G703 -- executable fixture path is derived from t.TempDir.
 	if err := os.WriteFile(path, binary, 0o700); err != nil {
 		t.Fatal(err)
 	}

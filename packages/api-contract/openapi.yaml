@@ -671,7 +671,7 @@ paths:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
     get:
       tags: [servers]
-      operationId: getServerAgentTlsConfig
+      operationId: getServerAgentTLSConfig
       summary: Read registered agent TLS trust configuration
       description: Requires servers.manage. Returns only the public custom CA bundle, never credentials or private keys.
       responses:
@@ -685,7 +685,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     put:
       tags: [servers]
-      operationId: setServerAgentTlsConfig
+      operationId: setServerAgentTLSConfig
       summary: Configure registered agent TLS trust
       description: Requires servers.manage. The CA bundle is public trust material; private keys and agent credentials are not accepted.
       requestBody:
@@ -705,7 +705,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [servers]
-      operationId: deleteServerAgentTlsConfig
+      operationId: deleteServerAgentTLSConfig
       summary: Disable registered agent TLS configuration
       description: Requires servers.manage. This only deletes trust metadata and does not issue an agent or camera request.
       responses:
@@ -772,6 +772,23 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/servers/{serverId}/agent/revoke-certificates:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: revokeServerAgentCertificates
+      summary: Revoke every certificate of the server's agent
+      description: Requires servers.manage. Revokes all agent certificates of the server that are not revoked yet, so the agent listener refuses them from the next call and the agent cannot renew; the agent must enroll again with a new token. Use it for a decommissioned or compromised agent. Pending enrollment tokens are not touched. Audited as SERVER_AGENT_CERTS_REVOKED. Calling it again returns zero.
+      responses:
+        "200":
+          description: How many certificates were revoked
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentCertificatesRevoked" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/agent/enroll:
     post:
       tags: [servers]
@@ -798,12 +815,13 @@ paths:
               schema: { $ref: "#/components/schemas/AgentEnrollment" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
   /api/v1/servers/{serverId}/agent/update-ssh:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       tags: [servers]
-      operationId: updateServerAgentOverSsh
+      operationId: updateServerAgentOverSSH
       summary: Update an existing registered agent and configure HTTPS
       description: Requires servers.manage and servers.config.secrets. The registered agent IPv4 and existing bearer are fixed by server registration. The root SSH password is transient. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. HTTPS health is verified before public trust metadata is recorded. Existing TLS-enabled agents are not replaced by this operation.
       requestBody:
@@ -845,7 +863,7 @@ paths:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       tags: [servers]
-      operationId: uninstallServerAgentOverSsh
+      operationId: uninstallServerAgentOverSSH
       summary: Uninstall a registered agent from the host over SSH
       description: Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
       requestBody:
@@ -3534,6 +3552,13 @@ components:
       name: openvms_session
       description: Browser session. State-changing requests must also send the X-OpenVMS-Request header.
   responses:
+    TooManyRequests:
+      description: Too many requests from this client address; retry after the number of seconds in Retry-After
+      headers:
+        Retry-After: { schema: { type: integer }, description: Seconds until a request is accepted again }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     BadRequest:
       description: The request is invalid
       content:
@@ -3806,8 +3831,24 @@ components:
         uptime_seconds: { type: integer, nullable: true }
         storage: { $ref: "#/components/schemas/ServerStorage" }
         camera_count: { type: integer }
+        agent_last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When an enrolled edge agent last sent a heartbeat to the agent listener (database clock). Absent until the first heartbeat; compare with the current time to decide whether the agent is still reporting.
+        agent_version: { type: string, description: Version the agent reported in its last heartbeat. Absent until the first heartbeat. }
+        agent_status: { $ref: "#/components/schemas/AgentStatus" }
+        agent_cert_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the client certificate the agent is using expires (the latest not_after among its certificates that are in use and not revoked). Absent until the agent first connects with mTLS and after its certificates are revoked. A time in the past means the agent's certificate expired and it can only recover with a new enrollment token.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AgentStatus:
+      type: string
+      enum: [unknown, online, degraded, offline, maintenance]
+      description: Operational status the agent reported in its last heartbeat. It is what the agent said, not whether the agent is still alive; use agent_last_seen_at for that.
     SyncResult:
       type: object
       required: [server, added, updated, missing]
@@ -3894,6 +3935,11 @@ components:
       properties:
         token: { type: string, description: "One-time secret, shown only in this response." }
         expires_at: { type: string, format: date-time }
+    AgentCertificatesRevoked:
+      type: object
+      required: [revoked]
+      properties:
+        revoked: { type: integer, minimum: 0, description: Certificates revoked by this call. }
     AgentEnrollRequest:
       type: object
       required: [token, csr_pem]

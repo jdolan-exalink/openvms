@@ -179,6 +179,7 @@ func (s *Service) StartServerAgentUpdate(ctx context.Context, actor authz.Actor,
 		if preflightHealth == nil {
 			return AgentInstallJob{}, ErrAgentUpdateUnavailable
 		}
+		// #nosec G115 -- validateAgentTLSConfig constrains the stored port to 1..65535.
 		if err := preflightHealth(ctx, row.Host, uint16(registeredTLS.SecurePort), token, registeredTLS); err != nil {
 			return AgentInstallJob{}, ErrAgentUpdateUnavailable
 		}
@@ -196,6 +197,7 @@ func (s *Service) StartServerAgentUpdate(ctx context.Context, actor authz.Actor,
 	trustMode := AgentTLSTrustCustom
 	if preserveTLS {
 		certificate = append([]byte(nil), registeredTLS.CAPEM...)
+		// #nosec G115 -- validateAgentTLSConfig constrains the stored port to 1..65535.
 		securePort = uint16(registeredTLS.SecurePort)
 		trustMode = registeredTLS.TrustMode
 	} else {
@@ -216,6 +218,7 @@ func (s *Service) StartServerAgentUpdate(ctx context.Context, actor authz.Actor,
 	request.hostKeyTrust = func(ctx context.Context, fingerprint string) error {
 		return s.trustAgentSSHHostKey(ctx, actor, serverID, row.Host, in.SSHPort, fingerprint)
 	}
+	// #nosec G118 -- the durable worker creates its own bounded context and outlives the HTTP request.
 	go s.runServerAgentUpdate(actor, job, row, request)
 	reservationOwned = false
 	return job.read(), nil
@@ -244,17 +247,6 @@ func (s *Service) loadRegisteredAgentForUpdate(ctx context.Context, actor authz.
 		return db.ServerAgent{}, "", ErrAgentUpdateUnavailable
 	}
 	return row, string(token), nil
-}
-
-func (s *Service) registeredAgentTLSExists(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (bool, error) {
-	_, err := s.agentTLSRow(ctx, actor, serverID)
-	if errors.Is(err, store.ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 func (s *Service) registeredAgentTLSConfig(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (AgentTLSConfig, error) {

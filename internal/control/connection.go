@@ -139,7 +139,7 @@ func (s *ConnectionServer) GetConnectionCandidates(ctx context.Context, req *ope
 	}, nil
 }
 
-func (s *ConnectionServer) ReportNetworkTelemetry(ctx context.Context, req *openvmsv1.ReportNetworkTelemetryRequest) (*openvmsv1.ReportNetworkTelemetryResponse, error) {
+func (s *ConnectionServer) ReportNetworkTelemetry(_ context.Context, req *openvmsv1.ReportNetworkTelemetryRequest) (*openvmsv1.ReportNetworkTelemetryResponse, error) {
 	if s.Log != nil {
 		s.Log.Info("desktop network telemetry reported",
 			"session_id", req.SessionId,

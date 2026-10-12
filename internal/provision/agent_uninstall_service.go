@@ -75,6 +75,7 @@ func (s *Service) StartServerAgentUninstall(ctx context.Context, actor authz.Act
 		return AgentInstallJob{}, ErrAgentUpdateUnavailable
 	}
 
+	// #nosec G118 -- durable uninstall job must outlive the HTTP request.
 	go s.runServerAgentUninstall(context.Background(), actor, job, row, in)
 	reservationOwned = false
 	return job.read(), nil
@@ -103,19 +104,7 @@ func (s *Service) runServerAgentUninstall(parent context.Context, actor authz.Ac
 	defer conn.Close()
 
 	job.update("running", "stopping", "Stopping and disabling agent service")
-	cmd := `set -e
-if systemctl is-active --quiet openvms-agent.service 2>/dev/null; then
-  systemctl stop openvms-agent.service
-fi
-if systemctl is-enabled --quiet openvms-agent.service 2>/dev/null; then
-  systemctl disable openvms-agent.service
-fi
-rm -f /etc/systemd/system/openvms-agent.service
-systemctl daemon-reload
-rm -f /usr/local/bin/openvms-agent
-rm -rf /etc/openvms
-printf 'openvms_uninstall=ok\n'
-`
+	cmd := agentUninstallScript()
 	out, err := conn.Run(ctx, cmd)
 	if err != nil || !strings.Contains(out, "openvms_uninstall=ok") {
 		slog.Warn("uninstall remote step failed", "err", err, "out", out)

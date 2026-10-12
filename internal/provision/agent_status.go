@@ -3,6 +3,7 @@ package provision
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -160,17 +161,24 @@ func applySnapshot(out *AgentView, snap agent.Snapshot) {
 		sampledAt := *snap.NetworkSampledAt
 		out.NetworkSampledAt = &sampledAt
 	}
-	out.MemoryTotal = int64(snap.MemoryTotal)
-	out.MemoryAvailable = int64(snap.MemoryAvailable)
+	out.MemoryTotal = signedSnapshotBytes(snap.MemoryTotal)
+	out.MemoryAvailable = signedSnapshotBytes(snap.MemoryAvailable)
 	out.Coral = snap.Coral
 	out.GPUPresent = snap.GPUPresent
 	out.GPUVendor = snap.GPUVendor
 	out.GPUName = snap.GPUName
-	out.CCTVTotal = int64(snap.CCTVTotal)
-	out.CCTVFree = int64(snap.CCTVFree)
-	out.DatabaseTotal = int64(snap.DatabaseTotal)
-	out.DatabaseFree = int64(snap.DatabaseFree)
+	out.CCTVTotal = signedSnapshotBytes(snap.CCTVTotal)
+	out.CCTVFree = signedSnapshotBytes(snap.CCTVFree)
+	out.DatabaseTotal = signedSnapshotBytes(snap.DatabaseTotal)
+	out.DatabaseFree = signedSnapshotBytes(snap.DatabaseFree)
 	out.Error = ""
+}
+
+func signedSnapshotBytes(value uint64) int64 {
+	if value > math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return int64(value)
 }
 
 // Discover runs credential-free ONVIF discovery on a managed server's registered agent.

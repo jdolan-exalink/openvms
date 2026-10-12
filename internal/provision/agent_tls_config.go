@@ -95,6 +95,7 @@ func (s *Service) SetAgentTLSConfig(ctx context.Context, actor authz.Actor, serv
 		}
 		if err := q.UpsertServerAgentTLS(ctx, db.UpsertServerAgentTLSParams{
 			ServerID: serverID, TenantID: row.TenantID,
+			// #nosec G115 -- validateAgentTLSConfig constrains this port to 1..65535.
 			SecurePort: int32(in.SecurePort), TrustMode: in.TrustMode, CaPem: nullCA(in),
 		}); err != nil {
 			return err
@@ -165,6 +166,10 @@ func (s *Service) agentTLSRow(ctx context.Context, actor authz.Actor, serverID u
 }
 
 func configFromRow(row db.ServerAgentTl) AgentTLSConfig {
+	if row.SecurePort < 1 || row.SecurePort > 65535 {
+		return AgentTLSConfig{TrustMode: row.TrustMode, CAPEM: caBytes(row.CaPem)}
+	}
+	// #nosec G115 -- invalid stored ports are rejected immediately above.
 	return AgentTLSConfig{SecurePort: uint32(row.SecurePort), TrustMode: row.TrustMode, CAPEM: caBytes(row.CaPem)}
 }
 

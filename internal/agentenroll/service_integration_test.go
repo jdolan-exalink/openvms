@@ -955,3 +955,68 @@ func seedOtherTenant(t *testing.T, e *env) (tenant, server uuid.UUID) {
 	}
 	return tenant, server
 }
+
+// manageDenied makes RequireManage fail like inventory does for an actor without servers.manage.
+var errNoManage = errors.New("forbidden")
+
+func TestRevokeServerCertificatesRevokesAuditsAndCounts(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.svc.RequireManage = func(context.Context, authz.Actor, uuid.UUID) error { return nil }
+	a := e.enrollAged(t, 20*24*time.Hour)
+	b := e.enrollAged(t, 0)
+	otherServer := e.newServer(t)
+	other := e.enrollAgedFor(t, otherServer, 0)
+
+	n, err := e.svc.RevokeServerCertificates(ctx, e.actor, e.server)
+	if err != nil || n != 2 {
+		t.Fatalf("RevokeServerCertificates = %d, %v; want the server's 2 live certificates", n, err)
+	}
+	if e.revokedAt(t, a.Issued.Serial) == nil || e.revokedAt(t, b.Issued.Serial) == nil {
+		t.Fatal("a certificate of the server is still live")
+	}
+	if e.revokedAt(t, other.Issued.Serial) != nil {
+		t.Fatal("another server's certificate was revoked")
+	}
+	var targetType, actorName string
+	var count int
+	e.scan(t, "SELECT target_type, actor_name, (details->>'revoked')::int FROM audit_log WHERE action = 'SERVER_AGENT_CERTS_REVOKED' AND target_id = $1",
+		[]any{e.server}, &targetType, &actorName, &count)
+	if targetType != "server_agent" || actorName != e.actor.Username || count != 2 {
+		t.Fatalf("audit = %q by %q revoking %d; want server_agent by %q revoking 2", targetType, actorName, count, e.actor.Username)
+	}
+	// A second call has nothing left to revoke and says so.
+	if n, err := e.svc.RevokeServerCertificates(ctx, e.actor, e.server); err != nil || n != 0 {
+		t.Fatalf("second call = %d, %v; want 0", n, err)
+	}
+}
+
+func TestRevokeServerCertificatesNeedsManageAndStaysInTheTenant(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	first := e.enrollAged(t, 0)
+
+	e.svc.RequireManage = func(context.Context, authz.Actor, uuid.UUID) error { return errNoManage }
+	if _, err := e.svc.RevokeServerCertificates(ctx, e.actor, e.server); !errors.Is(err, errNoManage) {
+		t.Fatalf("without servers.manage: %v, want the authorization error", err)
+	}
+	if e.revokedAt(t, first.Issued.Serial) != nil {
+		t.Fatal("a refused call revoked a certificate")
+	}
+
+	// Even if authorization were wrong, the transaction is scoped to the actor's tenant.
+	e.svc.RequireManage = func(context.Context, authz.Actor, uuid.UUID) error { return nil }
+	otherTenant, _ := seedOtherTenant(t, e)
+	stranger := authz.Actor{UserID: uuid.New(), Username: "intruder", TenantID: &otherTenant}
+	if _, err := e.svc.RevokeServerCertificates(ctx, stranger, e.server); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("another tenant's actor: %v, want ErrNotFound", err)
+	}
+	if e.revokedAt(t, first.Issued.Serial) != nil {
+		t.Fatal("another tenant revoked this tenant's certificate")
+	}
+	var audits int
+	e.scan(t, "SELECT count(*) FROM audit_log WHERE action = 'SERVER_AGENT_CERTS_REVOKED'", nil, &audits)
+	if audits != 0 {
+		t.Fatalf("%d audit rows after refused calls, want 0", audits)
+	}
+}

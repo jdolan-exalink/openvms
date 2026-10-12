@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -120,7 +121,7 @@ func decodeOperation(data []byte, name string, target any) error {
 	for {
 		token, err := decoder.Token()
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				return fmt.Errorf("missing SOAP operation %s", name)
 			}
 			return err

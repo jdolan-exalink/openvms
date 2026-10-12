@@ -12,8 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/jdolan-exalink/openvms/deploy/agent"
+	agentbundle "github.com/jdolan-exalink/openvms/deploy/agent"
 	"github.com/jdolan-exalink/openvms/internal/agent"
 )
 
@@ -61,8 +60,6 @@ func Exec(ctx context.Context, j *job, password string, conn Conn, binary []byte
 	j.setVariant(variant)
 	if variant == VariantCPU {
 		j.addWarning("cpu")
-	} else {
-		// Preserve the storage-mode warning if the operator opted into the demo fallback.
 	}
 	j.setStep(stepHardware, stateDone, string(variant))
 
@@ -111,7 +108,6 @@ func Exec(ctx context.Context, j *job, password string, conn Conn, binary []byte
 	j.setServer(serverID)
 	j.setStep(stepRegister, stateDone, "")
 	j.succeed()
-	token = ""
 }
 
 type hostPlatform struct {

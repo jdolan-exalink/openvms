@@ -87,6 +87,7 @@ func (s *Service) RegisterLocalAgent(ctx context.Context, actor authz.Actor, ses
 		}
 		rows, err := q.RegisterServerAgentIfAbsent(ctx, db.RegisterServerAgentIfAbsentParams{
 			ServerID: in.ServerID, TenantID: server.TenantID, Host: in.Host,
+			// #nosec G115 -- validateLocalAgentRegistration constrains HTTP port to 1..65535.
 			Port: int32(in.HTTPPort), Variant: "compose", TokenSealed: sealed, Version: agent.Version,
 		})
 		if err != nil {
@@ -98,6 +99,7 @@ func (s *Service) RegisterLocalAgent(ctx context.Context, actor authz.Actor, ses
 		ca := string(in.CAPEM)
 		config := AgentTLSConfig{SecurePort: in.SecurePort, TrustMode: AgentTLSTrustCustom, CAPEM: in.CAPEM}
 		if err := q.UpsertServerAgentTLS(ctx, db.UpsertServerAgentTLSParams{
+			// #nosec G115 -- validateLocalAgentRegistration constrains HTTPS port to 1..65535.
 			ServerID: in.ServerID, TenantID: server.TenantID, SecurePort: int32(in.SecurePort),
 			TrustMode: AgentTLSTrustCustom, CaPem: &ca,
 		}); err != nil {

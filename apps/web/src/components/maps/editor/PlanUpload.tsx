@@ -22,7 +22,7 @@ async function rotatePng(blob: Blob): Promise<{ blob: Blob; width: number; heigh
 }
 /** A keyed context cancels conversion/upload and revokes all previews when the map changes. */
 export function PlanUpload(props: PlanUploadProps) {
-  return <PlanUploadContext key={`${props.siteId}/${props.floorId}/${props.revision}`} {...props}/>;
+  return <PlanUploadContext key={`${props.siteId}/${props.floorId}`} {...props}/>;
 }
 function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,source}:PlanUploadProps) {
   const [file,setFile] = useState<File>();
@@ -59,7 +59,7 @@ function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,s
     const controller=new AbortController();request.current?.abort();request.current=controller;
     try {
       await uploadFloorPlan(siteId,floorId,revision,preview.blob,controller.signal);
-      if(!controller.signal.aborted) {clearPreview();onSaved();}
+      if(!controller.signal.aborted) {clearPreview();setFile(undefined);onSaved();}
     } catch(cause) {
       if(!controller.signal.aborted) {setError(cause instanceof Error ? cause.message : "No se pudo guardar el fondo.");if(cause instanceof ApiError && cause.status===409)onConflict?.();}
     } finally {if(!controller.signal.aborted) setBusy(false);}
@@ -98,7 +98,7 @@ function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,s
         Elegir imagen
         <input aria-label="Archivo de plano" type="file" accept="image/png,image/svg+xml,application/pdf,.png,.svg,.pdf"
           className="sr-only" onChange={event=>{
-            const next=event.target.files?.[0];if(!next)return;setFile(next);setPage(1);void prepare(next,1);
+            const next=event.target.files?.[0];if(!next)return;setFile(next);setPage(1);void prepare(next,1);event.target.value="";
           }}/>
       </label>
       <Button variant="tonal" disabled={busy} onClick={() => setDesignerOpen(true)}>
@@ -120,7 +120,7 @@ function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,s
     {busy && <p role="status">Procesando plano…</p>}
     <p className="text-on-surface-variant">PNG, SVG o una página PDF; máximo 20 MiB. Girar acomoda el plano antes de guardarlo.</p>
     <div className="flex flex-wrap gap-2"><Button variant="filled" disabled={!preview || busy} onClick={()=>void save()}>Guardar fondo</Button>
-      {(busy||preview) && <Button variant="outlined" onClick={()=>{request.current?.abort();setBusy(false);clearPreview();}}>Cancelar</Button>}
+      {(busy||preview) && <Button variant="outlined" onClick={()=>{request.current?.abort();setBusy(false);clearPreview();setFile(undefined);}}>Cancelar</Button>}
     </div>
     {designerOpen && (
       <RoomPlannerModal
@@ -143,7 +143,9 @@ function PlanUploadContext({siteId,floorId,revision,onSaved,onConflict,onDirty,s
             await uploadFloorPlan(siteId, floorId, revision, result.blob, controller.signal);
             try {
               localStorage.setItem(`openvms_floor_plan_${floorId}`, JSON.stringify(state));
-            } catch (_) {}
+            } catch {
+              // Plan state is optional when browser storage is unavailable.
+            }
             setDesignerOpen(false);
             onSaved();
           } catch (cause) {

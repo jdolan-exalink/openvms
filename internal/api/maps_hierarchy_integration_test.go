@@ -15,11 +15,17 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
+	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/bootstrap"
+	"github.com/jdolan-exalink/openvms/internal/inventory"
+	"github.com/jdolan-exalink/openvms/internal/store"
 )
 
 func TestMapsHierarchyPrivatePlanLifecycle(t *testing.T) {
 	te := setupMapsTest(t, true)
+	ctx := context.Background()
 	cam := te.Cameras["frigate-h01/acceso_norte"]
 	status, _, body := te.request(http.MethodPost, fmt.Sprintf("/api/v1/maps/sites/%s/buildings", cam.SiteID), te.AdminToken, nil, map[string]any{"name": "Plant A"})
 	if status != 201 {
@@ -137,9 +143,128 @@ func TestMapsHierarchyPrivatePlanLifecycle(t *testing.T) {
 	if status != 200 || len(entities.Entities) != 3 {
 		t.Fatalf("geo plus two floor placements: %d %s", status, body)
 	}
-	status, _, body = te.request(http.MethodDelete, fmt.Sprintf("/api/v1/maps/sites/%s/floors/%s", cam.SiteID, f.ID), te.AdminToken, map[string]string{"If-Match": fmt.Sprint(f.Revision)}, nil)
-	if status != 400 {
-		t.Fatalf("occupied floor deletion must preserve layout: %d %s", status, body)
+	createFloorZone := func(floorID uuid.UUID, name string) uuid.UUID {
+		t.Helper()
+		code, _, response := te.request(http.MethodPost, fmt.Sprintf("/api/v1/maps/sites/%s/zones", cam.SiteID), te.AdminToken, nil, gen.CreateMapZoneRequest{
+			FloorId: &floorID,
+			Name:    name,
+			Kind:    gen.CreateMapZoneRequestKindWarning,
+			Geometry: map[string]interface{}{
+				"type": "Polygon",
+				"coordinates": [][][]float64{
+					{{0.1, 0.1}, {0.8, 0.1}, {0.8, 0.9}, {0.1, 0.9}, {0.1, 0.1}},
+				},
+			},
+		})
+		if code != http.StatusCreated {
+			t.Fatalf("create %s zone: %d %s", name, code, response)
+		}
+		var zone gen.MapZone
+		if err := json.Unmarshal(response, &zone); err != nil {
+			t.Fatal(err)
+		}
+		return zone.Id
+	}
+	deletedZoneID := createFloorZone(f.ID, "Zone on deleted floor")
+	keptZoneID := createFloorZone(second.ID, "Zone on retained floor")
+
+	// A fully authorized user in another tenant cannot delete this floor or its contents.
+	otherTenant, err := te.Svc.CreateTenant(ctx, te.Admin, "floor-isolation", "Floor Isolation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSiteName := "Other tenant site"
+	otherSite, err := te.Svc.CreateSite(ctx, te.Admin, otherTenant.ID, inventory.SiteInput{Name: &otherSiteName})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherActor, otherToken, err := bootstrap.TenantUser(ctx, te.Store, otherTenant.ID, "floor-owner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := te.Svc.CreateGrant(ctx, te.Admin, inventory.GrantInput{
+		SubjectType: "user", SubjectID: otherActor.UserID, Permission: authz.MapsEdit,
+		Effect: authz.Allow, ScopeType: authz.ScopeSite, ScopeID: &otherSite.ID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	status, _, body = te.request(http.MethodPost, fmt.Sprintf("/api/v1/maps/sites/%s/buildings", otherSite.ID), otherToken, nil, map[string]any{"name": "Other building"})
+	if status != http.StatusCreated {
+		t.Fatalf("other tenant's valid maps.edit grant: %d %s", status, body)
+	}
+	var otherBuilding struct {
+		ID uuid.UUID `json:"id"`
+	}
+	if err := json.Unmarshal(body, &otherBuilding); err != nil {
+		t.Fatal(err)
+	}
+	status, _, body = te.request(http.MethodPost, fmt.Sprintf("/api/v1/maps/sites/%s/buildings/%s/floors", otherSite.ID, otherBuilding.ID), otherToken, nil, map[string]any{"name": "Other floor", "ordinal": 1})
+	if status != http.StatusCreated {
+		t.Fatalf("other tenant's floor: %d %s", status, body)
+	}
+	var otherFloor struct {
+		ID uuid.UUID `json:"id"`
+	}
+	if err := json.Unmarshal(body, &otherFloor); err != nil {
+		t.Fatal(err)
+	}
+	deletePath := fmt.Sprintf("/api/v1/maps/sites/%s/floors/%s", cam.SiteID, f.ID)
+	status, _, body = te.request(http.MethodDelete, deletePath, otherToken, map[string]string{"If-Match": fmt.Sprint(f.Revision)}, nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("other tenant must not delete floor: %d %s", status, body)
+	}
+
+	status, _, body = te.request(http.MethodDelete, deletePath, te.AdminToken, map[string]string{"If-Match": fmt.Sprint(f.Revision)}, nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("occupied floor deletion must cascade: %d %s", status, body)
+	}
+	status, _, body = te.request(http.MethodGet, path, te.AdminToken, nil, nil)
+	if status != http.StatusNotFound {
+		t.Fatalf("deleted floor plan remains readable: %d %s", status, body)
+	}
+	blobs.mu.Lock()
+	remainingBlobs := len(blobs.data)
+	blobs.mu.Unlock()
+	if remainingBlobs != 0 {
+		t.Fatalf("deleted floor leaked private plan blobs: %d", remainingBlobs)
+	}
+	status, _, body = te.request(http.MethodGet, fmt.Sprintf("/api/v1/maps/sites/%s/entities", cam.SiteID), te.AdminToken, nil, nil)
+	if err := json.Unmarshal(body, &entities); err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK || len(entities.Entities) != 2 {
+		t.Fatalf("geo and other-floor placements must survive deletion: %d %s", status, body)
+	}
+	var geo, retainedFloor bool
+	for _, entity := range entities.Entities {
+		if entity.Id != cam.ID || entity.Pos.FloorId == nil && entity.Pos.K != "geo" {
+			t.Fatalf("unexpected entity after floor deletion: %+v", entity)
+		}
+		if entity.Pos.FloorId == nil {
+			geo = true
+		} else if *entity.Pos.FloorId == second.ID {
+			retainedFloor = true
+		}
+	}
+	if !geo || !retainedFloor {
+		t.Fatalf("surviving placements: geo=%t other-floor=%t", geo, retainedFloor)
+	}
+	var deletedPlacements, retainedPlacements, deletedZoneActive, retainedZoneActive, deletedFloorLive, otherFloorLive int
+	if err := te.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM map_placements WHERE floor_id = $1),
+			(SELECT count(*) FROM map_placements WHERE floor_id = $2),
+			(SELECT count(*) FROM map_zones WHERE id = $3 AND deleted_at IS NULL),
+			(SELECT count(*) FROM map_zones WHERE id = $4 AND deleted_at IS NULL),
+			(SELECT count(*) FROM map_floors WHERE id = $1 AND deleted_at IS NULL),
+			(SELECT count(*) FROM map_floors WHERE id = $5 AND deleted_at IS NULL)`,
+			f.ID, second.ID, deletedZoneID, keptZoneID, otherFloor.ID,
+		).Scan(&deletedPlacements, &retainedPlacements, &deletedZoneActive, &retainedZoneActive, &deletedFloorLive, &otherFloorLive)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if deletedPlacements != 0 || retainedPlacements != 1 || deletedZoneActive != 0 || retainedZoneActive != 1 || deletedFloorLive != 0 || otherFloorLive != 1 {
+		t.Fatalf("cascade/isolation counts: deleted placements=%d retained placements=%d deleted zone=%d retained zone=%d deleted floor=%d other tenant floor=%d", deletedPlacements, retainedPlacements, deletedZoneActive, retainedZoneActive, deletedFloorLive, otherFloorLive)
 	}
 	status, _, _ = te.request(http.MethodDelete, fmt.Sprintf("/api/v1/maps/sites/%s/buildings/%s", cam.SiteID, b.ID), te.AdminToken, map[string]string{"If-Match": fmt.Sprint(b.Revision)}, nil)
 	if status != 400 {

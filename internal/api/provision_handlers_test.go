@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/oapi-codegen/runtime/types"
 
 	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
@@ -21,10 +20,10 @@ func TestServerProvisionProjectsProgressWithoutCredentialFields(t *testing.T) {
 		HostKey: "SHA256:verified", Steps: []provision.StepState{{ID: "connecting", State: "done"}},
 	}
 	got := serverProvision(snapshot)
-	if got.Id != types.UUID(jobID) || got.Status != genServerProvisionRunning || got.Warning == nil || *got.Warning != "cpu" {
+	if got.Id != jobID || got.Status != genServerProvisionRunning || got.Warning == nil || *got.Warning != "cpu" {
 		t.Fatalf("provision header fields not projected: %#v", got)
 	}
-	if got.ServerId == nil || *got.ServerId != types.UUID(serverID) || got.HostKey == nil || *got.HostKey != snapshot.HostKey {
+	if got.ServerId == nil || *got.ServerId != serverID || got.HostKey == nil || *got.HostKey != snapshot.HostKey {
 		t.Fatalf("provision identity fields not projected: %#v", got)
 	}
 	if len(got.Steps) != 1 || string(got.Steps[0].Id) != "connecting" || string(got.Steps[0].State) != "done" {

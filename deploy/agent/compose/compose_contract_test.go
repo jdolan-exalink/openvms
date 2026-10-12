@@ -139,6 +139,7 @@ func TestBootstrapCreatesIPVerifiedTLSAndPrivateTokenWithoutOverwrite(t *testing
 	root := t.TempDir()
 	output := filepath.Join(root, "local")
 	script := filepath.Join("bootstrap-local.sh")
+	// #nosec G204 -- fixed test script and documentation IP with t.TempDir output.
 	command := exec.Command("sh", script, "192.0.2.25", output)
 	if result, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("bootstrap failed: %v: %s", err, result)
@@ -159,14 +160,17 @@ func TestBootstrapCreatesIPVerifiedTLSAndPrivateTokenWithoutOverwrite(t *testing
 			t.Errorf("%s mode = %o, want %o", name, info.Mode().Perm(), wantMode)
 		}
 	}
+	// #nosec G204 -- fixed openssl test command reads the generated certificate in t.TempDir.
 	cert := exec.Command("openssl", "x509", "-in", filepath.Join(output, "tls.crt"), "-noout", "-checkip", "192.0.2.25")
 	if result, err := cert.CombinedOutput(); err != nil {
 		t.Fatalf("certificate does not verify its fixed IPv4 SAN: %v: %s", err, result)
 	}
+	// #nosec G204 -- fixed openssl test command verifies only t.TempDir fixtures.
 	trust := exec.Command("openssl", "verify", "-CAfile", filepath.Join(output, "tls.crt"), filepath.Join(output, "tls.crt"))
 	if result, err := trust.CombinedOutput(); err != nil {
 		t.Fatalf("self-signed certificate is not an explicit trust anchor: %v: %s", err, result)
 	}
+	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 	certPEM, err := os.ReadFile(filepath.Join(output, "tls.crt"))
 	if err != nil {
 		t.Fatal(err)
@@ -184,6 +188,7 @@ func TestBootstrapCreatesIPVerifiedTLSAndPrivateTokenWithoutOverwrite(t *testing
 	if _, err := certificate.Verify(x509.VerifyOptions{Roots: roots, DNSName: "192.0.2.25", KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}); err != nil {
 		t.Fatalf("generated cert is rejected by Go x509.Verify for the configured agent IP: %v", err)
 	}
+	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 	token, err := os.ReadFile(filepath.Join(output, "agent.token"))
 	if err != nil {
 		t.Fatal(err)
@@ -192,10 +197,12 @@ func TestBootstrapCreatesIPVerifiedTLSAndPrivateTokenWithoutOverwrite(t *testing
 		t.Fatalf("generated bearer token length = %d, want 64 hex characters", len(strings.TrimSpace(string(token))))
 	}
 	before := append([]byte(nil), token...)
+	// #nosec G204 -- fixed test script and documentation IP with t.TempDir output.
 	command = exec.Command("sh", script, "192.0.2.26", output)
 	if result, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("bootstrap unexpectedly replaced existing output: %s", result)
 	}
+	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 	after, err := os.ReadFile(filepath.Join(output, "agent.token"))
 	if err != nil {
 		t.Fatal(err)
@@ -208,6 +215,7 @@ func TestBootstrapCreatesIPVerifiedTLSAndPrivateTokenWithoutOverwrite(t *testing
 func TestBootstrapRejectsInvalidIPv4BeforeCreatingFiles(t *testing.T) {
 	root := t.TempDir()
 	output := filepath.Join(root, "local")
+	// #nosec G204 -- fixed test script with intentionally invalid documentation IP.
 	command := exec.Command("sh", "bootstrap-local.sh", "192.0.2.999", output)
 	if result, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("bootstrap accepted invalid IPv4: %s", result)
@@ -242,9 +250,11 @@ func TestBootstrapDoesNotReplaceDestinationCreatedImmediatelyBeforePublish(t *te
 	output := filepath.Join(root, "local")
 	wrapper := "#!/bin/sh\nfor candidate do\n  if [ \"$candidate\" = \"" + output + "\" ]; then\n    \"" + mkdirPath + "\" -m 700 -- \"" + output + "\"\n    exec \"" + mkdirPath + "\" \"$@\"\n  fi\ndone\nexec \"" + mkdirPath + "\" \"$@\"\n"
 	wrapperPath := filepath.Join(fakeBin, "mkdir")
+	// #nosec G306 -- test fixture deliberately uses public or executable permissions.
 	if err := os.WriteFile(wrapperPath, []byte(wrapper), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G204 -- fixed repository test script and t.TempDir fixture arguments.
 	command := exec.Command("sh", "bootstrap-local.sh", "192.0.2.25", output)
 	command.Env = append(os.Environ(), "PATH="+fakeBin+":"+os.Getenv("PATH"))
 	if result, err := command.CombinedOutput(); err == nil {
@@ -266,15 +276,18 @@ func TestBootstrapCleansOnlyItsArtifactsAfterPartialFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	generator := "#!/bin/sh\nprintf external > \"$TEST_OUTPUT_DIR/external-marker\"\nexit 1\n"
+	// #nosec G306 -- test fixture deliberately uses public or executable permissions.
 	if err := os.WriteFile(filepath.Join(fakeBin, "openssl"), []byte(generator), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	output := filepath.Join(root, "local")
+	// #nosec G204 -- fixed repository test script and t.TempDir fixture arguments.
 	command := exec.Command("sh", "bootstrap-local.sh", "192.0.2.25", output)
 	command.Env = append(os.Environ(), "PATH="+fakeBin+":"+os.Getenv("PATH"), "TEST_OUTPUT_DIR="+output)
 	if result, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("bootstrap succeeded despite TLS generator failure: %s", result)
 	}
+	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 	marker, err := os.ReadFile(filepath.Join(output, "external-marker"))
 	if err != nil || string(marker) != "external" {
 		t.Fatalf("cleanup removed or changed unexpected concurrent content: %q, %v", marker, err)
@@ -387,6 +400,7 @@ func TestWebTLSBootstrapCreatesVerifiedIPCertificateAndRefusesOverwrite(t *testi
 	root := t.TempDir()
 	output := filepath.Join(root, "web-tls")
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-local-tls.sh")
+	// #nosec G204 -- fixed repository test script and t.TempDir fixture arguments.
 	command := exec.Command("sh", script, "10.1.1.24", output)
 	if result, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("web TLS bootstrap failed: %v: %s", err, result)
@@ -400,6 +414,7 @@ func TestWebTLSBootstrapCreatesVerifiedIPCertificateAndRefusesOverwrite(t *testi
 			t.Fatalf("%s must have mode 0600: info=%v err=%v", name, info, err)
 		}
 	}
+	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 	certificatePEM, err := os.ReadFile(filepath.Join(output, "tls.crt"))
 	if err != nil {
 		t.Fatal(err)
@@ -420,10 +435,12 @@ func TestWebTLSBootstrapCreatesVerifiedIPCertificateAndRefusesOverwrite(t *testi
 	if err := os.WriteFile(filepath.Join(output, "marker"), []byte("preserve"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G204 -- fixed repository test script and t.TempDir fixture arguments.
 	command = exec.Command("sh", script, "10.1.1.25", output)
 	if result, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("bootstrap unexpectedly replaced existing TLS material: %s", result)
 	}
+	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 	marker, err := os.ReadFile(filepath.Join(output, "marker"))
 	if err != nil || string(marker) != "preserve" {
 		t.Fatalf("existing destination was modified: marker=%q err=%v", marker, err)
@@ -434,6 +451,7 @@ func TestWebTLSBootstrapRejectsInvalidIPv4BeforeCreatingOutput(t *testing.T) {
 	root := t.TempDir()
 	output := filepath.Join(root, "web-tls")
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-local-tls.sh")
+	// #nosec G204 -- fixed repository test script and t.TempDir fixture arguments.
 	command := exec.Command("sh", script, "10.1.1.999", output)
 	if result, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("bootstrap accepted invalid IPv4: %s", result)
@@ -458,9 +476,11 @@ func TestWebTLSBootstrapDoesNotReplaceDestinationAtAtomicClaimBoundary(t *testin
 	}
 	output := filepath.Join(root, "web-tls")
 	wrapper := "#!/bin/sh\nfor candidate do\n  if [ \"$candidate\" = \"" + output + "\" ]; then\n    \"" + mkdirPath + "\" -m 700 -- \"" + output + "\"\n    exec \"" + mkdirPath + "\" \"$@\"\n  fi\ndone\nexec \"" + mkdirPath + "\" \"$@\"\n"
+	// #nosec G306 -- test fixture deliberately uses public or executable permissions.
 	if err := os.WriteFile(filepath.Join(fakeBin, "mkdir"), []byte(wrapper), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G204 -- fixed repository bootstrap script with t.TempDir output.
 	command := exec.Command("sh", filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-local-tls.sh"), "10.1.1.24", output)
 	command.Env = append(os.Environ(), "PATH="+fakeBin+":"+os.Getenv("PATH"))
 	if result, err := command.CombinedOutput(); err == nil {

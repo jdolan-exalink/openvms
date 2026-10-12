@@ -135,10 +135,12 @@ func (s *Service) SaveFloor(ctx context.Context, actor authz.Actor, siteID, buil
 			if _, err = q.GetMapBuildingOnSite(ctx, db.GetMapBuildingOnSiteParams{ID: buildingID, TenantID: site.TenantID, SiteID: siteID}); err != nil {
 				return store.Classify(err)
 			}
+			// #nosec G115 -- ordinal is constrained to -10000..10000 before entering the transaction.
 			row, err = q.CreateMapFloor(ctx, db.CreateMapFloorParams{TenantID: site.TenantID, BuildingID: buildingID, Name: name, Ordinal: int32(ordinal)})
 			if errors.Is(store.Classify(err), store.ErrConflict) {
 				floors, fErr := q.ListMapFloorsByBuilding(ctx, db.ListMapFloorsByBuildingParams{BuildingID: buildingID, TenantID: site.TenantID})
 				if fErr == nil {
+					// #nosec G115 -- ordinal is constrained to -10000..10000 before entering the transaction.
 					maxOrd := int32(ordinal)
 					for _, fl := range floors {
 						if fl.Ordinal >= maxOrd {
@@ -253,4 +255,5 @@ func floorModel(r db.MapFloor) Floor {
 	return f
 }
 
+// #nosec G115 -- helper is called only after SaveFloor validates the ordinal range.
 func ptrOrdinal(n int) *int32 { v := int32(n); return &v }

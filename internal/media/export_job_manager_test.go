@@ -35,10 +35,12 @@ func TestExportPackageForensicHashing(t *testing.T) {
 	expectedHash := hex.EncodeToString(hasher.Sum(nil))
 
 	filePath := filepath.Join(tempDir, "camera_1.mp4")
+	// #nosec G306 -- test fixture deliberately uses public or executable permissions.
 	if err := os.WriteFile(filePath, sampleData, 0644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 
+	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 	readBytes, err := os.ReadFile(filePath)
 	if err != nil {
 		t.Fatalf("read file: %v", err)

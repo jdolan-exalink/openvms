@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -178,6 +179,7 @@ func ntpState(proc string) string {
 }
 
 func udpPort(path string, port int) bool {
+	// #nosec G304 -- proc/sysfs path is sourced from local configuration, not remote input.
 	f, err := os.Open(path)
 	if err != nil {
 		return false
@@ -216,10 +218,22 @@ func diskUsage(path string) (total, free uint64) {
 	if err := syscall.Statfs(path, &st); err != nil {
 		return 0, 0
 	}
-	return uint64(st.Blocks) * uint64(st.Bsize), uint64(st.Bavail) * uint64(st.Bsize)
+	return filesystemBytes(st.Blocks, st.Bsize), filesystemBytes(st.Bavail, st.Bsize)
+}
+
+func filesystemBytes(blocks uint64, blockSize int64) uint64 {
+	if blockSize <= 0 {
+		return 0
+	}
+	unsignedBlockSize := uint64(blockSize)
+	if blocks > math.MaxUint64/unsignedBlockSize {
+		return math.MaxUint64
+	}
+	return blocks * unsignedBlockSize
 }
 
 func readText(path string) string {
+	// #nosec G304 -- proc/sysfs path is sourced from local configuration, not remote input.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return ""

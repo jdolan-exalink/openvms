@@ -52,6 +52,7 @@ func newNetworkSampler(read func() ([]byte, error), now func() time.Time) *Netwo
 
 func newProcNetworkSampler(proc string) *NetworkSampler {
 	return newNetworkSampler(func() ([]byte, error) {
+		// #nosec G304 -- proc/sysfs path is sourced from local configuration, not remote input.
 		f, err := os.Open(filepath.Join(proc, "net/dev"))
 		if err != nil {
 			return nil, err
@@ -189,4 +190,3 @@ func isLANInterface(name string) bool {
 	}
 	return true
 }
-

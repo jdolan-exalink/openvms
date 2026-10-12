@@ -4,10 +4,12 @@ package grpctls
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"os"
 
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 // ClientOptions configures server verification for a gRPC client.
@@ -75,4 +77,22 @@ func ClientCredentials(opts ClientOptions) (credentials.TransportCredentials, er
 		cfg.RootCAs = pool
 	}
 	return credentials.NewTLS(cfg), nil
+}
+
+// ErrOptionsWithoutTLS means a CA file or server name was given for a client that has TLS off.
+// Callers (the edge agent, the SDK) wrap it with their own setting names.
+var ErrOptionsWithoutTLS = errors.New("grpctls: CA file and server name require TLS to be enabled")
+
+// TransportCredentials is the one place client TLS settings are validated and turned into
+// credentials: plaintext when enabled is false, verifying TLS otherwise. A CA file or server
+// name without TLS is refused so a typo cannot silently leave a channel in plaintext, and with TLS
+// the CA bundle is loaded now so a broken file fails at configuration time.
+func TransportCredentials(enabled bool, opts ClientOptions) (credentials.TransportCredentials, error) {
+	if !enabled {
+		if opts.CAFile != "" || opts.ServerName != "" {
+			return nil, ErrOptionsWithoutTLS
+		}
+		return insecure.NewCredentials(), nil
+	}
+	return ClientCredentials(opts)
 }

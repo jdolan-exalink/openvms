@@ -48,6 +48,7 @@ func TestClientConfigPersistsFirstHostKeyBeforePasswordAuthentication(t *testing
 		}
 		serverDone <- err
 	}()
+	// #nosec G115 -- the OS-assigned TCP listener port is in the uint16 range.
 	clientConn, err := dialAgentSSHWithHostKeyTrust(context.Background(), "127.0.0.1", uint16(listener.Addr().(*net.TCPAddr).Port), "root", "pw", func(_ context.Context, fingerprint string) error {
 		mu.Lock()
 		defer mu.Unlock()
@@ -90,6 +91,7 @@ func TestClientConfigRejectsFirstHostKeyWhenPersistenceFailsBeforePasswordAuth(t
 			_, _, _, _ = ssh.NewServerConn(conn, server)
 		}
 	}()
+	// #nosec G115 -- the OS-assigned TCP listener port is in the uint16 range.
 	client, err := dialAgentSSHWithHostKeyTrust(context.Background(), "127.0.0.1", uint16(listener.Addr().(*net.TCPAddr).Port), "root", "pw", func(context.Context, string) error {
 		return errors.New("trust store unavailable")
 	})

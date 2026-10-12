@@ -2,22 +2,49 @@ package agent
 
 import (
 	"context"
+	"math"
 	"net"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc"
 
 	openvmsv1 "github.com/jdolan-exalink/openvms/gen/go/openvms/v1"
 )
 
+func TestSignedBytesSaturatesValuesOutsideProtoRange(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   uint64
+		want int64
+	}{
+		{name: "zero", in: 0, want: 0},
+		{name: "maximum signed value", in: math.MaxInt64, want: math.MaxInt64},
+		{name: "unsigned overflow", in: math.MaxUint64, want: math.MaxInt64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := signedBytes(tc.in); got != tc.want {
+				t.Fatalf("signedBytes(%d) = %d, want %d", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUsedBytesDoesNotUnderflowWhenFreeExceedsTotal(t *testing.T) {
+	if got := usedBytes(10, 11); got != 0 {
+		t.Fatalf("usedBytes(10, 11) = %d, want 0", got)
+	}
+	if got := usedBytes(10, 3); got != 7 {
+		t.Fatalf("usedBytes(10, 3) = %d, want 7", got)
+	}
+}
+
 type mockNodeServer struct {
 	openvmsv1.UnimplementedNodeServiceServer
 	heartbeatCount atomic.Int32
 }
 
-func (m *mockNodeServer) Heartbeat(ctx context.Context, req *openvmsv1.NodeHeartbeatRequest) (*openvmsv1.NodeHeartbeatResponse, error) {
+func (m *mockNodeServer) Heartbeat(_ context.Context, _ *openvmsv1.NodeHeartbeatRequest) (*openvmsv1.NodeHeartbeatResponse, error) {
 	m.heartbeatCount.Add(1)
 	return &openvmsv1.NodeHeartbeatResponse{
 		Acknowledged: true,
@@ -41,32 +68,28 @@ func TestWorker_HeartbeatIntegration(t *testing.T) {
 	}()
 	defer grpcSrv.Stop()
 
-	w := NewWorker(WorkerConfig{
-		NodeID:            "test-node-01",
-		ControlGRPCAddr:   lis.Addr().String(),
-		HeartbeatInterval: 50 * time.Millisecond,
-	})
+	d := newBeatDriver()
+	cfg := WorkerConfig{NodeID: "test-node-01", ControlGRPCAddr: lis.Addr().String()}
+	d.wire(&cfg)
+	w := NewWorker(cfg)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	done := make(chan struct{})
+	go func() { _ = w.Run(ctx); close(done) }()
 
-	go func() {
-		_ = w.Run(ctx)
-	}()
-
-	// Wait for heartbeat with timeout
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if mockSrv.heartbeatCount.Load() > 0 {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	if err := d.next(t); err != nil {
+		t.Fatalf("initial heartbeat: %v", err)
 	}
-
+	if err := d.tick(t); err != nil {
+		t.Fatalf("heartbeat on a tick: %v", err)
+	}
 	cancel()
+	<-done
 
-	count := mockSrv.heartbeatCount.Load()
-	if count < 1 {
-		t.Errorf("expected at least 1 heartbeat, got %d", count)
+	if count := mockSrv.heartbeatCount.Load(); count != 2 {
+		t.Errorf("control server saw %d heartbeats, want exactly the initial one and one tick", count)
+	}
+	if got := w.HeartbeatsAcknowledged(); got != 2 {
+		t.Errorf("worker counted %d acknowledged heartbeats, want 2", got)
 	}
 }

@@ -117,6 +117,7 @@ func enrollToken(get func(string) string) (string, error) {
 	case token != "" && file != "":
 		return "", errors.New("set only one of OPENVMS_ENROLL_TOKEN and OPENVMS_ENROLL_TOKEN_FILE")
 	case file != "":
+		// #nosec G304 -- file path comes from trusted local configuration.
 		b, err := os.ReadFile(file)
 		if errors.Is(err, fs.ErrNotExist) {
 			// An operator may remove the spent token file; that is only a problem when the

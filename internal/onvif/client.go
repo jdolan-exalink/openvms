@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha1" // #nosec G505 -- WS-Security UsernameToken PasswordDigest requires SHA-1 for interoperability.
 	"encoding/base64"
 	"encoding/xml"
 	"errors"
@@ -128,8 +128,7 @@ func NewClient(transport http.RoundTripper, config Config) *Client {
 }
 
 const (
-	wsseNamespace      = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
-	wsuNamespace       = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
+	// #nosec G101 -- This is the required WS-Security PasswordDigest profile URI, not a credential.
 	passwordDigestType = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest"
 	base64BinaryType   = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary"
 )
@@ -171,6 +170,7 @@ func (c *Client) requestBody(operationXML string) ([]byte, error) {
 		return nil, errors.New("ONVIF authentication nonce unavailable")
 	}
 	created := c.now().UTC().Format("2006-01-02T15:04:05Z")
+	// #nosec G401 -- ONVIF UsernameToken PasswordDigest is specified as SHA-1; this is not used for signatures.
 	hash := sha1.New()
 	_, _ = hash.Write(nonce[:])
 	_, _ = io.WriteString(hash, created)
@@ -316,12 +316,12 @@ func (c *Client) Call(ctx context.Context, endpoint Endpoint, action, operationX
 	return nil, &CallError{Status: StatusDegraded, Code: "transport_error", cause: last}
 }
 
-func readBounded(r io.Reader, max int64) ([]byte, error) {
-	b, err := io.ReadAll(io.LimitReader(r, max+1))
+func readBounded(r io.Reader, maxBytes int64) ([]byte, error) {
+	b, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
 	if err != nil {
 		return nil, &CallError{Status: StatusFailed, Code: "response_read_failed", cause: err}
 	}
-	if int64(len(b)) > max {
+	if int64(len(b)) > maxBytes {
 		return nil, ErrResponseTooLarge
 	}
 	return b, nil

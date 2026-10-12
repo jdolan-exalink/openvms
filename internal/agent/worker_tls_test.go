@@ -5,7 +5,6 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"google.golang.org/grpc"
 
@@ -33,12 +32,15 @@ func heartbeatsAgainstTLSServer(t *testing.T, serverCert, serverKey string, cfg 
 
 	cfg.NodeID = "tls-node"
 	cfg.ControlGRPCAddr = lis.Addr().String()
-	cfg.HeartbeatInterval = 50 * time.Millisecond
+	d := newBeatDriver()
+	d.wire(&cfg)
 	w := NewWorker(cfg)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = w.Run(ctx); close(done) }()
+	// The initial heartbeat is the whole experiment: it either reaches the server or fails.
+	_ = d.next(t)
+	cancel()
 	<-done
 	return mock.heartbeatCount.Load()
 }

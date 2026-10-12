@@ -229,13 +229,13 @@ func parseCSR(csrPEM []byte) (*x509.CertificateRequest, error) {
 	}
 	csr, err := x509.ParseCertificateRequest(b.Bytes)
 	if err != nil {
-		return nil, fmt.Errorf("%w: parse: %v", ErrInvalidCSR, err)
+		return nil, fmt.Errorf("%w: parse: %w", ErrInvalidCSR, err)
 	}
 	if err := csr.CheckSignature(); err != nil {
-		return nil, fmt.Errorf("%w: signature: %v", ErrInvalidCSR, err)
+		return nil, fmt.Errorf("%w: signature: %w", ErrInvalidCSR, err)
 	}
 	if err := checkPublicKey(csr.PublicKey); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrInvalidCSR, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidCSR, err)
 	}
 	return csr, nil
 }

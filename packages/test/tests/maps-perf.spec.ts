@@ -74,6 +74,8 @@ async function stubBackend(page: Page) {
             online_cameras: ENTITY_COUNT, offline_cameras: 0, degraded_cameras: 0, alarm_count: 0,
           }],
         }));
+      case `/api/v1/maps/sites/${PERF_SITE_ID}`:
+        return route.fulfill(json({ id: PERF_SITE_ID, name: "Perf Site", buildings: [] }));
       case `/api/v1/maps/sites/${PERF_SITE_ID}/entities`:
         return route.fulfill(json({ revision: PERF_FIXTURE_REVISION, entities: generatePerfEntities(ENTITY_COUNT) }));
       default:

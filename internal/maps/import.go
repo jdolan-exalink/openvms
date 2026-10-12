@@ -100,6 +100,7 @@ func parsePlacementCSV(csvText string, cameras []siteCamera) ([]placementCSVRow,
 		}
 	}
 	if len(missing) > 0 {
+		//nolint:misspell // This message is intentionally in Spanish.
 		return nil, []ImportRowError{{
 			Line:    headerLine,
 			Message: "faltan columnas requeridas: " + strings.Join(missing, ", "),
@@ -229,12 +230,12 @@ func resolveCamera(token string, cameras []siteCamera) (uuid.UUID, string) {
 
 // parseCoordinate parses a required numeric column and enforces the same range the
 // placement endpoint validates, so an import can never write a row the API would refuse.
-func parseCoordinate(col, token string, min, max float64) (float64, string) {
+func parseCoordinate(col, token string, minimum, maximum float64) (float64, string) {
 	value, err := strconv.ParseFloat(token, 64)
 	if err != nil || math.IsNaN(value) {
 		return 0, fmt.Sprintf("%s inválida: %q", col, token)
 	}
-	if value < min || value > max {
+	if value < minimum || value > maximum {
 		return 0, fmt.Sprintf("%s fuera de rango: %s", col, token)
 	}
 	return value, ""
@@ -242,11 +243,11 @@ func parseCoordinate(col, token string, min, max float64) (float64, string) {
 
 // parseOptional parses an optional numeric column: empty stays nil, otherwise it must
 // parse and fall inside [min, max].
-func parseOptional(col, token string, min, max float64) (*float32, string) {
+func parseOptional(col, token string, minimum, maximum float64) (*float32, string) {
 	if token == "" {
 		return nil, ""
 	}
-	value, message := parseCoordinate(col, token, min, max)
+	value, message := parseCoordinate(col, token, minimum, maximum)
 	if message != "" {
 		return nil, message
 	}

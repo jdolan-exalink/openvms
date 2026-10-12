@@ -33,7 +33,7 @@ func (b *FrigateBackend) Name() string {
 	return "frigate-" + b.adapter.Name()
 }
 
-func (b *FrigateBackend) Version(ctx context.Context) (string, error) {
+func (b *FrigateBackend) Version(_ context.Context) (string, error) {
 	if b.adapter == nil {
 		return "", fmt.Errorf("frigate adapter not initialized")
 	}
@@ -75,7 +75,7 @@ func (b *FrigateBackend) ListCameras(ctx context.Context) ([]BackendCamera, erro
 	return out, nil
 }
 
-func (b *FrigateBackend) GetLiveStream(ctx context.Context, camera string, profile StreamProfile) (LiveStreamInfo, error) {
+func (b *FrigateBackend) GetLiveStream(_ context.Context, camera string, profile StreamProfile) (LiveStreamInfo, error) {
 	if camera == "" {
 		return LiveStreamInfo{}, fmt.Errorf("camera name is required")
 	}
@@ -156,7 +156,7 @@ func (b *FrigateBackend) GetEvents(ctx context.Context, filter EventFilter) ([]B
 
 	out := make([]BackendEvent, 0, len(reviews))
 	for _, r := range reviews {
-		var topScore float64 = 0.85
+		topScore := 0.85
 		var label string
 		if len(r.Data.Objects) > 0 {
 			label = r.Data.Objects[0]
@@ -227,7 +227,7 @@ func (b *FrigateBackend) GetSnapshot(ctx context.Context, camera string, height 
 	return data, contentType, nil
 }
 
-func (b *FrigateBackend) GetCameraCapabilities(ctx context.Context, camera string) (CameraCapabilities, error) {
+func (b *FrigateBackend) GetCameraCapabilities(ctx context.Context, _ string) (CameraCapabilities, error) {
 	if b.adapter == nil {
 		return CameraCapabilities{}, fmt.Errorf("frigate adapter not initialized")
 	}

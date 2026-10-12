@@ -13,6 +13,18 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/authz"
 )
 
+func TestProbeAgentRejectsPortOutsideUint16Range(t *testing.T) {
+	called := false
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		called = true
+		return nil, errors.New("unexpected probe")
+	})
+	_, err := probeAgent(context.Background(), transport, "192.0.2.10", 65537, nil, true, "token", OnvifProbeRequest{Endpoint: "http://192.0.2.8/device"})
+	if !errors.Is(err, ErrAgentProbeFailed) || called {
+		t.Fatalf("invalid port: err=%v, transport called=%v", err, called)
+	}
+}
+
 func TestProbeOnvifDeniesEitherPermissionBeforeAgentSecretsOrTransport(t *testing.T) {
 	for _, denied := range []string{"manage", "config.secrets"} {
 		t.Run(denied, func(t *testing.T) {
@@ -146,6 +158,7 @@ func TestValidateOnvifProbeRequestRequiresBoundedIPv4EndpointAndCredentialPair(t
 	for _, input := range []OnvifProbeRequest{
 		{Endpoint: "http://camera.local/device"},
 		{Endpoint: "http://192.0.2.8/device?token=secret"},
+		// #nosec G101 -- literal URL credentials are a rejection fixture, not a secret.
 		{Endpoint: "http://user:pass@192.0.2.8/device"},
 		{Endpoint: "http://[2001:db8::1]/device"},
 		{Endpoint: "http://192.0.2.8/device#fragment"},

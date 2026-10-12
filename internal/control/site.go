@@ -19,7 +19,7 @@ type SiteServer struct {
 	Identity *identity.Service
 }
 
-func (s *SiteServer) ListSites(ctx context.Context, req *openvmsv1.ListSitesRequest) (*openvmsv1.ListSitesResponse, error) {
+func (s *SiteServer) ListSites(ctx context.Context, _ *openvmsv1.ListSitesRequest) (*openvmsv1.ListSitesResponse, error) {
 	if s.Inv == nil {
 		return nil, status.Error(codes.Internal, "inventory service not configured")
 	}
@@ -58,8 +58,8 @@ func (s *SiteServer) ListSites(ctx context.Context, req *openvmsv1.ListSitesRequ
 			Longitude:      lng,
 			Status:         openvmsv1.OperationalStatus_OPERATIONAL_STATUS_ONLINE,
 			CreatedAt:      st.CreatedAt.Unix(),
-			CameraCount:    int32(st.CameraCount),
-			NodeCount:      int32(st.ServerCount),
+			CameraCount:    count32(st.CameraCount),
+			NodeCount:      st.ServerCount,
 		})
 	}
 
@@ -67,7 +67,7 @@ func (s *SiteServer) ListSites(ctx context.Context, req *openvmsv1.ListSitesRequ
 		Sites: pbSites,
 		Pagination: &openvmsv1.Pagination{
 			Page:       1,
-			PageSize:   int32(len(pbSites)),
+			PageSize:   count32(len(pbSites)),
 			TotalItems: int64(len(pbSites)),
 			TotalPages: 1,
 		},
@@ -117,8 +117,8 @@ func (s *SiteServer) GetSite(ctx context.Context, req *openvmsv1.GetSiteRequest)
 			Longitude:      lng,
 			Status:         openvmsv1.OperationalStatus_OPERATIONAL_STATUS_ONLINE,
 			CreatedAt:      st.CreatedAt.Unix(),
-			CameraCount:    int32(st.CameraCount),
-			NodeCount:      int32(st.ServerCount),
+			CameraCount:    count32(st.CameraCount),
+			NodeCount:      st.ServerCount,
 		},
 	}, nil
 }

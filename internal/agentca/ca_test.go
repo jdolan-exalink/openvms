@@ -219,6 +219,7 @@ func TestValidateCSRFlagsEveryCSRProblemAsInvalidCSR(t *testing.T) {
 func TestSignCSRKeyPolicy(t *testing.T) {
 	ca, _ := GenerateCA(testNow)
 	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	// #nosec G403 -- intentionally weak key verifies the CA rejects undersized RSA CSRs.
 	rsa1024, _ := rsa.GenerateKey(rand.Reader, 1024)
 	rsa2048, _ := rsa.GenerateKey(rand.Reader, 2048)
 	_, ed, _ := ed25519.GenerateKey(rand.Reader)

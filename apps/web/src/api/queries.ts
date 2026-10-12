@@ -52,9 +52,15 @@ export interface SystemConnections {
 export const systemConnectionsQuery = queryOptions({
   queryKey: ["system", "connections"],
   queryFn: async () => {
-    const { data, response } = await (api.GET as any)("/api/v1/system/connections");
+    // This server route is not yet described by the generated OpenAPI contract.
+    // Retain the shared client middleware (auth, CSRF, 401 handling) while typing this response.
+    const getConnections = api.GET as unknown as (path: "/api/v1/system/connections") => Promise<{
+      data?: SystemConnections;
+      response: Response;
+    }>;
+    const { data, response } = await getConnections("/api/v1/system/connections");
     if (!data) throw new Error(`system connections request failed with ${response.status}`);
-    return data as SystemConnections;
+    return data;
   },
   refetchInterval: 10_000,
 });

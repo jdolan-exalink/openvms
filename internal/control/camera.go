@@ -66,7 +66,7 @@ func (s *CameraServer) ListCameras(ctx context.Context, req *openvmsv1.ListCamer
 		Cameras: pbCams,
 		Pagination: &openvmsv1.Pagination{
 			Page:       1,
-			PageSize:   int32(len(pbCams)),
+			PageSize:   count32(len(pbCams)),
 			TotalItems: int64(len(pbCams)),
 			TotalPages: 1,
 		},
@@ -218,15 +218,15 @@ func cameraToProto(cam db.GetCameraRow) *openvmsv1.Camera {
 	}
 
 	caps := &openvmsv1.CameraCapabilities{
-		Ptz:            false,
-		AudioIn:        false,
-		AudioOut:       false,
-		ProfilesCount:  int32(len(profiles)),
-		MainCodec:      "h264",
-		SubCodec:       "h264",
-		Lpr:            cam.Lpr,
-		Analytics:      len(cam.Zones) > 0,
-		Fisheye:        false,
+		Ptz:           false,
+		AudioIn:       false,
+		AudioOut:      false,
+		ProfilesCount: count32(len(profiles)),
+		MainCodec:     "h264",
+		SubCodec:      "h264",
+		Lpr:           cam.Lpr,
+		Analytics:     len(cam.Zones) > 0,
+		Fisheye:       false,
 	}
 
 	return &openvmsv1.Camera{

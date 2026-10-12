@@ -185,7 +185,7 @@ export function FloorMap({ siteId, floor, initialMode, onModeChange, onDirty, on
     </div>
   )}
   {mode === "edit" && <aside aria-label="Edición del mapa" className="absolute bottom-3 right-3 top-16 z-30 flex w-76 max-w-[calc(100%-1.5rem)] min-h-0 flex-col overflow-hidden rounded-m3-xl border border-outline-variant/30 bg-surface-1/95 shadow-2xl backdrop-blur-md">
-   <div className="min-h-0 flex-1 p-2"><MapEditSidebar cameras={sidebarCameras} armedId={armed} onArm={setArmed} onUnplace={unplaceCamera} /></div>
+   <div className="min-h-0 flex-1 p-2"><MapEditSidebar cameras={sidebarCameras} armedId={armed} onArm={setArmed} onUnplace={unplaceCamera} onPointerDrop={(id, x, y) => canvasRef.current?.dropCamera(id, x, y)} /></div>
    <footer className="shrink-0 space-y-2 border-t border-outline-variant/20 bg-surface-2/80 p-2.5 text-xs">
     <div className="flex items-center justify-between font-mono text-[11px] text-on-surface-variant">
       <span>{pending.length > 0 ? `${pending.length} cambio(s) sin guardar` : "Sin cambios"}</span>

@@ -13,7 +13,6 @@ type fakePacketConn struct {
 	mu          sync.Mutex
 	iface       *net.Interface
 	ttl         int
-	local       *net.UDPAddr
 	destination net.Addr
 	deadline    time.Time
 	closed      bool

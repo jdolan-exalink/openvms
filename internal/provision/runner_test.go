@@ -193,6 +193,7 @@ func TestSystemDiskPreflightRequiresExplicitOptIn(t *testing.T) {
 func TestFrigateInstallUsesRequestedPersistentLayout(t *testing.T) {
 	read := func(path string) string {
 		t.Helper()
+		// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -282,6 +283,7 @@ func TestNTPStepServesTimeWithoutClockControlInContainers(t *testing.T) {
 func TestFrigateInstallDeploysLocalMQTTBroker(t *testing.T) {
 	read := func(path string) string {
 		t.Helper()
+		// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
 		data, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
@@ -290,6 +292,7 @@ func TestFrigateInstallDeploysLocalMQTTBroker(t *testing.T) {
 	}
 	for _, variant := range []string{"cpu", "stable", "openvino", "tensorrt"} {
 		compose := read("../../deploy/agent/compose/frigate-" + variant + ".yml")
+		//nolint:misspell // Mosquitto is the MQTT broker's product and service name.
 		for _, want := range []string{"mosquitto:", "eclipse-mosquitto:2", "/opt/frigate/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro", `"127.0.0.1:1883:1883"`, "depends_on: [mosquitto]"} {
 			if !strings.Contains(compose, want) {
 				t.Errorf("%s compose must include %q", variant, want)
@@ -298,10 +301,12 @@ func TestFrigateInstallDeploysLocalMQTTBroker(t *testing.T) {
 	}
 	for _, cfg := range []string{"cpu", "coral", "openvino", "tensorrt"} {
 		config := read("../../deploy/agent/config/" + cfg + ".yml")
+		//nolint:misspell // Mosquitto is the configured MQTT broker service name.
 		if !strings.Contains(config, "mqtt:\n  enabled: true\n  host: mosquitto\n  port: 1883\n") {
 			t.Errorf("%s Frigate config must publish to the local broker", cfg)
 		}
 	}
+	//nolint:misspell // Mosquitto is the installed MQTT broker service name.
 	if !strings.Contains(read("../../deploy/agent/install.sh"), `cp "${ROOT}/mosquitto.conf" "${FRIGATE}/mosquitto/mosquitto.conf"`) {
 		t.Error("installer must place the broker config next to the Frigate compose")
 	}

@@ -133,10 +133,22 @@ func TestVerifiedAgentHTTPClientUsesFixedHTTPSAuthorityAndNeverFollowsRedirect(t
 	if base.CheckRedirect == nil {
 		t.Fatal("base client's policy unexpectedly mutated")
 	}
-	if _, err := client.Do(context.Background(), http.MethodPost, "https://attacker.invalid/steal", nil, nil); err == nil {
+	resp, err = client.Do(context.Background(), http.MethodPost, "https://attacker.invalid/steal", nil, nil)
+	if resp != nil {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Errorf("close response body: %v", closeErr)
+		}
+	}
+	if err == nil {
 		t.Fatal("absolute URL path accepted")
 	}
-	if _, err := client.Do(context.Background(), http.MethodPost, "/v1/onvif/probe?token=secret", nil, nil); err == nil {
+	resp, err = client.Do(context.Background(), http.MethodPost, "/v1/onvif/probe?token=secret", nil, nil)
+	if resp != nil {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Errorf("close response body: %v", closeErr)
+		}
+	}
+	if err == nil {
 		t.Fatal("query string accepted")
 	}
 	if calls.Load() != 1 {
@@ -153,7 +165,12 @@ func TestVerifiedAgentHTTPClientTimeoutBoundsInjectedTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	_, err = client.Do(context.Background(), http.MethodPost, "/v1/onvif/probe", nil, nil)
+	resp, err := client.Do(context.Background(), http.MethodPost, "/v1/onvif/probe", nil, nil)
+	if resp != nil {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			t.Errorf("close response body: %v", closeErr)
+		}
+	}
 	if err == nil || time.Since(started) > time.Second {
 		t.Fatalf("timeout error=%v duration=%s", err, time.Since(started))
 	}

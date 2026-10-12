@@ -130,7 +130,6 @@ export function MapCanvas({
   const coverageRef = useRef(coverage);
   const layerVisibilityRef = useRef(layerVisibility);
   const clusterRef = useRef(clusterCameras);
-  clusterRef.current = clusterCameras;
   const installedClusterRef = useRef<boolean | null>(null);
   const heatmapPointsRef = useRef(heatmapPoints);
   const analyticsModeRef = useRef(analyticsMode);
@@ -161,6 +160,7 @@ export function MapCanvas({
     zonesRef.current = zones;
     coverageRef.current = coverage;
     layerVisibilityRef.current = layerVisibility;
+    clusterRef.current = clusterCameras;
     heatmapPointsRef.current = heatmapPoints;
     analyticsModeRef.current = analyticsMode;
 

@@ -1217,7 +1217,7 @@ describe("Servers", () => {
   describe("Agent uninstallation", () => {
     it("renders uninstall button and submits uninstallation job over SSH", async () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
-      let uninstallBody: any = null;
+      let uninstallBody: { ssh_password?: string; action?: string } | null = null;
       const grants = [
         { permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "a" },
         { permission: "servers.config.secrets", effect: "allow", scope_type: "server", scope_id: "a" },

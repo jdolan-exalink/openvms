@@ -3,8 +3,6 @@ package api
 import (
 	"context"
 
-	"github.com/google/uuid"
-
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
@@ -15,7 +13,7 @@ func (h *Handlers) CreateServerAgentEnrollToken(ctx context.Context, r gen.Creat
 	if err != nil {
 		return nil, err
 	}
-	tok, err := h.AgentEnroll.CreateToken(ctx, a, uuid.UUID(r.ServerId))
+	tok, err := h.AgentEnroll.CreateToken(ctx, a, r.ServerId)
 	if err != nil {
 		return nil, err
 	}
@@ -36,4 +34,17 @@ func (h *Handlers) EnrollAgent(ctx context.Context, r gen.EnrollAgentRequestObje
 		CaPem:          string(res.CAPEM),
 		NotAfter:       res.Issued.NotAfter,
 	}, nil
+}
+
+// RevokeServerAgentCertificates ends every certificate of the server's agent (servers.manage).
+func (h *Handlers) RevokeServerAgentCertificates(ctx context.Context, r gen.RevokeServerAgentCertificatesRequestObject) (gen.RevokeServerAgentCertificatesResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	n, err := h.AgentEnroll.RevokeServerCertificates(ctx, a, r.ServerId)
+	if err != nil {
+		return nil, err
+	}
+	return gen.RevokeServerAgentCertificates200JSONResponse{Revoked: int(n)}, nil
 }

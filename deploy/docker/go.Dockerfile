@@ -58,7 +58,7 @@ COPY gen ./gen
 COPY proto ./proto
 COPY pkg ./pkg
 COPY models/vehicle-body.onnx /opt/openvms/vehicle-body.onnx
-RUN curl -fsSL -o /tmp/ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-linux-x64-1.29.0.tgz \
+RUN curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors -o /tmp/ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-linux-x64-1.29.0.tgz \
  && tar -xzf /tmp/ort.tgz -C /tmp \
  && cp /tmp/onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so.1.29.0 /opt/openvms/libonnxruntime.so.1.29.0 \
  && chmod 0644 /opt/openvms/vehicle-body.onnx /opt/openvms/libonnxruntime.so.1.29.0 \

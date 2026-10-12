@@ -1,11 +1,13 @@
 package provision
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 var (
@@ -24,6 +26,7 @@ func LoadBinary() ([]byte, error) {
 
 func loadBinary() ([]byte, error) {
 	for _, path := range []string{"/opt/openvms/edge-agent", "bin/edge-agent"} {
+		// #nosec G304 -- binary path is a fixed installation path or private build artifact.
 		b, err := os.ReadFile(path)
 		if err == nil && len(b) > 4 && string(b[:4]) == "\x7fELF" {
 			return b, nil
@@ -50,13 +53,17 @@ func buildBinary() ([]byte, error) {
 	}
 	defer os.RemoveAll(dir)
 	out := filepath.Join(dir, "openvms-agent")
-	cmd := exec.Command("go", "build", "-trimpath", "-o", out, "./apps/edge-agent")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	// #nosec G204 -- fixed Go build command writes only to a private temporary directory.
+	cmd := exec.CommandContext(ctx, "go", "build", "-trimpath", "-o", out, "./apps/edge-agent")
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("build edge agent: %w: %s", err, tail(string(output), 400))
 	}
+	// #nosec G304 -- binary path is a fixed installation path or private build artifact.
 	return os.ReadFile(out)
 }
 

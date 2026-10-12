@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/jdolan-exalink/openvms/internal/agent/mtls"
 	"github.com/jdolan-exalink/openvms/internal/agentauth"
@@ -138,99 +140,121 @@ func (e *mtlsEnv) manager(t *testing.T, validity time.Duration) (*mtls.Manager, 
 	return mtls.NewManager(store, creds), c
 }
 
-func (e *mtlsEnv) run(t *testing.T, cfg WorkerConfig) (*Worker, context.CancelFunc) {
+// run starts a Worker driven by hand (see beatDriver) and returns it with its driver. The
+// renewal loop runs on the manager's own injected waits, never on real sleeps.
+func (e *mtlsEnv) run(t *testing.T, cfg WorkerConfig) (*Worker, *beatDriver) {
 	t.Helper()
 	cfg.ControlGRPCAddr = e.addr
 	cfg.TLSCAFile = e.serverCA
-	cfg.HeartbeatInterval = 20 * time.Millisecond
+	d := newBeatDriver()
+	d.wire(&cfg)
 	w := NewWorker(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { _ = w.Run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
-	return w, cancel
+	return w, d
 }
 
-func eventually(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
+// instantWaits makes the manager's retry waits return at once, so a retry happens immediately
+// and in order instead of after a real backoff.
+func instantWaits(mgr *mtls.Manager) {
+	mgr.Wait = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 }
+
+// renewals returns a channel of the certificates the manager renews to.
+func renewals(mgr *mtls.Manager) func() *mtls.Credentials {
+	ch := make(chan *mtls.Credentials, 16)
+	mgr.OnRenew = func(c *mtls.Credentials) { ch <- c }
+	return func() *mtls.Credentials {
+		select {
+		case c := <-ch:
+			return c
+		case <-time.After(failsafe):
+			panic("timed out waiting for a renewal")
+		}
+	}
+}
+
+func serial(c *mtls.Credentials) string { return c.Leaf.SerialNumber.Text(16) }
 
 func TestWorker_MTLSHeartbeatsWithTheCertificateIdentity(t *testing.T) {
 	e := startAgentListener(t)
 	mgr, _ := e.manager(t, time.Hour)
 	// The configured node id is ignored: the identity is the one in the certificate, the only
 	// server id the listener accepts.
-	w, _ := e.run(t, WorkerConfig{NodeID: "node-auto", MTLS: mgr})
+	w, d := e.run(t, WorkerConfig{NodeID: "node-auto", MTLS: mgr})
 	if w.cfg.NodeID != e.id.ServerID.String() {
 		t.Fatalf("node id = %q, want the certificate's server id %s", w.cfg.NodeID, e.id.ServerID)
 	}
-	eventually(t, "an acknowledged heartbeat", func() bool { return w.HeartbeatsAcknowledged() > 0 })
+	if err := d.next(t); err != nil {
+		t.Fatalf("initial heartbeat: %v", err)
+	}
+	if w.HeartbeatsAcknowledged() != 1 {
+		t.Fatalf("%d acknowledged heartbeats, want 1", w.HeartbeatsAcknowledged())
+	}
 }
 
 func TestWorker_MTLSRevokedCertificateIsNotAcknowledged(t *testing.T) {
 	e := startAgentListener(t)
 	mgr, c := e.manager(t, time.Hour)
 	e.pki.Store.Update(c.Serial, func(r *agentca.Certificate) { n := time.Now(); r.RevokedAt = &n })
-	w, _ := e.run(t, WorkerConfig{MTLS: mgr})
-	eventually(t, "the listener to see the certificate", func() bool { return e.store.seen(c.Serial) > 0 })
-	time.Sleep(100 * time.Millisecond)
+	w, d := e.run(t, WorkerConfig{MTLS: mgr})
+	for i := range 3 { // the initial heartbeat and two ticks
+		var err error
+		if i == 0 {
+			err = d.next(t)
+		} else {
+			err = d.tick(t)
+		}
+		if status.Code(err) != codes.Unauthenticated {
+			t.Fatalf("attempt %d: %v, want Unauthenticated", i+1, err)
+		}
+	}
 	if n := w.HeartbeatsAcknowledged(); n != 0 {
 		t.Fatalf("%d heartbeats acknowledged for a revoked certificate", n)
 	}
+	if e.store.seen(c.Serial) < 3 {
+		t.Fatal("the listener did not see every attempt")
+	}
 }
 
-func TestWorker_MTLSRenewsAndReconnectsWithTheNewCertificate(t *testing.T) {
+// A renewal swaps the certificate; the next tick reconnects and the heartbeat after it is made
+// with the new certificate, whose first use revokes the old one.
+func TestWorker_MTLSRenewsReconnectsAndRevokesTheOldCertificate(t *testing.T) {
 	e := startAgentListener(t)
 	// 1 minute left of a 6 minute lifetime: already past two thirds, so renewal is due at once.
 	mgr, old := e.manager(t, time.Minute)
-	w, _ := e.run(t, WorkerConfig{MTLS: mgr})
+	waitRenewal := renewals(mgr)
+	w, d := e.run(t, WorkerConfig{MTLS: mgr})
 
-	eventually(t, "a renewed certificate", func() bool {
-		return mgr.Current().Leaf.SerialNumber.Text(16) != old.Serial
-	})
-	renewed := mgr.Current().Leaf.SerialNumber.Text(16)
-	if got := mgr.Current().Identity; got != e.id {
-		t.Fatalf("renewed identity = %+v, want %+v", got, e.id)
+	renewed := waitRenewal()
+	if serial(renewed) == old.Serial {
+		t.Fatal("renewal kept the old certificate")
 	}
-	// New connections present the renewed certificate: heartbeats are made with it.
-	eventually(t, "a heartbeat with the renewed certificate", func() bool { return e.store.seen(renewed) > 1 })
-	if w.HeartbeatsAcknowledged() == 0 {
-		t.Fatal("no heartbeat was acknowledged")
+	if renewed.Identity != e.id {
+		t.Fatalf("renewed identity = %+v, want %+v", renewed.Identity, e.id)
+	}
+	_ = d.next(t) // the initial heartbeat, with whichever certificate was current
+	if err := d.tick(t); err != nil {
+		t.Fatalf("heartbeat after the renewal: %v", err)
+	}
+	if e.store.seen(serial(renewed)) == 0 {
+		t.Fatal("the heartbeat after the renewal did not use the renewed certificate")
+	}
+	rec, err := e.pki.Store.GetCertificate(context.Background(), old.Serial)
+	if err != nil || rec.RevokedAt == nil {
+		t.Fatalf("old certificate record = %+v, %v; want it revoked by the renewed one's first use", rec, err)
+	}
+	before := w.HeartbeatsAcknowledged()
+	if err := d.tick(t); err != nil || w.HeartbeatsAcknowledged() != before+1 {
+		t.Fatalf("next heartbeat: %v (acked %d -> %d)", err, before, w.HeartbeatsAcknowledged())
 	}
 	// The renewed credentials are on disk for the next start.
 	loaded, err := mgr.Store.Load()
-	if err != nil || loaded.Leaf.SerialNumber.Text(16) != renewed {
+	if err != nil || serial(loaded) != serial(renewed) {
 		t.Fatalf("stored credentials = %v, %v; want the renewed certificate", loaded, err)
 	}
-}
-
-// The renewed certificate supersedes the old one when it is first used, not before: once the
-// worker has reconnected with it, the old certificate is revoked and heartbeats keep being
-// acknowledged, which they could not be on a connection still using the old one.
-func TestWorker_MTLSRevokesTheOldCertificateOnceTheRenewedOneIsUsed(t *testing.T) {
-	e := startAgentListener(t)
-	mgr, old := e.manager(t, time.Minute)
-	w, _ := e.run(t, WorkerConfig{MTLS: mgr})
-
-	eventually(t, "a renewed certificate", func() bool { return mgr.Current().Leaf.SerialNumber.Text(16) != old.Serial })
-	renewed := mgr.Current().Leaf.SerialNumber.Text(16)
-	eventually(t, "the old certificate to be revoked by the renewed one's first use", func() bool {
-		rec, err := e.pki.Store.GetCertificate(context.Background(), old.Serial)
-		return err == nil && rec.RevokedAt != nil
-	})
-	if e.store.seen(renewed) == 0 {
-		t.Fatal("the old certificate was revoked but the renewed one never authenticated")
-	}
-	before := w.HeartbeatsAcknowledged()
-	eventually(t, "heartbeats on the renewed certificate", func() bool { return w.HeartbeatsAcknowledged()-before >= 3 })
 }
 
 // The renewal response is lost: the server issued a certificate the agent never saw. The agent
@@ -240,25 +264,30 @@ func TestWorker_MTLSRecoversFromALostRenewalResponse(t *testing.T) {
 	drop.Store(true)
 	e := startAgentListenerDropping(t, drop)
 	mgr, old := e.manager(t, time.Minute)
-	mgr.MinBackoff, mgr.MaxBackoff = 50*time.Millisecond, 50*time.Millisecond
-	w, _ := e.run(t, WorkerConfig{MTLS: mgr})
+	instantWaits(mgr)
+	waitRenewal := renewals(mgr)
+	w, d := e.run(t, WorkerConfig{MTLS: mgr})
 
-	eventually(t, "a renewed certificate after the lost response", func() bool { return mgr.Current().Leaf.SerialNumber.Text(16) != old.Serial })
+	renewed := waitRenewal() // only the retry succeeds
 	if drop.Load() {
 		t.Fatal("the first renewal response was never dropped")
 	}
-	renewed := mgr.Current().Leaf.SerialNumber.Text(16)
-	eventually(t, "the old certificate to be revoked", func() bool {
-		rec, err := e.pki.Store.GetCertificate(context.Background(), old.Serial)
-		return err == nil && rec.RevokedAt != nil
-	})
-	before := w.HeartbeatsAcknowledged()
-	eventually(t, "heartbeats on the renewed certificate", func() bool {
-		return w.HeartbeatsAcknowledged()-before >= 3 && e.store.seen(renewed) > 1
-	})
-	// The agent persisted what it uses.
+	if serial(renewed) == old.Serial {
+		t.Fatal("renewal kept the old certificate")
+	}
+	_ = d.next(t)
+	if err := d.tick(t); err != nil {
+		t.Fatalf("heartbeat after the retried renewal: %v", err)
+	}
+	rec, err := e.pki.Store.GetCertificate(context.Background(), old.Serial)
+	if err != nil || rec.RevokedAt == nil {
+		t.Fatalf("old certificate record = %+v, %v; want it revoked by the renewed one's first use", rec, err)
+	}
+	if e.store.seen(serial(renewed)) == 0 || w.HeartbeatsAcknowledged() == 0 {
+		t.Fatal("the agent never worked on the renewed certificate")
+	}
 	loaded, err := mgr.Store.Load()
-	if err != nil || loaded.Leaf.SerialNumber.Text(16) != renewed {
+	if err != nil || serial(loaded) != serial(renewed) {
 		t.Fatalf("stored credentials = %v, %v; want the certificate in use", loaded, err)
 	}
 }

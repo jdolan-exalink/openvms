@@ -528,18 +528,18 @@ export interface paths {
          * Read registered agent TLS trust configuration
          * @description Requires servers.manage. Returns only the public custom CA bundle, never credentials or private keys.
          */
-        get: operations["getServerAgentTlsConfig"];
+        get: operations["getServerAgentTLSConfig"];
         /**
          * Configure registered agent TLS trust
          * @description Requires servers.manage. The CA bundle is public trust material; private keys and agent credentials are not accepted.
          */
-        put: operations["setServerAgentTlsConfig"];
+        put: operations["setServerAgentTLSConfig"];
         post?: never;
         /**
          * Disable registered agent TLS configuration
          * @description Requires servers.manage. This only deletes trust metadata and does not issue an agent or camera request.
          */
-        delete: operations["deleteServerAgentTlsConfig"];
+        delete: operations["deleteServerAgentTLSConfig"];
         options?: never;
         head?: never;
         patch?: never;
@@ -612,6 +612,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/revoke-certificates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke every certificate of the server's agent
+         * @description Requires servers.manage. Revokes all agent certificates of the server that are not revoked yet, so the agent listener refuses them from the next call and the agent cannot renew; the agent must enroll again with a new token. Use it for a decommissioned or compromised agent. Pending enrollment tokens are not touched. Audited as SERVER_AGENT_CERTS_REVOKED. Calling it again returns zero.
+         */
+        post: operations["revokeServerAgentCertificates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agent/enroll": {
         parameters: {
             query?: never;
@@ -652,7 +674,7 @@ export interface paths {
          * Update an existing registered agent and configure HTTPS
          * @description Requires servers.manage and servers.config.secrets. The registered agent IPv4 and existing bearer are fixed by server registration. The root SSH password is transient. The first host key is persisted per server, IPv4 and port before password authentication; later key changes are rejected. First-contact trust does not independently verify server identity. HTTPS health is verified before public trust metadata is recorded. Existing TLS-enabled agents are not replaced by this operation.
          */
-        post: operations["updateServerAgentOverSsh"];
+        post: operations["updateServerAgentOverSSH"];
         delete?: never;
         options?: never;
         head?: never;
@@ -697,7 +719,7 @@ export interface paths {
          * Uninstall a registered agent from the host over SSH
          * @description Requires servers.manage and servers.config.secrets. Stops and disables the systemd agent service, removes agent files, and removes registration.
          */
-        post: operations["uninstallServerAgentOverSsh"];
+        post: operations["uninstallServerAgentOverSSH"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2813,11 +2835,29 @@ export interface components {
             uptime_seconds?: number | null;
             storage?: components["schemas"]["ServerStorage"];
             camera_count: number;
+            /**
+             * Format: date-time
+             * @description When an enrolled edge agent last sent a heartbeat to the agent listener (database clock). Absent until the first heartbeat; compare with the current time to decide whether the agent is still reporting.
+             */
+            agent_last_seen_at?: string | null;
+            /** @description Version the agent reported in its last heartbeat. Absent until the first heartbeat. */
+            agent_version?: string;
+            agent_status?: components["schemas"]["AgentStatus"];
+            /**
+             * Format: date-time
+             * @description When the client certificate the agent is using expires (the latest not_after among its certificates that are in use and not revoked). Absent until the agent first connects with mTLS and after its certificates are revoked. A time in the past means the agent's certificate expired and it can only recover with a new enrollment token.
+             */
+            agent_cert_expires_at?: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
         };
+        /**
+         * @description Operational status the agent reported in its last heartbeat. It is what the agent said, not whether the agent is still alive; use agent_last_seen_at for that.
+         * @enum {string}
+         */
+        AgentStatus: "unknown" | "online" | "degraded" | "offline" | "maintenance";
         SyncResult: {
             server: components["schemas"]["Server"];
             added: number;
@@ -2899,6 +2939,10 @@ export interface components {
             token: string;
             /** Format: date-time */
             expires_at: string;
+        };
+        AgentCertificatesRevoked: {
+            /** @description Certificates revoked by this call. */
+            revoked: number;
         };
         AgentEnrollRequest: {
             token: string;
@@ -4520,6 +4564,17 @@ export interface components {
         };
     };
     responses: {
+        /** @description Too many requests from this client address; retry after the number of seconds in Retry-After */
+        TooManyRequests: {
+            headers: {
+                /** @description Seconds until a request is accepted again */
+                "Retry-After"?: number;
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Error"];
+            };
+        };
         /** @description The request is invalid */
         BadRequest: {
             headers: {
@@ -5503,7 +5558,7 @@ export interface operations {
             502: components["responses"]["FrigateUnreachable"];
         };
     };
-    getServerAgentTlsConfig: {
+    getServerAgentTLSConfig: {
         parameters: {
             query?: never;
             header?: never;
@@ -5528,7 +5583,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    setServerAgentTlsConfig: {
+    setServerAgentTLSConfig: {
         parameters: {
             query?: never;
             header?: never;
@@ -5558,7 +5613,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    deleteServerAgentTlsConfig: {
+    deleteServerAgentTLSConfig: {
         parameters: {
             query?: never;
             header?: never;
@@ -5663,6 +5718,31 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    revokeServerAgentCertificates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many certificates were revoked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCertificatesRevoked"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     enrollAgent: {
         parameters: {
             query?: never;
@@ -5687,9 +5767,10 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+            429: components["responses"]["TooManyRequests"];
         };
     };
-    updateServerAgentOverSsh: {
+    updateServerAgentOverSSH: {
         parameters: {
             query?: never;
             header?: never;
@@ -5746,7 +5827,7 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    uninstallServerAgentOverSsh: {
+    uninstallServerAgentOverSSH: {
         parameters: {
             query?: never;
             header?: never;

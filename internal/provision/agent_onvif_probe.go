@@ -131,6 +131,7 @@ func (s *Service) ProbeOnvif(ctx context.Context, actor authz.Actor, serverID uu
 		return OnvifProbeResult{}, ErrAgentProbeFailed
 	}
 	useSystemRoots := config.TrustMode == AgentTLSTrustSystem
+	// #nosec G115 -- validateAgentTLSConfig constrains the port to 1..65535 above.
 	client, err := newVerifiedAgentHTTPClient(host, uint16(config.SecurePort), config.CAPEM, useSystemRoots, onvifProbeTimeout, nil, s.probeRoundTripper)
 	if err != nil {
 		return OnvifProbeResult{}, ErrAgentProbeFailed
@@ -159,6 +160,10 @@ func validateOnvifProbeRequest(in OnvifProbeRequest) error {
 }
 
 func probeAgent(ctx context.Context, transport http.RoundTripper, host string, port int32, caPEM []byte, useSystemRoots bool, token string, request OnvifProbeRequest) (OnvifProbeResult, error) {
+	if port < 1 || port > 65535 {
+		return OnvifProbeResult{}, ErrAgentProbeFailed
+	}
+	// #nosec G115 -- the port is range-checked immediately above.
 	client, err := newVerifiedAgentHTTPClient(host, uint16(port), caPEM, useSystemRoots, onvifProbeTimeout, nil, transport)
 	if err != nil {
 		return OnvifProbeResult{}, ErrAgentProbeFailed
@@ -167,6 +172,7 @@ func probeAgent(ctx context.Context, transport http.RoundTripper, host string, p
 }
 
 func probeAgentWithClient(ctx context.Context, client *VerifiedAgentHTTPClient, token string, input OnvifProbeRequest) (OnvifProbeResult, error) {
+	// #nosec G117 -- the credential is sent only to the verified agent over HTTPS and is never logged.
 	body, err := json.Marshal(input)
 	if err != nil || len(body) > maxOnvifProbeRequestBytes || token == "" {
 		return OnvifProbeResult{}, ErrAgentProbeFailed

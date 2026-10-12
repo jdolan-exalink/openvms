@@ -10,9 +10,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -67,15 +67,15 @@ func ensureExportDir(dir string) string {
 	if dir == "" {
 		dir = "/mnt/openvms/exports"
 	}
-	if err := os.MkdirAll(dir, 0755); err == nil {
+	if err := os.MkdirAll(dir, 0o700); err == nil {
 		return dir
 	}
 	fallback := "/var/lib/openvms/exports"
-	if err := os.MkdirAll(fallback, 0755); err == nil {
+	if err := os.MkdirAll(fallback, 0o700); err == nil {
 		return fallback
 	}
 	local := "./data/exports"
-	_ = os.MkdirAll(local, 0755)
+	_ = os.MkdirAll(local, 0o700)
 	return local
 }
 
@@ -89,16 +89,16 @@ func (m *ExportJobManager) cancelAllInFlight() {
 }
 
 type activeJobRow struct {
-	id          uuid.UUID
-	tenantID    uuid.UUID
-	name        string
-	start       time.Time
-	end         time.Time
-	status      string
-	protected   bool
-	expiresAt   *time.Time
-	requester   string
-	createdAt   time.Time
+	id        uuid.UUID
+	tenantID  uuid.UUID
+	name      string
+	start     time.Time
+	end       time.Time
+	status    string
+	protected bool
+	expiresAt *time.Time
+	requester string
+	createdAt time.Time
 }
 
 type activeItemRow struct {
@@ -417,14 +417,15 @@ func (m *ExportJobManager) transferItem(ctx context.Context, j activeJobRow, it 
 	}
 
 	jobDir := filepath.Join(m.StorageDir, j.id.String())
-	if err := os.MkdirAll(jobDir, 0755); err != nil {
+	if err := os.MkdirAll(jobDir, 0o700); err != nil {
 		return err
 	}
 
 	partPath := filepath.Join(jobDir, fmt.Sprintf("%s.mp4.part", it.id.String()))
 	finalPath := filepath.Join(jobDir, fmt.Sprintf("%s.mp4", it.id.String()))
 
-	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+	// #nosec G304 -- export path is composed from private storage root and UUID identifiers.
+	f, err := os.OpenFile(partPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
@@ -452,7 +453,7 @@ func (m *ExportJobManager) transferItem(ctx context.Context, j activeJobRow, it 
 
 			var etaSec int
 			if totalSize > cur && speedBps > 0 {
-				etaSec = int(float64((totalSize - cur)*8) / float64(speedBps))
+				etaSec = int(float64((totalSize-cur)*8) / float64(speedBps))
 			}
 
 			var prog float32 = 50
@@ -624,7 +625,7 @@ ORDER BY e.start_time ASC`, camIDs, j.start, j.end)
 	}
 
 	if b, err := json.MarshalIndent(manifestObj, "", "  "); err == nil {
-		_ = os.WriteFile(manifestPath, b, 0644)
+		_ = os.WriteFile(manifestPath, b, 0o600)
 	}
 
 	bJSON, _ := json.Marshal(manifestObj)
@@ -738,7 +739,7 @@ func collectZones(ctx context.Context, cams []zoneCamera, limit int, timeout tim
 	return out
 }
 
-func (m *ExportJobManager) failItem(ctx context.Context, itemID uuid.UUID, errMsg string) {
+func (m *ExportJobManager) failItem(_ context.Context, itemID uuid.UUID, errMsg string) {
 	dbCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = m.Store.TxRaw(dbCtx, store.AllTenants, func(tx pgx.Tx) error {

@@ -34,6 +34,7 @@ const (
 func NewAPIClient(caFile string) (*http.Client, error) {
 	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
 	if caFile != "" {
+		// #nosec G304 -- CA path is explicit local agent configuration, not remotely supplied.
 		pemBytes, err := os.ReadFile(caFile)
 		if err != nil {
 			return nil, fmt.Errorf("read API CA file: %w", err)

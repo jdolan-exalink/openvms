@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,14 +33,14 @@ func TestRelay_AuthorizeAndValidate(t *testing.T) {
 	// Wait for token expiration
 	time.Sleep(70 * time.Millisecond)
 	_, err = srv.ValidateToken(sess.Token)
-	if err != ErrTokenExpired {
+	if !errors.Is(err, ErrTokenExpired) {
 		t.Errorf("expected ErrTokenExpired, got %v", err)
 	}
 }
 
 func TestRelay_StreamProxy(t *testing.T) {
 	// 1. Mock upstream node server
-	nodeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	nodeSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "video/mp4")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("mock_video_stream_bytes"))

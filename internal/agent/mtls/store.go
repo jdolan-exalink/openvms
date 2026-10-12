@@ -27,9 +27,48 @@ const (
 // temporary file that is synced and renamed over the target, so a crash never leaves a
 // half-written file. A save stages all three files as .new first and renames them last, so
 // Load can finish a save that was interrupted at any point.
-type Store struct{ Dir string }
+type Store struct {
+	Dir string
+
+	// rename and sync are test seams (a crash between renames, counting directory syncs);
+	// nil uses os.Rename and a real directory fsync.
+	rename func(oldpath, newpath string) error
+	sync   func(dir string) error
+}
 
 func (s Store) path(name string) string { return filepath.Join(s.Dir, name) }
+
+func (s Store) renameFile(from, to string) error {
+	if s.rename != nil {
+		return s.rename(from, to)
+	}
+	return os.Rename(from, to)
+}
+
+func (s Store) syncDir() error {
+	if s.sync != nil {
+		return s.sync(s.Dir)
+	}
+	return syncDir(s.Dir)
+}
+
+// stagedNames are the three credential files; each can exist as name and name+pending.
+var credentialFiles = []string{caFile, keyFile, certFile}
+
+// removeStaged deletes every staged (.new) file. It runs only once a valid set of credentials is
+// in place, so what is left is a leftover of an interrupted or superseded save. Best effort: a
+// stale staged file is harmless to Load (it never forms a valid set), only untidy.
+func (s Store) removeStaged() {
+	removed := false
+	for _, name := range credentialFiles {
+		if err := os.Remove(s.path(name + pending)); err == nil {
+			removed = true
+		}
+	}
+	if removed {
+		_ = s.syncDir()
+	}
+}
 
 // CheckWritable creates the state directory if needed and proves that files can be created in
 // it. Enrollment calls it before redeeming the one-time token, so an unusable directory fails
@@ -70,6 +109,7 @@ func (s Store) read(name string) (stored, error) {
 }
 
 func readOptional(path string) ([]byte, error) {
+	// #nosec G304 -- credential path is composed from operator-selected state directory and fixed filenames.
 	b, err := os.ReadFile(path)
 	// ENOTDIR: the state path runs through a regular file; there are no credentials there, and
 	// CheckWritable reports the real problem before a token is redeemed.
@@ -130,16 +170,24 @@ func (s Store) Load() (*Credentials, error) {
 			}
 			continue
 		}
+		promoted := false
 		for _, f := range []struct {
 			name   string
 			staged bool
 		}{{caFile, as}, {keyFile, ks}, {certFile, cs}} {
 			if f.staged {
-				if err := os.Rename(s.path(f.name+pending), s.path(f.name)); err != nil {
+				if err := s.renameFile(s.path(f.name+pending), s.path(f.name)); err != nil {
 					return nil, err
 				}
+				promoted = true
 			}
 		}
+		if promoted {
+			if err := s.syncDir(); err != nil {
+				return nil, err
+			}
+		}
+		s.removeStaged()
 		return creds, nil
 	}
 	if firstErr == nil {
@@ -164,12 +212,17 @@ func (s Store) Save(c *Credentials) error {
 	if err := writeFile(s.path(certFile+pending), c.CertPEM, 0o644); err != nil {
 		return err
 	}
-	for _, name := range []string{caFile, keyFile, certFile} {
-		if err := os.Rename(s.path(name+pending), s.path(name)); err != nil {
+	// Make the staged files durable before the first rename, so a crash during the renames can
+	// always be completed from them.
+	if err := s.syncDir(); err != nil {
+		return err
+	}
+	for _, name := range credentialFiles {
+		if err := s.renameFile(s.path(name+pending), s.path(name)); err != nil {
 			return err
 		}
 	}
-	return syncDir(s.Dir)
+	return s.syncDir()
 }
 
 // TokenUsed reports whether token is the one this agent already enrolled with. Only its
@@ -219,6 +272,7 @@ func writeFile(path string, data []byte, perm os.FileMode) error {
 }
 
 func syncDir(dir string) error {
+	// #nosec G304 -- credential path is composed from operator-selected state directory and fixed filenames.
 	d, err := os.Open(dir)
 	if err != nil {
 		return err

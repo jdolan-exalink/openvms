@@ -180,6 +180,7 @@ func readLocalAgentFile(path string, maxBytes int64, private bool) ([]byte, erro
 	if private && before.Mode().Perm()&0o077 != 0 {
 		return nil, errors.New("private file permissions are too broad")
 	}
+	// #nosec G304 -- path was checked with Lstat and verified as the same regular file after opening.
 	file, err := os.Open(path)
 	if err != nil {
 		return nil, errors.New("file cannot be opened")

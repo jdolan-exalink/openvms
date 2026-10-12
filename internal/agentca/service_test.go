@@ -102,7 +102,7 @@ func TestLoadOrCreateCAAdoptsConcurrentWinner(t *testing.T) {
 	winner := newService(t, repo)
 	loser := &Service{Repo: repo, Sealer: winner.Sealer, Now: winner.Now}
 	var winnerCA *CA
-	repo.beforeInsert = func(r *fakeRepo) {
+	repo.beforeInsert = func(_ *fakeRepo) {
 		var err error
 		winnerCA, err = winner.LoadOrCreateCA(context.Background())
 		if err != nil {

@@ -54,7 +54,7 @@ func (q *fakeAgentSSHHostKeyQueries) ClaimServerAgentSSHHostKey(_ context.Contex
 	if _, exists := q.rows[key]; exists {
 		return 0, nil
 	}
-	q.rows[key] = db.GetServerAgentSSHHostKeyRow{ServerID: arg.ServerID, TenantID: arg.TenantID, Host: arg.Host, SshPort: arg.SshPort, Fingerprint: arg.Fingerprint}
+	q.rows[key] = db.GetServerAgentSSHHostKeyRow(arg)
 	return 1, nil
 }
 

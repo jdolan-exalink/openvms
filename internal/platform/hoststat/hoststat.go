@@ -2,6 +2,7 @@ package hoststat
 
 import (
 	"bufio"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -61,6 +62,7 @@ func Read(roots Roots) Snapshot {
 }
 
 func cpuModel(proc string) string {
+	// #nosec G304 -- proc is the trusted /proc root (or the explicit test override).
 	f, err := os.Open(filepath.Join(proc, "cpuinfo"))
 	if err != nil {
 		return ""
@@ -79,6 +81,7 @@ func cpuModel(proc string) string {
 }
 
 func cpuOnline(proc string) int {
+	// #nosec G304 -- proc is the trusted /proc root (or the explicit test override).
 	b, err := os.ReadFile(filepath.Join(proc, "stat"))
 	if err != nil {
 		return 0
@@ -120,6 +123,7 @@ func cpuPercent(proc string) (float64, bool) {
 type cpuSample struct{ idle, total uint64 }
 
 func cpuTimes(proc string) (cpuSample, bool) {
+	// #nosec G304 -- proc is the trusted /proc root (or the explicit test override).
 	b, err := os.ReadFile(filepath.Join(proc, "stat"))
 	if err != nil {
 		return cpuSample{}, false
@@ -149,6 +153,7 @@ func cpuTimes(proc string) (cpuSample, bool) {
 }
 
 func memInfo(proc string) (total, available uint64) {
+	// #nosec G304 -- proc root is local configuration or a test fixture.
 	f, err := os.Open(filepath.Join(proc, "meminfo"))
 	if err != nil {
 		return 0, 0
@@ -181,7 +186,19 @@ func disk(path string) (total, free uint64) {
 	} else if err != nil {
 		return 0, 0
 	}
-	return uint64(st.Blocks) * uint64(st.Bsize), uint64(st.Bavail) * uint64(st.Bsize)
+	return filesystemBytes(st.Blocks, st.Bsize), filesystemBytes(st.Bavail, st.Bsize)
+}
+
+func filesystemBytes(blocks uint64, blockSize int64) uint64 {
+	if blockSize <= 0 {
+		return 0
+	}
+	// #nosec G115 -- a positive statfs block size is safe to represent as uint64.
+	size := uint64(blockSize)
+	if blocks > math.MaxUint64/size {
+		return math.MaxUint64
+	}
+	return blocks * size
 }
 
 func gpus(drm string) []GPU {
@@ -253,6 +270,7 @@ func openvinoInstalled() bool {
 }
 
 func readFile(path string) string {
+	// #nosec G304 -- path is assembled from local system roots, not remote input.
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return ""
