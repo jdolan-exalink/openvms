@@ -1,0 +1,6 @@
+# Upstream base image vulnerabilities in caddy:2-alpine
+# Caddy's official upstream Alpine binary was compiled with Go 1.26.8;
+# these CVEs will be resolved once upstream Caddy releases an image built with Go >= 1.26.9.
+CVE-2026-78667
+CVE-2026-78669
+CVE-2026-97031
