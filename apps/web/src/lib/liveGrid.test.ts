@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile,
+  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId,
 } from "./liveGrid";
 
 describe("resizeTiles", () => {
@@ -229,5 +229,32 @@ describe("swapTiles / placeCameraUnique / duplicateTileIndexes", () => {
 
   it("finds cells that repeat an earlier camera", () => {
     expect([...duplicateTileIndexes([a, b, a, null, b])]).toEqual([2, 4]);
+  });
+
+  it("distinguishes different virtual views of the same camera", () => {
+    const v1: Tile = { camera_id: "a", quality: "sub", fisheye_view_id: "view-1" };
+    const v2: Tile = { camera_id: "a", quality: "sub", fisheye_view_id: "view-2" };
+    expect([...duplicateTileIndexes([v1, v2, v1])]).toEqual([2]);
+
+    const placed = placeCameraUnique([v1, null], 1, "a", "main", "view-2");
+    expect(placed).toEqual([v1, { camera_id: "a", quality: "main", fisheye_view_id: "view-2" }]);
+  });
+});
+
+describe("fisheye virtual view drag/drop resolution", () => {
+  it("encodes and decodes feview drag ids correctly", () => {
+    const dragId = feviewDragId("cam-360", "view-120-1");
+    expect(feviewFromDragId(dragId)).toEqual({ cameraId: "cam-360", viewId: "view-120-1" });
+    expect(feviewFromDragId("invalid-prefix:abc")).toBeNull();
+  });
+
+  it("resolves dropping a virtual view onto a tile slot", () => {
+    const dragId = feviewDragId("cam-360", "quad-2");
+    expect(resolveDragEnd(dragId, tileDragId(3))).toEqual({
+      type: "place",
+      index: 3,
+      cameraId: "cam-360",
+      fisheyeViewId: "quad-2",
+    });
   });
 });

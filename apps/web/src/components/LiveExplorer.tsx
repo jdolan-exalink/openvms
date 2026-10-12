@@ -1,7 +1,7 @@
 import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, GripVertical, History, LayoutGrid,
+  Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Compass, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, GripVertical, History, LayoutGrid,
   type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, Trash2, Video,
 } from "lucide-react";
 import { createContext, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -14,7 +14,9 @@ import { ErrorNote, IconButton, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { buildTree, type Camera, type Folder, type FolderNode, loadPrefs, type ServerNode, savePrefs, treeCameraDropId, treeFolderId, treeRootDropId, treeServerDragId } from "@/lib/explorer";
 import { LiveDetectionsPanel, LiveLprPanel, LiveMapsPanel } from "@/components/LiveSidePanels";
-import { cameraDragId, type LiveMapRef } from "@/lib/liveGrid";
+import { cameraDragId, feviewDragId, type LiveMapRef } from "@/lib/liveGrid";
+import { getFisheyeConfig } from "@/lib/fisheye/storage";
+import type { VirtualFisheyeView } from "@/lib/fisheye/types";
 import { useT } from "@/i18n";
 import type { useCameraFolders } from "@/lib/useCameraFolders";
 import { LongPressTracker } from "@/lib/touch";
@@ -149,9 +151,9 @@ export function LiveExplorer({
   sites: Schemas["Site"][];
   servers: Schemas["Server"][];
   folderApi: FolderApi;
-  onPick: (id: string) => void;
+  onPick: (id: string, viewId?: string) => void;
   /** Double-click: put the camera in the first empty cell of the current grid. */
-  onDoublePlace: (id: string) => void;
+  onDoublePlace: (id: string, viewId?: string) => void;
   onPlayback: (id: string) => void;
   canViewRecordings: boolean;
   /** A pinned explorer stays on screen when the pointer leaves the left edge. */
@@ -500,8 +502,8 @@ function ServerBranch({
   onRenaming: (id: string | null) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (f: Folder) => void;
-  onPick: (id: string) => void;
-  onDoublePlace: (id: string) => void;
+  onPick: (id: string, viewId?: string) => void;
+  onDoublePlace: (id: string, viewId?: string) => void;
   onPlayback: (id: string) => void;
   canViewRecordings: boolean;
 }) {
@@ -601,8 +603,8 @@ function FolderBranch({
   onRenaming: (id: string | null) => void;
   onRename: (id: string, name: string) => void;
   onDelete: (f: Folder) => void;
-  onPick: (id: string) => void;
-  onDoublePlace: (id: string) => void;
+  onPick: (id: string, viewId?: string) => void;
+  onDoublePlace: (id: string, viewId?: string) => void;
   onPlayback: (id: string) => void;
   canViewRecordings: boolean;
 }) {
@@ -704,8 +706,8 @@ function CameraRow({
   camera: Camera;
   canManage: boolean;
   indent: string;
-  onPick: (id: string) => void;
-  onDoublePlace: (id: string) => void;
+  onPick: (id: string, viewId?: string) => void;
+  onDoublePlace: (id: string, viewId?: string) => void;
   onPlayback: (id: string) => void;
   canViewRecordings: boolean;
 }) {
@@ -715,6 +717,11 @@ function CameraRow({
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: treeCameraDropId(camera.id), disabled: drop.disabled });
   const t = useT();
   const { bind, actions, navigate } = useMenuCtx();
+
+  const fisheyeConfig = useMemo(() => getFisheyeConfig(camera.id), [camera.id]);
+  const hasVirtualViews = fisheyeConfig.enabled && fisheyeConfig.views.length > 0;
+  const [viewsOpen, setViewsOpen] = useState(false);
+
   const menu = bind(() => [
     addToViewItem(actions, [camera.id], t),
     ...(actions.canConfigureCameras
@@ -731,63 +738,153 @@ function CameraRow({
     data: { kind: "camera", serverId: camera.server_id } satisfies DragData,
   });
   return (
-    <div
-      ref={setDropRef}
-      className={cn(indent, "flex min-w-0 items-center gap-1 border-t-2 border-transparent", isOver && !drop.disabled && "border-primary", drop.foreign && "opacity-40")}
-    >
+    <div className="flex flex-col min-w-0">
+      <div
+        ref={setDropRef}
+        className={cn(indent, "flex min-w-0 items-center gap-1 border-t-2 border-transparent", isOver && !drop.disabled && "border-primary", drop.foreign && "opacity-40")}
+      >
+        {hasVirtualViews && (
+          <button
+            type="button"
+            onClick={() => setViewsOpen(!viewsOpen)}
+            aria-expanded={viewsOpen}
+            aria-label={`Vistas virtuales de ${camera.display_name}`}
+            className="flex size-5 shrink-0 items-center justify-center rounded text-on-surface-variant hover:bg-on-surface/8"
+            title={viewsOpen ? "Ocultar vistas virtuales" : "Mostrar vistas virtuales"}
+          >
+            <Chevron open={viewsOpen} />
+          </button>
+        )}
+        <button
+          ref={setDragRef}
+          type="button"
+          onClick={() => {
+            clearTimeout(clickTimer.current);
+            if (touchTap.justHandled()) return;
+            clickTimer.current = setTimeout(() => onPick(camera.id), 220);
+          }}
+          onDoubleClick={() => {
+            clearTimeout(clickTimer.current);
+            if (touchTap.justHandled()) return;
+            onDoublePlace(camera.id);
+          }}
+          title={t("live.cameraHint", { name: camera.display_name })}
+          className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-m3-sm px-2 py-1.5 text-left hover:bg-on-surface/8", isDragging && "opacity-50")}
+          {...attributes}
+          {...listeners}
+          {...menu}
+          onPointerDown={(e) => {
+            menu.onPointerDown(e);
+            touchTap.handlers.onPointerDown(e);
+          }}
+          onPointerUp={(e) => {
+            menu.onPointerUp(e);
+            touchTap.handlers.onPointerUp(e);
+          }}
+          onPointerCancel={(e) => {
+            menu.onPointerCancel(e);
+            touchTap.handlers.onPointerCancel(e);
+          }}
+          onKeyDown={(e) => {
+            menu.onKeyDown(e);
+            if (!e.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(e);
+          }}
+        >
+          <Icon icon={hasVirtualViews ? Compass : Video} size="xs" className={cn(nodeIcon, hasVirtualViews && "text-cyan-400")} />
+          <span className={cn("size-1.5 shrink-0 rounded-full", dot(camera.status))} aria-hidden />
+          <span className="min-w-0 truncate">{camera.display_name}</span>
+          {hasVirtualViews && <Count n={fisheyeConfig.views.length} />}
+        </button>
+        {canViewRecordings && (
+          <>
+            <IconButton icon={History} title={t("live.watchLiveRecordings")} aria-label={t("live.watchRecordingsOf", { name: camera.display_name })} onClick={() => onPlayback(camera.id)} size="sm" />
+            <Link
+              to="/playback"
+              search={{ camera: camera.id }}
+              title={t("live.openRecordingsPage")}
+              aria-label={t("live.recordingsOf", { name: camera.display_name })}
+              className="relative inline-flex size-8 shrink-0 items-center justify-center rounded-full before:absolute before:-inset-1 before:content-[''] text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              <Icon icon={ExternalLink} size="xs" />
+            </Link>
+          </>
+        )}
+      </div>
+
+      {hasVirtualViews && viewsOpen && (
+        <div className="flex flex-col gap-0.5 my-0.5">
+          {fisheyeConfig.views.map((v) => (
+            <FisheyeViewRow
+              key={v.id}
+              camera={camera}
+              view={v}
+              indent={cn(indent, "ml-6")}
+              onPick={onPick}
+              onDoublePlace={onDoublePlace}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** FisheyeViewRow represents an individual virtual camera view that can be clicked or dragged to a grid slot. */
+function FisheyeViewRow({
+  camera,
+  view,
+  indent,
+  onPick,
+  onDoublePlace,
+}: {
+  camera: Camera;
+  view: VirtualFisheyeView;
+  indent: string;
+  onPick: (id: string, viewId?: string) => void;
+  onDoublePlace: (id: string, viewId?: string) => void;
+}) {
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(clickTimer.current), []);
+
+  const touchTap = useTouchDoubleTap(() => {
+    clearTimeout(clickTimer.current);
+    onDoublePlace(camera.id, view.id);
+  });
+
+  const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
+    id: feviewDragId(camera.id, view.id),
+    data: { kind: "camera", serverId: camera.server_id } satisfies DragData,
+  });
+
+  return (
+    <div className={cn(indent, "flex min-w-0 items-center gap-1 border-t-2 border-transparent")}>
       <button
         ref={setDragRef}
         type="button"
         onClick={() => {
           clearTimeout(clickTimer.current);
           if (touchTap.justHandled()) return;
-          clickTimer.current = setTimeout(() => onPick(camera.id), 220);
+          clickTimer.current = setTimeout(() => onPick(camera.id, view.id), 220);
         }}
         onDoubleClick={() => {
           clearTimeout(clickTimer.current);
           if (touchTap.justHandled()) return;
-          onDoublePlace(camera.id);
+          onDoublePlace(camera.id, view.id);
         }}
-        title={t("live.cameraHint", { name: camera.display_name })}
-        className={cn("flex min-w-0 flex-1 items-center gap-1.5 rounded-m3-sm px-2 py-1.5 text-left hover:bg-on-surface/8", isDragging && "opacity-50")}
+        title={`Arrastrar o colocar vista virtual ${view.name} (${view.yaw}°)`}
+        className={cn(
+          "flex min-w-0 flex-1 cursor-grab items-center gap-1.5 rounded-m3-sm px-2 py-1 text-left text-xs hover:bg-on-surface/8 text-on-surface/90",
+          isDragging && "opacity-50",
+        )}
         {...attributes}
         {...listeners}
-        {...menu}
-        onPointerDown={(e) => {
-          menu.onPointerDown(e);
-          touchTap.handlers.onPointerDown(e);
-        }}
-        onPointerUp={(e) => {
-          menu.onPointerUp(e);
-          touchTap.handlers.onPointerUp(e);
-        }}
-        onPointerCancel={(e) => {
-          menu.onPointerCancel(e);
-          touchTap.handlers.onPointerCancel(e);
-        }}
-        onKeyDown={(e) => {
-          menu.onKeyDown(e);
-          if (!e.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(e);
-        }}
       >
-        <Icon icon={Video} size="xs" className={nodeIcon} />
-        <span className={cn("size-1.5 shrink-0 rounded-full", dot(camera.status))} aria-hidden />
-        <span className="min-w-0 truncate">{camera.display_name}</span>
+        <Icon icon={Compass} size="xs" className="shrink-0 text-cyan-400" />
+        <span className="min-w-0 truncate font-normal">{view.name}</span>
+        <span className="text-[10px] text-muted font-mono shrink-0 ml-auto mr-1">
+          {view.yaw}°
+        </span>
       </button>
-      {canViewRecordings && (
-        <>
-          <IconButton icon={History} title={t("live.watchLiveRecordings")} aria-label={t("live.watchRecordingsOf", { name: camera.display_name })} onClick={() => onPlayback(camera.id)} size="sm" />
-          <Link
-            to="/playback"
-            search={{ camera: camera.id }}
-            title={t("live.openRecordingsPage")}
-            aria-label={t("live.recordingsOf", { name: camera.display_name })}
-            className="relative inline-flex size-8 shrink-0 items-center justify-center rounded-full before:absolute before:-inset-1 before:content-[''] text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
-          >
-            <Icon icon={ExternalLink} size="xs" />
-          </Link>
-        </>
-      )}
     </div>
   );
 }

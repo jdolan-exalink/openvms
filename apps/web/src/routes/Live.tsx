@@ -28,7 +28,7 @@ import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/P
 import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  cameraIdOf, duplicateTileIndexes, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
+  cameraIdOf, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
   serializeSelection, swapTiles, tileDragId,
   type Tile,
 } from "@/lib/liveGrid";
@@ -258,13 +258,13 @@ function LiveDesktop() {
 
   // index defaults to the currently selected tile (click-to-place); dragging a camera from the
   // list onto a specific slot passes that slot's index explicitly instead.
-  const place = (cameraId: string, index?: number) => {
+  const place = (cameraId: string, index?: number, viewId?: string) => {
     const at = index ?? selectedRef.current;
     const defaultQuality = cameras.data?.find((c) => c.id === cameraId)?.default_live_quality ?? "sub";
     const quality = columns === 1 ? "main" : defaultQuality;
     // The ref updates immediately so two clicks before the next render fill two cells.
     const source = tilesRef.current;
-    const next = persistentPlayers ? placeCameraUnique(source, at, cameraId, quality) : placeCameraAt(source, at, cameraId, quality);
+    const next = persistentPlayers ? placeCameraUnique(source, at, cameraId, quality, viewId) : placeCameraAt(source, at, cameraId, quality, viewId);
     const empty = next.findIndex((cell, i) => cell === null && i !== at);
     tilesRef.current = next;
     if (empty >= 0) selectedRef.current = empty;
@@ -303,7 +303,7 @@ function LiveDesktop() {
       }
       return;
     }
-    if (resolution.type === "place") place(resolution.cameraId, resolution.index);
+    if (resolution.type === "place") place(resolution.cameraId, resolution.index, resolution.fisheyeViewId);
     else if (resolution.type === "place-map") placeMap(resolution.map, resolution.index);
     else if (resolution.type === "reorder") reorder(resolution.from, resolution.to);
     else if (resolution.type === "fill-server") showGroup(camerasOfServer(resolution.serverId), servers.data?.find((server) => server.id === resolution.serverId)?.name ?? tr("live.theServer"));
@@ -434,10 +434,10 @@ function LiveDesktop() {
     if (skipped > 0) flash(`${label}: se muestran ${list.length - skipped} de ${list.length} cámaras. La grilla más grande es ${layout.name}.`, "warn");
     else flash(`${label}: ${layout.name} con ${plural(list.length)}.`);
   };
-  const placeInOpen = (cameraId: string) => {
+  const placeInOpen = (cameraId: string, viewId?: string) => {
     if (!camById.has(cameraId)) return;
     setTiles((current) => {
-      const next = placeInOpenCell(current, cameraId, cameraQuality(cameraId, columns));
+      const next = placeInOpenCell(current, cameraId, cameraQuality(cameraId, columns), viewId);
       if (next.index >= 0) setSelected(next.index);
       return next.tiles;
     });
@@ -511,7 +511,12 @@ function LiveDesktop() {
     selectedId: cameraIdOf(tiles[selected] ?? null),
     cameraById: camById,
   });
-  const dragLabel = activeDrag?.startsWith("camera:")
+  const feview = activeDrag ? feviewFromDragId(activeDrag) : null;
+  const dragLabel = feview
+    ? `${camById.get(feview.cameraId)?.display_name ?? "Cámara"} · ${
+        getFisheyeConfig(feview.cameraId).views.find((v) => v.id === feview.viewId)?.name ?? "Vista Virtual"
+      }`
+    : activeDrag?.startsWith("camera:")
     ? camById.get(activeDrag.slice("camera:".length))?.display_name
     : activeDrag?.startsWith("tfolder:")
       ? folderApi.folders.find((f) => f.id === activeDrag.slice("tfolder:".length))?.name
@@ -534,7 +539,7 @@ function LiveDesktop() {
       sites={sites.data ?? []}
       servers={servers.data ?? []}
       folderApi={folderApi}
-      onPick={place}
+      onPick={(id, viewId) => place(id, undefined, viewId)}
       onDoublePlace={placeInOpen}
       onPlayback={setPlaybackCameraId}
       canViewRecordings={can(me.data, "recordings.view")}
@@ -851,27 +856,72 @@ function GridTile({
         </>
       ) : tile && camera && "camera_id" in tile ? (
         <>
-          {isDuplicate ? (
-            <div className="relative size-full">
-              <img src={`/media/v1/cameras/${tile.camera_id}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-fill opacity-60" />
-              <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs"><span className="rounded-full bg-surface-1/80 px-3 py-1 text-on-surface">{tr("live.alreadyVisible")}</span></span>
-            </div>
-          ) : recLayer && !persistent ? null : (
-            // Without persistent players a live socket would keep streaming under REC, so it is
-            // unmounted there; persistent sessions stay mounted and suspended (last frame kept).
-            <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" />
-          )}
+          {(() => {
+            const feConfig = getFisheyeConfig(tile.camera_id);
+            const specificView = tile.fisheye_view_id
+              ? feConfig.views.find((v) => v.id === tile.fisheye_view_id)
+              : undefined;
+            const useFisheye =
+              !suspended &&
+              feConfig.enabled &&
+              (specificView !== undefined || feConfig.defaultMode !== "original");
+
+            if (isDuplicate) {
+              return (
+                <div className="relative size-full">
+                  <img src={`/media/v1/cameras/${tile.camera_id}/snapshot.jpg?h=360`} alt="" draggable={false} className="size-full object-fill opacity-60" />
+                  <span className="absolute inset-0 flex items-center justify-center p-2 text-center text-xs"><span className="rounded-full bg-surface-1/80 px-3 py-1 text-on-surface">{tr("live.alreadyVisible")}</span></span>
+                </div>
+              );
+            }
+
+            if (recLayer && !persistent) return null;
+
+            if (useFisheye) {
+              return (
+                <div className="relative size-full">
+                  <FisheyeViewer
+                    cameraId={tile.camera_id}
+                    compact={true}
+                    initialMode={specificView ? "virtual_ptz" : feConfig.defaultMode}
+                    targetViewId={specificView?.id}
+                    className="size-full"
+                  />
+                </div>
+              );
+            }
+
+            return (
+              <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" />
+            );
+          })()}
           {recLayer}
           <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 p-2 text-xs">
-            <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-on-surface backdrop-blur">
-              <Icon icon={Camera} size="xs" className="shrink-0" />
-              <span className="truncate font-medium">{camera.display_name}</span>
-              <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">
-                <span className={cn("size-2 rounded-full", status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-warn")} />
-                <Icon icon={status === "online" ? CircleCheck : status === "offline" ? CircleX : CircleHelp} size={12} className={status === "offline" ? "text-bad" : undefined} />
-                <span className="sr-only">{status ?? "unknown"}</span>
-              </span>
-            </span>
+            {(() => {
+              const feConfig = getFisheyeConfig(tile.camera_id);
+              const specificView = tile.fisheye_view_id
+                ? feConfig.views.find((v) => v.id === tile.fisheye_view_id)
+                : undefined;
+              return (
+                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-on-surface backdrop-blur">
+                  <Icon icon={specificView ? Compass : Camera} size="xs" className={cn("shrink-0", specificView && "text-cyan-400")} />
+                  <span className="truncate font-medium">
+                    {camera.display_name}
+                    {specificView && ` · ${specificView.name}`}
+                  </span>
+                  {specificView && (
+                    <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/60 px-1 rounded border border-cyan-800/40">
+                      {specificView.yaw}°
+                    </span>
+                  )}
+                  <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">
+                    <span className={cn("size-2 rounded-full", status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-warn")} />
+                    <Icon icon={status === "online" ? CircleCheck : status === "offline" ? CircleX : CircleHelp} size={12} className={status === "offline" ? "text-bad" : undefined} />
+                    <span className="sr-only">{status ?? "unknown"}</span>
+                  </span>
+                </span>
+              );
+            })()}
             <span className="ml-auto flex shrink-0 gap-1">
               {canViewRecordings && (
                 <Link to="/playback" search={{ camera: tile.camera_id }} title={tr("nav.recordings")} aria-label={tr("live.recordingsOf", { name: camera.display_name })} className={cn(tileAction, "m3-press inline-flex items-center justify-center focus-visible:outline-2 focus-visible:outline-primary")}>

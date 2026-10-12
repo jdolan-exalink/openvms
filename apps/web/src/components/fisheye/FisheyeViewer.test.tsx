@@ -58,4 +58,23 @@ describe("FisheyeViewer Component", () => {
     render(<FisheyeViewer cameraId="cam-123" videoElement={video} />);
     expect(screen.getByTestId("fisheye-canvas")).toBeInTheDocument();
   });
+
+  it("saves selected mode as default when clicking 'Guardar vista'", () => {
+    render(<FisheyeViewer cameraId="cam-123" />);
+
+    const fourQuadsBtn = screen.getByRole("button", { name: /4 Cuadrantes/i });
+    fireEvent.click(fourQuadsBtn);
+
+    const saveBtn = screen.getByRole("button", { name: /Guardar vista/i });
+    fireEvent.click(saveBtn);
+
+    expect(screen.getByText(/Guardado/i)).toBeInTheDocument();
+  });
+
+  it("renders in compact mode without top toolbar", () => {
+    render(<FisheyeViewer cameraId="cam-compact" initialMode="virtual_ptz" compact={true} />);
+
+    expect(screen.queryByRole("button", { name: "Original" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("fisheye-canvas")).toBeInTheDocument();
+  });
 });
