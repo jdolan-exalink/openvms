@@ -367,10 +367,10 @@ func toCamera(c db.GetCameraRow) gen.Camera {
 		Zones: c.Zones, Lpr: c.Lpr, Status: gen.HealthStatus(c.Status),
 		MissingSince: c.MissingSince, GroupIds: c.GroupIds, FolderId: c.FolderID, SortOrder: int(c.SortOrder), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 		DefaultLiveQuality: gen.CameraLiveQuality(c.DefaultLiveQuality), Description: c.Description, Location: c.Location,
-		Tags: append([]string{}, c.Tags...),
+		Tags:          append([]string{}, c.Tags...),
 		OnvifEndpoint: c.OnvifEndpoint,
-		OnvifProfile: c.OnvifProfile,
-		OnvifVersion: c.OnvifVersion,
+		OnvifProfile:  c.OnvifProfile,
+		OnvifVersion:  c.OnvifVersion,
 	}
 	if len(c.OnvifCapabilities) > 0 && string(c.OnvifCapabilities) != "{}" {
 		var caps gen.CameraOnvifCapabilities
