@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
@@ -618,4 +619,79 @@ func (s *Service) RestartServer(ctx context.Context, actor authz.Actor, id uuid.
 			"name":      srv.Name,
 		})
 	})
+}
+
+// CameraStreamHostInfo holds network and credential details extracted from camera streams.
+type CameraStreamHostInfo struct {
+	Host     string
+	Username string
+	Password string
+}
+
+func (s *Service) GetServerCameraStreamHosts(ctx context.Context, actor authz.Actor, id uuid.UUID) (map[string]CameraStreamHostInfo, error) {
+	var srv db.GetServerRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		srv, err = q.GetServer(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		return c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID))
+	})
+	if err != nil {
+		return nil, err
+	}
+	info, err := s.connInfo(db.FrigateServer{
+		ID:             srv.ID,
+		BaseUrl:        srv.BaseUrl,
+		AuthMode:       srv.AuthMode,
+		Username:       srv.Username,
+		PasswordSealed: srv.PasswordSealed,
+		TlsSkipVerify:  srv.TlsSkipVerify,
+	})
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := s.Connect(ctx, info)
+	if err != nil {
+		return nil, &FrigateError{Err: err}
+	}
+	rawPaths, err := adapter.RawPaths(ctx)
+	if err != nil {
+		return nil, &FrigateError{Err: err}
+	}
+	out := make(map[string]CameraStreamHostInfo)
+	if go2rtcMap, ok := rawPaths["go2rtc"].(map[string]any); ok {
+		if streamsMap, ok := go2rtcMap["streams"].(map[string]any); ok {
+			for streamKey, val := range streamsMap {
+				streamURL, ok := val.(string)
+				if !ok {
+					continue
+				}
+				camName := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(streamKey, "_main"), "_sub"), "_live")
+				parsed := parseRTSPStreamInfo(streamURL)
+				if parsed.Host != "" && out[camName].Host == "" {
+					out[camName] = parsed
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func parseRTSPStreamInfo(raw string) CameraStreamHostInfo {
+	if idx := strings.Index(raw, "#"); idx != -1 {
+		raw = raw[:idx]
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u == nil {
+		return CameraStreamHostInfo{}
+	}
+	host := u.Hostname()
+	var user, pass string
+	if u.User != nil {
+		user = u.User.Username()
+		pass, _ = u.User.Password()
+	}
+	return CameraStreamHostInfo{Host: host, Username: user, Password: pass}
 }

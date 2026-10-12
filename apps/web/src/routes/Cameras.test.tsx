@@ -653,3 +653,38 @@ describe("Cameras", () => {
     expect(alert).toHaveTextContent(/ONVIF_DISCOVERY_INTERFACES/i);
   });
 
+  it("renders ONVIF profile badges for cameras in the table", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          ...inventory([
+            {
+              id: "cam-onvif",
+              display_name: "Camara Patio",
+              remote_name: "patio",
+              server_id: "srv1",
+              site_id: "s1",
+              enabled: true,
+              status: "online",
+              zones: ["jardin"],
+              onvif_profile: "ONVIF-T",
+              onvif_version: "2.0",
+              onvif_capabilities: {
+                has_analytics: true,
+                has_ptz: false,
+              },
+            },
+          ]),
+          "/api/v1/servers": () => json({ items: [{ id: "srv1", name: "frigate-h01", site_id: "s1" }] }),
+        })
+      )
+    );
+    renderPage(Cameras);
+    expect(await screen.findByText("Camara Patio")).toBeInTheDocument();
+    const badge = screen.getByText("ONVIF-T");
+    expect(badge).toBeInTheDocument();
+    expect(screen.getByText("v2.0")).toBeInTheDocument();
+  });
+
+

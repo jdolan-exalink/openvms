@@ -175,6 +175,19 @@ UPDATE cameras SET
     description = coalesce(sqlc.narg('description'), description),
     location = coalesce(sqlc.narg('location'), location),
     tags = coalesce(sqlc.narg('tags')::text[], tags),
+    onvif_endpoint = coalesce(sqlc.narg('onvif_endpoint'), onvif_endpoint),
+    onvif_profile = coalesce(sqlc.narg('onvif_profile'), onvif_profile),
+    onvif_version = coalesce(sqlc.narg('onvif_version'), onvif_version),
+    onvif_capabilities = coalesce(sqlc.narg('onvif_capabilities'), onvif_capabilities),
+    updated_at = now()
+WHERE id = @id AND deleted_at IS NULL;
+
+-- name: UpdateCameraOnvif :exec
+UPDATE cameras SET
+    onvif_endpoint = @onvif_endpoint,
+    onvif_profile = @onvif_profile,
+    onvif_version = @onvif_version,
+    onvif_capabilities = @onvif_capabilities,
     updated_at = now()
 WHERE id = @id AND deleted_at IS NULL;
 

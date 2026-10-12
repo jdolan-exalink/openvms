@@ -138,6 +138,13 @@ export const cameraFrigateDocQuery = (cameraId: string) =>
     queryFn: async () => unwrap(await api.GET("/api/v1/cameras/{cameraId}/frigate-config", { params: { path: { cameraId } } })),
   });
 
+export const cameraQuery = (cameraId: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "one"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/cameras/{cameraId}", { params: { path: { cameraId } } })),
+    retry: false,
+  });
+
 export const frigateSchemaQuery = (serverId: string | undefined) =>
   queryOptions({
     queryKey: ["servers", serverId, "frigate-schema"],

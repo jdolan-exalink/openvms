@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { type FormEvent, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { cameraFrigateDocQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
+import { cameraFrigateDocQuery, cameraQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FrigateHistory } from "@/components/frigate/FrigateHistory";
@@ -25,6 +25,7 @@ import { can } from "@/lib/perm";
 type SectionResult = Schemas["FrigateSectionResult"];
 const HISTORY = "__history";
 const GENERAL = "__general";
+const ONVIF = "__onvif";
 
 const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isEmptyMask = (v: unknown) => v == null || v === "" || (Array.isArray(v) && v.length === 0) || (isRec(v) && Object.keys(v).length === 0);
@@ -69,6 +70,7 @@ export function FrigateCameraConfig() {
   const qc = useQueryClient();
   const me = useQuery(meQuery);
   const doc = useQuery(cameraFrigateDocQuery(cameraId));
+  const camera = useQuery(cameraQuery(cameraId));
   const serverId = doc.data?.server_id;
   const schema = useQuery(frigateSchemaQuery(serverId));
   const [active, setActive] = useState<string>();
@@ -219,7 +221,7 @@ export function FrigateCameraConfig() {
         error={apply.error ? new Error(`${apply.error.message} Las secciones anteriores pudieron aplicarse: revisa el historial o recarga para ver el estado actual.`) : null}
       />
 
-      <CameraIdentity name={doc.data.camera_name} version={version} config={config} />
+      <CameraIdentity name={doc.data.camera_name} version={version} config={config} camera={camera.data} />
       <div className="flex flex-col gap-3">
         <nav aria-label="Secciones de configuración" className="flex gap-1 overflow-x-auto rounded-m3-xl bg-surface-1 p-1.5">
           <button
@@ -229,6 +231,24 @@ export function FrigateCameraConfig() {
             className={cn("min-h-11 shrink-0 rounded-full px-4 text-xs font-bold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary", activeSection === GENERAL ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8")}
           >
             {t("common.general")}
+          </button>
+          <button
+            type="button"
+            aria-current={activeSection === ONVIF ? "page" : undefined}
+            onClick={() => setActive(ONVIF)}
+            className={cn(
+              "min-h-11 shrink-0 rounded-full px-4 text-xs font-bold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary",
+              activeSection === ONVIF ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8"
+            )}
+          >
+            <span className="flex items-center gap-1.5">
+              <span>Capacidades</span>
+              {camera.data?.onvif_profile && (
+                <span className="rounded-m3-sm bg-primary/20 px-1 py-0.5 font-mono text-[9px] font-semibold text-primary">
+                  {camera.data.onvif_profile}
+                </span>
+              )}
+            </span>
           </button>
           {sections.map((s) => (
             <button
@@ -254,9 +274,19 @@ export function FrigateCameraConfig() {
           </button>
         </nav>
 
-        <section aria-label={activeSection === HISTORY ? "Historial" : activeSection === GENERAL ? t("common.general") : sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded-m3-xl bg-surface-1 p-5">
+        <section aria-label={activeSection === HISTORY ? "Historial" : activeSection === GENERAL ? t("common.general") : activeSection === ONVIF ? "ONVIF" : sectionLabel(activeSection ?? "")} className="flex min-w-0 flex-col gap-4 rounded-m3-xl bg-surface-1 p-5">
           {activeSection === GENERAL ? (
             <CameraGeneral cameraId={cameraId} canManage={can(me.data, "cameras.manage")} />
+          ) : activeSection === ONVIF ? (
+            <CameraOnvifPanel
+              cameraId={cameraId}
+              camera={camera.data}
+              canManage={can(me.data, "cameras.manage")}
+              onApplyToFrigate={(patch) => {
+                setEdits((e) => ({ ...e, onvif: patch }));
+                setActive("onvif");
+              }}
+            />
           ) : activeSection === HISTORY ? (
             <FrigateHistory serverId={doc.data.server_id} cameraId={cameraId} secretsVisible={secretsVisible} canRollback={!readOnly && secretsVisible} onRestored={() => setNeedsRestart(true)} />
           ) : (
@@ -273,7 +303,7 @@ export function FrigateCameraConfig() {
             />
             )
           )}
-          {activeSection !== HISTORY && activeSection !== GENERAL && Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
+          {activeSection !== HISTORY && activeSection !== GENERAL && activeSection !== ONVIF && Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
             <p role="alert" className="text-xs text-bad">Hay valores no válidos en esta sección.</p>
           )}
         </section>
@@ -324,38 +354,326 @@ export function FrigateCameraConfig() {
   );
 }
 
-function CameraIdentity({ name, version, config }: { name: string; version: string; config: Record<string, unknown> }) {
+function displayEndpointHost(endpoint: string): string {
+  try {
+    const parsed = new URL(endpoint);
+    return parsed.hostname;
+  } catch {
+    return endpoint;
+  }
+}
+
+function CameraIdentity({
+  name,
+  version,
+  config,
+  camera,
+}: {
+  name: string;
+  version: string;
+  config: Record<string, unknown>;
+  camera?: Schemas["Camera"];
+}) {
   const detect = isRec(config.detect) ? config.detect : undefined;
   const width = typeof detect?.width === "number" ? detect.width : undefined;
   const height = typeof detect?.height === "number" ? detect.height : undefined;
   const onvif = isRec(config.onvif) ? config.onvif : undefined;
   const host = typeof onvif?.host === "string" && onvif.host && !onvif.host.includes("*") ? onvif.host : undefined;
+  const onvifProfile = camera?.onvif_profile;
+  const onvifCaps = camera?.onvif_capabilities;
   return (
     <div className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-5">
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="text-[22px] font-bold tracking-tight text-ink">{name}</h1>
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-[22px] font-bold tracking-tight text-ink">{name}</h1>
+            {onvifProfile && (
+              <span
+                className="rounded-m3-sm bg-primary/12 px-2 py-0.5 font-mono text-xs font-semibold text-primary"
+                title={[
+                  onvifProfile,
+                  camera?.onvif_version ? `v${camera.onvif_version}` : null,
+                  onvifCaps?.has_analytics ? "Detecciones/Analítica soportadas" : null,
+                  onvifCaps?.has_ptz ? "PTZ soportado" : null,
+                ].filter(Boolean).join(" · ")}
+              >
+                {onvifProfile}
+                {camera?.onvif_version && <span className="ml-1 opacity-75 font-normal">v{camera.onvif_version}</span>}
+              </span>
+            )}
+            {onvifCaps?.has_analytics && (
+              <span className="rounded-m3-sm bg-ok/12 px-2 py-0.5 text-xs font-medium text-ok">
+                Analítica ONVIF
+              </span>
+            )}
+          </div>
           <p className="text-sm text-muted">Frigate {version || "—"}</p>
         </div>
         <LinkButton to="/cameras">
           <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
         </LinkButton>
       </div>
-      <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+      <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
         <div className="rounded-m3-lg bg-surface-2 p-3"><dt className="text-muted">Versión</dt><dd className="font-mono">{version || "—"}</dd></div>
         <div className="rounded-m3-lg bg-surface-2 p-3"><dt className="text-muted">Resolución</dt><dd className="font-mono">{width && height ? `${width}×${height}` : "—"}</dd></div>
-        <div className="col-span-2 rounded-m3-lg bg-surface-2 p-3 sm:col-span-1"><dt className="text-muted">Host</dt><dd className="font-mono">{host ?? "—"}</dd></div>
+        <div className="rounded-m3-lg bg-surface-2 p-3"><dt className="text-muted">Host</dt><dd className="font-mono">{host ?? (camera?.onvif_endpoint ? displayEndpointHost(camera.onvif_endpoint) : "—")}</dd></div>
+        <div className="rounded-m3-lg bg-surface-2 p-3">
+          <dt className="text-muted">Soporte ONVIF</dt>
+          <dd className="font-medium text-ink">
+            {onvifProfile ? `${onvifProfile}${onvifCaps?.has_analytics ? " · Detecciones" : ""}` : "No vinculado"}
+          </dd>
+        </div>
       </dl>
     </div>
   );
 }
 
-function CameraGeneral({ cameraId, canManage }: { cameraId: string; canManage: boolean }) {
-  const camera = useQuery({
-    queryKey: ["cameras", cameraId, "one"],
-    queryFn: async () => unwrap(await api.GET("/api/v1/cameras/{cameraId}", { params: { path: { cameraId } } })),
-    retry: false,
+function CameraOnvifPanel({
+  cameraId,
+  camera,
+  canManage,
+  onApplyToFrigate,
+}: {
+  cameraId: string;
+  camera?: Schemas["Camera"];
+  canManage: boolean;
+  onApplyToFrigate: (patch: Record<string, unknown>) => void;
+}) {
+  const qc = useQueryClient();
+  const [endpointInput, setEndpointInput] = useState(camera?.onvif_endpoint ?? "");
+  const [usernameInput, setUsernameInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [applySuccessMsg, setApplySuccessMsg] = useState<string | null>(null);
+
+  const checkMutation = useMutation({
+    mutationFn: async () => {
+      setApplySuccessMsg(null);
+      return unwrap(
+        await api.POST("/api/v1/cameras/{cameraId}/onvif/check", {
+          params: { path: { cameraId } },
+          body: {
+            endpoint: endpointInput.trim() || undefined,
+            username: usernameInput || undefined,
+            password: passwordInput || undefined,
+          },
+        })
+      );
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["cameras"] });
+      await qc.invalidateQueries({ queryKey: ["cameras", cameraId, "one"] });
+    },
   });
+
+  const caps = camera?.onvif_capabilities;
+  const detectedHost = camera?.onvif_endpoint ? displayEndpointHost(camera.onvif_endpoint) : "";
+
+  const handleApplyToFrigate = () => {
+    if (!detectedHost) return;
+    onApplyToFrigate({
+      host: detectedHost,
+      ...(usernameInput ? { user: usernameInput } : {}),
+      ...(passwordInput ? { password: passwordInput } : {}),
+    });
+    setApplySuccessMsg(`Host "${detectedHost}" cargado en la pestaña ONVIF de Frigate. Podes revisar y aplicar los cambios.`);
+  };
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-1">
+        <h2 className="text-lg font-semibold">Soporte y Capacidades ONVIF</h2>
+        <p className="text-sm text-on-surface-variant">
+          Información detectada directamente desde la cámara mediante el protocolo estándar ONVIF (Profile S/T/M).
+        </p>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-3.5">
+          <span className="text-xs text-muted">Perfil y Versión</span>
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-ink">{camera?.onvif_profile ?? "No detectado"}</span>
+            {camera?.onvif_version && <span className="font-mono text-xs text-muted">v{camera.onvif_version}</span>}
+          </div>
+          {caps?.profiles && caps.profiles.length > 0 && (
+            <span className="text-xs text-muted">{caps.profiles.join(", ")}</span>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-3.5">
+          <span className="text-xs text-muted">Dispositivo</span>
+          <span className="font-semibold text-ink">
+            {caps?.manufacturer || caps?.model ? `${caps?.manufacturer ?? ""} ${caps?.model ?? ""}`.trim() : "—"}
+          </span>
+          <span className="font-mono text-xs text-muted">
+            {caps?.firmware_version ? `FW: ${caps.firmware_version}` : (caps?.serial_number ? `SN: ${caps.serial_number}` : "—")}
+          </span>
+        </div>
+
+        <div className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-3.5">
+          <span className="text-xs text-muted">Endpoint ONVIF</span>
+          <span className="break-all font-mono text-xs text-ink">{camera?.onvif_endpoint ?? "No vinculado"}</span>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 rounded-m3-lg bg-surface-2 p-4">
+        <h3 className="text-sm font-semibold text-ink">Funcionalidades de la Cámara</h3>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex items-start gap-3 rounded-m3-md bg-surface-1 p-3">
+            <div className={cn("mt-1 size-2.5 shrink-0 rounded-full", caps?.has_analytics ? "bg-ok" : "bg-muted/40")} />
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Detecciones y Analítica</span>
+                <span className={cn("rounded-m3-sm px-1.5 py-0.5 text-[10px] font-semibold", caps?.has_analytics ? "bg-ok/12 text-ok" : "bg-muted/12 text-muted")}>
+                  {caps?.has_analytics ? "Soportado (Profile M)" : "No detectado"}
+                </span>
+              </div>
+              <p className="text-xs text-muted">
+                {caps?.has_analytics
+                  ? "La cámara procesa analítica y metadatos de detección en hardware (WSDL ver20/analytics)."
+                  : "No se encontró servicio de analítica ONVIF reportado en el descriptor WSDL."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3 rounded-m3-md bg-surface-1 p-3">
+            <div className={cn("mt-1 size-2.5 shrink-0 rounded-full", caps?.has_events ? "bg-ok" : "bg-muted/40")} />
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Eventos y Notificaciones</span>
+                <span className={cn("rounded-m3-sm px-1.5 py-0.5 text-[10px] font-semibold", caps?.has_events ? "bg-ok/12 text-ok" : "bg-muted/12 text-muted")}>
+                  {caps?.has_events ? "Soportado" : "No detectado"}
+                </span>
+              </div>
+              <p className="text-xs text-muted">
+                {caps?.has_events
+                  ? "Soporte de alertas de movimiento, sabotaje y eventos push vía WS-BaseNotification."
+                  : "No reporta servicio de eventos ONVIF (ver10/events)."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3 rounded-m3-md bg-surface-1 p-3">
+            <div className={cn("mt-1 size-2.5 shrink-0 rounded-full", caps?.has_ptz ? "bg-ok" : "bg-muted/40")} />
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Control PTZ</span>
+                <span className={cn("rounded-m3-sm px-1.5 py-0.5 text-[10px] font-semibold", caps?.has_ptz ? "bg-ok/12 text-ok" : "bg-muted/12 text-muted")}>
+                  {caps?.has_ptz ? "Soportado" : "No detectado"}
+                </span>
+              </div>
+              <p className="text-xs text-muted">
+                {caps?.has_ptz
+                  ? "Permite control motorizado de paneo, inclinación, zoom y presets."
+                  : "Cámara fija o sin servicio PTZ ONVIF habilitado."}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3 rounded-m3-md bg-surface-1 p-3">
+            <div className={cn("mt-1 size-2.5 shrink-0 rounded-full", caps?.has_media2 ? "bg-ok" : "bg-muted/40")} />
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium">Streaming Media 2 (Profile T)</span>
+                <span className={cn("rounded-m3-sm px-1.5 py-0.5 text-[10px] font-semibold", caps?.has_media2 ? "bg-ok/12 text-ok" : "bg-muted/12 text-muted")}>
+                  {caps?.has_media2 ? "Soportado (H.265)" : "Media 1 (H.264)"}
+                </span>
+              </div>
+              <p className="text-xs text-muted">
+                {caps?.has_media2
+                  ? "Compatible con códec H.265 y perfiles de streaming de alta eficiencia."
+                  : "Utiliza protocolo de medios v1.0 (Profile S)."}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {caps?.services && caps.services.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-semibold text-muted uppercase">Servicios WSDL detectados ({caps.services.length})</span>
+          <div className="flex flex-wrap gap-1.5">
+            {caps.services.map((s, idx) => (
+              <span key={idx} className="rounded-m3-sm bg-surface-2 px-2 py-1 font-mono text-[11px] text-on-surface-variant">
+                {s.namespace.split("/").pop() || s.namespace} · v{s.version.major}.{s.version.minor}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {detectedHost && (
+        <div className="flex flex-col gap-2 rounded-m3-lg border border-primary/20 bg-primary/4 p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-ink">Aplicar host a la configuración de Frigate</p>
+              <p className="text-xs text-on-surface-variant">
+                Carga automáticamente el host detectado (<code className="font-mono">{detectedHost}</code>) en la pestaña ONVIF de Frigate para vincular autotracking y control.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="shrink-0 rounded-m3-full bg-primary px-4 py-2 text-xs font-medium text-on-primary hover:bg-primary/90"
+              onClick={handleApplyToFrigate}
+            >
+              Cargar en Frigate
+            </button>
+          </div>
+          {applySuccessMsg && <p role="status" className="text-xs font-medium text-ok">{applySuccessMsg}</p>}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-3 rounded-m3-lg bg-surface-2 p-4">
+        <h3 className="text-sm font-semibold text-ink">Comprobar o actualizar ONVIF de esta cámara</h3>
+        <p className="text-xs text-on-surface-variant">
+          Consulta la cámara desde el servidor a través de la red local para verificar su versión y capacidades de analítica.
+        </p>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Endpoint ONVIF" hint="Si se deja vacío, se detecta de la IP del stream.">
+            <TextInput
+              value={endpointInput}
+              onChange={(e) => setEndpointInput(e.target.value)}
+              placeholder={camera?.onvif_endpoint || "http://10.1.1.X/onvif/device_service"}
+            />
+          </Field>
+          <Field label="Usuario ONVIF (opcional)">
+            <TextInput
+              value={usernameInput}
+              onChange={(e) => setUsernameInput(e.target.value)}
+              placeholder="admin"
+            />
+          </Field>
+          <Field label="Contraseña ONVIF (opcional)">
+            <TextInput
+              type="password"
+              value={passwordInput}
+              onChange={(e) => setPasswordInput(e.target.value)}
+              placeholder="••••••••"
+            />
+          </Field>
+        </div>
+        <div className="flex items-center justify-between gap-2 pt-1">
+          <ErrorNote error={checkMutation.error} />
+          {checkMutation.isSuccess && (
+            <p role="status" className="text-xs font-medium text-ok">
+              ¡Capacidades ONVIF comprobadas y actualizadas correctamente!
+            </p>
+          )}
+          <Button
+            type="button"
+            variant="primary"
+            disabled={checkMutation.isPending || !canManage}
+            onClick={() => checkMutation.mutate()}
+          >
+            {checkMutation.isPending ? "Comprobando…" : "Comprobar y guardar ONVIF"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CameraGeneral({ cameraId, canManage }: { cameraId: string; canManage: boolean }) {
+  const camera = useQuery(cameraQuery(cameraId));
   if (camera.isLoading) return <p className="text-sm text-muted">Cargando ajustes…</p>;
   if (camera.error || !camera.data) return <ErrorNote error={camera.error ?? new Error("No se pudo leer la cámara.")} />;
   return <CameraGeneralForm camera={camera.data} canManage={canManage} />;

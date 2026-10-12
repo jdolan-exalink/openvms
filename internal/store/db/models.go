@@ -148,6 +148,10 @@ type Camera struct {
 	Tags               []string
 	FolderID           *uuid.UUID
 	SortOrder          int32
+	OnvifEndpoint      *string
+	OnvifProfile       *string
+	OnvifVersion       *string
+	OnvifCapabilities  json.RawMessage
 }
 
 type CameraFolder struct {

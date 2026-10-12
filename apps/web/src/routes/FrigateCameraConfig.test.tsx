@@ -150,4 +150,46 @@ describe("FrigateCameraConfig", () => {
     const patch = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "PATCH" && new URL(r.url).pathname === "/api/v1/cameras/c1")!;
     expect(await patch.clone().json()).toMatchObject({ location: "Boca norte", display_name: "acceso" });
   });
+
+  it("displays ONVIF capabilities and applies detected host to Frigate onvif config", async () => {
+    mount({}, {
+      "/api/v1/cameras/c1": () =>
+        json({
+          id: "c1",
+          display_name: "acceso",
+          remote_name: "acceso",
+          server_id: "s1",
+          site_id: "site1",
+          onvif_endpoint: "http://10.1.1.220/onvif/device_service",
+          onvif_profile: "ONVIF-T",
+          onvif_version: "2.0",
+          onvif_capabilities: {
+            manufacturer: "Hikvision",
+            model: "DS-2CD2043G2-I",
+            firmware_version: "V5.5.800",
+            serial_number: "DS-2CD2043G2-I20210101AAWR",
+            profiles: ["Profile T", "Profile M"],
+            has_analytics: true,
+            has_events: true,
+            has_ptz: false,
+            has_media2: true,
+            has_media1: true,
+          },
+        }),
+    });
+
+    expect(await screen.findByText("Analítica ONVIF")).toBeInTheDocument();
+    expect(screen.getAllByText(/ONVIF-T/).length).toBeGreaterThanOrEqual(1);
+
+    fireEvent.click(screen.getByRole("button", { name: /Capacidades/ }));
+    expect(await screen.findByText("Soporte y Capacidades ONVIF")).toBeInTheDocument();
+    expect(screen.getByText("Hikvision DS-2CD2043G2-I")).toBeInTheDocument();
+    expect(screen.getByText("Soportado (Profile M)")).toBeInTheDocument();
+
+    const applyButton = screen.getByRole("button", { name: "Cargar en Frigate" });
+    fireEvent.click(applyButton);
+    expect(await screen.findByLabelText("Host")).toHaveValue("10.1.1.220");
+    expect(screen.getByText(/1 sección modificada/)).toBeInTheDocument();
+  });
 });
+

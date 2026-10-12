@@ -43,6 +43,7 @@ type response struct {
 }
 type device struct {
 	XAddrs []string `json:"xaddrs"`
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 func NewHandler(token string, discoverer Discoverer, cfg Config) (*Handler, error) {
@@ -140,7 +141,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	result := response{Devices: make([]device, 0, len(devices))}
 	for _, found := range devices {
-		item := device{XAddrs: make([]string, 0, len(found.XAddrs))}
+		item := device{XAddrs: make([]string, 0, len(found.XAddrs)), Scopes: found.ScopeHints}
 		for _, endpoint := range found.XAddrs {
 			u, err := neturlParse(endpoint.String())
 			if err != nil {
