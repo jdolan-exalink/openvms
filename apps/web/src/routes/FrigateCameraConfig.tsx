@@ -586,6 +586,7 @@ export function FrigateCameraConfig() {
             <FisheyeSection
               cameraId={cameraId}
               cameraName={doc.data.camera_name}
+              snapshotUrl={`/media/v1/cameras/${cameraId}/snapshot.jpg`}
               canManage={!readOnly}
             />
           ) : activeSection === HISTORY ? (

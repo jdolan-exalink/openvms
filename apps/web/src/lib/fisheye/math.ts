@@ -100,8 +100,8 @@ export function rectilinearToRay(
   const sinP = Math.sin(pitchRad);
   ray = {
     x: ray.x,
-    y: ray.y * cosP - ray.z * sinP,
-    z: ray.y * sinP + ray.z * cosP,
+    y: ray.y * cosP + ray.z * sinP,
+    z: -ray.y * sinP + ray.z * cosP,
   };
 
   // Apply Yaw (around Y)
@@ -115,21 +115,20 @@ export function rectilinearToRay(
   };
 
   // Adapt to Mount orientation:
-  // Ceiling mount: looking downward from ceiling (Y down)
+  // Ceiling mount: looking downward from ceiling (Z down)
   // Wall mount: standard horizontal look
-  // Floor mount: looking upward (Y up)
+  // Floor mount: looking upward (Z up)
   if (mount === "ceiling") {
-    // Rotate 90 deg down so Z points down into room
-    return {
-      x: ray.x,
-      y: -ray.z,
-      z: ray.y,
-    };
-  } else if (mount === "floor") {
     return {
       x: ray.x,
       y: ray.z,
       z: -ray.y,
+    };
+  } else if (mount === "floor") {
+    return {
+      x: ray.x,
+      y: -ray.z,
+      z: ray.y,
     };
   }
 

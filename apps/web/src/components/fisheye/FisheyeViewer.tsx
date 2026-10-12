@@ -22,6 +22,7 @@ import type {
   VirtualFisheyeView,
 } from "@/lib/fisheye/types";
 import { VirtualPtzController } from "@/lib/fisheye/VirtualPtzController";
+import { PlayerSession } from "@/lib/live/PlayerSession";
 import { cn } from "@/lib/cn";
 import {
   Compass,
@@ -59,8 +60,48 @@ export function FisheyeViewer({
   );
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const sessionRef = useRef<PlayerSession | null>(null);
+  const snapshotRef = useRef<HTMLImageElement | null>(null);
+  const [, setSnapshotLoaded] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<FisheyeDewarpEngine | null>(null);
+
+  // Preload instant snapshot fallback so the view is never empty/black
+  useEffect(() => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = `/media/v1/cameras/${cameraId}/snapshot.jpg`;
+    img.onload = () => {
+      snapshotRef.current = img;
+      setSnapshotLoaded(true);
+    };
+    return () => {
+      img.onload = null;
+      snapshotRef.current = null;
+    };
+  }, [cameraId]);
+
+  // Connect live MSE stream if no external videoElement is provided
+  useEffect(() => {
+    if (videoElement || videoSrc) return;
+
+    try {
+      const session = new PlayerSession({
+        cameraId,
+        quality: "main",
+        muted: true,
+      });
+      session.connect();
+      sessionRef.current = session;
+
+      return () => {
+        session.close();
+        sessionRef.current = null;
+      };
+    } catch (e) {
+      console.warn("Failed to create PlayerSession for fisheye live stream:", e);
+    }
+  }, [cameraId, videoElement, videoSrc]);
 
   // Active virtual view for PTZ
   const [activeView, setActiveView] = useState<VirtualFisheyeView>(() => {
@@ -146,26 +187,38 @@ export function FisheyeViewer({
 
     const tick = () => {
       const engine = engineRef.current;
-      const targetVideo = videoElement || localVideoRef.current;
+      const targetVideo = videoElement || sessionRef.current?.video || localVideoRef.current;
+      const snapshot = snapshotRef.current;
 
-      if (
-        engine &&
-        targetVideo &&
-        targetVideo.readyState >= 2 &&
-        engine.isSupported
-      ) {
-        // Adapt canvas internal buffer size to video element
+      const isVideoReady = targetVideo && targetVideo.readyState >= 2;
+      const isSnapshotReady = snapshot && snapshot.complete && snapshot.naturalWidth > 0;
+
+      const source: TexImageSource | null = isVideoReady
+        ? targetVideo
+        : isSnapshotReady
+        ? snapshot
+        : null;
+
+      if (engine && source && engine.isSupported) {
+        // Adapt canvas internal buffer size to video element or snapshot
         const c = canvasRef.current;
         if (c) {
-          const w = targetVideo.videoWidth || c.clientWidth || 640;
-          const h = targetVideo.videoHeight || c.clientHeight || 480;
+          let w = 640;
+          let h = 480;
+          if (isVideoReady && targetVideo) {
+            w = targetVideo.videoWidth || c.clientWidth || 640;
+            h = targetVideo.videoHeight || c.clientHeight || 480;
+          } else if (isSnapshotReady && snapshot) {
+            w = snapshot.naturalWidth || c.clientWidth || 640;
+            h = snapshot.naturalHeight || c.clientHeight || 480;
+          }
           if (c.width !== w || c.height !== h) {
             c.width = w;
             c.height = h;
           }
         }
 
-        engine.render(targetVideo, {
+        engine.render(source, {
           mode,
           calibration: config.calibration,
           mountType: config.mountType,
@@ -405,7 +458,8 @@ export function FisheyeViewer({
                 {v.name} · {v.fov}° FOV
               </div>
               <FisheyeSingleViewport
-                videoElement={videoElement || localVideoRef.current}
+                videoElement={videoElement || sessionRef.current?.video || localVideoRef.current}
+                imageElement={snapshotRef.current}
                 calibration={config.calibration}
                 mountType={config.mountType}
                 projectionModel={config.projectionModel}
@@ -426,7 +480,8 @@ export function FisheyeViewer({
                 {v.name}
               </div>
               <FisheyeSingleViewport
-                videoElement={videoElement || localVideoRef.current}
+                videoElement={videoElement || sessionRef.current?.video || localVideoRef.current}
+                imageElement={snapshotRef.current}
                 calibration={config.calibration}
                 mountType={config.mountType}
                 projectionModel={config.projectionModel}
@@ -488,12 +543,14 @@ export function FisheyeViewer({
  */
 function FisheyeSingleViewport({
   videoElement,
+  imageElement,
   calibration,
   mountType,
   projectionModel,
   view,
 }: {
-  videoElement: HTMLVideoElement | null;
+  videoElement?: HTMLVideoElement | null;
+  imageElement?: HTMLImageElement | null;
   calibration: FisheyeConfig["calibration"];
   mountType: FisheyeConfig["mountType"];
   projectionModel: FisheyeConfig["projectionModel"];
@@ -517,17 +574,33 @@ function FisheyeSingleViewport({
     let rafId: number;
     const tick = () => {
       const engine = engineRef.current;
-      if (engine && videoElement && videoElement.readyState >= 2 && engine.isSupported) {
+      const isVideoReady = videoElement && videoElement.readyState >= 2;
+      const isImageReady =
+        imageElement && imageElement.complete && imageElement.naturalWidth > 0;
+      const source: TexImageSource | null = isVideoReady
+        ? videoElement
+        : isImageReady
+        ? imageElement
+        : null;
+
+      if (engine && source && engine.isSupported) {
         const c = canvasRef.current;
         if (c) {
-          const w = videoElement.videoWidth || c.clientWidth || 480;
-          const h = videoElement.videoHeight || c.clientHeight || 320;
+          let w = 480;
+          let h = 320;
+          if (isVideoReady && videoElement) {
+            w = videoElement.videoWidth || c.clientWidth || 480;
+            h = videoElement.videoHeight || c.clientHeight || 320;
+          } else if (isImageReady && imageElement) {
+            w = imageElement.naturalWidth || c.clientWidth || 480;
+            h = imageElement.naturalHeight || c.clientHeight || 320;
+          }
           if (c.width !== w || c.height !== h) {
             c.width = w;
             c.height = h;
           }
         }
-        engine.render(videoElement, {
+        engine.render(source, {
           mode: "virtual_ptz",
           calibration,
           mountType,
@@ -539,7 +612,7 @@ function FisheyeSingleViewport({
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [videoElement, calibration, mountType, projectionModel, view]);
+  }, [videoElement, imageElement, calibration, mountType, projectionModel, view]);
 
   return (
     <canvas
