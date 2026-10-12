@@ -135,9 +135,9 @@ jobs:
         run: docker compose up -d --build --wait --wait-timeout 180
       - name: Readiness through Caddy
         run: |
-          curl -fsS http://localhost:8000/health/ready
-          curl -fsS http://localhost:8000/api/v1/system/info
-          curl -fsS -o /dev/null http://localhost:8000/
+          curl --retry 30 --retry-delay 2 --retry-connrefused --retry-all-errors -fsS http://localhost:8000/health/ready
+          curl --retry 10 --retry-delay 1 --retry-connrefused --retry-all-errors -fsS http://localhost:8000/api/v1/system/info
+          curl --retry 10 --retry-delay 1 --retry-connrefused --retry-all-errors -fsS -o /dev/null http://localhost:8000/
       - name: Logs on failure
         if: failure()
         run: docker compose logs --tail=200
