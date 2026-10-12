@@ -1,5 +1,23 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
+import { EnhancementControl } from "@/components/EnhancementControl";
 import { cn } from "@/lib/cn";
+import { extractRoiRect } from "@/lib/enhancement/analysis";
+import { ImageEnhancementEngineImpl } from "@/lib/enhancement/engine";
+import {
+  DEFAULT_ADJUSTMENTS,
+  type EnhancementAdjustments,
+  type EnhancementMode,
+} from "@/lib/enhancement/types";
+import { generateCssFilterString } from "@/lib/enhancement/webgl";
 import { IDENTITY_ZOOM, panBy, pinchZoom, wheelPixels, zoomAtPoint, zoomTransform, type DigitalZoom } from "@/lib/live/digitalZoom";
 import { TouchDoubleTap } from "@/lib/touch";
 import { useIsPhoneDevice } from "@/lib/useIsPhoneDevice";
@@ -21,6 +39,8 @@ type ZoomFrameProps = {
   picture?: (zoom: DigitalZoom) => ReactNode;
   /** When false, nothing local is scaled (the surface layer scales its own stage). */
   scalePicture?: boolean;
+  /** Enable dynamic visual enhancement engine and UI controls. Defaults to true. */
+  enhanceable?: boolean;
   children?: ReactNode;
 };
 
@@ -34,7 +54,17 @@ const touchPoint = (event: { clientX: number; clientY: number }) => ({ x: event.
  * page scrolls and tiles can be dragged (`touch-action: pan-y`); gestures are captured only while
  * two fingers are down or the picture is zoomed (`touch-action: none`).
  */
-export function ZoomFrame({ frameRef, stageRef, resetKey, className, onZoom, picture, scalePicture = true, children }: ZoomFrameProps) {
+export function ZoomFrame({
+  frameRef,
+  stageRef,
+  resetKey,
+  className,
+  onZoom,
+  picture,
+  scalePicture = true,
+  enhanceable = true,
+  children,
+}: ZoomFrameProps) {
   const [frameEl, setFrameEl] = useState<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState<DigitalZoom>(IDENTITY_ZOOM);
   const [dragging, setDragging] = useState(false);
@@ -48,6 +78,105 @@ export function ZoomFrame({ frameRef, stageRef, resetKey, className, onZoom, pic
   const pinch = useRef<{ distance: number; mid: { x: number; y: number } } | null>(null);
   const [tap] = useState(() => new TouchDoubleTap<ReactPointerEvent<HTMLDivElement>>());
   const onZoomRef = useRef(onZoom);
+
+  // Dynamic visual enhancement engine
+  const [engine] = useState(() => new ImageEnhancementEngineImpl());
+  const [enhancementMode, setEnhancementMode] = useState<EnhancementMode>("auto");
+  const [adjustments, setAdjustments] = useState<EnhancementAdjustments>(() => engine.getAdjustments());
+
+  useEffect(() => {
+    return () => {
+      engine.destroy();
+    };
+  }, [engine]);
+
+  const handleModeChange = useCallback((nextMode: EnhancementMode) => {
+    engine.setMode(nextMode);
+    setEnhancementMode(nextMode);
+    if (nextMode === "off") {
+      setAdjustments({ ...DEFAULT_ADJUSTMENTS });
+    } else {
+      setAdjustments({ ...engine.getAdjustments() });
+    }
+  }, [engine]);
+
+  const handleAdjustmentsChange = useCallback((patch: Partial<EnhancementAdjustments>) => {
+    engine.setManualAdjustments(patch);
+    setAdjustments({ ...engine.getAdjustments() });
+  }, [engine]);
+
+  const handleReset = useCallback(() => {
+    engine.reset();
+    setEnhancementMode(engine.mode);
+    setAdjustments({ ...engine.getAdjustments() });
+  }, [engine]);
+
+  const updateEnhancements = useCallback((currentZoom: DigitalZoom) => {
+    if (!enhanceable || enhancementMode === "off") return;
+    const el = frameEl;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const roi = extractRoiRect(currentZoom, rect.width, rect.height);
+    const mediaEl = (stageRef?.current ?? el).querySelector<HTMLVideoElement | HTMLCanvasElement>("video, canvas");
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    if (mediaEl) {
+      const adj = engine.update(mediaEl, roi, now);
+      setAdjustments({ ...adj });
+    } else {
+      setAdjustments({ ...engine.getAdjustments() });
+    }
+  }, [enhanceable, enhancementMode, engine, frameEl, stageRef]);
+
+  // Recalculate ROI and adjustments when zoom or configuration changes
+  useEffect(() => {
+    updateEnhancements(zoom);
+  }, [zoom, updateEnhancements]);
+
+  // Throttled RAF loop for live frame smoothing/updates in auto/manual mode.
+  // In grid views (1, 4, 9, 16 cameras), background tiles (1x zoom) poll at 600ms,
+  // while active zoomed tiles poll at 150ms. Re-renders are skipped if values are unchanged.
+  useEffect(() => {
+    if (!enhanceable || enhancementMode === "off") return;
+    let rafId: number;
+    let lastTime = 0;
+
+    const hasSignificantChange = (prev: EnhancementAdjustments, next: EnhancementAdjustments): boolean => {
+      return (
+        Math.abs(prev.brightness - next.brightness) >= 0.5 ||
+        Math.abs(prev.contrast - next.contrast) >= 0.5 ||
+        Math.abs(prev.gamma - next.gamma) >= 0.02 ||
+        Math.abs(prev.saturation - next.saturation) >= 0.5 ||
+        Math.abs(prev.sharpness - next.sharpness) >= 0.5 ||
+        Math.abs(prev.blackLevel - next.blackLevel) >= 0.005 ||
+        Math.abs(prev.whiteLevel - next.whiteLevel) >= 0.005 ||
+        Math.abs(prev.temperature - next.temperature) >= 0.5
+      );
+    };
+
+    const tick = (now: number) => {
+      const minInterval = zoomRef.current.scale > 1 ? 150 : 600;
+      if (now - lastTime >= minInterval) {
+        lastTime = now;
+        const el = frameEl;
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const roi = extractRoiRect(zoomRef.current, rect.width, rect.height);
+          const mediaEl = (stageRef?.current ?? el).querySelector<HTMLVideoElement | HTMLCanvasElement>("video, canvas");
+          if (mediaEl) {
+            const adj = engine.update(mediaEl, roi, now);
+            setAdjustments((prev) => (hasSignificantChange(prev, adj) ? { ...adj } : prev));
+          }
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [enhanceable, enhancementMode, engine, frameEl, stageRef]);
+
   if (trackedKey !== resetKey) {
     setTrackedKey(resetKey);
     setZoom(IDENTITY_ZOOM);
@@ -196,7 +325,14 @@ export function ZoomFrame({ frameRef, stageRef, resetKey, className, onZoom, pic
   };
 
   const zoomed = zoom.scale > 1;
-  const stageStyle = zoomed ? { transform: zoomTransform(zoom), transformOrigin: "0 0" } : undefined;
+  const cssFilter = enhanceable ? generateCssFilterString(adjustments) : "none";
+  const stageStyle: React.CSSProperties | undefined =
+    zoomed || cssFilter !== "none"
+      ? {
+          ...(zoomed ? { transform: zoomTransform(zoom), transformOrigin: "0 0" } : {}),
+          ...(cssFilter !== "none" ? { filter: cssFilter } : {}),
+        }
+      : undefined;
 
   return (
     <div
@@ -220,6 +356,16 @@ export function ZoomFrame({ frameRef, stageRef, resetKey, className, onZoom, pic
         </div>
       )}
       {children}
+      {enhanceable && (
+        <EnhancementControl
+          mode={enhancementMode}
+          onModeChange={handleModeChange}
+          adjustments={adjustments}
+          onAdjustmentsChange={handleAdjustmentsChange}
+          onReset={handleReset}
+          className="absolute bottom-1.5 left-1.5 z-[3]"
+        />
+      )}
       {zoomed && (
         <button
           type="button"

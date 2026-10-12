@@ -7,7 +7,6 @@ import {
   DEFAULT_ADJUSTMENTS,
   type EnhancementAdjustments,
   type ImageStats,
-  type RoiRect,
 } from "./analysis";
 import { ImageEnhancementEngineImpl } from "./engine";
 

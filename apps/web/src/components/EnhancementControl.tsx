@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { cn } from "@/lib/cn";
 import {
-  DEFAULT_ADJUSTMENTS,
   type EnhancementAdjustments,
   type EnhancementMode,
 } from "@/lib/enhancement/types";

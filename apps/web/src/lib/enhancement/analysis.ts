@@ -1,6 +1,6 @@
-import { IDENTITY_ZOOM, type DigitalZoom } from "@/lib/live/digitalZoom";
+import { type DigitalZoom } from "@/lib/live/digitalZoom";
 import { DEFAULT_ADJUSTMENTS, type EnhancementAdjustments, type ImageStats, type RoiRect } from "./types";
-export { DEFAULT_ADJUSTMENTS };
+export { DEFAULT_ADJUSTMENTS, type EnhancementAdjustments, type ImageStats, type RoiRect };
 
 export const FULL_FRAME_ROI: Readonly<RoiRect> = Object.freeze({
   x: 0,
@@ -68,8 +68,22 @@ export function sampleFrameStats(
   if (!ctx) return null;
 
   try {
-    const sw = "videoWidth" in source ? (source.videoWidth as number) : (source.width as number);
-    const sh = "videoHeight" in source ? (source.videoHeight as number) : (source.height as number);
+    const sw =
+      "videoWidth" in source
+        ? (source.videoWidth as number)
+        : "displayWidth" in source
+          ? (source.displayWidth as number)
+          : "width" in source
+            ? (source.width as number)
+            : 0;
+    const sh =
+      "videoHeight" in source
+        ? (source.videoHeight as number)
+        : "displayHeight" in source
+          ? (source.displayHeight as number)
+          : "height" in source
+            ? (source.height as number)
+            : 0;
     if (!sw || !sh) return null;
 
     const sx = roi.x * sw;
@@ -91,13 +105,13 @@ export function sampleFrameStats(
     let maxLuma = 0;
 
     for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
+      const r = data[i] ?? 0;
+      const g = data[i + 1] ?? 0;
+      const b = data[i + 2] ?? 0;
 
       // ITU-R BT.709 luminance
       const luma = Math.round(0.2126 * r + 0.7152 * g + 0.0722 * b);
-      histogram[luma]++;
+      histogram[luma] = (histogram[luma] ?? 0) + 1;
       sumLuma += luma;
       sumR += r;
       sumG += g;
@@ -120,7 +134,7 @@ export function sampleFrameStats(
     const targetP95 = totalPixels * 0.95;
 
     for (let val = 0; val < 256; val++) {
-      count += histogram[val];
+      count += histogram[val] ?? 0;
       if (count >= targetP5 && p5Luma === minLuma) {
         p5Luma = val;
       }

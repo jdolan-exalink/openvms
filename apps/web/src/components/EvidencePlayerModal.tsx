@@ -24,9 +24,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "@/api/client";
 import { cameraFrigateDocQuery } from "@/api/queries";
+import { EnhancementControl } from "@/components/EnhancementControl";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { Button, LinkButton } from "@/components/ui";
+import { FULL_FRAME_ROI } from "@/lib/enhancement/analysis";
+import { ImageEnhancementEngineImpl } from "@/lib/enhancement/engine";
+import {
+  DEFAULT_ADJUSTMENTS,
+  type EnhancementAdjustments,
+  type EnhancementMode,
+} from "@/lib/enhancement/types";
+import { generateCssFilterString } from "@/lib/enhancement/webgl";
 import { fmtBytes, fmtDateTime, fmtTime, labelName } from "@/lib/format";
 import { positionAt, trackWindow, trailUntil, zoneEntries, type TrackPoint, type ZoneEntry } from "@/lib/objectTracks";
 import { useSyncedPlayback } from "@/lib/useSyncedPlayback";
@@ -485,6 +494,204 @@ function CameraEvidenceOverlay({
   );
 }
 
+interface EvidenceVideoTileProps {
+  item: EvidencePlayerCameraItem;
+  isMaximized: boolean;
+  onToggleMaximize: () => void;
+  isCopied: boolean;
+  camEvents: ForensicEvent[];
+  videoSrc: string;
+  isMuted: boolean;
+  isPlaying: boolean;
+  isMaster: boolean;
+  currentTime: number;
+  clipStartUnix: number;
+  manifestZones?: Record<string, unknown>;
+  isPublic?: boolean;
+  layers: {
+    zones: boolean;
+    touched: boolean;
+    tracking: boolean;
+    events: boolean;
+  };
+  onVideoRef: (id: string, el: HTMLVideoElement | null) => void;
+  onTimeUpdate: (id: string, e: React.SyntheticEvent<HTMLVideoElement>) => void;
+  onLoadedMetadata: (id: string, e: React.SyntheticEvent<HTMLVideoElement>) => void;
+  onMasterEnded: () => void;
+  copyToClipboard: (hash: string, id: string) => void;
+}
+
+function EvidenceVideoTile({
+  item,
+  isMaximized,
+  onToggleMaximize,
+  isCopied,
+  camEvents,
+  videoSrc,
+  isMuted,
+  isPlaying,
+  isMaster,
+  currentTime,
+  clipStartUnix,
+  manifestZones,
+  isPublic,
+  layers,
+  onVideoRef,
+  onTimeUpdate,
+  onLoadedMetadata,
+  onMasterEnded,
+  copyToClipboard,
+}: EvidenceVideoTileProps) {
+  const [engine] = useState(() => new ImageEnhancementEngineImpl());
+  const [enhancementMode, setEnhancementMode] = useState<EnhancementMode>("auto");
+  const [adjustments, setAdjustments] = useState<EnhancementAdjustments>(() => engine.getAdjustments());
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      engine.destroy();
+    };
+  }, [engine]);
+
+  const handleModeChange = useCallback((nextMode: EnhancementMode) => {
+    engine.setMode(nextMode);
+    setEnhancementMode(nextMode);
+    if (nextMode === "off") {
+      setAdjustments({ ...DEFAULT_ADJUSTMENTS });
+    } else {
+      setAdjustments({ ...engine.getAdjustments() });
+    }
+  }, [engine]);
+
+  const handleAdjustmentsChange = useCallback((patch: Partial<EnhancementAdjustments>) => {
+    engine.setManualAdjustments(patch);
+    setAdjustments({ ...engine.getAdjustments() });
+  }, [engine]);
+
+  const handleReset = useCallback(() => {
+    engine.reset();
+    setEnhancementMode(engine.mode);
+    setAdjustments({ ...engine.getAdjustments() });
+  }, [engine]);
+
+  // Throttled RAF loop to analyze video frame when playing in auto mode
+  useEffect(() => {
+    if (enhancementMode === "off") return;
+    let rafId: number;
+    let lastTime = 0;
+
+    const tick = (now: number) => {
+      if (now - lastTime >= 150) {
+        lastTime = now;
+        const el = localVideoRef.current;
+        if (el && el.readyState >= 2) {
+          const adj = engine.update(el, FULL_FRAME_ROI, now);
+          setAdjustments({ ...adj });
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+
+    rafId = requestAnimationFrame(tick);
+    return () => {
+      cancelAnimationFrame(rafId);
+    };
+  }, [enhancementMode, engine]);
+
+  const cssFilter = generateCssFilterString(adjustments);
+  const videoFilterStyle = cssFilter !== "none" ? { filter: cssFilter } : undefined;
+
+  return (
+    <div className="relative flex flex-col bg-surface-1 rounded-m3-lg border border-outline-variant/60 overflow-hidden shadow-sm">
+      {/* Camera Header Badge */}
+      <div className="flex items-center justify-between px-3 py-1.5 bg-surface-2/80 border-b border-outline-variant/40 text-xs">
+        <span className="font-semibold text-on-surface">{item.camera_name}</span>
+        <div className="flex items-center gap-2">
+          {item.server_name && (
+            <span className="text-[11px] text-muted font-mono">{item.server_name}</span>
+          )}
+          <button
+            type="button"
+            onClick={onToggleMaximize}
+            className="p-1 rounded hover:bg-surface-3 text-muted hover:text-on-surface transition-colors cursor-pointer"
+            title={isMaximized ? "Volver a cuadrícula" : "Maximizar esta cámara"}
+          >
+            <Icon icon={isMaximized ? Minimize2 : Maximize2} size="xs" />
+          </button>
+        </div>
+      </div>
+
+      {/* HTML5 Video Element & Overlay Canvas */}
+      <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
+        <video
+          ref={(el) => {
+            localVideoRef.current = el;
+            onVideoRef(item.id, el);
+          }}
+          src={videoSrc}
+          muted={isMuted}
+          playsInline
+          autoPlay
+          preload="auto"
+          style={videoFilterStyle}
+          onTimeUpdate={(e) => onTimeUpdate(item.id, e)}
+          onLoadedMetadata={(e) => onLoadedMetadata(item.id, e)}
+          onCanPlay={(e) => {
+            if (isPlaying) {
+              e.currentTarget.play().catch(() => {});
+            }
+          }}
+          onEnded={() => {
+            if (isMaster) {
+              onMasterEnded();
+            }
+          }}
+          className="w-full h-full object-cover"
+        />
+
+        {/* SVG Forensic Layer: Zones, Touched Zones, Tracking Lines */}
+        <CameraEvidenceOverlay
+          cameraId={item.camera_id}
+          currentTime={currentTime}
+          clipStartUnix={clipStartUnix}
+          cameraEvents={camEvents}
+          manifestZones={manifestZones}
+          isPublic={isPublic}
+          layers={layers}
+        />
+
+        {/* Dynamic Visual Enhancement Controls */}
+        <EnhancementControl
+          mode={enhancementMode}
+          onModeChange={handleModeChange}
+          adjustments={adjustments}
+          onAdjustmentsChange={handleAdjustmentsChange}
+          onReset={handleReset}
+          className="absolute bottom-1.5 left-1.5 z-20"
+        />
+      </div>
+
+      {/* Camera Forensic Integrity Footer */}
+      <div className="flex items-center justify-between px-3 py-1.5 bg-surface-1 border-t border-outline-variant/40 text-[11px] font-mono">
+        {item.sha256_hash ? (
+          <button
+            type="button"
+            onClick={() => copyToClipboard(item.sha256_hash!, item.id)}
+            className="inline-flex items-center gap-1.5 text-ok hover:text-ok/80 transition-colors"
+            title={`Hash SHA-256 completo: ${item.sha256_hash}\nHaga clic para copiar`}
+          >
+            <Icon icon={isCopied ? Check : CheckCircle2} size="xs" />
+            <span>SHA-256: {item.sha256_hash.slice(0, 16)}...</span>
+          </button>
+        ) : (
+          <span className="text-muted">Procesando firma...</span>
+        )}
+        <span className="text-muted">{fmtBytes(item.total_bytes)}</span>
+      </div>
+    </div>
+  );
+}
+
 export function EvidencePlayerModal({
   job,
   onClose,
@@ -898,99 +1105,36 @@ export function EvidencePlayerModal({
           maximizedCameraId ? "max-h-[65vh]" : "max-h-[50vh]"
         } p-1`}
       >
-        {(maximizedCameraId ? items.filter((it) => it.id === maximizedCameraId) : items).map((it) => {
-          const isCopied = copiedHash === it.id;
-          const camEvents = allEvents.filter((e) => e.camera_id === it.camera_id);
-
-          return (
-            <div
-              key={it.id}
-              className="relative flex flex-col bg-surface-1 rounded-m3-lg border border-outline-variant/60 overflow-hidden shadow-sm"
-            >
-              {/* Camera Header Badge */}
-              <div className="flex items-center justify-between px-3 py-1.5 bg-surface-2/80 border-b border-outline-variant/40 text-xs">
-                <span className="font-semibold text-on-surface">{it.camera_name}</span>
-                <div className="flex items-center gap-2">
-                  {it.server_name && (
-                    <span className="text-[11px] text-muted font-mono">{it.server_name}</span>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMaximizedCameraId(maximizedCameraId === it.id ? null : it.id)
-                    }
-                    className="p-1 rounded hover:bg-surface-3 text-muted hover:text-on-surface transition-colors cursor-pointer"
-                    title={
-                      maximizedCameraId === it.id ? "Volver a cuadrícula" : "Maximizar esta cámara"
-                    }
-                  >
-                    <Icon icon={maximizedCameraId === it.id ? Minimize2 : Maximize2} size="xs" />
-                  </button>
-                </div>
-              </div>
-
-              {/* HTML5 Video Element & Overlay Canvas */}
-              <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
-                <video
-                  ref={(el) => {
-                    if (el) {
-                      videoRefs.current.set(it.id, el);
-                    } else {
-                      videoRefs.current.delete(it.id);
-                    }
-                  }}
-                  src={getVideoSrc(it)}
-                  muted={isMuted}
-                  playsInline
-                  autoPlay
-                  preload="auto"
-                  onTimeUpdate={(e) => onTimeUpdate(it.id, e)}
-                  onLoadedMetadata={(e) => onLoadedMetadata(it.id, e)}
-                  onCanPlay={(e) => {
-                    if (isPlaying) {
-                      e.currentTarget.play().catch(() => {});
-                    }
-                  }}
-                  onEnded={() => {
-                    if (it.id === masterKey) {
-                      setIsPlaying(false);
-                    }
-                  }}
-                  className="w-full h-full object-cover"
-                />
-
-                {/* SVG Forensic Layer: Zones, Touched Zones, Tracking Lines */}
-                <CameraEvidenceOverlay
-                  cameraId={it.camera_id}
-                  currentTime={currentTime}
-                  clipStartUnix={clipStartUnix}
-                  cameraEvents={camEvents}
-                  manifestZones={job.manifest?.zones && typeof job.manifest.zones === "object" && !Array.isArray(job.manifest.zones) ? job.manifest.zones as Record<string, unknown> : undefined}
-                  isPublic={isPublic}
-                  layers={layers}
-                />
-              </div>
-
-              {/* Camera Forensic Integrity Footer */}
-              <div className="flex items-center justify-between px-3 py-1.5 bg-surface-1 border-t border-outline-variant/40 text-[11px] font-mono">
-                {it.sha256_hash ? (
-                  <button
-                    type="button"
-                    onClick={() => copyToClipboard(it.sha256_hash!, it.id)}
-                    className="inline-flex items-center gap-1.5 text-ok hover:text-ok/80 transition-colors"
-                    title={`Hash SHA-256 completo: ${it.sha256_hash}\nHaga clic para copiar`}
-                  >
-                    <Icon icon={isCopied ? Check : CheckCircle2} size="xs" />
-                    <span>SHA-256: {it.sha256_hash.slice(0, 16)}...</span>
-                  </button>
-                ) : (
-                  <span className="text-muted">Procesando firma...</span>
-                )}
-                <span className="text-muted">{fmtBytes(it.total_bytes)}</span>
-              </div>
-            </div>
-          );
-        })}
+        {(maximizedCameraId ? items.filter((it) => it.id === maximizedCameraId) : items).map((it) => (
+          <EvidenceVideoTile
+            key={it.id}
+            item={it}
+            isMaximized={maximizedCameraId === it.id}
+            onToggleMaximize={() => setMaximizedCameraId(maximizedCameraId === it.id ? null : it.id)}
+            isCopied={copiedHash === it.id}
+            camEvents={allEvents.filter((e) => e.camera_id === it.camera_id)}
+            videoSrc={getVideoSrc(it)}
+            isMuted={isMuted}
+            isPlaying={isPlaying}
+            isMaster={it.id === masterKey}
+            currentTime={currentTime}
+            clipStartUnix={clipStartUnix}
+            manifestZones={job.manifest?.zones && typeof job.manifest.zones === "object" && !Array.isArray(job.manifest.zones) ? job.manifest.zones as Record<string, unknown> : undefined}
+            isPublic={isPublic}
+            layers={layers}
+            onVideoRef={(id, el) => {
+              if (el) {
+                videoRefs.current.set(id, el);
+              } else {
+                videoRefs.current.delete(id);
+              }
+            }}
+            onTimeUpdate={onTimeUpdate}
+            onLoadedMetadata={onLoadedMetadata}
+            onMasterEnded={() => setIsPlaying(false)}
+            copyToClipboard={copyToClipboard}
+          />
+        ))}
       </div>
 
       {/* Compact Multi-Camera Dock Timeline (Live Recorded Pattern) */}

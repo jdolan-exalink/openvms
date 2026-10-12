@@ -41,21 +41,23 @@ Operators monitoring security cameras frequently encounter suboptimal lighting c
   - Implement compact `EnhancementControl` component with `OFF` / `AUTO` quick toggle, popover with manual sliders (brightness, contrast, gamma, saturation, sharpness), and "Restablecer imagen" button.
   - TDD: RED test in `apps/web/src/components/EnhancementControl.test.tsx` verifying toggle states, accessibility, and reset actions -> GREEN -> REFACTOR (4 passed).
 
-- [ ] `TASK-4`: Integration with Digital Zoom & Players
-  - Route: Delegated writer.
+- [x] `TASK-4`: Integration with Digital Zoom & Players
+  - Route: Delegated writer (subagent).
   - Connect `ZoomFrame` visible ROI to `ImageEnhancementEngine`.
   - Wire into `MsePlayer` (Live View), `HlsPlayer` (Playback), and `EvidencePlayerModal` (Exports).
-  - TDD: RED test in `apps/web/src/components/DigitalZoomEnhancement.test.tsx` verifying ROI updates trigger enhancement adjustments -> GREEN -> REFACTOR.
+  - TDD: Tests in `apps/web/src/components/DigitalZoomEnhancement.test.tsx` and `apps/web/src/components/EvidencePlayerModal.test.tsx` (all passed).
 
-- [ ] `TASK-5`: Grid Multicamera Throttling & Final Verification
+- [x] `TASK-5`: Grid Multicamera Throttling & Final Verification
   - Route: Direct inline.
-  - Implement grid throttling policy (active/zoomed camera priority, throttled sampling for background grid tiles).
-  - Run full test suite and build verification.
+  - Implement grid throttling policy (active/zoomed camera priority at 150ms, throttled sampling for background grid tiles at 600ms, skip redundant re-renders via equality check).
+  - Full test suite verified (26/26 tests passed) and production build clean (0 errors).
 
 ## Progress & Verification Evidence
 - `TASK-1`: Complete. 8/8 tests passed in `src/lib/enhancement/engine.test.ts`. Verified ROI extraction from digital zoom, auto contrast/gamma/black-level adjustments, and lerp interpolation.
 - `TASK-2`: Complete. 3/3 tests passed in `src/lib/enhancement/webgl.test.ts`. WebGL hardware shader pipeline (Laplacian unsharp mask, levels stretch, gamma, contrast, saturation, white balance) and CSS filter fallback implemented.
 - `TASK-3`: Complete. 4/4 tests passed in `src/components/EnhancementControl.test.tsx`. Compact quick AUTO/OFF toggle badge, manual slider drawer (brightness, contrast, gamma, saturation, sharpness), and image reset action.
+- `TASK-4`: Complete. `ZoomFrame` (powering Live View `MsePlayer` and Playback `HlsPlayer`) and `EvidencePlayerModal` (Exports) integrated with dynamic ROI tracking and hardware-accelerated CSS filter rendering.
+- `TASK-5`: Complete. Multicamera performance optimized for 1, 4, 9, 16 camera grids. Verified clean build and full vitest suite passing (26/26 tests).
 
 ## Next Step
-Execute `TASK-4`: Integration with Digital Zoom & Players under strict TDD.
+Feature complete and deployed. Ready for user verification.

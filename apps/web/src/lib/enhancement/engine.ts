@@ -65,6 +65,10 @@ export class ImageEnhancementEngineImpl implements ImageEnhancementEngine {
     return stats;
   }
 
+  getLastStats(): ImageStats | null {
+    return this.lastStats;
+  }
+
   calculateAdjustments(stats: ImageStats, roi: RoiRect = FULL_FRAME_ROI): EnhancementAdjustments {
     return computeAutoAdjustments(stats, roi);
   }

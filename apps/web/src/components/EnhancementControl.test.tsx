@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_ADJUSTMENTS, type EnhancementAdjustments, type EnhancementMode } from "@/lib/enhancement/types";
+import { DEFAULT_ADJUSTMENTS } from "@/lib/enhancement/types";
 import { EnhancementControl } from "./EnhancementControl";
 
 describe("EnhancementControl Component", () => {
