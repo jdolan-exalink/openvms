@@ -71,7 +71,10 @@ export function analyzeFrameQuality(
   let maxLuma = 0;
 
   for (let i = 0, p = 0; i < data.length; i += 4, p++) {
-    const luma = 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+    const r = data[i] ?? 0;
+    const g = data[i + 1] ?? 0;
+    const b = data[i + 2] ?? 0;
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
     gray[p] = luma;
     sumLuma += luma;
     if (luma < minLuma) minLuma = luma;
@@ -91,12 +94,13 @@ export function analyzeFrameQuality(
     const row = y * width;
     for (let x = 1; x < width - 1; x++) {
       const idx = row + x;
-      const lap =
-        gray[idx - 1] +
-        gray[idx + 1] +
-        gray[idx - width] +
-        gray[idx + width] -
-        4 * gray[idx];
+      const gIdx = gray[idx] ?? 0;
+      const gLeft = gray[idx - 1] ?? 0;
+      const gRight = gray[idx + 1] ?? 0;
+      const gUp = gray[idx - width] ?? 0;
+      const gDown = gray[idx + width] ?? 0;
+
+      const lap = gLeft + gRight + gUp + gDown - 4 * gIdx;
 
       sumLap += lap;
       sumLapSq += lap * lap;
@@ -116,15 +120,15 @@ export function analyzeFrameQuality(
     for (let x = 1; x < width - 1; x++) {
       const idx = row + x;
       const n =
-        gray[idx - 1 - width] -
-        2 * gray[idx - width] +
-        gray[idx + 1 - width] -
-        2 * gray[idx - 1] +
-        4 * gray[idx] -
-        2 * gray[idx + 1] +
-        gray[idx - 1 + width] -
-        2 * gray[idx + width] +
-        gray[idx + 1 + width];
+        (gray[idx - 1 - width] ?? 0) -
+        2 * (gray[idx - width] ?? 0) +
+        (gray[idx + 1 - width] ?? 0) -
+        2 * (gray[idx - 1] ?? 0) +
+        4 * (gray[idx] ?? 0) -
+        2 * (gray[idx + 1] ?? 0) +
+        (gray[idx - 1 + width] ?? 0) -
+        2 * (gray[idx + width] ?? 0) +
+        (gray[idx + 1 + width] ?? 0);
 
       sumNoise += Math.abs(n);
     }
@@ -164,23 +168,23 @@ export function applyDeblurFilter(
       for (let c = 0; c < 3; c++) {
         // Compute 3x3 local blur
         const blur =
-          (data[idx - 4 - width * 4 + c] +
-            2 * data[idx - width * 4 + c] +
-            data[idx + 4 - width * 4 + c] +
-            2 * data[idx - 4 + c] +
-            4 * data[idx + c] +
-            2 * data[idx + 4 + c] +
-            data[idx - 4 + width * 4 + c] +
-            2 * data[idx + width * 4 + c] +
-            data[idx + 4 + width * 4 + c]) /
+          ((data[idx - 4 - width * 4 + c] ?? 0) +
+            2 * (data[idx - width * 4 + c] ?? 0) +
+            (data[idx + 4 - width * 4 + c] ?? 0) +
+            2 * (data[idx - 4 + c] ?? 0) +
+            4 * (data[idx + c] ?? 0) +
+            2 * (data[idx + 4 + c] ?? 0) +
+            (data[idx - 4 + width * 4 + c] ?? 0) +
+            2 * (data[idx + width * 4 + c] ?? 0) +
+            (data[idx + 4 + width * 4 + c] ?? 0)) /
           16;
 
-        const val = data[idx + c];
+        const val = data[idx + c] ?? 0;
         const diff = val - blur;
         // Edge contrast restoration with halo dampening
         output[idx + c] = Math.min(255, Math.max(0, Math.round(val + diff * strength)));
       }
-      output[idx + 3] = data[idx + 3];
+      output[idx + 3] = data[idx + 3] ?? 255;
     }
   }
 
@@ -206,9 +210,9 @@ export function applyDenoiseFilter(
   for (let y = 1; y < height - 1; y++) {
     for (let x = 1; x < width - 1; x++) {
       const centerIdx = (y * width + x) * 4;
-      const centerR = data[centerIdx];
-      const centerG = data[centerIdx + 1];
-      const centerB = data[centerIdx + 2];
+      const centerR = data[centerIdx] ?? 0;
+      const centerG = data[centerIdx + 1] ?? 0;
+      const centerB = data[centerIdx + 2] ?? 0;
 
       let sumR = 0;
       let sumG = 0;
@@ -218,9 +222,9 @@ export function applyDenoiseFilter(
       for (let dy = -1; dy <= 1; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           const nIdx = ((y + dy) * width + (x + dx)) * 4;
-          const nr = data[nIdx];
-          const ng = data[nIdx + 1];
-          const nb = data[nIdx + 2];
+          const nr = data[nIdx] ?? 0;
+          const ng = data[nIdx + 1] ?? 0;
+          const nb = data[nIdx + 2] ?? 0;
 
           const distSq = dx * dx + dy * dy;
           const colorDiffSq =
@@ -282,14 +286,19 @@ export function applySuperResolution(
 
       for (let c = 0; c < 4; c++) {
         // Bilinear base
-        const top = data[idx00 + c] * (1 - tx) + data[idx10 + c] * tx;
-        const bottom = data[idx01 + c] * (1 - tx) + data[idx11 + c] * tx;
+        const p00 = data[idx00 + c] ?? 0;
+        const p10 = data[idx10 + c] ?? 0;
+        const p01 = data[idx01 + c] ?? 0;
+        const p11 = data[idx11 + c] ?? 0;
+
+        const top = p00 * (1 - tx) + p10 * tx;
+        const bottom = p01 * (1 - tx) + p11 * tx;
         let val = top * (1 - ty) + bottom * ty;
 
         // Sub-pixel gradient enhancement on RGB channels
         if (c < 3) {
-          const gradX = Math.abs(data[idx10 + c] - data[idx00 + c]);
-          const gradY = Math.abs(data[idx01 + c] - data[idx00 + c]);
+          const gradX = Math.abs(p10 - p00);
+          const gradY = Math.abs(p01 - p00);
           if (gradX > 15 || gradY > 15) {
             val = val + (val - (top + bottom) * 0.5) * 0.35;
           }
@@ -322,14 +331,17 @@ export function applyToneMapping(
   // Compute average luminance to determine shadow-lifting curve
   let totalLuma = 0;
   for (let i = 0; i < data.length; i += 4) {
-    totalLuma += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+    const r = data[i] ?? 0;
+    const g = data[i + 1] ?? 0;
+    const b = data[i + 2] ?? 0;
+    totalLuma += 0.2126 * r + 0.7152 * g + 0.0722 * b;
   }
   const avgLuma = totalLuma / (width * height);
   const shadowLift = avgLuma < 80 ? 1.25 : 1.05;
 
   for (let i = 0; i < data.length; i += 4) {
     for (let c = 0; c < 3; c++) {
-      const norm = data[i + c] / 255;
+      const norm = (data[i + c] ?? 0) / 255;
       // Gamma lift on shadows, preserving highlights
       const lifted = Math.pow(norm, 1.0 / shadowLift);
       // Gentle S-curve contrast
@@ -367,8 +379,8 @@ export class ForensicEnhancementEngine {
     origCanvas.height = Math.round(sHeight);
     const origCtx = origCanvas.getContext("2d", { willReadFrequently: true });
     let currentPixels: Uint8ClampedArray;
-    let currentW = origCanvas.width;
-    let currentH = origCanvas.height;
+    const currentW = origCanvas.width;
+    const currentH = origCanvas.height;
 
     if (origCtx) {
       origCtx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, origCanvas.width, origCanvas.height);
@@ -401,21 +413,21 @@ export class ForensicEnhancementEngine {
     const scaleFactor = options.scaleFactor ?? 2;
     const superRes = applySuperResolution(currentPixels, currentW, currentH, scaleFactor);
     currentPixels = superRes.data;
-    currentW = superRes.width;
-    currentH = superRes.height;
+    const finalW = superRes.width;
+    const finalH = superRes.height;
     operations.push("super_resolution");
 
     // 6. Tone Mapping & Post-processing
-    currentPixels = applyToneMapping(currentPixels, currentW, currentH);
+    currentPixels = applyToneMapping(currentPixels, finalW, finalH);
     operations.push("tone_mapping");
 
     // 7. Write enhanced output canvas
     const enhancedCanvas = document.createElement("canvas");
-    enhancedCanvas.width = currentW;
-    enhancedCanvas.height = currentH;
+    enhancedCanvas.width = finalW;
+    enhancedCanvas.height = finalH;
     const enhCtx = enhancedCanvas.getContext("2d");
     if (enhCtx) {
-      const enhImgData = enhCtx.createImageData(currentW, currentH);
+      const enhImgData = enhCtx.createImageData(finalW, finalH);
       enhImgData.data.set(currentPixels);
       enhCtx.putImageData(enhImgData, 0, 0);
     }

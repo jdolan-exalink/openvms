@@ -12,7 +12,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import type { ForensicProcessOptions, ForensicResult } from "@/lib/enhancement/forensic";
@@ -35,7 +35,7 @@ export function ForensicComparisonModal({
   onClose,
   result,
   isLoading = false,
-  onReprocess,
+  onReprocess: _onReprocess,
   cameraName: initialCameraName,
   timestamp: initialTimestamp,
 }: ForensicComparisonModalProps) {

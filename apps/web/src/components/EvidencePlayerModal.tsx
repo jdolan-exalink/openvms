@@ -525,7 +525,7 @@ interface EvidenceVideoTileProps {
   onLoadedMetadata: (id: string, e: React.SyntheticEvent<HTMLVideoElement>) => void;
   onMasterEnded: () => void;
   copyToClipboard: (hash: string, id: string) => void;
-  onEnhanceCapture: (item: EvidenceExportItem, videoEl: HTMLVideoElement | null) => void;
+  onEnhanceCapture: (item: EvidencePlayerCameraItem, videoEl: HTMLVideoElement | null) => void;
 }
 
 function EvidenceVideoTile({
@@ -761,7 +761,7 @@ export function EvidencePlayerModal({
   }
 
   const handleEnhanceCapture = useCallback(
-    async (item: EvidenceExportItem, videoEl: HTMLVideoElement | null) => {
+    async (item: EvidencePlayerCameraItem, videoEl: HTMLVideoElement | null) => {
       setIsForensicOpen(true);
       setIsForensicLoading(true);
       try {

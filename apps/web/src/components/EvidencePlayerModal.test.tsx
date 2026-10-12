@@ -110,7 +110,9 @@ describe("EvidencePlayerModal Enhancement Integration", () => {
     expect(enhanceBtns.length).toBeGreaterThan(0);
 
     // Click 'Mejorar captura' on first tile
-    fireEvent.click(enhanceBtns[0]);
+    const [firstEnhanceBtn] = enhanceBtns;
+    expect(firstEnhanceBtn).toBeDefined();
+    fireEvent.click(firstEnhanceBtn!);
 
     // Forensic comparison modal should open
     expect(await screen.findByText("Mejora de Detalle Forense")).toBeInTheDocument();
