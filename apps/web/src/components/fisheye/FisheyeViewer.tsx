@@ -1,6 +1,5 @@
 import {
   type PointerEvent as ReactPointerEvent,
-  type WheelEvent as ReactWheelEvent,
   useCallback,
   useEffect,
   useRef,
@@ -68,15 +67,34 @@ export function FisheyeViewer({
 
   // Preload instant snapshot fallback so the view is never empty/black
   useEffect(() => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = `/media/v1/cameras/${cameraId}/snapshot.jpg`;
-    img.onload = () => {
-      snapshotRef.current = img;
-      setSnapshotLoaded(true);
-    };
+    let active = true;
+    let objectUrl: string | null = null;
+
+    fetch(`/media/v1/cameras/${encodeURIComponent(cameraId)}/snapshot.jpg`, {
+      credentials: "same-origin",
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Snapshot HTTP ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        const img = new Image();
+        img.onload = () => {
+          if (!active) return;
+          snapshotRef.current = img;
+          setSnapshotLoaded(true);
+        };
+        img.src = objectUrl;
+      })
+      .catch((err) => {
+        console.warn("Fisheye snapshot fetch failed:", err);
+      });
+
     return () => {
-      img.onload = null;
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
       snapshotRef.current = null;
     };
   }, [cameraId]);
@@ -267,12 +285,25 @@ export function FisheyeViewer({
     }
   };
 
-  const handleWheel = (e: ReactWheelEvent<HTMLDivElement>) => {
-    if (mode === "virtual_ptz") {
-      e.preventDefault();
-      ptzControllerRef.current?.zoomBy(e.deltaY);
-    }
-  };
+  const stageRef = useRef<HTMLDivElement | null>(null);
+
+  // Active non-passive wheel zoom listener to prevent page scrolling without browser warnings
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+
+    const onWheel = (e: WheelEvent) => {
+      if (mode === "virtual_ptz") {
+        e.preventDefault();
+        ptzControllerRef.current?.zoomBy(e.deltaY);
+      }
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+    };
+  }, [mode]);
 
   const handleDoubleClick = (e: ReactPointerEvent<HTMLDivElement>) => {
     if (mode === "virtual_ptz") {
@@ -493,12 +524,12 @@ export function FisheyeViewer({
       ) : (
         /* Standard Single Viewport (Original, 360, Panorama, or Virtual PTZ) */
         <div
+          ref={stageRef}
           data-testid="fisheye-stage"
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
-          onWheel={handleWheel}
           onDoubleClick={handleDoubleClick}
           className={cn(
             "relative w-full h-full min-h-[360px] flex items-center justify-center bg-black overflow-hidden touch-none",
