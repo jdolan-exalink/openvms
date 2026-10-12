@@ -23,15 +23,17 @@ CCTV operators frequently pause recorded evidence on critical moments (license p
 
 ## Actionable Tasks
 
-- [ ] `TASK-1`: Core Forensic Pipeline & Adaptive Providers
+- [x] `TASK-1`: Core Forensic Pipeline & Adaptive Providers
   - Route: Direct inline / delegated writer.
   - Implement `ForensicEnhancementEngine`, `FrameAnalyzer`, `DeblurProvider`, `DenoiseProvider`, `SuperResolutionProvider`, and `PostProcessor` in `apps/web/src/lib/enhancement/forensic.ts`.
   - TDD: RED test in `apps/web/src/lib/enhancement/forensic.test.ts` verifying blur detection, adaptive pipeline execution, and ROI processing -> GREEN -> REFACTOR.
+  - Verification: 6 vitest tests passing.
 
-- [ ] `TASK-2`: Interactive Split Before/After Comparator Component
+- [x] `TASK-2`: Interactive Split Before/After Comparator Component
   - Route: Direct inline / delegated writer.
   - Implement `ForensicComparisonModal.tsx` with interactive split comparison slider, side-by-side view, zoom/pan controls, original & enhanced download buttons, and forensic metadata banner.
   - TDD: RED test in `apps/web/src/components/ForensicComparisonModal.test.tsx` verifying slider interaction, downloads, and modal controls -> GREEN -> REFACTOR.
+  - Verification: 8 vitest tests passing.
 
 - [ ] `TASK-3`: Integration into Export Player (`EvidencePlayerModal`)
   - Route: Delegated writer.
@@ -44,7 +46,8 @@ CCTV operators frequently pause recorded evidence on critical moments (license p
   - Verify full test suite, linting, build, and deploy to Docker container.
 
 ## Progress & Verification Evidence
-- *Pending initial task execution.*
+- `TASK-1`: `forensic.ts` and `forensic.test.ts` completed with 6 passing tests. Committed in `6108405`.
+- `TASK-2`: `ForensicComparisonModal.tsx` and `ForensicComparisonModal.test.tsx` completed with 8 passing tests.
 
 ## Next Step
-Execute `TASK-1`: Core Forensic Pipeline & Adaptive Providers under strict TDD.
+Execute `TASK-3`: Integrate forensic enhancement trigger and comparison modal into `EvidencePlayerModal.tsx`.
