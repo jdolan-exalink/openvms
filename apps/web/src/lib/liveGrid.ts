@@ -9,12 +9,18 @@ import { parsePanes, type Pane } from "./presentations";
 
 export type Quality = "sub" | "main";
 export type LiveMapRef = { site_id: string; floor_id?: string; name: string };
-export type CameraTile = { camera_id: string; quality: Quality };
+export type CameraTile = { camera_id: string; quality: Quality; fisheye_view_id?: string };
 export type MapGridTile = { map: LiveMapRef };
 export type Tile = CameraTile | MapGridTile | null;
 
 export function cameraIdOf(tile: Tile): string | undefined {
   return tile && "camera_id" in tile ? tile.camera_id : undefined;
+}
+
+export function tileIdentityKey(tile: Tile): string | undefined {
+  if (!tile) return undefined;
+  if (isMapTile(tile)) return `map:${tile.map.site_id}:${tile.map.floor_id ?? ""}`;
+  return tile.fisheye_view_id ? `${tile.camera_id}#${tile.fisheye_view_id}` : tile.camera_id;
 }
 
 export function isMapTile(tile: Tile): tile is MapGridTile {
@@ -30,8 +36,8 @@ export function resizeTiles(tiles: Tile[], columns: number, rows = columns): Til
 }
 
 /** placeCameraAt returns a new tiles array with the camera placed at index. */
-export function placeCameraAt(tiles: Tile[], index: number, cameraId: string, quality: Quality): Tile[] {
-  return tiles.map((t, i) => (i === index ? { camera_id: cameraId, quality } : t));
+export function placeCameraAt(tiles: Tile[], index: number, cameraId: string, quality: Quality, fisheyeViewId?: string): Tile[] {
+  return tiles.map((t, i) => (i === index ? { camera_id: cameraId, quality, ...(fisheyeViewId ? { fisheye_view_id: fisheyeViewId } : {}) } : t));
 }
 
 /**
@@ -66,9 +72,10 @@ export function swapTiles(tiles: Tile[], a: number, b: number): Tile[] {
  * already in the grid it swaps with the tile at `index` (keeping its stream and quality),
  * otherwise it behaves like placeCameraAt.
  */
-export function placeCameraUnique(tiles: Tile[], index: number, cameraId: string, quality: Quality): Tile[] {
-  const at = tiles.findIndex((t) => cameraIdOf(t) === cameraId);
-  return at >= 0 ? swapTiles(tiles, at, index) : placeCameraAt(tiles, index, cameraId, quality);
+export function placeCameraUnique(tiles: Tile[], index: number, cameraId: string, quality: Quality, fisheyeViewId?: string): Tile[] {
+  const matchKey = fisheyeViewId ? `${cameraId}#${fisheyeViewId}` : cameraId;
+  const at = tiles.findIndex((t) => tileIdentityKey(t) === matchKey);
+  return at >= 0 ? swapTiles(tiles, at, index) : placeCameraAt(tiles, index, cameraId, quality, fisheyeViewId);
 }
 
 /** duplicateTileIndexes lists the cells that repeat a camera already shown in an earlier cell. */
@@ -76,10 +83,10 @@ export function duplicateTileIndexes(tiles: Tile[]): Set<number> {
   const seen = new Set<string>();
   const duplicates = new Set<number>();
   tiles.forEach((t, i) => {
-    const id = cameraIdOf(t);
-    if (!id) return;
-    if (seen.has(id)) duplicates.add(i);
-    else seen.add(id);
+    const key = tileIdentityKey(t);
+    if (!key) return;
+    if (seen.has(key)) duplicates.add(i);
+    else seen.add(key);
   });
   return duplicates;
 }
@@ -112,7 +119,7 @@ function cameraIdFromDragId(id: string | number): string | null {
 }
 
 export type DragResolution =
-  | { type: "place"; index: number; cameraId: string }
+  | { type: "place"; index: number; cameraId: string; fisheyeViewId?: string }
   | { type: "place-map"; index: number; map: LiveMapRef }
   | { type: "reorder"; from: number; to: number }
   | { type: "fill-server"; serverId: string }
@@ -125,6 +132,23 @@ export const LIVE_GRID_DROP_ID = "live-grid";
 const SERVER_DRAG_PREFIX = "tserver:";
 const FOLDER_DRAG_PREFIX = "tfolder:";
 const MAP_PREFIX = "tmap:";
+export const FEVIEW_DRAG_PREFIX = "tfeview:";
+
+export function feviewDragId(cameraId: string, viewId: string): string {
+  return `${FEVIEW_DRAG_PREFIX}${encodeURIComponent(cameraId)}:${encodeURIComponent(viewId)}`;
+}
+
+export function feviewFromDragId(id: string | number): { cameraId: string; viewId: string } | null {
+  const s = String(id);
+  if (!s.startsWith(FEVIEW_DRAG_PREFIX)) return null;
+  const rest = s.slice(FEVIEW_DRAG_PREFIX.length);
+  const colon = rest.indexOf(":");
+  if (colon <= 0) return null;
+  const cameraId = decodeURIComponent(rest.slice(0, colon));
+  const viewId = decodeURIComponent(rest.slice(colon + 1));
+  if (!cameraId || !viewId) return null;
+  return { cameraId, viewId };
+}
 
 /** mapDragId identifies a site or floor map dragged from the live sidebar onto a cell. */
 export function mapDragId(map: LiveMapRef): string {
@@ -179,6 +203,10 @@ export function resolveDragEnd(activeId: string | number, overId: string | numbe
     return { type: "place-map", index: toIndex, map };
   }
   if (toIndex === null) return null;
+  const feview = feviewFromDragId(activeId);
+  if (feview !== null) {
+    return { type: "place", index: toIndex, cameraId: feview.cameraId, fisheyeViewId: feview.viewId };
+  }
   const cameraId = cameraIdFromDragId(activeId);
   if (cameraId !== null) return { type: "place", index: toIndex, cameraId };
   const fromIndex = tileIndexFromDragId(activeId);
@@ -211,13 +239,14 @@ export function tilesForCameras(cameras: { id: string; quality: Quality }[], col
  * placeInOpenCell puts a camera in the first empty cell of the current grid.
  * A full grid replaces the first cell. A camera already on the grid stays where it is.
  */
-export function placeInOpenCell(tiles: Tile[], cameraId: string, quality: Quality): { tiles: Tile[]; index: number } {
-  const existing = tiles.findIndex((tile) => cameraIdOf(tile) === cameraId);
+export function placeInOpenCell(tiles: Tile[], cameraId: string, quality: Quality, fisheyeViewId?: string): { tiles: Tile[]; index: number } {
+  const matchKey = fisheyeViewId ? `${cameraId}#${fisheyeViewId}` : cameraId;
+  const existing = tiles.findIndex((tile) => tileIdentityKey(tile) === matchKey);
   if (existing >= 0) return { tiles, index: existing };
   const empty = tiles.findIndex((tile) => tile === null);
   const index = empty >= 0 ? empty : 0;
   if (index >= tiles.length) return { tiles, index: -1 };
-  return { tiles: placeCameraUnique(tiles, index, cameraId, quality), index };
+  return { tiles: placeCameraUnique(tiles, index, cameraId, quality, fisheyeViewId), index };
 }
 
 export function fitTiles(tiles: Tile[], count: number): Tile[] {
@@ -268,7 +297,8 @@ export function parseSelection(raw: string | null, validCameraIds: ReadonlySet<s
       return { map: { site_id: map.site_id, name: map.name, floor_id: typeof map.floor_id === "string" ? map.floor_id : undefined } };
     }
     if (typeof record.camera_id !== "string" || !validCameraIds.has(record.camera_id)) return null;
-    return { camera_id: record.camera_id, quality: record.quality === "main" ? "main" : "sub" };
+    const feViewId = typeof (record as { fisheye_view_id?: unknown }).fisheye_view_id === "string" ? (record as { fisheye_view_id: string }).fisheye_view_id : undefined;
+    return { camera_id: record.camera_id, quality: record.quality === "main" ? "main" : "sub", ...(feViewId ? { fisheye_view_id: feViewId } : {}) };
   });
   const panes = parsePanes(columns, resolvedRows, record.panes);
   if (panes) return { columns, rows: resolvedRows, tiles: fitTiles(cleaned, panes.length), panes };

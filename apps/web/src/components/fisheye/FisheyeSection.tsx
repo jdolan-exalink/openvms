@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { Button, Select, Switch } from "@/components/ui";
@@ -16,6 +16,7 @@ import type {
   FisheyeProjectionModel,
 } from "@/lib/fisheye/types";
 import {
+  Check,
   Compass,
   Eye,
   Grid2X2,
@@ -41,16 +42,34 @@ export function FisheyeSection({
   canManage = true,
   onConfigChange,
 }: FisheyeSectionProps) {
+  const [savedConfig, setSavedConfig] = useState<FisheyeConfig>(() =>
+    getFisheyeConfig(cameraId),
+  );
   const [config, setConfig] = useState<FisheyeConfig>(() =>
     getFisheyeConfig(cameraId),
   );
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [detectedBadge, setDetectedBadge] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+
+  const hasChanges = useMemo(() => {
+    return JSON.stringify(config) !== JSON.stringify(savedConfig);
+  }, [config, savedConfig]);
 
   const updateConfig = (next: FisheyeConfig) => {
     setConfig(next);
-    saveFisheyeConfig(next);
-    onConfigChange?.(next);
+  };
+
+  const handleSave = () => {
+    saveFisheyeConfig(config);
+    setSavedConfig(config);
+    onConfigChange?.(config);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2000);
+  };
+
+  const handleCancel = () => {
+    setConfig(savedConfig);
   };
 
   const handleAutoDetect = () => {
@@ -314,6 +333,50 @@ export function FisheyeSection({
           </div>
         </div>
       )}
+
+      {/* Configurator Action Footer: Guardar y Cancelar */}
+      <div className="flex items-center justify-between pt-3 border-t border-outline-variant/40 mt-1">
+        <div className="text-xs">
+          {saveSuccess ? (
+            <span className="text-ok font-semibold flex items-center gap-1">
+              <Icon icon={Check} size="xs" /> Configuración guardada
+            </span>
+          ) : hasChanges ? (
+            <span className="text-amber-400 font-medium">
+              Hay cambios pendientes de guardar
+            </span>
+          ) : (
+            <span className="text-muted">
+              Configuración al día
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outlined"
+            size="sm"
+            onClick={handleCancel}
+            disabled={!hasChanges}
+            title="Descartar cambios no guardados"
+            className="text-xs"
+          >
+            Cancelar
+          </Button>
+
+          <Button
+            variant="filled"
+            size="sm"
+            onClick={handleSave}
+            disabled={!hasChanges || !canManage}
+            title="Guardar cambios de calibración y vistas"
+            className="text-xs"
+          >
+            <Icon icon={Check} size="xs" />
+            <span>Guardar</span>
+          </Button>
+        </div>
+      </div>
 
       {/* Visual Calibration Modal */}
       {isCalibrating && (

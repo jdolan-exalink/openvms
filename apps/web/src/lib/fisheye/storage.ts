@@ -166,6 +166,8 @@ export function getFisheyeViewMode(cameraId: string): FisheyeViewMode {
     ) {
       return mode;
     }
+    const config = getFisheyeConfig(cameraId);
+    if (config?.defaultMode) return config.defaultMode;
   } catch {}
   return "virtual_ptz";
 }

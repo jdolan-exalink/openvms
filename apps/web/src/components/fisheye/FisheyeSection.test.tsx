@@ -29,6 +29,10 @@ describe("FisheyeSection Component", () => {
     expect(screen.getByText(/Vista 2 \(120°\)/i)).toBeInTheDocument();
     expect(screen.getByText(/Vista 3 \(240°\)/i)).toBeInTheDocument();
 
+    // Click Guardar to persist and invoke onConfigChange
+    const saveBtn = screen.getByRole("button", { name: /^Guardar$/i });
+    fireEvent.click(saveBtn);
+
     expect(onConfigChange).toHaveBeenCalledWith(
       expect.objectContaining({
         views: expect.arrayContaining([
@@ -38,15 +42,8 @@ describe("FisheyeSection Component", () => {
     );
   });
 
-  it("applies '4 Cuadrantes' preset on click", () => {
-    const onConfigChange = vi.fn();
-    render(
-      <FisheyeSection
-        cameraId="cam-fe-1"
-        cameraName="Camera 360"
-        onConfigChange={onConfigChange}
-      />,
-    );
+  it("applies '4 Cuadrantes' preset on click and cancels when clicking Cancelar", () => {
+    render(<FisheyeSection cameraId="cam-fe-1" cameraName="Camera 360" />);
 
     const btnQuad = screen.getByRole("button", { name: /4 Cuadrantes/i });
     fireEvent.click(btnQuad);
@@ -55,6 +52,12 @@ describe("FisheyeSection Component", () => {
     expect(screen.getByText(/Cuadrante Este \(90°\)/i)).toBeInTheDocument();
     expect(screen.getByText(/Cuadrante Sur \(180°\)/i)).toBeInTheDocument();
     expect(screen.getByText(/Cuadrante Oeste \(270°\)/i)).toBeInTheDocument();
+
+    // Revert with Cancelar
+    const cancelBtn = screen.getByRole("button", { name: /Cancelar/i });
+    fireEvent.click(cancelBtn);
+
+    expect(screen.queryByText(/Cuadrante Norte \(0°\)/i)).not.toBeInTheDocument();
   });
 
   it("triggers auto-detection for known manufacturer camera", () => {

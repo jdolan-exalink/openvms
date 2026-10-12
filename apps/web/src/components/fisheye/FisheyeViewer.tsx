@@ -24,6 +24,8 @@ import { VirtualPtzController } from "@/lib/fisheye/VirtualPtzController";
 import { PlayerSession } from "@/lib/live/PlayerSession";
 import { cn } from "@/lib/cn";
 import {
+  Bookmark,
+  Check,
   Compass,
   Grid2X2,
   Plus,
@@ -40,6 +42,9 @@ export interface FisheyeViewerProps {
   config?: FisheyeConfig;
   onConfigChange?: (config: FisheyeConfig) => void;
   onOpenCalibration?: () => void;
+  compact?: boolean;
+  initialMode?: FisheyeViewMode;
+  targetViewId?: string;
 }
 
 export function FisheyeViewer({
@@ -50,13 +55,17 @@ export function FisheyeViewer({
   config: externalConfig,
   onConfigChange,
   onOpenCalibration,
+  compact = false,
+  initialMode,
+  targetViewId,
 }: FisheyeViewerProps) {
   const [config, setConfig] = useState<FisheyeConfig>(() =>
     externalConfig || getFisheyeConfig(cameraId),
   );
   const [mode, setMode] = useState<FisheyeViewMode>(() =>
-    getFisheyeViewMode(cameraId),
+    targetViewId ? "virtual_ptz" : (initialMode || config.defaultMode || getFisheyeViewMode(cameraId)),
   );
+  const [savedFeedback, setSavedFeedback] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const sessionRef = useRef<PlayerSession | null>(null);
@@ -123,6 +132,10 @@ export function FisheyeViewer({
 
   // Active virtual view for PTZ
   const [activeView, setActiveView] = useState<VirtualFisheyeView>(() => {
+    if (targetViewId) {
+      const match = config.views.find((v) => v.id === targetViewId);
+      if (match) return match;
+    }
     if (config.views.length > 0) return config.views[0]!;
     return {
       id: "default-ptz",
@@ -336,6 +349,19 @@ export function FisheyeViewer({
     updateConfig(nextConfig);
   };
 
+  const handleSaveModeAsDefault = () => {
+    const updated: FisheyeConfig = {
+      ...config,
+      defaultMode: mode,
+    };
+    setConfig(updated);
+    saveFisheyeConfig(updated);
+    saveFisheyeViewMode(cameraId, mode);
+    onConfigChange?.(updated);
+    setSavedFeedback(true);
+    setTimeout(() => setSavedFeedback(false), 2000);
+  };
+
   return (
     <div
       className={cn(
@@ -344,137 +370,155 @@ export function FisheyeViewer({
       )}
     >
       {/* Top Floating Control Toolbar */}
-      <div className="absolute top-2 left-2 right-2 z-30 flex flex-wrap items-center justify-between gap-1.5 pointer-events-auto">
-        {/* View Mode Segmented Controls */}
-        <div className="flex items-center gap-1 rounded-m3-md bg-black/75 backdrop-blur-md p-1 border border-white/10 shadow-lg text-[11px] font-semibold text-white/90">
-          <button
-            type="button"
-            onClick={() => handleModeChange("original")}
-            className={cn(
-              "px-2 py-0.5 rounded transition-colors",
-              mode === "original" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
-            )}
-            title="Vista circular original sin corrección"
-          >
-            Original
-          </button>
-          <button
-            type="button"
-            onClick={() => handleModeChange("360")}
-            className={cn(
-              "px-2 py-0.5 rounded transition-colors",
-              mode === "360" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
-            )}
-            title="Panorámica 360° con desplazamiento continuo"
-          >
-            360°
-          </button>
-          <button
-            type="button"
-            onClick={() => handleModeChange("panorama")}
-            className={cn(
-              "px-2 py-0.5 rounded transition-colors",
-              mode === "panorama" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
-            )}
-            title="Panorama plano 180°"
-          >
-            Panorama
-          </button>
-          <button
-            type="button"
-            onClick={() => handleModeChange("virtual_ptz")}
-            className={cn(
-              "px-2 py-0.5 rounded transition-colors flex items-center gap-1",
-              mode === "virtual_ptz" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
-            )}
-            title="PTZ Virtual interactivo"
-          >
-            <Icon icon={Compass} size="xs" />
-            <span>PTZ Virtual</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleModeChange("3_fixed_120")}
-            className={cn(
-              "px-2 py-0.5 rounded transition-colors flex items-center gap-1",
-              mode === "3_fixed_120" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
-            )}
-            title="3 vistas fijas de 120° cubriendo 360°"
-          >
-            <Icon icon={View} size="xs" />
-            <span>3 Fijas (120°)</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => handleModeChange("4_quadrants")}
-            className={cn(
-              "px-2 py-0.5 rounded transition-colors flex items-center gap-1",
-              mode === "4_quadrants" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
-            )}
-            title="4 cuadrantes de 90°"
-          >
-            <Icon icon={Grid2X2} size="xs" />
-            <span>4 Cuadrantes</span>
-          </button>
-        </div>
-
-        {/* Presets & Actions Drawer */}
-        <div className="flex items-center gap-1.5">
-          {mode === "virtual_ptz" && config.views.length > 0 && (
-            <select
-              aria-label="Seleccionar preset"
-              value={activeView.id}
-              onChange={(e) => {
-                const found = config.views.find((v) => v.id === e.target.value);
-                if (found) {
-                  setActiveView(found);
-                  ptzControllerRef.current?.setState(found, true);
-                }
-              }}
-              className="rounded-m3-md bg-black/75 backdrop-blur-md px-2 py-1 text-[11px] font-semibold text-white/90 border border-white/10 cursor-pointer shadow-lg outline-none"
-            >
-              {config.views.map((v) => (
-                <option key={v.id} value={v.id} className="bg-neutral-900 text-white">
-                  {v.name}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {mode === "virtual_ptz" && (
-            <>
-              <button
-                type="button"
-                onClick={handleCreateView}
-                title="Guardar orientación actual como vista virtual"
-                className="flex items-center gap-1 rounded-m3-md bg-black/75 backdrop-blur-md px-2 py-1 text-[11px] font-semibold text-white/90 hover:bg-white/20 border border-white/10 shadow-lg"
-              >
-                <Icon icon={Plus} size="xs" />
-                <span>Crear vista</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => ptzControllerRef.current?.reset(undefined, true)}
-                title="Restablecer posición PTZ"
-                className="p-1 rounded-m3-md bg-black/75 backdrop-blur-md text-white/90 hover:bg-white/20 border border-white/10 shadow-lg"
-              >
-                <Icon icon={RotateCcw} size="xs" />
-              </button>
-            </>
-          )}
-
-          {onOpenCalibration && (
+      {!compact && (
+        <div className="absolute top-2 left-2 right-2 z-30 flex flex-wrap items-center justify-between gap-1.5 pointer-events-auto">
+          {/* View Mode Segmented Controls */}
+          <div className="flex items-center gap-1 rounded-m3-md bg-black/75 backdrop-blur-md p-1 border border-white/10 shadow-lg text-[11px] font-semibold text-white/90">
             <button
               type="button"
-              onClick={onOpenCalibration}
-              title="Calibrar lente Fisheye"
-              className="p-1 rounded-m3-md bg-black/75 backdrop-blur-md text-white/90 hover:bg-white/20 border border-white/10 shadow-lg"
+              onClick={() => handleModeChange("original")}
+              className={cn(
+                "px-2 py-0.5 rounded transition-colors",
+                mode === "original" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
+              )}
+              title="Vista circular original sin corrección"
             >
-              <Icon icon={Sliders} size="xs" />
+              Original
             </button>
-          )}
+            <button
+              type="button"
+              onClick={() => handleModeChange("360")}
+              className={cn(
+                "px-2 py-0.5 rounded transition-colors",
+                mode === "360" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
+              )}
+              title="Panorámica 360° con desplazamiento continuo"
+            >
+              360°
+            </button>
+            <button
+              type="button"
+              onClick={() => handleModeChange("panorama")}
+              className={cn(
+                "px-2 py-0.5 rounded transition-colors",
+                mode === "panorama" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
+              )}
+              title="Panorama plano 180°"
+            >
+              Panorama
+            </button>
+            <button
+              type="button"
+              onClick={() => handleModeChange("virtual_ptz")}
+              className={cn(
+                "px-2 py-0.5 rounded transition-colors flex items-center gap-1",
+                mode === "virtual_ptz" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
+              )}
+              title="PTZ Virtual interactivo"
+            >
+              <Icon icon={Compass} size="xs" />
+              <span>PTZ Virtual</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleModeChange("3_fixed_120")}
+              className={cn(
+                "px-2 py-0.5 rounded transition-colors flex items-center gap-1",
+                mode === "3_fixed_120" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
+              )}
+              title="3 vistas fijas de 120° cubriendo 360°"
+            >
+              <Icon icon={View} size="xs" />
+              <span>3 Fijas (120°)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleModeChange("4_quadrants")}
+              className={cn(
+                "px-2 py-0.5 rounded transition-colors flex items-center gap-1",
+                mode === "4_quadrants" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
+              )}
+              title="4 cuadrantes de 90°"
+            >
+              <Icon icon={Grid2X2} size="xs" />
+              <span>4 Cuadrantes</span>
+            </button>
+          </div>
+
+          {/* Presets & Actions Drawer */}
+          <div className="flex items-center gap-1.5">
+            {mode === "virtual_ptz" && config.views.length > 0 && (
+              <select
+                aria-label="Seleccionar preset"
+                value={activeView.id}
+                onChange={(e) => {
+                  const found = config.views.find((v) => v.id === e.target.value);
+                  if (found) {
+                    setActiveView(found);
+                    ptzControllerRef.current?.setState(found, true);
+                  }
+                }}
+                className="rounded-m3-md bg-black/75 backdrop-blur-md px-2 py-1 text-[11px] font-semibold text-white/90 border border-white/10 cursor-pointer shadow-lg outline-none"
+              >
+                {config.views.map((v) => (
+                  <option key={v.id} value={v.id} className="bg-neutral-900 text-white">
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            {mode === "virtual_ptz" && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleCreateView}
+                  title="Guardar orientación actual como vista virtual"
+                  className="flex items-center gap-1 rounded-m3-md bg-black/75 backdrop-blur-md px-2 py-1 text-[11px] font-semibold text-white/90 hover:bg-white/20 border border-white/10 shadow-lg"
+                >
+                  <Icon icon={Plus} size="xs" />
+                  <span>Crear vista</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => ptzControllerRef.current?.reset(undefined, true)}
+                  title="Restablecer posición PTZ"
+                  className="p-1 rounded-m3-md bg-black/75 backdrop-blur-md text-white/90 hover:bg-white/20 border border-white/10 shadow-lg"
+                >
+                  <Icon icon={RotateCcw} size="xs" />
+                </button>
+              </>
+            )}
+
+            {/* Guardar selección actual como predeterminada */}
+            <button
+              type="button"
+              onClick={handleSaveModeAsDefault}
+              title="Guardar selección para que se comporte así en la grilla"
+              className={cn(
+                "flex items-center gap-1 rounded-m3-md px-2 py-1 text-[11px] font-semibold border shadow-lg transition-colors",
+                savedFeedback
+                  ? "bg-ok text-on-ok border-ok"
+                  : "bg-black/75 backdrop-blur-md text-white/90 hover:bg-white/20 border-white/10",
+              )}
+            >
+              <Icon icon={savedFeedback ? Check : Bookmark} size="xs" />
+              <span>{savedFeedback ? "Guardado" : "Guardar vista"}</span>
+            </button>
+
+            {onOpenCalibration && (
+              <button
+                type="button"
+                onClick={onOpenCalibration}
+                title="Calibrar lente Fisheye"
+                className="p-1 rounded-m3-md bg-black/75 backdrop-blur-md text-white/90 hover:bg-white/20 border border-white/10 shadow-lg"
+              >
+                <Icon icon={Sliders} size="xs" />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Main Viewport Stage */}
       {mode === "3_fixed_120" ? (
@@ -572,7 +616,7 @@ export function FisheyeViewer({
 /**
  * Sub-viewport for Multi-view modes (3 fijas 120°, 4 cuadrantes)
  */
-function FisheyeSingleViewport({
+export function FisheyeSingleViewport({
   videoElement,
   imageElement,
   calibration,
