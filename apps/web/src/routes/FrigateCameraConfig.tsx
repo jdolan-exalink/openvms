@@ -1,4 +1,7 @@
-import { ArrowLeft, CircleCheck, RefreshCw, TriangleAlert } from "lucide-react";
+import {
+  Activity, ArrowLeft, Camera, CircleCheck, Eye, HardDrive, History, Layers, Radio,
+  RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, TriangleAlert, Video,
+} from "lucide-react";
 import { Icon } from "@/components/Icon";
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -26,6 +29,35 @@ type SectionResult = Schemas["FrigateSectionResult"];
 const HISTORY = "__history";
 const GENERAL = "__general";
 const ONVIF = "__onvif";
+
+function getSectionIcon(section: string) {
+  switch (section) {
+    case GENERAL:
+      return SlidersHorizontal;
+    case ONVIF:
+      return ShieldCheck;
+    case "detect":
+    case "ffmpeg":
+      return Video;
+    case "live":
+      return Eye;
+    case "objects":
+    case "motion":
+      return Activity;
+    case "zones":
+      return Layers;
+    case "record":
+      return HardDrive;
+    case "snapshots":
+      return Camera;
+    case "onvif":
+      return Radio;
+    case HISTORY:
+      return History;
+    default:
+      return Settings;
+  }
+}
 
 const isRec = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 const isEmptyMask = (v: unknown) => v == null || v === "" || (Array.isArray(v) && v.length === 0) || (isRec(v) && Object.keys(v).length === 0);
@@ -221,56 +253,93 @@ export function FrigateCameraConfig() {
         error={apply.error ? new Error(`${apply.error.message} Las secciones anteriores pudieron aplicarse: revisa el historial o recarga para ver el estado actual.`) : null}
       />
 
-      <CameraIdentity name={doc.data.camera_name} version={version} config={config} camera={camera.data} />
+      <CameraIdentity name={doc.data.camera_name} version={version} config={config} camera={camera.data} cameraId={cameraId} />
       <div className="flex flex-col gap-3">
-        <nav aria-label="Secciones de configuración" className="flex gap-1 overflow-x-auto rounded-m3-xl bg-surface-1 p-1.5">
+        <nav aria-label="Secciones de configuración" className="flex gap-1.5 overflow-x-auto rounded-m3-xl border border-outline-variant/60 bg-surface-1 p-2 shadow-sm">
           <button
             type="button"
             aria-current={activeSection === GENERAL ? "page" : undefined}
             onClick={() => setActive(GENERAL)}
-            className={cn("min-h-11 shrink-0 rounded-full px-4 text-xs font-bold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary", activeSection === GENERAL ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8")}
+            className={cn(
+              "flex min-h-11 shrink-0 items-center gap-2 rounded-full px-4 text-xs font-bold whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+              activeSection === GENERAL
+                ? "bg-primary text-on-primary shadow-sm"
+                : "text-on-surface-variant hover:bg-on-surface/8"
+            )}
           >
-            {t("common.general")}
+            <Icon icon={SlidersHorizontal} size="xs" />
+            <span>{t("common.general")}</span>
           </button>
           <button
             type="button"
             aria-current={activeSection === ONVIF ? "page" : undefined}
             onClick={() => setActive(ONVIF)}
             className={cn(
-              "min-h-11 shrink-0 rounded-full px-4 text-xs font-bold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary",
-              activeSection === ONVIF ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8"
+              "flex min-h-11 shrink-0 items-center gap-2 rounded-full px-4 text-xs font-bold whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+              activeSection === ONVIF
+                ? "bg-primary text-on-primary shadow-sm"
+                : "text-on-surface-variant hover:bg-on-surface/8"
             )}
           >
+            <Icon icon={ShieldCheck} size="xs" />
             <span className="flex items-center gap-1.5">
               <span>Capacidades</span>
               {camera.data?.onvif_profile && (
-                <span className="rounded-m3-sm bg-primary/20 px-1 py-0.5 font-mono text-[9px] font-semibold text-primary">
+                <span
+                  className={cn(
+                    "rounded-m3-sm px-1 py-0.5 font-mono text-[9px] font-semibold",
+                    activeSection === ONVIF
+                      ? "bg-on-primary/20 text-on-primary"
+                      : "bg-primary/20 text-primary"
+                  )}
+                >
                   {camera.data.onvif_profile}
                 </span>
               )}
             </span>
           </button>
-          {sections.map((s) => (
-            <button
-              key={s}
-              type="button"
-              aria-current={activeSection === s ? "page" : undefined}
-              onClick={() => setActive(s)}
-              className={cn("min-h-11 shrink-0 rounded-full px-4 text-xs font-bold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary", "text-left", activeSection === s ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8")}
-            >
-              <span className="flex flex-col">
-                <span>{sectionLabel(s)}{dirty.includes(s) && <span aria-label="con cambios" className="ml-1 text-primary">●</span>}</span>
-                <LiveBadge live={isLiveSection(s, version)} />
-              </span>
-            </button>
-          ))}
+          {sections.map((s) => {
+            const live = isLiveSection(s, version);
+            const SIcon = getSectionIcon(s);
+            return (
+              <button
+                key={s}
+                type="button"
+                aria-current={activeSection === s ? "page" : undefined}
+                onClick={() => setActive(s)}
+                className={cn(
+                  "flex min-h-11 shrink-0 items-center gap-2 rounded-full px-4 text-xs font-bold whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+                  activeSection === s
+                    ? "bg-primary text-on-primary shadow-sm"
+                    : "text-on-surface-variant hover:bg-on-surface/8"
+                )}
+              >
+                <Icon icon={SIcon} size="xs" />
+                <span className="flex flex-col text-left">
+                  <span>
+                    {sectionLabel(s)}
+                    {dirty.includes(s) && (
+                      <span aria-label="con cambios" className="ml-1 text-primary animate-pulse">●</span>
+                    )}
+                  </span>
+                  <LiveBadge live={live} />
+                </span>
+              </button>
+            );
+          })}
           <button
             type="button"
             aria-current={activeSection === HISTORY ? "page" : undefined}
             onClick={() => setActive(HISTORY)}
-            className={cn("min-h-11 shrink-0 rounded-full px-4 text-xs font-bold whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary", "text-left", activeSection === HISTORY ? "bg-primary-container text-on-primary-container" : "text-on-surface-variant hover:bg-on-surface/8")}
+            className={cn(
+              "flex min-h-11 shrink-0 items-center gap-2 rounded-full px-4 text-xs font-bold whitespace-nowrap transition-colors focus-visible:outline-2 focus-visible:outline-primary",
+              activeSection === HISTORY
+                ? "bg-primary text-on-primary shadow-sm"
+                : "text-on-surface-variant hover:bg-on-surface/8"
+            )}
           >
-            Historial
+            <Icon icon={History} size="xs" />
+            <span>Historial</span>
           </button>
         </nav>
 
@@ -368,62 +437,155 @@ function CameraIdentity({
   version,
   config,
   camera,
+  cameraId,
 }: {
   name: string;
   version: string;
   config: Record<string, unknown>;
   camera?: Schemas["Camera"];
+  cameraId?: string;
 }) {
+  const [imgError, setImgError] = useState(false);
   const detect = isRec(config.detect) ? config.detect : undefined;
   const width = typeof detect?.width === "number" ? detect.width : undefined;
   const height = typeof detect?.height === "number" ? detect.height : undefined;
+  const fps = typeof detect?.fps === "number" ? detect.fps : undefined;
   const onvif = isRec(config.onvif) ? config.onvif : undefined;
   const host = typeof onvif?.host === "string" && onvif.host && !onvif.host.includes("*") ? onvif.host : undefined;
   const onvifProfile = camera?.onvif_profile;
   const onvifCaps = camera?.onvif_capabilities;
+  const isOnline = camera?.enabled && camera.status === "online";
+  const snapshotUrl = cameraId ? `/media/v1/cameras/${cameraId}/snapshot.jpg?h=360` : undefined;
+
   return (
-    <div className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-[22px] font-bold tracking-tight text-ink">{name}</h1>
-            {onvifProfile && (
-              <span
-                className="rounded-m3-sm bg-primary/12 px-2 py-0.5 font-mono text-xs font-semibold text-primary"
-                title={[
-                  onvifProfile,
-                  camera?.onvif_version ? `v${camera.onvif_version}` : null,
-                  onvifCaps?.has_analytics ? "Detecciones/Analítica soportadas" : null,
-                  onvifCaps?.has_ptz ? "PTZ soportado" : null,
-                ].filter(Boolean).join(" · ")}
-              >
-                {onvifProfile}
-                {camera?.onvif_version && <span className="ml-1 opacity-75 font-normal">v{camera.onvif_version}</span>}
-              </span>
+    <div className="flex flex-col gap-4 rounded-m3-2xl border border-outline-variant/60 bg-gradient-to-b from-surface-1 to-surface-dim p-4 sm:p-5 shadow-sm">
+      <div className="flex flex-col gap-5 lg:flex-row lg:items-stretch lg:gap-6">
+        {/* Avigilon Live Snapshot Viewfinder */}
+        {snapshotUrl && (
+          <div className="relative aspect-video w-full shrink-0 overflow-hidden rounded-m3-xl border border-outline-variant/80 bg-black/80 sm:w-80 lg:w-96 shadow-inner">
+            {!imgError ? (
+              <img
+                src={snapshotUrl}
+                alt={`Vista previa de ${name}`}
+                className="size-full object-cover"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <div className="flex size-full flex-col items-center justify-center gap-2 text-muted">
+                <Icon icon={Video} size="md" className="opacity-40" />
+                <span className="font-mono text-xs">Sin vista previa</span>
+              </div>
             )}
-            {onvifCaps?.has_analytics && (
-              <span className="rounded-m3-sm bg-ok/12 px-2 py-0.5 text-xs font-medium text-ok">
-                Analítica ONVIF
-              </span>
-            )}
+            {/* Avigilon HUD Overlays */}
+            <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-2.5 bg-gradient-to-t from-black/70 via-transparent to-black/60">
+              <div className="flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1.5 rounded-m3-xs bg-black/60 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-white backdrop-blur-md">
+                  <span className={cn("size-2 rounded-full", isOnline ? "bg-ok animate-pulse" : "bg-muted")} />
+                  {isOnline ? "EN VIVO" : camera?.enabled ? "ONLINE" : "OFFLINE"}
+                </span>
+                <span className="rounded-m3-xs bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white/90 backdrop-blur-md">
+                  {width && height ? `${width}×${height}` : "1080p"}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-white/90">
+                <span className="rounded-m3-xs bg-black/60 px-1.5 py-0.5 backdrop-blur-md">
+                  {fps ? `${fps} FPS` : (camera?.fps ? `${camera.fps.toFixed(1)} FPS` : "Detección activa")}
+                </span>
+                <span className="rounded-m3-xs bg-black/60 px-1.5 py-0.5 backdrop-blur-md">
+                  {camera?.default_live_quality === "main" ? "STREAM MAIN" : "STREAM SUB"}
+                </span>
+              </div>
+            </div>
           </div>
-          <p className="text-sm text-muted">Frigate {version || "—"}</p>
+        )}
+
+        {/* Avigilon Device Telemetry Header */}
+        <div className="flex min-w-0 flex-1 flex-col justify-between gap-3">
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-[22px] font-bold tracking-tight text-ink sm:text-2xl">{name}</h1>
+                  {onvifProfile && (
+                    <span
+                      className="inline-flex items-center gap-1 rounded-m3-sm border border-primary/30 bg-primary/12 px-2 py-0.5 font-mono text-xs font-semibold text-primary"
+                      title={[
+                        onvifProfile,
+                        camera?.onvif_version ? `v${camera.onvif_version}` : null,
+                        onvifCaps?.has_analytics ? "Detecciones/Analítica soportadas" : null,
+                        onvifCaps?.has_ptz ? "PTZ soportado" : null,
+                      ].filter(Boolean).join(" · ")}
+                    >
+                      <Icon icon={Radio} size="xs" />
+                      <span>{onvifProfile}</span>
+                      {camera?.onvif_version && <span className="ml-1 opacity-75 font-normal">v{camera.onvif_version}</span>}
+                    </span>
+                  )}
+                  {onvifCaps?.has_analytics && (
+                    <span className="inline-flex items-center gap-1 rounded-m3-sm border border-ok/30 bg-ok/12 px-2 py-0.5 text-xs font-medium text-ok">
+                      <Icon icon={Sparkles} size="xs" /> Analítica ONVIF
+                    </span>
+                  )}
+                  {onvifCaps?.has_ptz && (
+                    <span className="rounded-m3-sm border border-secondary/30 bg-secondary/12 px-2 py-0.5 font-mono text-xs font-semibold text-secondary">
+                      PTZ
+                    </span>
+                  )}
+                  {camera?.lpr && (
+                    <span className="rounded-m3-sm bg-secondary-container px-2 py-0.5 font-mono text-xs font-bold text-on-secondary-container">
+                      LPR
+                    </span>
+                  )}
+                </div>
+                <p className="font-mono text-xs text-muted">
+                  {camera?.remote_name ? `ID / Origen Frigate: ${camera.remote_name}` : `Cámara: ${name}`}
+                  {version && ` · Frigate ${version}`}
+                </p>
+              </div>
+              <LinkButton to="/cameras" variant="tonal" className="self-start text-xs">
+                <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
+              </LinkButton>
+            </div>
+          </div>
+
+          {/* Avigilon Enterprise Telemetry Grid */}
+          <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+            <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
+              <dt className="text-muted font-medium">Versión</dt>
+              <dd className="font-mono text-ink font-semibold">{version || "—"}</dd>
+              <span className="truncate text-[10px] text-muted">
+                {onvifCaps?.manufacturer ? `Marca: ${onvifCaps.manufacturer}` : "Frigate NVR"}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
+              <dt className="text-muted font-medium">Resolución</dt>
+              <dd className="font-mono text-ink font-semibold">{width && height ? `${width}×${height}` : "—"}</dd>
+              <span className="font-mono text-[10px] text-muted">
+                {fps ? `${fps} fps` : (camera?.fps ? `${camera.fps.toFixed(1)} fps` : "1080p standard")}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
+              <dt className="text-muted font-medium">Host</dt>
+              <dd className="truncate font-mono text-ink font-semibold">{host ?? (camera?.onvif_endpoint ? displayEndpointHost(camera.onvif_endpoint) : "—")}</dd>
+              <span className="truncate text-[10px] text-muted">
+                {camera?.onvif_endpoint ? "ONVIF vinculado" : "Stream RTSP"}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-0.5 rounded-m3-lg border border-outline-variant/40 bg-surface-2 p-3">
+              <dt className="text-muted font-medium">Soporte ONVIF</dt>
+              <dd className="font-medium text-ink">
+                {onvifProfile ? `${onvifProfile}${onvifCaps?.has_analytics ? " · Detecciones" : ""}` : "No vinculado"}
+              </dd>
+              <span className="truncate text-[10px] text-muted">
+                {onvifCaps?.profiles && onvifCaps.profiles.length > 0 ? onvifCaps.profiles.join(", ") : "WSDL estándar"}
+              </span>
+            </div>
+          </dl>
         </div>
-        <LinkButton to="/cameras">
-          <Icon icon={ArrowLeft} size="xs" /> Volver a cámaras
-        </LinkButton>
       </div>
-      <dl className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-        <div className="rounded-m3-lg bg-surface-2 p-3"><dt className="text-muted">Versión</dt><dd className="font-mono">{version || "—"}</dd></div>
-        <div className="rounded-m3-lg bg-surface-2 p-3"><dt className="text-muted">Resolución</dt><dd className="font-mono">{width && height ? `${width}×${height}` : "—"}</dd></div>
-        <div className="rounded-m3-lg bg-surface-2 p-3"><dt className="text-muted">Host</dt><dd className="font-mono">{host ?? (camera?.onvif_endpoint ? displayEndpointHost(camera.onvif_endpoint) : "—")}</dd></div>
-        <div className="rounded-m3-lg bg-surface-2 p-3">
-          <dt className="text-muted">Soporte ONVIF</dt>
-          <dd className="font-medium text-ink">
-            {onvifProfile ? `${onvifProfile}${onvifCaps?.has_analytics ? " · Detecciones" : ""}` : "No vinculado"}
-          </dd>
-        </div>
-      </dl>
     </div>
   );
 }

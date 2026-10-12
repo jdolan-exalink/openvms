@@ -1,5 +1,6 @@
-import { SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal, Video } from "lucide-react";
 import { Icon } from "./Icon";
+import { cn } from "@/lib/cn";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type FormEvent, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
@@ -92,85 +93,133 @@ export function CameraSettingsDrawer({
 
   const canEdit = canManage || canConfigServer;
 
+  const [imgError, setImgError] = useState(false);
+  const snapshotUrl = `/media/v1/cameras/${camera.id}/snapshot.jpg?h=240`;
+  const isOnline = camera.enabled && camera.status === "online";
+
   return (
     <Modal title="Ajustes de cámara" onClose={onClose}>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-        <dt className="text-muted">Origen en Frigate</dt>
-        <dd className="font-mono text-xs">{camera.remote_name}</dd>
-        <dt className="text-muted">Sitio</dt>
-        <dd>{siteName ?? "—"}</dd>
-        <dt className="text-muted">Servidor</dt>
-        <dd>{serverName ?? "—"}</dd>
-        <dt className="text-muted">Estado</dt>
-        <dd>{camera.enabled ? <StatusBadge status={camera.status} /> : "Deshabilitada"}</dd>
-      </dl>
-
-      {canEdit ? (
-        <form onSubmit={submit} className="flex flex-col gap-3">
-          {canManage ? (
-            <>
-              <Field label="Nombre">
-                <TextInput value={name} onChange={(e) => setName(e.target.value)} aria-invalid={invalid} />
-              </Field>
-              {invalid && <p role="alert" className="text-xs text-bad">El nombre no puede estar vacío.</p>}
-              <Switch label="Habilitada" checked={enabled} onChange={setEnabled} />
-              <Field label="Calidad en vivo por defecto" hint="Flujo que usa la cámara al añadirla a la grilla de Vivo.">
-                <Select value={quality} onChange={(e) => setQuality(e.target.value as Camera["default_live_quality"])}>
-                  <option value="sub">Sub (menor calidad)</option>
-                  <option value="main">Main (alta calidad)</option>
-                </Select>
-              </Field>
-              <Field label="Descripción">
-                <TextInput value={description} maxLength={1000} onChange={(e) => setDescription(e.target.value)} />
-              </Field>
-              <Field label="Ubicación">
-                <TextInput value={location} maxLength={200} onChange={(e) => setLocation(e.target.value)} />
-              </Field>
-              <Field label="Etiquetas" hint="Separadas por comas (máximo 20).">
-                <TextInput value={tags} onChange={(e) => setTags(e.target.value)} />
-              </Field>
-            </>
+      <div className="flex flex-col gap-4">
+        {/* Avigilon Live Viewfinder Thumbnail */}
+        <div className="relative aspect-video w-full overflow-hidden rounded-m3-lg border border-outline-variant/60 bg-black/80 shadow-inner">
+          {!imgError ? (
+            <img
+              src={snapshotUrl}
+              alt={`Vista previa de ${camera.display_name}`}
+              className="size-full object-cover"
+              onError={() => setImgError(true)}
+            />
           ) : (
-            <p className="text-xs text-muted">Necesitas cameras.manage para editar los ajustes de VMS.</p>
-          )}
-
-          <div className="mt-2 flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-4">
-            <h3 className="mb-2 text-base font-bold">Configuración en Frigate</h3>
-            {frigateConfig.isLoading && <p className="text-xs text-muted">Cargando configuración de Frigate…</p>}
-            {frigateConfig.error && <p className="text-xs text-muted">Configuración de Frigate no disponible.</p>}
-            {frigateConfig.data && <FrigateSummary config={frigateConfig.data} />}
-            {canConfigServer && (
-              <LinkButton
-                variant="tonal"
-                to="/cameras/$cameraId/frigate"
-                params={{ cameraId: camera.id }}
-                onClick={onClose}
-                className="mt-3 self-start"
-              >
-                <Icon icon={SlidersHorizontal} size="xs" /> Editar configuración de Frigate
-              </LinkButton>
-            )}
-          </div>
-
-          <ErrorNote error={save.error} />
-          <div className="flex justify-end gap-2 mt-2">
-            <Button variant="text" onClick={onClose}>Cancelar</Button>
-            <Button type="submit" variant="primary" disabled={save.isPending}>
-              {save.isPending ? "Guardando…" : "Guardar"}
-            </Button>
-          </div>
-        </form>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <p className="text-xs text-muted">Necesitas el permiso cameras.manage o servers.config para editar esta cámara.</p>
-          {frigateConfig.data && (
-            <div className="rounded-m3-lg bg-surface-2 p-4">
-              <h3 className="mb-2 text-base font-bold">Configuración en Frigate</h3>
-              <FrigateSummary config={frigateConfig.data} />
+            <div className="flex size-full flex-col items-center justify-center gap-2 text-muted">
+              <Icon icon={Video} size="md" className="opacity-40" />
+              <span className="font-mono text-xs">Vista previa no disponible</span>
             </div>
           )}
+          <div className="pointer-events-none absolute inset-0 flex flex-col justify-between p-3 bg-gradient-to-t from-black/80 via-transparent to-black/60">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 rounded-m3-xs bg-black/60 px-2 py-0.5 font-mono text-[10px] font-bold tracking-wider text-white backdrop-blur-md">
+                <span className={cn("size-2 rounded-full", isOnline ? "bg-ok animate-pulse" : "bg-muted")} />
+                {isOnline ? "EN VIVO" : camera.enabled ? "ONLINE" : "OFFLINE"}
+              </span>
+              {camera.onvif_profile && (
+                <span className="rounded-m3-xs bg-primary/20 border border-primary/30 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary backdrop-blur-md">
+                  {camera.onvif_profile}
+                </span>
+              )}
+            </div>
+            <div className="flex items-end justify-between gap-2">
+              <div>
+                <p className="font-bold text-sm text-white drop-shadow-sm">{camera.display_name}</p>
+                <p className="font-mono text-[11px] text-white/80">{camera.remote_name}</p>
+              </div>
+              <span className="rounded-m3-xs bg-black/60 px-1.5 py-0.5 font-mono text-[10px] text-white/90 backdrop-blur-md">
+                {quality === "main" ? "MAIN" : "SUB"}
+              </span>
+            </div>
+          </div>
         </div>
-      )}
+
+        {/* Telemetry card */}
+        <div className="rounded-m3-lg bg-surface-2 p-3.5 border border-outline-variant/40">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            <dt className="text-muted">Origen en Frigate</dt>
+            <dd className="font-mono text-xs text-ink">{camera.remote_name}</dd>
+            <dt className="text-muted">Sitio</dt>
+            <dd className="text-ink">{siteName ?? "—"}</dd>
+            <dt className="text-muted">Servidor</dt>
+            <dd className="text-ink">{serverName ?? "—"}</dd>
+            <dt className="text-muted">Estado</dt>
+            <dd>{camera.enabled ? <StatusBadge status={camera.status} /> : "Deshabilitada"}</dd>
+          </dl>
+        </div>
+
+        {canEdit ? (
+          <form onSubmit={submit} className="flex flex-col gap-3">
+            {canManage ? (
+              <>
+                <Field label="Nombre">
+                  <TextInput value={name} onChange={(e) => setName(e.target.value)} aria-invalid={invalid} />
+                </Field>
+                {invalid && <p role="alert" className="text-xs text-bad">El nombre no puede estar vacío.</p>}
+                <Switch label="Habilitada" checked={enabled} onChange={setEnabled} />
+                <Field label="Calidad en vivo por defecto" hint="Flujo que usa la cámara al añadirla a la grilla de Vivo.">
+                  <Select value={quality} onChange={(e) => setQuality(e.target.value as Camera["default_live_quality"])}>
+                    <option value="sub">Sub (menor calidad)</option>
+                    <option value="main">Main (alta calidad)</option>
+                  </Select>
+                </Field>
+                <Field label="Descripción">
+                  <TextInput value={description} maxLength={1000} onChange={(e) => setDescription(e.target.value)} />
+                </Field>
+                <Field label="Ubicación">
+                  <TextInput value={location} maxLength={200} onChange={(e) => setLocation(e.target.value)} />
+                </Field>
+                <Field label="Etiquetas" hint="Separadas por comas (máximo 20).">
+                  <TextInput value={tags} onChange={(e) => setTags(e.target.value)} />
+                </Field>
+              </>
+            ) : (
+              <p className="text-xs text-muted">Necesitas cameras.manage para editar los ajustes de VMS.</p>
+            )}
+
+            <div className="mt-2 flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-4 border border-outline-variant/40">
+              <h3 className="mb-2 text-base font-bold text-ink">Configuración en Frigate</h3>
+              {frigateConfig.isLoading && <p className="text-xs text-muted">Cargando configuración de Frigate…</p>}
+              {frigateConfig.error && <p className="text-xs text-muted">Configuración de Frigate no disponible.</p>}
+              {frigateConfig.data && <FrigateSummary config={frigateConfig.data} />}
+              {canConfigServer && (
+                <LinkButton
+                  variant="tonal"
+                  to="/cameras/$cameraId/frigate"
+                  params={{ cameraId: camera.id }}
+                  onClick={onClose}
+                  className="mt-3 self-start"
+                >
+                  <Icon icon={SlidersHorizontal} size="xs" /> Configuración avanzada (Estilo Avigilon)
+                </LinkButton>
+              )}
+            </div>
+
+            <ErrorNote error={save.error} />
+            <div className="flex justify-end gap-2 mt-2">
+              <Button variant="text" onClick={onClose}>Cancelar</Button>
+              <Button type="submit" variant="primary" disabled={save.isPending}>
+                {save.isPending ? "Guardando…" : "Guardar"}
+              </Button>
+            </div>
+          </form>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-muted">Necesitas el permiso cameras.manage o servers.config para editar esta cámara.</p>
+            {frigateConfig.data && (
+              <div className="rounded-m3-lg bg-surface-2 p-4 border border-outline-variant/40">
+                <h3 className="mb-2 text-base font-bold text-ink">Configuración en Frigate</h3>
+                <FrigateSummary config={frigateConfig.data} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </Modal>
   );
 }
