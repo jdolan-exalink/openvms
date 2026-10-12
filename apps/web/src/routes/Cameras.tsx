@@ -4,7 +4,7 @@ import { Link, useSearch } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serverAgentQuery, serversQuery, sitesQuery } from "@/api/queries";
-import { api, unwrap } from "@/api/client";
+import { api, unwrap, ApiError } from "@/api/client";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { can } from "@/lib/perm";
 import { Icon } from "@/components/Icon";
@@ -75,12 +75,22 @@ export function isUsableDiscoveryInterface(name: string): boolean {
   return true;
 }
 
+export function formatDiscoveryError(error: unknown): string | null {
+  if (!error) return null;
+  if (error instanceof ApiError) {
+    if (error.code === "discovery_unsupported" || error.status === 409) {
+      return "El agente del servidor tiene el descubrimiento deshabilitado o la interfaz no está permitida. Requiere configurar ONVIF_DISCOVERY_INTERFACES y ONVIF_ALLOWED_CIDRS en el agente.";
+    }
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 export function Cameras() {
   const t = useT();
   const search = useSearch({ strict: false }) as { site_id?: string; server_id?: string };
   const [filter, setFilter] = useState<CameraFilter>({ site_id: search.site_id, server_id: search.server_id });
   const [discoveryServerId, setDiscoveryServerId] = useState("");
-  const [interfaceName, setInterfaceName] = useState("");
+  const [selectedInterfaceName, setSelectedInterfaceName] = useState<string | null>(null);
   const [customInterface, setCustomInterface] = useState(false);
   const [discovery, setDiscovery] = useState<{ pending: boolean; error?: unknown; devices?: { xaddrs: string[] }[] }>({ pending: false });
   const [probeServerId, setProbeServerId] = useState("");
@@ -107,6 +117,10 @@ export function Cameras() {
   const serverName = new Map(servers.data?.map((s) => [s.id, s.name]));
   const update = (k: keyof CameraFilter, v: string) => setFilter((f) => ({ ...f, [k]: v || undefined }));
   const selectedDiscoveryServer = servers.data?.find((server) => server.id === discoveryServerId);
+  const defaultInterface = filteredInterfaces.includes("eth0")
+    ? "eth0"
+    : (filteredInterfaces[0] ?? (selectedDiscoveryServer ? "eth0" : ""));
+  const interfaceName = selectedInterfaceName ?? defaultInterface;
   const canDiscover = !!selectedDiscoveryServer && canManageServer(me.data, selectedDiscoveryServer) && interfaceName.trim().length > 0 && !discovery.pending;
   const cancelDiscovery = () => {
     discoveryVersion.current += 1;
@@ -168,12 +182,12 @@ export function Cameras() {
   const selectDiscoveryServer = (serverId: string) => {
     cancelDiscovery();
     setDiscoveryServerId(serverId);
-    setInterfaceName("");
+    setSelectedInterfaceName(null);
     setCustomInterface(false);
   };
   const changeInterface = (value: string) => {
     cancelDiscovery();
-    setInterfaceName(value);
+    setSelectedInterfaceName(value);
   };
   const searchOnvif = async () => {
     if (!selectedDiscoveryServer || !canManageServer(me.data, selectedDiscoveryServer) || !interfaceName.trim()) return;
@@ -221,8 +235,9 @@ export function Cameras() {
                     type="button"
                     className="text-xs font-normal text-primary hover:underline"
                     onClick={() => {
-                      setCustomInterface(!customInterface);
-                      setInterfaceName("");
+                      const next = !customInterface;
+                      setCustomInterface(next);
+                      setSelectedInterfaceName(next ? (interfaceName || "eth0") : null);
                     }}
                   >
                     {customInterface ? "Elegir de la lista" : "Ingresar manualmente"}
@@ -238,7 +253,7 @@ export function Cameras() {
                     const val = event.target.value;
                     if (val === "__custom__") {
                       setCustomInterface(true);
-                      setInterfaceName("");
+                      setSelectedInterfaceName(interfaceName || "eth0");
                     } else {
                       changeInterface(val);
                     }
@@ -266,7 +281,7 @@ export function Cameras() {
         </div>
         {selectedDiscoveryServer && !canManageServer(me.data, selectedDiscoveryServer) && <p className="text-sm text-muted">No tiene permiso servers.manage para este servidor.</p>}
         {(!selectedDiscoveryServer || canManageServer(me.data, selectedDiscoveryServer)) && <div><button type="button" className="h-11 rounded-m3-full bg-primary px-5 text-sm font-medium text-on-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={!canDiscover} onClick={() => void searchOnvif()}>{discovery.pending ? "Buscando…" : "Buscar dispositivos ONVIF"}</button></div>}
-        <ErrorNote error={discovery.error} />
+        <ErrorNote error={formatDiscoveryError(discovery.error)} />
         {discovery.pending && <p role="status" className="text-sm text-muted">Buscando dispositivos en la red del servidor…</p>}
         {discovery.devices?.length === 0 && <p role="status" className="text-sm text-muted">No se encontraron dispositivos ONVIF en esa interfaz.</p>}
         {!!discovery.devices?.length && <ul aria-label="Dispositivos ONVIF encontrados" className="flex flex-col gap-2">

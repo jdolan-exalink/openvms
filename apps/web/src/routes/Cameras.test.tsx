@@ -598,3 +598,58 @@ describe("Cameras", () => {
     expect(textInput).toBeInTheDocument();
     expect(textInput).toHaveAttribute("placeholder", "Por ejemplo: eth0");
   });
+
+  it("automatically selects eth0 by default and allows changing it", async () => {
+    const fetchMock = vi.fn(stubApi({
+      ...inventory([]),
+      "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ id: "g", permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "srv1" }] }),
+      "/api/v1/servers/srv1/agent": () => json({
+        installed: true,
+        network_interfaces: [
+          { name: "ens18", rx_bytes_per_second: 100, tx_bytes_per_second: 200 },
+          { name: "eth0", rx_bytes_per_second: 300, tx_bytes_per_second: 400 },
+        ],
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras);
+
+    const serverSelect = await screen.findByLabelText("Servidor para descubrir cámaras");
+    await within(serverSelect).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(serverSelect, { target: { value: "srv1" } });
+
+    // Combobox should automatically have eth0 selected
+    const interfaceSelect = await screen.findByRole("combobox", { name: "Interfaz de red del agente" });
+    await waitFor(() => expect(interfaceSelect).toHaveValue("eth0"));
+    expect(screen.getByRole("button", { name: "Buscar dispositivos ONVIF" })).toBeEnabled();
+
+    // User can change it to ens18
+    fireEvent.change(interfaceSelect, { target: { value: "ens18" } });
+    expect(interfaceSelect).toHaveValue("ens18");
+  });
+
+  it("displays actionable instructions when discovery returns 409 discovery_unsupported", async () => {
+    const fetchMock = vi.fn(stubApi({
+      ...inventory([]),
+      "/api/v1/me": () => json({ id: "u", tenant_id: "t", grants: [{ id: "g", permission: "servers.manage", effect: "allow", scope_type: "server", scope_id: "srv1" }] }),
+      "/api/v1/servers/srv1/agent": () => json({
+        installed: true,
+        network_interfaces: [{ name: "eth0", rx_bytes_per_second: 100, tx_bytes_per_second: 200 }],
+      }),
+      "POST /api/v1/servers/srv1/onvif/discover": () => json({ code: "discovery_unsupported", message: "agent discovery is unsupported or the interface is not allowed" }, 409),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras);
+
+    const serverSelect = await screen.findByLabelText("Servidor para descubrir cámaras");
+    await within(serverSelect).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(serverSelect, { target: { value: "srv1" } });
+
+    const searchBtn = await screen.findByRole("button", { name: "Buscar dispositivos ONVIF" });
+    await waitFor(() => expect(searchBtn).toBeEnabled());
+    fireEvent.click(searchBtn);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/ONVIF_DISCOVERY_INTERFACES/i);
+  });
+
