@@ -248,7 +248,7 @@ func (q *Queries) DeleteCameraFolder(ctx context.Context, id uuid.UUID) error {
 }
 
 const getCamera = `-- name: GetCamera :one
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -280,6 +280,10 @@ type GetCameraRow struct {
 	Tags               []string
 	FolderID           *uuid.UUID
 	SortOrder          int32
+	OnvifEndpoint      *string
+	OnvifProfile       *string
+	OnvifVersion       *string
+	OnvifCapabilities  json.RawMessage
 	GroupIds           []uuid.UUID
 }
 
@@ -311,6 +315,10 @@ func (q *Queries) GetCamera(ctx context.Context, id uuid.UUID) (GetCameraRow, er
 		&i.Tags,
 		&i.FolderID,
 		&i.SortOrder,
+		&i.OnvifEndpoint,
+		&i.OnvifProfile,
+		&i.OnvifVersion,
+		&i.OnvifCapabilities,
 		&i.GroupIds,
 	)
 	return i, err
@@ -794,7 +802,7 @@ func (q *Queries) ListCameraGroups(ctx context.Context, tenantID *uuid.UUID) ([]
 }
 
 const listCameras = `-- name: ListCameras :many
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -844,6 +852,10 @@ type ListCamerasRow struct {
 	Tags               []string
 	FolderID           *uuid.UUID
 	SortOrder          int32
+	OnvifEndpoint      *string
+	OnvifProfile       *string
+	OnvifVersion       *string
+	OnvifCapabilities  json.RawMessage
 	GroupIds           []uuid.UUID
 }
 
@@ -887,6 +899,10 @@ func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]Lis
 			&i.Tags,
 			&i.FolderID,
 			&i.SortOrder,
+			&i.OnvifEndpoint,
+			&i.OnvifProfile,
+			&i.OnvifVersion,
+			&i.OnvifCapabilities,
 			&i.GroupIds,
 		); err != nil {
 			return nil, err
@@ -932,7 +948,7 @@ func (q *Queries) ListServerBlobKeys(ctx context.Context, serverID uuid.UUID) ([
 }
 
 const listServerCameras = `-- name: ListServerCameras :many
-SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
+SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order, onvif_endpoint, onvif_profile, onvif_version, onvif_capabilities FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]Camera, error) {
@@ -969,6 +985,10 @@ func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]
 			&i.Tags,
 			&i.FolderID,
 			&i.SortOrder,
+			&i.OnvifEndpoint,
+			&i.OnvifProfile,
+			&i.OnvifVersion,
+			&i.OnvifCapabilities,
 		); err != nil {
 			return nil, err
 		}
@@ -1523,8 +1543,12 @@ UPDATE cameras SET
     description = coalesce($4, description),
     location = coalesce($5, location),
     tags = coalesce($6::text[], tags),
+    onvif_endpoint = coalesce($7, onvif_endpoint),
+    onvif_profile = coalesce($8, onvif_profile),
+    onvif_version = coalesce($9, onvif_version),
+    onvif_capabilities = coalesce($10, onvif_capabilities),
     updated_at = now()
-WHERE id = $7 AND deleted_at IS NULL
+WHERE id = $11 AND deleted_at IS NULL
 `
 
 type UpdateCameraParams struct {
@@ -1534,6 +1558,10 @@ type UpdateCameraParams struct {
 	Description        *string
 	Location           *string
 	Tags               []string
+	OnvifEndpoint      *string
+	OnvifProfile       *string
+	OnvifVersion       *string
+	OnvifCapabilities  []byte
 	ID                 uuid.UUID
 }
 
@@ -1545,6 +1573,10 @@ func (q *Queries) UpdateCamera(ctx context.Context, arg UpdateCameraParams) erro
 		arg.Description,
 		arg.Location,
 		arg.Tags,
+		arg.OnvifEndpoint,
+		arg.OnvifProfile,
+		arg.OnvifVersion,
+		arg.OnvifCapabilities,
 		arg.ID,
 	)
 	return err
@@ -1584,6 +1616,35 @@ func (q *Queries) UpdateCameraHealth(ctx context.Context, arg UpdateCameraHealth
 		arg.Fps,
 		arg.ServerID,
 		arg.RemoteName,
+	)
+	return err
+}
+
+const updateCameraOnvif = `-- name: UpdateCameraOnvif :exec
+UPDATE cameras SET
+    onvif_endpoint = $1,
+    onvif_profile = $2,
+    onvif_version = $3,
+    onvif_capabilities = $4,
+    updated_at = now()
+WHERE id = $5 AND deleted_at IS NULL
+`
+
+type UpdateCameraOnvifParams struct {
+	OnvifEndpoint     *string
+	OnvifProfile      *string
+	OnvifVersion      *string
+	OnvifCapabilities json.RawMessage
+	ID                uuid.UUID
+}
+
+func (q *Queries) UpdateCameraOnvif(ctx context.Context, arg UpdateCameraOnvifParams) error {
+	_, err := q.db.Exec(ctx, updateCameraOnvif,
+		arg.OnvifEndpoint,
+		arg.OnvifProfile,
+		arg.OnvifVersion,
+		arg.OnvifCapabilities,
+		arg.ID,
 	)
 	return err
 }

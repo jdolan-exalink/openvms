@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -30,6 +31,7 @@ type Handler struct {
 	token      string
 	discoverer Discoverer
 	interfaces map[string]struct{}
+	allowAll   bool
 	networks   []netip.Prefix
 }
 
@@ -41,6 +43,7 @@ type response struct {
 }
 type device struct {
 	XAddrs []string `json:"xaddrs"`
+	Scopes []string `json:"scopes,omitempty"`
 }
 
 func NewHandler(token string, discoverer Discoverer, cfg Config) (*Handler, error) {
@@ -50,6 +53,10 @@ func NewHandler(token string, discoverer Discoverer, cfg Config) (*Handler, erro
 	h := &Handler{token: token, discoverer: discoverer, interfaces: make(map[string]struct{}), networks: make([]netip.Prefix, 0, len(cfg.AllowedCIDRs))}
 	for _, name := range cfg.Interfaces {
 		name = strings.TrimSpace(name)
+		if name == "*" {
+			h.allowAll = true
+			continue
+		}
 		if name == "" || strings.ContainsAny(name, ",/\\\r\n\t") {
 			return nil, errors.New("invalid ONVIF discovery interface")
 		}
@@ -68,15 +75,23 @@ func NewHandler(token string, discoverer Discoverer, cfg Config) (*Handler, erro
 	return h, nil
 }
 
-// LoadConfig treats both empty settings as feature-disabled. Partial or malformed
-// configuration is an error so an operator cannot accidentally broaden policy.
+// LoadConfig parses interface and CIDR settings. If both are empty, it defaults
+// to enabling discovery on all interfaces ("*") with all IPv4 networks allowed ("0.0.0.0/0"),
+// making discovery a standard service that runs by default. Discovery can be explicitly
+// disabled by setting interfaces to "none" or "disabled".
 func LoadConfig(interfaces, cidrs string) (Config, bool, error) {
 	interfaces, cidrs = strings.TrimSpace(interfaces), strings.TrimSpace(cidrs)
-	if interfaces == "" && cidrs == "" {
+	if strings.EqualFold(interfaces, "none") || strings.EqualFold(interfaces, "disabled") {
 		return Config{}, false, nil
 	}
-	if interfaces == "" || cidrs == "" {
-		return Config{}, false, errors.New("both ONVIF_DISCOVERY_INTERFACES and ONVIF_ALLOWED_CIDRS are required")
+	if interfaces == "" && cidrs == "" {
+		return Config{Interfaces: []string{"*"}, AllowedCIDRs: []string{"0.0.0.0/0"}}, true, nil
+	}
+	if interfaces == "" {
+		interfaces = "*"
+	}
+	if cidrs == "" {
+		cidrs = "0.0.0.0/0"
 	}
 	return Config{Interfaces: strings.Split(interfaces, ","), AllowedCIDRs: strings.Split(cidrs, ",")}, true, nil
 }
@@ -104,16 +119,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(input.InterfaceName) == "" || input.InterfaceName != strings.TrimSpace(input.InterfaceName) {
+	if strings.TrimSpace(input.InterfaceName) == "" || input.InterfaceName != strings.TrimSpace(input.InterfaceName) || strings.ContainsAny(input.InterfaceName, ",/\\\r\n\t") {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if _, ok := h.interfaces[input.InterfaceName]; !ok {
-		http.Error(w, "interface not allowed", http.StatusForbidden)
-		return
+	if !h.allowAll {
+		if _, ok := h.interfaces[input.InterfaceName]; !ok {
+			http.Error(w, "interface not allowed", http.StatusForbidden)
+			return
+		}
 	}
 	devices, err := h.discoverer.Probe(r.Context(), input.InterfaceName)
 	if err != nil {
+		slog.Error("ONVIF discovery probe failed", "error", err, "interface", input.InterfaceName)
 		if r.Context().Err() != nil {
 			http.Error(w, "request canceled", http.StatusRequestTimeout)
 			return
@@ -123,7 +141,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	result := response{Devices: make([]device, 0, len(devices))}
 	for _, found := range devices {
-		item := device{XAddrs: make([]string, 0, len(found.XAddrs))}
+		item := device{XAddrs: make([]string, 0, len(found.XAddrs)), Scopes: found.ScopeHints}
 		for _, endpoint := range found.XAddrs {
 			u, err := neturlParse(endpoint.String())
 			if err != nil {

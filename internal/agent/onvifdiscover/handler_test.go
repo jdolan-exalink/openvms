@@ -109,6 +109,55 @@ func TestDiscoverHandlerRedactsDiscoveryErrors(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDefaultsAndOverrides(t *testing.T) {
+	cfg, enabled, err := LoadConfig("", "")
+	if err != nil || !enabled {
+		t.Fatalf("expected LoadConfig empty to be enabled, got enabled=%v err=%v", enabled, err)
+	}
+	if len(cfg.Interfaces) != 1 || cfg.Interfaces[0] != "*" {
+		t.Fatalf("expected wildcard interfaces, got %+v", cfg.Interfaces)
+	}
+	if len(cfg.AllowedCIDRs) != 1 || cfg.AllowedCIDRs[0] != "0.0.0.0/0" {
+		t.Fatalf("expected 0.0.0.0/0, got %+v", cfg.AllowedCIDRs)
+	}
+
+	for _, val := range []string{"none", "disabled", "None", "DISABLED"} {
+		_, enabled, err := LoadConfig(val, "")
+		if err != nil || enabled {
+			t.Fatalf("expected %q to be disabled, got enabled=%v err=%v", val, enabled, err)
+		}
+	}
+
+	cfg, enabled, err = LoadConfig("eth0,ens18", "")
+	if err != nil || !enabled || len(cfg.Interfaces) != 2 || cfg.AllowedCIDRs[0] != "0.0.0.0/0" {
+		t.Fatalf("expected interface override with default CIDR, got %+v, enabled=%v, err=%v", cfg, enabled, err)
+	}
+
+	cfg, enabled, err = LoadConfig("eth0", "192.168.1.0/24")
+	if err != nil || !enabled || cfg.Interfaces[0] != "eth0" || cfg.AllowedCIDRs[0] != "192.168.1.0/24" {
+		t.Fatalf("expected explicit config, got %+v, enabled=%v, err=%v", cfg, enabled, err)
+	}
+}
+
+func TestDiscoverHandlerWithWildcardInterfaces(t *testing.T) {
+	f := &fakeDiscovery{devices: []onvif.DiscoveredDevice{{
+		EndpointReference: "urn:uuid:device-1",
+		XAddrs:            []onvif.Endpoint{endpoint(t, "http://10.1.1.50/onvif/device_service")},
+	}}}
+	h, err := NewHandler("token", f, Config{Interfaces: []string{"*"}, AllowedCIDRs: []string{"0.0.0.0/0"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := request(h, `{"interface_name":"ens18"}`, "token")
+	if w.Code != 200 || !f.called || f.iface != "ens18" {
+		t.Fatalf("expected ens18 to be allowed, code=%d called=%v iface=%s", w.Code, f.called, f.iface)
+	}
+	w = request(h, `{"interface_name":"../bad"}`, "token")
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for malformed interface name, got %d", w.Code)
+	}
+}
+
 func endpoint(t *testing.T, s string) onvif.Endpoint {
 	t.Helper()
 	e, err := onvif.ParseEndpoint(s)

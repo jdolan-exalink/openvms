@@ -793,6 +793,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/onvif/check-cameras": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Correlate and check ONVIF capabilities for all cameras on the server
+         * @description Scans the network for ONVIF devices and correlates them with installed cameras on the server, saving ONVIF profiles (such as ONVIF-T), versions, and capabilities. Requires servers.manage on the server.
+         */
+        post: operations["checkServerCamerasOnvif"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/agent": {
         parameters: {
             query?: never;
@@ -934,6 +956,28 @@ export interface paths {
          *     Answers 409 for Frigate older than 0.16.
          */
         patch: operations["patchCameraFrigateConfig"];
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/onvif/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check and save ONVIF capabilities for a camera
+         * @description Probes the camera ONVIF endpoint via the server agent and updates stored ONVIF profile, version, and capabilities. Requires cameras.manage on the camera.
+         */
+        post: operations["checkCameraOnvif"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/servers/{serverId}/frigate-config/schema": {
@@ -2977,9 +3021,41 @@ export interface components {
         };
         OnvifDiscoveryDevice: {
             xaddrs: string[];
+            scopes?: string[];
         };
         OnvifDiscoveryResult: {
             devices: components["schemas"]["OnvifDiscoveryDevice"][];
+        };
+        CameraOnvifCapabilities: {
+            manufacturer?: string;
+            model?: string;
+            firmware_version?: string;
+            serial_number?: string;
+            hardware_id?: string;
+            profiles?: string[];
+            has_analytics?: boolean;
+            has_events?: boolean;
+            has_ptz?: boolean;
+            has_media2?: boolean;
+            has_media1?: boolean;
+            has_imaging?: boolean;
+            services?: components["schemas"]["OnvifProbeService"][];
+        } & {
+            [key: string]: unknown;
+        };
+        CameraOnvifCheckRequest: {
+            endpoint?: string;
+            username?: string;
+            password?: string;
+        };
+        ServerCheckCamerasOnvifRequest: {
+            interface_name?: string;
+        };
+        ServerCheckCamerasOnvifResult: {
+            checked: number;
+            matched: number;
+            updated: number;
+            cameras: components["schemas"]["Camera"][];
         };
         OnvifProbeRequest: {
             /** @description HTTP(S) ONVIF device endpoint on an IPv4 literal. */
@@ -3116,6 +3192,10 @@ export interface components {
             description: string;
             location: string;
             tags: string[];
+            onvif_endpoint?: string | null;
+            onvif_profile?: string | null;
+            onvif_version?: string | null;
+            onvif_capabilities?: components["schemas"]["CameraOnvifCapabilities"];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -3148,6 +3228,9 @@ export interface components {
             location?: string;
             /** @description Replaces the camera's tags. Values are trimmed and de-duplicated case-insensitively. */
             tags?: string[];
+            onvif_endpoint?: string | null;
+            onvif_profile?: string | null;
+            onvif_version?: string | null;
         };
         CameraFrigateConfig: {
             /** Format: uuid */
@@ -5947,6 +6030,37 @@ export interface operations {
             502: components["responses"]["FrigateUnreachable"];
         };
     };
+    checkServerCamerasOnvif: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ServerCheckCamerasOnvifRequest"];
+            };
+        };
+        responses: {
+            /** @description Result of checking cameras */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerCheckCamerasOnvifResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
     getServerAgent: {
         parameters: {
             query?: never;
@@ -6194,6 +6308,37 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    checkCameraOnvif: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CameraOnvifCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Camera updated with ONVIF information */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Camera"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };

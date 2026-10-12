@@ -2,6 +2,7 @@ package inventory
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -72,6 +73,10 @@ type CameraUpdate struct {
 	Description        *string
 	Location           *string
 	Tags               *[]string
+	OnvifEndpoint      *string
+	OnvifProfile       *string
+	OnvifVersion       *string
+	OnvifCapabilities  json.RawMessage
 }
 
 // Limits for the VMS-side camera settings; they mirror maxLength/maxItems in the OpenAPI contract.
@@ -144,6 +149,8 @@ func (s *Service) UpdateCamera(ctx context.Context, actor authz.Actor, id uuid.U
 		params := db.UpdateCameraParams{
 			ID: id, DisplayName: in.DisplayName, Enabled: in.Enabled,
 			DefaultLiveQuality: in.DefaultLiveQuality, Description: in.Description, Location: in.Location,
+			OnvifEndpoint: in.OnvifEndpoint, OnvifProfile: in.OnvifProfile, OnvifVersion: in.OnvifVersion,
+			OnvifCapabilities: in.OnvifCapabilities,
 		}
 		if in.Tags != nil {
 			params.Tags = *in.Tags
@@ -161,6 +168,62 @@ func (s *Service) UpdateCamera(ctx context.Context, actor authz.Actor, id uuid.U
 		return db.GetCameraRow{}, err
 	}
 	return s.GetCamera(ctx, actor, id)
+}
+
+func (s *Service) UpdateCameraOnvif(ctx context.Context, actor authz.Actor, id uuid.UUID, endpoint, profile, version *string, capabilities json.RawMessage) (db.GetCameraRow, error) {
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		cam, err := q.GetCamera(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		if err := c.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
+			return err
+		}
+		if len(capabilities) == 0 {
+			capabilities = json.RawMessage("{}")
+		}
+		if err := q.UpdateCameraOnvif(ctx, db.UpdateCameraOnvifParams{
+			ID:                id,
+			OnvifEndpoint:     endpoint,
+			OnvifProfile:      profile,
+			OnvifVersion:      version,
+			OnvifCapabilities: capabilities,
+		}); err != nil {
+			return err
+		}
+		return audit(ctx, q, actor, &cam.TenantID, ActionCameraUpdated, "camera", id, map[string]any{
+			"onvif_endpoint": endpoint, "onvif_profile": profile, "onvif_version": version,
+		})
+	})
+	if err != nil {
+		return db.GetCameraRow{}, err
+	}
+	return s.GetCamera(ctx, actor, id)
+}
+
+func (s *Service) ListServerCameras(ctx context.Context, actor authz.Actor, serverID uuid.UUID) ([]db.GetCameraRow, error) {
+	var out []db.GetCameraRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		srv, err := q.GetServer(ctx, serverID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		if err := c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID)); err != nil {
+			return err
+		}
+		cams, err := q.ListServerCameras(ctx, serverID)
+		if err != nil {
+			return err
+		}
+		for _, cam := range cams {
+			row, err := q.GetCamera(ctx, cam.ID)
+			if err == nil {
+				out = append(out, row)
+			}
+		}
+		return nil
+	})
+	return out, err
 }
 
 // CameraGroupView lists only members the caller can view.

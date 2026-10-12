@@ -20,6 +20,7 @@ const maxDiscoveryResponse = 1 << 20
 // DiscoveryDevice is a credential-free subset of the edge-agent discovery response.
 type DiscoveryDevice struct {
 	XAddrs []string `json:"xaddrs"`
+	Scopes []string `json:"scopes,omitempty"`
 }
 type DiscoveryResult struct {
 	Devices []DiscoveryDevice `json:"devices"`

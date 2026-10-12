@@ -949,6 +949,30 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/onvif/check-cameras:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: checkServerCamerasOnvif
+      summary: Correlate and check ONVIF capabilities for all cameras on the server
+      description: Scans the network for ONVIF devices and correlates them with installed cameras on the server, saving ONVIF profiles (such as ONVIF-T), versions, and capabilities. Requires servers.manage on the server.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServerCheckCamerasOnvifRequest" }
+      responses:
+        "200":
+          description: Result of checking cameras
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerCheckCamerasOnvifResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/servers/{serverId}/agent:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1130,6 +1154,30 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/onvif/check:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: checkCameraOnvif
+      summary: Check and save ONVIF capabilities for a camera
+      description: Probes the camera ONVIF endpoint via the server agent and updates stored ONVIF profile, version, and capabilities. Requires cameras.manage on the camera.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraOnvifCheckRequest" }
+      responses:
+        "200":
+          description: Camera updated with ONVIF information
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Camera" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/servers/{serverId}/frigate-config/schema:
     parameters:
@@ -3983,12 +4031,55 @@ components:
       required: [xaddrs]
       properties:
         xaddrs: { type: array, items: { type: string, format: uri } }
+        scopes: { type: array, items: { type: string } }
     OnvifDiscoveryResult:
       type: object
       additionalProperties: false
       required: [devices]
       properties:
         devices: { type: array, items: { $ref: "#/components/schemas/OnvifDiscoveryDevice" } }
+    CameraOnvifCapabilities:
+      type: object
+      additionalProperties: true
+      properties:
+        manufacturer: { type: string }
+        model: { type: string }
+        firmware_version: { type: string }
+        serial_number: { type: string }
+        hardware_id: { type: string }
+        profiles: { type: array, items: { type: string } }
+        has_analytics: { type: boolean }
+        has_events: { type: boolean }
+        has_ptz: { type: boolean }
+        has_media2: { type: boolean }
+        has_media1: { type: boolean }
+        has_imaging: { type: boolean }
+        services:
+          type: array
+          items: { $ref: "#/components/schemas/OnvifProbeService" }
+    CameraOnvifCheckRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        endpoint: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 256 }
+        password: { type: string, maxLength: 1024, writeOnly: true }
+    ServerCheckCamerasOnvifRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        interface_name: { type: string, maxLength: 64 }
+    ServerCheckCamerasOnvifResult:
+      type: object
+      additionalProperties: false
+      required: [checked, matched, updated, cameras]
+      properties:
+        checked: { type: integer }
+        matched: { type: integer }
+        updated: { type: integer }
+        cameras:
+          type: array
+          items: { $ref: "#/components/schemas/Camera" }
     OnvifProbeRequest:
       type: object
       additionalProperties: false
@@ -4143,6 +4234,11 @@ components:
         description: { type: string, maxLength: 1000 }
         location: { type: string, maxLength: 200 }
         tags: { type: array, items: { type: string, maxLength: 40 }, maxItems: 20 }
+        onvif_endpoint: { type: string, nullable: true }
+        onvif_profile: { type: string, nullable: true }
+        onvif_version: { type: string, nullable: true }
+        onvif_capabilities:
+          $ref: "#/components/schemas/CameraOnvifCapabilities"
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     CameraFolder:
@@ -4174,6 +4270,9 @@ components:
           items: { type: string, maxLength: 40 }
           maxItems: 20
           description: Replaces the camera's tags. Values are trimmed and de-duplicated case-insensitively.
+        onvif_endpoint: { type: string, maxLength: 2048, nullable: true }
+        onvif_profile: { type: string, maxLength: 64, nullable: true }
+        onvif_version: { type: string, maxLength: 64, nullable: true }
     CameraFrigateConfig:
       type: object
       required: [camera_id, camera_name, server_id, detect_enabled, tracked_objects, lpr_enabled, zones]

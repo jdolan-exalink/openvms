@@ -274,7 +274,11 @@ func (h *Handlers) DiscoverServerOnvif(ctx context.Context, r gen.DiscoverServer
 	}
 	out := gen.OnvifDiscoveryResult{Devices: make([]gen.OnvifDiscoveryDevice, 0, len(result.Devices))}
 	for _, device := range result.Devices {
-		out.Devices = append(out.Devices, gen.OnvifDiscoveryDevice{Xaddrs: device.XAddrs})
+		dev := gen.OnvifDiscoveryDevice{Xaddrs: device.XAddrs}
+		if len(device.Scopes) > 0 {
+			dev.Scopes = &device.Scopes
+		}
+		out.Devices = append(out.Devices, dev)
 	}
 	return gen.DiscoverServerOnvif200JSONResponse(out), nil
 }

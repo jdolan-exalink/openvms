@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"os"
 	"strings"
 	"time"
 )
@@ -109,7 +111,11 @@ func (d *Discovery) Probe(ctx context.Context, interfaceName string) ([]Discover
 			if ctx.Err() != nil {
 				return result, ctx.Err()
 			}
-			if errors.Is(err, ErrDiscoveryTimeout) || (errors.Is(err, context.DeadlineExceeded) && probeCtx.Err() != nil) {
+			var netErr net.Error
+			if errors.Is(err, ErrDiscoveryTimeout) ||
+				errors.Is(err, os.ErrDeadlineExceeded) ||
+				errors.Is(err, context.DeadlineExceeded) ||
+				(errors.As(err, &netErr) && netErr.Timeout()) {
 				return result, nil
 			}
 			if errors.Is(err, context.Canceled) {

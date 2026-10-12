@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
@@ -618,4 +619,170 @@ func (s *Service) RestartServer(ctx context.Context, actor authz.Actor, id uuid.
 			"name":      srv.Name,
 		})
 	})
+}
+
+// CameraStreamHostInfo holds network and credential details extracted from camera streams.
+type CameraStreamHostInfo struct {
+	Host     string
+	Username string
+	Password string
+}
+
+func (s *Service) GetServerCameraStreamHosts(ctx context.Context, actor authz.Actor, id uuid.UUID) (map[string]CameraStreamHostInfo, error) {
+	var srv db.GetServerRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		srv, err = q.GetServer(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		return c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID))
+	})
+	if err != nil {
+		return nil, err
+	}
+	info, err := s.connInfo(db.FrigateServer{
+		ID:             srv.ID,
+		BaseUrl:        srv.BaseUrl,
+		AuthMode:       srv.AuthMode,
+		Username:       srv.Username,
+		PasswordSealed: srv.PasswordSealed,
+		TlsSkipVerify:  srv.TlsSkipVerify,
+	})
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := s.Connect(ctx, info)
+	if err != nil {
+		return nil, &FrigateError{Err: err}
+	}
+	rawPaths, err := adapter.RawPaths(ctx)
+	if err != nil {
+		return nil, &FrigateError{Err: err}
+	}
+	return ExtractCameraStreamHosts(rawPaths), nil
+}
+
+// ExtractCameraStreamHosts parses rawPaths from Frigate to extract camera stream hosts and credentials.
+func ExtractCameraStreamHosts(rawPaths map[string]any) map[string]CameraStreamHostInfo {
+	out := make(map[string]CameraStreamHostInfo)
+
+	updateCameraInfo := func(name string, candidate CameraStreamHostInfo) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		for _, key := range []string{name, strings.ToLower(name)} {
+			existing, exists := out[key]
+			if !exists {
+				out[key] = candidate
+				continue
+			}
+			if existing.Host == "" && candidate.Host != "" {
+				existing.Host = candidate.Host
+			}
+			// Prefer candidate credentials if existing has none
+			if (existing.Username == "" && existing.Password == "") && (candidate.Username != "" || candidate.Password != "") {
+				existing.Username = candidate.Username
+				existing.Password = candidate.Password
+			}
+			out[key] = existing
+		}
+	}
+
+	// 1. Parse go2rtc streams
+	if go2rtcMap, ok := rawPaths["go2rtc"].(map[string]any); ok {
+		if streamsMap, ok := go2rtcMap["streams"].(map[string]any); ok {
+			for streamKey, val := range streamsMap {
+				camName := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(streamKey, "_main"), "_sub"), "_live"), "_stream")
+				var urls []string
+				switch v := val.(type) {
+				case string:
+					urls = append(urls, v)
+				case []any:
+					for _, item := range v {
+						if s, ok := item.(string); ok {
+							urls = append(urls, s)
+						}
+					}
+				case []string:
+					urls = append(urls, v...)
+				}
+				for _, u := range urls {
+					parsed := parseRTSPStreamInfo(u)
+					if parsed.Host != "" {
+						updateCameraInfo(camName, parsed)
+						updateCameraInfo(streamKey, parsed)
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Parse cameras configuration (onvif block and ffmpeg inputs)
+	if camerasMap, ok := rawPaths["cameras"].(map[string]any); ok {
+		for camName, camVal := range camerasMap {
+			camCfg, ok := camVal.(map[string]any)
+			if !ok {
+				continue
+			}
+			// Check direct onvif block
+			if onvifMap, ok := camCfg["onvif"].(map[string]any); ok {
+				host, _ := onvifMap["host"].(string)
+				user, _ := onvifMap["user"].(string)
+				pass, _ := onvifMap["password"].(string)
+				if host != "" && !isLocalHost(host) {
+					updateCameraInfo(camName, CameraStreamHostInfo{Host: host, Username: user, Password: pass})
+				}
+			}
+			// Check ffmpeg inputs
+			if ffMap, ok := camCfg["ffmpeg"].(map[string]any); ok {
+				if inputs, ok := ffMap["inputs"].([]any); ok {
+					for _, in := range inputs {
+						if inMap, ok := in.(map[string]any); ok {
+							if path, ok := inMap["path"].(string); ok {
+								parsed := parseRTSPStreamInfo(path)
+								if parsed.Host != "" {
+									updateCameraInfo(camName, parsed)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return out
+}
+
+func isLocalHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" || h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "0.0.0.0" {
+		return true
+	}
+	if strings.HasPrefix(h, "127.") {
+		return true
+	}
+	return false
+}
+
+func parseRTSPStreamInfo(raw string) CameraStreamHostInfo {
+	if idx := strings.Index(raw, "#"); idx != -1 {
+		raw = raw[:idx]
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u == nil {
+		return CameraStreamHostInfo{}
+	}
+	host := u.Hostname()
+	if isLocalHost(host) {
+		return CameraStreamHostInfo{}
+	}
+	var user, pass string
+	if u.User != nil {
+		user = u.User.Username()
+		pass, _ = u.User.Password()
+	}
+	return CameraStreamHostInfo{Host: host, Username: user, Password: pass}
 }

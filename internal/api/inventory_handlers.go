@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/google/uuid"
 
@@ -366,7 +367,16 @@ func toCamera(c db.GetCameraRow) gen.Camera {
 		Zones: c.Zones, Lpr: c.Lpr, Status: gen.HealthStatus(c.Status),
 		MissingSince: c.MissingSince, GroupIds: c.GroupIds, FolderId: c.FolderID, SortOrder: int(c.SortOrder), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 		DefaultLiveQuality: gen.CameraLiveQuality(c.DefaultLiveQuality), Description: c.Description, Location: c.Location,
-		Tags: append([]string{}, c.Tags...),
+		Tags:          append([]string{}, c.Tags...),
+		OnvifEndpoint: c.OnvifEndpoint,
+		OnvifProfile:  c.OnvifProfile,
+		OnvifVersion:  c.OnvifVersion,
+	}
+	if len(c.OnvifCapabilities) > 0 && string(c.OnvifCapabilities) != "{}" {
+		var caps gen.CameraOnvifCapabilities
+		if err := json.Unmarshal(c.OnvifCapabilities, &caps); err == nil {
+			out.OnvifCapabilities = &caps
+		}
 	}
 	if c.Fps != nil {
 		out.Fps = c.Fps
@@ -406,6 +416,7 @@ func (h *Handlers) GetCamera(ctx context.Context, r gen.GetCameraRequestObject) 
 func cameraUpdate(b *gen.CameraUpdate) inventory.CameraUpdate {
 	out := inventory.CameraUpdate{
 		DisplayName: b.DisplayName, Enabled: b.Enabled, Description: b.Description, Location: b.Location, Tags: b.Tags,
+		OnvifEndpoint: b.OnvifEndpoint, OnvifProfile: b.OnvifProfile, OnvifVersion: b.OnvifVersion,
 	}
 	if b.DefaultLiveQuality != nil {
 		q := string(*b.DefaultLiveQuality)
