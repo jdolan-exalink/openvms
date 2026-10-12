@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -129,6 +130,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	devices, err := h.discoverer.Probe(r.Context(), input.InterfaceName)
 	if err != nil {
+		slog.Error("ONVIF discovery probe failed", "error", err, "interface", input.InterfaceName)
 		if r.Context().Err() != nil {
 			http.Error(w, "request canceled", http.StatusRequestTimeout)
 			return

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -185,7 +186,14 @@ func (s *udpDiscoverySession) Receive(ctx context.Context) ([]byte, error) {
 	}
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil, ctx.Err()
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return nil, ctx.Err()
+			}
+			return nil, ErrDiscoveryTimeout
+		}
+		var netErr net.Error
+		if (errors.As(err, &netErr) && netErr.Timeout()) || errors.Is(err, os.ErrDeadlineExceeded) {
+			return nil, ErrDiscoveryTimeout
 		}
 		return nil, err
 	}
