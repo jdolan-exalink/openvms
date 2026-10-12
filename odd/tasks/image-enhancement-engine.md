@@ -36,10 +36,10 @@ Operators monitoring security cameras frequently encounter suboptimal lighting c
   - Implement WebGL shader renderer (`WebGLVisualEnhancer`) with shaders for levels, gamma, contrast, saturation, and unsharp mask, plus Canvas 2D / CSS filter fallback.
   - TDD: RED test in `apps/web/src/lib/enhancement/webgl.test.ts` verifying shader setup, texture binding, and fallback degradation -> GREEN -> REFACTOR (3 passed).
 
-- [ ] `TASK-3`: Player UI Controls (`EnhancementControl`)
-  - Route: Direct inline / delegated writer.
+- [x] `TASK-3`: Player UI Controls (`EnhancementControl`)
+  - Route: Direct inline.
   - Implement compact `EnhancementControl` component with `OFF` / `AUTO` quick toggle, popover with manual sliders (brightness, contrast, gamma, saturation, sharpness), and "Restablecer imagen" button.
-  - TDD: RED test in `apps/web/src/components/EnhancementControl.test.tsx` verifying toggle states, accessibility, and reset actions -> GREEN -> REFACTOR.
+  - TDD: RED test in `apps/web/src/components/EnhancementControl.test.tsx` verifying toggle states, accessibility, and reset actions -> GREEN -> REFACTOR (4 passed).
 
 - [ ] `TASK-4`: Integration with Digital Zoom & Players
   - Route: Delegated writer.
@@ -55,6 +55,7 @@ Operators monitoring security cameras frequently encounter suboptimal lighting c
 ## Progress & Verification Evidence
 - `TASK-1`: Complete. 8/8 tests passed in `src/lib/enhancement/engine.test.ts`. Verified ROI extraction from digital zoom, auto contrast/gamma/black-level adjustments, and lerp interpolation.
 - `TASK-2`: Complete. 3/3 tests passed in `src/lib/enhancement/webgl.test.ts`. WebGL hardware shader pipeline (Laplacian unsharp mask, levels stretch, gamma, contrast, saturation, white balance) and CSS filter fallback implemented.
+- `TASK-3`: Complete. 4/4 tests passed in `src/components/EnhancementControl.test.tsx`. Compact quick AUTO/OFF toggle badge, manual slider drawer (brightness, contrast, gamma, saturation, sharpness), and image reset action.
 
 ## Next Step
-Execute `TASK-3`: Player UI Controls (`EnhancementControl`) under strict TDD.
+Execute `TASK-4`: Integration with Digital Zoom & Players under strict TDD.
