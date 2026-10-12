@@ -113,4 +113,59 @@ describe("ForensicComparisonModal", () => {
     fireEvent.click(closeBtn);
     expect(handleClose).toHaveBeenCalledTimes(1);
   });
+
+  it("supports mouse wheel zoom and displays updated scale", () => {
+    render(
+      <ForensicComparisonModal isOpen={true} onClose={vi.fn()} result={mockResult} />,
+    );
+
+    const viewer = screen.getByTestId("forensic-viewer");
+    expect(viewer).toBeInTheDocument();
+
+    // Wheel event with deltaY < 0 (zoom in)
+    fireEvent.wheel(viewer, { deltaY: -120 });
+
+    // Zoom level indicator should be higher than 100%
+    const zoomText = screen.getByTestId("zoom-level-text");
+    expect(parseInt(zoomText.textContent || "100", 10)).toBeGreaterThan(100);
+  });
+
+  it("resets zoom and pan on double click", () => {
+    render(
+      <ForensicComparisonModal isOpen={true} onClose={vi.fn()} result={mockResult} />,
+    );
+
+    const viewer = screen.getByTestId("forensic-viewer");
+    expect(viewer).toBeInTheDocument();
+
+    // Zoom in first with button
+    const zoomInBtn = screen.getByRole("button", { name: /aumentar zoom/i });
+    fireEvent.click(zoomInBtn);
+
+    const zoomText = screen.getByTestId("zoom-level-text");
+    expect(parseInt(zoomText.textContent || "100", 10)).toBeGreaterThan(100);
+
+    // Double click to reset
+    fireEvent.doubleClick(viewer);
+    expect(screen.getByTestId("zoom-level-text").textContent).toBe("100%");
+  });
+
+  it("supports dragging to pan when zoomed", () => {
+    render(
+      <ForensicComparisonModal isOpen={true} onClose={vi.fn()} result={mockResult} />,
+    );
+
+    const viewer = screen.getByTestId("forensic-viewer");
+    const zoomInBtn = screen.getByRole("button", { name: /aumentar zoom/i });
+    fireEvent.click(zoomInBtn);
+    fireEvent.click(zoomInBtn);
+
+    // Drag to pan
+    fireEvent.pointerDown(viewer, { clientX: 200, clientY: 200, button: 0, pointerId: 1 });
+    fireEvent.pointerMove(viewer, { clientX: 150, clientY: 150, button: 0, pointerId: 1 });
+    fireEvent.pointerUp(viewer, { pointerId: 1 });
+
+    const transformStage = screen.getByTestId("enhanced-layer");
+    expect(transformStage.getAttribute("style")).toContain("translate(");
+  });
 });
