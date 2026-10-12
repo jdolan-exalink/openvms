@@ -50,7 +50,7 @@ vec3 rotateRoll(vec3 v, float angle) {
 vec3 rotatePitch(vec3 v, float angle) {
   float c = cos(angle);
   float s = sin(angle);
-  return vec3(v.x, v.y * c - v.z * s, v.y * s + v.z * c);
+  return vec3(v.x, v.y * c + v.z * s, -v.y * s + v.z * c);
 }
 
 vec3 rotateYaw(vec3 v, float angle) {

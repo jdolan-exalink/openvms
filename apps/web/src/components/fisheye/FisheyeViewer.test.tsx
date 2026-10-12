@@ -52,4 +52,10 @@ describe("FisheyeViewer Component", () => {
     // PTZ coordinates HUD reflects zoomed FOV
     expect(screen.getByText(/FOV:/i)).toBeInTheDocument();
   });
+
+  it("handles videoElement prop when supplied directly", () => {
+    const video = document.createElement("video");
+    render(<FisheyeViewer cameraId="cam-123" videoElement={video} />);
+    expect(screen.getByTestId("fisheye-canvas")).toBeInTheDocument();
+  });
 });

@@ -322,7 +322,7 @@ export function FisheyeSection({
           onClose={() => setIsCalibrating(false)}
         >
           <FisheyeCalibrationView
-            snapshotUrl={snapshotUrl}
+            snapshotUrl={snapshotUrl || `/media/v1/cameras/${cameraId}/snapshot.jpg`}
             initialCalibration={config.calibration}
             initialMountType={config.mountType}
             initialLensType={config.lensType}

@@ -736,10 +736,7 @@ function LiveDesktop() {
           className="max-w-5xl"
         >
           <div className="w-full h-[68vh] min-h-[480px]">
-            <FisheyeViewer
-              cameraId={fisheyeModalCameraId}
-              videoSrc={`/media/v1/cameras/${fisheyeModalCameraId}/hls/live.m3u8`}
-            />
+            <FisheyeViewer cameraId={fisheyeModalCameraId} />
           </div>
         </Modal>
       )}

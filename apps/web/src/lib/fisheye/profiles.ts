@@ -28,7 +28,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
       centerY: 0.5,
       radius: 0.49,
       rotation: 0,
-      fov: 360,
+      fov: 185,
     },
   },
   {
@@ -43,7 +43,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
       centerY: 0.5,
       radius: 0.485,
       rotation: 0,
-      fov: 360,
+      fov: 185,
     },
   },
   {
@@ -58,7 +58,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
       centerY: 0.5,
       radius: 0.49,
       rotation: 0,
-      fov: 360,
+      fov: 185,
     },
   },
   {
@@ -73,7 +73,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
       centerY: 0.5,
       radius: 0.48,
       rotation: 0,
-      fov: 360,
+      fov: 185,
     },
   },
   {
@@ -88,7 +88,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
       centerY: 0.5,
       radius: 0.49,
       rotation: 0,
-      fov: 360,
+      fov: 185,
     },
   },
   {
@@ -149,7 +149,7 @@ export function detectFisheyeProfile(camera: {
         centerY: 0.5,
         radius: 0.48,
         rotation: 0,
-        fov: 360,
+        fov: 185,
       },
     };
   }

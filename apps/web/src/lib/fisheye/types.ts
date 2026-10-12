@@ -72,7 +72,7 @@ export const DEFAULT_FISHEYE_CALIBRATION: FisheyeCalibration = {
   centerY: 0.5,
   radius: 0.48,
   rotation: 0,
-  fov: 360,
+  fov: 185,
 };
 
 export const DEFAULT_FISHEYE_CONFIG: Omit<FisheyeConfig, "cameraId"> = {
