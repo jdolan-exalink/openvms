@@ -7,6 +7,7 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import { cameraFrigateConfigQuery } from "@/api/queries";
 import { Modal } from "@/components/Modal";
 import { Button, ErrorNote, Field, LinkButton, Select, StatusBadge, Switch, TextInput } from "@/components/ui";
+import { FisheyeSection } from "./fisheye/FisheyeSection";
 
 type Camera = Schemas["Camera"];
 
@@ -216,6 +217,16 @@ export function CameraSettingsDrawer({
                     </label>
                   </div>
                 </div>
+
+                {isFisheye && (
+                  <div className="mt-1">
+                    <FisheyeSection
+                      cameraId={camera.id}
+                      cameraName={name}
+                      canManage={canManage}
+                    />
+                  </div>
+                )}
               </>
             ) : (
               <p className="text-xs text-muted">Necesitas cameras.manage para editar los ajustes de VMS.</p>

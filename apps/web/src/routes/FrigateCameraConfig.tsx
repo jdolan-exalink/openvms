@@ -1,7 +1,8 @@
 import {
-  Activity, ArrowLeft, Camera, Car, CircleCheck, Eye, HardDrive, History, Layers, Radio,
+  Activity, ArrowLeft, Camera, Car, CircleCheck, Compass, Eye, HardDrive, History, Layers, Radio,
   RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, TriangleAlert, Video,
 } from "lucide-react";
+import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
 import { Icon } from "@/components/Icon";
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -30,6 +31,7 @@ type SectionResult = Schemas["FrigateSectionResult"];
 const HISTORY = "__history";
 const GENERAL = "__general";
 const ONVIF = "__onvif";
+const FISHEYE = "__fisheye";
 
 function getSectionIcon(section: string) {
   switch (section) {
@@ -452,7 +454,32 @@ export function FrigateCameraConfig() {
               </div>
             </div>
 
-            {/* 5. Streams FFmpeg */}
+            {/* 5. Modo Fisheye / 360° */}
+            <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
+              <button
+                type="button"
+                aria-current={activeSection === FISHEYE ? "page" : undefined}
+                onClick={() => setActive(FISHEYE)}
+                className={cn(
+                  "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
+                  activeSection === FISHEYE
+                    ? "bg-primary text-on-primary shadow-sm"
+                    : "text-on-surface hover:bg-surface-3"
+                )}
+              >
+                <span className="flex items-center gap-2">
+                  <Icon icon={Compass} size="xs" />
+                  <span>Fisheye / 360°</span>
+                </span>
+                {(camera.data?.tags?.includes("fisheye") || camera.data?.tags?.includes("ojo_de_pez")) && (
+                  <span className="rounded-m3-xs bg-cyan-400/20 text-cyan-300 px-1 py-0.5 text-[9px] font-mono">
+                    Activo
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* 6. Streams FFmpeg */}
             {sections.includes("ffmpeg") && (
               <button
                 type="button"
@@ -554,6 +581,12 @@ export function FrigateCameraConfig() {
                 setEdits((e) => ({ ...e, onvif: patch }));
                 setActive("onvif");
               }}
+            />
+          ) : activeSection === FISHEYE ? (
+            <FisheyeSection
+              cameraId={cameraId}
+              cameraName={doc.data.camera_name}
+              canManage={!readOnly}
             />
           ) : activeSection === HISTORY ? (
             <FrigateHistory
