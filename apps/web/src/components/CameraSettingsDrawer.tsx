@@ -1,4 +1,4 @@
-import { SlidersHorizontal, Video } from "lucide-react";
+import { Activity, Car, Eye, Radio, SlidersHorizontal, Sparkles, Video } from "lucide-react";
 import { Icon } from "./Icon";
 import { cn } from "@/lib/cn";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -54,12 +54,25 @@ export function CameraSettingsDrawer({
   const [tags, setTags] = useState(camera.tags.join(", "));
   const [invalid, setInvalid] = useState(false);
 
+  const [isLpr, setIsLpr] = useState(camera.lpr ?? camera.tags.includes("lpr"));
+  const [isPtz, setIsPtz] = useState(camera.onvif_capabilities?.has_ptz ?? camera.tags.includes("ptz"));
+  const [isFisheye, setIsFisheye] = useState(camera.tags.includes("fisheye") || camera.tags.includes("ojo_de_pez"));
+  const [hasAudio, setHasAudio] = useState(camera.tags.includes("audio") || camera.tags.includes("mic"));
+  const [isThermal, setIsThermal] = useState(camera.tags.includes("thermal") || camera.tags.includes("termica"));
+
   // Read-only Frigate summary; the full editor lives on its own page (FrigateCameraConfig).
   const frigateConfig = useQuery(cameraFrigateConfigQuery(camera.id));
 
   const save = useMutation({
     mutationFn: async () => {
       if (canManage) {
+        const parsedTags = new Set(tags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean));
+        if (isLpr) parsedTags.add("lpr"); else parsedTags.delete("lpr");
+        if (isPtz) parsedTags.add("ptz"); else parsedTags.delete("ptz");
+        if (isFisheye) parsedTags.add("fisheye"); else parsedTags.delete("fisheye");
+        if (hasAudio) parsedTags.add("audio"); else parsedTags.delete("audio");
+        if (isThermal) parsedTags.add("thermal"); else parsedTags.delete("thermal");
+
         await unwrap(
           await api.PATCH("/api/v1/cameras/{cameraId}", {
             params: { path: { cameraId: camera.id } },
@@ -69,7 +82,7 @@ export function CameraSettingsDrawer({
               default_live_quality: quality,
               description: description.trim(),
               location: location.trim(),
-              tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+              tags: Array.from(parsedTags),
             },
           }),
         );
@@ -177,6 +190,32 @@ export function CameraSettingsDrawer({
                 <Field label="Etiquetas" hint="Separadas por comas (máximo 20).">
                   <TextInput value={tags} onChange={(e) => setTags(e.target.value)} />
                 </Field>
+
+                <div className="flex flex-col gap-2 rounded-m3-lg border border-outline-variant/60 bg-surface-2 p-3">
+                  <span className="text-xs font-bold text-muted uppercase">Tipo y Funciones de Cámara</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className={cn("flex items-center gap-2 rounded-m3-md p-2 text-xs border cursor-pointer transition-colors", isLpr ? "border-primary bg-primary/10 text-ink font-semibold" : "border-outline-variant/60 bg-surface-1 text-muted")}>
+                      <input type="checkbox" checked={isLpr} onChange={(e) => setIsLpr(e.target.checked)} className="size-3.5 rounded accent-primary" />
+                      <span className="flex items-center gap-1"><Icon icon={Car} size="xs" /> LPR</span>
+                    </label>
+                    <label className={cn("flex items-center gap-2 rounded-m3-md p-2 text-xs border cursor-pointer transition-colors", isPtz ? "border-primary bg-primary/10 text-ink font-semibold" : "border-outline-variant/60 bg-surface-1 text-muted")}>
+                      <input type="checkbox" checked={isPtz} onChange={(e) => setIsPtz(e.target.checked)} className="size-3.5 rounded accent-primary" />
+                      <span className="flex items-center gap-1"><Icon icon={Radio} size="xs" /> PTZ</span>
+                    </label>
+                    <label className={cn("flex items-center gap-2 rounded-m3-md p-2 text-xs border cursor-pointer transition-colors", isFisheye ? "border-primary bg-primary/10 text-ink font-semibold" : "border-outline-variant/60 bg-surface-1 text-muted")}>
+                      <input type="checkbox" checked={isFisheye} onChange={(e) => setIsFisheye(e.target.checked)} className="size-3.5 rounded accent-primary" />
+                      <span className="flex items-center gap-1"><Icon icon={Eye} size="xs" /> 360° / Fisheye</span>
+                    </label>
+                    <label className={cn("flex items-center gap-2 rounded-m3-md p-2 text-xs border cursor-pointer transition-colors", hasAudio ? "border-primary bg-primary/10 text-ink font-semibold" : "border-outline-variant/60 bg-surface-1 text-muted")}>
+                      <input type="checkbox" checked={hasAudio} onChange={(e) => setHasAudio(e.target.checked)} className="size-3.5 rounded accent-primary" />
+                      <span className="flex items-center gap-1"><Icon icon={Activity} size="xs" /> Audio</span>
+                    </label>
+                    <label className={cn("flex items-center gap-2 rounded-m3-md p-2 text-xs border cursor-pointer transition-colors col-span-2", isThermal ? "border-primary bg-primary/10 text-ink font-semibold" : "border-outline-variant/60 bg-surface-1 text-muted")}>
+                      <input type="checkbox" checked={isThermal} onChange={(e) => setIsThermal(e.target.checked)} className="size-3.5 rounded accent-primary" />
+                      <span className="flex items-center gap-1"><Icon icon={Sparkles} size="xs" /> Cámara Térmica</span>
+                    </label>
+                  </div>
+                </div>
               </>
             ) : (
               <p className="text-xs text-muted">Necesitas cameras.manage para editar los ajustes de VMS.</p>

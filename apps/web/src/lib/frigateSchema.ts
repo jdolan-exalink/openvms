@@ -130,8 +130,8 @@ export function schemaAt(root: JSchema, start: JSchema, path: (string | number)[
   return cur;
 }
 
-/** Fields Frigate fills in itself and that mean nothing to an operator. */
-export const HIDDEN_FIELDS = new Set(["enabled_in_config", "name"]);
+/** Fields Frigate fills in itself and that mean nothing to an operator. Birdseye is managed globally as IA-View. */
+export const HIDDEN_FIELDS = new Set(["enabled_in_config", "name", "birdseye"]);
 
 export function humanizeKey(key: string): string {
   const s = key.replace(/_/g, " ").trim();
@@ -141,7 +141,7 @@ export function humanizeKey(key: string): string {
 // --- sections ---------------------------------------------------------------------------------
 
 export const SECTION_ORDER = [
-  "enabled", "ffmpeg", "detect", "objects", "motion", "record", "snapshots", "zones", "review", "audio", "birdseye",
+  "enabled", "ffmpeg", "detect", "objects", "motion", "record", "snapshots", "zones", "review", "audio",
   "lpr", "face_recognition", "semantic_search", "onvif", "live", "ui", "timestamp_style", "mqtt", "notifications", "genai",
 ];
 

@@ -1,7 +1,7 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { RefreshCw, Settings } from "lucide-react";
+import { RefreshCw, Settings, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serverAgentQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { api, unwrap, ApiError } from "@/api/client";
@@ -9,6 +9,7 @@ import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { can } from "@/lib/perm";
 import { Icon } from "@/components/Icon";
 import { Empty, ErrorNote, LinkButton, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
+import { IaViewModal } from "@/components/IaViewModal";
 function summarize(cameras: { enabled: boolean; status: string }[]) {
   const online = cameras.filter((c) => c.enabled && c.status === "online").length;
   const disabled = cameras.filter((c) => !c.enabled).length;
@@ -98,6 +99,7 @@ export function Cameras() {
   const [probeUsername, setProbeUsername] = useState("");
   const [probePassword, setProbePassword] = useState("");
   const [probe, setProbe] = useState<{ pending: boolean; result?: import("@/api/client").Schemas["OnvifProbeResult"]; error?: string }>({ pending: false });
+  const [iaViewOpen, setIaViewOpen] = useState(false);
   const discoveryVersion = useRef(0);
   const activeDiscovery = useRef<AbortController | null>(null);
   const probeVersion = useRef(0);
@@ -334,6 +336,14 @@ export function Cameras() {
                 {checkServerCameras.isPending ? "Comprobando cámaras…" : "Comprobar y vincular ONVIF en cámaras"}
               </button>
             )}
+            <button
+              type="button"
+              className="flex h-11 items-center gap-1.5 rounded-m3-full border border-primary/40 bg-primary/10 px-4 text-sm font-semibold text-primary hover:bg-primary/18"
+              onClick={() => setIaViewOpen(true)}
+            >
+              <Icon icon={Sparkles} size="xs" />
+              Canal IA-View
+            </button>
           </div>
         )}
         {checkResult && <p role="status" className="rounded-m3-lg bg-ok/12 px-4 py-2.5 text-sm text-ok">{checkResult}</p>}
@@ -486,6 +496,7 @@ export function Cameras() {
           </tbody>
         </Table>
       )}
+      <IaViewModal open={iaViewOpen} onClose={() => setIaViewOpen(false)} />
     </div>
   );
 }
