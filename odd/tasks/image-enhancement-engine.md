@@ -31,10 +31,10 @@ Operators monitoring security cameras frequently encounter suboptimal lighting c
   - Implement `ImageEnhancementEngine` interface, types (`EnhancementAdjustments`, `EnhancementMode`, `RoiRect`), histogram/luminance/white-balance analysis, and lerp smoother in `apps/web/src/lib/enhancement/`.
   - TDD: RED test in `apps/web/src/lib/enhancement/engine.test.ts` verifying analysis and smooth adjustments -> GREEN -> REFACTOR (8 passed).
 
-- [ ] `TASK-2`: WebGL & Fallback Rendering Pipeline
-  - Route: Delegated writer.
+- [x] `TASK-2`: WebGL & Fallback Rendering Pipeline
+  - Route: Direct inline.
   - Implement WebGL shader renderer (`WebGLVisualEnhancer`) with shaders for levels, gamma, contrast, saturation, and unsharp mask, plus Canvas 2D / CSS filter fallback.
-  - TDD: RED test in `apps/web/src/lib/enhancement/webgl.test.ts` verifying shader setup, texture binding, and fallback degradation -> GREEN -> REFACTOR.
+  - TDD: RED test in `apps/web/src/lib/enhancement/webgl.test.ts` verifying shader setup, texture binding, and fallback degradation -> GREEN -> REFACTOR (3 passed).
 
 - [ ] `TASK-3`: Player UI Controls (`EnhancementControl`)
   - Route: Direct inline / delegated writer.
@@ -54,6 +54,7 @@ Operators monitoring security cameras frequently encounter suboptimal lighting c
 
 ## Progress & Verification Evidence
 - `TASK-1`: Complete. 8/8 tests passed in `src/lib/enhancement/engine.test.ts`. Verified ROI extraction from digital zoom, auto contrast/gamma/black-level adjustments, and lerp interpolation.
+- `TASK-2`: Complete. 3/3 tests passed in `src/lib/enhancement/webgl.test.ts`. WebGL hardware shader pipeline (Laplacian unsharp mask, levels stretch, gamma, contrast, saturation, white balance) and CSS filter fallback implemented.
 
 ## Next Step
-Execute `TASK-2`: WebGL & Fallback Rendering Pipeline under strict TDD.
+Execute `TASK-3`: Player UI Controls (`EnhancementControl`) under strict TDD.

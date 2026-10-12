@@ -1,16 +1,6 @@
 import { IDENTITY_ZOOM, type DigitalZoom } from "@/lib/live/digitalZoom";
-import type { EnhancementAdjustments, ImageStats, RoiRect } from "./types";
-
-export const DEFAULT_ADJUSTMENTS: Readonly<EnhancementAdjustments> = Object.freeze({
-  brightness: 0,
-  contrast: 0,
-  gamma: 1.0,
-  saturation: 0,
-  sharpness: 0,
-  blackLevel: 0.0,
-  whiteLevel: 1.0,
-  temperature: 0,
-});
+import { DEFAULT_ADJUSTMENTS, type EnhancementAdjustments, type ImageStats, type RoiRect } from "./types";
+export { DEFAULT_ADJUSTMENTS };
 
 export const FULL_FRAME_ROI: Readonly<RoiRect> = Object.freeze({
   x: 0,

@@ -36,6 +36,17 @@ export type EnhancementAdjustments = {
   temperature: number;
 };
 
+export const DEFAULT_ADJUSTMENTS: Readonly<EnhancementAdjustments> = Object.freeze({
+  brightness: 0,
+  contrast: 0,
+  gamma: 1.0,
+  saturation: 0,
+  sharpness: 0,
+  blackLevel: 0.0,
+  whiteLevel: 1.0,
+  temperature: 0,
+});
+
 /**
  * Analyzed scene statistics from a frame or ROI sample.
  */
