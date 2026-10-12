@@ -41,7 +41,7 @@ export function MapWorkspace(props: Props) {
   const floorId = selection.floor;
   const onlySite = !siteId && sites.data?.length === 1 ? sites.data[0]?.id : undefined;
   const detail = useQuery(workspaceSiteQuery(siteId ?? onlySite ?? ""));
-  const floor = detail.data?.buildings.flatMap(building => building.floors).find(item => item.id === floorId);
+  const floor = detail.data?.buildings?.flatMap(building => building.floors).find(item => item.id === floorId);
   const invalid = !!floorId && (!siteId || detail.isSuccess && !detail.isFetching && !floor);
   function change(next: {
     site?: string;
@@ -96,7 +96,7 @@ export function MapWorkspace(props: Props) {
    <label className="order-3 flex shrink-0 items-center gap-1.5">
     <span className="font-medium text-on-surface-variant">Mapa</span>
     <Select aria-label="Mapa" title="El mapa geográfico usa coordenadas. Los demás son una imagen de fondo, sin coordenadas, para edificios o planos." className="h-11 max-w-56 rounded-full text-xs" value={floorId ?? ""} disabled={!visibleSiteId || detail.isLoading} onChange={event => change({ site: siteId ?? onlySite, floor: event.target.value || undefined })}>
-     <option value="">Mapa geográfico</option>{detail.data?.buildings.map(building => building.floors.map(item => <option key={item.id} value={item.id}>{building.name} / {item.name}</option>))}
+     <option value="">Mapa geográfico</option>{detail.data?.buildings?.map(building => building.floors.map(item => <option key={item.id} value={item.id}>{building.name} / {item.name}</option>))}
     </Select>
    </label>
    <div className="order-4 flex shrink-0 items-center gap-1">

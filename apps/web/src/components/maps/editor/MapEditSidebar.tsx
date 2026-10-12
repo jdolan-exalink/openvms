@@ -25,6 +25,7 @@ export function MapEditSidebar({
   armedId,
   onArm,
   onUnplace,
+  onPointerDrop,
 }: {
   cameras: readonly MapEditCamera[];
   folders?: readonly MapTreeFolder[];
@@ -32,6 +33,7 @@ export function MapEditSidebar({
   armedId?: string;
   onArm: (cameraId: string) => void;
   onUnplace?: (cameraId: string) => void;
+  onPointerDrop?: (cameraId: string, clientX: number, clientY: number) => void;
 }) {
   const [query, setQuery] = useState("");
   const [draggingId, setDraggingId] = useState<string>();
@@ -80,6 +82,7 @@ export function MapEditSidebar({
             setDraggingId(id);
           }}
           onDragEnd={() => setDraggingId(undefined)}
+          onPointerDrop={onPointerDrop}
         />
       </div>
     </section>

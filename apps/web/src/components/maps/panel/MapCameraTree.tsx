@@ -4,7 +4,7 @@ import { Chevron, Count, dot, nodeIcon, rowBase, rowSelected } from "@/component
 import { IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { useT } from "@/i18n";
-import { useMemo, useState, type DragEvent } from "react";
+import { useMemo, useRef, useState, type DragEvent } from "react";
 
 export type MapTreeCamera = {
   id: string;
@@ -70,6 +70,7 @@ type RowShared = {
   draggingId?: string;
   onDragStart?: (id: string, event: DragEvent<HTMLButtonElement>) => void;
   onDragEnd?: () => void;
+  onPointerDrop?: (cameraId: string, clientX: number, clientY: number) => void;
 };
 
 /**
@@ -91,6 +92,7 @@ export function MapCameraTree({
   draggingId,
   onDragStart,
   onDragEnd,
+  onPointerDrop,
   keepEmptyFolders = true,
 }: {
   cameras: readonly MapTreeCamera[];
@@ -110,13 +112,14 @@ export function MapCameraTree({
   draggingId?: string;
   onDragStart?: (id: string, event: DragEvent<HTMLButtonElement>) => void;
   onDragEnd?: () => void;
+  onPointerDrop?: (cameraId: string, clientX: number, clientY: number) => void;
   keepEmptyFolders?: boolean;
 }) {
   const [closed, setClosed] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => groupCameras(cameras, folders, servers, keepEmptyFolders), [cameras, folders, servers, keepEmptyFolders]);
   const toggle = (key: string) => setClosed((current) => ({ ...current, [key]: !current[key] }));
   if (groups.length === 0) return <p className="px-1 text-xs text-on-surface-variant">No hay cámaras para este filtro.</p>;
-  const shared: RowShared = { selectedId, armedId, onSelect, onOpen, onClose, onUnplace, openIds, draggable, draggingId, onDragStart, onDragEnd };
+  const shared: RowShared = { selectedId, armedId, onSelect, onOpen, onClose, onUnplace, openIds, draggable, draggingId, onDragStart, onDragEnd, onPointerDrop };
   return (
     <nav aria-label="Cámaras" className="flex min-w-0 flex-col text-sm">
       {groups.map((group) => {
@@ -162,23 +165,58 @@ export function MapCameraTree({
 
 function CameraRow({ camera, indent, shared }: { camera: MapTreeCamera; indent: string; shared: RowShared }) {
   const t = useT();
-  const { selectedId, armedId, onSelect, onOpen, onClose, onUnplace, openIds, draggable, draggingId, onDragStart, onDragEnd } = shared;
+  const pointerDragRef = useRef<{ x: number; y: number; pointer: number; moved: boolean } | undefined>(undefined);
+  const [touchDragging, setTouchDragging] = useState(false);
+  const { selectedId, armedId, onSelect, onOpen, onClose, onUnplace, openIds, draggable, draggingId, onDragStart, onDragEnd, onPointerDrop } = shared;
   const selected = selectedId === camera.id || armedId === camera.id;
   const placed = camera.placed === true;
   const windowOpen = openIds?.has(camera.id) === true;
   const toggleLabel = t(windowOpen ? "maps.closeLiveNamed" : "maps.openLiveNamed", { name: camera.name });
   const canToggle = onOpen && camera.placed !== false;
+  const isDragging = draggingId === camera.id || touchDragging;
   return (
     <div className={cn(indent, "group/cam flex min-w-0 items-center gap-1")}>
       <button
         type="button"
         draggable={draggable}
+        style={{ touchAction: onPointerDrop ? "none" : undefined }}
+        onPointerDown={(event) => {
+          if (!onPointerDrop || event.pointerType === "mouse" || !event.isPrimary) return;
+          pointerDragRef.current = { x: event.clientX, y: event.clientY, pointer: event.pointerId, moved: false };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const drag = pointerDragRef.current;
+          if (!drag || drag.pointer !== event.pointerId) return;
+          if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 5) {
+            drag.moved = true;
+            setTouchDragging(true);
+          }
+        }}
+        onPointerUp={(event) => {
+          const drag = pointerDragRef.current;
+          if (!drag || drag.pointer !== event.pointerId) return;
+          pointerDragRef.current = undefined;
+          setTouchDragging(false);
+          if (drag.moved) {
+            event.preventDefault();
+            onPointerDrop?.(camera.id, event.clientX, event.clientY);
+          }
+        }}
+        onPointerCancel={() => {
+          pointerDragRef.current = undefined;
+          setTouchDragging(false);
+        }}
+        onLostPointerCapture={() => {
+          pointerDragRef.current = undefined;
+          setTouchDragging(false);
+        }}
         aria-pressed={selected}
         aria-label={camera.name}
         onClick={() => onSelect(camera.id)}
         onDragStart={draggable ? (event) => onDragStart?.(camera.id, event) : undefined}
         onDragEnd={draggable ? () => onDragEnd?.() : undefined}
-        className={cn(rowBase, selected && rowSelected, draggable && "cursor-grab", draggingId === camera.id && "cursor-grabbing opacity-50")}
+        className={cn(rowBase, selected && rowSelected, draggable && "cursor-grab", isDragging && "cursor-grabbing opacity-50")}
       >
         <Icon icon={Video} size="xs" className={nodeIcon} />
         <span className={cn("size-1.5 shrink-0 rounded-full", dot(camera.status))} aria-hidden />
