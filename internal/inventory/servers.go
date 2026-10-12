@@ -660,23 +660,111 @@ func (s *Service) GetServerCameraStreamHosts(ctx context.Context, actor authz.Ac
 	if err != nil {
 		return nil, &FrigateError{Err: err}
 	}
+	return ExtractCameraStreamHosts(rawPaths), nil
+}
+
+// ExtractCameraStreamHosts parses rawPaths from Frigate to extract camera stream hosts and credentials.
+func ExtractCameraStreamHosts(rawPaths map[string]any) map[string]CameraStreamHostInfo {
 	out := make(map[string]CameraStreamHostInfo)
+
+	updateCameraInfo := func(name string, candidate CameraStreamHostInfo) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return
+		}
+		for _, key := range []string{name, strings.ToLower(name)} {
+			existing, exists := out[key]
+			if !exists {
+				out[key] = candidate
+				continue
+			}
+			if existing.Host == "" && candidate.Host != "" {
+				existing.Host = candidate.Host
+			}
+			// Prefer candidate credentials if existing has none
+			if (existing.Username == "" && existing.Password == "") && (candidate.Username != "" || candidate.Password != "") {
+				existing.Username = candidate.Username
+				existing.Password = candidate.Password
+			}
+			out[key] = existing
+		}
+	}
+
+	// 1. Parse go2rtc streams
 	if go2rtcMap, ok := rawPaths["go2rtc"].(map[string]any); ok {
 		if streamsMap, ok := go2rtcMap["streams"].(map[string]any); ok {
 			for streamKey, val := range streamsMap {
-				streamURL, ok := val.(string)
-				if !ok {
-					continue
+				camName := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(streamKey, "_main"), "_sub"), "_live"), "_stream")
+				var urls []string
+				switch v := val.(type) {
+				case string:
+					urls = append(urls, v)
+				case []any:
+					for _, item := range v {
+						if s, ok := item.(string); ok {
+							urls = append(urls, s)
+						}
+					}
+				case []string:
+					urls = append(urls, v...)
 				}
-				camName := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(streamKey, "_main"), "_sub"), "_live")
-				parsed := parseRTSPStreamInfo(streamURL)
-				if parsed.Host != "" && out[camName].Host == "" {
-					out[camName] = parsed
+				for _, u := range urls {
+					parsed := parseRTSPStreamInfo(u)
+					if parsed.Host != "" {
+						updateCameraInfo(camName, parsed)
+						updateCameraInfo(streamKey, parsed)
+					}
 				}
 			}
 		}
 	}
-	return out, nil
+
+	// 2. Parse cameras configuration (onvif block and ffmpeg inputs)
+	if camerasMap, ok := rawPaths["cameras"].(map[string]any); ok {
+		for camName, camVal := range camerasMap {
+			camCfg, ok := camVal.(map[string]any)
+			if !ok {
+				continue
+			}
+			// Check direct onvif block
+			if onvifMap, ok := camCfg["onvif"].(map[string]any); ok {
+				host, _ := onvifMap["host"].(string)
+				user, _ := onvifMap["user"].(string)
+				pass, _ := onvifMap["password"].(string)
+				if host != "" && !isLocalHost(host) {
+					updateCameraInfo(camName, CameraStreamHostInfo{Host: host, Username: user, Password: pass})
+				}
+			}
+			// Check ffmpeg inputs
+			if ffMap, ok := camCfg["ffmpeg"].(map[string]any); ok {
+				if inputs, ok := ffMap["inputs"].([]any); ok {
+					for _, in := range inputs {
+						if inMap, ok := in.(map[string]any); ok {
+							if path, ok := inMap["path"].(string); ok {
+								parsed := parseRTSPStreamInfo(path)
+								if parsed.Host != "" {
+									updateCameraInfo(camName, parsed)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return out
+}
+
+func isLocalHost(host string) bool {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if h == "" || h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "0.0.0.0" {
+		return true
+	}
+	if strings.HasPrefix(h, "127.") {
+		return true
+	}
+	return false
 }
 
 func parseRTSPStreamInfo(raw string) CameraStreamHostInfo {
@@ -688,6 +776,9 @@ func parseRTSPStreamInfo(raw string) CameraStreamHostInfo {
 		return CameraStreamHostInfo{}
 	}
 	host := u.Hostname()
+	if isLocalHost(host) {
+		return CameraStreamHostInfo{}
+	}
 	var user, pass string
 	if u.User != nil {
 		user = u.User.Username()

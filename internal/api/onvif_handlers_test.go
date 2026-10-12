@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
 
@@ -111,3 +112,39 @@ func TestParseOnvifProbeCapabilities(t *testing.T) {
 		}
 	})
 }
+
+func TestFindStreamInfo(t *testing.T) {
+	hosts := map[string]inventory.CameraStreamHostInfo{
+		"portones": {Host: "10.1.1.220", Username: "admin", Password: "passPortones"},
+		"Patio":    {Host: "10.1.1.224", Username: "admin", Password: "passPatio"},
+	}
+
+	t.Run("matches exact name", func(t *testing.T) {
+		info := findStreamInfo(hosts, "Patio")
+		if info.Host != "10.1.1.224" || info.Password != "passPatio" {
+			t.Fatalf("info = %+v, want Patio", info)
+		}
+	})
+
+	t.Run("matches case-insensitively", func(t *testing.T) {
+		info := findStreamInfo(hosts, "Portones")
+		if info.Host != "10.1.1.220" || info.Password != "passPortones" {
+			t.Fatalf("info = %+v, want portones", info)
+		}
+	})
+
+	t.Run("matches fallback name", func(t *testing.T) {
+		info := findStreamInfo(hosts, "NonExistent", "patio")
+		if info.Host != "10.1.1.224" || info.Password != "passPatio" {
+			t.Fatalf("info = %+v, want patio", info)
+		}
+	})
+
+	t.Run("returns empty when not found", func(t *testing.T) {
+		info := findStreamInfo(hosts, "Unknown")
+		if info.Host != "" || info.Username != "" || info.Password != "" {
+			t.Fatalf("info = %+v, want empty", info)
+		}
+	})
+}
+

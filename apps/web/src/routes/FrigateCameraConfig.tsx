@@ -635,14 +635,14 @@ function CameraOnvifPanel({
               placeholder={camera?.onvif_endpoint || "http://10.1.1.X/onvif/device_service"}
             />
           </Field>
-          <Field label="Usuario ONVIF (opcional)">
+          <Field label="Usuario ONVIF (opcional)" hint="Por defecto usa el usuario del stream si se deja vacío.">
             <TextInput
               value={usernameInput}
               onChange={(e) => setUsernameInput(e.target.value)}
               placeholder="admin"
             />
           </Field>
-          <Field label="Contraseña ONVIF (opcional)">
+          <Field label="Contraseña ONVIF (opcional)" hint="Por defecto usa la contraseña del stream si se deja vacía.">
             <TextInput
               type="password"
               value={passwordInput}

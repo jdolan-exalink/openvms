@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
+	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
 
@@ -119,7 +120,7 @@ func (h *Handlers) CheckCameraOnvif(ctx context.Context, r gen.CheckCameraOnvifR
 			endpoint = strings.TrimSpace(*r.Body.Endpoint)
 		}
 		if r.Body.Username != nil {
-			username = *r.Body.Username
+			username = strings.TrimSpace(*r.Body.Username)
 		}
 		if r.Body.Password != nil {
 			password = *r.Body.Password
@@ -130,15 +131,16 @@ func (h *Handlers) CheckCameraOnvif(ctx context.Context, r gen.CheckCameraOnvifR
 		endpoint = strings.TrimSpace(*cam.OnvifEndpoint)
 	}
 
-	if endpoint == "" {
-		hosts, _ := h.Inv.GetServerCameraStreamHosts(ctx, a, cam.ServerID)
-		if info, ok := hosts[cam.RemoteName]; ok && info.Host != "" {
-			endpoint = "http://" + info.Host + "/onvif/device_service"
-			if username == "" && info.Username != "" {
-				username = info.Username
-				password = info.Password
-			}
-		}
+	hosts, _ := h.Inv.GetServerCameraStreamHosts(ctx, a, cam.ServerID)
+	streamInfo := findStreamInfo(hosts, cam.RemoteName, cam.DisplayName)
+
+	if endpoint == "" && streamInfo.Host != "" {
+		endpoint = "http://" + streamInfo.Host + "/onvif/device_service"
+	}
+
+	if username == "" && streamInfo.Username != "" {
+		username = streamInfo.Username
+		password = streamInfo.Password
 	}
 
 	if endpoint == "" {
@@ -169,6 +171,27 @@ func (h *Handlers) CheckCameraOnvif(ctx context.Context, r gen.CheckCameraOnvifR
 	}
 
 	return gen.CheckCameraOnvif200JSONResponse(toCamera(updatedCam)), nil
+}
+
+func findStreamInfo(hosts map[string]inventory.CameraStreamHostInfo, names ...string) inventory.CameraStreamHostInfo {
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		if info, ok := hosts[n]; ok && (info.Host != "" || info.Username != "") {
+			return info
+		}
+		if info, ok := hosts[strings.ToLower(n)]; ok && (info.Host != "" || info.Username != "") {
+			return info
+		}
+		for k, info := range hosts {
+			if strings.EqualFold(k, n) && (info.Host != "" || info.Username != "") {
+				return info
+			}
+		}
+	}
+	return inventory.CameraStreamHostInfo{}
 }
 
 func (h *Handlers) CheckServerCamerasOnvif(ctx context.Context, r gen.CheckServerCamerasOnvifRequestObject) (gen.CheckServerCamerasOnvifResponseObject, error) {
@@ -211,23 +234,26 @@ func (h *Handlers) CheckServerCamerasOnvif(ctx context.Context, r gen.CheckServe
 		var candidateIP string
 		var creds provision.OnvifProbeRequest
 
+		streamInfo := findStreamInfo(streamHosts, cam.RemoteName, cam.DisplayName)
+		if streamInfo.Username != "" {
+			creds.Username = streamInfo.Username
+			creds.Password = streamInfo.Password
+		}
+
 		if cam.OnvifEndpoint != nil && *cam.OnvifEndpoint != "" {
 			if u, err := url.Parse(*cam.OnvifEndpoint); err == nil {
 				candidateIP = u.Hostname()
 			}
 		}
 
-		if candidateIP == "" {
-			if info, ok := streamHosts[cam.RemoteName]; ok && info.Host != "" {
-				candidateIP = info.Host
-				creds.Username = info.Username
-				creds.Password = info.Password
-			}
+		if candidateIP == "" && streamInfo.Host != "" {
+			candidateIP = streamInfo.Host
 		}
 
 		if candidateIP == "" {
 			for ip := range discoveredByIP {
-				if strings.Contains(strings.ToLower(cam.RemoteName), strings.ToLower(ip)) {
+				if strings.Contains(strings.ToLower(cam.RemoteName), strings.ToLower(ip)) ||
+					strings.Contains(strings.ToLower(cam.DisplayName), strings.ToLower(ip)) {
 					candidateIP = ip
 					break
 				}
@@ -238,6 +264,8 @@ func (h *Handlers) CheckServerCamerasOnvif(ctx context.Context, r gen.CheckServe
 			endpoint := "http://" + candidateIP + "/onvif/device_service"
 			if disc, ok := discoveredByIP[candidateIP]; ok && len(disc.XAddrs) > 0 {
 				endpoint = disc.XAddrs[0]
+			} else if cam.OnvifEndpoint != nil && *cam.OnvifEndpoint != "" {
+				endpoint = *cam.OnvifEndpoint
 			}
 			creds.Endpoint = endpoint
 
