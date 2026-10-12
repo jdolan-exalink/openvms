@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link, useSearch } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serversQuery, sitesQuery } from "@/api/queries";
+import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serverAgentQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { api, unwrap } from "@/api/client";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { can } from "@/lib/perm";
@@ -67,12 +67,21 @@ function displayEndpoint(endpoint: string) {
   }
 }
 
+export function isUsableDiscoveryInterface(name: string): boolean {
+  const normalized = name.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized === "lo" || normalized.startsWith("loopback")) return false;
+  if (normalized.startsWith("docker") || normalized.startsWith("br-") || normalized.startsWith("veth")) return false;
+  return true;
+}
+
 export function Cameras() {
   const t = useT();
   const search = useSearch({ strict: false }) as { site_id?: string; server_id?: string };
   const [filter, setFilter] = useState<CameraFilter>({ site_id: search.site_id, server_id: search.server_id });
   const [discoveryServerId, setDiscoveryServerId] = useState("");
   const [interfaceName, setInterfaceName] = useState("");
+  const [customInterface, setCustomInterface] = useState(false);
   const [discovery, setDiscovery] = useState<{ pending: boolean; error?: unknown; devices?: { xaddrs: string[] }[] }>({ pending: false });
   const [probeServerId, setProbeServerId] = useState("");
   const [probeEndpoint, setProbeEndpoint] = useState("");
@@ -88,6 +97,11 @@ export function Cameras() {
   const servers = useQuery(serversQuery);
   const me = useQuery(meQuery);
   const policy = useQuery(classifyPolicyQuery);
+  const agent = useQuery(serverAgentQuery(discoveryServerId));
+  const serverInterfaces = agent.data?.network_interfaces ?? [];
+  const filteredInterfaces = Array.from(
+    new Set(serverInterfaces.map((i) => i.name.trim()).filter(isUsableDiscoveryInterface))
+  ).sort();
   const cameraOn = new Map(policy.data?.cameras.map((c) => [c.id, c]));
   const siteName = new Map(sites.data?.map((s) => [s.id, s.name]));
   const serverName = new Map(servers.data?.map((s) => [s.id, s.name]));
@@ -154,6 +168,8 @@ export function Cameras() {
   const selectDiscoveryServer = (serverId: string) => {
     cancelDiscovery();
     setDiscoveryServerId(serverId);
+    setInterfaceName("");
+    setCustomInterface(false);
   };
   const changeInterface = (value: string) => {
     cancelDiscovery();
@@ -196,9 +212,57 @@ export function Cameras() {
               {servers.data?.map((server) => <option key={server.id} value={server.id}>{server.name}</option>)}
             </Select>
           </label>
-          {(!selectedDiscoveryServer || canManageServer(me.data, selectedDiscoveryServer)) && <label className="flex flex-col gap-1 text-sm font-medium">Interfaz de red del agente
-            <TextInput aria-label="Interfaz de red del agente" value={interfaceName} onChange={(event) => changeInterface(event.target.value)} placeholder="Por ejemplo: eth0" />
-          </label>}
+          {(!selectedDiscoveryServer || canManageServer(me.data, selectedDiscoveryServer)) && (
+            <div className="flex flex-col gap-1 text-sm font-medium">
+              <div className="flex items-center justify-between">
+                <label htmlFor="discovery-interface">Interfaz de red del agente</label>
+                {filteredInterfaces.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-xs font-normal text-primary hover:underline"
+                    onClick={() => {
+                      setCustomInterface(!customInterface);
+                      setInterfaceName("");
+                    }}
+                  >
+                    {customInterface ? "Elegir de la lista" : "Ingresar manualmente"}
+                  </button>
+                )}
+              </div>
+              {filteredInterfaces.length > 0 && !customInterface ? (
+                <Select
+                  id="discovery-interface"
+                  aria-label="Interfaz de red del agente"
+                  value={interfaceName}
+                  onChange={(event) => {
+                    const val = event.target.value;
+                    if (val === "__custom__") {
+                      setCustomInterface(true);
+                      setInterfaceName("");
+                    } else {
+                      changeInterface(val);
+                    }
+                  }}
+                >
+                  <option value="">Seleccione una interfaz</option>
+                  {filteredInterfaces.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                  <option value="__custom__">Ingresar manualmente…</option>
+                </Select>
+              ) : (
+                <TextInput
+                  id="discovery-interface"
+                  aria-label="Interfaz de red del agente"
+                  value={interfaceName}
+                  onChange={(event) => changeInterface(event.target.value)}
+                  placeholder="Por ejemplo: eth0"
+                />
+              )}
+            </div>
+          )}
         </div>
         {selectedDiscoveryServer && !canManageServer(me.data, selectedDiscoveryServer) && <p className="text-sm text-muted">No tiene permiso servers.manage para este servidor.</p>}
         {(!selectedDiscoveryServer || canManageServer(me.data, selectedDiscoveryServer)) && <div><button type="button" className="h-11 rounded-m3-full bg-primary px-5 text-sm font-medium text-on-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={!canDiscover} onClick={() => void searchOnvif()}>{discovery.pending ? "Buscando…" : "Buscar dispositivos ONVIF"}</button></div>}

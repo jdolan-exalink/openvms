@@ -95,6 +95,15 @@ export const serversQuery = queryOptions({
   refetchInterval: 15_000,
 });
 
+export const serverAgentQuery = (serverId: string | undefined) =>
+  queryOptions({
+    queryKey: ["server-agent", serverId],
+    enabled: !!serverId,
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId: serverId as string } } })),
+    retry: false,
+  });
+
 export type CameraFilter = { site_id?: string; server_id?: string; q?: string };
 
 export const camerasQuery = (filter: CameraFilter = {}) =>
