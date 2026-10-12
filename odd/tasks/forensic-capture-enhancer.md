@@ -1,0 +1,50 @@
+# Feature: On-Demand Forensic Detail Enhancement (Mejorar detalle)
+
+## Objective
+Implement an on-demand forensic detail enhancement pipeline ("Mejorar detalle" / "Mejora IA") in the OpenVMS export player and playback interfaces. When playback is paused, operators can trigger enhancement on the full frame or digitally zoomed region of interest (ROI). An interactive before/after split comparator modal displays the original versus enhanced image, complete with forensic metadata and download options for both images. Original video and evidence remain strictly untouched.
+
+## Problem & Motivation
+CCTV operators frequently pause recorded evidence on critical moments (license plates, faces, vehicles, clothing) to inspect identifying details. Often these frames suffer from motion blur, camera sensor noise, or optical compression. Operators need an immediate, trustworthy enhancement tool with zero risk of forensic evidence contamination, allowing side-by-side verification and export of both the pristine original and the digitally processed frame.
+
+## Scope & Constraints
+- **Forensic Integrity**: Non-destructive. Never modify original video streams, recordings, or export archives.
+- **Adaptive Modular Pipeline**: `ForensicEnhancementEngine` with `FrameAnalyzer`, `DeblurProvider`, `DenoiseProvider`, `SuperResolutionProvider`, and `PostProcessor`.
+- **ROI Support**: Respects active digital zoom coordinates so the operator can enhance a license plate or face at high detail without processing an entire 4K canvas unnecessarily.
+- **Interactive UI**: Before/after split slider modal with pan/zoom, fullscreen, download original, download enhanced, and copy snapshot.
+- **TDD Mode**: Strict TDD Mode enabled (RED -> GREEN -> REFACTOR). Runner: `pnpm --filter @openvms/web test`.
+
+## Acceptance Criteria
+- [ ] Modular `ForensicEnhancementEngine` with pluggable analyzers and filters (Deblur, Denoise, Super-Resolution, Tone Mapping).
+- [ ] Quality analyzer assessing Laplacian blur variance and noise levels to apply only necessary processing stages.
+- [ ] Interactive `ForensicComparisonModal` with before/after split slider, side-by-side mode, zoom/pan, downloads, and forensic label.
+- [ ] "Mejorar detalle" button appears on video streams when playback is paused.
+- [ ] Integrated into `EvidencePlayerModal` with camera and timestamp metadata attached.
+- [ ] 100% test pass rate and clean build.
+
+## Actionable Tasks
+
+- [ ] `TASK-1`: Core Forensic Pipeline & Adaptive Providers
+  - Route: Direct inline / delegated writer.
+  - Implement `ForensicEnhancementEngine`, `FrameAnalyzer`, `DeblurProvider`, `DenoiseProvider`, `SuperResolutionProvider`, and `PostProcessor` in `apps/web/src/lib/enhancement/forensic.ts`.
+  - TDD: RED test in `apps/web/src/lib/enhancement/forensic.test.ts` verifying blur detection, adaptive pipeline execution, and ROI processing -> GREEN -> REFACTOR.
+
+- [ ] `TASK-2`: Interactive Split Before/After Comparator Component
+  - Route: Direct inline / delegated writer.
+  - Implement `ForensicComparisonModal.tsx` with interactive split comparison slider, side-by-side view, zoom/pan controls, original & enhanced download buttons, and forensic metadata banner.
+  - TDD: RED test in `apps/web/src/components/ForensicComparisonModal.test.tsx` verifying slider interaction, downloads, and modal controls -> GREEN -> REFACTOR.
+
+- [ ] `TASK-3`: Integration into Export Player (`EvidencePlayerModal`)
+  - Route: Delegated writer.
+  - Add "Mejorar captura" action button when stream is paused in `EvidencePlayerModal.tsx`.
+  - Wire frame capture, ROI extraction, enhancement execution, and comparison modal presentation.
+  - TDD: Tests in `apps/web/src/components/EvidencePlayerModal.test.tsx` -> GREEN -> REFACTOR.
+
+- [ ] `TASK-4`: Final Verification, Build & Docker Deployment
+  - Route: Direct inline.
+  - Verify full test suite, linting, build, and deploy to Docker container.
+
+## Progress & Verification Evidence
+- *Pending initial task execution.*
+
+## Next Step
+Execute `TASK-1`: Core Forensic Pipeline & Adaptive Providers under strict TDD.
