@@ -14,12 +14,12 @@ CCTV operators frequently pause recorded evidence on critical moments (license p
 - **TDD Mode**: Strict TDD Mode enabled (RED -> GREEN -> REFACTOR). Runner: `pnpm --filter @openvms/web test`.
 
 ## Acceptance Criteria
-- [ ] Modular `ForensicEnhancementEngine` with pluggable analyzers and filters (Deblur, Denoise, Super-Resolution, Tone Mapping).
-- [ ] Quality analyzer assessing Laplacian blur variance and noise levels to apply only necessary processing stages.
-- [ ] Interactive `ForensicComparisonModal` with before/after split slider, side-by-side mode, zoom/pan, downloads, and forensic label.
-- [ ] "Mejorar detalle" button appears on video streams when playback is paused.
-- [ ] Integrated into `EvidencePlayerModal` with camera and timestamp metadata attached.
-- [ ] 100% test pass rate and clean build.
+- [x] Modular `ForensicEnhancementEngine` with pluggable analyzers and filters (Deblur, Denoise, Super-Resolution, Tone Mapping).
+- [x] Quality analyzer assessing Laplacian blur variance and noise levels to apply only necessary processing stages.
+- [x] Interactive `ForensicComparisonModal` with before/after split slider, side-by-side mode, zoom/pan, downloads, and forensic label.
+- [x] "Mejorar captura" / "Mejorar detalle" button appears on video streams when playback is paused.
+- [x] Integrated into `EvidencePlayerModal` with camera and timestamp metadata attached.
+- [x] 100% test pass rate and clean build.
 
 ## Actionable Tasks
 
@@ -42,14 +42,15 @@ CCTV operators frequently pause recorded evidence on critical moments (license p
   - TDD: Tests in `apps/web/src/components/EvidencePlayerModal.test.tsx` -> GREEN -> REFACTOR.
   - Verification: 3 vitest tests passing in `EvidencePlayerModal.test.tsx`.
 
-- [ ] `TASK-4`: Final Verification, Build & Docker Deployment
+- [x] `TASK-4`: Final Verification, Build & Docker Deployment
   - Route: Direct inline.
-  - Verify full test suite, linting, build, and deploy to Docker container.
+  - Verify full test suite (138 test files, 1013 tests passing 100%), strict TypeScript compilation (`tsc --noEmit`), Vite production build, and deploy to Docker container (`openvms-web-1` running healthy on port 8000).
 
 ## Progress & Verification Evidence
 - `TASK-1`: `forensic.ts` and `forensic.test.ts` completed with 6 passing tests. Committed in `6108405`.
 - `TASK-2`: `ForensicComparisonModal.tsx` and `ForensicComparisonModal.test.tsx` completed with 8 passing tests. Committed in `b61c36c`.
-- `TASK-3`: Integrated into `EvidencePlayerModal.tsx` with paused button on video tiles and transport bar. All tests passing GREEN.
+- `TASK-3`: Integrated into `EvidencePlayerModal.tsx` with paused button on video tiles and transport bar. Committed in `d4eb8fd`.
+- `TASK-4`: Verified strict TypeScript typed-array indexing (`129c865`), passed all 1,013 tests, Vite build clean, container `openvms-web-1` deployed and serving HTTP 200 on port 8000.
 
 ## Next Step
-Execute `TASK-4`: Run full test suite, TypeScript check, Vite build, and deploy container.
+Feature complete. Ready for user inspection or PR creation.
