@@ -35,7 +35,8 @@ uniform int uMountType;       // 0: ceiling, 1: wall, 2: floor
 uniform int uMode;            // 0: original, 1: rectilinear/ptz, 2: panorama_180, 3: cylindrical_360
 uniform vec3 uViewAngles;     // yaw, pitch, roll in radians
 uniform float uVirtualFov;    // radians
-uniform float uAspectRatio;
+uniform float uAspectRatio;   // canvas aspect ratio
+uniform float uTextureAspect; // source video/image aspect ratio (width / height)
 uniform float uWrapScroll;
 
 const float PI = 3.14159265358979323846;
@@ -91,7 +92,7 @@ void main() {
     float halfFov = uVirtualFov * 0.5;
     float tanHalf = tan(halfFov);
     float rx = vCoord.x * tanHalf;
-    float ry = -vCoord.y * (tanHalf / uAspectRatio);
+    float ry = vCoord.y * (tanHalf / uAspectRatio);
     float rz = 1.0;
     vec3 ray = normalize(vec3(rx, ry, rz));
 
@@ -103,16 +104,20 @@ void main() {
     // Adapt to Mount
     vec3 lensRay = ray;
     if (uMountType == 0) {
-      // Ceiling mount: camera points down (+Z down)
+      // Ceiling mount: camera points down towards floor (+Z down)
       lensRay = vec3(ray.x, ray.z, -ray.y);
     } else if (uMountType == 2) {
-      // Floor mount: camera points up (+Z up)
+      // Floor mount: camera points up towards ceiling (+Z up)
       lensRay = vec3(ray.x, -ray.z, ray.y);
     }
 
     vec3 normRay = normalize(lensRay);
-    float theta = acos(clamp(normRay.z, -1.0, 1.0));
+    if (normRay.z < -0.05) {
+      gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+      return;
+    }
 
+    float theta = acos(clamp(normRay.z, -1.0, 1.0));
     if (theta > maxTheta) {
       gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
       return;
@@ -121,26 +126,26 @@ void main() {
     float phi = atan(normRay.y, normRay.x) + uRotation;
     float r = computeRadius(theta, maxTheta, uRadius, uProjectionModel);
 
-    uvSample = uCenter + vec2(r * cos(phi), r * sin(phi));
+    uvSample = uCenter + vec2((r / uTextureAspect) * cos(phi), r * sin(phi));
 
   } else if (uMode == 2) {
     // Mode: Panorama 180
     float phi = vCoord.x * (PI * 0.5) + uViewAngles.x + uRotation;
-    float normY = 1.0 - (vCoord.y * 0.5 + 0.5);
-    float theta = normY * maxTheta;
+    float t = vCoord.y * 0.5 + 0.5;
+    float theta = mix(0.12 * maxTheta, 0.90 * maxTheta, t);
     float r = computeRadius(theta, maxTheta, uRadius, uProjectionModel);
 
-    uvSample = uCenter + vec2(r * cos(phi), r * sin(phi));
+    uvSample = uCenter + vec2((r / uTextureAspect) * cos(phi), r * sin(phi));
 
   } else if (uMode == 3) {
     // Mode: 360 Cylindrical with Wrap-around
-    float scrollU = mod((vCoord.x * 0.5 + 0.5) + uWrapScroll, 1.0);
-    float phi = scrollU * (2.0 * PI) - PI + uRotation;
-    float normY = 1.0 - (vCoord.y * 0.5 + 0.5);
-    float theta = normY * maxTheta;
+    float scrollU = fract((vCoord.x * 0.5 + 0.5) + uWrapScroll);
+    float phi = scrollU * (2.0 * PI) - PI + uViewAngles.x + uRotation;
+    float t = vCoord.y * 0.5 + 0.5;
+    float theta = mix(0.12 * maxTheta, 0.90 * maxTheta, t);
     float r = computeRadius(theta, maxTheta, uRadius, uProjectionModel);
 
-    uvSample = uCenter + vec2(r * cos(phi), r * sin(phi));
+    uvSample = uCenter + vec2((r / uTextureAspect) * cos(phi), r * sin(phi));
   }
 
   // Check bounds
@@ -182,6 +187,7 @@ export class FisheyeDewarpEngine {
   private uViewAnglesLoc: WebGLUniformLocation | null = null;
   private uVirtualFovLoc: WebGLUniformLocation | null = null;
   private uAspectRatioLoc: WebGLUniformLocation | null = null;
+  private uTextureAspectLoc: WebGLUniformLocation | null = null;
   private uWrapScrollLoc: WebGLUniformLocation | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -234,6 +240,7 @@ export class FisheyeDewarpEngine {
     this.uViewAnglesLoc = gl.getUniformLocation(prog, "uViewAngles");
     this.uVirtualFovLoc = gl.getUniformLocation(prog, "uVirtualFov");
     this.uAspectRatioLoc = gl.getUniformLocation(prog, "uAspectRatio");
+    this.uTextureAspectLoc = gl.getUniformLocation(prog, "uTextureAspect");
     this.uWrapScrollLoc = gl.getUniformLocation(prog, "uWrapScroll");
 
     // Quad geometry: full screen 2 triangles
@@ -335,6 +342,19 @@ export class FisheyeDewarpEngine {
     );
     gl.uniform1f(this.uVirtualFovLoc, toRad(view.fov));
     gl.uniform1f(this.uAspectRatioLoc, width / height);
+
+    let sourceWidth = 1920;
+    let sourceHeight = 1080;
+    if (source instanceof HTMLVideoElement) {
+      sourceWidth = source.videoWidth || 1920;
+      sourceHeight = source.videoHeight || 1080;
+    } else if (source instanceof HTMLImageElement) {
+      sourceWidth = source.naturalWidth || 1920;
+      sourceHeight = source.naturalHeight || 1080;
+    }
+    const textureAspect = sourceHeight > 0 ? sourceWidth / sourceHeight : 1.0;
+    gl.uniform1f(this.uTextureAspectLoc, textureAspect);
+
     gl.uniform1f(this.uWrapScrollLoc, options.wrapScroll || 0);
 
     gl.drawArrays(gl.TRIANGLES, 0, 6);

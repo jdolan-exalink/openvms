@@ -77,7 +77,7 @@ export function rectilinearToRay(
 
   // Ray in camera coordinate frame (looking down +Z)
   const rx = u * tanHalfFov;
-  const ry = -v * (tanHalfFov / aspectRatio);
+  const ry = v * (tanHalfFov / aspectRatio);
   const rz = 1.0;
 
   let ray = normalize({ x: rx, y: ry, z: rz });
@@ -144,6 +144,7 @@ export function rayToFisheyeUv(
   calibration: FisheyeCalibration,
   model: FisheyeProjectionModel,
   mount: FisheyeMountType,
+  textureAspect = 1.0,
 ): { u: number; v: number } | null {
   // Convert ray back relative to the lens optical axis
   let lx = ray.x;
@@ -175,7 +176,7 @@ export function rayToFisheyeUv(
   const r = calculateFisheyeRadius(theta, calibration.radius, calibration.fov, model);
 
   // Map to normalized UV texture coordinates [0, 1]
-  const u = calibration.centerX + r * Math.cos(phi);
+  const u = calibration.centerX + (r / textureAspect) * Math.cos(phi);
   const v = calibration.centerY + r * Math.sin(phi);
 
   return { u, v };
