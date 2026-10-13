@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { AppShell, TopBarActionsSlot } from "@/components/AppShell";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
@@ -8,9 +8,12 @@ import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { playerMetrics } from "@/lib/live/playerMetrics";
 import { saveFisheyeConfig } from "@/lib/fisheye/storage";
 import { DEFAULT_FISHEYE_CALIBRATION } from "@/lib/fisheye/types";
-import { Live } from "./Live";
+import { Live, useTileOverlayVisibility } from "./Live";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("openvms.live.sidebar.pinned", "1");
@@ -87,6 +90,33 @@ const emptyCatalogs = {
 };
 
 describe("Live", () => {
+  it("hides tile overlays after three seconds and reveals them again on interaction", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useTileOverlayVisibility());
+    expect(result.current.visible).toBe(true);
+    act(() => { vi.advanceTimersByTime(3000); });
+    expect(result.current.visible).toBe(false);
+    act(() => { result.current.reveal(); });
+    expect(result.current.visible).toBe(true);
+    act(() => { result.current.scheduleHide(); vi.advanceTimersByTime(3000); });
+    expect(result.current.visible).toBe(false);
+  });
+
+  it("does not render a fisheye dewarping action for a regular camera", async () => {
+    stubBrowserAPIs();
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-plain", quality: "sub" }, null, null, null,
+    ]));
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-plain", "Plain camera")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    await screen.findAllByText("Plain camera", { selector: ".truncate" });
+    expect(screen.queryByRole("button", { name: "Fisheye 360°" })).not.toBeInTheDocument();
+  });
+
   it("marks the selected tile with aria-current and moves it on click", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({
@@ -137,12 +167,14 @@ describe("Live", () => {
     const camBtn = await screen.findByRole("button", { name: /North/ });
     fireEvent.click(camBtn);
 
-    const nameEl = await within(tile).findByText("North");
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("North")).toBeInTheDocument());
+    const placedTile = screen.getByLabelText("Cuadro 1");
+    const nameEl = within(placedTile).getByText("North");
     expect(nameEl).toBeInTheDocument();
     const overlay = nameEl.closest(".absolute");
     expect(overlay?.className).toContain("z-[3]");
 
-    const video = tile.querySelector("video");
+    const video = placedTile.querySelector("video");
     expect(video?.className).toContain("object-fill");
   });
 
@@ -205,14 +237,73 @@ describe("Live", () => {
     expect(screen.getByRole("main", { name: "Main Workspace" })).not.toContainElement(cameraSearch);
 
     fireEvent.click(await screen.findByRole("button", { name: /Puerta norte/ }));
-    const tile = await screen.findByLabelText("Cuadro 1");
-    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    await waitFor(() => expect(screen.getByLabelText("Cuadro 1").querySelector("video")).not.toBeNull());
+    const tile = screen.getByLabelText("Cuadro 1");
     const video = tile.querySelector("video");
     const socketCount = FakeSocket.created;
     fireEvent.click(screen.getByRole("button", { name: /^Campus/ }));
 
     expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video);
     expect(FakeSocket.created).toBe(socketCount);
+  });
+
+  it("marks cameras in the live grid bold and offline cameras gray in the sidebar", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-online", "Online camera"), camera("cam-offline", "Offline camera", { status: "offline" })] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+      "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" }] }),
+      "/api/v1/views": () => json({ items: [] }),
+    })));
+    renderPage(Live);
+
+    const online = await screen.findByRole("button", { name: /Online camera/ });
+    const offline = await screen.findByRole("button", { name: /Offline camera/ });
+    expect(online.querySelector("span.min-w-0.truncate")).not.toHaveClass("font-bold");
+    expect(offline.querySelector("span.min-w-0.truncate")).toHaveClass("text-on-surface-variant");
+
+    fireEvent.click(online);
+    await waitFor(() => expect(online.querySelector("span.min-w-0.truncate")).toHaveClass("font-bold"));
+    expect(offline.querySelector("span.min-w-0.truncate")).not.toHaveClass("font-bold");
+
+    fireEvent.click(offline);
+    await waitFor(() => expect(offline.querySelector("span.min-w-0.truncate")).toHaveClass("font-bold"));
+    expect(offline.querySelector("span.min-w-0.truncate")).toHaveClass("text-on-surface-variant");
+  });
+
+  it("uses a fish icon for fisheye cameras and keeps view disclosure at the row's right edge", async () => {
+    stubBrowserAPIs();
+    saveFisheyeConfig({
+      cameraId: "cam-fish",
+      enabled: true,
+      lensType: "fisheye_360",
+      mountType: "ceiling",
+      projectionModel: "equidistant",
+      calibration: DEFAULT_FISHEYE_CALIBRATION,
+      views: [],
+      defaultMode: "3_fixed_120",
+    });
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-fish", "Fisheye camera")] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+      "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" }] }),
+      "/api/v1/views": () => json({ items: [] }),
+    })));
+    renderPage(Live);
+
+    const cameraName = await screen.findByText("Fisheye camera");
+    const rowButton = cameraName.closest("button");
+    expect(rowButton).not.toBeNull();
+    expect(rowButton?.querySelector("svg.lucide-fish")).toBeInTheDocument();
+    expect(rowButton).toHaveAttribute("title");
+    const disclosure = screen.getByRole("button", { name: "Vistas virtuales de Fisheye camera" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(disclosure).toHaveAttribute("title", "Ocultar vistas virtuales");
+    expect(disclosure.parentElement?.lastElementChild).toBe(disclosure);
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
   });
 
   it("restores a previously saved grid selection, dropping cameras the user can no longer see", async () => {

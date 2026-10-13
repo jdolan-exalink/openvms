@@ -22,8 +22,7 @@ export type FisheyeViewMode =
   | "360"
   | "panorama"
   | "virtual_ptz"
-  | "3_fixed_120"
-  | "4_quadrants";
+  | "3_fixed_120";
 
 export interface FisheyeCalibration {
   /** Normalized optical center X in [0, 1] range (default: 0.5) */
@@ -52,7 +51,7 @@ export interface VirtualFisheyeView {
   /** Virtual Camera Field of View in degrees (e.g. 60 to 120, default: 90) */
   fov: number;
   /** Preset type identifier if created from a standard template */
-  presetType?: "custom" | "3_fixed_120" | "4_quadrants";
+  presetType?: "custom" | "3_fixed_120";
 }
 
 export interface FisheyeConfig {

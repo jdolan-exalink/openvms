@@ -60,71 +60,10 @@ export function generate3Fixed120Views(
 }
 
 /**
- * Generates 4 quadrant virtual views covering 360° (0°, 90°, 180°, 270°) with 88° FOV each.
- * In ceiling mount, pitch is oriented down (-48°) so the entire upper frustum remains
- * within the lens circle, eliminating dead black borders at the top.
- */
-export function generate4QuadrantsViews(
-  cameraId: string,
-  mountType: FisheyeMountType = "ceiling",
-): VirtualFisheyeView[] {
-  const isCeiling = mountType === "ceiling";
-  const pitch = isCeiling ? -48 : 0;
-  const fov = 88;
-
-  return [
-    {
-      id: `${cameraId}-quad-1`,
-      cameraId,
-      name: "Vista 1 (Norte)",
-      projection: "rectilinear",
-      yaw: 0,
-      pitch,
-      roll: 0,
-      fov,
-      presetType: "4_quadrants",
-    },
-    {
-      id: `${cameraId}-quad-2`,
-      cameraId,
-      name: "Vista 2 (Este)",
-      projection: "rectilinear",
-      yaw: 90,
-      pitch,
-      roll: 0,
-      fov,
-      presetType: "4_quadrants",
-    },
-    {
-      id: `${cameraId}-quad-3`,
-      cameraId,
-      name: "Vista 3 (Sur)",
-      projection: "rectilinear",
-      yaw: 180,
-      pitch,
-      roll: 0,
-      fov,
-      presetType: "4_quadrants",
-    },
-    {
-      id: `${cameraId}-quad-4`,
-      cameraId,
-      name: "Vista 4 (Oeste)",
-      projection: "rectilinear",
-      yaw: -90,
-      pitch,
-      roll: 0,
-      fov,
-      presetType: "4_quadrants",
-    },
-  ];
-}
-
-/**
  * Resolves effective virtual views for a camera config.
  * When custom views exist, returns them. Otherwise, automatically provides
- * the standard views based on defaultMode (3 fixed 120° views or 4 quadrants)
- * so fisheye cameras always have ready-to-drag individual views in the tree.
+ * the standard views based on defaultMode (3 fixed 120° views)
+ * so fisheye cameras have ready-to-drag individual views in the tree.
  */
 export function getEffectiveVirtualViews(config: FisheyeConfig): VirtualFisheyeView[] {
   if (!config.enabled || config.lensType === "normal") {
@@ -136,7 +75,7 @@ export function getEffectiveVirtualViews(config: FisheyeConfig): VirtualFisheyeV
   if (config.defaultMode === "3_fixed_120") {
     return generate3Fixed120Views(config.cameraId, config.mountType);
   }
-  return generate4QuadrantsViews(config.cameraId, config.mountType);
+  return [];
 }
 
 /**
@@ -203,8 +142,7 @@ export function getFisheyeViewMode(cameraId: string): FisheyeViewMode {
       mode === "360" ||
       mode === "panorama" ||
       mode === "virtual_ptz" ||
-      mode === "3_fixed_120" ||
-      mode === "4_quadrants"
+      mode === "3_fixed_120"
     ) {
       return mode;
     }

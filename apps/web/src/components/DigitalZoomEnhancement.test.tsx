@@ -25,7 +25,7 @@ describe("DigitalZoom Enhancement Integration", () => {
   it("mounts EnhancementControl by default, and hides it when enhanceable is false", () => {
     const { unmount } = render(<ZoomFrame resetKey="test-cam-1" />);
 
-    const badge = screen.getByRole("button", { name: /Mejora visual: AUTO/i });
+    const badge = screen.getByRole("button", { name: /Ajustes de mejora visual/i });
     expect(badge).toBeInTheDocument();
 
     unmount();
@@ -34,20 +34,13 @@ describe("DigitalZoom Enhancement Integration", () => {
     expect(screen.queryByRole("button", { name: /Mejora visual/i })).not.toBeInTheDocument();
   });
 
-  it("toggles between AUTO and OFF updating state correctly", () => {
+  it("offers mode changes inside the settings panel", () => {
     render(<ZoomFrame resetKey="test-cam-2" />);
 
-    const autoBadge = screen.getByRole("button", { name: /Mejora visual: AUTO/i });
-    expect(autoBadge).toBeInTheDocument();
-
-    // Toggle to OFF
-    fireEvent.click(autoBadge);
-    const offBadge = screen.getByRole("button", { name: /Mejora visual: OFF/i });
-    expect(offBadge).toBeInTheDocument();
-
-    // Toggle back to AUTO
-    fireEvent.click(offBadge);
-    expect(screen.getByRole("button", { name: /Mejora visual: AUTO/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Ajustes de mejora visual/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Off" }));
+    fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+    expect(screen.getByRole("button", { name: "Auto" })).toBeInTheDocument();
   });
 
   it("triggers ROI recalculation when zoom changes", () => {

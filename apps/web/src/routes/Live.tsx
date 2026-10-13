@@ -31,7 +31,7 @@ import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/P
 import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
+  cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles, tileIdentityKey,
   serializeSelection, swapTiles, tileDragId, tilesForFisheyeMultiView,
   type Tile,
 } from "@/lib/liveGrid";
@@ -180,8 +180,7 @@ function LiveDesktop() {
 
       if (updatedCameraId) {
         const feConfig = getFisheyeConfig(updatedCameraId);
-        const isMultiMode =
-          feConfig.defaultMode === "3_fixed_120" || feConfig.defaultMode === "4_quadrants";
+        const isMultiMode = feConfig.defaultMode === "3_fixed_120";
 
         // "y quiero que si salimos de grilla 3 o 4 que borre las vistas"
         if (!isMultiMode || feConfig.views.length === 0) {
@@ -500,9 +499,35 @@ function LiveDesktop() {
       flash(`${label} no tiene cámaras.`, "warn");
       return;
     }
-    const layout = presentationForCount(DEFAULT_PRESENTATIONS, list.length);
-    const built = fitTiles(list.map((camera): Tile => ({ camera_id: camera.id, quality: cameraQuality(camera.id, layout.columns) })), layout.panes.length);
-    const skipped = Math.max(0, list.length - layout.panes.length);
+    const expandedTiles: Tile[] = [];
+    for (const camera of list) {
+      const feConfig = getFisheyeConfig(camera.id);
+      const isFisheye = Boolean(
+        (feConfig.enabled && feConfig.lensType !== "normal") ||
+        camera.tags?.includes("fisheye") ||
+        camera.tags?.includes("ojo_de_pez") ||
+        Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))
+      );
+      const effectiveViews = isFisheye ? getEffectiveVirtualViews(feConfig) : [];
+      if (isFisheye && (feConfig.defaultMode === "3_fixed_120" || effectiveViews.length >= 2)) {
+        // Tile 0: real camera stream (raw / original)
+        expandedTiles.push({ camera_id: camera.id, quality: "sub" });
+        // Tiles 1..N: the virtual views (e.g. 3 of 120°)
+        for (const v of effectiveViews) {
+          expandedTiles.push({ camera_id: camera.id, quality: "sub", fisheye_view_id: v.id });
+        }
+      } else {
+        expandedTiles.push({ camera_id: camera.id, quality: "sub" });
+      }
+    }
+    const layout = presentationForCount(DEFAULT_PRESENTATIONS, expandedTiles.length);
+    const built = fitTiles(
+      expandedTiles.map((t) =>
+        t && "camera_id" in t ? { ...t, quality: cameraQuality(t.camera_id, layout.columns) } : t
+      ),
+      layout.panes.length
+    );
+    const skipped = Math.max(0, expandedTiles.length - layout.panes.length);
     setColumns(layout.columns);
     setRows(layout.rows);
     setPanes(layout.panes);
@@ -510,8 +535,8 @@ function LiveDesktop() {
     setSelected(0);
     setFocus(null);
     setViewId("");
-    if (skipped > 0) flash(`${label}: se muestran ${list.length - skipped} de ${list.length} cámaras. La grilla más grande es ${layout.name}.`, "warn");
-    else flash(`${label}: ${layout.name} con ${plural(list.length)}.`);
+    if (skipped > 0) flash(`${label}: se muestran ${expandedTiles.length - skipped} de ${expandedTiles.length} vistas. La grilla más grande es ${layout.name}.`, "warn");
+    else flash(`${label}: ${layout.name} con ${plural(expandedTiles.length)}.`);
   };
   const placeInOpen = (cameraId: string, viewId?: string) => {
     if (!camById.has(cameraId)) return;
@@ -632,6 +657,7 @@ function LiveDesktop() {
   const sidebarContent = (
     <LiveExplorer
       cameras={cameras.data ?? []}
+      gridCameraIds={gridCameraIds}
       sites={sites.data ?? []}
       servers={servers.data ?? []}
       folderApi={folderApi}
@@ -731,9 +757,10 @@ function LiveDesktop() {
                             : "player";
                     recLayer = <RecTile cameraId={id} name={cam.display_name} state={state} transport={transport} isMaster={id === masterId} />;
                   }
+                  const identityKey = tileIdentityKey(t);
                   return (
                     <GridTile
-                      key={persistentPlayers ? (cameraId && !duplicates.has(i) ? `camera:${cameraId}` : `cell:${i}`) : i}
+                      key={identityKey && !duplicates.has(i) ? `camera:${identityKey}` : `cell:${i}`}
                       index={i}
                       placement={focus === null && panes[i] ? { gridColumn: `${panes[i].col + 1} / span ${panes[i].colSpan}`, gridRow: `${panes[i].row + 1} / span ${panes[i].rowSpan}` } : undefined}
                       tile={t}
@@ -877,6 +904,26 @@ function LiveGridFrame({ className, style, role, label, mode, children }: { clas
   );
 }
 
+export function useTileOverlayVisibility() {
+  const [visible, setVisible] = useState(true);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reveal = () => {
+    if (timer.current) clearTimeout(timer.current);
+    setVisible(true);
+  };
+  const scheduleHide = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setVisible(false), 3000);
+  };
+  useEffect(() => {
+    timer.current = setTimeout(() => setVisible(false), 3000);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+  return { visible, reveal, scheduleHide };
+}
+
 function GridTile({
   index,
   placement,
@@ -929,6 +976,7 @@ function GridTile({
   onRemove: () => void;
 }) {
   const tr = useT();
+  const { visible: overlayVisible, reveal: revealOverlay, scheduleHide: scheduleOverlayHide } = useTileOverlayVisibility();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...placement };
   // Touch: two quick taps expand the tile like a double click. The dblclick some browsers synthesize after it is ignored.
@@ -940,7 +988,19 @@ function GridTile({
       aria-label={tr("live.cell", { index: index + 1 })}
       aria-current={isSelected ? "true" : undefined}
       data-selected={isSelected ? "true" : undefined}
-      onClick={onSelect}
+      onClick={(event) => {
+        onSelect();
+        if (event.detail > 0 && typeof window.matchMedia === "function" && window.matchMedia("(hover: none)").matches) {
+          revealOverlay();
+          scheduleOverlayHide();
+        }
+      }}
+      onPointerEnter={revealOverlay}
+      onPointerLeave={scheduleOverlayHide}
+      onFocusCapture={revealOverlay}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) scheduleOverlayHide();
+      }}
       onDoubleClick={() => {
         if (touchTap.justHandled()) return;
         onToggleFocus();
@@ -1000,7 +1060,7 @@ function GridTile({
               ? effectiveViews.find((v) => v.id === tile.fisheye_view_id) ||
                 feConfig.views.find((v) => v.id === tile.fisheye_view_id)
               : undefined;
-            const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || feConfig.defaultMode === "4_quadrants" || effectiveViews.length >= 2);
+            const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || effectiveViews.length >= 2);
             const useFisheye =
               !suspended &&
               isFisheyeCamera &&
@@ -1052,11 +1112,11 @@ function GridTile({
                 ? effectiveViews.find((v) => v.id === tile.fisheye_view_id) ||
                   feConfig.views.find((v) => v.id === tile.fisheye_view_id)
                 : undefined;
-              const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || feConfig.defaultMode === "4_quadrants" || effectiveViews.length >= 2);
+              const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || effectiveViews.length >= 2);
               return (
                 <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-on-surface backdrop-blur">
                   <Icon icon={specificView ? Compass : Camera} size="xs" className={cn("shrink-0", specificView && "text-cyan-400")} />
-                  <span className="truncate font-medium">
+                  <span className={cn("truncate font-medium transition-opacity", !overlayVisible && status !== "offline" && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100")}>
                     {camera.display_name}
                     {specificView ? ` · ${specificView.name}` : (isFisheyeCamera && hasMultipleViews ? " (Original)" : "")}
                   </span>
@@ -1073,7 +1133,7 @@ function GridTile({
                 </span>
               );
             })()}
-            <span className="ml-auto flex shrink-0 gap-1">
+            <span className={cn("ml-auto flex shrink-0 gap-1 transition-opacity", !overlayVisible && "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100")}>
               {canViewRecordings && (
                 <Link to="/playback" search={{ camera: tile.camera_id }} title={tr("nav.recordings")} aria-label={tr("live.recordingsOf", { name: camera.display_name })} className={cn(tileAction, "m3-press inline-flex items-center justify-center focus-visible:outline-2 focus-visible:outline-primary")}>
                   <Icon icon={History} size="xs" />

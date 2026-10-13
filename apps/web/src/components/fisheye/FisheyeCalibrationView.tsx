@@ -13,7 +13,7 @@ import {
   type FisheyeMountType,
   type FisheyeProjectionModel,
 } from "@/lib/fisheye/types";
-import { Check, RotateCcw, Target } from "lucide-react";
+import { Check, RotateCcw, Target, X } from "lucide-react";
 
 export interface FisheyeCalibrationViewProps {
   snapshotUrl?: string;
@@ -46,6 +46,7 @@ export function FisheyeCalibrationView({
   const [lensType, setLensType] = useState<FisheyeLensType>(initialLensType);
   const [projectionModel, setProjectionModel] =
     useState<FisheyeProjectionModel>(initialProjectionModel);
+  const [aspectRatio, setAspectRatio] = useState<number>(1);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragMode, setDragMode] = useState<"center" | "radius" | null>(null);
@@ -70,7 +71,7 @@ export function FisheyeCalibrationView({
         centerY: Math.max(0.1, Math.min(0.9, Math.round(y * 1000) / 1000)),
       }));
     } else if (dragMode === "radius") {
-      const dx = x - calibration.centerX;
+      const dx = (x - calibration.centerX) * aspectRatio;
       const dy = y - calibration.centerY;
       const dist = Math.hypot(dx, dy);
       setCalibration((prev) => ({
@@ -91,19 +92,21 @@ export function FisheyeCalibrationView({
     setCalibration({ ...DEFAULT_FISHEYE_CALIBRATION });
   }, []);
 
-  // Compute SVG circle parameters based on percentage
+  // Compute SVG circle parameters based on percentage and aspect ratio
   const cxPct = calibration.centerX * 100;
   const cyPct = calibration.centerY * 100;
-  const rPct = calibration.radius * 100;
+  const rxPct = (calibration.radius / aspectRatio) * 100;
+  const ryPct = calibration.radius * 100;
 
   return (
-    <div className="flex flex-col lg:flex-row gap-6 p-4 bg-surface-1 rounded-m3-xl border border-outline-variant/60 shadow-lg max-w-5xl mx-auto">
+    <div className="flex flex-col lg:flex-row gap-6 p-1 max-w-5xl mx-auto">
       {/* Interactive Calibration Viewport */}
       <div className="flex-1 flex flex-col items-center justify-center">
         <div
           ref={containerRef}
           data-testid="calibration-viewport"
-          className="relative aspect-square w-full max-w-[460px] bg-black rounded-m3-lg overflow-hidden select-none touch-none shadow-inner border border-outline-variant/40"
+          style={{ aspectRatio: `${aspectRatio}` }}
+          className="relative w-full max-w-[560px] bg-black rounded-m3-lg overflow-hidden select-none touch-none shadow-inner border border-outline-variant/40"
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
@@ -112,6 +115,12 @@ export function FisheyeCalibrationView({
             <img
               src={snapshotUrl}
               alt="Fisheye Frame"
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                if (img.naturalWidth && img.naturalHeight) {
+                  setAspectRatio(img.naturalWidth / img.naturalHeight);
+                }
+              }}
               className="w-full h-full object-contain pointer-events-none"
               draggable={false}
             />
@@ -128,16 +137,17 @@ export function FisheyeCalibrationView({
             <defs>
               <mask id="lens-mask">
                 <rect width="100%" height="100%" fill="white" />
-                <circle cx={`${cxPct}%`} cy={`${cyPct}%`} r={`${rPct}%`} fill="black" />
+                <ellipse cx={`${cxPct}%`} cy={`${cyPct}%`} rx={`${rxPct}%`} ry={`${ryPct}%`} fill="black" />
               </mask>
             </defs>
             <rect width="100%" height="100%" fill="rgba(0, 0, 0, 0.45)" mask="url(#lens-mask)" />
 
-            {/* Lens boundary circle */}
-            <circle
+            {/* Lens boundary circle (ellipse matching sensor aspect ratio) */}
+            <ellipse
               cx={`${cxPct}%`}
               cy={`${cyPct}%`}
-              r={`${rPct}%`}
+              rx={`${rxPct}%`}
+              ry={`${ryPct}%`}
               fill="none"
               stroke="#06b6d4"
               strokeWidth="2.5"
@@ -186,7 +196,7 @@ export function FisheyeCalibrationView({
             data-testid="radius-handle"
             aria-label="Ajustar radio útil"
             style={{
-              left: `${cxPct + rPct}%`,
+              left: `${cxPct + rxPct}%`,
               top: `${cyPct}%`,
               transform: "translate(-50%, -50%)",
             }}
@@ -301,17 +311,28 @@ export function FisheyeCalibrationView({
         </div>
 
         {/* Action Buttons */}
-        <div className="flex items-center gap-2 pt-2 border-t border-outline-variant/40 mt-auto">
+        <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-outline-variant/40 mt-auto">
           <Button
-            variant="tonal"
+            variant="text"
             size="sm"
             onClick={handleReset}
             title="Restablecer a valores por defecto"
-            className="flex-1"
           >
             <Icon icon={RotateCcw} size="xs" />
             <span>Restablecer</span>
           </Button>
+          <div className="flex-1" />
+          {onClose && (
+            <Button
+              variant="outlined"
+              size="sm"
+              onClick={onClose}
+              title="Cancelar y descartar cambios"
+            >
+              <Icon icon={X} size="xs" />
+              <span>Cancelar</span>
+            </Button>
+          )}
           <Button
             variant="filled"
             size="sm"
@@ -324,10 +345,10 @@ export function FisheyeCalibrationView({
               });
               onClose?.();
             }}
-            className="flex-1"
+            title="Guardar calibración"
           >
             <Icon icon={Check} size="xs" />
-            <span>Guardar</span>
+            <span>Guardar calibración</span>
           </Button>
         </div>
       </div>

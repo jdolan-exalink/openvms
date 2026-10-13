@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   generate3Fixed120Views,
-  generate4QuadrantsViews,
   getEffectiveVirtualViews,
   getFisheyeConfig,
   getFisheyeViewMode,
@@ -83,15 +82,6 @@ describe("Fisheye Storage Module", () => {
     expect(views.every((v) => v.presetType === "3_fixed_120")).toBe(true);
   });
 
-  it("generates 4 quadrant virtual views covering 360 degrees", () => {
-    const quads = generate4QuadrantsViews("cam-intersection");
-    expect(quads).toHaveLength(4);
-    expect(quads[0]?.yaw).toBe(0);
-    expect(quads[1]?.yaw).toBe(90);
-    expect(quads[2]?.yaw).toBe(180);
-    expect(quads[3]?.yaw).toBe(-90);
-  });
-
   it("stores and retrieves last active view mode", () => {
     expect(getFisheyeViewMode("cam-test")).toBe("original");
     saveFisheyeViewMode("cam-test", "3_fixed_120");
@@ -103,22 +93,20 @@ describe("Fisheye Storage Module", () => {
     // By default, no camera is fisheye, so effective views is empty
     expect(getEffectiveVirtualViews(unconfigured)).toHaveLength(0);
 
-    // Camera explicitly configured as fisheye
-    const configuredFisheye = { ...unconfigured, enabled: true, lensType: "fisheye_360" as const };
+    // Camera explicitly configured as fisheye with 3 fixed 120 views mode
+    const configuredFisheye = {
+      ...unconfigured,
+      enabled: true,
+      lensType: "fisheye_360" as const,
+      defaultMode: "3_fixed_120" as const,
+    };
     const effective = getEffectiveVirtualViews(configuredFisheye);
-    expect(effective).toHaveLength(4);
-    expect(effective[0]?.name).toBe("Vista 1 (Norte)");
-    expect(effective[0]?.pitch).toBe(-48); // Optimal ceiling pitch eliminating top black borders
-
-    // 3 fixed views mode
-    const config3 = { ...configuredFisheye, defaultMode: "3_fixed_120" as const };
-    const effective3 = getEffectiveVirtualViews(config3);
-    expect(effective3).toHaveLength(3);
-    expect(effective3[0]?.name).toBe("Vista 1 (0°)");
-    expect(effective3[0]?.pitch).toBe(-46);
+    expect(effective).toHaveLength(3);
+    expect(effective[0]?.name).toBe("Vista 1 (0°)");
+    expect(effective[0]?.pitch).toBe(-46); // Optimal ceiling pitch eliminating top black borders
 
     // Wall mount pitch adapts to 0
-    const quadsWall = generate4QuadrantsViews("cam-wall", "wall");
-    expect(quadsWall[0]?.pitch).toBe(0);
+    const viewsWall = generate3Fixed120Views("cam-wall", "wall");
+    expect(viewsWall[0]?.pitch).toBe(0);
   });
 });

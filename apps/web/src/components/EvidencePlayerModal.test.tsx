@@ -35,24 +35,22 @@ describe("EvidencePlayerModal Enhancement Integration", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders export video tile with EnhancementControl and toggles AUTO/OFF", () => {
+  it("opens enhancement settings from the promoted icon and changes modes there", () => {
     render(
       <QueryClientProvider client={queryClient}>
         <EvidencePlayerModal job={mockJob} onClose={vi.fn()} />
       </QueryClientProvider>,
     );
 
-    // Enhancement control badge is visible in the tile overlay
-    const badge = screen.getByRole("button", { name: /Mejora visual: AUTO/i });
-    expect(badge).toBeInTheDocument();
+    expect(screen.queryByText("AUTO")).not.toBeInTheDocument();
+    const enhancementIcon = screen.getByRole("button", { name: /Ajustes de mejora visual/i });
+    expect(enhancementIcon.querySelector("svg")).toBeInTheDocument();
+    fireEvent.click(enhancementIcon);
+    expect(screen.getByRole("dialog", { name: "Panel de mejora visual" })).toBeInTheDocument();
 
-    // Toggle to OFF
-    fireEvent.click(badge);
-    expect(screen.getByRole("button", { name: /Mejora visual: OFF/i })).toBeInTheDocument();
-
-    // Toggle back to AUTO
-    fireEvent.click(screen.getByRole("button", { name: /Mejora visual: OFF/i }));
-    expect(screen.getByRole("button", { name: /Mejora visual: AUTO/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Off" }));
+    fireEvent.click(screen.getByRole("button", { name: "Auto" }));
+    expect(screen.getByRole("dialog", { name: "Panel de mejora visual" })).toBeInTheDocument();
   });
 
   it("applies CSS filter to the video element when manual adjustments change", () => {

@@ -1,4 +1,4 @@
-import { RotateCcw, Sliders, Sparkles } from "lucide-react";
+import { RotateCcw, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "@/components/Icon";
 import { cn } from "@/lib/cn";
@@ -39,15 +39,6 @@ export function EnhancementControl({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [open]);
 
-  const toggleQuickMode = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (mode === "auto") {
-      onModeChange("off");
-    } else {
-      onModeChange("auto");
-    }
-  };
-
   const handleSlider = (key: keyof EnhancementAdjustments, value: number) => {
     if (mode !== "manual") {
       onModeChange("manual");
@@ -65,24 +56,8 @@ export function EnhancementControl({
       className={cn("relative inline-flex items-center text-xs select-none", className)}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      {/* Quick toggle pill */}
+      {/* Keep the enhancement affordance compact; mode selection lives in settings. */}
       <div className="flex items-center rounded-m3-md border border-white/20 bg-black/75 shadow-xs backdrop-blur-xs">
-        <button
-          type="button"
-          onClick={toggleQuickMode}
-          title={isOff ? "Activar mejora automática" : "Desactivar mejora visual"}
-          aria-label={`Mejora visual: ${mode.toUpperCase()}`}
-          className={cn(
-            "flex items-center gap-1.5 px-2 py-1 font-semibold tracking-wide transition-colors",
-            isAuto && "text-primary hover:text-primary-hover",
-            isManual && "text-amber-400 hover:text-amber-300",
-            isOff && "text-white/60 hover:text-white/90",
-          )}
-        >
-          <Icon icon={Sparkles} size="xs" className={cn(isAuto && "animate-pulse text-primary")} />
-          <span className="text-[11px] font-bold uppercase">{mode}</span>
-        </button>
-
         <button
           type="button"
           onClick={(e) => {
@@ -93,11 +68,13 @@ export function EnhancementControl({
           aria-label="Ajustes de mejora visual"
           aria-expanded={open}
           className={cn(
-            "border-l border-white/20 px-1.5 py-1 text-white/70 hover:text-white transition-colors",
-            open && "bg-white/20 text-white",
+            "px-2 py-1 text-white/80 hover:text-white transition-colors",
+            isAuto && "text-primary",
+            isManual && "text-amber-400",
+            isOff && "text-white/60",
           )}
         >
-          <Icon icon={Sliders} size="xs" />
+          <Icon icon={Sparkles} size="xs" className={cn(isAuto && "animate-pulse text-primary")} />
         </button>
       </div>
 

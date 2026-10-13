@@ -4,7 +4,7 @@ import { DEFAULT_ADJUSTMENTS } from "@/lib/enhancement/types";
 import { EnhancementControl } from "./EnhancementControl";
 
 describe("EnhancementControl Component", () => {
-  it("renders with AUTO badge by default and toggles to OFF on click", () => {
+  it("promotes the enhancement icon and keeps mode selection inside settings", () => {
     const onModeChange = vi.fn();
     const onReset = vi.fn();
 
@@ -17,14 +17,15 @@ describe("EnhancementControl Component", () => {
       />,
     );
 
-    const toggleBtn = screen.getByRole("button", { name: /Mejora visual: AUTO/i });
-    expect(toggleBtn).toBeInTheDocument();
-
-    fireEvent.click(toggleBtn);
+    expect(screen.queryByText("AUTO")).not.toBeInTheDocument();
+    const optionsBtn = screen.getByRole("button", { name: /Ajustes de mejora visual/i });
+    expect(optionsBtn.querySelector("svg")).toBeInTheDocument();
+    fireEvent.click(optionsBtn);
+    fireEvent.click(screen.getByRole("button", { name: "Off" }));
     expect(onModeChange).toHaveBeenCalledWith("off");
   });
 
-  it("toggles from OFF to AUTO when clicked in OFF state", () => {
+  it("does not expose a quick mode toggle when enhancement is off", () => {
     const onModeChange = vi.fn();
     const onReset = vi.fn();
 
@@ -37,10 +38,9 @@ describe("EnhancementControl Component", () => {
       />,
     );
 
-    const toggleBtn = screen.getByRole("button", { name: /Mejora visual: OFF/i });
-    expect(toggleBtn).toBeInTheDocument();
-
-    fireEvent.click(toggleBtn);
+    expect(screen.queryByRole("button", { name: /Mejora visual: OFF/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Ajustes de mejora visual/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Auto" }));
     expect(onModeChange).toHaveBeenCalledWith("auto");
   });
 

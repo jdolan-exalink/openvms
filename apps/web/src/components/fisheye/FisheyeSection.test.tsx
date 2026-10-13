@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { FisheyeSection } from "./FisheyeSection";
 
@@ -53,24 +53,23 @@ describe("FisheyeSection Component", () => {
     );
   });
 
-  it("applies '4 Cuadrantes' preset on click and cancels when clicking Cancelar", () => {
+  it("applies '3 Fijas de 120°' preset on click and cancels when clicking Cancelar", () => {
     render(<FisheyeSection cameraId="cam-fe-1" cameraName="Camera 360" />);
 
     fireEvent.click(screen.getByRole("switch"));
 
-    const btnQuad = screen.getByRole("button", { name: /4 Cuadrantes/i });
-    fireEvent.click(btnQuad);
+    const btn120 = screen.getByRole("button", { name: /3 Fijas de 120°/i });
+    fireEvent.click(btn120);
 
-    expect(screen.getByText(/Vista 1 \(Norte\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Vista 2 \(Este\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Vista 3 \(Sur\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Vista 4 \(Oeste\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 1 \(0°\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 2 \(120°\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 3 \(240°\)/i)).toBeInTheDocument();
 
     // Revert with Cancelar
     const cancelBtn = screen.getByRole("button", { name: /Cancelar/i });
     fireEvent.click(cancelBtn);
 
-    expect(screen.queryByText(/Vista 1 \(Norte\)/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Vista 1 \(0°\)/i)).not.toBeInTheDocument();
   });
 
   it("triggers auto-detection for known manufacturer camera", () => {
@@ -84,23 +83,36 @@ describe("FisheyeSection Component", () => {
     expect(screen.getByText(/Detectado: Provision-ISR/i)).toBeInTheDocument();
   });
 
-  it("clears virtual views when switching default mode away from 3 or 4 grids", () => {
+  it("clears virtual views when switching default mode away from 3 fixed views", () => {
     render(<FisheyeSection cameraId="cam-fe-clear" cameraName="Camera 360" />);
 
     fireEvent.click(screen.getByRole("switch"));
 
-    // First generate 4 quadrants
-    fireEvent.click(screen.getByRole("button", { name: /4 Cuadrantes/i }));
-    expect(screen.getByText(/Vista 1 \(Norte\)/i)).toBeInTheDocument();
+    // First generate 3 fixed views
+    fireEvent.click(screen.getByRole("button", { name: /3 Fijas de 120°/i }));
+    expect(screen.getByText(/Vista 1 \(0°\)/i)).toBeInTheDocument();
 
-    // Now change default mode dropdown to Panorama
+    // Now change default mode dropdown to Original
     const selects = screen.getAllByRole("combobox");
     const modeSelect = selects[3]!;
-    fireEvent.change(modeSelect, { target: { value: "panorama" } });
+    fireEvent.change(modeSelect, { target: { value: "original" } });
 
     // Views are cleared!
-    expect(screen.queryByText(/Vista 1 \(Norte\)/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Vista 1 \(0°\)/i)).not.toBeInTheDocument();
     expect(screen.getByText(/No hay vistas virtuales configuradas/i)).toBeInTheDocument();
+  });
+
+  it("removes panorama as a view mode while retaining panoramic projection", () => {
+    render(<FisheyeSection cameraId="cam-fe-panorama" cameraName="Camera 360" />);
+    fireEvent.click(screen.getByRole("switch"));
+
+    const selects = screen.getAllByRole("combobox");
+    const lensSelect = selects[0]!;
+    const modeSelect = selects[3]!;
+    expect(within(modeSelect).queryByRole("option", { name: /Panorama 180°/i })).not.toBeInTheDocument();
+    expect(within(modeSelect).queryByRole("option", { name: /4 Cuadrantes/i })).not.toBeInTheDocument();
+    expect(within(modeSelect).getByRole("option", { name: /360° Panorámica/i })).toBeInTheDocument();
+    expect(within(lensSelect).getByRole("option", { name: /Panorámica/i })).toBeInTheDocument();
   });
 
   it("clears virtual views when clicking 'Borrar vistas'", () => {
