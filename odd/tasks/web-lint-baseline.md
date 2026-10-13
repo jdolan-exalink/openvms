@@ -31,7 +31,7 @@ Without those steps CI verifies nothing for the web app; #32 and #33 were only t
 ## Tasks
 
 - [x] WL-01 — Mechanical fixes: math.ts, storage.ts, EvidencePlayerModal no-empty, ForensicComparisonModal unused var, LiveExplorer useMemo dependency (verify `fisheyeVersion` is really unnecessary before removing it; if it is used to force recomputation, restructure instead).
-- [ ] WL-02 — FisheyeViewer react-hooks fixes (refs in render, set-state-in-effect).
+- [x] WL-02 — FisheyeViewer react-hooks fixes (refs in render, set-state-in-effect).
 - [ ] WL-03 — EvidencePlayerModal ref read during render.
 - [ ] WL-04 — ForensicComparisonModal memoization and impure call during render.
 
@@ -49,5 +49,6 @@ Without those steps CI verifies nothing for the web app; #32 and #33 were only t
 
 - 2026-10-13: document created; branch `fix/web-lint-baseline` from `origin/main` (`1e0b1ec`).
 - WL-01 done: 8 diagnostics fixed (math prefer-const; storage 2x and EvidencePlayerModal:667 no-empty via explanatory comments inside catch, since swallow semantics are intended; ForensicComparisonModal unused `_onReprocess` destructure removed; LiveExplorer `fisheyeVersion` was an intentional refresh trigger, so the stale useMemo was replaced by a per-render read so the context change still re-reads localStorage). Tests (existing, pass-first): src/lib/fisheye, LiveExplorer, EvidencePlayerModal, ForensicComparison, routes/Live: 6 files / 98 tests pass; typecheck passes. No characterization tests needed.
+- WL-02 done: FisheyeViewer 4 diagnostics fixed. ptz controller ref init uses `== null` lazy-init pattern; externalConfig/initialMode+targetViewId sync moved from effects to render-time state adjustment (same trigger: only when the prop changes); 3-view grid no longer reads refs in render: FisheyeSingleViewport takes `getVideoElement`/`getImageElement` getters read inside its rAF tick. Added 2 characterization tests (initialMode rerender, external config rerender), verified passing on both the old and new code. fisheye/Live/LiveExplorer/lib tests: 7 files / 109 tests pass; eslint 0 on fisheye dir; typecheck passes.
 
 Repository-relative file: `odd/tasks/web-lint-baseline.md`

@@ -186,7 +186,7 @@ export function FisheyeViewer({
   });
 
   const ptzControllerRef = useRef<VirtualPtzController | null>(null);
-  if (!ptzControllerRef.current) {
+  if (ptzControllerRef.current == null) {
     ptzControllerRef.current = new VirtualPtzController(activeView, (state) => {
       setActiveView((prev) => ({
         ...prev,
@@ -211,19 +211,31 @@ export function FisheyeViewer({
     [cameraId, config.mountType],
   );
 
+  // Ref reads happen lazily inside the child's animation loop, never during render.
+  const getVideoSource = useCallback(
+    () => videoElement || sessionRef.current?.video || localVideoRef.current,
+    [videoElement],
+  );
+  const getSnapshotImage = useCallback(() => snapshotRef.current, []);
+
   // Synchronize internal and external config
-  useEffect(() => {
+  // Adjusted during render (not in an effect) only when the external prop actually changes.
+  const [syncedExternalConfig, setSyncedExternalConfig] = useState(externalConfig);
+  if (externalConfig !== syncedExternalConfig) {
+    setSyncedExternalConfig(externalConfig);
     if (externalConfig) {
       setConfig(externalConfig);
     }
-  }, [externalConfig]);
+  }
 
-  // Synchronize internal mode with external initialMode changes
-  useEffect(() => {
+  // Synchronize internal mode with external initialMode changes (same render-time pattern).
+  const [syncedModeInputs, setSyncedModeInputs] = useState({ initialMode, targetViewId });
+  if (syncedModeInputs.initialMode !== initialMode || syncedModeInputs.targetViewId !== targetViewId) {
+    setSyncedModeInputs({ initialMode, targetViewId });
     if (initialMode && !targetViewId) {
       setMode(initialMode);
     }
-  }, [initialMode, targetViewId]);
+  }
 
   const targetView = useMemo(() => {
     if (!targetViewId) return undefined;
@@ -621,8 +633,8 @@ export function FisheyeViewer({
                 {v.name} · {v.fov}° FOV
               </div>
               <FisheyeSingleViewport
-                videoElement={videoElement || sessionRef.current?.video || localVideoRef.current}
-                imageElement={snapshotRef.current}
+                getVideoElement={getVideoSource}
+                getImageElement={getSnapshotImage}
                 calibration={config.calibration}
                 mountType={config.mountType}
                 projectionModel={config.projectionModel}
@@ -685,15 +697,15 @@ export function FisheyeViewer({
  * Sub-viewport for Multi-view modes (3 fijas 120°, 4 cuadrantes)
  */
 export function FisheyeSingleViewport({
-  videoElement,
-  imageElement,
+  getVideoElement,
+  getImageElement,
   calibration,
   mountType,
   projectionModel,
   view,
 }: {
-  videoElement?: HTMLVideoElement | null;
-  imageElement?: HTMLImageElement | null;
+  getVideoElement?: () => HTMLVideoElement | null | undefined;
+  getImageElement?: () => HTMLImageElement | null | undefined;
   calibration: FisheyeConfig["calibration"];
   mountType: FisheyeConfig["mountType"];
   projectionModel: FisheyeConfig["projectionModel"];
@@ -720,6 +732,8 @@ export function FisheyeSingleViewport({
         engineRef.current = new FisheyeDewarpEngine(canvasRef.current);
       }
       const engine = engineRef.current;
+      const videoElement = getVideoElement?.();
+      const imageElement = getImageElement?.();
       const isVideoReady = videoElement && videoElement.readyState >= 2;
       const isImageReady =
         imageElement && imageElement.complete && imageElement.naturalWidth > 0;
@@ -752,7 +766,7 @@ export function FisheyeSingleViewport({
     };
     rafId = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafId);
-  }, [videoElement, imageElement, calibration, mountType, projectionModel, view]);
+  }, [getVideoElement, getImageElement, calibration, mountType, projectionModel, view]);
 
   return (
     <canvas

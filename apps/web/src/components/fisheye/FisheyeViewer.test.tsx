@@ -192,4 +192,26 @@ describe("FisheyeViewer Component", () => {
 
     expect(screen.getByText(/FOV:/i).textContent).not.toContain("80°");
   });
+
+  it("follows a changing initialMode prop when no target view is set", () => {
+    const { rerender } = render(<FisheyeViewer cameraId="cam-initial-mode" initialMode="original" />);
+    expect(screen.getByRole("button", { name: "Original" })).toHaveClass("bg-primary");
+
+    rerender(<FisheyeViewer cameraId="cam-initial-mode" initialMode="360" />);
+
+    expect(screen.getByRole("button", { name: "360°" })).toHaveClass("bg-primary");
+    expect(screen.getByRole("button", { name: "Original" })).not.toHaveClass("bg-primary");
+  });
+
+  it("syncs the internal config when the external config prop changes", () => {
+    const view = (id: string, name: string) => ({ id, cameraId: "cam-ext-config", name, projection: "rectilinear" as const, yaw: 0, pitch: 0, roll: 0, fov: 80 });
+    const base = { ...DEFAULT_FISHEYE_CONFIG, cameraId: "cam-ext-config", enabled: true, lensType: "fisheye_360" as const };
+    const { rerender } = render(<FisheyeViewer cameraId="cam-ext-config" config={{ ...base, views: [view("a", "Alpha")] }} />);
+    expect(screen.getByRole("option", { name: "Alpha" })).toBeInTheDocument();
+
+    rerender(<FisheyeViewer cameraId="cam-ext-config" config={{ ...base, views: [view("b", "Beta")] }} />);
+
+    expect(screen.getByRole("option", { name: "Beta" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Alpha" })).not.toBeInTheDocument();
+  });
 });
