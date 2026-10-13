@@ -150,7 +150,9 @@ export function getFisheyeViewMode(cameraId: string): FisheyeViewMode {
     }
     const config = getFisheyeConfig(cameraId);
     if (config?.defaultMode) return config.defaultMode;
-  } catch {}
+  } catch {
+    // Storage unavailable or corrupted: fall back to the default mode below.
+  }
   return "virtual_ptz";
 }
 
@@ -161,5 +163,7 @@ export function saveFisheyeViewMode(cameraId: string, mode: FisheyeViewMode): vo
   if (!cameraId || typeof localStorage === "undefined") return;
   try {
     localStorage.setItem(`${VIEW_MODE_PREFIX}${cameraId}`, mode);
-  } catch {}
+  } catch {
+    // Storage unavailable or quota exceeded: the mode simply is not persisted.
+  }
 }

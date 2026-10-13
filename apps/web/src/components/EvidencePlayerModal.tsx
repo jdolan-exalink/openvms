@@ -664,7 +664,9 @@ function EvidenceVideoTile({
                     if (res && typeof res.catch === "function") {
                       res.catch(() => {});
                     }
-                  } catch {}
+                  } catch {
+                    // play() is unsupported or threw synchronously: ignore, playback stays paused.
+                  }
                 }
               }}
               onEnded={() => {

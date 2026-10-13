@@ -171,7 +171,7 @@ export function rayToFisheyeUv(
   }
 
   // Polar angle phi in sensor plane
-  let phi = Math.atan2(norm.y, norm.x) + toRad(calibration.rotation);
+  const phi = Math.atan2(norm.y, norm.x) + toRad(calibration.rotation);
 
   const r = calculateFisheyeRadius(theta, calibration.radius, calibration.fov, model);
 

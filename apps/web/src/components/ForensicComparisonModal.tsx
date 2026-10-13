@@ -44,7 +44,6 @@ export function ForensicComparisonModal({
   onClose,
   result,
   isLoading = false,
-  onReprocess: _onReprocess,
   cameraName: initialCameraName,
   timestamp: initialTimestamp,
 }: ForensicComparisonModalProps) {
