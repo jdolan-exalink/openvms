@@ -568,6 +568,30 @@ describe("Live", () => {
     expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
   });
 
+  it("keeps a tile saved on main at a single main session after maximize ends", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte", { default_live_quality: "main" })] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+
+    fireEvent.doubleClick(tile);
+    act(() => { vi.advanceTimersByTime(5_001); });
+    fireEvent.doubleClick(tile);
+    act(() => { vi.advanceTimersByTime(10_000); });
+
+    expect(tile.querySelectorAll("video")).toHaveLength(1);
+    expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "main" });
+  });
+
   it("keeps a manual thirty-second override alive when maximize ends", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({

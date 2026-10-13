@@ -82,7 +82,7 @@ function LiveDesktop() {
   const [tiles, setTiles] = useState<Tile[]>(() => Array(4).fill(null));
   const [selected, setSelected] = useState(0);
   const [focus, setFocus] = useState<number | null>(null);
-  const [qualityOverrides, setQualityOverrides] = useState<Record<string, { quality: Quality; identities: string[]; source: "manual" | "maximize" | "focus-restore" }>>({});
+  const [qualityOverrides, setQualityOverrides] = useState<Record<string, { quality: Quality; identities: string[]; source: "manual" | "maximize" }>>({});
   const [viewId, setViewId] = useState("");
   const [playbackCameraId, setPlaybackCameraId] = useState<string | null>(null);
   const [viewDialog, setViewDialog] = useState<null | { mode: "create" } | { mode: "edit"; id: string }>(null);
@@ -377,7 +377,7 @@ function LiveDesktop() {
     qualityTimersRef.current.delete(cameraId);
   };
 
-  const setQualityOverride = (cameraId: string, quality: Quality, source: "manual" | "maximize" | "focus-restore") => {
+  const setQualityOverride = (cameraId: string, quality: Quality, source: "manual" | "maximize") => {
     const identities = tilesRef.current.flatMap((tile) => {
       if (!tile || !("camera_id" in tile) || tile.camera_id !== cameraId) return [];
       const identity = tileIdentityKey(tile);
@@ -727,7 +727,12 @@ function LiveDesktop() {
       maximizedCameraIdsRef.current.delete(previous);
       if (qualityOverridesRef.current[previous]?.source === "maximize") {
         clearQualityTimer(previous);
-        setQualityOverride(previous, "sub", "focus-restore");
+        setQualityOverrides((current) => {
+          if (current[previous]?.source !== "maximize") return current;
+          const next = { ...current };
+          delete next[previous];
+          return next;
+        });
       }
     }
     previousFocusedCameraRef.current = focusedCameraId;
