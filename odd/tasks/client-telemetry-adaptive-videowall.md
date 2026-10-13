@@ -26,7 +26,7 @@ Operators need to know whether a station can hold a layout, where the bottleneck
 ### Stage 1 — telemetry and sidebar meter (branch `feat/live-telemetry-meter`)
 
 - [x] VT-01 — Maximize promotes to main immediately (remove the 5 s dwell at `Live.tsx:~758`); keep gap-free handoff and manual-override semantics; update dependent tests.
-- [ ] VT-02 — `VideoTelemetryService`: per-session received bytes (WebSocket media messages), 1 Hz sampling of presented/dropped frames (`getVideoPlaybackQuality`), session state counts (playing, connecting, paused/suspended, error) and main/sub counts, 60 s ring buffer of totals; plus static `ClientCapabilities` basics (logical processors, reported memory, WebGL/WebGL2 renderer/vendor when exposed).
+- [x] VT-02 — `VideoTelemetryService`: per-session received bytes (WebSocket media messages), 1 Hz sampling of presented/dropped frames (`getVideoPlaybackQuality`), session state counts (playing, connecting, paused/suspended, error) and main/sub counts, 60 s ring buffer of totals; plus static `ClientCapabilities` basics (logical processors, reported memory, WebGL/WebGL2 renderer/vendor when exposed).
 - [ ] VT-03 — Compact sidebar footer meter in `LiveExplorer`: live Mbps with 60 s histogram, FPS presented, dropped %, stream counts by state and main/sub, CPU threads and GPU name, health class (Óptimo / Aceptable / Al límite / Saturado) from a first `PerformanceClassifier`. Modern, compact, theme-aware.
 
 ### Stage 2 — diagnose the ~26-camera limit
@@ -57,5 +57,6 @@ Operators need to know whether a station can hold a layout, where the bottleneck
 
 - 2026-10-13: document created; mapping findings recorded in Problem; branch `feat/live-telemetry-meter` from `main` (`75a688f`).
 - VT-01 (delegated writer): removed the 5 s dwell and `maximizeTimerRef` entirely (no setTimeout kept); promotion now runs synchronously in the focus effect via the existing override handoff. RED: updated "promotes to main immediately" + 3 dependent tests failed on old code (4 failed / 63 passed). GREEN: `pnpm test src/routes/Live.test.tsx` 67/67; `pnpm lint` 0 problems; `pnpm typecheck` ok. Persistent grid->expand->grid test now expects exactly 1 extra main socket (3 total) with 2 sub sockets and 0 sub reconnects.
+- VT-02 (delegated writer): `apps/web/src/lib/telemetry/` (`videoTelemetry.ts`, `performanceClassifier.ts`, `clientCapabilities.ts`, `useVideoTelemetry.ts`); `PlayerSession` registers in its constructor (covers persistent and private sessions), adds `byteLength` per binary message, unregisters on close. RED: 4 new test files failed to load (modules missing). GREEN: `pnpm test src/lib/telemetry` 25/25, `src/lib/live` green; lint 0 problems; typecheck ok.
 
 Repository-relative file: `odd/tasks/client-telemetry-adaptive-videowall.md`
