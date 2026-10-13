@@ -13,7 +13,7 @@ import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/a
 import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { MsePlayer } from "@/components/MsePlayer";
 import { FisheyeViewer } from "@/components/fisheye/FisheyeViewer";
-import { getFisheyeConfig } from "@/lib/fisheye/storage";
+import { getEffectiveVirtualViews, getFisheyeConfig } from "@/lib/fisheye/storage";
 import { useFeatures } from "@/lib/features";
 import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { LiveRecDock } from "@/components/LiveRecDock";
@@ -514,7 +514,7 @@ function LiveDesktop() {
   const feview = activeDrag ? feviewFromDragId(activeDrag) : null;
   const dragLabel = feview
     ? `${camById.get(feview.cameraId)?.display_name ?? "Cámara"} · ${
-        getFisheyeConfig(feview.cameraId).views.find((v) => v.id === feview.viewId)?.name ?? "Vista Virtual"
+        getEffectiveVirtualViews(getFisheyeConfig(feview.cameraId)).find((v) => v.id === feview.viewId)?.name ?? "Vista Virtual"
       }`
     : activeDrag?.startsWith("camera:")
     ? camById.get(activeDrag.slice("camera:".length))?.display_name
@@ -858,12 +858,14 @@ function GridTile({
         <>
           {(() => {
             const feConfig = getFisheyeConfig(tile.camera_id);
+            const effectiveViews = getEffectiveVirtualViews(feConfig);
             const specificView = tile.fisheye_view_id
-              ? feConfig.views.find((v) => v.id === tile.fisheye_view_id)
+              ? effectiveViews.find((v) => v.id === tile.fisheye_view_id) ||
+                feConfig.views.find((v) => v.id === tile.fisheye_view_id)
               : undefined;
             const useFisheye =
               !suspended &&
-              feConfig.enabled &&
+              (feConfig.enabled || camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez")) &&
               (specificView !== undefined || feConfig.defaultMode !== "original");
 
             if (isDuplicate) {
@@ -899,8 +901,10 @@ function GridTile({
           <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 p-2 text-xs">
             {(() => {
               const feConfig = getFisheyeConfig(tile.camera_id);
+              const effectiveViews = getEffectiveVirtualViews(feConfig);
               const specificView = tile.fisheye_view_id
-                ? feConfig.views.find((v) => v.id === tile.fisheye_view_id)
+                ? effectiveViews.find((v) => v.id === tile.fisheye_view_id) ||
+                  feConfig.views.find((v) => v.id === tile.fisheye_view_id)
                 : undefined;
               return (
                 <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-on-surface backdrop-blur">

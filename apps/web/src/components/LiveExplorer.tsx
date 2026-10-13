@@ -1,7 +1,7 @@
 import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Compass, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, GripVertical, History, LayoutGrid,
+  Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Compass, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, Grid2X2, GripVertical, History, LayoutGrid,
   type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, Trash2, Video,
 } from "lucide-react";
 import { createContext, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -15,7 +15,8 @@ import { cn } from "@/lib/cn";
 import { buildTree, type Camera, type Folder, type FolderNode, loadPrefs, type ServerNode, savePrefs, treeCameraDropId, treeFolderId, treeRootDropId, treeServerDragId } from "@/lib/explorer";
 import { LiveDetectionsPanel, LiveLprPanel, LiveMapsPanel } from "@/components/LiveSidePanels";
 import { cameraDragId, feviewDragId, type LiveMapRef } from "@/lib/liveGrid";
-import { getFisheyeConfig } from "@/lib/fisheye/storage";
+import { getEffectiveVirtualViews, getFisheyeConfig } from "@/lib/fisheye/storage";
+import { detectFisheyeProfile } from "@/lib/fisheye/profiles";
 import type { VirtualFisheyeView } from "@/lib/fisheye/types";
 import { useT } from "@/i18n";
 import type { useCameraFolders } from "@/lib/useCameraFolders";
@@ -719,11 +720,34 @@ function CameraRow({
   const { bind, actions, navigate } = useMenuCtx();
 
   const fisheyeConfig = useMemo(() => getFisheyeConfig(camera.id), [camera.id]);
-  const hasVirtualViews = fisheyeConfig.enabled && fisheyeConfig.views.length > 0;
-  const [viewsOpen, setViewsOpen] = useState(false);
+  const isFisheyeCamera = Boolean(
+    camera.tags?.includes("fisheye") ||
+    camera.tags?.includes("ojo_de_pez") ||
+    fisheyeConfig.enabled ||
+    detectFisheyeProfile(camera) !== null
+  );
+  const virtualViews = useMemo(() => {
+    if (!isFisheyeCamera) return [];
+    return getEffectiveVirtualViews(fisheyeConfig);
+  }, [isFisheyeCamera, fisheyeConfig]);
+
+  const hasVirtualViews = virtualViews.length > 0;
+  const [viewsOpen, setViewsOpen] = useState(true);
 
   const menu = bind(() => [
     addToViewItem(actions, [camera.id], t),
+    ...(hasVirtualViews
+      ? [
+          {
+            id: "distribute_views",
+            label: "Distribuir cuadrantes en la grilla",
+            icon: Grid2X2,
+            onSelect: () => {
+              virtualViews.forEach((v) => onDoublePlace(camera.id, v.id));
+            },
+          } satisfies MenuItem,
+        ]
+      : []),
     ...(actions.canConfigureCameras
       ? [{ id: "cfg", label: t("live.configure"), icon: Settings, onSelect: () => void navigate({ to: "/cameras/$cameraId/frigate", params: { cameraId: camera.id } }) } satisfies MenuItem]
       : []),
@@ -793,7 +817,7 @@ function CameraRow({
           <Icon icon={hasVirtualViews ? Compass : Video} size="xs" className={cn(nodeIcon, hasVirtualViews && "text-cyan-400")} />
           <span className={cn("size-1.5 shrink-0 rounded-full", dot(camera.status))} aria-hidden />
           <span className="min-w-0 truncate">{camera.display_name}</span>
-          {hasVirtualViews && <Count n={fisheyeConfig.views.length} />}
+          {hasVirtualViews && <Count n={virtualViews.length} />}
         </button>
         {canViewRecordings && (
           <>
@@ -813,7 +837,7 @@ function CameraRow({
 
       {hasVirtualViews && viewsOpen && (
         <div className="flex flex-col gap-0.5 my-0.5">
-          {fisheyeConfig.views.map((v) => (
+          {virtualViews.map((v) => (
             <FisheyeViewRow
               key={v.id}
               camera={camera}

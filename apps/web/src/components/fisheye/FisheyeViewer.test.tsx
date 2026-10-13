@@ -1,8 +1,11 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { FisheyeViewer } from "./FisheyeViewer";
 
 describe("FisheyeViewer Component", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
   it("renders toolbar with view mode buttons and canvas stage", () => {
     render(<FisheyeViewer cameraId="cam-123" />);
 
@@ -34,10 +37,10 @@ describe("FisheyeViewer Component", () => {
     const fourQuadsBtn = screen.getByRole("button", { name: /4 Cuadrantes/i });
     fireEvent.click(fourQuadsBtn);
 
-    expect(screen.getByText(/Cuadrante Norte \(0°\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Cuadrante Este \(90°\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Cuadrante Sur \(180°\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Cuadrante Oeste \(270°\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 1 \(Norte\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 2 \(Este\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 3 \(Sur\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 4 \(Oeste\)/i)).toBeInTheDocument();
   });
 
   it("handles mouse wheel zoom in Virtual PTZ mode", () => {

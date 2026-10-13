@@ -48,16 +48,16 @@ describe("FisheyeSection Component", () => {
     const btnQuad = screen.getByRole("button", { name: /4 Cuadrantes/i });
     fireEvent.click(btnQuad);
 
-    expect(screen.getByText(/Cuadrante Norte \(0°\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Cuadrante Este \(90°\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Cuadrante Sur \(180°\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/Cuadrante Oeste \(270°\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 1 \(Norte\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 2 \(Este\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 3 \(Sur\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/Vista 4 \(Oeste\)/i)).toBeInTheDocument();
 
     // Revert with Cancelar
     const cancelBtn = screen.getByRole("button", { name: /Cancelar/i });
     fireEvent.click(cancelBtn);
 
-    expect(screen.queryByText(/Cuadrante Norte \(0°\)/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Vista 1 \(Norte\)/i)).not.toBeInTheDocument();
   });
 
   it("triggers auto-detection for known manufacturer camera", () => {
