@@ -340,6 +340,39 @@ describe("Live", () => {
     expect(disclosure).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("updates an explorer row when its fisheye config is saved after render", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-late", "Late fisheye"), camera("cam-other", "Other camera")] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+      "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" }] }),
+      "/api/v1/views": () => json({ items: [] }),
+    })));
+    renderPage(Live);
+
+    const row = (await screen.findByText("Late fisheye")).closest("button");
+    expect(row?.querySelector("svg.lucide-fish")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Vistas virtuales de Late fisheye" })).toBeNull();
+
+    act(() => {
+      saveFisheyeConfig({
+        cameraId: "cam-late",
+        enabled: true,
+        lensType: "fisheye_360",
+        mountType: "ceiling",
+        projectionModel: "equidistant",
+        calibration: DEFAULT_FISHEYE_CALIBRATION,
+        views: [],
+        defaultMode: "3_fixed_120",
+      });
+    });
+
+    await waitFor(() => expect(screen.getByText("Late fisheye").closest("button")?.querySelector("svg.lucide-fish")).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Vistas virtuales de Late fisheye" })).toBeInTheDocument();
+    expect(screen.getByText("Other camera").closest("button")?.querySelector("svg.lucide-fish")).toBeNull();
+  });
+
   it("restores a previously saved grid selection, dropping cameras the user can no longer see", async () => {
     stubBrowserAPIs();
     localStorage.setItem(

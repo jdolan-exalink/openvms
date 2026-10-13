@@ -15,7 +15,8 @@ import { cn } from "@/lib/cn";
 import { buildTree, type Camera, type Folder, type FolderNode, loadPrefs, type ServerNode, savePrefs, treeCameraDropId, treeFolderId, treeRootDropId, treeServerDragId } from "@/lib/explorer";
 import { LiveDetectionsPanel, LiveLprPanel, LiveMapsPanel } from "@/components/LiveSidePanels";
 import { cameraDragId, feviewDragId, type LiveMapRef } from "@/lib/liveGrid";
-import { getEffectiveVirtualViews, getFisheyeConfig } from "@/lib/fisheye/storage";
+import { getEffectiveVirtualViews } from "@/lib/fisheye/storage";
+import { useFisheyeConfig } from "@/lib/fisheye/useFisheyeConfig";
 import { detectFisheyeProfile } from "@/lib/fisheye/profiles";
 import type { VirtualFisheyeView } from "@/lib/fisheye/types";
 import { useT } from "@/i18n";
@@ -55,7 +56,7 @@ type MenuProps = {
   "data-longpress": "";
 };
 type Bind = (build: () => MenuItem[]) => MenuProps;
-type MenuCtxValue = { bind: Bind; actions: ExplorerActions; navigate: ReturnType<typeof useNavigate>; fisheyeVersion: number };
+type MenuCtxValue = { bind: Bind; actions: ExplorerActions; navigate: ReturnType<typeof useNavigate> };
 const MenuCtx = createContext<MenuCtxValue | null>(null);
 const useMenuCtx = () => {
   const ctx = useContext(MenuCtx);
@@ -265,15 +266,8 @@ export function LiveExplorer({
   const [confirmDelete, setConfirmDelete] = useState<Folder | null>(null);
   const mutationError = folderApi.create.error ?? folderApi.rename.error ?? folderApi.reorder.error ?? error;
 
-  const [fisheyeVersion, setFisheyeVersion] = useState(0);
-  useEffect(() => {
-    const handler = () => setFisheyeVersion((v) => v + 1);
-    window.addEventListener("openvms:fisheye-config-changed", handler);
-    return () => window.removeEventListener("openvms:fisheye-config-changed", handler);
-  }, []);
-
   return (
-    <MenuCtx.Provider value={{ bind, actions, navigate, fisheyeVersion }}>
+    <MenuCtx.Provider value={{ bind, actions, navigate }}>
     <div className="flex min-h-0 min-w-0 flex-col gap-2 md:flex-1" data-live-sidebar="true" aria-label={t("live.sidebar")} role="region">
       <div className="flex shrink-0 items-center gap-0.5">
         <div role="tablist" aria-label={t("live.sections")} className="flex min-w-0 flex-1 overflow-x-auto text-[11px] font-medium">
@@ -740,8 +734,7 @@ function CameraRow({
   const t = useT();
   const { bind, actions, navigate } = useMenuCtx();
 
-  // Read on every render: fisheyeVersion (context) changes re-render this row when the stored config changes.
-  const fisheyeConfig = getFisheyeConfig(camera.id);
+  const fisheyeConfig = useFisheyeConfig(camera.id);
   const isFisheyeCamera = Boolean(
     (fisheyeConfig.enabled && fisheyeConfig.lensType !== "normal") ||
     camera.tags?.includes("fisheye") ||
