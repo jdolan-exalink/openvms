@@ -164,4 +164,15 @@ describe("FisheyeViewer Component", () => {
     // Mode is reverted to original
     expect(screen.getByRole("button", { name: "Original" })).toHaveClass("bg-primary");
   });
+
+  it("returns to the just-saved mode when clicking Cancelar after Guardar vista", () => {
+    render(<FisheyeViewer cameraId="cam-cancel-saved" initialMode="original" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /3 Fijas/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Guardar vista/i }));
+    fireEvent.click(screen.getByRole("button", { name: /PTZ Virtual/i }));
+    fireEvent.click(screen.getByRole("button", { name: /cancelar/i }));
+
+    expect(screen.getByRole("button", { name: /3 Fijas/i })).toHaveClass("bg-primary");
+  });
 });

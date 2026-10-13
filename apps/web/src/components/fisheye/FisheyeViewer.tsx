@@ -440,6 +440,7 @@ export function FisheyeViewer({
       defaultMode: mode,
       views: viewsToSave,
     };
+    cancelModeRef.current = mode;
     setConfig(updated);
     saveFisheyeConfig(updated);
     saveFisheyeViewMode(cameraId, mode);
