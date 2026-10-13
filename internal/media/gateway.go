@@ -1109,8 +1109,25 @@ func liveStream(cam Camera, quality string) (string, error) {
 }
 
 // liveEnd is why a live session stopped. A non-empty code makes the gateway tell the browser
-// with an error frame before closing; an empty code is a plain peer disconnect.
-type liveEnd struct{ code, msg string }
+// with an error frame before closing; an empty code is a plain peer disconnect. detail is the
+// upstream's own reason (credentials redacted); it is logged for operators, never sent to the browser.
+type liveEnd struct{ code, msg, detail string }
+
+// maxUpstreamDetail bounds how much of an upstream error message reaches the logs.
+const maxUpstreamDetail = 512
+
+// urlUserinfo matches the userinfo part of a URL (scheme://user[:pass]@).
+var urlUserinfo = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.-]*://)[^/@\s]+@`)
+
+// redactURLCredentials hides URL credentials (go2rtc errors often echo the camera's RTSP URL)
+// and truncates the text so a log line stays bounded.
+func redactURLCredentials(s string) string {
+	s = urlUserinfo.ReplaceAllString(s, "${1}***@")
+	if len(s) > maxUpstreamDetail {
+		s = s[:maxUpstreamDetail]
+	}
+	return s
+}
 
 // live relays Frigate's go2rtc MSE websocket (/live/mse/api/ws?src=stream). The browser
 // speaks the go2rtc protocol end to end; the gateway authorizes, copies frames, keeps both
@@ -1165,6 +1182,7 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 	quality := qualityLabel(r.URL.Query().Get("quality"))
 	stream, err := liveStream(cam, quality)
 	if err != nil {
+		g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "quality", quality, "error", err)
 		reject(CodeCameraOffline, "the camera has no live stream available")
 		return
 	}
@@ -1238,7 +1256,7 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 			}
 			_ = raw.SetReadDeadline(time.Now().Add(pongWait))
 			if err := upstream.write(mt, data); err != nil {
-				finish(liveEnd{CodeCameraOffline, "lost the connection to the camera stream"})
+				finish(liveEnd{code: CodeCameraOffline, msg: "lost the connection to the camera stream"})
 				return
 			}
 			liveBytes.WithLabelValues("up").Add(float64(len(data)))
@@ -1250,7 +1268,7 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		for {
 			mt, data, err := upConn.ReadMessage()
 			if err != nil {
-				finish(liveEnd{CodeCameraOffline, "the camera stream ended"})
+				finish(liveEnd{code: CodeCameraOffline, msg: "the camera stream ended"})
 				return
 			}
 			_ = upConn.SetReadDeadline(time.Now().Add(pongWait))
@@ -1282,7 +1300,7 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				if err := upConn.WriteControl(websocket.PingMessage, nil, dl); err != nil {
-					finish(liveEnd{CodeCameraOffline, "lost the connection to the camera stream"})
+					finish(liveEnd{code: CodeCameraOffline, msg: "lost the connection to the camera stream"})
 					return
 				}
 			}
@@ -1301,6 +1319,9 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 
 	e := <-done
 	cancel()
+	if e.detail != "" {
+		g.Svc.Log.WarnContext(r.Context(), "live upstream error", "camera", id, "stream", stream, "quality", quality, "code", e.code, "detail", e.detail)
+	}
 	if e.code != "" {
 		g.sendLiveError(client, e.code, e.msg)
 	} else {
@@ -1347,10 +1368,11 @@ func upstreamError(data []byte) (liveEnd, bool) {
 	if json.Unmarshal(data, &m) != nil || m.Type != "error" {
 		return liveEnd{}, false
 	}
+	detail := redactURLCredentials(m.Value)
 	if strings.Contains(strings.ToLower(m.Value), "codec") {
-		return liveEnd{CodeCodecUnsupported, "the camera codec is not supported"}, true
+		return liveEnd{code: CodeCodecUnsupported, msg: "the camera codec is not supported", detail: detail}, true
 	}
-	return liveEnd{CodeCameraOffline, "the camera stream is not available"}, true
+	return liveEnd{code: CodeCameraOffline, msg: "the camera stream is not available", detail: detail}, true
 }
 
 // watchAccess re-checks the caller's credential and camera permission every interval until
@@ -1375,11 +1397,11 @@ func (g *Gateway) watchAccess(ctx context.Context, r *http.Request, a authz.Acto
 			switch {
 			case err != nil:
 				if failures++; failures >= maxRevalidateFailures {
-					return liveEnd{CodeServerError, "could not verify the session"}
+					return liveEnd{code: CodeServerError, msg: "could not verify the session"}
 				}
 				continue
 			case !valid:
-				return liveEnd{CodeUnauthorized, "session ended"}
+				return liveEnd{code: CodeUnauthorized, msg: "session ended"}
 			}
 		}
 		_, err := g.Svc.Authorize(ctx, a, camID, authz.LiveView)
@@ -1390,12 +1412,12 @@ func (g *Gateway) watchAccess(ctx context.Context, r *http.Request, a authz.Acto
 			failures = 0
 		case errors.Is(err, access.ErrForbidden):
 			g.auditDenied(ctx, a, err, r.Method, r.URL.Path)
-			return liveEnd{CodeForbidden, "you no longer have permission for this camera"}
+			return liveEnd{code: CodeForbidden, msg: "you no longer have permission for this camera"}
 		case errors.Is(err, store.ErrNotFound):
-			return liveEnd{CodeForbidden, "camera no longer available"}
+			return liveEnd{code: CodeForbidden, msg: "camera no longer available"}
 		default:
 			if failures++; failures >= maxRevalidateFailures {
-				return liveEnd{CodeServerError, "could not verify access"}
+				return liveEnd{code: CodeServerError, msg: "could not verify access"}
 			}
 		}
 	}
