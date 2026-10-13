@@ -52,6 +52,20 @@ export interface FisheyeViewerProps {
   onFirstFrame?: () => void;
 }
 
+function isSameVirtualView(a: VirtualFisheyeView | undefined, b: VirtualFisheyeView): boolean {
+  return (
+    !!a &&
+    a.id === b.id &&
+    a.cameraId === b.cameraId &&
+    a.name === b.name &&
+    a.projection === b.projection &&
+    a.yaw === b.yaw &&
+    a.pitch === b.pitch &&
+    a.roll === b.roll &&
+    a.fov === b.fov
+  );
+}
+
 export function FisheyeViewer({
   cameraId,
   videoSrc,
@@ -219,28 +233,22 @@ export function FisheyeViewer({
     );
   }, [config, targetViewId]);
 
-  // Adjust this component's state during render when its controlling view changes.
-  // React retries the render with the selected view, avoiding an effect-driven extra render.
-  const activeViewMatchesTarget =
-    targetView &&
-    activeView.id === targetView.id &&
-    activeView.cameraId === targetView.cameraId &&
-    activeView.name === targetView.name &&
-    activeView.projection === targetView.projection &&
-    activeView.yaw === targetView.yaw &&
-    activeView.pitch === targetView.pitch &&
-    activeView.roll === targetView.roll &&
-    activeView.fov === targetView.fov;
-  if (targetView && (!activeViewMatchesTarget || mode !== "virtual_ptz")) {
-    setActiveView(targetView);
-    setMode("virtual_ptz");
+  // Adjust this component's state during render only when the controlling view itself changes
+  // (identity or fields), so user pan/zoom on a targeted tile is not snapped back on every render.
+  const [syncedTarget, setSyncedTarget] = useState<VirtualFisheyeView | undefined>(targetView);
+  if (!targetView ? syncedTarget !== undefined : !isSameVirtualView(syncedTarget, targetView)) {
+    setSyncedTarget(targetView);
+    if (targetView) {
+      setActiveView(targetView);
+      setMode("virtual_ptz");
+    }
   }
 
   useEffect(() => {
-    if (targetView) {
-      ptzControllerRef.current?.setState(targetView);
+    if (syncedTarget) {
+      ptzControllerRef.current?.setState(syncedTarget);
     }
-  }, [targetView]);
+  }, [syncedTarget]);
 
   // Synchronize with global fisheye-config-changed events
   useEffect(() => {

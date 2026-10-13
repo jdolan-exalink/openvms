@@ -175,4 +175,21 @@ describe("FisheyeViewer Component", () => {
 
     expect(screen.getByRole("button", { name: /3 Fijas/i })).toHaveClass("bg-primary");
   });
+
+  it("keeps user zoom on a targeted virtual view instead of snapping back to the saved view", () => {
+    saveFisheyeConfig({
+      ...DEFAULT_FISHEYE_CONFIG,
+      cameraId: "cam-target-zoom",
+      enabled: true,
+      lensType: "fisheye_360",
+      views: [{ id: "front", cameraId: "cam-target-zoom", name: "Front", projection: "rectilinear", yaw: 0, pitch: 0, roll: 0, fov: 80 }],
+    });
+
+    render(<FisheyeViewer cameraId="cam-target-zoom" targetViewId="front" />);
+    expect(screen.getByText(/FOV:/i).textContent).toContain("80°");
+
+    fireEvent.wheel(screen.getByTestId("fisheye-stage"), { deltaY: -100 });
+
+    expect(screen.getByText(/FOV:/i).textContent).not.toContain("80°");
+  });
 });
