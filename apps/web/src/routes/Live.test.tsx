@@ -608,7 +608,7 @@ describe("Live", () => {
     expect(saved?.tiles.slice(0, 3).map((tile) => tile && "quality" in tile ? tile.quality : null)).toEqual(["sub", "sub", "main"]);
   });
 
-  it("waits more than five seconds after maximize before switching and restores sub on unmaximize", async () => {
+  it("promotes to main immediately on maximize and restores sub on unmaximize", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({
       "/api/v1/me": meResponse,
@@ -624,9 +624,6 @@ describe("Live", () => {
     vi.useFakeTimers();
     fireEvent.doubleClick(tile);
 
-    act(() => { vi.advanceTimersByTime(5_000); });
-    expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(false);
-    act(() => { vi.advanceTimersByTime(1); });
     expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(true);
 
     fireEvent.doubleClick(tile);
@@ -652,7 +649,6 @@ describe("Live", () => {
     vi.useFakeTimers();
 
     fireEvent.doubleClick(tile);
-    act(() => { vi.advanceTimersByTime(5_001); });
     fireEvent.doubleClick(tile);
     act(() => { vi.advanceTimersByTime(10_000); });
 
@@ -691,8 +687,7 @@ describe("Live", () => {
       vi.useFakeTimers();
 
       fireEvent.doubleClick(tile);
-      act(() => { vi.advanceTimersByTime(5_001); });
-      expect(subLifecycle(acquire.mock.calls)).toBe(0);
+        expect(subLifecycle(acquire.mock.calls)).toBe(0);
       expect(subLifecycle(release.mock.calls)).toBe(0);
       expect(baseVideo.isConnected).toBe(true);
       expect(tile.querySelector('[data-testid="quality-target-surface"]')).toHaveAttribute("data-quality", "main");
@@ -771,7 +766,6 @@ describe("Live", () => {
     vi.useFakeTimers();
 
     fireEvent.doubleClick(tile);
-    act(() => { vi.advanceTimersByTime(5_001); });
     fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
     fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
     act(() => { vi.advanceTimersByTime(30_000); });
@@ -844,7 +838,6 @@ describe("Live", () => {
     expect(replaced.querySelectorAll("video")).toHaveLength(1);
 
     fireEvent.doubleClick(replaced);
-    act(() => { vi.advanceTimersByTime(5_001); });
     expect(screen.getByLabelText("Cuadro 1").querySelectorAll("video")).toHaveLength(2);
   });
 
@@ -1596,7 +1589,10 @@ describe("Live with persistent players (P0 acceptance)", () => {
     expect(screen.getByLabelText("Cuadro 2")).not.toHaveClass("hidden");
     expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video1);
     expect(screen.getByLabelText("Cuadro 2").querySelector("video")).toBe(video2);
-    expect(FakeSocket.created).toBe(2);
+    // Maximize now promotes to main immediately: exactly one extra (main) socket, no sub reconnects.
+    expect(FakeSocket.created).toBe(3);
+    expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(2);
+    expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
     expect(playerMetrics.get("cam-1", "sub")?.connectAttempts).toBe(1);
     expect(playerMetrics.get("cam-1", "sub")?.reconnectCount).toBe(0);
     expect(playerMetrics.get("cam-2", "sub")?.reconnectCount).toBe(0);
