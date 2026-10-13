@@ -30,7 +30,7 @@ Operators need to know whether a station can hold a layout, where the bottleneck
 - [x] VT-03 — Compact sidebar footer meter in `LiveExplorer`: live Mbps with 60 s histogram, FPS presented, dropped %, stream counts by state and main/sub, CPU threads and GPU name, health class (Óptimo / Aceptable / Al límite / Saturado) from a first `PerformanceClassifier`. Modern, compact, theme-aware.
 
 - [x] VT-03a — Review fix: health must not depend on a fixed EXPECTED_FPS (CCTV substreams often run 5–10 fps). Classify on dropped-frame ratio and stalls (an ACTIVE session whose presented frame count does not advance), not absolute FPS; cover a healthy low-fps station.
-- [ ] VT-03b — Review fix: regression for rapid focus changes across several cameras — each superseded main override is released and main sockets do not pile up.
+- [x] VT-03b — Review fix: regression for rapid focus changes across several cameras — each superseded main override is released and main sockets do not pile up.
 - [x] VT-03c — Review fix: on sampler stop/restart, history and snapshot must not mix pre- and post-pause samples (reset or gap-aware); cover unsubscribe → resubscribe.
 - [x] VT-03d — Review fix: meter tests use an isolated telemetry instance (or reset) so they do not depend on test order.
 
@@ -68,5 +68,6 @@ Operators need to know whether a station can hold a layout, where the bottleneck
 - VT-03a (delegated writer): removed EXPECTED_FPS/FPS thresholds; health now uses dropped ratio, stalled ACTIVE sessions (`measured`/`stalled` in `ClassifierSample`, STALL_SHARE_THRESHOLDS), error and connecting share; WARM/suspended excluded from frame metrics; fps kept as informational. RED: healthy 5/10/2/0.5 fps classifier tests and stall tests failed (7 failed / 10 passed; e.g. "expected 'saturated' to be 'optimal'"). GREEN: `src/lib/telemetry` 32/32; eslint + typecheck clean.
 - VT-03c (delegated writer): `stop()` resets ring buffer and snapshot (chose reset over gap marker: simplest, no consumer needs pre-pause history, and EMPTY_SNAPSHOT is the same state as a fresh service). RED: "expected 10 to be +0" (stale Mbps after resubscribe). GREEN: `src/lib/telemetry` 33/33.
 - VT-03d (delegated writer): `VideoTelemetryMeter` takes an optional `service` prop (via `useVideoTelemetry(service = videoTelemetry)`); tests create a fresh `VideoTelemetryService` in `beforeEach`. Isolation change, no behavior change: passes under `--sequence.shuffle` x4 (4/4 each).
+- VT-03b (delegated writer): characterization test in `Live.test.tsx` ("rapid focus changes across cameras", private and persistent): maximize/unmaximize cams 1,2,3 in a row; asserts exactly one main target while maximized, none after, private main sockets closed on each unmaximize, persistent ones kept WARM then all closed once after TTL with release==acquire for main. Passed first run (no source change). Note: with private players, sub sessions of the other tiles are recreated around maximize (pre-existing, not asserted).
 
 Repository-relative file: `odd/tasks/client-telemetry-adaptive-videowall.md`

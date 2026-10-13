@@ -744,6 +744,64 @@ describe("Live", () => {
     });
   });
 
+  describe.each([{ persistent: false }, { persistent: true }])("rapid focus changes across cameras (persistentPlayers=$persistent)", ({ persistent }) => {
+    it("releases every superseded main session and never leaves more than one main target active", async () => {
+      if (persistent) localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true }));
+      stubBrowserAPIs();
+      localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+        { camera_id: "cam-1", quality: "sub" }, { camera_id: "cam-2", quality: "sub" }, { camera_id: "cam-3", quality: "sub" }, null,
+      ]));
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte"), camera("cam-2", "Porton sur"), camera("cam-3", "Patio")] }),
+        ...emptyCatalogs,
+      })));
+
+      renderPage(() => (
+        <PlayerSessionProvider userId="u1">
+          <Live />
+        </PlayerSessionProvider>
+      ));
+      // Tiles can remount while the selection loads, so always resolve them fresh.
+      const tileAt = (n: number) => screen.getByLabelText(`Cuadro ${n}`);
+      for (const n of [1, 2, 3]) await waitFor(() => expect(tileAt(n).querySelector("video")).not.toBeNull());
+      await waitFor(() => expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(3));
+      const mainClosers = new Map<FakeSocket, ReturnType<typeof vi.spyOn>>();
+      const trackMain = () => {
+        for (const socket of FakeSocket.instances) {
+          if (socket.url.includes("quality=main") && !mainClosers.has(socket)) mainClosers.set(socket, vi.spyOn(socket, "close"));
+        }
+      };
+      const openMainSockets = () => [...mainClosers.entries()].filter(([, close]) => close.mock.calls.length === 0).length;
+      const mainCalls = (calls: unknown[][]) => calls.filter(([, quality]) => quality === "main").length;
+      const acquire = vi.spyOn(PlayerSessionManager.prototype, "acquire");
+      const release = vi.spyOn(PlayerSessionManager.prototype, "release");
+      vi.useFakeTimers();
+
+      for (const n of [1, 2, 3]) {
+        fireEvent.doubleClick(tileAt(n));
+        trackMain();
+        expect(document.querySelectorAll('[data-testid="quality-target-surface"][data-quality="main"]')).toHaveLength(1);
+        fireEvent.doubleClick(tileAt(n));
+        trackMain();
+        expect(document.querySelectorAll('[data-testid="quality-target-surface"]')).toHaveLength(0);
+        // Private players close their main socket as soon as the target unmounts; persistent ones keep it WARM.
+        expect(openMainSockets()).toBe(persistent ? mainClosers.size : 0);
+      }
+
+      expect(mainClosers.size).toBe(3);
+      if (persistent) {
+        // The manager reuses the sub sessions of the tiles hidden while another one was maximized.
+        expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(3);
+        expect(mainCalls(release.mock.calls)).toBe(mainCalls(acquire.mock.calls));
+        act(() => { vi.advanceTimersByTime(DEFAULT_WARM_SESSION_TTL_MS + 1); });
+      }
+      expect(openMainSockets()).toBe(0);
+      for (const close of mainClosers.values()) expect(close).toHaveBeenCalledTimes(1);
+      expect(document.querySelectorAll('[data-testid="quality-target-surface"]')).toHaveLength(0);
+    });
+  });
+
   it("keeps a manual thirty-second override alive when maximize ends", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({
