@@ -2,7 +2,7 @@ import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Compass, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, Grid2X2, GripVertical, History, LayoutGrid,
-  type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, Trash2, Video,
+  type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, SlidersHorizontal, Trash2, Video,
 } from "lucide-react";
 import { createContext, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Schemas } from "@/api/client";
@@ -35,6 +35,8 @@ export type ExplorerActions = {
   canConfigureServers: boolean;
   /** servers.config: opens the Frigate camera config editor. */
   canConfigureCameras: boolean;
+  /** Open Fisheye view configuration modal. */
+  onConfigureFisheye?: (cameraId: string) => void;
 };
 
 type MenuProps = {
@@ -51,7 +53,7 @@ type MenuProps = {
   "data-longpress": "";
 };
 type Bind = (build: () => MenuItem[]) => MenuProps;
-type MenuCtxValue = { bind: Bind; actions: ExplorerActions; navigate: ReturnType<typeof useNavigate> };
+type MenuCtxValue = { bind: Bind; actions: ExplorerActions; navigate: ReturnType<typeof useNavigate>; fisheyeVersion: number };
 const MenuCtx = createContext<MenuCtxValue | null>(null);
 const useMenuCtx = () => {
   const ctx = useContext(MenuCtx);
@@ -259,8 +261,15 @@ export function LiveExplorer({
   const [confirmDelete, setConfirmDelete] = useState<Folder | null>(null);
   const mutationError = folderApi.create.error ?? folderApi.rename.error ?? folderApi.reorder.error ?? error;
 
+  const [fisheyeVersion, setFisheyeVersion] = useState(0);
+  useEffect(() => {
+    const handler = () => setFisheyeVersion((v) => v + 1);
+    window.addEventListener("openvms:fisheye-config-changed", handler);
+    return () => window.removeEventListener("openvms:fisheye-config-changed", handler);
+  }, []);
+
   return (
-    <MenuCtx.Provider value={{ bind, actions, navigate }}>
+    <MenuCtx.Provider value={{ bind, actions, navigate, fisheyeVersion }}>
     <div className="flex min-h-0 min-w-0 flex-col gap-2 md:flex-1" data-live-sidebar="true" aria-label={t("live.sidebar")} role="region">
       <div className="flex shrink-0 items-center gap-0.5">
         <div role="tablist" aria-label={t("live.sections")} className="flex min-w-0 flex-1 overflow-x-auto text-[11px] font-medium">
@@ -717,9 +726,9 @@ function CameraRow({
   const drop = useDropState(camera.server_id, canManage, ["camera"]);
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: treeCameraDropId(camera.id), disabled: drop.disabled });
   const t = useT();
-  const { bind, actions, navigate } = useMenuCtx();
+  const { bind, actions, navigate, fisheyeVersion } = useMenuCtx();
 
-  const fisheyeConfig = useMemo(() => getFisheyeConfig(camera.id), [camera.id]);
+  const fisheyeConfig = useMemo(() => getFisheyeConfig(camera.id), [camera.id, fisheyeVersion]);
   const isFisheyeCamera = Boolean(
     (fisheyeConfig.enabled && fisheyeConfig.lensType !== "normal") ||
     camera.tags?.includes("fisheye") ||
@@ -736,16 +745,28 @@ function CameraRow({
 
   const menu = bind(() => [
     addToViewItem(actions, [camera.id], t),
-    ...(hasVirtualViews
+    ...(isFisheyeCamera
       ? [
           {
-            id: "distribute_views",
-            label: "Distribuir cuadrantes en la grilla",
-            icon: Grid2X2,
+            id: "cfg_fisheye",
+            label: "Configuración de vista",
+            icon: SlidersHorizontal,
             onSelect: () => {
-              virtualViews.forEach((v) => onDoublePlace(camera.id, v.id));
+              actions.onConfigureFisheye?.(camera.id);
             },
           } satisfies MenuItem,
+          ...(hasVirtualViews
+            ? [
+                {
+                  id: "distribute_views",
+                  label: "Distribuir cuadrantes en la grilla",
+                  icon: Grid2X2,
+                  onSelect: () => {
+                    virtualViews.forEach((v) => onDoublePlace(camera.id, v.id));
+                  },
+                } satisfies MenuItem,
+              ]
+            : []),
         ]
       : []),
     ...(actions.canConfigureCameras
@@ -867,6 +888,7 @@ function FisheyeViewRow({
   onPick: (id: string, viewId?: string) => void;
   onDoublePlace: (id: string, viewId?: string) => void;
 }) {
+  const { actions, bind } = useMenuCtx();
   const clickTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(clickTimer.current), []);
 
@@ -879,6 +901,21 @@ function FisheyeViewRow({
     id: feviewDragId(camera.id, view.id),
     data: { kind: "camera", serverId: camera.server_id } satisfies DragData,
   });
+
+  const menu = bind(() => [
+    {
+      id: "place_view",
+      label: "Colocar en la grilla",
+      icon: LayoutGrid,
+      onSelect: () => onDoublePlace(camera.id, view.id),
+    } satisfies MenuItem,
+    {
+      id: "cfg_fisheye_from_view",
+      label: "Configuración de vista",
+      icon: SlidersHorizontal,
+      onSelect: () => actions.onConfigureFisheye?.(camera.id),
+    } satisfies MenuItem,
+  ]);
 
   return (
     <div className={cn(indent, "flex min-w-0 items-center gap-1 border-t-2 border-transparent")}>
@@ -902,6 +939,23 @@ function FisheyeViewRow({
         )}
         {...attributes}
         {...listeners}
+        {...menu}
+        onPointerDown={(e) => {
+          menu.onPointerDown(e);
+          touchTap.handlers.onPointerDown(e);
+        }}
+        onPointerUp={(e) => {
+          menu.onPointerUp(e);
+          touchTap.handlers.onPointerUp(e);
+        }}
+        onPointerCancel={(e) => {
+          menu.onPointerCancel(e);
+          touchTap.handlers.onPointerCancel(e);
+        }}
+        onKeyDown={(e) => {
+          menu.onKeyDown(e);
+          if (!e.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(e);
+        }}
       >
         <Icon icon={Compass} size="xs" className="shrink-0 text-cyan-400" />
         <span className="min-w-0 truncate font-normal">{view.name}</span>

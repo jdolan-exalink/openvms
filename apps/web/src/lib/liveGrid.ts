@@ -346,3 +346,27 @@ export function growLayout(layouts: { columns: number; rows: number }[], current
   if (bigger.length === 0) return null;
   return bigger.find((l) => l.columns * l.rows >= needed) ?? bigger[bigger.length - 1] ?? null;
 }
+
+/**
+ * tilesForFisheyeMultiView generates tiles for populating an empty grid with a fisheye camera:
+ * - Tile 0: real camera view (original stream, no fisheye_view_id)
+ * - Tiles 1..N: the virtual fixed views (e.g. 3 of 120° or 4 quadrants)
+ */
+export function tilesForFisheyeMultiView(
+  cameraId: string,
+  virtualViews: { id: string }[],
+  quality: Quality = "sub",
+  totalSlots: number,
+): Tile[] {
+  const cells = Math.max(totalSlots, 1 + virtualViews.length);
+  const result: Tile[] = Array.from({ length: cells }, () => null);
+  // Tile 0: real view
+  result[0] = { camera_id: cameraId, quality };
+  // Subsequent tiles: virtual views
+  virtualViews.forEach((v, idx) => {
+    if (idx + 1 < result.length) {
+      result[idx + 1] = { camera_id: cameraId, quality, fisheye_view_id: v.id };
+    }
+  });
+  return result;
+}

@@ -6,15 +6,17 @@ import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Camera, CircleCheck, CircleHelp, CircleX, Compass, History, Maximize2, Minimize2, X } from "lucide-react";
+import { Camera, CircleCheck, CircleHelp, CircleX, Compass, History, Maximize2, Minimize2, SlidersHorizontal, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { MsePlayer } from "@/components/MsePlayer";
 import { FisheyeViewer } from "@/components/fisheye/FisheyeViewer";
+import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
 import { getEffectiveVirtualViews, getFisheyeConfig } from "@/lib/fisheye/storage";
 import { detectFisheyeProfile } from "@/lib/fisheye/profiles";
+import type { VirtualFisheyeView } from "@/lib/fisheye/types";
 import { useFeatures } from "@/lib/features";
 import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { LiveRecDock } from "@/components/LiveRecDock";
@@ -30,7 +32,7 @@ import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/u
 import { cn } from "@/lib/cn";
 import {
   cameraIdOf, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
-  serializeSelection, swapTiles, tileDragId,
+  serializeSelection, swapTiles, tileDragId, tilesForFisheyeMultiView,
   type Tile,
 } from "@/lib/liveGrid";
 import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
@@ -104,6 +106,7 @@ function LiveDesktop() {
   const [noticeTone, setNoticeTone] = useState<"ok" | "warn">("warn");
   const [deleteViewId, setDeleteViewId] = useState<string | null>(null);
   const [fisheyeModalCameraId, setFisheyeModalCameraId] = useState<string | null>(null);
+  const [fisheyeConfigCameraId, setFisheyeConfigCameraId] = useState<string | null>(null);
   const flash = (text: string, tone: "ok" | "warn" = "ok") => {
     setNoticeTone(tone);
     setTreeNotice(text);
@@ -288,6 +291,21 @@ function LiveDesktop() {
     if (empty >= 0) setSelected(empty);
   };
 
+  const populateEmptyGridWithFisheyeMultiView = (cameraId: string, virtualViews: VirtualFisheyeView[], defaultQuality: "sub" | "main" = "sub") => {
+    const totalCount = 1 + virtualViews.length;
+    const pres = presentationForCount(catalog, totalCount);
+    const quality = pres.columns === 1 ? "main" : defaultQuality;
+    const nextTiles = tilesForFisheyeMultiView(cameraId, virtualViews, quality, pres.panes.length);
+    setColumns(pres.columns);
+    setRows(pres.rows);
+    setPanes(pres.panes);
+    setTiles(nextTiles);
+    tilesRef.current = nextTiles;
+    setSelected(0);
+    setFocus(null);
+    setViewId("");
+  };
+
   const finishDrag = () => {
     dragging.current = false;
     setActiveDrag(null);
@@ -304,7 +322,24 @@ function LiveDesktop() {
       }
       return;
     }
-    if (resolution.type === "place") place(resolution.cameraId, resolution.index, resolution.fisheyeViewId);
+    if (resolution.type === "place") {
+      const isGridEmpty = tiles.every((t) => t === null);
+      const feConfig = getFisheyeConfig(resolution.cameraId);
+      const cam = camById.get(resolution.cameraId);
+      const isFisheye = Boolean(
+        (feConfig.enabled && feConfig.lensType !== "normal") ||
+        cam?.tags?.includes("fisheye") ||
+        cam?.tags?.includes("ojo_de_pez") ||
+        Boolean(cam?.onvif_profile && detectFisheyeProfile({ onvif_profile: cam.onvif_profile }))
+      );
+      const effectiveViews = isFisheye ? getEffectiveVirtualViews(feConfig) : [];
+
+      if (!resolution.fisheyeViewId && isGridEmpty && isFisheye && effectiveViews.length >= 2) {
+        populateEmptyGridWithFisheyeMultiView(resolution.cameraId, effectiveViews, cam?.default_live_quality ?? "sub");
+      } else {
+        place(resolution.cameraId, resolution.index, resolution.fisheyeViewId);
+      }
+    }
     else if (resolution.type === "place-map") placeMap(resolution.map, resolution.index);
     else if (resolution.type === "reorder") reorder(resolution.from, resolution.to);
     else if (resolution.type === "fill-server") showGroup(camerasOfServer(resolution.serverId), servers.data?.find((server) => server.id === resolution.serverId)?.name ?? tr("live.theServer"));
@@ -437,6 +472,22 @@ function LiveDesktop() {
   };
   const placeInOpen = (cameraId: string, viewId?: string) => {
     if (!camById.has(cameraId)) return;
+    const isGridEmpty = tiles.every((t) => t === null);
+    const feConfig = getFisheyeConfig(cameraId);
+    const cam = camById.get(cameraId);
+    const isFisheye = Boolean(
+      (feConfig.enabled && feConfig.lensType !== "normal") ||
+      cam?.tags?.includes("fisheye") ||
+      cam?.tags?.includes("ojo_de_pez") ||
+      Boolean(cam?.onvif_profile && detectFisheyeProfile({ onvif_profile: cam.onvif_profile }))
+    );
+    const effectiveViews = isFisheye ? getEffectiveVirtualViews(feConfig) : [];
+
+    if (!viewId && isGridEmpty && isFisheye && effectiveViews.length >= 2) {
+      populateEmptyGridWithFisheyeMultiView(cameraId, effectiveViews, cam?.default_live_quality ?? "sub");
+      return;
+    }
+
     setTiles((current) => {
       const next = placeInOpenCell(current, cameraId, cameraQuality(cameraId, columns), viewId);
       if (next.index >= 0) setSelected(next.index);
@@ -495,6 +546,7 @@ function LiveDesktop() {
     canConfigureSites: can(me.data, "sites.manage"),
     canConfigureServers: can(me.data, "servers.manage"),
     canConfigureCameras: can(me.data, "servers.config"),
+    onConfigureFisheye: (cameraId: string) => setFisheyeConfigCameraId(cameraId),
   };
 
   // With persistent players the other tiles stay mounted (hidden, sessions WARM) while one is
@@ -658,6 +710,7 @@ function LiveDesktop() {
                       onSelect={() => setSelected(i)}
                       onToggleFocus={() => t && setFocus(focus === null ? i : null)}
                       onOpenFisheye={(id) => setFisheyeModalCameraId(id)}
+                      onConfigureFisheye={(id) => setFisheyeConfigCameraId(id)}
                       onRemove={() => {
                         setTiles((x) => x.map((v, j) => (j === i ? null : v)));
                         setFocus(null);
@@ -746,6 +799,19 @@ function LiveDesktop() {
           </div>
         </Modal>
       )}
+      {fisheyeConfigCameraId && camById.has(fisheyeConfigCameraId) && (
+        <Modal
+          title={`Configuración de vista Fisheye · ${camById.get(fisheyeConfigCameraId)!.display_name}`}
+          onClose={() => setFisheyeConfigCameraId(null)}
+          className="max-w-4xl"
+        >
+          <FisheyeSection
+            cameraId={fisheyeConfigCameraId}
+            cameraName={camById.get(fisheyeConfigCameraId)!.display_name}
+            canManage={can(me.data, "cameras.manage") || can(me.data, "servers.config")}
+          />
+        </Modal>
+      )}
     </div>
   );
 }
@@ -787,6 +853,7 @@ function GridTile({
   onSelect,
   onToggleFocus,
   onOpenFisheye,
+  onConfigureFisheye,
   onRemove,
 }: {
   index: number;
@@ -812,6 +879,7 @@ function GridTile({
   onSelect: () => void;
   onToggleFocus: () => void;
   onOpenFisheye?: (cameraId: string) => void;
+  onConfigureFisheye?: (cameraId: string) => void;
   onRemove: () => void;
 }) {
   const tr = useT();
@@ -830,6 +898,22 @@ function GridTile({
       onDoubleClick={() => {
         if (touchTap.justHandled()) return;
         onToggleFocus();
+      }}
+      onContextMenu={(e) => {
+        if (tile && "camera_id" in tile && onConfigureFisheye) {
+          const feConfig = getFisheyeConfig(tile.camera_id);
+          const isFisheye = Boolean(
+            (feConfig.enabled && feConfig.lensType !== "normal") ||
+            camera?.tags?.includes("fisheye") ||
+            camera?.tags?.includes("ojo_de_pez") ||
+            Boolean(camera?.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))
+          );
+          if (isFisheye) {
+            e.preventDefault();
+            e.stopPropagation();
+            onConfigureFisheye(tile.camera_id);
+          }
+        }
       }}
       {...touchTap.handlers}
       className={cn(
@@ -870,10 +954,11 @@ function GridTile({
               ? effectiveViews.find((v) => v.id === tile.fisheye_view_id) ||
                 feConfig.views.find((v) => v.id === tile.fisheye_view_id)
               : undefined;
+            const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || feConfig.defaultMode === "4_quadrants" || effectiveViews.length >= 2);
             const useFisheye =
               !suspended &&
               isFisheyeCamera &&
-              (specificView !== undefined || feConfig.defaultMode !== "original");
+              (specificView !== undefined || (feConfig.defaultMode !== "original" && !hasMultipleViews));
 
             if (isDuplicate) {
               return (
@@ -908,17 +993,24 @@ function GridTile({
           <div className="absolute inset-x-0 top-0 z-[3] flex items-center gap-1.5 p-2 text-xs">
             {(() => {
               const feConfig = getFisheyeConfig(tile.camera_id);
-              const effectiveViews = getEffectiveVirtualViews(feConfig);
+              const isFisheyeCamera = Boolean(
+                (feConfig.enabled && feConfig.lensType !== "normal") ||
+                camera.tags?.includes("fisheye") ||
+                camera.tags?.includes("ojo_de_pez") ||
+                Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))
+              );
+              const effectiveViews = isFisheyeCamera ? getEffectiveVirtualViews(feConfig) : [];
               const specificView = tile.fisheye_view_id
                 ? effectiveViews.find((v) => v.id === tile.fisheye_view_id) ||
                   feConfig.views.find((v) => v.id === tile.fisheye_view_id)
                 : undefined;
+              const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || feConfig.defaultMode === "4_quadrants" || effectiveViews.length >= 2);
               return (
                 <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-on-surface backdrop-blur">
                   <Icon icon={specificView ? Compass : Camera} size="xs" className={cn("shrink-0", specificView && "text-cyan-400")} />
                   <span className="truncate font-medium">
                     {camera.display_name}
-                    {specificView && ` · ${specificView.name}`}
+                    {specificView ? ` · ${specificView.name}` : (isFisheyeCamera && hasMultipleViews ? " (Original)" : "")}
                   </span>
                   {specificView && (
                     <span className="text-[10px] font-mono text-cyan-300 bg-cyan-950/60 px-1 rounded border border-cyan-800/40">
@@ -948,6 +1040,18 @@ function GridTile({
                   onClick={(e) => {
                     e.stopPropagation();
                     onOpenFisheye(tile.camera_id);
+                  }}
+                />
+              )}
+              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || (getFisheyeConfig(tile.camera_id).enabled && getFisheyeConfig(tile.camera_id).lensType !== "normal") || Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))) && onConfigureFisheye && (
+                <IconButton
+                  icon={SlidersHorizontal}
+                  title="Configuración de vista Fisheye"
+                  aria-label="Configuración de vista"
+                  className={cn(tileAction, "text-cyan-400 hover:text-cyan-300")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onConfigureFisheye(tile.camera_id);
                   }}
                 />
               )}
