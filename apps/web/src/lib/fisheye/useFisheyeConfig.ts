@@ -1,10 +1,10 @@
 import { useCallback, useSyncExternalStore } from "react";
-import { getFisheyeConfig } from "./storage";
+import { fisheyeConfigStorageKey, getFisheyeConfig } from "./storage";
 import type { FisheyeConfig } from "./types";
 
 const CONFIG_CHANGED_EVENT = "openvms:fisheye-config-changed";
 
-type CacheEntry = { serialized: string; config: FisheyeConfig };
+type CacheEntry = { raw: string | null; config: FisheyeConfig };
 const cache = new Map<string, CacheEntry>();
 
 function subscribe(onChange: () => void): () => void {
@@ -12,16 +12,25 @@ function subscribe(onChange: () => void): () => void {
   return () => window.removeEventListener(CONFIG_CHANGED_EVENT, onChange);
 }
 
+function readRaw(cameraId: string): string | null {
+  try {
+    return typeof localStorage !== "undefined" ? localStorage.getItem(fisheyeConfigStorageKey(cameraId)) : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * getFisheyeConfig builds a fresh object on every call, so the snapshot is
- * cached per camera and only replaced when the serialized config changes.
+ * getFisheyeConfig parses and builds a fresh object on every call, so the snapshot is cached per
+ * camera and keyed on the raw stored string: an unchanged string skips parsing and keeps the same
+ * reference, while any write (with or without the change event) is picked up on the next read.
  */
 function readSnapshot(cameraId: string): FisheyeConfig {
-  const config = getFisheyeConfig(cameraId);
-  const serialized = JSON.stringify(config);
+  const raw = readRaw(cameraId);
   const cached = cache.get(cameraId);
-  if (cached && cached.serialized === serialized) return cached.config;
-  cache.set(cameraId, { serialized, config });
+  if (cached && cached.raw === raw) return cached.config;
+  const config = getFisheyeConfig(cameraId);
+  cache.set(cameraId, { raw, config });
   return config;
 }
 

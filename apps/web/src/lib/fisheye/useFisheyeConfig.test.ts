@@ -34,6 +34,24 @@ describe("useFisheyeConfig", () => {
     expect(result.current.lensType).toBe("fisheye_180");
   });
 
+  it("does not re-parse the stored config on rerenders when the stored string is unchanged", () => {
+    saveFisheyeConfig(config("cam-1"));
+    const { rerender } = renderHook(() => useFisheyeConfig("cam-1"));
+    const parse = vi.spyOn(JSON, "parse");
+    rerender();
+    rerender();
+    expect(parse).not.toHaveBeenCalled();
+  });
+
+  it("picks up a direct storage write that did not dispatch the change event on the next render", () => {
+    saveFisheyeConfig(config("cam-1"));
+    const { result, rerender } = renderHook(() => useFisheyeConfig("cam-1"));
+    expect(result.current.enabled).toBe(true);
+    localStorage.clear();
+    rerender();
+    expect(result.current.enabled).toBe(false);
+  });
+
   it("keeps the same reference across rerenders when nothing changed", () => {
     saveFisheyeConfig(config("cam-1"));
     const { result, rerender } = renderHook(() => useFisheyeConfig("cam-1"));
