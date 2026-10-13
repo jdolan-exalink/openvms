@@ -22,7 +22,8 @@ describe("Fisheye Storage Module", () => {
   it("returns default config when camera is unconfigured", () => {
     const config = getFisheyeConfig("cam-unconfigured");
     expect(config.cameraId).toBe("cam-unconfigured");
-    expect(config.enabled).toBe(true);
+    expect(config.enabled).toBe(false);
+    expect(config.lensType).toBe("normal");
     expect(config.mountType).toBe("ceiling");
     expect(config.views).toHaveLength(0);
   });
@@ -92,20 +93,25 @@ describe("Fisheye Storage Module", () => {
   });
 
   it("stores and retrieves last active view mode", () => {
-    expect(getFisheyeViewMode("cam-test")).toBe("virtual_ptz");
+    expect(getFisheyeViewMode("cam-test")).toBe("original");
     saveFisheyeViewMode("cam-test", "3_fixed_120");
     expect(getFisheyeViewMode("cam-test")).toBe("3_fixed_120");
   });
 
   it("resolves effective virtual views automatically", () => {
     const unconfigured = getFisheyeConfig("cam-unconfigured");
-    const effective = getEffectiveVirtualViews(unconfigured);
+    // By default, no camera is fisheye, so effective views is empty
+    expect(getEffectiveVirtualViews(unconfigured)).toHaveLength(0);
+
+    // Camera explicitly configured as fisheye
+    const configuredFisheye = { ...unconfigured, enabled: true, lensType: "fisheye_360" as const };
+    const effective = getEffectiveVirtualViews(configuredFisheye);
     expect(effective).toHaveLength(4);
     expect(effective[0]?.name).toBe("Vista 1 (Norte)");
     expect(effective[0]?.pitch).toBe(-48); // Optimal ceiling pitch eliminating top black borders
 
     // 3 fixed views mode
-    const config3 = { ...unconfigured, defaultMode: "3_fixed_120" as const };
+    const config3 = { ...configuredFisheye, defaultMode: "3_fixed_120" as const };
     const effective3 = getEffectiveVirtualViews(config3);
     expect(effective3).toHaveLength(3);
     expect(effective3[0]?.name).toBe("Vista 1 (0°)");

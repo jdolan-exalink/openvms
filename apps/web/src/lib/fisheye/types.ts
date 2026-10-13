@@ -76,11 +76,11 @@ export const DEFAULT_FISHEYE_CALIBRATION: FisheyeCalibration = {
 };
 
 export const DEFAULT_FISHEYE_CONFIG: Omit<FisheyeConfig, "cameraId"> = {
-  enabled: true,
-  lensType: "fisheye_360",
+  enabled: false,
+  lensType: "normal",
   mountType: "ceiling",
   projectionModel: "equidistant",
   calibration: DEFAULT_FISHEYE_CALIBRATION,
   views: [],
-  defaultMode: "virtual_ptz",
+  defaultMode: "original",
 };
