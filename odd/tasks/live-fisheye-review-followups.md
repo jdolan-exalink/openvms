@@ -22,7 +22,7 @@ Two of them leave streams open indefinitely or force reconnects; the others brea
 
 ## Tasks
 
-- [ ] RF-01 — Clear a camera's `manual` quality override when all of its grid identities are removed, so that a later maximize still promotes to main (`apps/web/src/routes/Live.tsx` ~769, ~738).
+- [x] RF-01 — Clear a camera's `manual` quality override when all of its grid identities are removed, so that a later maximize still promotes to main (`apps/web/src/routes/Live.tsx` ~769, ~738).
 - [ ] RF-02 — On unmaximize, restore each identity's own saved quality instead of installing a permanent `sub` focus-restore override; no lingering dual session (`apps/web/src/routes/Live.tsx` ~725).
 - [x] RF-03 — Clear the sticky `discardWhenReleased` flag when the same camera:quality session is acquired again, so the next full release moves it to WARM (`apps/web/src/lib/live/PlayerSessionManager.ts` ~96).
 - [ ] RF-04 — Update the fisheye Cancel baseline after "Guardar vista" so Cancel returns to the saved mode (`apps/web/src/components/fisheye/FisheyeViewer.tsx` ~69).
@@ -43,5 +43,6 @@ Two of them leave streams open indefinitely or force reconnects; the others brea
 
 - 2026-10-13: document created from review findings R3-stale-manual-override, R3-focus-restore-forces-sub, R3-discard-flag-sticky, R3-001, R3-002, R3-003.
 - RF-03: RED `expected close not to be called, got ["user-removed"]` (new test in PlayerSessionManager.test.ts). Fix: acquire() clears `discardWhenReleased`. GREEN: `pnpm vitest run src/lib/live/PlayerSessionManager.test.ts` 2/2; `pnpm typecheck` ok.
+- RF-01: RED `expected <video> to have a length of 2 but got 1` (Live.test.tsx, remove+replace manually overridden camera, maximize >5s). Fix: tiles effect deletes the override entry when no identity remains. GREEN: Live.test.tsx 62/62; typecheck ok; lint still 13 errors/1 warning.
 
 Repository-relative file: `odd/tasks/live-fisheye-review-followups.md`

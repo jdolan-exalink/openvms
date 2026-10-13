@@ -770,6 +770,12 @@ function LiveDesktop() {
       if (validCount === 0) {
         clearQualityTimer(cameraId);
         if (previousFocusedCameraRef.current === cameraId) clearTimeout(maximizeTimerRef.current);
+        setQualityOverrides((current) => {
+          if (!(cameraId in current)) return current;
+          const next = { ...current };
+          delete next[cameraId];
+          return next;
+        });
       }
     }
   }, [tiles]);

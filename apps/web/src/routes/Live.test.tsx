@@ -654,6 +654,38 @@ describe("Live", () => {
     expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]))?.tiles[0]).toEqual({ camera_id: "cam-2", quality: "sub" });
   });
 
+  it("still promotes to main on maximize after a manually overridden camera was removed and placed again", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
+    fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
+    fireEvent.click(screen.getByRole("button", { name: "Quitar Puerta norte" }));
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBeNull();
+    act(() => { vi.advanceTimersByTime(500); });
+
+    fireEvent.click(screen.getByLabelText("Cuadro 1"));
+    fireEvent.click(screen.getByText("Puerta norte"));
+    act(() => { vi.advanceTimersByTime(500); });
+    const replaced = screen.getByLabelText("Cuadro 1");
+    expect(replaced.querySelectorAll("video")).toHaveLength(1);
+
+    fireEvent.doubleClick(replaced);
+    act(() => { vi.advanceTimersByTime(5_001); });
+    expect(screen.getByLabelText("Cuadro 1").querySelectorAll("video")).toHaveLength(2);
+  });
+
   it("leaves no pending quality timers after unmounting with a manual override and a maximize dwell", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({
