@@ -95,7 +95,7 @@ export function FisheyeSection({
   };
 
   const handleApply3Fixed120 = () => {
-    const views = generate3Fixed120Views(cameraId);
+    const views = generate3Fixed120Views(cameraId, config.mountType);
     const next: FisheyeConfig = {
       ...config,
       views,
@@ -105,7 +105,7 @@ export function FisheyeSection({
   };
 
   const handleApply4Quadrants = () => {
-    const views = generate4QuadrantsViews(cameraId);
+    const views = generate4QuadrantsViews(cameraId, config.mountType);
     const next: FisheyeConfig = {
       ...config,
       views,

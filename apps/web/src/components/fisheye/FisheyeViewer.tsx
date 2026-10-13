@@ -2,6 +2,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -10,6 +11,7 @@ import { FisheyeDewarpEngine } from "@/lib/fisheye/engine";
 import {
   generate3Fixed120Views,
   generate4QuadrantsViews,
+  getEffectiveVirtualViews,
   getFisheyeConfig,
   getFisheyeViewMode,
   saveFisheyeConfig,
@@ -132,20 +134,24 @@ export function FisheyeViewer({
 
   // Active virtual view for PTZ
   const [activeView, setActiveView] = useState<VirtualFisheyeView>(() => {
+    const effective = getEffectiveVirtualViews(config);
     if (targetViewId) {
-      const match = config.views.find((v) => v.id === targetViewId);
+      const match =
+        effective.find((v) => v.id === targetViewId) ||
+        config.views.find((v) => v.id === targetViewId);
       if (match) return match;
     }
     if (config.views.length > 0) return config.views[0]!;
+    if (effective.length > 0) return effective[0]!;
     return {
       id: "default-ptz",
       cameraId,
       name: "PTZ 1",
       projection: "rectilinear",
       yaw: 0,
-      pitch: -25,
+      pitch: config.mountType === "ceiling" ? -48 : 0,
       roll: 0,
-      fov: 90,
+      fov: 88,
     };
   });
 
@@ -169,12 +175,14 @@ export function FisheyeViewer({
   const isDraggingRef = useRef(false);
   const lastPointerRef = useRef({ x: 0, y: 0 });
 
-  // Multi-view states
-  const [threeViews] = useState<VirtualFisheyeView[]>(() =>
-    generate3Fixed120Views(cameraId),
+  // Multi-view states dynamically adapted to mount
+  const threeViews = useMemo(
+    () => generate3Fixed120Views(cameraId, config.mountType),
+    [cameraId, config.mountType],
   );
-  const [fourViews] = useState<VirtualFisheyeView[]>(() =>
-    generate4QuadrantsViews(cameraId),
+  const fourViews = useMemo(
+    () => generate4QuadrantsViews(cameraId, config.mountType),
+    [cameraId, config.mountType],
   );
 
   // Synchronize internal and external config
@@ -196,6 +204,16 @@ export function FisheyeViewer({
   const handleModeChange = (newMode: FisheyeViewMode) => {
     setMode(newMode);
     saveFisheyeViewMode(cameraId, newMode);
+    if (newMode === "4_quadrants" || newMode === "3_fixed_120") {
+      const newViews =
+        newMode === "4_quadrants"
+          ? generate4QuadrantsViews(cameraId, config.mountType)
+          : generate3Fixed120Views(cameraId, config.mountType);
+      const nextConfig = { ...config, defaultMode: newMode, views: newViews };
+      setConfig(nextConfig);
+      saveFisheyeConfig(nextConfig);
+      onConfigChange?.(nextConfig);
+    }
   };
 
   // Setup WebGL Dewarp Engine on canvas mount
@@ -231,18 +249,12 @@ export function FisheyeViewer({
         : null;
 
       if (engine && source && engine.isSupported) {
-        // Adapt canvas internal buffer size to video element or snapshot
+        // Adapt canvas internal buffer size to rendered viewport dimensions
         const c = canvasRef.current;
         if (c) {
-          let w = 640;
-          let h = 480;
-          if (isVideoReady && targetVideo) {
-            w = targetVideo.videoWidth || c.clientWidth || 640;
-            h = targetVideo.videoHeight || c.clientHeight || 480;
-          } else if (isSnapshotReady && snapshot) {
-            w = snapshot.naturalWidth || c.clientWidth || 640;
-            h = snapshot.naturalHeight || c.clientHeight || 480;
-          }
+          const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 2) : 1;
+          const w = Math.round((c.clientWidth || 640) * dpr);
+          const h = Math.round((c.clientHeight || 480) * dpr);
           if (c.width !== w || c.height !== h) {
             c.width = w;
             c.height = h;
@@ -350,9 +362,19 @@ export function FisheyeViewer({
   };
 
   const handleSaveModeAsDefault = () => {
+    const viewsToSave =
+      mode === "4_quadrants"
+        ? generate4QuadrantsViews(cameraId, config.mountType)
+        : mode === "3_fixed_120"
+        ? generate3Fixed120Views(cameraId, config.mountType)
+        : config.views.length > 0
+        ? config.views
+        : getEffectiveVirtualViews(config);
+
     const updated: FisheyeConfig = {
       ...config,
       defaultMode: mode,
+      views: viewsToSave,
     };
     setConfig(updated);
     saveFisheyeConfig(updated);
@@ -523,11 +545,11 @@ export function FisheyeViewer({
       {/* Main Viewport Stage */}
       {mode === "3_fixed_120" ? (
         /* Multi-view Grid: 3 Fixed 120° Views side by side */
-        <div className="w-full h-full min-h-[360px] grid grid-cols-1 md:grid-cols-3 gap-1 bg-neutral-950 p-1">
+        <div className={cn("w-full h-full grid grid-cols-1 md:grid-cols-3 gap-1 bg-neutral-950 p-1", !compact && "min-h-[360px]")}>
           {threeViews.map((v) => (
             <div
               key={v.id}
-              className="relative aspect-video md:aspect-auto flex flex-col items-center justify-center bg-neutral-900 rounded overflow-hidden border border-white/10"
+              className="relative w-full h-full flex flex-col items-center justify-center bg-neutral-900 rounded overflow-hidden border border-white/10"
             >
               <div className="absolute top-2 left-2 z-20 px-2 py-0.5 rounded bg-black/80 text-[10px] font-mono text-cyan-300 border border-cyan-500/30">
                 {v.name} · {v.fov}° FOV
@@ -545,11 +567,11 @@ export function FisheyeViewer({
         </div>
       ) : mode === "4_quadrants" ? (
         /* Multi-view Grid: 4 Quadrants in a 2x2 grid */
-        <div className="w-full h-full min-h-[360px] grid grid-cols-2 grid-rows-2 gap-1 bg-neutral-950 p-1">
+        <div className={cn("w-full h-full grid grid-cols-2 grid-rows-2 gap-1 bg-neutral-950 p-1", !compact && "min-h-[360px]")}>
           {fourViews.map((v) => (
             <div
               key={v.id}
-              className="relative aspect-video flex flex-col items-center justify-center bg-neutral-900 rounded overflow-hidden border border-white/10"
+              className="relative w-full h-full flex flex-col items-center justify-center bg-neutral-900 rounded overflow-hidden border border-white/10"
             >
               <div className="absolute top-2 left-2 z-20 px-2 py-0.5 rounded bg-black/80 text-[10px] font-mono text-yellow-300 border border-yellow-500/30">
                 {v.name}
@@ -576,7 +598,8 @@ export function FisheyeViewer({
           onPointerCancel={handlePointerUp}
           onDoubleClick={handleDoubleClick}
           className={cn(
-            "relative w-full h-full min-h-[360px] flex items-center justify-center bg-black overflow-hidden touch-none",
+            "relative w-full h-full flex items-center justify-center bg-black overflow-hidden touch-none",
+            !compact && "min-h-[360px]",
             mode === "virtual_ptz" || mode === "360" ? "cursor-grab active:cursor-grabbing" : "cursor-default",
           )}
         >
@@ -584,7 +607,7 @@ export function FisheyeViewer({
           <canvas
             ref={canvasRef}
             data-testid="fisheye-canvas"
-            className="w-full h-full object-contain pointer-events-none"
+            className="w-full h-full object-fill pointer-events-none"
           />
 
           {/* Hidden video element when videoSrc is passed directly */}
@@ -661,15 +684,9 @@ export function FisheyeSingleViewport({
       if (engine && source && engine.isSupported) {
         const c = canvasRef.current;
         if (c) {
-          let w = 480;
-          let h = 320;
-          if (isVideoReady && videoElement) {
-            w = videoElement.videoWidth || c.clientWidth || 480;
-            h = videoElement.videoHeight || c.clientHeight || 320;
-          } else if (isImageReady && imageElement) {
-            w = imageElement.naturalWidth || c.clientWidth || 480;
-            h = imageElement.naturalHeight || c.clientHeight || 320;
-          }
+          const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 2) : 1;
+          const w = Math.round((c.clientWidth || 480) * dpr);
+          const h = Math.round((c.clientHeight || 320) * dpr);
           if (c.width !== w || c.height !== h) {
             c.width = w;
             c.height = h;
@@ -692,7 +709,7 @@ export function FisheyeSingleViewport({
   return (
     <canvas
       ref={canvasRef}
-      className="w-full h-full object-cover pointer-events-none"
+      className="w-full h-full object-fill pointer-events-none"
     />
   );
 }

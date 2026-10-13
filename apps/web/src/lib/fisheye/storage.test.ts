@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   generate3Fixed120Views,
   generate4QuadrantsViews,
+  getEffectiveVirtualViews,
   getFisheyeConfig,
   getFisheyeViewMode,
   saveFisheyeConfig,
@@ -94,5 +95,24 @@ describe("Fisheye Storage Module", () => {
     expect(getFisheyeViewMode("cam-test")).toBe("virtual_ptz");
     saveFisheyeViewMode("cam-test", "3_fixed_120");
     expect(getFisheyeViewMode("cam-test")).toBe("3_fixed_120");
+  });
+
+  it("resolves effective virtual views automatically", () => {
+    const unconfigured = getFisheyeConfig("cam-unconfigured");
+    const effective = getEffectiveVirtualViews(unconfigured);
+    expect(effective).toHaveLength(4);
+    expect(effective[0]?.name).toBe("Vista 1 (Norte)");
+    expect(effective[0]?.pitch).toBe(-48); // Optimal ceiling pitch eliminating top black borders
+
+    // 3 fixed views mode
+    const config3 = { ...unconfigured, defaultMode: "3_fixed_120" as const };
+    const effective3 = getEffectiveVirtualViews(config3);
+    expect(effective3).toHaveLength(3);
+    expect(effective3[0]?.name).toBe("Vista 1 (0°)");
+    expect(effective3[0]?.pitch).toBe(-46);
+
+    // Wall mount pitch adapts to 0
+    const quadsWall = generate4QuadrantsViews("cam-wall", "wall");
+    expect(quadsWall[0]?.pitch).toBe(0);
   });
 });
