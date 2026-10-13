@@ -5,7 +5,7 @@ import { Pill, type PillTone } from "@/components/ui";
 import { getClientCapabilities, gpuShortName } from "@/lib/telemetry/clientCapabilities";
 import { HEALTH_LABELS, type PerformanceHealth } from "@/lib/telemetry/performanceClassifier";
 import { useVideoTelemetry } from "@/lib/telemetry/useVideoTelemetry";
-import { HISTORY_SIZE, type HistoryPoint } from "@/lib/telemetry/videoTelemetry";
+import { HISTORY_SIZE, type HistoryPoint, type VideoTelemetryService } from "@/lib/telemetry/videoTelemetry";
 
 export const TELEMETRY_COLLAPSED_KEY = "openvms.live.telemetryMeter.collapsed";
 
@@ -73,8 +73,8 @@ function Stat({ label, value, title }: { label: string; value: string; title?: s
 }
 
 /** Compact live-video meter pinned to the bottom of the camera sidebar. Only this component follows the 1 Hz ticks. */
-export function VideoTelemetryMeter() {
-  const snap = useVideoTelemetry();
+export function VideoTelemetryMeter({ service }: { service?: VideoTelemetryService } = {}) {
+  const snap = useVideoTelemetry(service);
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [caps] = useState(getClientCapabilities);
   const toggle = () =>

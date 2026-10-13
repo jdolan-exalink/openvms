@@ -1,15 +1,18 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PlayerState } from "@/lib/live/playerState";
-import { videoTelemetry } from "@/lib/telemetry/videoTelemetry";
+import { VideoTelemetryService } from "@/lib/telemetry/videoTelemetry";
 import { TELEMETRY_COLLAPSED_KEY, VideoTelemetryMeter } from "./VideoTelemetryMeter";
 
+let telemetry: VideoTelemetryService;
+
 function addSession(state: PlayerState, quality: "main" | "sub") {
-  return videoTelemetry.register({ cameraId: "c", quality, getState: () => state, video: document.createElement("video") });
+  return telemetry.register({ cameraId: "c", quality, getState: () => state, video: document.createElement("video") });
 }
 
 beforeEach(() => {
   vi.useFakeTimers();
+  telemetry = new VideoTelemetryService();
   localStorage.clear();
 });
 afterEach(() => {
@@ -21,7 +24,7 @@ describe("VideoTelemetryMeter", () => {
   it("renders Mbps, health, stream counts and station info, and updates on each tick", () => {
     const live = addSession("ACTIVE", "sub");
     const paused = addSession("SUSPENDED", "main");
-    render(<VideoTelemetryMeter />);
+    render(<VideoTelemetryMeter service={telemetry} />);
     expect(screen.getByTestId("telemetry-mbps")).toHaveTextContent("0.0 Mbps");
     expect(screen.getByText("Óptimo")).toBeInTheDocument();
 
@@ -41,7 +44,7 @@ describe("VideoTelemetryMeter", () => {
 
   it("caps the histogram at 60 bars", () => {
     const live = addSession("ACTIVE", "sub");
-    render(<VideoTelemetryMeter />);
+    render(<VideoTelemetryMeter service={telemetry} />);
     for (let i = 0; i < 70; i++) {
       live.addBytes(125_000);
       act(() => { vi.advanceTimersByTime(1000); });
@@ -51,7 +54,7 @@ describe("VideoTelemetryMeter", () => {
   });
 
   it("collapses to Mbps + health and remembers the choice", () => {
-    const { unmount } = render(<VideoTelemetryMeter />);
+    const { unmount } = render(<VideoTelemetryMeter service={telemetry} />);
     expect(screen.getByRole("img", { name: /Histograma/ })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Contraer telemetría de video" }));
     expect(screen.queryByRole("img", { name: /Histograma/ })).toBeNull();
@@ -60,7 +63,7 @@ describe("VideoTelemetryMeter", () => {
     expect(localStorage.getItem(TELEMETRY_COLLAPSED_KEY)).toBe("1");
     unmount();
 
-    render(<VideoTelemetryMeter />);
+    render(<VideoTelemetryMeter service={telemetry} />);
     expect(screen.queryByRole("img", { name: /Histograma/ })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Expandir telemetría de video" }));
     expect(screen.getByRole("img", { name: /Histograma/ })).toBeInTheDocument();
@@ -69,7 +72,7 @@ describe("VideoTelemetryMeter", () => {
   it("works when localStorage throws", () => {
     vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
-    render(<VideoTelemetryMeter />);
+    render(<VideoTelemetryMeter service={telemetry} />);
     fireEvent.click(screen.getByRole("button", { name: "Contraer telemetría de video" }));
     expect(screen.queryByRole("img", { name: /Histograma/ })).toBeNull();
     vi.restoreAllMocks();
