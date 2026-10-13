@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { FEATURES_OVERRIDE_KEY } from "@/lib/features";
-import { PlayerSessionManager } from "@/lib/live/PlayerSessionManager";
+import { DEFAULT_WARM_SESSION_TTL_MS, PlayerSessionManager } from "@/lib/live/PlayerSessionManager";
 import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { playerMetrics } from "@/lib/live/playerMetrics";
@@ -711,8 +711,18 @@ describe("Live", () => {
       expect(closeSub).not.toHaveBeenCalled();
       expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
 
-      act(() => { vi.advanceTimersByTime(30_001); });
-      expect(closeMain).toHaveBeenCalled();
+      if (persistent) {
+        // The manager keeps the released main session WARM until its TTL evicts it.
+        expect(closeMain).not.toHaveBeenCalled();
+        act(() => { vi.advanceTimersByTime(DEFAULT_WARM_SESSION_TTL_MS - 1); });
+        expect(closeMain).not.toHaveBeenCalled();
+        act(() => { vi.advanceTimersByTime(2); });
+      } else {
+        // A private player owns its session and closes it when the target layer unmounts.
+        expect(closeMain).toHaveBeenCalledTimes(1);
+        act(() => { vi.advanceTimersByTime(DEFAULT_WARM_SESSION_TTL_MS + 1); });
+      }
+      expect(closeMain).toHaveBeenCalledTimes(1);
       expect(closeSub).not.toHaveBeenCalled();
       expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
       expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
