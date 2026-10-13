@@ -6,6 +6,8 @@ import { json, renderPage, stubApi } from "@/test-utils";
 import { FEATURES_OVERRIDE_KEY } from "@/lib/features";
 import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { playerMetrics } from "@/lib/live/playerMetrics";
+import { saveFisheyeConfig } from "@/lib/fisheye/storage";
+import { DEFAULT_FISHEYE_CALIBRATION } from "@/lib/fisheye/types";
 import { Live } from "./Live";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -1076,5 +1078,82 @@ describe("Live with persistent players (P0 acceptance)", () => {
       if (original) Object.defineProperty(Document.prototype, "fullscreenElement", original);
       else Reflect.deleteProperty(document, "fullscreenElement");
     }
+  });
+
+  it("populates empty grid with real view and 3 fixed views when fisheye camera is placed", async () => {
+    stubBrowserAPIs();
+    saveFisheyeConfig({
+      cameraId: "cam-fe-1",
+      enabled: true,
+      lensType: "fisheye_360",
+      mountType: "ceiling",
+      projectionModel: "equidistant",
+      calibration: DEFAULT_FISHEYE_CALIBRATION,
+      views: [],
+      defaultMode: "3_fixed_120",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () =>
+            json({ items: [camera("cam-fe-1", "Fisheye Hall")] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+
+    renderPage(Live);
+
+    const camBtn = await screen.findByText("Fisheye Hall");
+    fireEvent.doubleClick(camBtn);
+
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-fe-1"]));
+      expect(saved?.tiles).toHaveLength(4);
+      // Tile 0 is real view (no fisheye_view_id)
+      expect(saved?.tiles[0]).toEqual({ camera_id: "cam-fe-1", quality: "sub" });
+      // Tiles 1..3 are the 3 of 120°
+      expect(saved?.tiles[1]).toEqual(expect.objectContaining({ camera_id: "cam-fe-1", fisheye_view_id: "cam-fe-1-view-120-1" }));
+      expect(saved?.tiles[2]).toEqual(expect.objectContaining({ camera_id: "cam-fe-1", fisheye_view_id: "cam-fe-1-view-120-2" }));
+      expect(saved?.tiles[3]).toEqual(expect.objectContaining({ camera_id: "cam-fe-1", fisheye_view_id: "cam-fe-1-view-120-3" }));
+    });
+  });
+
+  it("opens fisheye view configuration modal on right-click menu in Live", async () => {
+    stubBrowserAPIs();
+    saveFisheyeConfig({
+      cameraId: "cam-fe-2",
+      enabled: true,
+      lensType: "fisheye_360",
+      mountType: "ceiling",
+      projectionModel: "equidistant",
+      calibration: DEFAULT_FISHEYE_CALIBRATION,
+      views: [],
+      defaultMode: "virtual_ptz",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () =>
+            json({ items: [camera("cam-fe-2", "Fisheye Lobby")] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+
+    renderPage(Live);
+
+    const camBtn = await screen.findByText("Fisheye Lobby");
+    fireEvent.contextMenu(camBtn);
+
+    const cfgOption = await screen.findByText("Configuración de vista");
+    expect(cfgOption).toBeInTheDocument();
+    fireEvent.click(cfgOption);
+
+    expect(await screen.findByText(/Configuración de vista Fisheye · Fisheye Lobby/i)).toBeInTheDocument();
   });
 });

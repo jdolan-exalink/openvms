@@ -181,6 +181,11 @@ export function saveFisheyeConfig(config: FisheyeConfig): void {
 
   try {
     localStorage.setItem(`${CONFIG_PREFIX}${config.cameraId}`, JSON.stringify(config));
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("openvms:fisheye-config-changed", { detail: config }),
+      );
+    }
   } catch (err) {
     console.warn("Failed to persist fisheye config:", err);
   }

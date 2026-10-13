@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId,
+  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId, tilesForFisheyeMultiView,
 } from "./liveGrid";
 
 describe("resizeTiles", () => {
@@ -256,5 +256,29 @@ describe("fisheye virtual view drag/drop resolution", () => {
       cameraId: "cam-360",
       fisheyeViewId: "quad-2",
     });
+  });
+});
+
+describe("tilesForFisheyeMultiView", () => {
+  it("populates 1 real view + 3 views of 120 on a 4-pane grid", () => {
+    const views = [{ id: "v1" }, { id: "v2" }, { id: "v3" }];
+    const tiles = tilesForFisheyeMultiView("cam-360", views, "sub", 4);
+    expect(tiles).toHaveLength(4);
+    expect(tiles[0]).toEqual({ camera_id: "cam-360", quality: "sub" });
+    expect(tiles[1]).toEqual({ camera_id: "cam-360", quality: "sub", fisheye_view_id: "v1" });
+    expect(tiles[2]).toEqual({ camera_id: "cam-360", quality: "sub", fisheye_view_id: "v2" });
+    expect(tiles[3]).toEqual({ camera_id: "cam-360", quality: "sub", fisheye_view_id: "v3" });
+  });
+
+  it("populates 1 real view + 4 quadrant views on a 6-pane grid with trailing empty slot", () => {
+    const views = [{ id: "q1" }, { id: "q2" }, { id: "q3" }, { id: "q4" }];
+    const tiles = tilesForFisheyeMultiView("cam-360", views, "main", 6);
+    expect(tiles).toHaveLength(6);
+    expect(tiles[0]).toEqual({ camera_id: "cam-360", quality: "main" });
+    expect(tiles[1]).toEqual({ camera_id: "cam-360", quality: "main", fisheye_view_id: "q1" });
+    expect(tiles[2]).toEqual({ camera_id: "cam-360", quality: "main", fisheye_view_id: "q2" });
+    expect(tiles[3]).toEqual({ camera_id: "cam-360", quality: "main", fisheye_view_id: "q3" });
+    expect(tiles[4]).toEqual({ camera_id: "cam-360", quality: "main", fisheye_view_id: "q4" });
+    expect(tiles[5]).toBeNull();
   });
 });
