@@ -721,17 +721,17 @@ function CameraRow({
 
   const fisheyeConfig = useMemo(() => getFisheyeConfig(camera.id), [camera.id]);
   const isFisheyeCamera = Boolean(
+    (fisheyeConfig.enabled && fisheyeConfig.lensType !== "normal") ||
     camera.tags?.includes("fisheye") ||
     camera.tags?.includes("ojo_de_pez") ||
-    fisheyeConfig.enabled ||
-    detectFisheyeProfile(camera) !== null
+    Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))
   );
   const virtualViews = useMemo(() => {
     if (!isFisheyeCamera) return [];
     return getEffectiveVirtualViews(fisheyeConfig);
   }, [isFisheyeCamera, fisheyeConfig]);
 
-  const hasVirtualViews = virtualViews.length > 0;
+  const hasVirtualViews = isFisheyeCamera && virtualViews.length > 0;
   const [viewsOpen, setViewsOpen] = useState(true);
 
   const menu = bind(() => [

@@ -127,6 +127,9 @@ export function generate4QuadrantsViews(
  * so fisheye cameras always have ready-to-drag individual views in the tree.
  */
 export function getEffectiveVirtualViews(config: FisheyeConfig): VirtualFisheyeView[] {
+  if (!config.enabled || config.lensType === "normal") {
+    return [];
+  }
   if (config.views && config.views.length > 0) {
     return config.views;
   }

@@ -14,6 +14,7 @@ import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { MsePlayer } from "@/components/MsePlayer";
 import { FisheyeViewer } from "@/components/fisheye/FisheyeViewer";
 import { getEffectiveVirtualViews, getFisheyeConfig } from "@/lib/fisheye/storage";
+import { detectFisheyeProfile } from "@/lib/fisheye/profiles";
 import { useFeatures } from "@/lib/features";
 import { LivePlaybackPanel } from "@/components/LivePlaybackPanel";
 import { LiveRecDock } from "@/components/LiveRecDock";
@@ -858,14 +859,20 @@ function GridTile({
         <>
           {(() => {
             const feConfig = getFisheyeConfig(tile.camera_id);
-            const effectiveViews = getEffectiveVirtualViews(feConfig);
+            const isFisheyeCamera = Boolean(
+              (feConfig.enabled && feConfig.lensType !== "normal") ||
+              camera.tags?.includes("fisheye") ||
+              camera.tags?.includes("ojo_de_pez") ||
+              Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))
+            );
+            const effectiveViews = isFisheyeCamera ? getEffectiveVirtualViews(feConfig) : [];
             const specificView = tile.fisheye_view_id
               ? effectiveViews.find((v) => v.id === tile.fisheye_view_id) ||
                 feConfig.views.find((v) => v.id === tile.fisheye_view_id)
               : undefined;
             const useFisheye =
               !suspended &&
-              (feConfig.enabled || camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez")) &&
+              isFisheyeCamera &&
               (specificView !== undefined || feConfig.defaultMode !== "original");
 
             if (isDuplicate) {
@@ -932,7 +939,7 @@ function GridTile({
                   <Icon icon={History} size="xs" />
                 </Link>
               )}
-              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || getFisheyeConfig(tile.camera_id).enabled) && onOpenFisheye && (
+              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || (getFisheyeConfig(tile.camera_id).enabled && getFisheyeConfig(tile.camera_id).lensType !== "normal") || Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))) && onOpenFisheye && (
                 <IconButton
                   icon={Compass}
                   title="Navegación y dewarping Fisheye 360°"

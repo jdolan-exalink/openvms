@@ -145,7 +145,14 @@ export function FisheyeSection({
             label={config.enabled ? "Habilitado" : "Deshabilitado"}
             checked={config.enabled}
             onChange={(checked) =>
-              updateConfig({ ...config, enabled: checked })
+              updateConfig({
+                ...config,
+                enabled: checked,
+                lensType:
+                  checked && config.lensType === "normal"
+                    ? "fisheye_360"
+                    : config.lensType,
+              })
             }
             disabled={!canManage}
           />

@@ -19,7 +19,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
   {
     id: "provision_isr_f360",
     manufacturer: "Provision-ISR",
-    modelPattern: /F-360|FE-.*|PR-.*360/i,
+    modelPattern: /\b(F-360|PR-FE360|FE-360|PR-.*360)\b/i,
     lensType: "fisheye_360",
     mountType: "ceiling",
     projectionModel: "equidistant",
@@ -34,7 +34,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
   {
     id: "hikvision_fisheye_63xx",
     manufacturer: "Hikvision",
-    modelPattern: /DS-2CD63|DS-2CD29|DS-2DF.*FE|DS-2CD.*F/i,
+    modelPattern: /\b(DS-2CD63\d\d|DS-2CD29\d\d|DS-2DF\d+FE)\b/i,
     lensType: "fisheye_360",
     mountType: "ceiling",
     projectionModel: "equidistant",
@@ -49,7 +49,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
   {
     id: "dahua_fisheye_ebw",
     manufacturer: "Dahua",
-    modelPattern: /IPC-EBW|IPC-EW|DH-IPC-.*360/i,
+    modelPattern: /\b(IPC-EBW\d*|DH-IPC-EBW\d*|IPC-EW\d*)\b/i,
     lensType: "fisheye_360",
     mountType: "ceiling",
     projectionModel: "equidistant",
@@ -64,7 +64,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
   {
     id: "axis_fisheye_m30",
     manufacturer: "Axis",
-    modelPattern: /M305[78]|M307[78]|M306[78]|P39.*-R/i,
+    modelPattern: /\b(M305[78]|M307[78]|M306[78]|P39.*-R)\b/i,
     lensType: "fisheye_360",
     mountType: "ceiling",
     projectionModel: "equidistant",
@@ -79,7 +79,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
   {
     id: "hanwha_fisheye_xnf",
     manufacturer: "Hanwha Vision",
-    modelPattern: /XNF-90|XNF-80|QNF-90|QNF-80/i,
+    modelPattern: /\b(XNF-90|XNF-80|QNF-90|QNF-80)\b/i,
     lensType: "fisheye_360",
     mountType: "ceiling",
     projectionModel: "equidistant",
@@ -94,7 +94,7 @@ export const KNOWN_FISHEYE_PROFILES: ManufacturerFisheyeProfile[] = [
   {
     id: "generic_180_panoramic",
     manufacturer: "Generic Panoramic",
-    modelPattern: /180|pano|panoramic/i,
+    modelPattern: /\b(panoramic|panorama|180°|180-degree)\b/i,
     lensType: "fisheye_180",
     mountType: "wall",
     projectionModel: "equidistant",
