@@ -14,6 +14,7 @@ import type {
   FisheyeLensType,
   FisheyeMountType,
   FisheyeProjectionModel,
+  FisheyeViewMode,
 } from "@/lib/fisheye/types";
 import {
   Check,
@@ -94,6 +95,22 @@ export function FisheyeSection({
     }
   };
 
+  const handleSetMode = (targetMode: FisheyeViewMode) => {
+    if (targetMode === "3_fixed_120") {
+      handleApply3Fixed120();
+    } else if (targetMode === "4_quadrants") {
+      handleApply4Quadrants();
+    } else {
+      // Leaving 3 or 4: clear virtual views so camera returns to single view mode
+      const next: FisheyeConfig = {
+        ...config,
+        views: [],
+        defaultMode: targetMode,
+      };
+      updateConfig(next);
+    }
+  };
+
   const handleApply3Fixed120 = () => {
     const views = generate3Fixed120Views(cameraId, config.mountType);
     const next: FisheyeConfig = {
@@ -115,9 +132,11 @@ export function FisheyeSection({
   };
 
   const handleDeleteView = (viewId: string) => {
+    const nextViews = config.views.filter((v) => v.id !== viewId);
     const next: FisheyeConfig = {
       ...config,
-      views: config.views.filter((v) => v.id !== viewId),
+      views: nextViews,
+      defaultMode: nextViews.length === 0 ? "original" : config.defaultMode,
     };
     updateConfig(next);
   };
@@ -162,7 +181,7 @@ export function FisheyeSection({
       {config.enabled && (
         <div className="flex flex-col gap-5">
           {/* Lens & Mounting Parameters */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <label className="font-semibold text-xs text-muted block mb-1">
                 Tipo de lente
@@ -226,6 +245,27 @@ export function FisheyeSection({
                 <option value="equisolid">Equisólida (Baja distorsión)</option>
                 <option value="stereographic">Estereográfica</option>
                 <option value="orthographic">Ortográfica</option>
+              </Select>
+            </div>
+
+            <div>
+              <label className="font-semibold text-xs text-muted block mb-1">
+                Modo por defecto
+              </label>
+              <Select
+                value={config.defaultMode || "original"}
+                onChange={(e) =>
+                  handleSetMode(e.target.value as FisheyeViewMode)
+                }
+                disabled={!canManage}
+                className="w-full text-xs"
+              >
+                <option value="original">Original (Sin dewarp)</option>
+                <option value="panorama">Panorama 180°</option>
+                <option value="360">360° Panorámica</option>
+                <option value="virtual_ptz">PTZ Virtual</option>
+                <option value="3_fixed_120">3 Fijas de 120°</option>
+                <option value="4_quadrants">4 Cuadrantes</option>
               </Select>
             </div>
           </div>
@@ -296,6 +336,19 @@ export function FisheyeSection({
                   <Icon icon={Grid2X2} size="xs" />
                   <span>4 Cuadrantes</span>
                 </Button>
+
+                {config.views.length > 0 && (
+                  <Button
+                    variant="text"
+                    size="sm"
+                    onClick={() => handleSetMode("original")}
+                    title="Borrar todas las vistas virtuales y volver a vista individual"
+                    className="text-bad hover:bg-bad/10 text-xs"
+                  >
+                    <Icon icon={Trash2} size="xs" />
+                    <span>Borrar vistas</span>
+                  </Button>
+                )}
               </div>
             </div>
 

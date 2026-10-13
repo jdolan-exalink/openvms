@@ -31,7 +31,7 @@ import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/P
 import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  cameraIdOf, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
+  cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
   serializeSelection, swapTiles, tileDragId, tilesForFisheyeMultiView,
   type Tile,
 } from "@/lib/liveGrid";
@@ -170,6 +170,49 @@ function LiveDesktop() {
   const uniformLayouts = DEFAULT_PRESENTATIONS.filter((item) => item.panes.length === item.columns * item.rows).map((item) => ({ columns: item.columns, rows: item.rows }));
 
   const camById = useMemo(() => new Map(cameras.data?.map((c) => [c.id, c])), [cameras.data]);
+
+  const [fisheyeVersion, setFisheyeVersion] = useState(0);
+  useEffect(() => {
+    const handleConfigChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<{ cameraId?: string }>;
+      const updatedCameraId = customEvent.detail?.cameraId;
+      setFisheyeVersion((v) => v + 1);
+
+      if (updatedCameraId) {
+        const feConfig = getFisheyeConfig(updatedCameraId);
+        const isMultiMode =
+          feConfig.defaultMode === "3_fixed_120" || feConfig.defaultMode === "4_quadrants";
+
+        // "y quiero que si salimos de grilla 3 o 4 que borre las vistas"
+        if (!isMultiMode || feConfig.views.length === 0) {
+          const res = cleanFisheyeVirtualViewTiles(tilesRef.current, updatedCameraId, {
+            resetIfOnlyThisCamera: true,
+            defaultQuality: "main",
+          });
+
+          if (res.changed) {
+            if (res.shouldResetGridToSingle) {
+              setColumns(1);
+              setRows(1);
+              setPanes(uniformPanes(1, 1));
+              setTiles(res.tiles);
+              tilesRef.current = res.tiles;
+              setSelected(0);
+              setFocus(null);
+            } else {
+              setTiles(res.tiles);
+              tilesRef.current = res.tiles;
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener("openvms:fisheye-config-changed", handleConfigChanged);
+    return () => {
+      window.removeEventListener("openvms:fisheye-config-changed", handleConfigChanged);
+    };
+  }, [camById]);
 
   // LIVE/REC (LV-9): the mode and shared time live in the URL (?mode=rec&t=<ISO>) so reload and
   // links work; LIVE clears both. REC needs a recordings grant somewhere, else it never activates.
@@ -711,6 +754,7 @@ function LiveDesktop() {
                       onToggleFocus={() => t && setFocus(focus === null ? i : null)}
                       onOpenFisheye={(id) => setFisheyeModalCameraId(id)}
                       onConfigureFisheye={(id) => setFisheyeConfigCameraId(id)}
+                      fisheyeVersion={fisheyeVersion}
                       onRemove={() => {
                         setTiles((x) => x.map((v, j) => (j === i ? null : v)));
                         setFocus(null);
@@ -854,6 +898,7 @@ function GridTile({
   onToggleFocus,
   onOpenFisheye,
   onConfigureFisheye,
+  fisheyeVersion,
   onRemove,
 }: {
   index: number;
@@ -880,6 +925,7 @@ function GridTile({
   onToggleFocus: () => void;
   onOpenFisheye?: (cameraId: string) => void;
   onConfigureFisheye?: (cameraId: string) => void;
+  fisheyeVersion?: number;
   onRemove: () => void;
 }) {
   const tr = useT();
@@ -975,7 +1021,9 @@ function GridTile({
               return (
                 <div className="relative size-full">
                   <FisheyeViewer
+                    key={`${tile.camera_id}-${tile.fisheye_view_id ?? "root"}-${feConfig.defaultMode}-${fisheyeVersion ?? 0}`}
                     cameraId={tile.camera_id}
+                    config={feConfig}
                     compact={true}
                     initialMode={specificView ? "virtual_ptz" : feConfig.defaultMode}
                     targetViewId={specificView?.id}

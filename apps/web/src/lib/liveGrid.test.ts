@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId, tilesForFisheyeMultiView,
+  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId, tilesForFisheyeMultiView, cleanFisheyeVirtualViewTiles,
 } from "./liveGrid";
 
 describe("resizeTiles", () => {
@@ -280,5 +280,49 @@ describe("tilesForFisheyeMultiView", () => {
     expect(tiles[3]).toEqual({ camera_id: "cam-360", quality: "main", fisheye_view_id: "q3" });
     expect(tiles[4]).toEqual({ camera_id: "cam-360", quality: "main", fisheye_view_id: "q4" });
     expect(tiles[5]).toBeNull();
+  });
+});
+
+describe("cleanFisheyeVirtualViewTiles", () => {
+  it("does nothing when there are no virtual views for the camera", () => {
+    const tiles: Tile[] = [
+      { camera_id: "cam-1", quality: "sub" },
+      { camera_id: "cam-2", quality: "sub" },
+    ];
+    const res = cleanFisheyeVirtualViewTiles(tiles, "cam-1");
+    expect(res.changed).toBe(false);
+    expect(res.shouldResetGridToSingle).toBe(false);
+    expect(res.tiles).toEqual(tiles);
+  });
+
+  it("resets grid to 1x1 single tile when only this fisheye camera was in the grid", () => {
+    const tiles: Tile[] = [
+      { camera_id: "cam-fe", quality: "sub" },
+      { camera_id: "cam-fe", quality: "sub", fisheye_view_id: "view-1" },
+      { camera_id: "cam-fe", quality: "sub", fisheye_view_id: "view-2" },
+      null,
+    ];
+    const res = cleanFisheyeVirtualViewTiles(tiles, "cam-fe", { resetIfOnlyThisCamera: true, defaultQuality: "main" });
+    expect(res.changed).toBe(true);
+    expect(res.shouldResetGridToSingle).toBe(true);
+    expect(res.tiles).toEqual([{ camera_id: "cam-fe", quality: "main" }]);
+  });
+
+  it("clears virtual views with nulls when other cameras exist in the grid without resetting grid", () => {
+    const tiles: Tile[] = [
+      { camera_id: "cam-fe", quality: "sub" },
+      { camera_id: "cam-fe", quality: "sub", fisheye_view_id: "view-1" },
+      { camera_id: "cam-other", quality: "sub" },
+      { camera_id: "cam-fe", quality: "sub", fisheye_view_id: "view-2" },
+    ];
+    const res = cleanFisheyeVirtualViewTiles(tiles, "cam-fe", { resetIfOnlyThisCamera: true });
+    expect(res.changed).toBe(true);
+    expect(res.shouldResetGridToSingle).toBe(false);
+    expect(res.tiles).toEqual([
+      { camera_id: "cam-fe", quality: "sub" },
+      null,
+      { camera_id: "cam-other", quality: "sub" },
+      null,
+    ]);
   });
 });

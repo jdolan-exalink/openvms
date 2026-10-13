@@ -192,6 +192,29 @@ export function FisheyeViewer({
     }
   }, [externalConfig]);
 
+  // Synchronize internal mode with external initialMode changes
+  useEffect(() => {
+    if (initialMode && !targetViewId) {
+      setMode(initialMode);
+    }
+  }, [initialMode, targetViewId]);
+
+  // Synchronize with global fisheye-config-changed events
+  useEffect(() => {
+    const handleConfigChanged = (e: Event) => {
+      const customEvent = e as CustomEvent<{ cameraId?: string }>;
+      if (!customEvent.detail?.cameraId || customEvent.detail.cameraId === cameraId) {
+        const fresh = getFisheyeConfig(cameraId);
+        setConfig(fresh);
+        if (!targetViewId && fresh.defaultMode) {
+          setMode(fresh.defaultMode);
+        }
+      }
+    };
+    window.addEventListener("openvms:fisheye-config-changed", handleConfigChanged);
+    return () => window.removeEventListener("openvms:fisheye-config-changed", handleConfigChanged);
+  }, [cameraId, targetViewId]);
+
   const updateConfig = useCallback(
     (nextConfig: FisheyeConfig) => {
       setConfig(nextConfig);
@@ -213,19 +236,24 @@ export function FisheyeViewer({
       setConfig(nextConfig);
       saveFisheyeConfig(nextConfig);
       onConfigChange?.(nextConfig);
+    } else {
+      // Leaving 3 or 4: clear virtual views so camera returns to single view
+      const nextConfig = { ...config, defaultMode: newMode, views: [] };
+      setConfig(nextConfig);
+      saveFisheyeConfig(nextConfig);
+      onConfigChange?.(nextConfig);
     }
   };
 
   // Setup WebGL Dewarp Engine on canvas mount
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const engine = new FisheyeDewarpEngine(canvas);
-    engineRef.current = engine;
+    if (canvas && !engineRef.current) {
+      engineRef.current = new FisheyeDewarpEngine(canvas);
+    }
 
     return () => {
-      engine.destroy();
+      engineRef.current?.destroy();
       engineRef.current = null;
     };
   }, []);
@@ -235,6 +263,16 @@ export function FisheyeViewer({
     let rafId: number;
 
     const tick = () => {
+      const isMulti = mode === "3_fixed_120" || mode === "4_quadrants";
+      if (isMulti) {
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+
+      if (!engineRef.current && canvasRef.current) {
+        engineRef.current = new FisheyeDewarpEngine(canvasRef.current);
+      }
+
       const engine = engineRef.current;
       const targetVideo = videoElement || sessionRef.current?.video || localVideoRef.current;
       const snapshot = snapshotRef.current;
@@ -255,7 +293,7 @@ export function FisheyeViewer({
           const dpr = typeof window !== "undefined" ? Math.min(window.devicePixelRatio || 1, 2) : 1;
           const w = Math.round((c.clientWidth || 640) * dpr);
           const h = Math.round((c.clientHeight || 480) * dpr);
-          if (c.width !== w || c.height !== h) {
+          if (w > 0 && h > 0 && (c.width !== w || c.height !== h)) {
             c.width = w;
             c.height = h;
           }
@@ -367,9 +405,7 @@ export function FisheyeViewer({
         ? generate4QuadrantsViews(cameraId, config.mountType)
         : mode === "3_fixed_120"
         ? generate3Fixed120Views(cameraId, config.mountType)
-        : config.views.length > 0
-        ? config.views
-        : getEffectiveVirtualViews(config);
+        : [];
 
     const updated: FisheyeConfig = {
       ...config,
@@ -543,7 +579,7 @@ export function FisheyeViewer({
       )}
 
       {/* Main Viewport Stage */}
-      {mode === "3_fixed_120" ? (
+      {mode === "3_fixed_120" && (
         /* Multi-view Grid: 3 Fixed 120° Views side by side */
         <div className={cn("w-full h-full grid grid-cols-1 md:grid-cols-3 gap-1 bg-neutral-950 p-1", !compact && "min-h-[360px]")}>
           {threeViews.map((v) => (
@@ -565,7 +601,9 @@ export function FisheyeViewer({
             </div>
           ))}
         </div>
-      ) : mode === "4_quadrants" ? (
+      )}
+
+      {mode === "4_quadrants" && (
         /* Multi-view Grid: 4 Quadrants in a 2x2 grid */
         <div className={cn("w-full h-full grid grid-cols-2 grid-rows-2 gap-1 bg-neutral-950 p-1", !compact && "min-h-[360px]")}>
           {fourViews.map((v) => (
@@ -587,41 +625,43 @@ export function FisheyeViewer({
             </div>
           ))}
         </div>
-      ) : (
-        /* Standard Single Viewport (Original, 360, Panorama, or Virtual PTZ) */
-        <div
-          ref={stageRef}
-          data-testid="fisheye-stage"
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
-          onDoubleClick={handleDoubleClick}
-          className={cn(
-            "relative w-full h-full flex items-center justify-center bg-black overflow-hidden touch-none",
-            !compact && "min-h-[360px]",
-            mode === "virtual_ptz" || mode === "360" ? "cursor-grab active:cursor-grabbing" : "cursor-default",
-          )}
-        >
-          {/* WebGL Dewarp Canvas */}
-          <canvas
-            ref={canvasRef}
-            data-testid="fisheye-canvas"
-            className="w-full h-full object-fill pointer-events-none"
-          />
+      )}
 
-          {/* Hidden video element when videoSrc is passed directly */}
-          {videoSrc && !videoElement && (
-            <video
-              ref={localVideoRef}
-              src={videoSrc}
-              muted
-              playsInline
-              autoPlay
-              loop
-              className="hidden"
-            />
-          )}
+      {/* Standard Single Viewport (Original, 360, Panorama, or Virtual PTZ) */}
+      <div
+        ref={stageRef}
+        data-testid="fisheye-stage"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onDoubleClick={handleDoubleClick}
+        className={cn(
+          "relative w-full h-full flex items-center justify-center bg-black overflow-hidden touch-none",
+          !compact && "min-h-[360px]",
+          mode === "virtual_ptz" || mode === "360" ? "cursor-grab active:cursor-grabbing" : "cursor-default",
+          (mode === "3_fixed_120" || mode === "4_quadrants") && "hidden",
+        )}
+      >
+        {/* WebGL Dewarp Canvas */}
+        <canvas
+          ref={canvasRef}
+          data-testid="fisheye-canvas"
+          className="w-full h-full object-fill pointer-events-none"
+        />
+
+        {/* Hidden video element when videoSrc is passed directly */}
+        {videoSrc && !videoElement && (
+          <video
+            ref={localVideoRef}
+            src={videoSrc}
+            muted
+            playsInline
+            autoPlay
+            loop
+            className="hidden"
+          />
+        )}
 
           {/* Floating PTZ Coordinates HUD (in Virtual PTZ mode) */}
           {mode === "virtual_ptz" && (
@@ -631,7 +671,6 @@ export function FisheyeViewer({
             </div>
           )}
         </div>
-      )}
     </div>
   );
 }
@@ -671,6 +710,9 @@ export function FisheyeSingleViewport({
   useEffect(() => {
     let rafId: number;
     const tick = () => {
+      if (!engineRef.current && canvasRef.current) {
+        engineRef.current = new FisheyeDewarpEngine(canvasRef.current);
+      }
       const engine = engineRef.current;
       const isVideoReady = videoElement && videoElement.readyState >= 2;
       const isImageReady =

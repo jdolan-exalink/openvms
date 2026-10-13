@@ -27,6 +27,10 @@ export function isMapTile(tile: Tile): tile is MapGridTile {
   return !!tile && "map" in tile;
 }
 
+export function isCameraTile(tile: Tile): tile is CameraTile {
+  return !!tile && "camera_id" in tile;
+}
+
 /** resizeTiles truncates or pads tiles to the requested grid dimensions, keeping existing order. */
 export function resizeTiles(tiles: Tile[], columns: number, rows = columns): Tile[] {
   const count = columns * rows;
@@ -369,4 +373,50 @@ export function tilesForFisheyeMultiView(
     }
   });
   return result;
+}
+
+/**
+ * cleanFisheyeVirtualViewTiles clears virtual views of a fisheye camera from the grid
+ * when the camera is switched back to a single view mode.
+ * If all non-null tiles in the grid belonged to this camera and resetIfOnlyThisCamera is true,
+ * it returns shouldResetGridToSingle: true and a single 1x1 tile of the root camera.
+ */
+export function cleanFisheyeVirtualViewTiles(
+  currentTiles: Tile[],
+  cameraId: string,
+  options?: { resetIfOnlyThisCamera?: boolean; defaultQuality?: Quality },
+): { tiles: Tile[]; shouldResetGridToSingle: boolean; changed: boolean } {
+  const hasVirtualViews = currentTiles.some(
+    (t) => isCameraTile(t) && t.camera_id === cameraId && Boolean(t.fisheye_view_id),
+  );
+
+  if (!hasVirtualViews) {
+    return { tiles: currentTiles, shouldResetGridToSingle: false, changed: false };
+  }
+
+  const onlyThisCamera = currentTiles.every(
+    (t) => t === null || (isCameraTile(t) && t.camera_id === cameraId),
+  );
+
+  if (onlyThisCamera && options?.resetIfOnlyThisCamera) {
+    const quality = options.defaultQuality ?? "main";
+    return {
+      tiles: [{ camera_id: cameraId, quality }],
+      shouldResetGridToSingle: true,
+      changed: true,
+    };
+  }
+
+  const next = currentTiles.map((t) => {
+    if (isCameraTile(t) && t.camera_id === cameraId && t.fisheye_view_id) {
+      return null;
+    }
+    return t;
+  });
+
+  return {
+    tiles: next,
+    shouldResetGridToSingle: false,
+    changed: true,
+  };
 }

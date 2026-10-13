@@ -1156,4 +1156,66 @@ describe("Live with persistent players (P0 acceptance)", () => {
 
     expect(await screen.findByText(/Configuración de vista Fisheye · Fisheye Lobby/i)).toBeInTheDocument();
   });
+
+  it("clears virtual views and resets grid to 1x1 when fisheye camera switches away from multi-view", async () => {
+    stubBrowserAPIs();
+    saveFisheyeConfig({
+      cameraId: "cam-fe-3",
+      enabled: true,
+      lensType: "fisheye_360",
+      mountType: "ceiling",
+      projectionModel: "equidistant",
+      calibration: DEFAULT_FISHEYE_CALIBRATION,
+      views: [{ id: "v1", cameraId: "cam-fe-3", name: "V1", projection: "rectilinear", yaw: 0, pitch: -30, roll: 0, fov: 120 }],
+      defaultMode: "3_fixed_120",
+    });
+
+    localStorage.setItem(
+      liveSelectionKey("t1", "u1"),
+      serializeSelection(2, [
+        { camera_id: "cam-fe-3", quality: "main" },
+        { camera_id: "cam-fe-3", quality: "sub", fisheye_view_id: "v1" },
+        null,
+        null,
+      ]),
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        stubApi({
+          "/api/v1/me": meResponse,
+          "/api/v1/cameras": () =>
+            json({ items: [camera("cam-fe-3", "Fisheye Hall")] }),
+          ...emptyCatalogs,
+        }),
+      ),
+    );
+
+    renderPage(Live);
+
+    await screen.findByText("Fisheye Hall");
+
+    // Camera leaves 3 or 4: switches to panorama and clears views
+    saveFisheyeConfig({
+      cameraId: "cam-fe-3",
+      enabled: true,
+      lensType: "fisheye_360",
+      mountType: "ceiling",
+      projectionModel: "equidistant",
+      calibration: DEFAULT_FISHEYE_CALIBRATION,
+      views: [],
+      defaultMode: "panorama",
+    });
+
+    // Grid should clear the virtual view and reset to single 1x1 tile
+    await waitFor(() => {
+      const saved = parseSelection(
+        localStorage.getItem(liveSelectionKey("t1", "u1")),
+        new Set(["cam-fe-3"]),
+      );
+      expect(saved?.columns).toBe(1);
+      expect(saved?.tiles).toEqual([{ camera_id: "cam-fe-3", quality: "main" }]);
+    });
+  });
 });

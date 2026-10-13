@@ -16,7 +16,7 @@ describe("FisheyeSection Component", () => {
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
 
-    expect(screen.getAllByRole("combobox")).toHaveLength(3);
+    expect(screen.getAllByRole("combobox")).toHaveLength(4);
     expect(screen.getByRole("button", { name: /Autodetectar fabricante/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Calibrar círculo útil/i })).toBeInTheDocument();
   });
@@ -82,5 +82,38 @@ describe("FisheyeSection Component", () => {
     fireEvent.click(autoDetectBtn);
 
     expect(screen.getByText(/Detectado: Provision-ISR/i)).toBeInTheDocument();
+  });
+
+  it("clears virtual views when switching default mode away from 3 or 4 grids", () => {
+    render(<FisheyeSection cameraId="cam-fe-clear" cameraName="Camera 360" />);
+
+    fireEvent.click(screen.getByRole("switch"));
+
+    // First generate 4 quadrants
+    fireEvent.click(screen.getByRole("button", { name: /4 Cuadrantes/i }));
+    expect(screen.getByText(/Vista 1 \(Norte\)/i)).toBeInTheDocument();
+
+    // Now change default mode dropdown to Panorama
+    const selects = screen.getAllByRole("combobox");
+    const modeSelect = selects[3]!;
+    fireEvent.change(modeSelect, { target: { value: "panorama" } });
+
+    // Views are cleared!
+    expect(screen.queryByText(/Vista 1 \(Norte\)/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/No hay vistas virtuales configuradas/i)).toBeInTheDocument();
+  });
+
+  it("clears virtual views when clicking 'Borrar vistas'", () => {
+    render(<FisheyeSection cameraId="cam-fe-del" cameraName="Camera 360" />);
+
+    fireEvent.click(screen.getByRole("switch"));
+
+    fireEvent.click(screen.getByRole("button", { name: /3 Fijas de 120°/i }));
+    expect(screen.getByText(/Vista 1 \(0°\)/i)).toBeInTheDocument();
+
+    const clearBtn = screen.getByRole("button", { name: /Borrar vistas/i });
+    fireEvent.click(clearBtn);
+
+    expect(screen.queryByText(/Vista 1 \(0°\)/i)).not.toBeInTheDocument();
   });
 });

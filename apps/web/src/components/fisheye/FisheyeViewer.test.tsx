@@ -80,4 +80,28 @@ describe("FisheyeViewer Component", () => {
     expect(screen.queryByRole("button", { name: "Original" })).not.toBeInTheDocument();
     expect(screen.getByTestId("fisheye-canvas")).toBeInTheDocument();
   });
+
+  it("switches from 4 cuadrantes to panorama, preserving canvas and clearing virtual views", () => {
+    render(<FisheyeViewer cameraId="cam-switch" />);
+
+    // Switch to 4 quadrants
+    fireEvent.click(screen.getByRole("button", { name: /4 Cuadrantes/i }));
+    expect(screen.getByText(/Vista 1 \(Norte\)/i)).toBeInTheDocument();
+
+    // Switch to Panorama
+    fireEvent.click(screen.getByRole("button", { name: "Panorama" }));
+
+    // Canvas must be present and visible
+    const canvas = screen.getByTestId("fisheye-canvas");
+    expect(canvas).toBeInTheDocument();
+    expect(screen.queryByText(/Vista 1 \(Norte\)/i)).not.toBeInTheDocument();
+
+    // Check that views are cleared in storage
+    const raw = localStorage.getItem("openvms.fisheye.configs.v1");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      expect(parsed["cam-switch"]?.views).toEqual([]);
+      expect(parsed["cam-switch"]?.defaultMode).toBe("panorama");
+    }
+  });
 });
