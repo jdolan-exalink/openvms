@@ -91,6 +91,28 @@ describe("ForensicComparisonModal", () => {
     HTMLCanvasElement.prototype.toDataURL = originalToDataURL;
   });
 
+  it("names downloaded files with camera name and metadata timestamp", () => {
+    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = vi.fn(() => "data:image/png;base64,mockdata");
+    const names: string[] = [];
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        names.push(this.download);
+      });
+
+    render(<ForensicComparisonModal isOpen={true} onClose={vi.fn()} result={mockResult} />);
+    fireEvent.click(screen.getByRole("button", { name: /descargar original/i }));
+    fireEvent.click(screen.getByRole("button", { name: /descargar mejorada/i }));
+
+    expect(names).toEqual([
+      "front_entrance_original_1728765432.png",
+      "front_entrance_mejorada_1728765432.png",
+    ]);
+    clickSpy.mockRestore();
+    HTMLCanvasElement.prototype.toDataURL = originalToDataURL;
+  });
+
   it("toggles comparison view mode between split slider and side-by-side", () => {
     render(
       <ForensicComparisonModal isOpen={true} onClose={vi.fn()} result={mockResult} />,

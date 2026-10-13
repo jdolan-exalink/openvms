@@ -664,7 +664,9 @@ function EvidenceVideoTile({
                     if (res && typeof res.catch === "function") {
                       res.catch(() => {});
                     }
-                  } catch {}
+                  } catch {
+                    // play() is unsupported or threw synchronously: ignore, playback stays paused.
+                  }
                 }
               }}
               onEnded={() => {
@@ -781,10 +783,7 @@ export function EvidencePlayerModal({
   const [forensicResult, setForensicResult] = useState<ForensicResult | null>(null);
   const [isForensicOpen, setIsForensicOpen] = useState(false);
   const [isForensicLoading, setIsForensicLoading] = useState(false);
-  const forensicEngineRef = useRef<ForensicEnhancementEngine | null>(null);
-  if (!forensicEngineRef.current) {
-    forensicEngineRef.current = new ForensicEnhancementEngine();
-  }
+  const [forensicEngine] = useState(() => new ForensicEnhancementEngine());
 
   const handleEnhanceCapture = useCallback(
     async (
@@ -796,7 +795,7 @@ export function EvidencePlayerModal({
       setIsForensicLoading(true);
       try {
         const target = videoEl || document.createElement("canvas");
-        const result = await forensicEngineRef.current!.enhanceFrame(target, {
+        const result = await forensicEngine.enhanceFrame(target, {
           roi,
           metadata: {
             cameraId: item.camera_id,
@@ -811,7 +810,7 @@ export function EvidencePlayerModal({
         setIsForensicLoading(false);
       }
     },
-    [currentTime],
+    [currentTime, forensicEngine],
   );
 
   const items = useMemo(() => job.items ?? [], [job.items]);

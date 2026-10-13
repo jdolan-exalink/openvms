@@ -738,19 +738,17 @@ function CameraRow({
   const drop = useDropState(camera.server_id, canManage, ["camera"]);
   const { setNodeRef: setDropRef, isOver } = useDroppable({ id: treeCameraDropId(camera.id), disabled: drop.disabled });
   const t = useT();
-  const { bind, actions, navigate, fisheyeVersion } = useMenuCtx();
+  const { bind, actions, navigate } = useMenuCtx();
 
-  const fisheyeConfig = useMemo(() => getFisheyeConfig(camera.id), [camera.id, fisheyeVersion]);
+  // Read on every render: fisheyeVersion (context) changes re-render this row when the stored config changes.
+  const fisheyeConfig = getFisheyeConfig(camera.id);
   const isFisheyeCamera = Boolean(
     (fisheyeConfig.enabled && fisheyeConfig.lensType !== "normal") ||
     camera.tags?.includes("fisheye") ||
     camera.tags?.includes("ojo_de_pez") ||
     Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))
   );
-  const virtualViews = useMemo(() => {
-    if (!isFisheyeCamera) return [];
-    return getEffectiveVirtualViews(fisheyeConfig);
-  }, [isFisheyeCamera, fisheyeConfig]);
+  const virtualViews = isFisheyeCamera ? getEffectiveVirtualViews(fisheyeConfig) : [];
 
   const hasVirtualViews = isFisheyeCamera && virtualViews.length > 0;
   const [viewsOpen, setViewsOpen] = useState(true);

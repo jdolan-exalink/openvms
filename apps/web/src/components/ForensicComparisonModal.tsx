@@ -44,7 +44,6 @@ export function ForensicComparisonModal({
   onClose,
   result,
   isLoading = false,
-  onReprocess: _onReprocess,
   cameraName: initialCameraName,
   timestamp: initialTimestamp,
 }: ForensicComparisonModalProps) {
@@ -72,23 +71,25 @@ export function ForensicComparisonModal({
   const [isPanning, setIsPanning] = useState(false);
 
   // Convert canvases to data URLs for reliable rendering and export
+  const originalCanvas = result?.originalCanvas;
+  const enhancedCanvas = result?.enhancedCanvas;
   const originalUrl = useMemo(() => {
-    if (!result?.originalCanvas) return "";
+    if (!originalCanvas) return "";
     try {
-      return result.originalCanvas.toDataURL("image/png") || "data:image/png;base64,mock";
+      return originalCanvas.toDataURL("image/png") || "data:image/png;base64,mock";
     } catch {
       return "data:image/png;base64,mock";
     }
-  }, [result?.originalCanvas]);
+  }, [originalCanvas]);
 
   const enhancedUrl = useMemo(() => {
-    if (!result?.enhancedCanvas) return "";
+    if (!enhancedCanvas) return "";
     try {
-      return result.enhancedCanvas.toDataURL("image/png") || "data:image/png;base64,mock";
+      return enhancedCanvas.toDataURL("image/png") || "data:image/png;base64,mock";
     } catch {
       return "data:image/png;base64,mock";
     }
-  }, [result?.enhancedCanvas]);
+  }, [enhancedCanvas]);
 
   const applyZoom = useCallback((next: DigitalZoom) => {
     zoomRef.current = next;
@@ -192,7 +193,8 @@ export function ForensicComparisonModal({
 
   const cameraName =
     result?.metadata?.cameraName || initialCameraName || "Cámara CCTV";
-  const timestamp =
+  // Resolved at download time so the render stays pure.
+  const resolveTimestamp = () =>
     result?.metadata?.timestamp || initialTimestamp || Math.round(Date.now() / 1000);
 
   const handleDownloadOriginal = () => {
@@ -201,7 +203,7 @@ export function ForensicComparisonModal({
       const dataUrl = result.originalCanvas.toDataURL("image/png");
       const a = document.createElement("a");
       a.href = dataUrl;
-      a.download = `${cameraName.toLowerCase().replace(/\s+/g, "_")}_original_${timestamp}.png`;
+      a.download = `${cameraName.toLowerCase().replace(/\s+/g, "_")}_original_${resolveTimestamp()}.png`;
       a.click();
     } catch {
       // fallback
@@ -214,7 +216,7 @@ export function ForensicComparisonModal({
       const dataUrl = result.enhancedCanvas.toDataURL("image/png");
       const a = document.createElement("a");
       a.href = dataUrl;
-      a.download = `${cameraName.toLowerCase().replace(/\s+/g, "_")}_mejorada_${timestamp}.png`;
+      a.download = `${cameraName.toLowerCase().replace(/\s+/g, "_")}_mejorada_${resolveTimestamp()}.png`;
       a.click();
     } catch {
       // fallback
