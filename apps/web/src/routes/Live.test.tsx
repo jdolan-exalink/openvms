@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { FEATURES_OVERRIDE_KEY } from "@/lib/features";
+import { PlayerSessionManager } from "@/lib/live/PlayerSessionManager";
 import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { playerMetrics } from "@/lib/live/playerMetrics";
@@ -649,10 +650,17 @@ describe("Live", () => {
       const subSocket = FakeSocket.instances.find((socket) => socket.url.includes("quality=sub"))!;
       const closeSub = vi.spyOn(subSocket, "close");
       const baseVideo = tile.querySelector("video")!;
+      // A persistent manager can keep the same socket and <video> alive across a React remount,
+      // so count sub-session acquisitions and releases to observe the base player mount itself.
+      const subLifecycle = (method: unknown[][]) => method.filter(([cameraId, quality]) => cameraId === "cam-1" && quality === "sub").length;
+      const acquire = vi.spyOn(PlayerSessionManager.prototype, "acquire");
+      const release = vi.spyOn(PlayerSessionManager.prototype, "release");
       vi.useFakeTimers();
 
       fireEvent.doubleClick(tile);
       act(() => { vi.advanceTimersByTime(5_001); });
+      expect(subLifecycle(acquire.mock.calls)).toBe(0);
+      expect(subLifecycle(release.mock.calls)).toBe(0);
       expect(baseVideo.isConnected).toBe(true);
       expect(tile.querySelector('[data-testid="quality-target-surface"]')).toHaveAttribute("data-quality", "main");
       expect(closeSub).not.toHaveBeenCalled();
@@ -665,6 +673,8 @@ describe("Live", () => {
       expect(tile.querySelector('[data-testid="quality-target-surface"]')).toBeNull();
       expect(tile.querySelectorAll("video")).toHaveLength(1);
       expect(baseVideo.isConnected).toBe(true);
+      expect(subLifecycle(acquire.mock.calls)).toBe(0);
+      expect(subLifecycle(release.mock.calls)).toBe(0);
       expect(closeSub).not.toHaveBeenCalled();
       expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
 
