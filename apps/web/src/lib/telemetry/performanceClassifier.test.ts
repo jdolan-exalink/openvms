@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { classifyPerformance, EXPECTED_FPS, type ClassifierSample } from "./performanceClassifier";
+import { classifyPerformance, type ClassifierSample } from "./performanceClassifier";
 
 const ok = (over: Partial<ClassifierSample> = {}): ClassifierSample => ({
-  fps: EXPECTED_FPS,
+  fps: 15,
   droppedRatio: 0,
   playing: 10,
   connecting: 0,
   error: 0,
   total: 10,
+  measured: 10,
+  stalled: 0,
   ...over,
 });
 
@@ -27,13 +29,22 @@ describe("classifyPerformance", () => {
     expect(classifyPerformance([ok({ droppedRatio })])).toBe(expected);
   });
 
+  it.each([5, 10, 2, 0.5])("keeps a healthy %f fps station optimal (fps is informational)", (fps) => {
+    expect(classifyPerformance([ok({ fps }), ok({ fps }), ok({ fps })])).toBe("optimal");
+    expect(classifyPerformance([ok({ fps: null })])).toBe("optimal");
+  });
+
   it.each([
-    [EXPECTED_FPS * 0.9, "optimal"],
-    [EXPECTED_FPS * 0.7, "acceptable"],
-    [EXPECTED_FPS * 0.5, "limit"],
-    [EXPECTED_FPS * 0.2, "saturated"],
-  ] as const)("maps presented fps %f to %s", (fps, expected) => {
-    expect(classifyPerformance([ok({ fps })])).toBe(expected);
+    [1, "optimal"],
+    [2, "acceptable"],
+    [3, "limit"],
+    [6, "saturated"],
+  ] as const)("degrades when %d of 10 active sessions stall (%s)", (stalled, expected) => {
+    expect(classifyPerformance([ok({ stalled })])).toBe(expected);
+  });
+
+  it("ignores samples without measurable active sessions (WARM or paused only)", () => {
+    expect(classifyPerformance([ok({ measured: 0, stalled: 0, fps: null })])).toBe("optimal");
   });
 
   it("degrades with a share of errored streams", () => {

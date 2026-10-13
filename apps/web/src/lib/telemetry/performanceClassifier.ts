@@ -1,11 +1,17 @@
 /**
  * Pure classification of how well the client station is keeping up with the live videowall.
- * Thresholds are heuristics over the last few 1 Hz samples; the worst signal wins.
+ * Thresholds are heuristics over the last few 1 Hz samples; the worst signal wins. Signals are
+ * dropped-frame ratio, stalled ACTIVE sessions, error share and connecting share; absolute FPS is
+ * deliberately not a signal because it depends on each camera's configured frame rate.
  */
 export type PerformanceHealth = "optimal" | "acceptable" | "limit" | "saturated";
 
 export type ClassifierSample = {
-  /** Average presented frames per second per playing stream; null when it could not be measured. */
+  /**
+   * Average presented frames per second per ACTIVE stream; null when it could not be measured.
+   * Informational only: camera frame rates legitimately vary (CCTV substreams often run 5-10 fps),
+   * so it never feeds the health classification.
+   */
   fps: number | null;
   /** Dropped / total decoded frames in the sample, 0..1. */
   droppedRatio: number;
@@ -13,17 +19,19 @@ export type ClassifierSample = {
   connecting: number;
   error: number;
   total: number;
+  /** ACTIVE sessions whose frame counters could be compared with the previous sample. */
+  measured: number;
+  /** Of those, sessions whose frame count did not advance during the sample (stalled). */
+  stalled: number;
 };
 
-/** Frame rate a typical CCTV substream should present; below this share the station is struggling. */
-export const EXPECTED_FPS = 15;
 /** Number of most recent samples averaged to avoid flapping. */
 export const CLASSIFIER_WINDOW = 5;
 
 /** Lower bounds (inclusive) of each degraded level for the dropped-frame ratio. */
 export const DROPPED_THRESHOLDS = { acceptable: 0.03, limit: 0.08, saturated: 0.2 } as const;
-/** Upper bounds (exclusive) of presented-fps / EXPECTED_FPS for each level, from best to worst. */
-export const FPS_RATIO_THRESHOLDS = { optimal: 0.8, acceptable: 0.6, limit: 0.4 } as const;
+/** Lower bounds (inclusive) of the share of measured ACTIVE sessions that stalled, for each degraded level. */
+export const STALL_SHARE_THRESHOLDS = { acceptable: 0.15, limit: 0.3, saturated: 0.5 } as const;
 /** Lower bounds (inclusive) of the share of streams in ERROR for each degraded level. */
 export const ERROR_SHARE_THRESHOLDS = { acceptable: 0.1, limit: 0.25, saturated: 0.5 } as const;
 /** Share of streams still connecting above which the station is at least "acceptable" (not "optimal"). */
@@ -55,12 +63,12 @@ export function classifyPerformance(samples: readonly ClassifierSample[]): Perfo
   else if (dropped >= DROPPED_THRESHOLDS.limit) health = worst(health, "limit");
   else if (dropped >= DROPPED_THRESHOLDS.acceptable) health = worst(health, "acceptable");
 
-  const fpsValues = withStreams.filter((s) => s.fps !== null && s.playing > 0).map((s) => s.fps as number);
-  if (fpsValues.length > 0) {
-    const ratio = mean(fpsValues) / EXPECTED_FPS;
-    if (ratio < FPS_RATIO_THRESHOLDS.limit) health = worst(health, "saturated");
-    else if (ratio < FPS_RATIO_THRESHOLDS.acceptable) health = worst(health, "limit");
-    else if (ratio < FPS_RATIO_THRESHOLDS.optimal) health = worst(health, "acceptable");
+  const measuredSamples = withStreams.filter((s) => s.measured > 0);
+  if (measuredSamples.length > 0) {
+    const stallShare = mean(measuredSamples.map((s) => s.stalled / s.measured));
+    if (stallShare >= STALL_SHARE_THRESHOLDS.saturated) health = worst(health, "saturated");
+    else if (stallShare >= STALL_SHARE_THRESHOLDS.limit) health = worst(health, "limit");
+    else if (stallShare >= STALL_SHARE_THRESHOLDS.acceptable) health = worst(health, "acceptable");
   }
 
   const errorShare = mean(withStreams.map((s) => s.error / s.total));

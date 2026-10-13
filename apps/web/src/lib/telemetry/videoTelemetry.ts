@@ -41,7 +41,7 @@ export type VideoTelemetrySnapshot = {
   at: number;
   /** Total received video, megabits per second over the last interval. */
   mbps: number;
-  /** Average presented frames per second per playing stream; null when not measurable. */
+  /** Average presented frames per second per ACTIVE stream; null when not measurable (informational). */
   fps: number | null;
   droppedFrames: number;
   /** Dropped / decoded frames in the last interval, 0..1. */
@@ -153,6 +153,7 @@ export class VideoTelemetryService {
     let totalBytes = 0;
     let presented = 0;
     let measured = 0;
+    let stalled = 0;
     let decoded = 0;
     let dropped = 0;
 
@@ -169,8 +170,10 @@ export class VideoTelemetryService {
         const prevDropped = e.lastDroppedFrames;
         e.lastDroppedFrames = frames.dropped;
         // Counters restart with a new MediaSource: rebaseline instead of reporting garbage.
-        if (prev !== null && frames.total >= prev && frames.dropped >= prevDropped && (state === "ACTIVE" || state === "WARM")) {
+        // Only ACTIVE sessions count: WARM ones present few frames by design and would skew health.
+        if (prev !== null && frames.total >= prev && frames.dropped >= prevDropped && state === "ACTIVE") {
           const dTotal = frames.total - prev;
+          if (dTotal === 0) stalled++;
           const dDropped = frames.dropped - prevDropped;
           decoded += dTotal;
           dropped += dDropped;
@@ -202,6 +205,8 @@ export class VideoTelemetryService {
       connecting: streams.connecting,
       error: streams.error,
       total: streams.total,
+      measured,
+      stalled,
     };
     this.push(point);
     const history = this.history();

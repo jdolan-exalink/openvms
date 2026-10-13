@@ -118,6 +118,45 @@ describe("VideoTelemetryService", () => {
     expect(snap.droppedRatio).toBe(0);
   });
 
+  it("classifies a healthy 5 fps station as optimal", () => {
+    const svc = new VideoTelemetryService();
+    const cams = Array.from({ length: 4 }, () => source({ frames: { total: 0, dropped: 0 } }));
+    for (const c of cams) svc.register(c.src);
+    svc.subscribe(() => {});
+    for (let t = 1; t <= 6; t++) {
+      for (const c of cams) c.s.frames = { total: t * 5, dropped: 0 };
+      vi.advanceTimersByTime(1000);
+    }
+    const snap = svc.getSnapshot();
+    expect(snap.fps).toBeCloseTo(5, 5);
+    expect(snap.health).toBe("optimal");
+  });
+
+  it("degrades health when ACTIVE sessions stall, but ignores WARM sessions", () => {
+    const svc = new VideoTelemetryService();
+    const stalled = Array.from({ length: 3 }, () => source({ frames: { total: 10, dropped: 0 } }));
+    const live = source({ frames: { total: 0, dropped: 0 } });
+    const warm = source({ state: "WARM", frames: { total: 0, dropped: 0 } });
+    for (const c of [...stalled, live, warm]) svc.register(c.src);
+    svc.subscribe(() => {});
+    for (let t = 1; t <= 5; t++) {
+      live.s.frames = { total: t * 10, dropped: 0 };
+      vi.advanceTimersByTime(1000);
+    }
+    expect(svc.getSnapshot().health).toBe("saturated"); // 3 of 4 active sessions never advanced
+
+    const svc2 = new VideoTelemetryService();
+    const ok = source({ frames: { total: 0, dropped: 0 } });
+    const idleWarm = Array.from({ length: 3 }, () => source({ state: "WARM", frames: { total: 5, dropped: 0 } }));
+    for (const c of [ok, ...idleWarm]) svc2.register(c.src);
+    svc2.subscribe(() => {});
+    for (let t = 1; t <= 5; t++) {
+      ok.s.frames = { total: t * 10, dropped: 0 };
+      vi.advanceTimersByTime(1000);
+    }
+    expect(svc2.getSnapshot().health).toBe("optimal"); // frozen WARM sessions are not stalls
+  });
+
   it("unregister removes the session and its bytes", () => {
     const svc = new VideoTelemetryService();
     const h = svc.register(source().src);
