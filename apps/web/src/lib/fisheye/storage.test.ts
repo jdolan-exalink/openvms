@@ -114,4 +114,15 @@ describe("Fisheye Storage Module", () => {
     const viewsWall = generate3Fixed120Views("cam-wall", "wall");
     expect(viewsWall[0]?.pitch).toBe(0);
   });
+
+  it("migrates a legacy 4_quadrants default mode to virtual_ptz", () => {
+    localStorage.setItem(
+      "openvms.fisheye.config.cam-legacy",
+      JSON.stringify({ ...DEFAULT_FISHEYE_CONFIG, cameraId: "cam-legacy", enabled: true, lensType: "fisheye_360", defaultMode: "4_quadrants" }),
+    );
+    localStorage.setItem("openvms.fisheye.mode.cam-legacy", "4_quadrants");
+
+    expect(getFisheyeConfig("cam-legacy").defaultMode).toBe("virtual_ptz");
+    expect(getFisheyeViewMode("cam-legacy")).toBe("virtual_ptz");
+  });
 });

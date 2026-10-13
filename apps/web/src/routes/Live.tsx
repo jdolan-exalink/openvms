@@ -48,6 +48,16 @@ import { useRecSession } from "@/lib/useRecSession";
 import { usePlayerSessionManager } from "@/lib/live/PlayerSessionProvider";
 
 /** copyViewName picks «Nombre (copia)» or «Nombre (copia 2)» so a duplicate stays unique. */
+/** Empties a restored tile whose saved fisheye view no longer exists (e.g. removed quadrant views). */
+function dropUnresolvedFisheyeTile(tile: Tile): Tile {
+  if (!tile || !("camera_id" in tile) || !tile.fisheye_view_id) return tile;
+  const config = getFisheyeConfig(tile.camera_id);
+  const resolves =
+    getEffectiveVirtualViews(config).some((v) => v.id === tile.fisheye_view_id) ||
+    config.views.some((v) => v.id === tile.fisheye_view_id);
+  return resolves ? tile : null;
+}
+
 function copyViewName(name: string, taken: Set<string>): string {
   const base = `${name} (copia)`;
   if (!taken.has(base.toLowerCase())) return base;
@@ -248,7 +258,7 @@ function LiveDesktop() {
         setColumns(saved.columns);
         setRows(saved.rows);
         setPanes(saved.panes ?? uniformPanes(saved.columns, saved.rows));
-        setTiles(saved.tiles);
+        setTiles(saved.tiles.map(dropUnresolvedFisheyeTile));
       }
     } catch {
       // Storage unavailable or corrupt: keep the default empty grid.

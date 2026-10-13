@@ -8,7 +8,7 @@ import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { playerMetrics } from "@/lib/live/playerMetrics";
 import { saveFisheyeConfig } from "@/lib/fisheye/storage";
-import { DEFAULT_FISHEYE_CALIBRATION } from "@/lib/fisheye/types";
+import { DEFAULT_FISHEYE_CALIBRATION, DEFAULT_FISHEYE_CONFIG } from "@/lib/fisheye/types";
 import { Live, useTileOverlayVisibility } from "./Live";
 
 afterEach(() => {
@@ -362,6 +362,40 @@ describe("Live", () => {
     expect(await screen.findAllByText("Puerta norte")).toHaveLength(2);
     // 4 slots (2x2), 1 filled, cam-gone silently dropped instead of erroring.
     expect(screen.getAllByText("Vacío")).toHaveLength(3);
+  });
+
+  it("empties restored fisheye tiles whose saved view no longer exists", async () => {
+    stubBrowserAPIs();
+    saveFisheyeConfig({
+      ...DEFAULT_FISHEYE_CONFIG,
+      cameraId: "cam-fe-stale",
+      enabled: true,
+      lensType: "fisheye_360",
+      views: [{ id: "v-live", cameraId: "cam-fe-stale", name: "Vista viva", projection: "rectilinear", yaw: 0, pitch: 0, roll: 0, fov: 100 }],
+    });
+    localStorage.setItem(
+      liveSelectionKey("t1", "u1"),
+      serializeSelection(2, [
+        { camera_id: "cam-fe-stale", quality: "sub", fisheye_view_id: "v-live" },
+        { camera_id: "cam-fe-stale", quality: "sub", fisheye_view_id: "v-removed-quadrant" },
+        null,
+        null,
+      ]),
+    );
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-fe-stale", "Fish stale")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+
+    await screen.findAllByText(/Vista viva/);
+    expect(screen.getAllByText("Vacío")).toHaveLength(3);
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-fe-stale"]));
+      expect(saved?.tiles[1]).toBeNull();
+    });
   });
 
   it("persists the grid selection to localStorage, keyed by tenant and user, when a camera is placed", async () => {

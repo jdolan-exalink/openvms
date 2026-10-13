@@ -78,6 +78,13 @@ export function getEffectiveVirtualViews(config: FisheyeConfig): VirtualFisheyeV
   return [];
 }
 
+const SUPPORTED_VIEW_MODES: readonly FisheyeViewMode[] = ["original", "360", "panorama", "virtual_ptz", "3_fixed_120"];
+
+/** Maps legacy or unknown stored modes (e.g. the removed "4_quadrants") to the current default. */
+function normalizeViewMode(mode: unknown): FisheyeViewMode {
+  return SUPPORTED_VIEW_MODES.includes(mode as FisheyeViewMode) ? (mode as FisheyeViewMode) : "virtual_ptz";
+}
+
 /**
  * Retrieves the stored fisheye configuration for a given camera,
  * falling back to defaults if not yet configured.
@@ -95,6 +102,7 @@ export function getFisheyeConfig(cameraId: string): FisheyeConfig {
         ...DEFAULT_FISHEYE_CONFIG,
         ...parsed,
         cameraId,
+        defaultMode: normalizeViewMode(parsed.defaultMode ?? DEFAULT_FISHEYE_CONFIG.defaultMode),
         calibration: {
           ...DEFAULT_FISHEYE_CONFIG.calibration,
           ...(parsed.calibration || {}),
@@ -137,14 +145,8 @@ export function getFisheyeViewMode(cameraId: string): FisheyeViewMode {
   if (!cameraId || typeof localStorage === "undefined") return "virtual_ptz";
   try {
     const mode = localStorage.getItem(`${VIEW_MODE_PREFIX}${cameraId}`);
-    if (
-      mode === "original" ||
-      mode === "360" ||
-      mode === "panorama" ||
-      mode === "virtual_ptz" ||
-      mode === "3_fixed_120"
-    ) {
-      return mode;
+    if (SUPPORTED_VIEW_MODES.includes(mode as FisheyeViewMode)) {
+      return mode as FisheyeViewMode;
     }
     const config = getFisheyeConfig(cameraId);
     if (config?.defaultMode) return config.defaultMode;

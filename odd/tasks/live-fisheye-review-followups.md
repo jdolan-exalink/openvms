@@ -27,7 +27,7 @@ Two of them leave streams open indefinitely or force reconnects; the others brea
 - [x] RF-03 — Clear the sticky `discardWhenReleased` flag when the same camera:quality session is acquired again, so the next full release moves it to WARM (`apps/web/src/lib/live/PlayerSessionManager.ts` ~96).
 - [x] RF-04 — Update the fisheye Cancel baseline after "Guardar vista" so Cancel returns to the saved mode (`apps/web/src/components/fisheye/FisheyeViewer.tsx` ~69).
 - [x] RF-05 — Do not snap user pan/zoom on targeted virtual-view tiles back on every render; resync only when the target view itself changes (`apps/web/src/components/fisheye/FisheyeViewer.tsx` ~210).
-- [ ] RF-06 — Migrate legacy `4_quadrants` configs to a supported mode and handle stale quadrant view references in saved grids (`apps/web/src/lib/fisheye/storage.ts` ~78, `types.ts`, Live grid restore).
+- [x] RF-06 — Migrate legacy `4_quadrants` configs to a supported mode and handle stale quadrant view references in saved grids (`apps/web/src/lib/fisheye/storage.ts` ~78, `types.ts`, Live grid restore).
 
 ## Acceptance criteria
 
@@ -47,5 +47,6 @@ Two of them leave streams open indefinitely or force reconnects; the others brea
 - RF-02: RED `expected 1 video, got 2` after maximize/unmaximize on a tile saved on main (Live.test.tsx). Fix: unmaximize deletes the maximize override instead of installing a `sub` focus-restore one (type removed). GREEN: Live.test.tsx 63/63; typecheck ok; lint 13 errors/1 warning.
 - RF-04: RED `expected 3 Fijas button toHaveClass bg-primary` after Guardar vista then Cancelar (FisheyeViewer.test.tsx). Fix: handleSaveModeAsDefault updates cancelModeRef. GREEN: FisheyeViewer.test.tsx 12/12; typecheck ok; lint FisheyeViewer.tsx unchanged at 4 baseline errors.
 - RF-05: RED `FOV: 80°` unchanged after wheel zoom on targeted view (FisheyeViewer.test.tsx). Fix: render-phase sync now keyed on a `syncedTarget` state and field-wise comparison (resync/PTZ setState only when the target's identity/fields change); no mode forcing otherwise. GREEN: fisheye + Live tests 86/86 (incl. FGI-09 and 'tracks a changing target virtual view'); typecheck ok; FisheyeViewer.tsx lint still the 4 baseline errors (lines shifted only).
+- RF-06: RED `expected '4_quadrants' to be 'virtual_ptz'` (storage.test.ts) and `expected 3 Vacío, got 2` for a restored tile with a removed fisheye_view_id (Live.test.tsx). Fix: storage normalizes unknown/legacy modes to `virtual_ptz` (config and stored mode); Live restore empties tiles whose fisheye_view_id does not resolve. GREEN: fisheye/Live tests 105/105; typecheck ok.
 
 Repository-relative file: `odd/tasks/live-fisheye-review-followups.md`
