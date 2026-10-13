@@ -132,6 +132,18 @@ describe("VideoTelemetryService", () => {
     expect(snap.health).toBe("optimal");
   });
 
+  it("does not count a slow but steady camera (0.5 fps) as stalled", () => {
+    const svc = new VideoTelemetryService();
+    const cams = Array.from({ length: 4 }, () => source({ frames: { total: 0, dropped: 0 } }));
+    for (const c of cams) svc.register(c.src);
+    svc.subscribe(() => {});
+    for (let t = 1; t <= 8; t++) {
+      for (const c of cams) c.s.frames = { total: Math.floor(t / 2), dropped: 0 };
+      vi.advanceTimersByTime(1000);
+    }
+    expect(svc.getSnapshot().health).toBe("optimal");
+  });
+
   it("degrades health when ACTIVE sessions stall, but ignores WARM sessions", () => {
     const svc = new VideoTelemetryService();
     const stalled = Array.from({ length: 3 }, () => source({ frames: { total: 10, dropped: 0 } }));
@@ -139,7 +151,8 @@ describe("VideoTelemetryService", () => {
     const warm = source({ state: "WARM", frames: { total: 0, dropped: 0 } });
     for (const c of [...stalled, live, warm]) svc.register(c.src);
     svc.subscribe(() => {});
-    for (let t = 1; t <= 5; t++) {
+    // A stall only counts after STALL_SAMPLES frozen samples, so sustain it across the classifier window.
+    for (let t = 1; t <= 8; t++) {
       live.s.frames = { total: t * 10, dropped: 0 };
       vi.advanceTimersByTime(1000);
     }

@@ -4,6 +4,8 @@ import { classifyPerformance, type ClassifierSample, type PerformanceHealth } fr
 /** Number of 1 Hz samples kept (one minute). */
 export const HISTORY_SIZE = 60;
 const SAMPLE_INTERVAL_MS = 1000;
+/** Consecutive samples without a new frame before an ACTIVE session counts as stalled (tolerates sub-1 fps cameras). */
+export const STALL_SAMPLES = 3;
 
 /** What the service needs to observe from a live session (kept structural to stay framework- and class-agnostic). */
 export type TelemetrySource = {
@@ -59,6 +61,7 @@ type Entry = {
   lastBytes: number;
   lastTotalFrames: number | null;
   lastDroppedFrames: number;
+  frozenSamples: number;
 };
 
 function emptyCounts(): StreamCounts {
@@ -104,7 +107,7 @@ export class VideoTelemetryService {
   constructor(private readonly now: () => number = () => Date.now()) {}
 
   register(source: TelemetrySource): TelemetryHandle {
-    const entry: Entry = { source, bytes: 0, lastBytes: 0, lastTotalFrames: null, lastDroppedFrames: 0 };
+    const entry: Entry = { source, bytes: 0, lastBytes: 0, lastTotalFrames: null, lastDroppedFrames: 0, frozenSamples: 0 };
     this.entries.add(entry);
     return {
       addBytes: (bytes) => {
@@ -134,6 +137,7 @@ export class VideoTelemetryService {
       const frames = readFrames(e.source.video);
       e.lastTotalFrames = frames ? frames.total : null;
       e.lastDroppedFrames = frames ? frames.dropped : 0;
+      e.frozenSamples = 0;
     }
     this.timer = setInterval(() => this.tick(), SAMPLE_INTERVAL_MS);
   }
@@ -178,12 +182,15 @@ export class VideoTelemetryService {
         // Only ACTIVE sessions count: WARM ones present few frames by design and would skew health.
         if (prev !== null && frames.total >= prev && frames.dropped >= prevDropped && state === "ACTIVE") {
           const dTotal = frames.total - prev;
-          if (dTotal === 0) stalled++;
+          e.frozenSamples = dTotal === 0 ? e.frozenSamples + 1 : 0;
+          if (e.frozenSamples >= STALL_SAMPLES) stalled++;
           const dDropped = frames.dropped - prevDropped;
           decoded += dTotal;
           dropped += dDropped;
           presented += dTotal - dDropped;
           measured++;
+        } else {
+          e.frozenSamples = 0;
         }
       }
 
