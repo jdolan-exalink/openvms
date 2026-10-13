@@ -6,7 +6,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Camera, CircleCheck, CircleHelp, CircleX, Compass, History, Maximize2, Minimize2, SlidersHorizontal, X } from "lucide-react";
+import { Camera, CircleCheck, CircleHelp, CircleX, Compass, Fish, History, Maximize2, Minimize2, SlidersHorizontal, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
@@ -27,13 +27,14 @@ import { useT } from "@/i18n";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { type ExplorerActions, LiveExplorer } from "@/components/LiveExplorer";
 import { Modal } from "@/components/Modal";
+import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/Presentations";
 import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles,
+  cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles, tileIdentityKey,
   serializeSelection, swapTiles, tileDragId, tilesForFisheyeMultiView,
-  type Tile,
+  type Quality, type Tile,
 } from "@/lib/liveGrid";
 import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
 import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
@@ -44,8 +45,19 @@ import { useLiveDragSensors } from "@/lib/dndSensors";
 import { useTouchDoubleTap } from "@/lib/useTouchDoubleTap";
 import { useCameraFolders } from "@/lib/useCameraFolders";
 import { useRecSession } from "@/lib/useRecSession";
+import { usePlayerSessionManager } from "@/lib/live/PlayerSessionProvider";
 
 /** copyViewName picks «Nombre (copia)» or «Nombre (copia 2)» so a duplicate stays unique. */
+/** Empties a restored tile whose saved fisheye view no longer exists (e.g. removed quadrant views). */
+function dropUnresolvedFisheyeTile(tile: Tile): Tile {
+  if (!tile || !("camera_id" in tile) || !tile.fisheye_view_id) return tile;
+  const config = getFisheyeConfig(tile.camera_id);
+  const resolves =
+    getEffectiveVirtualViews(config).some((v) => v.id === tile.fisheye_view_id) ||
+    config.views.some((v) => v.id === tile.fisheye_view_id);
+  return resolves ? tile : null;
+}
+
 function copyViewName(name: string, taken: Set<string>): string {
   const base = `${name} (copia)`;
   if (!taken.has(base.toLowerCase())) return base;
@@ -80,6 +92,7 @@ function LiveDesktop() {
   const [tiles, setTiles] = useState<Tile[]>(() => Array(4).fill(null));
   const [selected, setSelected] = useState(0);
   const [focus, setFocus] = useState<number | null>(null);
+  const [qualityOverrides, setQualityOverrides] = useState<Record<string, { quality: Quality; identities: string[]; source: "manual" | "maximize" }>>({});
   const [viewId, setViewId] = useState("");
   const [playbackCameraId, setPlaybackCameraId] = useState<string | null>(null);
   const [viewDialog, setViewDialog] = useState<null | { mode: "create" } | { mode: "edit"; id: string }>(null);
@@ -90,10 +103,19 @@ function LiveDesktop() {
   const [restored, setRestored] = useState(false);
   const tilesRef = useRef(tiles);
   const selectedRef = useRef(selected);
+  const qualityOverridesRef = useRef(qualityOverrides);
+  const qualityTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const maximizeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const maximizedCameraIdsRef = useRef(new Set<string>());
+  const [invalidatedOverrideKeys, setInvalidatedOverrideKeys] = useState<Set<string>>(() => new Set());
+  const previousFocusedCameraRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     tilesRef.current = tiles;
     selectedRef.current = selected;
   }, [tiles, selected]);
+  useEffect(() => {
+    qualityOverridesRef.current = qualityOverrides;
+  }, [qualityOverrides]);
   const [consumedCamera, setConsumedCamera] = useState<string | undefined>();
   const folderApi = useCameraFolders(cameras.data);
   const [sidebarPinned, setSidebarPinnedState] = useState(loadSidebarPinned);
@@ -150,6 +172,7 @@ function LiveDesktop() {
   }, []);
   const topBar = useTopBarActionsPortalTarget();
   const { persistentPlayers, videoSurfaceLayer } = useFeatures();
+  const playerSessionManager = usePlayerSessionManager();
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
     const sync = () => {
@@ -180,8 +203,7 @@ function LiveDesktop() {
 
       if (updatedCameraId) {
         const feConfig = getFisheyeConfig(updatedCameraId);
-        const isMultiMode =
-          feConfig.defaultMode === "3_fixed_120" || feConfig.defaultMode === "4_quadrants";
+        const isMultiMode = feConfig.defaultMode === "3_fixed_120";
 
         // "y quiero que si salimos de grilla 3 o 4 que borre las vistas"
         if (!isMultiMode || feConfig.views.length === 0) {
@@ -236,7 +258,7 @@ function LiveDesktop() {
         setColumns(saved.columns);
         setRows(saved.rows);
         setPanes(saved.panes ?? uniformPanes(saved.columns, saved.rows));
-        setTiles(saved.tiles);
+        setTiles(saved.tiles.map(dropUnresolvedFisheyeTile));
       }
     } catch {
       // Storage unavailable or corrupt: keep the default empty grid.
@@ -303,6 +325,24 @@ function LiveDesktop() {
     setFocus(null);
   };
 
+  const discardRemovedSessions = (previous: Tile[], next: Tile[]) => {
+    if (!persistentPlayers || !playerSessionManager) return;
+    const retained = new Set(next.flatMap((tile) => tile && "camera_id" in tile
+      ? [`${tile.camera_id}:${"quality" in tile ? tile.quality : "sub"}`]
+      : []));
+    const removed = new Map<string, "main" | "sub">();
+    for (const tile of previous) {
+      if (!tile || !("camera_id" in tile)) continue;
+      const quality = "quality" in tile ? tile.quality : "sub";
+      const key = `${tile.camera_id}:${quality}`;
+      if (!retained.has(key)) removed.set(key, quality);
+    }
+    for (const [key, quality] of removed) {
+      const cameraId = key.slice(0, key.lastIndexOf(":"));
+      playerSessionManager.discard(cameraId, quality);
+    }
+  };
+
   // index defaults to the currently selected tile (click-to-place); dragging a camera from the
   // list onto a specific slot passes that slot's index explicitly instead.
   const place = (cameraId: string, index?: number, viewId?: string) => {
@@ -312,11 +352,73 @@ function LiveDesktop() {
     // The ref updates immediately so two clicks before the next render fill two cells.
     const source = tilesRef.current;
     const next = persistentPlayers ? placeCameraUnique(source, at, cameraId, quality, viewId) : placeCameraAt(source, at, cameraId, quality, viewId);
+    discardRemovedSessions(source, next);
     const empty = next.findIndex((cell, i) => cell === null && i !== at);
     tilesRef.current = next;
     if (empty >= 0) selectedRef.current = empty;
     setTiles(next);
     if (empty >= 0) setSelected(empty);
+  };
+
+  const removeTile = (index: number) => {
+    const next = tilesRef.current.map((tile, tileIndex) => (tileIndex === index ? null : tile));
+    discardRemovedSessions(tilesRef.current, next);
+    tilesRef.current = next;
+    setTiles(next);
+    setSelected((current) => current === index ? 0 : current);
+    selectedRef.current = selectedRef.current === index ? 0 : selectedRef.current;
+    setFocus(null);
+  };
+
+  const closeAllStreams = () => {
+    const next = tilesRef.current.map(() => null);
+    discardRemovedSessions(tilesRef.current, next);
+    tilesRef.current = next;
+    setTiles(next);
+    setSelected(0);
+    selectedRef.current = 0;
+    setFocus(null);
+    setViewId("");
+  };
+
+  const clearQualityTimer = (cameraId: string) => {
+    const timer = qualityTimersRef.current.get(cameraId);
+    if (timer !== undefined) clearTimeout(timer);
+    qualityTimersRef.current.delete(cameraId);
+  };
+
+  const setQualityOverride = (cameraId: string, quality: Quality, source: "manual" | "maximize") => {
+    const identities = tilesRef.current.flatMap((tile) => {
+      if (!tile || !("camera_id" in tile) || tile.camera_id !== cameraId) return [];
+      const identity = tileIdentityKey(tile);
+      if (!identity) return [];
+      setInvalidatedOverrideKeys((current) => {
+        const next = new Set(current);
+        next.delete(`${cameraId}:${identity}`);
+        return next;
+      });
+      return [identity];
+    });
+    if (identities.length === 0) return;
+    setQualityOverrides((current) => ({ ...current, [cameraId]: { quality, identities: [...new Set(identities)], source } }));
+  };
+
+  const requestTemporaryMainQuality = (cameraId: string) => {
+    clearQualityTimer(cameraId);
+    setQualityOverride(cameraId, "main", "manual");
+    const timer = setTimeout(() => {
+      qualityTimersRef.current.delete(cameraId);
+      setQualityOverrides((current) => {
+        if (current[cameraId]?.source !== "manual") return current;
+        if (maximizedCameraIdsRef.current.has(cameraId)) {
+          return { ...current, [cameraId]: { ...current[cameraId], quality: "main", source: "maximize" } };
+        }
+        const next = { ...current };
+        delete next[cameraId];
+        return next;
+      });
+    }, 30_000);
+    qualityTimersRef.current.set(cameraId, timer);
   };
 
   // Swapping (not shifting) keeps every other tile in its cell, so only the two swapped cameras move.
@@ -500,9 +602,35 @@ function LiveDesktop() {
       flash(`${label} no tiene cámaras.`, "warn");
       return;
     }
-    const layout = presentationForCount(DEFAULT_PRESENTATIONS, list.length);
-    const built = fitTiles(list.map((camera): Tile => ({ camera_id: camera.id, quality: cameraQuality(camera.id, layout.columns) })), layout.panes.length);
-    const skipped = Math.max(0, list.length - layout.panes.length);
+    const expandedTiles: Tile[] = [];
+    for (const camera of list) {
+      const feConfig = getFisheyeConfig(camera.id);
+      const isFisheye = Boolean(
+        (feConfig.enabled && feConfig.lensType !== "normal") ||
+        camera.tags?.includes("fisheye") ||
+        camera.tags?.includes("ojo_de_pez") ||
+        Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))
+      );
+      const effectiveViews = isFisheye ? getEffectiveVirtualViews(feConfig) : [];
+      if (isFisheye && (feConfig.defaultMode === "3_fixed_120" || effectiveViews.length >= 2)) {
+        // Tile 0: real camera stream (raw / original)
+        expandedTiles.push({ camera_id: camera.id, quality: "sub" });
+        // Tiles 1..N: the virtual views (e.g. 3 of 120°)
+        for (const v of effectiveViews) {
+          expandedTiles.push({ camera_id: camera.id, quality: "sub", fisheye_view_id: v.id });
+        }
+      } else {
+        expandedTiles.push({ camera_id: camera.id, quality: "sub" });
+      }
+    }
+    const layout = presentationForCount(DEFAULT_PRESENTATIONS, expandedTiles.length);
+    const built = fitTiles(
+      expandedTiles.map((t) =>
+        t && "camera_id" in t ? { ...t, quality: cameraQuality(t.camera_id, layout.columns) } : t
+      ),
+      layout.panes.length
+    );
+    const skipped = Math.max(0, expandedTiles.length - layout.panes.length);
     setColumns(layout.columns);
     setRows(layout.rows);
     setPanes(layout.panes);
@@ -510,8 +638,8 @@ function LiveDesktop() {
     setSelected(0);
     setFocus(null);
     setViewId("");
-    if (skipped > 0) flash(`${label}: se muestran ${list.length - skipped} de ${list.length} cámaras. La grilla más grande es ${layout.name}.`, "warn");
-    else flash(`${label}: ${layout.name} con ${plural(list.length)}.`);
+    if (skipped > 0) flash(`${label}: se muestran ${expandedTiles.length - skipped} de ${expandedTiles.length} vistas. La grilla más grande es ${layout.name}.`, "warn");
+    else flash(`${label}: ${layout.name} con ${plural(expandedTiles.length)}.`);
   };
   const placeInOpen = (cameraId: string, viewId?: string) => {
     if (!camById.has(cameraId)) return;
@@ -590,6 +718,7 @@ function LiveDesktop() {
     canConfigureServers: can(me.data, "servers.manage"),
     canConfigureCameras: can(me.data, "servers.config"),
     onConfigureFisheye: (cameraId: string) => setFisheyeConfigCameraId(cameraId),
+    onTemporaryMainQuality: requestTemporaryMainQuality,
   };
 
   // With persistent players the other tiles stay mounted (hidden, sessions WARM) while one is
@@ -600,6 +729,86 @@ function LiveDesktop() {
 
   const gridCameraIds = useMemo(() => [...new Set(tiles.flatMap((t) => { const id = cameraIdOf(t); return id && camById.has(id) ? [id] : []; }))], [tiles, camById]);
   const focusedCameraId = focus !== null ? cameraIdOf(tiles[focus] ?? null) : undefined;
+  useEffect(() => {
+    const previous = previousFocusedCameraRef.current;
+    clearTimeout(maximizeTimerRef.current);
+    maximizeTimerRef.current = undefined;
+    if (previous && previous !== focusedCameraId) {
+      maximizedCameraIdsRef.current.delete(previous);
+      if (qualityOverridesRef.current[previous]?.source === "maximize") {
+        clearQualityTimer(previous);
+        setQualityOverrides((current) => {
+          if (current[previous]?.source !== "maximize") return current;
+          const next = { ...current };
+          delete next[previous];
+          return next;
+        });
+      }
+    }
+    previousFocusedCameraRef.current = focusedCameraId;
+    if (focusedCameraId) {
+      const cameraId = focusedCameraId;
+      maximizeTimerRef.current = setTimeout(() => {
+        if (previousFocusedCameraRef.current !== cameraId) return;
+        maximizedCameraIdsRef.current.add(cameraId);
+        if (qualityOverridesRef.current[cameraId]?.source !== "manual") {
+          clearQualityTimer(cameraId);
+          setQualityOverride(cameraId, "main", "maximize");
+        }
+      }, 5_001);
+    }
+  }, [focusedCameraId]);
+
+  useEffect(() => {
+    const activeIdentities = new Map<string, Set<string>>();
+    for (const tile of tiles) {
+      if (!tile || !("camera_id" in tile)) continue;
+      const identity = tileIdentityKey(tile);
+      if (!identity) continue;
+      const active = activeIdentities.get(tile.camera_id) ?? new Set<string>();
+      active.add(identity);
+      activeIdentities.set(tile.camera_id, active);
+    }
+    for (const [cameraId, override] of Object.entries(qualityOverridesRef.current)) {
+      const active = activeIdentities.get(cameraId);
+      let validCount = 0;
+      for (const identity of override.identities) {
+        if (active?.has(identity)) validCount++;
+        else {
+          setInvalidatedOverrideKeys((current) => {
+            const next = new Set(current);
+            next.add(`${cameraId}:${identity}`);
+            return next;
+          });
+        }
+      }
+      if (validCount === 0) {
+        clearQualityTimer(cameraId);
+        if (previousFocusedCameraRef.current === cameraId) clearTimeout(maximizeTimerRef.current);
+        setQualityOverrides((current) => {
+          if (!(cameraId in current)) return current;
+          const next = { ...current };
+          delete next[cameraId];
+          return next;
+        });
+      }
+    }
+  }, [tiles]);
+
+  useEffect(() => () => {
+    for (const timer of qualityTimersRef.current.values()) clearTimeout(timer);
+    qualityTimersRef.current.clear();
+    clearTimeout(maximizeTimerRef.current);
+  }, []);
+
+  const qualityOverrideFor = (tile: Tile): Quality | undefined => {
+    if (!tile || !("camera_id" in tile)) return undefined;
+    const identity = tileIdentityKey(tile);
+    const override = qualityOverrides[tile.camera_id];
+    if (!identity || !override?.identities.includes(identity)) return undefined;
+    if (invalidatedOverrideKeys.has(`${tile.camera_id}:${identity}`)) return undefined;
+    return override.quality;
+  };
   const { rec, now, transport, recData, denied, recLimited, hasCoverage, masterId, timelineCameras, setMode } = useRecSession({
     canRec,
     cameraIds: gridCameraIds,
@@ -632,6 +841,7 @@ function LiveDesktop() {
   const sidebarContent = (
     <LiveExplorer
       cameras={cameras.data ?? []}
+      gridCameraIds={gridCameraIds}
       sites={sites.data ?? []}
       servers={servers.data ?? []}
       folderApi={folderApi}
@@ -702,6 +912,7 @@ function LiveDesktop() {
             <div role="group" aria-label={tr("live.gridLayout")} className="flex shrink-0 flex-wrap items-center gap-1">
               <LayoutMenu catalog={catalog} active={{ columns, panes }} onSelect={applyPresentation} onEdit={() => setEditorOpen(true)} />
               <FullscreenButton active={fullscreen} onClick={toggleFullscreen} />
+              <IconButton icon={X} title="Cerrar todas las cámaras" aria-label="Cerrar todas las cámaras" className="size-8" onClick={closeAllStreams} />
               {canRec && (fullscreen || !topBar.available) && <div className="ml-auto">{modeToggle}</div>}
             </div>
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
@@ -731,9 +942,10 @@ function LiveDesktop() {
                             : "player";
                     recLayer = <RecTile cameraId={id} name={cam.display_name} state={state} transport={transport} isMaster={id === masterId} />;
                   }
+                  const identityKey = tileIdentityKey(t);
                   return (
                     <GridTile
-                      key={persistentPlayers ? (cameraId && !duplicates.has(i) ? `camera:${cameraId}` : `cell:${i}`) : i}
+                      key={identityKey && !duplicates.has(i) ? `camera:${identityKey}` : `cell:${i}`}
                       index={i}
                       placement={focus === null && panes[i] ? { gridColumn: `${panes[i].col + 1} / span ${panes[i].colSpan}`, gridRow: `${panes[i].row + 1} / span ${panes[i].rowSpan}` } : undefined}
                       tile={t}
@@ -749,16 +961,14 @@ function LiveDesktop() {
                       serverId={cam?.server_id}
                       canViewRecordings={can(me.data, "recordings.view")}
                       status={cam?.status}
-                      quality={persistentPlayers ? (t && "quality" in t ? t.quality : "sub") : focus === i || columns === 1 ? "main" : (t && "quality" in t ? t.quality : "sub")}
+                      quality={t && "quality" in t ? t.quality : "sub"}
+                      qualityOverride={qualityOverrideFor(t)}
                       onSelect={() => setSelected(i)}
                       onToggleFocus={() => t && setFocus(focus === null ? i : null)}
                       onOpenFisheye={(id) => setFisheyeModalCameraId(id)}
                       onConfigureFisheye={(id) => setFisheyeConfigCameraId(id)}
                       fisheyeVersion={fisheyeVersion}
-                      onRemove={() => {
-                        setTiles((x) => x.map((v, j) => (j === i ? null : v)));
-                        setFocus(null);
-                      }}
+                      onRemove={() => removeTile(i)}
                     />
                   );
                 })}
@@ -877,6 +1087,125 @@ function LiveGridFrame({ className, style, role, label, mode, children }: { clas
   );
 }
 
+export function useTileOverlayVisibility() {
+  const [visible, setVisible] = useState(true);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reveal = () => {
+    if (timer.current) clearTimeout(timer.current);
+    setVisible(true);
+  };
+  const scheduleHide = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setVisible(false), 3000);
+  };
+  useEffect(() => {
+    timer.current = setTimeout(() => setVisible(false), 3000);
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+  return { visible, reveal, scheduleHide };
+}
+
+function FisheyeQualityLayers({
+  cameraId,
+  config,
+  compact,
+  initialMode,
+  targetViewId,
+  className,
+  quality,
+  qualityOverride,
+  identity,
+}: {
+  cameraId: string;
+  config: ReturnType<typeof getFisheyeConfig>;
+  compact: boolean;
+  initialMode: ReturnType<typeof getFisheyeConfig>["defaultMode"];
+  targetViewId?: string;
+  className?: string;
+  quality: Quality;
+  qualityOverride?: Quality;
+  identity: string;
+}) {
+  const [frameReady, setFrameReady] = useState<{ requested: Quality | undefined; quality: Quality | null }>({ requested: undefined, quality: null });
+  const readyQuality = frameReady.requested === qualityOverride ? frameReady.quality : null;
+  const handoff = qualityOverride !== undefined && qualityOverride !== quality;
+  return (
+    <div className={cn("relative", className)}>
+      <div className="absolute inset-0 z-0">
+        <FisheyeViewer
+          key={`${identity}:base:${quality}`}
+          cameraId={cameraId}
+          config={config}
+          compact={compact}
+          initialMode={initialMode}
+          targetViewId={targetViewId}
+          quality={quality}
+          className="size-full"
+        />
+      </div>
+      {handoff && qualityOverride && (
+        <div className={cn("absolute inset-0 z-[1]", readyQuality === qualityOverride ? "opacity-100" : "pointer-events-none opacity-0")}>
+          <FisheyeViewer
+            key={`${identity}:target:${qualityOverride}`}
+            cameraId={cameraId}
+            config={config}
+            compact={compact}
+            initialMode={initialMode}
+            targetViewId={targetViewId}
+            quality={qualityOverride}
+            onFirstFrame={() => setFrameReady({ requested: qualityOverride, quality: qualityOverride })}
+            className="size-full"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QualityTargetSurface({
+  cameraId,
+  quality,
+  persistent,
+  surface,
+  serverId,
+  active,
+  suspended,
+}: {
+  cameraId: string;
+  quality: Quality;
+  persistent: boolean;
+  surface: boolean;
+  serverId?: string;
+  active: boolean;
+  suspended: boolean;
+}) {
+  const [ready, setReady] = useState(false);
+  return (
+    <div
+      data-testid="quality-target-surface"
+      data-quality={quality}
+      className={cn("absolute inset-0 z-[1]", ready ? "opacity-100" : "pointer-events-none opacity-0")}
+    >
+      <MsePlayer
+        cameraId={cameraId}
+        quality={quality}
+        persistent={persistent}
+        surface={surface}
+        serverId={serverId}
+        active={active}
+        suspended={suspended}
+        objectFit="fill"
+        className="size-full"
+        onFirstFrame={() => setReady(true)}
+        hideStatusOverlay
+        hideSurfaceUntilFrame
+      />
+    </div>
+  );
+}
+
 function GridTile({
   index,
   placement,
@@ -894,6 +1223,7 @@ function GridTile({
   canViewRecordings,
   status,
   quality,
+  qualityOverride,
   onSelect,
   onToggleFocus,
   onOpenFisheye,
@@ -921,6 +1251,7 @@ function GridTile({
   canViewRecordings: boolean;
   status?: string;
   quality: "sub" | "main";
+  qualityOverride?: Quality;
   onSelect: () => void;
   onToggleFocus: () => void;
   onOpenFisheye?: (cameraId: string) => void;
@@ -929,6 +1260,8 @@ function GridTile({
   onRemove: () => void;
 }) {
   const tr = useT();
+  const { visible: overlayVisible, reveal: revealOverlay, scheduleHide: scheduleOverlayHide } = useTileOverlayVisibility();
+  const [fisheyeActionsAt, setFisheyeActionsAt] = useState<{ x: number; y: number; opener: HTMLButtonElement } | null>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...placement };
   // Touch: two quick taps expand the tile like a double click. The dblclick some browsers synthesize after it is ignored.
@@ -940,7 +1273,19 @@ function GridTile({
       aria-label={tr("live.cell", { index: index + 1 })}
       aria-current={isSelected ? "true" : undefined}
       data-selected={isSelected ? "true" : undefined}
-      onClick={onSelect}
+      onClick={(event) => {
+        onSelect();
+        if (event.detail > 0 && typeof window.matchMedia === "function" && window.matchMedia("(hover: none)").matches) {
+          revealOverlay();
+          scheduleOverlayHide();
+        }
+      }}
+      onPointerEnter={revealOverlay}
+      onPointerLeave={scheduleOverlayHide}
+      onFocusCapture={revealOverlay}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) scheduleOverlayHide();
+      }}
       onDoubleClick={() => {
         if (touchTap.justHandled()) return;
         onToggleFocus();
@@ -1000,7 +1345,7 @@ function GridTile({
               ? effectiveViews.find((v) => v.id === tile.fisheye_view_id) ||
                 feConfig.views.find((v) => v.id === tile.fisheye_view_id)
               : undefined;
-            const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || feConfig.defaultMode === "4_quadrants" || effectiveViews.length >= 2);
+            const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || effectiveViews.length >= 2);
             const useFisheye =
               !suspended &&
               isFisheyeCamera &&
@@ -1019,22 +1364,40 @@ function GridTile({
 
             if (useFisheye) {
               return (
-                <div className="relative size-full">
-                  <FisheyeViewer
-                    key={`${tile.camera_id}-${tile.fisheye_view_id ?? "root"}-${feConfig.defaultMode}-${fisheyeVersion ?? 0}`}
-                    cameraId={tile.camera_id}
-                    config={feConfig}
-                    compact={true}
-                    initialMode={specificView ? "virtual_ptz" : feConfig.defaultMode}
-                    targetViewId={specificView?.id}
-                    className="size-full"
-                  />
-                </div>
+                <FisheyeQualityLayers
+                  cameraId={tile.camera_id}
+                  config={feConfig}
+                  compact
+                  initialMode={specificView ? "virtual_ptz" : feConfig.defaultMode}
+                  targetViewId={specificView?.id}
+                  className="size-full"
+                  quality={quality}
+                  qualityOverride={qualityOverride}
+                  identity={`${tile.camera_id}-${tile.fisheye_view_id ?? "root"}-${feConfig.defaultMode}-${fisheyeVersion ?? 0}`}
+                />
               );
             }
 
+            const basePlayer = <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" />;
+            // The wrapper is rendered whether or not a target layer exists, so the base player keeps its
+            // position in the tree and is never remounted (its session closed) when the target appears or goes away.
+            const showTarget = qualityOverride !== undefined && qualityOverride !== quality;
             return (
-              <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" />
+              <div className="relative size-full">
+                <div className="absolute inset-0 z-0">{basePlayer}</div>
+                {showTarget && (
+                  <QualityTargetSurface
+                    key={`${tileIdentityKey(tile) ?? tile.camera_id}:${qualityOverride}`}
+                    cameraId={tile.camera_id}
+                    quality={qualityOverride}
+                    persistent={persistent}
+                    surface={surface}
+                    serverId={serverId}
+                    active={!isHidden}
+                    suspended={suspended}
+                  />
+                )}
+              </div>
             );
           })()}
           {recLayer}
@@ -1052,11 +1415,11 @@ function GridTile({
                 ? effectiveViews.find((v) => v.id === tile.fisheye_view_id) ||
                   feConfig.views.find((v) => v.id === tile.fisheye_view_id)
                 : undefined;
-              const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || feConfig.defaultMode === "4_quadrants" || effectiveViews.length >= 2);
+              const hasMultipleViews = isFisheyeCamera && (feConfig.defaultMode === "3_fixed_120" || effectiveViews.length >= 2);
               return (
                 <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-surface-1/80 px-2.5 py-1 text-on-surface backdrop-blur">
                   <Icon icon={specificView ? Compass : Camera} size="xs" className={cn("shrink-0", specificView && "text-cyan-400")} />
-                  <span className="truncate font-medium">
+                  <span className={cn("truncate font-medium transition-opacity", !overlayVisible && status !== "offline" && "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100")}>
                     {camera.display_name}
                     {specificView ? ` · ${specificView.name}` : (isFisheyeCamera && hasMultipleViews ? " (Original)" : "")}
                   </span>
@@ -1073,33 +1436,24 @@ function GridTile({
                 </span>
               );
             })()}
-            <span className="ml-auto flex shrink-0 gap-1">
+            <span className={cn("ml-auto flex shrink-0 gap-1 transition-opacity", !overlayVisible && "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100")}>
               {canViewRecordings && (
                 <Link to="/playback" search={{ camera: tile.camera_id }} title={tr("nav.recordings")} aria-label={tr("live.recordingsOf", { name: camera.display_name })} className={cn(tileAction, "m3-press inline-flex items-center justify-center focus-visible:outline-2 focus-visible:outline-primary")}>
                   <Icon icon={History} size="xs" />
                 </Link>
               )}
-              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || (getFisheyeConfig(tile.camera_id).enabled && getFisheyeConfig(tile.camera_id).lensType !== "normal") || Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))) && onOpenFisheye && (
+              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || (getFisheyeConfig(tile.camera_id).enabled && getFisheyeConfig(tile.camera_id).lensType !== "normal") || Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))) && (onOpenFisheye || onConfigureFisheye) && (
                 <IconButton
-                  icon={Compass}
-                  title="Navegación y dewarping Fisheye 360°"
-                  aria-label="Fisheye 360°"
+                  icon={Fish}
+                  title="Acciones de Fisheye"
+                  aria-label="Acciones de Fisheye"
+                  aria-haspopup="menu"
+                  aria-expanded={Boolean(fisheyeActionsAt)}
                   className={cn(tileAction, "text-cyan-400 hover:text-cyan-300")}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onOpenFisheye(tile.camera_id);
-                  }}
-                />
-              )}
-              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || (getFisheyeConfig(tile.camera_id).enabled && getFisheyeConfig(tile.camera_id).lensType !== "normal") || Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))) && onConfigureFisheye && (
-                <IconButton
-                  icon={SlidersHorizontal}
-                  title="Configuración de vista Fisheye"
-                  aria-label="Configuración de vista"
-                  className={cn(tileAction, "text-cyan-400 hover:text-cyan-300")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onConfigureFisheye(tile.camera_id);
+                    const bounds = e.currentTarget.getBoundingClientRect();
+                    setFisheyeActionsAt({ x: bounds.left, y: bounds.bottom, opener: e.currentTarget });
                   }}
                 />
               )}
@@ -1125,6 +1479,18 @@ function GridTile({
               />
             </span>
           </div>
+          {fisheyeActionsAt && camera && (
+            <ContextMenu
+              x={fisheyeActionsAt.x}
+              y={fisheyeActionsAt.y}
+              returnFocusTo={fisheyeActionsAt.opener}
+              onClose={() => setFisheyeActionsAt(null)}
+              items={[
+                ...(onOpenFisheye ? [{ id: "dewarp", label: "Navegación y dewarping Fisheye 360°", icon: Fish, onSelect: () => onOpenFisheye(camera.id) } satisfies MenuItem] : []),
+                ...(onConfigureFisheye ? [{ id: "configure", label: "Configuración de vista Fisheye", icon: SlidersHorizontal, onSelect: () => onConfigureFisheye(camera.id) } satisfies MenuItem] : []),
+              ]}
+            />
+          )}
         </>
       ) : (
         <div className="flex size-full items-center justify-center text-xs text-on-surface-variant">{tile && !camera ? tr("live.noAccess") : tr("live.emptyCell")}</div>

@@ -10,7 +10,6 @@ import { Icon } from "@/components/Icon";
 import { FisheyeDewarpEngine } from "@/lib/fisheye/engine";
 import {
   generate3Fixed120Views,
-  generate4QuadrantsViews,
   getEffectiveVirtualViews,
   getFisheyeConfig,
   getFisheyeViewMode,
@@ -24,16 +23,17 @@ import type {
 } from "@/lib/fisheye/types";
 import { VirtualPtzController } from "@/lib/fisheye/VirtualPtzController";
 import { PlayerSession } from "@/lib/live/PlayerSession";
+import type { SessionQuality } from "@/lib/live/PlayerSession";
 import { cn } from "@/lib/cn";
 import {
   Bookmark,
   Check,
   Compass,
-  Grid2X2,
   Plus,
   RotateCcw,
   Sliders,
   View,
+  X,
 } from "lucide-react";
 
 export interface FisheyeViewerProps {
@@ -47,6 +47,23 @@ export interface FisheyeViewerProps {
   compact?: boolean;
   initialMode?: FisheyeViewMode;
   targetViewId?: string;
+  /** Source stream quality; Live can keep a previous-quality instance warm during handoff. */
+  quality?: SessionQuality;
+  onFirstFrame?: () => void;
+}
+
+function isSameVirtualView(a: VirtualFisheyeView | undefined, b: VirtualFisheyeView): boolean {
+  return (
+    !!a &&
+    a.id === b.id &&
+    a.cameraId === b.cameraId &&
+    a.name === b.name &&
+    a.projection === b.projection &&
+    a.yaw === b.yaw &&
+    a.pitch === b.pitch &&
+    a.roll === b.roll &&
+    a.fov === b.fov
+  );
 }
 
 export function FisheyeViewer({
@@ -60,6 +77,8 @@ export function FisheyeViewer({
   compact = false,
   initialMode,
   targetViewId,
+  quality = "main",
+  onFirstFrame,
 }: FisheyeViewerProps) {
   const [config, setConfig] = useState<FisheyeConfig>(() =>
     externalConfig || getFisheyeConfig(cameraId),
@@ -67,10 +86,21 @@ export function FisheyeViewer({
   const [mode, setMode] = useState<FisheyeViewMode>(() =>
     targetViewId ? "virtual_ptz" : (initialMode || config.defaultMode || getFisheyeViewMode(cameraId)),
   );
+  const cancelModeRef = useRef<FisheyeViewMode>(
+    targetViewId ? "virtual_ptz" : (initialMode || config.defaultMode || getFisheyeViewMode(cameraId)),
+  );
   const [savedFeedback, setSavedFeedback] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const sessionRef = useRef<PlayerSession | null>(null);
+  const onFirstFrameRef = useRef(onFirstFrame);
+  const firstFrameNotifiedRef = useRef(false);
+  useEffect(() => {
+    onFirstFrameRef.current = onFirstFrame;
+  });
+  useEffect(() => {
+    firstFrameNotifiedRef.current = false;
+  }, [cameraId, quality, videoElement, videoSrc]);
   const snapshotRef = useRef<HTMLImageElement | null>(null);
   const [, setSnapshotLoaded] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -117,7 +147,7 @@ export function FisheyeViewer({
     try {
       const session = new PlayerSession({
         cameraId,
-        quality: "main",
+        quality,
         muted: true,
       });
       session.connect();
@@ -130,7 +160,7 @@ export function FisheyeViewer({
     } catch (e) {
       console.warn("Failed to create PlayerSession for fisheye live stream:", e);
     }
-  }, [cameraId, videoElement, videoSrc]);
+  }, [cameraId, videoElement, videoSrc, quality]);
 
   // Active virtual view for PTZ
   const [activeView, setActiveView] = useState<VirtualFisheyeView>(() => {
@@ -180,10 +210,6 @@ export function FisheyeViewer({
     () => generate3Fixed120Views(cameraId, config.mountType),
     [cameraId, config.mountType],
   );
-  const fourViews = useMemo(
-    () => generate4QuadrantsViews(cameraId, config.mountType),
-    [cameraId, config.mountType],
-  );
 
   // Synchronize internal and external config
   useEffect(() => {
@@ -198,6 +224,31 @@ export function FisheyeViewer({
       setMode(initialMode);
     }
   }, [initialMode, targetViewId]);
+
+  const targetView = useMemo(() => {
+    if (!targetViewId) return undefined;
+    return (
+      getEffectiveVirtualViews(config).find((view) => view.id === targetViewId) ||
+      config.views.find((view) => view.id === targetViewId)
+    );
+  }, [config, targetViewId]);
+
+  // Adjust this component's state during render only when the controlling view itself changes
+  // (identity or fields), so user pan/zoom on a targeted tile is not snapped back on every render.
+  const [syncedTarget, setSyncedTarget] = useState<VirtualFisheyeView | undefined>(targetView);
+  if (!targetView ? syncedTarget !== undefined : !isSameVirtualView(syncedTarget, targetView)) {
+    setSyncedTarget(targetView);
+    if (targetView) {
+      setActiveView(targetView);
+      setMode("virtual_ptz");
+    }
+  }
+
+  useEffect(() => {
+    if (syncedTarget) {
+      ptzControllerRef.current?.setState(syncedTarget);
+    }
+  }, [syncedTarget]);
 
   // Synchronize with global fisheye-config-changed events
   useEffect(() => {
@@ -226,23 +277,6 @@ export function FisheyeViewer({
 
   const handleModeChange = (newMode: FisheyeViewMode) => {
     setMode(newMode);
-    saveFisheyeViewMode(cameraId, newMode);
-    if (newMode === "4_quadrants" || newMode === "3_fixed_120") {
-      const newViews =
-        newMode === "4_quadrants"
-          ? generate4QuadrantsViews(cameraId, config.mountType)
-          : generate3Fixed120Views(cameraId, config.mountType);
-      const nextConfig = { ...config, defaultMode: newMode, views: newViews };
-      setConfig(nextConfig);
-      saveFisheyeConfig(nextConfig);
-      onConfigChange?.(nextConfig);
-    } else {
-      // Leaving 3 or 4: clear virtual views so camera returns to single view
-      const nextConfig = { ...config, defaultMode: newMode, views: [] };
-      setConfig(nextConfig);
-      saveFisheyeConfig(nextConfig);
-      onConfigChange?.(nextConfig);
-    }
   };
 
   // Setup WebGL Dewarp Engine on canvas mount
@@ -263,7 +297,7 @@ export function FisheyeViewer({
     let rafId: number;
 
     const tick = () => {
-      const isMulti = mode === "3_fixed_120" || mode === "4_quadrants";
+      const isMulti = mode === "3_fixed_120";
       if (isMulti) {
         rafId = requestAnimationFrame(tick);
         return;
@@ -299,7 +333,7 @@ export function FisheyeViewer({
           }
         }
 
-        engine.render(source, {
+        const rendered = engine.render(source, {
           mode,
           calibration: config.calibration,
           mountType: config.mountType,
@@ -307,6 +341,10 @@ export function FisheyeViewer({
           view: activeView,
           wrapScroll,
         });
+        if (rendered && isVideoReady && source === targetVideo && !firstFrameNotifiedRef.current) {
+          firstFrameNotifiedRef.current = true;
+          onFirstFrameRef.current?.();
+        }
       }
 
       rafId = requestAnimationFrame(tick);
@@ -336,7 +374,7 @@ export function FisheyeViewer({
     if (mode === "360") {
       // Horizontal cylindrical wrap-around scroll
       setWrapScroll((prev) => (prev - dx / rect.width + 1) % 1);
-    } else if (mode === "virtual_ptz" || mode === "panorama") {
+    } else if (mode === "virtual_ptz") {
       ptzControllerRef.current?.panBy(dx, dy, rect.width, rect.height);
     }
   };
@@ -401,9 +439,7 @@ export function FisheyeViewer({
 
   const handleSaveModeAsDefault = () => {
     const viewsToSave =
-      mode === "4_quadrants"
-        ? generate4QuadrantsViews(cameraId, config.mountType)
-        : mode === "3_fixed_120"
+      mode === "3_fixed_120"
         ? generate3Fixed120Views(cameraId, config.mountType)
         : [];
 
@@ -412,6 +448,7 @@ export function FisheyeViewer({
       defaultMode: mode,
       views: viewsToSave,
     };
+    cancelModeRef.current = mode;
     setConfig(updated);
     saveFisheyeConfig(updated);
     saveFisheyeViewMode(cameraId, mode);
@@ -456,17 +493,6 @@ export function FisheyeViewer({
             </button>
             <button
               type="button"
-              onClick={() => handleModeChange("panorama")}
-              className={cn(
-                "px-2 py-0.5 rounded transition-colors",
-                mode === "panorama" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
-              )}
-              title="Panorama plano 180°"
-            >
-              Panorama
-            </button>
-            <button
-              type="button"
               onClick={() => handleModeChange("virtual_ptz")}
               className={cn(
                 "px-2 py-0.5 rounded transition-colors flex items-center gap-1",
@@ -488,18 +514,6 @@ export function FisheyeViewer({
             >
               <Icon icon={View} size="xs" />
               <span>3 Fijas (120°)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleModeChange("4_quadrants")}
-              className={cn(
-                "px-2 py-0.5 rounded transition-colors flex items-center gap-1",
-                mode === "4_quadrants" ? "bg-primary text-on-primary font-bold" : "hover:bg-white/10",
-              )}
-              title="4 cuadrantes de 90°"
-            >
-              <Icon icon={Grid2X2} size="xs" />
-              <span>4 Cuadrantes</span>
             </button>
           </div>
 
@@ -554,14 +568,30 @@ export function FisheyeViewer({
               onClick={handleSaveModeAsDefault}
               title="Guardar selección para que se comporte así en la grilla"
               className={cn(
-                "flex items-center gap-1 rounded-m3-md px-2 py-1 text-[11px] font-semibold border shadow-lg transition-colors",
+                "flex items-center gap-1.5 rounded-m3-md px-2.5 py-1 text-[11px] font-bold border shadow-md transition-all active:scale-95",
                 savedFeedback
                   ? "bg-ok text-on-ok border-ok"
-                  : "bg-black/75 backdrop-blur-md text-white/90 hover:bg-white/20 border-white/10",
+                  : "bg-primary text-on-primary border-primary hover:bg-primary-hover",
               )}
             >
               <Icon icon={savedFeedback ? Check : Bookmark} size="xs" />
               <span>{savedFeedback ? "Guardado" : "Guardar vista"}</span>
+            </button>
+
+            {/* Cancelar / Descartar cambios */}
+            <button
+              type="button"
+              onClick={() => {
+                setMode(cancelModeRef.current);
+                if (mode === "virtual_ptz") {
+                  ptzControllerRef.current?.reset();
+                }
+              }}
+              title="Descartar cambios y volver al modo guardado"
+              className="flex items-center gap-1 rounded-m3-md bg-black/75 backdrop-blur-md px-2 py-1 text-[11px] font-semibold text-white/80 hover:bg-white/20 hover:text-white border border-white/10 shadow-lg transition-colors"
+            >
+              <Icon icon={X} size="xs" />
+              <span>Cancelar</span>
             </button>
 
             {onOpenCalibration && (
@@ -603,30 +633,6 @@ export function FisheyeViewer({
         </div>
       )}
 
-      {mode === "4_quadrants" && (
-        /* Multi-view Grid: 4 Quadrants in a 2x2 grid */
-        <div className={cn("w-full h-full grid grid-cols-2 grid-rows-2 gap-1 bg-neutral-950 p-1", !compact && "min-h-[360px]")}>
-          {fourViews.map((v) => (
-            <div
-              key={v.id}
-              className="relative w-full h-full flex flex-col items-center justify-center bg-neutral-900 rounded overflow-hidden border border-white/10"
-            >
-              <div className="absolute top-2 left-2 z-20 px-2 py-0.5 rounded bg-black/80 text-[10px] font-mono text-yellow-300 border border-yellow-500/30">
-                {v.name}
-              </div>
-              <FisheyeSingleViewport
-                videoElement={videoElement || sessionRef.current?.video || localVideoRef.current}
-                imageElement={snapshotRef.current}
-                calibration={config.calibration}
-                mountType={config.mountType}
-                projectionModel={config.projectionModel}
-                view={v}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Standard Single Viewport (Original, 360, Panorama, or Virtual PTZ) */}
       <div
         ref={stageRef}
@@ -640,7 +646,7 @@ export function FisheyeViewer({
           "relative w-full h-full flex items-center justify-center bg-black overflow-hidden touch-none",
           !compact && "min-h-[360px]",
           mode === "virtual_ptz" || mode === "360" ? "cursor-grab active:cursor-grabbing" : "cursor-default",
-          (mode === "3_fixed_120" || mode === "4_quadrants") && "hidden",
+          mode === "3_fixed_120" && "hidden",
         )}
       >
         {/* WebGL Dewarp Canvas */}

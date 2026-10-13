@@ -1,7 +1,7 @@
 import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
-  Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Compass, Copy, ExternalLink, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, Grid2X2, GripVertical, History, LayoutGrid,
+  Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Compass, Copy, ExternalLink, Fish, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, Grid2X2, GripVertical, History, LayoutGrid,
   type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, SlidersHorizontal, Trash2, Video,
 } from "lucide-react";
 import { createContext, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
@@ -37,6 +37,8 @@ export type ExplorerActions = {
   canConfigureCameras: boolean;
   /** Open Fisheye view configuration modal. */
   onConfigureFisheye?: (cameraId: string) => void;
+  /** Temporarily request the main stream for every active grid view of a camera. */
+  onTemporaryMainQuality?: (cameraId: string) => void;
 };
 
 type MenuProps = {
@@ -124,6 +126,7 @@ function Section({ title, icon, open, onToggle, count, menu, children }: { title
  */
 export function LiveExplorer({
   cameras,
+  gridCameraIds,
   sites,
   servers,
   folderApi,
@@ -151,6 +154,7 @@ export function LiveExplorer({
   error,
 }: {
   cameras: Camera[];
+  gridCameraIds: string[];
   sites: Schemas["Site"][];
   servers: Schemas["Server"][];
   folderApi: FolderApi;
@@ -337,6 +341,7 @@ export function LiveExplorer({
                     <ServerBranch
                       key={srv.id}
                       server={srv}
+                      gridCameraIds={gridCameraIds}
                       siteId={site.id}
                       isOpen={isOpen}
                       toggle={toggle}
@@ -484,6 +489,7 @@ function ViewRow({
 
 function ServerBranch({
   server,
+  gridCameraIds,
   siteId,
   isOpen,
   toggle,
@@ -501,6 +507,7 @@ function ServerBranch({
   canViewRecordings,
 }: {
   server: ServerNode;
+  gridCameraIds: string[];
   siteId: string;
   isOpen: (key: string) => boolean;
   toggle: (key: string) => void;
@@ -570,6 +577,7 @@ function ServerBranch({
               key={node.folder.id}
               node={node}
               server={server}
+              gridCameraIds={gridCameraIds}
               isOpen={isOpen}
               toggle={toggle}
               renaming={renaming === node.folder.id}
@@ -583,7 +591,7 @@ function ServerBranch({
             />
           ))}
           {server.rootCameras.map((c) => (
-            <CameraRow key={c.id} camera={c} canManage={server.canManage} indent="ml-4" onPick={onPick} onDoublePlace={onDoublePlace} onPlayback={onPlayback} canViewRecordings={canViewRecordings} />
+            <CameraRow key={c.id} camera={c} gridCameraIds={gridCameraIds} canManage={server.canManage} indent="ml-4" onPick={onPick} onDoublePlace={onDoublePlace} onPlayback={onPlayback} canViewRecordings={canViewRecordings} />
           ))}
         </>
       )}
@@ -594,6 +602,7 @@ function ServerBranch({
 function FolderBranch({
   node,
   server,
+  gridCameraIds,
   isOpen,
   toggle,
   renaming,
@@ -607,6 +616,7 @@ function FolderBranch({
 }: {
   node: FolderNode;
   server: ServerNode;
+  gridCameraIds: string[];
   isOpen: (key: string) => boolean;
   toggle: (key: string) => void;
   renaming: boolean;
@@ -697,7 +707,7 @@ function FolderBranch({
       </div>
       {isOpen(key) &&
         node.cameras.map((c) => (
-          <CameraRow key={c.id} camera={c} canManage={server.canManage} indent="ml-5" onPick={onPick} onDoublePlace={onDoublePlace} onPlayback={onPlayback} canViewRecordings={canViewRecordings} />
+          <CameraRow key={c.id} camera={c} gridCameraIds={gridCameraIds} canManage={server.canManage} indent="ml-5" onPick={onPick} onDoublePlace={onDoublePlace} onPlayback={onPlayback} canViewRecordings={canViewRecordings} />
         ))}
     </div>
   );
@@ -706,6 +716,7 @@ function FolderBranch({
 /** CameraRow keeps click-to-place and drag-to-grid; managers can also drop cameras on it to reorder. */
 function CameraRow({
   camera,
+  gridCameraIds,
   canManage,
   indent,
   onPick,
@@ -714,6 +725,7 @@ function CameraRow({
   canViewRecordings,
 }: {
   camera: Camera;
+  gridCameraIds: string[];
   canManage: boolean;
   indent: string;
   onPick: (id: string, viewId?: string) => void;
@@ -742,6 +754,7 @@ function CameraRow({
 
   const hasVirtualViews = isFisheyeCamera && virtualViews.length > 0;
   const [viewsOpen, setViewsOpen] = useState(true);
+  const [qualityOpen, setQualityOpen] = useState(false);
 
   const menu = bind(() => [
     addToViewItem(actions, [camera.id], t),
@@ -788,18 +801,6 @@ function CameraRow({
         ref={setDropRef}
         className={cn(indent, "flex min-w-0 items-center gap-1 border-t-2 border-transparent", isOver && !drop.disabled && "border-primary", drop.foreign && "opacity-40")}
       >
-        {hasVirtualViews && (
-          <button
-            type="button"
-            onClick={() => setViewsOpen(!viewsOpen)}
-            aria-expanded={viewsOpen}
-            aria-label={`Vistas virtuales de ${camera.display_name}`}
-            className="flex size-5 shrink-0 items-center justify-center rounded text-on-surface-variant hover:bg-on-surface/8"
-            title={viewsOpen ? "Ocultar vistas virtuales" : "Mostrar vistas virtuales"}
-          >
-            <Chevron open={viewsOpen} />
-          </button>
-        )}
         <button
           ref={setDragRef}
           type="button"
@@ -835,11 +836,47 @@ function CameraRow({
             if (!e.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(e);
           }}
         >
-          <Icon icon={hasVirtualViews ? Compass : Video} size="xs" className={cn(nodeIcon, hasVirtualViews && "text-cyan-400")} />
+          <Icon icon={isFisheyeCamera ? Fish : Video} size="xs" className={cn(nodeIcon, isFisheyeCamera && "text-cyan-400")} />
           <span className={cn("size-1.5 shrink-0 rounded-full", dot(camera.status))} aria-hidden />
-          <span className="min-w-0 truncate">{camera.display_name}</span>
+          <span className={cn("min-w-0 truncate", gridCameraIds.includes(camera.id) && "font-bold", camera.status === "offline" && "text-on-surface-variant")}>{camera.display_name}</span>
           {hasVirtualViews && <Count n={virtualViews.length} />}
         </button>
+        {gridCameraIds.includes(camera.id) && actions.onTemporaryMainQuality && (
+          <div className="relative shrink-0">
+            <IconButton
+              icon={SlidersHorizontal}
+              size="sm"
+              aria-label={`Calidad de ${camera.display_name}`}
+              aria-expanded={qualityOpen}
+              aria-controls={`quality-${camera.id}`}
+              title="Cambiar calidad del stream"
+              onClick={(event) => {
+                event.stopPropagation();
+                setQualityOpen((open) => !open);
+              }}
+            />
+            {qualityOpen && (
+              <div
+                id={`quality-${camera.id}`}
+                role="group"
+                aria-label={`Calidad de ${camera.display_name}`}
+                className="absolute right-0 top-full z-50 mt-1 flex min-w-36 flex-col rounded-m3-md border border-line bg-surface-1 p-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  className="rounded-m3-sm px-3 py-2 text-left text-xs hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    actions.onTemporaryMainQuality?.(camera.id);
+                    setQualityOpen(false);
+                  }}
+                >
+                  Principal por 30 s
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {canViewRecordings && (
           <>
             <IconButton icon={History} title={t("live.watchLiveRecordings")} aria-label={t("live.watchRecordingsOf", { name: camera.display_name })} onClick={() => onPlayback(camera.id)} size="sm" />
@@ -853,6 +890,18 @@ function CameraRow({
               <Icon icon={ExternalLink} size="xs" />
             </Link>
           </>
+        )}
+        {hasVirtualViews && (
+          <button
+            type="button"
+            onClick={() => setViewsOpen(!viewsOpen)}
+            aria-expanded={viewsOpen}
+            aria-label={`Vistas virtuales de ${camera.display_name}`}
+            className="flex size-8 shrink-0 items-center justify-center rounded text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
+            title={viewsOpen ? "Ocultar vistas virtuales" : "Mostrar vistas virtuales"}
+          >
+            <Chevron open={viewsOpen} />
+          </button>
         )}
       </div>
 

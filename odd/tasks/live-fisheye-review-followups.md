@@ -1,0 +1,55 @@
+# Live and fisheye review follow-ups
+
+## Objective
+
+Fix six non-blocking reliability findings from the approved native reviews of commits `bb81c6f` (FGI) and `26b6856`+`1e05a29` (LGS+LSQ) before opening the PR.
+
+## Problem
+
+The reviewer reported inferential defects in quality overrides, player session reuse, and fisheye viewer state. They were not verified when reported.
+
+## Why
+
+Two of them leave streams open indefinitely or force reconnects; the others break saved fisheye state or user interaction.
+
+## Scope and constraints
+
+- Only the six findings below. Each fix starts with a failing regression (strict TDD); if the regression cannot be made to fail, the finding is recorded as not reproduced and no source change is made.
+- Preserve existing behavior and assertions of FGI, LGS, and LSQ.
+- Legacy `4_quadrants` migration default: treat it as the current default mode (`virtual_ptz`) and drop grid tiles that reference fisheye views that no longer exist.
+- No push, PR, or remote operations.
+- Effective TDD mode: enabled by project instructions; runner `pnpm test` (vitest) in `apps/web`.
+
+## Tasks
+
+- [x] RF-01 — Clear a camera's `manual` quality override when all of its grid identities are removed, so that a later maximize still promotes to main (`apps/web/src/routes/Live.tsx` ~769, ~738).
+- [x] RF-02 — On unmaximize, restore each identity's own saved quality instead of installing a permanent `sub` focus-restore override; no lingering dual session (`apps/web/src/routes/Live.tsx` ~725).
+- [x] RF-03 — Clear the sticky `discardWhenReleased` flag when the same camera:quality session is acquired again, so the next full release moves it to WARM (`apps/web/src/lib/live/PlayerSessionManager.ts` ~96).
+- [x] RF-04 — Update the fisheye Cancel baseline after "Guardar vista" so Cancel returns to the saved mode (`apps/web/src/components/fisheye/FisheyeViewer.tsx` ~69).
+- [x] RF-05 — Do not snap user pan/zoom on targeted virtual-view tiles back on every render; resync only when the target view itself changes (`apps/web/src/components/fisheye/FisheyeViewer.tsx` ~210).
+- [x] RF-06 — Migrate legacy `4_quadrants` configs to a supported mode and handle stale quadrant view references in saved grids (`apps/web/src/lib/fisheye/storage.ts` ~78, `types.ts`, Live grid restore).
+- [x] RF-07 — Keep the base MsePlayer mounted (stable tree position) when a temporary quality target layer appears or disappears, so maximize promotion and unmaximize do not reconnect the base stream; release the target session through the normal warm path (`apps/web/src/routes/Live.tsx`, quality target layers).
+
+## Acceptance criteria
+
+- Each task has a regression that failed before the fix (or a recorded non-reproduction) and passes after.
+- `pnpm test`, `pnpm typecheck` pass; `pnpm lint` adds no diagnostics over the baseline (13 errors, 1 warning).
+- One Conventional Commit per task on `feat/fisheye-grid-camera-indicators`.
+
+## Route
+
+- Delegated direct: fixes span 4+ non-trivial files (Live.tsx, PlayerSessionManager.ts, FisheyeViewer.tsx, storage.ts) → one bounded writer.
+
+## Progress and evidence
+
+- 2026-10-13: document created from review findings R3-stale-manual-override, R3-focus-restore-forces-sub, R3-discard-flag-sticky, R3-001, R3-002, R3-003.
+- RF-03: RED `expected close not to be called, got ["user-removed"]` (new test in PlayerSessionManager.test.ts). Fix: acquire() clears `discardWhenReleased`. GREEN: `pnpm vitest run src/lib/live/PlayerSessionManager.test.ts` 2/2; `pnpm typecheck` ok.
+- RF-01: RED `expected <video> to have a length of 2 but got 1` (Live.test.tsx, remove+replace manually overridden camera, maximize >5s). Fix: tiles effect deletes the override entry when no identity remains. GREEN: Live.test.tsx 62/62; typecheck ok; lint still 13 errors/1 warning.
+- RF-02: RED `expected 1 video, got 2` after maximize/unmaximize on a tile saved on main (Live.test.tsx). Fix: unmaximize deletes the maximize override instead of installing a `sub` focus-restore one (type removed). GREEN: Live.test.tsx 63/63; typecheck ok; lint 13 errors/1 warning.
+- RF-04: RED `expected 3 Fijas button toHaveClass bg-primary` after Guardar vista then Cancelar (FisheyeViewer.test.tsx). Fix: handleSaveModeAsDefault updates cancelModeRef. GREEN: FisheyeViewer.test.tsx 12/12; typecheck ok; lint FisheyeViewer.tsx unchanged at 4 baseline errors.
+- RF-05: RED `FOV: 80°` unchanged after wheel zoom on targeted view (FisheyeViewer.test.tsx). Fix: render-phase sync now keyed on a `syncedTarget` state and field-wise comparison (resync/PTZ setState only when the target's identity/fields change); no mode forcing otherwise. GREEN: fisheye + Live tests 86/86 (incl. FGI-09 and 'tracks a changing target virtual view'); typecheck ok; FisheyeViewer.tsx lint still the 4 baseline errors (lines shifted only).
+- RF-06: RED `expected '4_quadrants' to be 'virtual_ptz'` (storage.test.ts) and `expected 3 Vacío, got 2` for a restored tile with a removed fisheye_view_id (Live.test.tsx). Fix: storage normalizes unknown/legacy modes to `virtual_ptz` (config and stored mode); Live restore empties tiles whose fisheye_view_id does not resolve. GREEN: fisheye/Live tests 105/105; typecheck ok.
+- 2026-10-13 RF-07 opened: regression vs 748fe6a found while tightening test 2b1239a. Socket trace (maximize 6s, unmaximize): base persist=1 no socket churn; HEAD (persist 0 and 1) closes sub#0/opens sub#1 at promotion and closes sub#1+main#2/opens sub#3 at unmaximize. Base layer remount defeats LSQ gap-free handoff.
+- RF-07: RED `expected "close" to not be called at all, but actually been called 1 times` (persistentPlayers=false, base sub socket at promotion) and base video no longer connected. Root cause: `Live.tsx` GridTile returned the bare base MsePlayer when no override existed but wrapped it in `div > div.absolute` once a target existed, so the player's tree position changed and React remounted it (session closed). Fix: always render the wrapper; target layer is a conditional sibling. FisheyeQualityLayers already had a stable wrapper. Target release: unchanged paths; main socket closed within the 30 s window in both modes (persistent mode via PlayerSessionManager release, non-persistent via MsePlayer unmount). GREEN: Live.test.tsx 66/66; pnpm test 145 files / 1093 tests; typecheck ok; lint 13 errors / 1 warning (baseline).
+
+Repository-relative file: `odd/tasks/live-fisheye-review-followups.md`

@@ -14,6 +14,8 @@ type Entry = {
   /** Nearest rounded box around the slot (the grid tile); the video copies its corners. */
   rounded: HTMLElement | null;
   playing: boolean;
+  /** A hidden handoff target must not occlude the currently rendered session. */
+  visible: boolean;
   applied: string;
   unsubscribe: () => void;
 };
@@ -124,10 +126,11 @@ export class VideoSurfaceLayerController {
 
   /** preserveOwner refuses competing preview slots instead of stealing an existing surface. */
   /** register shows `session`'s video over `slot`; the returned function releases the slot. */
-  register(session: PlayerSession, slot: HTMLElement, preserveOwner = false): () => void {
+  register(session: PlayerSession, slot: HTMLElement, preserveOwner = false, visible = true): () => void {
     const existing = this.entries.get(session);
     if (preserveOwner && existing?.slot && existing.slot !== slot) return () => {};
     const entry = this.entry(session);
+    entry.visible = visible;
     if (entry.slot && entry.slot !== slot) this.observer?.unobserve(entry.slot);
     entry.slot = slot;
     entry.clippers = clippingAncestors(slot);
@@ -206,7 +209,7 @@ export class VideoSurfaceLayerController {
     wrapper.appendChild(stage);
     this.host?.appendChild(wrapper);
     session.attach(stage);
-    const entry: Entry = { session, wrapper, stage, slot: null, clippers: [], rounded: null, playing: false, applied: "", unsubscribe: () => {} };
+    const entry: Entry = { session, wrapper, stage, slot: null, clippers: [], rounded: null, playing: false, visible: true, applied: "", unsubscribe: () => {} };
     const sync = () => {
       const { state } = session.getSnapshot();
       if (state === "EVICTED") return this.drop(entry);
@@ -249,7 +252,7 @@ export class VideoSurfaceLayerController {
   private layout(e: Entry): boolean {
     const hide = () => this.apply(e, "hidden");
     const slot = e.slot;
-    if (!slot || !slot.isConnected || !e.playing) return hide();
+    if (!slot || !slot.isConnected || !e.playing || !e.visible) return hide();
     const r = slot.getBoundingClientRect();
     if (r.width < 1 || r.height < 1) return hide();
     // Intersect with every scroll container so the overlay never draws over headers or panels.

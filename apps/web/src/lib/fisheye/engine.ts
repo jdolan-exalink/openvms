@@ -129,10 +129,10 @@ void main() {
     uvSample = uCenter + vec2((r / uTextureAspect) * cos(phi), r * sin(phi));
 
   } else if (uMode == 2) {
-    // Mode: Panorama 180
-    float phi = vCoord.x * (PI * 0.5) + uViewAngles.x + uRotation;
+    // Mode: Panorama (full panoramic unwrap without clipping)
+    float phi = -vCoord.x * PI + uViewAngles.x + uRotation;
     float t = vCoord.y * 0.5 + 0.5;
-    float theta = mix(0.12 * maxTheta, 0.90 * maxTheta, t);
+    float theta = mix(0.01 * maxTheta, 0.99 * maxTheta, t);
     float r = computeRadius(theta, maxTheta, uRadius, uProjectionModel);
 
     uvSample = uCenter + vec2((r / uTextureAspect) * cos(phi), r * sin(phi));
@@ -142,7 +142,7 @@ void main() {
     float scrollU = fract((vCoord.x * 0.5 + 0.5) + uWrapScroll);
     float phi = scrollU * (2.0 * PI) - PI + uViewAngles.x + uRotation;
     float t = vCoord.y * 0.5 + 0.5;
-    float theta = mix(0.12 * maxTheta, 0.90 * maxTheta, t);
+    float theta = mix(0.01 * maxTheta, 0.99 * maxTheta, t);
     float r = computeRadius(theta, maxTheta, uRadius, uProjectionModel);
 
     uvSample = uCenter + vec2((r / uTextureAspect) * cos(phi), r * sin(phi));

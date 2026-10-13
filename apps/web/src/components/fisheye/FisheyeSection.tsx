@@ -5,7 +5,6 @@ import { Button, Select, Switch } from "@/components/ui";
 import { detectFisheyeProfile } from "@/lib/fisheye/profiles";
 import {
   generate3Fixed120Views,
-  generate4QuadrantsViews,
   getFisheyeConfig,
   saveFisheyeConfig,
 } from "@/lib/fisheye/storage";
@@ -20,7 +19,6 @@ import {
   Check,
   Compass,
   Eye,
-  Grid2X2,
   Sliders,
   Sparkles,
   Trash2,
@@ -98,10 +96,8 @@ export function FisheyeSection({
   const handleSetMode = (targetMode: FisheyeViewMode) => {
     if (targetMode === "3_fixed_120") {
       handleApply3Fixed120();
-    } else if (targetMode === "4_quadrants") {
-      handleApply4Quadrants();
     } else {
-      // Leaving 3 or 4: clear virtual views so camera returns to single view mode
+      // Leaving 3: clear virtual views so camera returns to single view mode
       const next: FisheyeConfig = {
         ...config,
         views: [],
@@ -117,16 +113,6 @@ export function FisheyeSection({
       ...config,
       views,
       defaultMode: "3_fixed_120",
-    };
-    updateConfig(next);
-  };
-
-  const handleApply4Quadrants = () => {
-    const views = generate4QuadrantsViews(cameraId, config.mountType);
-    const next: FisheyeConfig = {
-      ...config,
-      views,
-      defaultMode: "4_quadrants",
     };
     updateConfig(next);
   };
@@ -261,11 +247,9 @@ export function FisheyeSection({
                 className="w-full text-xs"
               >
                 <option value="original">Original (Sin dewarp)</option>
-                <option value="panorama">Panorama 180°</option>
                 <option value="360">360° Panorámica</option>
                 <option value="virtual_ptz">PTZ Virtual</option>
                 <option value="3_fixed_120">3 Fijas de 120°</option>
-                <option value="4_quadrants">4 Cuadrantes</option>
               </Select>
             </div>
           </div>
@@ -324,17 +308,6 @@ export function FisheyeSection({
                 >
                   <Icon icon={View} size="xs" />
                   <span>3 Fijas de 120°</span>
-                </Button>
-
-                <Button
-                  variant="outlined"
-                  size="sm"
-                  onClick={handleApply4Quadrants}
-                  title="Generar 4 vistas cuadrantes de 90°"
-                  className="bg-surface-1"
-                >
-                  <Icon icon={Grid2X2} size="xs" />
-                  <span>4 Cuadrantes</span>
                 </Button>
 
                 {config.views.length > 0 && (

@@ -1,25 +1,36 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
 import { AppShell, TopBarActionsSlot } from "@/components/AppShell";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { FEATURES_OVERRIDE_KEY } from "@/lib/features";
 import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
+import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { playerMetrics } from "@/lib/live/playerMetrics";
 import { saveFisheyeConfig } from "@/lib/fisheye/storage";
-import { DEFAULT_FISHEYE_CALIBRATION } from "@/lib/fisheye/types";
-import { Live } from "./Live";
+import { DEFAULT_FISHEYE_CALIBRATION, DEFAULT_FISHEYE_CONFIG } from "@/lib/fisheye/types";
+import { Live, useTileOverlayVisibility } from "./Live";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("openvms.live.sidebar.pinned", "1");
   FakeSocket.created = 0;
+  FakeSocket.closed = 0;
+  FakeSocket.urls = [];
+  FakeSocket.instances = [];
 });
 
 /** FakeSocket/FakeMediaSource let MsePlayer mount without a real browser MSE stack. */
 class FakeSocket {
   static created = 0;
+  static closed = 0;
+  static urls: string[] = [];
+  static instances: FakeSocket[] = [];
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: unknown }) => void) | null = null;
   onclose: (() => void) | null = null;
@@ -28,9 +39,11 @@ class FakeSocket {
   binaryType = "blob";
   constructor(public url: string) {
     FakeSocket.created += 1;
+    FakeSocket.urls.push(url);
+    FakeSocket.instances.push(this);
   }
   send() {}
-  close() {}
+  close() { FakeSocket.closed += 1; }
 }
 class FakeMediaSource {
   static isTypeSupported() {
@@ -87,6 +100,56 @@ const emptyCatalogs = {
 };
 
 describe("Live", () => {
+  it("hides tile overlays after three seconds and reveals them again on interaction", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useTileOverlayVisibility());
+    expect(result.current.visible).toBe(true);
+    act(() => { vi.advanceTimersByTime(3000); });
+    expect(result.current.visible).toBe(false);
+    act(() => { result.current.reveal(); });
+    expect(result.current.visible).toBe(true);
+    act(() => { result.current.scheduleHide(); vi.advanceTimersByTime(3000); });
+    expect(result.current.visible).toBe(false);
+  });
+
+  it("does not render a fisheye dewarping action for a regular camera", async () => {
+    stubBrowserAPIs();
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-plain", quality: "sub" }, null, null, null,
+    ]));
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-plain", "Plain camera")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    await screen.findAllByText("Plain camera", { selector: ".truncate" });
+    expect(screen.queryByRole("button", { name: "Fisheye 360°" })).not.toBeInTheDocument();
+  });
+
+  it("consolidates live fisheye actions behind the fish menu and preserves both flows", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-fish", "Fish camera", { tags: ["fisheye"] })] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: /Fish camera/ }));
+
+    const fishAction = await screen.findByRole("button", { name: "Acciones de Fisheye" });
+    expect(fishAction.querySelector("svg")).toHaveClass("lucide-fish");
+    expect(within(screen.getByLabelText("Cuadro 1")).queryByRole("button", { name: "Configuración de vista" })).not.toBeInTheDocument();
+    fireEvent.click(fishAction);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Navegación y dewarping Fisheye 360°/ }));
+    expect(await screen.findByRole("dialog", { name: /Fisheye 360° Dewarping/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Acciones de Fisheye" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Configuración de vista Fisheye/ }));
+    expect(await screen.findByRole("dialog", { name: /Configuración de vista Fisheye/ })).toBeInTheDocument();
+  });
+
   it("marks the selected tile with aria-current and moves it on click", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({
@@ -137,12 +200,14 @@ describe("Live", () => {
     const camBtn = await screen.findByRole("button", { name: /North/ });
     fireEvent.click(camBtn);
 
-    const nameEl = await within(tile).findByText("North");
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("North")).toBeInTheDocument());
+    const placedTile = screen.getByLabelText("Cuadro 1");
+    const nameEl = within(placedTile).getByText("North");
     expect(nameEl).toBeInTheDocument();
     const overlay = nameEl.closest(".absolute");
     expect(overlay?.className).toContain("z-[3]");
 
-    const video = tile.querySelector("video");
+    const video = placedTile.querySelector("video");
     expect(video?.className).toContain("object-fill");
   });
 
@@ -205,14 +270,73 @@ describe("Live", () => {
     expect(screen.getByRole("main", { name: "Main Workspace" })).not.toContainElement(cameraSearch);
 
     fireEvent.click(await screen.findByRole("button", { name: /Puerta norte/ }));
-    const tile = await screen.findByLabelText("Cuadro 1");
-    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    await waitFor(() => expect(screen.getByLabelText("Cuadro 1").querySelector("video")).not.toBeNull());
+    const tile = screen.getByLabelText("Cuadro 1");
     const video = tile.querySelector("video");
     const socketCount = FakeSocket.created;
     fireEvent.click(screen.getByRole("button", { name: /^Campus/ }));
 
     expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video);
     expect(FakeSocket.created).toBe(socketCount);
+  });
+
+  it("marks cameras in the live grid bold and offline cameras gray in the sidebar", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-online", "Online camera"), camera("cam-offline", "Offline camera", { status: "offline" })] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+      "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" }] }),
+      "/api/v1/views": () => json({ items: [] }),
+    })));
+    renderPage(Live);
+
+    const online = await screen.findByRole("button", { name: /Online camera/ });
+    const offline = await screen.findByRole("button", { name: /Offline camera/ });
+    expect(online.querySelector("span.min-w-0.truncate")).not.toHaveClass("font-bold");
+    expect(offline.querySelector("span.min-w-0.truncate")).toHaveClass("text-on-surface-variant");
+
+    fireEvent.click(online);
+    await waitFor(() => expect(online.querySelector("span.min-w-0.truncate")).toHaveClass("font-bold"));
+    expect(offline.querySelector("span.min-w-0.truncate")).not.toHaveClass("font-bold");
+
+    fireEvent.click(offline);
+    await waitFor(() => expect(offline.querySelector("span.min-w-0.truncate")).toHaveClass("font-bold"));
+    expect(offline.querySelector("span.min-w-0.truncate")).toHaveClass("text-on-surface-variant");
+  });
+
+  it("uses a fish icon for fisheye cameras and keeps view disclosure at the row's right edge", async () => {
+    stubBrowserAPIs();
+    saveFisheyeConfig({
+      cameraId: "cam-fish",
+      enabled: true,
+      lensType: "fisheye_360",
+      mountType: "ceiling",
+      projectionModel: "equidistant",
+      calibration: DEFAULT_FISHEYE_CALIBRATION,
+      views: [],
+      defaultMode: "3_fixed_120",
+    });
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-fish", "Fisheye camera")] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+      "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" }] }),
+      "/api/v1/views": () => json({ items: [] }),
+    })));
+    renderPage(Live);
+
+    const cameraName = await screen.findByText("Fisheye camera");
+    const rowButton = cameraName.closest("button");
+    expect(rowButton).not.toBeNull();
+    expect(rowButton?.querySelector("svg.lucide-fish")).toBeInTheDocument();
+    expect(rowButton).toHaveAttribute("title");
+    const disclosure = screen.getByRole("button", { name: "Vistas virtuales de Fisheye camera" });
+    expect(disclosure).toHaveAttribute("aria-expanded", "true");
+    expect(disclosure).toHaveAttribute("title", "Ocultar vistas virtuales");
+    expect(disclosure.parentElement?.lastElementChild).toBe(disclosure);
+    fireEvent.click(disclosure);
+    expect(disclosure).toHaveAttribute("aria-expanded", "false");
   });
 
   it("restores a previously saved grid selection, dropping cameras the user can no longer see", async () => {
@@ -240,6 +364,40 @@ describe("Live", () => {
     expect(screen.getAllByText("Vacío")).toHaveLength(3);
   });
 
+  it("empties restored fisheye tiles whose saved view no longer exists", async () => {
+    stubBrowserAPIs();
+    saveFisheyeConfig({
+      ...DEFAULT_FISHEYE_CONFIG,
+      cameraId: "cam-fe-stale",
+      enabled: true,
+      lensType: "fisheye_360",
+      views: [{ id: "v-live", cameraId: "cam-fe-stale", name: "Vista viva", projection: "rectilinear", yaw: 0, pitch: 0, roll: 0, fov: 100 }],
+    });
+    localStorage.setItem(
+      liveSelectionKey("t1", "u1"),
+      serializeSelection(2, [
+        { camera_id: "cam-fe-stale", quality: "sub", fisheye_view_id: "v-live" },
+        { camera_id: "cam-fe-stale", quality: "sub", fisheye_view_id: "v-removed-quadrant" },
+        null,
+        null,
+      ]),
+    );
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-fe-stale", "Fish stale")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+
+    await screen.findAllByText(/Vista viva/);
+    expect(screen.getAllByText("Vacío")).toHaveLength(3);
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-fe-stale"]));
+      expect(saved?.tiles[1]).toBeNull();
+    });
+  });
+
   it("persists the grid selection to localStorage, keyed by tenant and user, when a camera is placed", async () => {
     stubBrowserAPIs();
     vi.stubGlobal(
@@ -262,6 +420,408 @@ describe("Live", () => {
       const saved = parseSelection(raw, new Set(["cam-1"]));
       expect(saved?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
     });
+  });
+
+  it("exposes a quality control beside a camera that is already in the grid", async () => {
+    stubBrowserAPIs();
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-1", quality: "sub" }, null, null, null,
+    ]));
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+
+    expect(await screen.findByRole("button", { name: "Calidad de Puerta norte" })).toBeInTheDocument();
+  });
+
+  it("keeps the old frame through a temporary main-quality handoff and restores each saved tile quality", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
+    fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
+
+    const targetSurface = tile.querySelector('[data-testid="quality-target-surface"]');
+    expect(targetSurface).toBeInTheDocument();
+    expect(targetSurface).toHaveClass("opacity-0");
+    expect(targetSurface?.querySelector('[data-testid="player-status"]')).not.toBeInTheDocument();
+    const videos = tile.querySelectorAll("video");
+    expect(videos).toHaveLength(2);
+    expect(FakeSocket.urls.some((url) => url.includes("quality=sub"))).toBe(true);
+    expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(true);
+
+    Object.defineProperty(videos[0], "videoWidth", { configurable: true, value: 640 });
+    fireEvent.loadedData(videos[0]!);
+    expect(videos[0]).toHaveStyle({ opacity: "1" });
+    expect(videos[1]).toHaveStyle({ opacity: "0" });
+    Object.defineProperty(videos[1], "readyState", { configurable: true, value: 2 });
+    Object.defineProperty(videos[1], "videoWidth", { configurable: true, value: 640 });
+    fireEvent.loadedData(videos[1]!);
+    expect(targetSurface).toHaveClass("opacity-100");
+    expect(videos[0]).toHaveStyle({ opacity: "1" });
+    expect(videos[1]).toHaveStyle({ opacity: "1" });
+
+    const savedDuringOverride = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]));
+    expect(savedDuringOverride?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
+    act(() => { vi.advanceTimersByTime(29_999); });
+    expect(tile.querySelectorAll("video")).toHaveLength(2);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(tile.querySelectorAll("video")).toHaveLength(1);
+    const savedAfterRestore = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]));
+    expect(savedAfterRestore?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
+  });
+
+  it("keeps the external target surface hidden until its first drawable frame", async () => {
+    localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true, videoSurfaceLayer: true }));
+    stubBrowserAPIs();
+    const originalRect = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      if (this.hasAttribute("data-surface-slot")) {
+        return { x: 0, y: 0, top: 0, left: 0, right: 640, bottom: 360, width: 640, height: 360, toJSON: () => ({}) } as DOMRect;
+      }
+      return originalRect.call(this);
+    });
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+    const LiveWithSurfaceSessions = () => (
+      <PlayerSessionProvider userId="u1">
+        <VideoSurfaceLayer><Live /></VideoSurfaceLayer>
+      </PlayerSessionProvider>
+    );
+
+    renderPage(LiveWithSurfaceSessions);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
+    act(() => FakeSocket.instances[0]?.onmessage?.({ data: new ArrayBuffer(1) }));
+    fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
+    fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(2));
+    act(() => FakeSocket.instances[1]?.onmessage?.({ data: new ArrayBuffer(1) }));
+
+    const wrappers = await waitFor(() => {
+      const nodes = screen.getByTestId("video-surface-layer").querySelectorAll('[data-video-surface="cam-1"]');
+      expect(nodes).toHaveLength(2);
+      return nodes;
+    });
+    expect((wrappers[1] as HTMLElement).style.visibility).toBe("hidden");
+
+    const targetVideo = wrappers[1]?.querySelector("video");
+    expect(targetVideo).not.toBeNull();
+    Object.defineProperty(targetVideo, "readyState", { configurable: true, value: 2 });
+    Object.defineProperty(targetVideo, "videoWidth", { configurable: true, value: 640 });
+    fireEvent.loadedData(targetVideo!);
+    expect((wrappers[1] as HTMLElement).style.visibility).toBe("visible");
+  });
+
+  it("promotes all active fisheye grid identities and keeps their saved qualities unchanged", async () => {
+    stubBrowserAPIs();
+    saveFisheyeConfig({
+      cameraId: "cam-fe-quality",
+      enabled: true,
+      lensType: "fisheye_360",
+      mountType: "ceiling",
+      projectionModel: "equidistant",
+      calibration: DEFAULT_FISHEYE_CALIBRATION,
+      views: [
+        { id: "v-a", cameraId: "cam-fe-quality", name: "View A", projection: "rectilinear", yaw: 0, pitch: 0, roll: 0, fov: 120 },
+        { id: "v-b", cameraId: "cam-fe-quality", name: "View B", projection: "rectilinear", yaw: 120, pitch: 0, roll: 0, fov: 120 },
+      ],
+      defaultMode: "3_fixed_120",
+    });
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-fe-quality", quality: "sub" },
+      { camera_id: "cam-fe-quality", quality: "sub", fisheye_view_id: "v-a" },
+      { camera_id: "cam-fe-quality", quality: "main", fisheye_view_id: "v-b" },
+      null,
+    ]));
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-fe-quality", "Fish quality")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Calidad de Fish quality" });
+    vi.useFakeTimers();
+
+    const mainSessionsBefore = FakeSocket.urls.filter((url) => url.includes("quality=main")).length;
+    fireEvent.click(screen.getByRole("button", { name: "Calidad de Fish quality" }));
+    fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
+
+    const mainSessionsAfter = FakeSocket.urls.filter((url) => url.includes("quality=main")).length;
+    expect(mainSessionsAfter - mainSessionsBefore).toBe(2);
+    expect(FakeSocket.urls.some((url) => url.includes("quality=sub"))).toBe(true);
+    const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-fe-quality"]));
+    expect(saved?.tiles.slice(0, 3).map((tile) => tile && "quality" in tile ? tile.quality : null)).toEqual(["sub", "sub", "main"]);
+  });
+
+  it("waits more than five seconds after maximize before switching and restores sub on unmaximize", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+    fireEvent.doubleClick(tile);
+
+    act(() => { vi.advanceTimersByTime(5_000); });
+    expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(false);
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(true);
+
+    fireEvent.doubleClick(tile);
+    expect(tile.querySelectorAll("video")).toHaveLength(1);
+    expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
+    act(() => { vi.advanceTimersByTime(10_000); });
+    expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
+  });
+
+  it("keeps a tile saved on main at a single main session after maximize ends", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte", { default_live_quality: "main" })] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+
+    fireEvent.doubleClick(tile);
+    act(() => { vi.advanceTimersByTime(5_001); });
+    fireEvent.doubleClick(tile);
+    act(() => { vi.advanceTimersByTime(10_000); });
+
+    expect(tile.querySelectorAll("video")).toHaveLength(1);
+    expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "main" });
+  });
+
+  describe.each([{ persistent: false }, { persistent: true }])("quality handoff keeps the base player mounted (persistentPlayers=$persistent)", ({ persistent }) => {
+    it("never closes or reopens the base sub socket across maximize promotion and unmaximize, and releases main afterwards", async () => {
+      if (persistent) localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true }));
+      stubBrowserAPIs();
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+        ...emptyCatalogs,
+      })));
+
+      renderPage(() => (
+        <PlayerSessionProvider userId="u1">
+          <Live />
+        </PlayerSessionProvider>
+      ));
+      fireEvent.click(await screen.findByText("Puerta norte"));
+      await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+      const tile = await screen.findByLabelText("Cuadro 1");
+      await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+      await waitFor(() => expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1));
+      const subSocket = FakeSocket.instances.find((socket) => socket.url.includes("quality=sub"))!;
+      const closeSub = vi.spyOn(subSocket, "close");
+      const baseVideo = tile.querySelector("video")!;
+      vi.useFakeTimers();
+
+      fireEvent.doubleClick(tile);
+      act(() => { vi.advanceTimersByTime(5_001); });
+      expect(baseVideo.isConnected).toBe(true);
+      expect(tile.querySelector('[data-testid="quality-target-surface"]')).toHaveAttribute("data-quality", "main");
+      expect(closeSub).not.toHaveBeenCalled();
+      expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
+      const mainSocket = FakeSocket.instances.find((socket) => socket.url.includes("quality=main"));
+      expect(mainSocket).toBeDefined();
+      const closeMain = vi.spyOn(mainSocket!, "close");
+
+      fireEvent.doubleClick(tile);
+      expect(tile.querySelector('[data-testid="quality-target-surface"]')).toBeNull();
+      expect(tile.querySelectorAll("video")).toHaveLength(1);
+      expect(baseVideo.isConnected).toBe(true);
+      expect(closeSub).not.toHaveBeenCalled();
+      expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
+
+      act(() => { vi.advanceTimersByTime(30_001); });
+      expect(closeMain).toHaveBeenCalled();
+      expect(closeSub).not.toHaveBeenCalled();
+      expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
+      expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
+      expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
+    });
+  });
+
+  it("keeps a manual thirty-second override alive when maximize ends", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+
+    fireEvent.doubleClick(tile);
+    fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
+    fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
+    fireEvent.doubleClick(tile);
+    act(() => { vi.advanceTimersByTime(30_000); });
+
+    expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(true);
+    expect(tile.querySelectorAll("video")).toHaveLength(1);
+  });
+
+  it("keeps main after a manual window expires while the camera remains maximized", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+
+    fireEvent.doubleClick(tile);
+    act(() => { vi.advanceTimersByTime(5_001); });
+    fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
+    fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
+    act(() => { vi.advanceTimersByTime(30_000); });
+
+    expect(tile.querySelectorAll("video")).toHaveLength(2);
+    fireEvent.doubleClick(tile);
+    expect(tile.querySelectorAll("video")).toHaveLength(1);
+  });
+
+  it("drops a temporary main override when its tile is closed and keeps the replacement camera on its own quality", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte"), camera("cam-2", "Porton sur")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
+    fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
+    expect(tile.querySelectorAll("video")).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: "Quitar Puerta norte" }));
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBeNull();
+    fireEvent.click(screen.getByLabelText("Cuadro 1"));
+    fireEvent.click(screen.getByText("Porton sur"));
+    act(() => { vi.advanceTimersByTime(500); });
+    const mainBefore = FakeSocket.urls.filter((url) => url.includes("quality=main")).length;
+    const replaced = screen.getByLabelText("Cuadro 1");
+    expect(replaced.textContent).toContain("Porton sur");
+    expect(replaced.querySelectorAll("video")).toHaveLength(1);
+
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(mainBefore);
+    expect(screen.getByLabelText("Cuadro 1").querySelectorAll("video")).toHaveLength(1);
+    expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]))?.tiles[0]).toEqual({ camera_id: "cam-2", quality: "sub" });
+  });
+
+  it("still promotes to main on maximize after a manually overridden camera was removed and placed again", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
+    fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
+    fireEvent.click(screen.getByRole("button", { name: "Quitar Puerta norte" }));
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBeNull();
+    act(() => { vi.advanceTimersByTime(500); });
+
+    fireEvent.click(screen.getByLabelText("Cuadro 1"));
+    fireEvent.click(screen.getByText("Puerta norte"));
+    act(() => { vi.advanceTimersByTime(500); });
+    const replaced = screen.getByLabelText("Cuadro 1");
+    expect(replaced.querySelectorAll("video")).toHaveLength(1);
+
+    fireEvent.doubleClick(replaced);
+    act(() => { vi.advanceTimersByTime(5_001); });
+    expect(screen.getByLabelText("Cuadro 1").querySelectorAll("video")).toHaveLength(2);
+  });
+
+  it("leaves no pending quality timers after unmounting with a manual override and a maximize dwell", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const { unmount } = renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+    vi.useFakeTimers();
+    const baseline = vi.getTimerCount();
+
+    fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
+    fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
+    fireEvent.doubleClick(tile);
+    expect(vi.getTimerCount()).toBeGreaterThan(baseline);
+
+    unmount();
+    const urlsAfterUnmount = FakeSocket.urls.length;
+    act(() => { vi.advanceTimersByTime(60_000); });
+    expect(FakeSocket.urls).toHaveLength(urlsAfterUnmount);
+    expect(errorSpy).not.toHaveBeenCalled();
   });
 
   it("places a camera using its default live quality", async () => {
@@ -862,6 +1422,76 @@ describe("Live with persistent players (P0 acceptance)", () => {
       expect(FakeSocket.created).toBe(2);
     });
   }
+
+  it("closes all streams without changing the selected grid dimensions", async () => {
+    await renderPersistent();
+    const closedBefore = FakeSocket.closed;
+    const grid = screen.getByRole("group", { name: "Grilla de video" });
+    const initialColumns = getComputedStyle(grid).gridTemplateColumns;
+    const initialRows = grid.style.getPropertyValue("--grid-rows");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar todas las cámaras" }));
+
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBeNull();
+    expect(screen.getByLabelText("Cuadro 2").querySelector("video")).toBeNull();
+    await waitFor(() => expect(FakeSocket.closed).toBeGreaterThan(closedBefore));
+    expect(getComputedStyle(grid).gridTemplateColumns).toBe(initialColumns);
+    expect(grid.style.getPropertyValue("--grid-rows")).toBe(initialRows);
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]));
+      expect(saved?.tiles).toEqual([null, null, null, null]);
+    });
+  });
+
+  it("keeps the final tile closed in the persisted selection", async () => {
+    localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true }));
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-1", quality: "sub" }, null, null, null,
+    ]));
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte"), camera("cam-2", "Porton sur")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(LiveWithSessions);
+    fireEvent.click(await screen.findByRole("button", { name: "Quitar Puerta norte" }));
+
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]));
+      expect(saved?.tiles).toEqual([null, null, null, null]);
+    });
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBeNull();
+  });
+
+  it("does not restore camera A after replacing it with B and closing B", async () => {
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-1", quality: "sub" }, null, null, null,
+    ]));
+    playerMetrics.reset();
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte"), camera("cam-2", "Porton sur")] }),
+      ...emptyCatalogs,
+    })));
+    const { unmount } = renderPage(LiveWithSessions);
+    await screen.findByRole("button", { name: "Quitar Puerta norte" });
+    const closedBeforeReplace = FakeSocket.closed;
+    fireEvent.click(within(screen.getByTestId("live-edge")).getByRole("button", { name: /Porton sur/ }));
+    await waitFor(() => expect(screen.getByLabelText("Cuadro 1").textContent).toContain("Porton sur"));
+    await waitFor(() => expect(FakeSocket.closed).toBeGreaterThan(closedBeforeReplace));
+    fireEvent.click(screen.getByRole("button", { name: "Quitar Porton sur" }));
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]));
+      expect(saved?.tiles).toEqual([null, null, null, null]);
+    });
+
+    unmount();
+    renderPage(LiveWithSessions);
+    await waitFor(() => expect(screen.getByLabelText("Cuadro 1").textContent).toContain("Vacío"));
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBeNull();
+  });
 
   it("moving a camera from cell 1 to cell 8 keeps the same session and does not reconnect", async () => {
     await renderPersistent();
