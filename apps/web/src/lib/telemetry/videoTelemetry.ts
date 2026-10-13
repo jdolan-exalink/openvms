@@ -141,6 +141,11 @@ export class VideoTelemetryService {
   private stop(): void {
     clearInterval(this.timer);
     this.timer = undefined;
+    // Nobody is watching: drop history and snapshot so a later restart never joins pre- and
+    // post-pause samples (the classifier window and histogram would otherwise span the gap).
+    this.ringStart = 0;
+    this.ringLength = 0;
+    this.snapshot = EMPTY_SNAPSHOT;
   }
 
   private tick(): void {

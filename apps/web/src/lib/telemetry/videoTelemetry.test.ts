@@ -157,6 +157,30 @@ describe("VideoTelemetryService", () => {
     expect(svc2.getSnapshot().health).toBe("optimal"); // frozen WARM sessions are not stalls
   });
 
+  it("starts fresh after unsubscribe and resubscribe (no stale snapshot or history)", () => {
+    const svc = new VideoTelemetryService();
+    const h = svc.register(source().src);
+    const unsub = svc.subscribe(() => {});
+    h.addBytes(1_250_000);
+    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(1000);
+    expect(svc.getSnapshot().history).toHaveLength(2);
+    expect(svc.getSnapshot().mbps).toBe(0);
+    h.addBytes(1_250_000);
+    vi.advanceTimersByTime(1000);
+    expect(svc.getSnapshot().mbps).toBeGreaterThan(0);
+    unsub();
+    vi.advanceTimersByTime(30_000);
+
+    svc.subscribe(() => {});
+    expect(svc.getSnapshot().mbps).toBe(0);
+    expect(svc.getSnapshot().history).toHaveLength(0);
+    vi.advanceTimersByTime(1000);
+    const snap = svc.getSnapshot();
+    expect(snap.history).toHaveLength(1);
+    expect(snap.mbps).toBe(0);
+  });
+
   it("unregister removes the session and its bytes", () => {
     const svc = new VideoTelemetryService();
     const h = svc.register(source().src);
