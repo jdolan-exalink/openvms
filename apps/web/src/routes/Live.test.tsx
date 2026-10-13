@@ -626,37 +626,55 @@ describe("Live", () => {
     expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "main" });
   });
 
-  it("returns a tile saved on sub to a single sub session and releases main after maximize ends", async () => {
-    stubBrowserAPIs();
-    vi.stubGlobal("fetch", vi.fn(stubApi({
-      "/api/v1/me": meResponse,
-      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
-      ...emptyCatalogs,
-    })));
+  describe.each([{ persistent: false }, { persistent: true }])("quality handoff keeps the base player mounted (persistentPlayers=$persistent)", ({ persistent }) => {
+    it("never closes or reopens the base sub socket across maximize promotion and unmaximize, and releases main afterwards", async () => {
+      if (persistent) localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true }));
+      stubBrowserAPIs();
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+        ...emptyCatalogs,
+      })));
 
-    renderPage(Live);
-    fireEvent.click(await screen.findByText("Puerta norte"));
-    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
-    const tile = await screen.findByLabelText("Cuadro 1");
-    await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
-    vi.useFakeTimers();
+      renderPage(() => (
+        <PlayerSessionProvider userId="u1">
+          <Live />
+        </PlayerSessionProvider>
+      ));
+      fireEvent.click(await screen.findByText("Puerta norte"));
+      await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+      const tile = await screen.findByLabelText("Cuadro 1");
+      await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+      await waitFor(() => expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1));
+      const subSocket = FakeSocket.instances.find((socket) => socket.url.includes("quality=sub"))!;
+      const closeSub = vi.spyOn(subSocket, "close");
+      const baseVideo = tile.querySelector("video")!;
+      vi.useFakeTimers();
 
-    fireEvent.doubleClick(tile);
-    act(() => { vi.advanceTimersByTime(5_001); });
-    expect(tile.querySelector('[data-testid="quality-target-surface"]')).toHaveAttribute("data-quality", "main");
-    const mainSocket = FakeSocket.instances.find((socket) => socket.url.includes("quality=main"));
-    expect(mainSocket).toBeDefined();
-    const closeMain = vi.spyOn(mainSocket!, "close");
+      fireEvent.doubleClick(tile);
+      act(() => { vi.advanceTimersByTime(5_001); });
+      expect(baseVideo.isConnected).toBe(true);
+      expect(tile.querySelector('[data-testid="quality-target-surface"]')).toHaveAttribute("data-quality", "main");
+      expect(closeSub).not.toHaveBeenCalled();
+      expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
+      const mainSocket = FakeSocket.instances.find((socket) => socket.url.includes("quality=main"));
+      expect(mainSocket).toBeDefined();
+      const closeMain = vi.spyOn(mainSocket!, "close");
 
-    fireEvent.doubleClick(tile);
-    expect(tile.querySelector('[data-testid="quality-target-surface"]')).toBeNull();
-    expect(tile.querySelectorAll("video")).toHaveLength(1);
+      fireEvent.doubleClick(tile);
+      expect(tile.querySelector('[data-testid="quality-target-surface"]')).toBeNull();
+      expect(tile.querySelectorAll("video")).toHaveLength(1);
+      expect(baseVideo.isConnected).toBe(true);
+      expect(closeSub).not.toHaveBeenCalled();
+      expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
 
-    act(() => { vi.advanceTimersByTime(30_001); });
-    expect(closeMain).toHaveBeenCalled();
-    expect(tile.querySelector('[data-testid="quality-target-surface"]')).toBeNull();
-    expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
-    expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
+      act(() => { vi.advanceTimersByTime(30_001); });
+      expect(closeMain).toHaveBeenCalled();
+      expect(closeSub).not.toHaveBeenCalled();
+      expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
+      expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
+      expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
+    });
   });
 
   it("keeps a manual thirty-second override alive when maximize ends", async () => {

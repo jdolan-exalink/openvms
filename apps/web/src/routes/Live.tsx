@@ -1379,20 +1379,24 @@ function GridTile({
             }
 
             const basePlayer = <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" />;
-            if (!qualityOverride || qualityOverride === quality) return basePlayer;
+            // The wrapper is rendered whether or not a target layer exists, so the base player keeps its
+            // position in the tree and is never remounted (its session closed) when the target appears or goes away.
+            const showTarget = qualityOverride !== undefined && qualityOverride !== quality;
             return (
               <div className="relative size-full">
                 <div className="absolute inset-0 z-0">{basePlayer}</div>
-                <QualityTargetSurface
-                  key={`${tileIdentityKey(tile) ?? tile.camera_id}:${qualityOverride}`}
-                  cameraId={tile.camera_id}
-                  quality={qualityOverride}
-                  persistent={persistent}
-                  surface={surface}
-                  serverId={serverId}
-                  active={!isHidden}
-                  suspended={suspended}
-                />
+                {showTarget && (
+                  <QualityTargetSurface
+                    key={`${tileIdentityKey(tile) ?? tile.camera_id}:${qualityOverride}`}
+                    cameraId={tile.camera_id}
+                    quality={qualityOverride}
+                    persistent={persistent}
+                    surface={surface}
+                    serverId={serverId}
+                    active={!isHidden}
+                    suspended={suspended}
+                  />
+                )}
               </div>
             );
           })()}
