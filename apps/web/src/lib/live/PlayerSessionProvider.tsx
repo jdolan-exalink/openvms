@@ -57,3 +57,8 @@ export function usePlayerSession(cameraId: string, quality: SessionQuality, serv
   }, [manager, fallback, cameraId, quality]);
   return cameraId && session?.cameraId === cameraId ? session : null;
 }
+
+/** Returns the shared manager for explicit Live-grid removals; null outside its provider. */
+export function usePlayerSessionManager(): PlayerSessionManager | null {
+  return useContext(ManagerContext);
+}

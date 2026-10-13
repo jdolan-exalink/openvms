@@ -21,7 +21,7 @@ export const DEFAULT_WARM_SESSION_TTL_MS = 30_000;
 export const DEFAULT_MAX_WARM_PLAYERS = 8;
 export const DEFAULT_MAX_CONCURRENT_PLAYERS = 32;
 
-type Entry = { session: PlayerSession; refs: number; timer?: ReturnType<typeof setTimeout>; releasedAt: number };
+type Entry = { session: PlayerSession; refs: number; timer?: ReturnType<typeof setTimeout>; releasedAt: number; discardWhenReleased?: boolean };
 
 const keyOf = (cameraId: string, quality: SessionQuality) => `${cameraId}:${quality}`;
 
@@ -82,10 +82,23 @@ export class PlayerSessionManager {
     if (!entry || entry.refs === 0) return;
     entry.refs -= 1;
     if (entry.refs > 0) return;
+    if (entry.discardWhenReleased) {
+      this.evict(key, "user-removed");
+      return;
+    }
     entry.releasedAt = ++this.releaseSeq;
     entry.session.markWarm("released");
     entry.timer = setTimeout(() => this.evict(key, "warm-ttl"), this.warmSessionTTL);
     this.trimWarm();
+  }
+
+  /** discard closes a session after its last active consumer leaves following explicit removal. */
+  discard(cameraId: string, quality: SessionQuality): void {
+    const key = keyOf(cameraId, quality);
+    const entry = this.entries.get(key);
+    if (!entry) return;
+    if (entry.refs === 0) this.evict(key, "user-removed");
+    else entry.discardWhenReleased = true;
   }
 
   /** clear closes every session (logout or user change). */

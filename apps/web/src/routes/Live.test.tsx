@@ -18,11 +18,17 @@ beforeEach(() => {
   localStorage.clear();
   localStorage.setItem("openvms.live.sidebar.pinned", "1");
   FakeSocket.created = 0;
+  FakeSocket.closed = 0;
+  FakeSocket.urls = [];
+  FakeSocket.instances = [];
 });
 
 /** FakeSocket/FakeMediaSource let MsePlayer mount without a real browser MSE stack. */
 class FakeSocket {
   static created = 0;
+  static closed = 0;
+  static urls: string[] = [];
+  static instances: FakeSocket[] = [];
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: unknown }) => void) | null = null;
   onclose: (() => void) | null = null;
@@ -31,9 +37,11 @@ class FakeSocket {
   binaryType = "blob";
   constructor(public url: string) {
     FakeSocket.created += 1;
+    FakeSocket.urls.push(url);
+    FakeSocket.instances.push(this);
   }
   send() {}
-  close() {}
+  close() { FakeSocket.closed += 1; }
 }
 class FakeMediaSource {
   static isTypeSupported() {
@@ -115,6 +123,29 @@ describe("Live", () => {
     renderPage(Live);
     await screen.findAllByText("Plain camera", { selector: ".truncate" });
     expect(screen.queryByRole("button", { name: "Fisheye 360°" })).not.toBeInTheDocument();
+  });
+
+  it("consolidates live fisheye actions behind the fish menu and preserves both flows", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-fish", "Fish camera", { tags: ["fisheye"] })] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: /Fish camera/ }));
+
+    const fishAction = await screen.findByRole("button", { name: "Acciones de Fisheye" });
+    expect(fishAction.querySelector("svg")).toHaveClass("lucide-fish");
+    expect(within(screen.getByLabelText("Cuadro 1")).queryByRole("button", { name: "Configuración de vista" })).not.toBeInTheDocument();
+    fireEvent.click(fishAction);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /Navegación y dewarping Fisheye 360°/ }));
+    expect(await screen.findByRole("dialog", { name: /Fisheye 360° Dewarping/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar" }));
+    fireEvent.click(screen.getByRole("button", { name: "Acciones de Fisheye" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Configuración de vista Fisheye/ }));
+    expect(await screen.findByRole("dialog", { name: /Configuración de vista Fisheye/ })).toBeInTheDocument();
   });
 
   it("marks the selected tile with aria-current and moves it on click", async () => {
@@ -953,6 +984,76 @@ describe("Live with persistent players (P0 acceptance)", () => {
       expect(FakeSocket.created).toBe(2);
     });
   }
+
+  it("closes all streams without changing the selected grid dimensions", async () => {
+    await renderPersistent();
+    const closedBefore = FakeSocket.closed;
+    const grid = screen.getByRole("group", { name: "Grilla de video" });
+    const initialColumns = getComputedStyle(grid).gridTemplateColumns;
+    const initialRows = grid.style.getPropertyValue("--grid-rows");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar todas las cámaras" }));
+
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBeNull();
+    expect(screen.getByLabelText("Cuadro 2").querySelector("video")).toBeNull();
+    await waitFor(() => expect(FakeSocket.closed).toBeGreaterThan(closedBefore));
+    expect(getComputedStyle(grid).gridTemplateColumns).toBe(initialColumns);
+    expect(grid.style.getPropertyValue("--grid-rows")).toBe(initialRows);
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]));
+      expect(saved?.tiles).toEqual([null, null, null, null]);
+    });
+  });
+
+  it("keeps the final tile closed in the persisted selection", async () => {
+    localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true }));
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-1", quality: "sub" }, null, null, null,
+    ]));
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte"), camera("cam-2", "Porton sur")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(LiveWithSessions);
+    fireEvent.click(await screen.findByRole("button", { name: "Quitar Puerta norte" }));
+
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]));
+      expect(saved?.tiles).toEqual([null, null, null, null]);
+    });
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBeNull();
+  });
+
+  it("does not restore camera A after replacing it with B and closing B", async () => {
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-1", quality: "sub" }, null, null, null,
+    ]));
+    playerMetrics.reset();
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte"), camera("cam-2", "Porton sur")] }),
+      ...emptyCatalogs,
+    })));
+    const { unmount } = renderPage(LiveWithSessions);
+    await screen.findByRole("button", { name: "Quitar Puerta norte" });
+    const closedBeforeReplace = FakeSocket.closed;
+    fireEvent.click(within(screen.getByTestId("live-edge")).getByRole("button", { name: /Porton sur/ }));
+    await waitFor(() => expect(screen.getByLabelText("Cuadro 1").textContent).toContain("Porton sur"));
+    await waitFor(() => expect(FakeSocket.closed).toBeGreaterThan(closedBeforeReplace));
+    fireEvent.click(screen.getByRole("button", { name: "Quitar Porton sur" }));
+    await waitFor(() => {
+      const saved = parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1", "cam-2"]));
+      expect(saved?.tiles).toEqual([null, null, null, null]);
+    });
+
+    unmount();
+    renderPage(LiveWithSessions);
+    await waitFor(() => expect(screen.getByLabelText("Cuadro 1").textContent).toContain("Vacío"));
+    expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBeNull();
+  });
 
   it("moving a camera from cell 1 to cell 8 keeps the same session and does not reconnect", async () => {
     await renderPersistent();

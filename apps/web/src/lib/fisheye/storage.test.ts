@@ -83,9 +83,14 @@ describe("Fisheye Storage Module", () => {
   });
 
   it("stores and retrieves last active view mode", () => {
-    expect(getFisheyeViewMode("cam-test")).toBe("original");
+    expect(getFisheyeViewMode("cam-test")).toBe("virtual_ptz");
     saveFisheyeViewMode("cam-test", "3_fixed_120");
     expect(getFisheyeViewMode("cam-test")).toBe("3_fixed_120");
+  });
+
+  it("honors a saved non-default mode when no transient mode is saved", () => {
+    saveFisheyeConfig({ ...DEFAULT_FISHEYE_CONFIG, cameraId: "cam-saved-mode", enabled: true, lensType: "fisheye_360", defaultMode: "360" });
+    expect(getFisheyeViewMode("cam-saved-mode")).toBe("360");
   });
 
   it("resolves effective virtual views automatically", () => {

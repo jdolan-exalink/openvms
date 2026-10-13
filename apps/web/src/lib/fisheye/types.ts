@@ -81,5 +81,5 @@ export const DEFAULT_FISHEYE_CONFIG: Omit<FisheyeConfig, "cameraId"> = {
   projectionModel: "equidistant",
   calibration: DEFAULT_FISHEYE_CALIBRATION,
   views: [],
-  defaultMode: "original",
+  defaultMode: "virtual_ptz",
 };

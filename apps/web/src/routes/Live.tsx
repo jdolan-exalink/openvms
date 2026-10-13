@@ -6,7 +6,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Camera, CircleCheck, CircleHelp, CircleX, Compass, History, Maximize2, Minimize2, SlidersHorizontal, X } from "lucide-react";
+import { Camera, CircleCheck, CircleHelp, CircleX, Compass, Fish, History, Maximize2, Minimize2, SlidersHorizontal, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
@@ -27,6 +27,7 @@ import { useT } from "@/i18n";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { type ExplorerActions, LiveExplorer } from "@/components/LiveExplorer";
 import { Modal } from "@/components/Modal";
+import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/Presentations";
 import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -44,6 +45,7 @@ import { useLiveDragSensors } from "@/lib/dndSensors";
 import { useTouchDoubleTap } from "@/lib/useTouchDoubleTap";
 import { useCameraFolders } from "@/lib/useCameraFolders";
 import { useRecSession } from "@/lib/useRecSession";
+import { usePlayerSessionManager } from "@/lib/live/PlayerSessionProvider";
 
 /** copyViewName picks «Nombre (copia)» or «Nombre (copia 2)» so a duplicate stays unique. */
 function copyViewName(name: string, taken: Set<string>): string {
@@ -150,6 +152,7 @@ function LiveDesktop() {
   }, []);
   const topBar = useTopBarActionsPortalTarget();
   const { persistentPlayers, videoSurfaceLayer } = useFeatures();
+  const playerSessionManager = usePlayerSessionManager();
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
     const sync = () => {
@@ -302,6 +305,24 @@ function LiveDesktop() {
     setFocus(null);
   };
 
+  const discardRemovedSessions = (previous: Tile[], next: Tile[]) => {
+    if (!persistentPlayers || !playerSessionManager) return;
+    const retained = new Set(next.flatMap((tile) => tile && "camera_id" in tile
+      ? [`${tile.camera_id}:${"quality" in tile ? tile.quality : "sub"}`]
+      : []));
+    const removed = new Map<string, "main" | "sub">();
+    for (const tile of previous) {
+      if (!tile || !("camera_id" in tile)) continue;
+      const quality = "quality" in tile ? tile.quality : "sub";
+      const key = `${tile.camera_id}:${quality}`;
+      if (!retained.has(key)) removed.set(key, quality);
+    }
+    for (const [key, quality] of removed) {
+      const cameraId = key.slice(0, key.lastIndexOf(":"));
+      playerSessionManager.discard(cameraId, quality);
+    }
+  };
+
   // index defaults to the currently selected tile (click-to-place); dragging a camera from the
   // list onto a specific slot passes that slot's index explicitly instead.
   const place = (cameraId: string, index?: number, viewId?: string) => {
@@ -311,11 +332,33 @@ function LiveDesktop() {
     // The ref updates immediately so two clicks before the next render fill two cells.
     const source = tilesRef.current;
     const next = persistentPlayers ? placeCameraUnique(source, at, cameraId, quality, viewId) : placeCameraAt(source, at, cameraId, quality, viewId);
+    discardRemovedSessions(source, next);
     const empty = next.findIndex((cell, i) => cell === null && i !== at);
     tilesRef.current = next;
     if (empty >= 0) selectedRef.current = empty;
     setTiles(next);
     if (empty >= 0) setSelected(empty);
+  };
+
+  const removeTile = (index: number) => {
+    const next = tilesRef.current.map((tile, tileIndex) => (tileIndex === index ? null : tile));
+    discardRemovedSessions(tilesRef.current, next);
+    tilesRef.current = next;
+    setTiles(next);
+    setSelected((current) => current === index ? 0 : current);
+    selectedRef.current = selectedRef.current === index ? 0 : selectedRef.current;
+    setFocus(null);
+  };
+
+  const closeAllStreams = () => {
+    const next = tilesRef.current.map(() => null);
+    discardRemovedSessions(tilesRef.current, next);
+    tilesRef.current = next;
+    setTiles(next);
+    setSelected(0);
+    selectedRef.current = 0;
+    setFocus(null);
+    setViewId("");
   };
 
   // Swapping (not shifting) keeps every other tile in its cell, so only the two swapped cameras move.
@@ -728,6 +771,7 @@ function LiveDesktop() {
             <div role="group" aria-label={tr("live.gridLayout")} className="flex shrink-0 flex-wrap items-center gap-1">
               <LayoutMenu catalog={catalog} active={{ columns, panes }} onSelect={applyPresentation} onEdit={() => setEditorOpen(true)} />
               <FullscreenButton active={fullscreen} onClick={toggleFullscreen} />
+              <IconButton icon={X} title="Cerrar todas las cámaras" aria-label="Cerrar todas las cámaras" className="size-8" onClick={closeAllStreams} />
               {canRec && (fullscreen || !topBar.available) && <div className="ml-auto">{modeToggle}</div>}
             </div>
             <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
@@ -782,10 +826,7 @@ function LiveDesktop() {
                       onOpenFisheye={(id) => setFisheyeModalCameraId(id)}
                       onConfigureFisheye={(id) => setFisheyeConfigCameraId(id)}
                       fisheyeVersion={fisheyeVersion}
-                      onRemove={() => {
-                        setTiles((x) => x.map((v, j) => (j === i ? null : v)));
-                        setFocus(null);
-                      }}
+                      onRemove={() => removeTile(i)}
                     />
                   );
                 })}
@@ -977,6 +1018,7 @@ function GridTile({
 }) {
   const tr = useT();
   const { visible: overlayVisible, reveal: revealOverlay, scheduleHide: scheduleOverlayHide } = useTileOverlayVisibility();
+  const [fisheyeActionsAt, setFisheyeActionsAt] = useState<{ x: number; y: number; opener: HTMLButtonElement } | null>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...placement };
   // Touch: two quick taps expand the tile like a double click. The dblclick some browsers synthesize after it is ignored.
@@ -1139,27 +1181,18 @@ function GridTile({
                   <Icon icon={History} size="xs" />
                 </Link>
               )}
-              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || (getFisheyeConfig(tile.camera_id).enabled && getFisheyeConfig(tile.camera_id).lensType !== "normal") || Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))) && onOpenFisheye && (
+              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || (getFisheyeConfig(tile.camera_id).enabled && getFisheyeConfig(tile.camera_id).lensType !== "normal") || Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))) && (onOpenFisheye || onConfigureFisheye) && (
                 <IconButton
-                  icon={Compass}
-                  title="Navegación y dewarping Fisheye 360°"
-                  aria-label="Fisheye 360°"
+                  icon={Fish}
+                  title="Acciones de Fisheye"
+                  aria-label="Acciones de Fisheye"
+                  aria-haspopup="menu"
+                  aria-expanded={Boolean(fisheyeActionsAt)}
                   className={cn(tileAction, "text-cyan-400 hover:text-cyan-300")}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onOpenFisheye(tile.camera_id);
-                  }}
-                />
-              )}
-              {camera && (camera.tags?.includes("fisheye") || camera.tags?.includes("ojo_de_pez") || (getFisheyeConfig(tile.camera_id).enabled && getFisheyeConfig(tile.camera_id).lensType !== "normal") || Boolean(camera.onvif_profile && detectFisheyeProfile({ onvif_profile: camera.onvif_profile }))) && onConfigureFisheye && (
-                <IconButton
-                  icon={SlidersHorizontal}
-                  title="Configuración de vista Fisheye"
-                  aria-label="Configuración de vista"
-                  className={cn(tileAction, "text-cyan-400 hover:text-cyan-300")}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onConfigureFisheye(tile.camera_id);
+                    const bounds = e.currentTarget.getBoundingClientRect();
+                    setFisheyeActionsAt({ x: bounds.left, y: bounds.bottom, opener: e.currentTarget });
                   }}
                 />
               )}
@@ -1185,6 +1218,18 @@ function GridTile({
               />
             </span>
           </div>
+          {fisheyeActionsAt && camera && (
+            <ContextMenu
+              x={fisheyeActionsAt.x}
+              y={fisheyeActionsAt.y}
+              returnFocusTo={fisheyeActionsAt.opener}
+              onClose={() => setFisheyeActionsAt(null)}
+              items={[
+                ...(onOpenFisheye ? [{ id: "dewarp", label: "Navegación y dewarping Fisheye 360°", icon: Fish, onSelect: () => onOpenFisheye(camera.id) } satisfies MenuItem] : []),
+                ...(onConfigureFisheye ? [{ id: "configure", label: "Configuración de vista Fisheye", icon: SlidersHorizontal, onSelect: () => onConfigureFisheye(camera.id) } satisfies MenuItem] : []),
+              ]}
+            />
+          )}
         </>
       ) : (
         <div className="flex size-full items-center justify-center text-xs text-on-surface-variant">{tile && !camera ? tr("live.noAccess") : tr("live.emptyCell")}</div>

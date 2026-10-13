@@ -15,12 +15,28 @@ describe("FisheyeViewer Component", () => {
     expect(screen.getByRole("button", { name: "360°" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /PTZ Virtual/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /3 Fijas/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /PTZ Virtual/i })).toHaveClass("bg-primary");
     expect(screen.queryByRole("button", { name: "Panorama" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /4 Cuadrantes/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Guardar vista/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Cancelar/i })).toBeInTheDocument();
 
     expect(screen.getByTestId("fisheye-canvas")).toBeInTheDocument();
+  });
+
+  it("opens in the explicitly saved non-default per-camera mode", () => {
+    saveFisheyeConfig({
+      ...DEFAULT_FISHEYE_CONFIG,
+      cameraId: "cam-saved-mode",
+      enabled: true,
+      lensType: "fisheye_360",
+      defaultMode: "360",
+    });
+
+    render(<FisheyeViewer cameraId="cam-saved-mode" />);
+
+    expect(screen.getByRole("button", { name: "360°" })).toHaveClass("bg-primary");
+    expect(screen.getByRole("button", { name: /PTZ Virtual/i })).not.toHaveClass("bg-primary");
   });
 
   it("tracks a changing target virtual view", () => {
