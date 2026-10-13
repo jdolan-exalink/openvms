@@ -65,6 +65,7 @@ export class PlayerSessionManager {
     if (entry) {
       clearTimeout(entry.timer);
       entry.timer = undefined;
+      entry.discardWhenReleased = false;
       entry.refs += 1;
       entry.session.markActive("acquired");
       return entry.session;
