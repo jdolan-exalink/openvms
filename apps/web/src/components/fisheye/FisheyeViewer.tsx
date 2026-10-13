@@ -23,6 +23,7 @@ import type {
 } from "@/lib/fisheye/types";
 import { VirtualPtzController } from "@/lib/fisheye/VirtualPtzController";
 import { PlayerSession } from "@/lib/live/PlayerSession";
+import type { SessionQuality } from "@/lib/live/PlayerSession";
 import { cn } from "@/lib/cn";
 import {
   Bookmark,
@@ -46,6 +47,9 @@ export interface FisheyeViewerProps {
   compact?: boolean;
   initialMode?: FisheyeViewMode;
   targetViewId?: string;
+  /** Source stream quality; Live can keep a previous-quality instance warm during handoff. */
+  quality?: SessionQuality;
+  onFirstFrame?: () => void;
 }
 
 export function FisheyeViewer({
@@ -59,6 +63,8 @@ export function FisheyeViewer({
   compact = false,
   initialMode,
   targetViewId,
+  quality = "main",
+  onFirstFrame,
 }: FisheyeViewerProps) {
   const [config, setConfig] = useState<FisheyeConfig>(() =>
     externalConfig || getFisheyeConfig(cameraId),
@@ -73,6 +79,14 @@ export function FisheyeViewer({
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const sessionRef = useRef<PlayerSession | null>(null);
+  const onFirstFrameRef = useRef(onFirstFrame);
+  const firstFrameNotifiedRef = useRef(false);
+  useEffect(() => {
+    onFirstFrameRef.current = onFirstFrame;
+  });
+  useEffect(() => {
+    firstFrameNotifiedRef.current = false;
+  }, [cameraId, quality, videoElement, videoSrc]);
   const snapshotRef = useRef<HTMLImageElement | null>(null);
   const [, setSnapshotLoaded] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -119,7 +133,7 @@ export function FisheyeViewer({
     try {
       const session = new PlayerSession({
         cameraId,
-        quality: "main",
+        quality,
         muted: true,
       });
       session.connect();
@@ -132,7 +146,7 @@ export function FisheyeViewer({
     } catch (e) {
       console.warn("Failed to create PlayerSession for fisheye live stream:", e);
     }
-  }, [cameraId, videoElement, videoSrc]);
+  }, [cameraId, videoElement, videoSrc, quality]);
 
   // Active virtual view for PTZ
   const [activeView, setActiveView] = useState<VirtualFisheyeView>(() => {
@@ -311,7 +325,7 @@ export function FisheyeViewer({
           }
         }
 
-        engine.render(source, {
+        const rendered = engine.render(source, {
           mode,
           calibration: config.calibration,
           mountType: config.mountType,
@@ -319,6 +333,10 @@ export function FisheyeViewer({
           view: activeView,
           wrapScroll,
         });
+        if (rendered && isVideoReady && source === targetVideo && !firstFrameNotifiedRef.current) {
+          firstFrameNotifiedRef.current = true;
+          onFirstFrameRef.current?.();
+        }
       }
 
       rafId = requestAnimationFrame(tick);

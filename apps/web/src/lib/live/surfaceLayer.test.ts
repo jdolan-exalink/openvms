@@ -145,6 +145,24 @@ describe("VideoSurfaceLayerController", () => {
     expect(host.contains(wrapper)).toBe(false);
   });
 
+  it("keeps a wrapper registered as not visible hidden while the session is playing until visibility is granted", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const layer = new VideoSurfaceLayerController();
+    layer.setHost(host);
+    const { session, video, setState } = fakeSession("ACTIVE");
+    const slot = slotAt({ left: 0, top: 0, width: 100, height: 100 });
+    layer.register(session, slot, false, false);
+    const wrapper = video.parentElement?.parentElement as HTMLElement;
+    expect(wrapper.style.visibility).toBe("hidden");
+    setState("WARM");
+    setState("ACTIVE");
+    expect(wrapper.style.visibility).toBe("hidden");
+
+    layer.register(session, slot, false, true);
+    expect(wrapper.style.visibility).toBe("visible");
+  });
+
   it("zooms an inner stage and leaves the video element without a transform", () => {
     const host = document.createElement("div");
     document.body.appendChild(host);

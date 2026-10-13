@@ -37,6 +37,8 @@ export type ExplorerActions = {
   canConfigureCameras: boolean;
   /** Open Fisheye view configuration modal. */
   onConfigureFisheye?: (cameraId: string) => void;
+  /** Temporarily request the main stream for every active grid view of a camera. */
+  onTemporaryMainQuality?: (cameraId: string) => void;
 };
 
 type MenuProps = {
@@ -752,6 +754,7 @@ function CameraRow({
 
   const hasVirtualViews = isFisheyeCamera && virtualViews.length > 0;
   const [viewsOpen, setViewsOpen] = useState(true);
+  const [qualityOpen, setQualityOpen] = useState(false);
 
   const menu = bind(() => [
     addToViewItem(actions, [camera.id], t),
@@ -838,6 +841,42 @@ function CameraRow({
           <span className={cn("min-w-0 truncate", gridCameraIds.includes(camera.id) && "font-bold", camera.status === "offline" && "text-on-surface-variant")}>{camera.display_name}</span>
           {hasVirtualViews && <Count n={virtualViews.length} />}
         </button>
+        {gridCameraIds.includes(camera.id) && actions.onTemporaryMainQuality && (
+          <div className="relative shrink-0">
+            <IconButton
+              icon={SlidersHorizontal}
+              size="sm"
+              aria-label={`Calidad de ${camera.display_name}`}
+              aria-expanded={qualityOpen}
+              aria-controls={`quality-${camera.id}`}
+              title="Cambiar calidad del stream"
+              onClick={(event) => {
+                event.stopPropagation();
+                setQualityOpen((open) => !open);
+              }}
+            />
+            {qualityOpen && (
+              <div
+                id={`quality-${camera.id}`}
+                role="group"
+                aria-label={`Calidad de ${camera.display_name}`}
+                className="absolute right-0 top-full z-50 mt-1 flex min-w-36 flex-col rounded-m3-md border border-line bg-surface-1 p-1 shadow-lg"
+              >
+                <button
+                  type="button"
+                  className="rounded-m3-sm px-3 py-2 text-left text-xs hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    actions.onTemporaryMainQuality?.(camera.id);
+                    setQualityOpen(false);
+                  }}
+                >
+                  Principal por 30 s
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {canViewRecordings && (
           <>
             <IconButton icon={History} title={t("live.watchLiveRecordings")} aria-label={t("live.watchRecordingsOf", { name: camera.display_name })} onClick={() => onPlayback(camera.id)} size="sm" />

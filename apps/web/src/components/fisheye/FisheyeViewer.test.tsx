@@ -1,12 +1,25 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { saveFisheyeConfig } from "@/lib/fisheye/storage";
 import { DEFAULT_FISHEYE_CONFIG } from "@/lib/fisheye/types";
 import { FisheyeViewer } from "./FisheyeViewer";
 
+const engineProbe = vi.hoisted(() => ({ draws: 0 }));
+vi.mock("@/lib/fisheye/engine", () => ({
+  FisheyeDewarpEngine: class {
+    isSupported = true;
+    render() {
+      engineProbe.draws += 1;
+      return true;
+    }
+    destroy() {}
+  },
+}));
+
 describe("FisheyeViewer Component", () => {
   beforeEach(() => {
     localStorage.clear();
+    engineProbe.draws = 0;
   });
   it("renders toolbar with view mode buttons and canvas stage", () => {
     render(<FisheyeViewer cameraId="cam-123" />);
@@ -93,6 +106,20 @@ describe("FisheyeViewer Component", () => {
     const video = document.createElement("video");
     render(<FisheyeViewer cameraId="cam-123" videoElement={video} />);
     expect(screen.getByTestId("fisheye-canvas")).toBeInTheDocument();
+  });
+
+  it("does not report fisheye readiness before the canvas has drawn", async () => {
+    const video = document.createElement("video");
+    const onFirstFrame = vi.fn();
+    render(<FisheyeViewer cameraId="cam-frame" videoElement={video} quality="sub" onFirstFrame={onFirstFrame} />);
+
+    Object.defineProperty(video, "readyState", { configurable: true, value: 2 });
+    Object.defineProperty(video, "videoWidth", { configurable: true, value: 640 });
+    fireEvent.loadedData(video);
+
+    expect(onFirstFrame).not.toHaveBeenCalled();
+    await waitFor(() => expect(onFirstFrame).toHaveBeenCalledTimes(1));
+    expect(engineProbe.draws).toBeGreaterThan(0);
   });
 
   it("saves selected mode as default when clicking 'Guardar vista'", () => {

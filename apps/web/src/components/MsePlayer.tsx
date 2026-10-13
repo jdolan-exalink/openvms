@@ -37,6 +37,12 @@ type MsePlayerProps = {
   suspended?: boolean;
   /** How the picture fills the tile. Map windows use cover; live views use fill. Default fill. */
   objectFit?: "contain" | "cover" | "fill";
+  /** Called only when this session's video has a decoded, drawable frame. */
+  onFirstFrame?: () => void;
+  /** Hide target-quality status chrome while an existing quality surface remains visible. */
+  hideStatusOverlay?: boolean;
+  /** Keep a persistent video-surface-layer target non-occluding until its first drawable frame. */
+  hideSurfaceUntilFrame?: boolean;
 };
 
 /**
@@ -54,11 +60,14 @@ function PlayerChrome({
   snapshot,
   cameraId,
   onRetry,
+  hideStatusOverlay,
 }: {
   snapshot: SessionSnapshot;
   cameraId?: string;
   onRetry?: () => void;
+  hideStatusOverlay?: boolean;
 }) {
+  if (hideStatusOverlay) return null;
   const showing = snapshot.state === "ACTIVE" || snapshot.state === "WARM";
   if (showing) return null;
   if (cameraId) return <PlayerStatusOverlay cameraId={cameraId} snapshot={snapshot} onRetry={onRetry} />;
@@ -105,6 +114,32 @@ function usePersistentSession(
   return { session, snapshot };
 }
 
+function useFirstFrame(session: PlayerSession | null | undefined, onFirstFrame?: () => void) {
+  const callbackRef = useRef(onFirstFrame);
+  useEffect(() => {
+    callbackRef.current = onFirstFrame;
+  }, [onFirstFrame]);
+  useEffect(() => {
+    if (!session) return;
+    const video = session.video;
+    let notified = false;
+    const notify = () => {
+      if (notified || video.readyState < 2 || video.videoWidth < 1) return;
+      notified = true;
+      callbackRef.current?.();
+    };
+    video.addEventListener("loadeddata", notify);
+    video.addEventListener("playing", notify);
+    video.addEventListener("resize", notify);
+    notify();
+    return () => {
+      video.removeEventListener("loadeddata", notify);
+      video.removeEventListener("playing", notify);
+      video.removeEventListener("resize", notify);
+    };
+  }, [session]);
+}
+
 /** useInViewport reports whether the element intersects the viewport (true when unsupported). */
 function useInViewport(ref: React.RefObject<HTMLElement | null>): boolean {
   const [inViewport, setInViewport] = useState(true);
@@ -128,11 +163,12 @@ function useInViewport(ref: React.RefObject<HTMLElement | null>): boolean {
 }
 
 /** PersistentMsePlayer shows a manager-owned session; unmounting only detaches the `<video>`. */
-function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, onFirstFrame, hideStatusOverlay, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const frame = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const layer = useSurfaceLayer();
   const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, frame);
+  useFirstFrame(session, onFirstFrame);
   useLayoutEffect(() => {
     const el = stage.current;
     if (!session || !el) return;
@@ -145,16 +181,21 @@ function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, susp
   }, [session, muted, layer, objectFit]);
   return (
     <ZoomFrame frameRef={frame} stageRef={stage} resetKey={`${cameraId}:${quality}`} className={className}>
-      <PlayerChrome snapshot={snapshot} cameraId={cameraId} onRetry={() => session?.retryNow()} />
+      <PlayerChrome snapshot={snapshot} cameraId={cameraId} onRetry={() => session?.retryNow()} hideStatusOverlay={hideStatusOverlay} />
     </ZoomFrame>
   );
 }
 
 /** SurfaceMsePlayer leaves the `<video>` in the VideoSurfaceLayer and only reserves its slot here. */
-function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, onFirstFrame, hideStatusOverlay, hideSurfaceUntilFrame = false, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const frame = useRef<HTMLDivElement>(null);
   const layer = useSurfaceLayer();
+  const [surfaceReady, setSurfaceReady] = useState(!hideSurfaceUntilFrame);
   const { session, snapshot } = usePersistentSession({ cameraId, quality, serverId, active, suspended, onError }, frame);
+  useFirstFrame(session, () => {
+    setSurfaceReady(true);
+    onFirstFrame?.();
+  });
   useEffect(() => {
     session?.setMuted(muted);
   }, [session, muted]);
@@ -174,21 +215,23 @@ function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspend
   const showing = snapshot.state === "ACTIVE" || snapshot.state === "WARM";
   return (
     <ZoomFrame frameRef={frame} resetKey={`${cameraId}:${quality}`} className={className} scalePicture={false} onZoom={onZoom}>
-      <SurfaceSlot session={session} className="absolute inset-0" />
-      {!showing && <PlayerStatusOverlay cameraId={cameraId} snapshot={snapshot} onRetry={() => session?.retryNow()} />}
+      <SurfaceSlot session={session} className="absolute inset-0" visible={surfaceReady} />
+      {!hideStatusOverlay && !showing && <PlayerStatusOverlay cameraId={cameraId} snapshot={snapshot} onRetry={() => session?.retryNow()} />}
     </ZoomFrame>
   );
 }
 
 /** PrivateMsePlayer owns its session: it closes with the component (the legacy behaviour). */
-function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, onError, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, onError, onFirstFrame, hideStatusOverlay, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const stage = useRef<HTMLDivElement>(null);
   const session = useRef<PlayerSession | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot>(IDLE_SNAPSHOT);
   const onErrorRef = useRef(onError);
+  const onFirstFrameRef = useRef(onFirstFrame);
   const mutedRef = useRef(muted);
   useEffect(() => {
     onErrorRef.current = onError;
+    onFirstFrameRef.current = onFirstFrame;
     mutedRef.current = muted;
     session.current?.setMuted(muted);
   });
@@ -198,6 +241,15 @@ function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, 
     if (!host) return;
     const s = new PlayerSession({ cameraId, quality, muted: mutedRef.current, onError: (m) => onErrorRef.current?.(m) });
     session.current = s;
+    let notified = false;
+    const notifyFirstFrame = () => {
+      if (notified || s.video.readyState < 2 || s.video.videoWidth < 1) return;
+      notified = true;
+      onFirstFrameRef.current?.();
+    };
+    s.video.addEventListener("loadeddata", notifyFirstFrame);
+    s.video.addEventListener("playing", notifyFirstFrame);
+    s.video.addEventListener("resize", notifyFirstFrame);
     setSnapshot(s.getSnapshot());
     const off = s.subscribe(() => setSnapshot(s.getSnapshot()));
     s.attach(host);
@@ -205,6 +257,9 @@ function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, 
     s.connect();
     return () => {
       off();
+      s.video.removeEventListener("loadeddata", notifyFirstFrame);
+      s.video.removeEventListener("playing", notifyFirstFrame);
+      s.video.removeEventListener("resize", notifyFirstFrame);
       s.close("unmount");
       session.current = null;
     };
@@ -212,7 +267,7 @@ function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, 
 
   return (
     <ZoomFrame stageRef={stage} resetKey={`${cameraId}:${quality}`} className={className}>
-      <PlayerChrome snapshot={snapshot} />
+      <PlayerChrome snapshot={snapshot} hideStatusOverlay={hideStatusOverlay} />
     </ZoomFrame>
   );
 }

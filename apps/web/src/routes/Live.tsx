@@ -34,7 +34,7 @@ import { cn } from "@/lib/cn";
 import {
   cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles, tileIdentityKey,
   serializeSelection, swapTiles, tileDragId, tilesForFisheyeMultiView,
-  type Tile,
+  type Quality, type Tile,
 } from "@/lib/liveGrid";
 import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
 import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
@@ -82,6 +82,7 @@ function LiveDesktop() {
   const [tiles, setTiles] = useState<Tile[]>(() => Array(4).fill(null));
   const [selected, setSelected] = useState(0);
   const [focus, setFocus] = useState<number | null>(null);
+  const [qualityOverrides, setQualityOverrides] = useState<Record<string, { quality: Quality; identities: string[]; source: "manual" | "maximize" | "focus-restore" }>>({});
   const [viewId, setViewId] = useState("");
   const [playbackCameraId, setPlaybackCameraId] = useState<string | null>(null);
   const [viewDialog, setViewDialog] = useState<null | { mode: "create" } | { mode: "edit"; id: string }>(null);
@@ -92,10 +93,19 @@ function LiveDesktop() {
   const [restored, setRestored] = useState(false);
   const tilesRef = useRef(tiles);
   const selectedRef = useRef(selected);
+  const qualityOverridesRef = useRef(qualityOverrides);
+  const qualityTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const maximizeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const maximizedCameraIdsRef = useRef(new Set<string>());
+  const [invalidatedOverrideKeys, setInvalidatedOverrideKeys] = useState<Set<string>>(() => new Set());
+  const previousFocusedCameraRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     tilesRef.current = tiles;
     selectedRef.current = selected;
   }, [tiles, selected]);
+  useEffect(() => {
+    qualityOverridesRef.current = qualityOverrides;
+  }, [qualityOverrides]);
   const [consumedCamera, setConsumedCamera] = useState<string | undefined>();
   const folderApi = useCameraFolders(cameras.data);
   const [sidebarPinned, setSidebarPinnedState] = useState(loadSidebarPinned);
@@ -359,6 +369,46 @@ function LiveDesktop() {
     selectedRef.current = 0;
     setFocus(null);
     setViewId("");
+  };
+
+  const clearQualityTimer = (cameraId: string) => {
+    const timer = qualityTimersRef.current.get(cameraId);
+    if (timer !== undefined) clearTimeout(timer);
+    qualityTimersRef.current.delete(cameraId);
+  };
+
+  const setQualityOverride = (cameraId: string, quality: Quality, source: "manual" | "maximize" | "focus-restore") => {
+    const identities = tilesRef.current.flatMap((tile) => {
+      if (!tile || !("camera_id" in tile) || tile.camera_id !== cameraId) return [];
+      const identity = tileIdentityKey(tile);
+      if (!identity) return [];
+      setInvalidatedOverrideKeys((current) => {
+        const next = new Set(current);
+        next.delete(`${cameraId}:${identity}`);
+        return next;
+      });
+      return [identity];
+    });
+    if (identities.length === 0) return;
+    setQualityOverrides((current) => ({ ...current, [cameraId]: { quality, identities: [...new Set(identities)], source } }));
+  };
+
+  const requestTemporaryMainQuality = (cameraId: string) => {
+    clearQualityTimer(cameraId);
+    setQualityOverride(cameraId, "main", "manual");
+    const timer = setTimeout(() => {
+      qualityTimersRef.current.delete(cameraId);
+      setQualityOverrides((current) => {
+        if (current[cameraId]?.source !== "manual") return current;
+        if (maximizedCameraIdsRef.current.has(cameraId)) {
+          return { ...current, [cameraId]: { ...current[cameraId], quality: "main", source: "maximize" } };
+        }
+        const next = { ...current };
+        delete next[cameraId];
+        return next;
+      });
+    }, 30_000);
+    qualityTimersRef.current.set(cameraId, timer);
   };
 
   // Swapping (not shifting) keeps every other tile in its cell, so only the two swapped cameras move.
@@ -658,6 +708,7 @@ function LiveDesktop() {
     canConfigureServers: can(me.data, "servers.manage"),
     canConfigureCameras: can(me.data, "servers.config"),
     onConfigureFisheye: (cameraId: string) => setFisheyeConfigCameraId(cameraId),
+    onTemporaryMainQuality: requestTemporaryMainQuality,
   };
 
   // With persistent players the other tiles stay mounted (hidden, sessions WARM) while one is
@@ -668,6 +719,75 @@ function LiveDesktop() {
 
   const gridCameraIds = useMemo(() => [...new Set(tiles.flatMap((t) => { const id = cameraIdOf(t); return id && camById.has(id) ? [id] : []; }))], [tiles, camById]);
   const focusedCameraId = focus !== null ? cameraIdOf(tiles[focus] ?? null) : undefined;
+  useEffect(() => {
+    const previous = previousFocusedCameraRef.current;
+    clearTimeout(maximizeTimerRef.current);
+    maximizeTimerRef.current = undefined;
+    if (previous && previous !== focusedCameraId) {
+      maximizedCameraIdsRef.current.delete(previous);
+      if (qualityOverridesRef.current[previous]?.source === "maximize") {
+        clearQualityTimer(previous);
+        setQualityOverride(previous, "sub", "focus-restore");
+      }
+    }
+    previousFocusedCameraRef.current = focusedCameraId;
+    if (focusedCameraId) {
+      const cameraId = focusedCameraId;
+      maximizeTimerRef.current = setTimeout(() => {
+        if (previousFocusedCameraRef.current !== cameraId) return;
+        maximizedCameraIdsRef.current.add(cameraId);
+        if (qualityOverridesRef.current[cameraId]?.source !== "manual") {
+          clearQualityTimer(cameraId);
+          setQualityOverride(cameraId, "main", "maximize");
+        }
+      }, 5_001);
+    }
+  }, [focusedCameraId]);
+
+  useEffect(() => {
+    const activeIdentities = new Map<string, Set<string>>();
+    for (const tile of tiles) {
+      if (!tile || !("camera_id" in tile)) continue;
+      const identity = tileIdentityKey(tile);
+      if (!identity) continue;
+      const active = activeIdentities.get(tile.camera_id) ?? new Set<string>();
+      active.add(identity);
+      activeIdentities.set(tile.camera_id, active);
+    }
+    for (const [cameraId, override] of Object.entries(qualityOverridesRef.current)) {
+      const active = activeIdentities.get(cameraId);
+      let validCount = 0;
+      for (const identity of override.identities) {
+        if (active?.has(identity)) validCount++;
+        else {
+          setInvalidatedOverrideKeys((current) => {
+            const next = new Set(current);
+            next.add(`${cameraId}:${identity}`);
+            return next;
+          });
+        }
+      }
+      if (validCount === 0) {
+        clearQualityTimer(cameraId);
+        if (previousFocusedCameraRef.current === cameraId) clearTimeout(maximizeTimerRef.current);
+      }
+    }
+  }, [tiles]);
+
+  useEffect(() => () => {
+    for (const timer of qualityTimersRef.current.values()) clearTimeout(timer);
+    qualityTimersRef.current.clear();
+    clearTimeout(maximizeTimerRef.current);
+  }, []);
+
+  const qualityOverrideFor = (tile: Tile): Quality | undefined => {
+    if (!tile || !("camera_id" in tile)) return undefined;
+    const identity = tileIdentityKey(tile);
+    const override = qualityOverrides[tile.camera_id];
+    if (!identity || !override?.identities.includes(identity)) return undefined;
+    if (invalidatedOverrideKeys.has(`${tile.camera_id}:${identity}`)) return undefined;
+    return override.quality;
+  };
   const { rec, now, transport, recData, denied, recLimited, hasCoverage, masterId, timelineCameras, setMode } = useRecSession({
     canRec,
     cameraIds: gridCameraIds,
@@ -820,7 +940,8 @@ function LiveDesktop() {
                       serverId={cam?.server_id}
                       canViewRecordings={can(me.data, "recordings.view")}
                       status={cam?.status}
-                      quality={persistentPlayers ? (t && "quality" in t ? t.quality : "sub") : focus === i || columns === 1 ? "main" : (t && "quality" in t ? t.quality : "sub")}
+                      quality={t && "quality" in t ? t.quality : "sub"}
+                      qualityOverride={qualityOverrideFor(t)}
                       onSelect={() => setSelected(i)}
                       onToggleFocus={() => t && setFocus(focus === null ? i : null)}
                       onOpenFisheye={(id) => setFisheyeModalCameraId(id)}
@@ -965,6 +1086,105 @@ export function useTileOverlayVisibility() {
   return { visible, reveal, scheduleHide };
 }
 
+function FisheyeQualityLayers({
+  cameraId,
+  config,
+  compact,
+  initialMode,
+  targetViewId,
+  className,
+  quality,
+  qualityOverride,
+  identity,
+}: {
+  cameraId: string;
+  config: ReturnType<typeof getFisheyeConfig>;
+  compact: boolean;
+  initialMode: ReturnType<typeof getFisheyeConfig>["defaultMode"];
+  targetViewId?: string;
+  className?: string;
+  quality: Quality;
+  qualityOverride?: Quality;
+  identity: string;
+}) {
+  const [frameReady, setFrameReady] = useState<{ requested: Quality | undefined; quality: Quality | null }>({ requested: undefined, quality: null });
+  const readyQuality = frameReady.requested === qualityOverride ? frameReady.quality : null;
+  const handoff = qualityOverride !== undefined && qualityOverride !== quality;
+  return (
+    <div className={cn("relative", className)}>
+      <div className="absolute inset-0 z-0">
+        <FisheyeViewer
+          key={`${identity}:base:${quality}`}
+          cameraId={cameraId}
+          config={config}
+          compact={compact}
+          initialMode={initialMode}
+          targetViewId={targetViewId}
+          quality={quality}
+          className="size-full"
+        />
+      </div>
+      {handoff && qualityOverride && (
+        <div className={cn("absolute inset-0 z-[1]", readyQuality === qualityOverride ? "opacity-100" : "pointer-events-none opacity-0")}>
+          <FisheyeViewer
+            key={`${identity}:target:${qualityOverride}`}
+            cameraId={cameraId}
+            config={config}
+            compact={compact}
+            initialMode={initialMode}
+            targetViewId={targetViewId}
+            quality={qualityOverride}
+            onFirstFrame={() => setFrameReady({ requested: qualityOverride, quality: qualityOverride })}
+            className="size-full"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QualityTargetSurface({
+  cameraId,
+  quality,
+  persistent,
+  surface,
+  serverId,
+  active,
+  suspended,
+}: {
+  cameraId: string;
+  quality: Quality;
+  persistent: boolean;
+  surface: boolean;
+  serverId?: string;
+  active: boolean;
+  suspended: boolean;
+}) {
+  const [ready, setReady] = useState(false);
+  return (
+    <div
+      data-testid="quality-target-surface"
+      data-quality={quality}
+      className={cn("absolute inset-0 z-[1]", ready ? "opacity-100" : "pointer-events-none opacity-0")}
+    >
+      <MsePlayer
+        cameraId={cameraId}
+        quality={quality}
+        persistent={persistent}
+        surface={surface}
+        serverId={serverId}
+        active={active}
+        suspended={suspended}
+        objectFit="fill"
+        className="size-full"
+        onFirstFrame={() => setReady(true)}
+        hideStatusOverlay
+        hideSurfaceUntilFrame
+      />
+    </div>
+  );
+}
+
 function GridTile({
   index,
   placement,
@@ -982,6 +1202,7 @@ function GridTile({
   canViewRecordings,
   status,
   quality,
+  qualityOverride,
   onSelect,
   onToggleFocus,
   onOpenFisheye,
@@ -1009,6 +1230,7 @@ function GridTile({
   canViewRecordings: boolean;
   status?: string;
   quality: "sub" | "main";
+  qualityOverride?: Quality;
   onSelect: () => void;
   onToggleFocus: () => void;
   onOpenFisheye?: (cameraId: string) => void;
@@ -1121,22 +1343,36 @@ function GridTile({
 
             if (useFisheye) {
               return (
-                <div className="relative size-full">
-                  <FisheyeViewer
-                    key={`${tile.camera_id}-${tile.fisheye_view_id ?? "root"}-${feConfig.defaultMode}-${fisheyeVersion ?? 0}`}
-                    cameraId={tile.camera_id}
-                    config={feConfig}
-                    compact={true}
-                    initialMode={specificView ? "virtual_ptz" : feConfig.defaultMode}
-                    targetViewId={specificView?.id}
-                    className="size-full"
-                  />
-                </div>
+                <FisheyeQualityLayers
+                  cameraId={tile.camera_id}
+                  config={feConfig}
+                  compact
+                  initialMode={specificView ? "virtual_ptz" : feConfig.defaultMode}
+                  targetViewId={specificView?.id}
+                  className="size-full"
+                  quality={quality}
+                  qualityOverride={qualityOverride}
+                  identity={`${tile.camera_id}-${tile.fisheye_view_id ?? "root"}-${feConfig.defaultMode}-${fisheyeVersion ?? 0}`}
+                />
               );
             }
 
+            const basePlayer = <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" />;
+            if (!qualityOverride || qualityOverride === quality) return basePlayer;
             return (
-              <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" />
+              <div className="relative size-full">
+                <div className="absolute inset-0 z-0">{basePlayer}</div>
+                <QualityTargetSurface
+                  key={`${tileIdentityKey(tile) ?? tile.camera_id}:${qualityOverride}`}
+                  cameraId={tile.camera_id}
+                  quality={qualityOverride}
+                  persistent={persistent}
+                  surface={surface}
+                  serverId={serverId}
+                  active={!isHidden}
+                  suspended={suspended}
+                />
+              </div>
             );
           })()}
           {recLayer}
