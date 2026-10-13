@@ -633,6 +633,25 @@ describe("Live", () => {
     expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
   });
 
+  it("pins the telemetry meter below the scrolling camera list", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    const row = await screen.findByText("Puerta norte");
+    const sidebar = document.querySelector('[data-live-sidebar="true"]') as HTMLElement;
+    const meter = within(sidebar).getByTestId("video-telemetry-meter");
+    expect(meter).toHaveClass("shrink-0");
+    const scroller = row.closest(".overflow-y-auto") as HTMLElement;
+    expect(scroller).not.toBeNull();
+    expect(scroller.contains(meter)).toBe(false);
+    expect(scroller.nextElementSibling).toBe(meter);
+  });
+
   it("keeps a tile saved on main at a single main session after maximize ends", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({
