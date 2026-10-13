@@ -7,6 +7,11 @@ import {
 } from "./types";
 
 const CONFIG_PREFIX = "openvms.fisheye.config.";
+
+/** localStorage key that holds the fisheye config of one camera. */
+export function fisheyeConfigStorageKey(cameraId: string): string {
+  return `${CONFIG_PREFIX}${cameraId}`;
+}
 const VIEW_MODE_PREFIX = "openvms.fisheye.mode.";
 
 /**
