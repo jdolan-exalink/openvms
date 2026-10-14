@@ -22,6 +22,11 @@ type Snapshot struct {
 	MemoryTotal      uint64             `json:"memory_total_bytes"`
 	MemoryAvailable  uint64             `json:"memory_available_bytes"`
 	Coral            bool               `json:"coral"`
+	CoralUSB         bool               `json:"coral_usb"`
+	CoralPCIe        bool               `json:"coral_pcie"`
+	OpenVINO         bool               `json:"openvino"`
+	Hailo            bool               `json:"hailo"`
+	Nvidia           bool               `json:"nvidia"`
 	GPUPresent       bool               `json:"gpu_present"`
 	GPUVendor        string             `json:"gpu_vendor"`
 	GPUName          string             `json:"gpu_name"`
@@ -44,6 +49,7 @@ type Paths struct {
 	CCTV string
 	DB   string
 	Etc  string
+	Sys  string
 }
 
 // Sampler caches one reading so overlapping polls do not stack the CPU sample.
@@ -138,7 +144,12 @@ func Read(opts Paths, variant string) Snapshot {
 		NTP:             ntpState(opts.Proc),
 		MemoryTotal:     host.MemTotal,
 		MemoryAvailable: host.MemAvailable,
-		Coral:           coralPresent(opts),
+		Coral:           coralPCIePresent(opts) || coralUSBPresent(opts),
+		CoralUSB:        coralUSBPresent(opts),
+		CoralPCIe:       coralPCIePresent(opts),
+		OpenVINO:        openvinoPresent(opts, host),
+		Hailo:           hailoPresent(opts),
+		Nvidia:          nvidiaPresent(opts, host),
 		CCTVTotal:       cctvTotal,
 		CCTVFree:        cctvFree,
 		DatabaseTotal:   dbTotal,
@@ -153,16 +164,38 @@ func Read(opts Paths, variant string) Snapshot {
 		out.GPUVendor = host.GPUs[0].Vendor
 		out.GPUName = host.GPUs[0].Name
 	}
+	if out.Nvidia && !out.GPUPresent {
+		out.GPUPresent = true
+		if out.GPUVendor == "" {
+			out.GPUVendor = "NVIDIA"
+		}
+	}
 	return out
 }
 
 func coralPresent(opts Paths) bool {
-	if opts.Dev == "" {
-		opts.Dev = "/dev"
+	return coralPCIePresent(opts) || coralUSBPresent(opts)
+}
+
+func coralPCIePresent(opts Paths) bool {
+	dev := opts.Dev
+	if dev == "" {
+		dev = "/dev"
 	}
-	if _, err := os.Stat(filepath.Join(opts.Dev, "apex_0")); err == nil {
+	if _, err := os.Stat(filepath.Join(dev, "apex_0")); err == nil {
 		return true
 	}
+	sys := opts.Sys
+	if sys == "" {
+		sys = "/sys"
+	}
+	if _, err := os.Stat(filepath.Join(sys, "bus", "pci", "drivers", "apex")); err == nil {
+		return true
+	}
+	return false
+}
+
+func coralUSBPresent(opts Paths) bool {
 	root := opts.USB
 	if root == "" {
 		root = "/sys/bus/usb/devices"
@@ -177,6 +210,82 @@ func coralPresent(opts Paths) bool {
 		if (vendor == "1a6e" && product == "089a") || (vendor == "18d1" && product == "9302") {
 			return true
 		}
+	}
+	return false
+}
+
+func hailoPresent(opts Paths) bool {
+	dev := opts.Dev
+	if dev == "" {
+		dev = "/dev"
+	}
+	if _, err := os.Stat(filepath.Join(dev, "hailo0")); err == nil {
+		return true
+	}
+	sys := opts.Sys
+	if sys == "" {
+		sys = "/sys"
+	}
+	if _, err := os.Stat(filepath.Join(sys, "class", "hailo_chardev")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(sys, "bus", "pci", "drivers", "hailo_pci")); err == nil {
+		return true
+	}
+	pciDevices := filepath.Join(sys, "bus", "pci", "devices")
+	if entries, err := os.ReadDir(pciDevices); err == nil {
+		for _, e := range entries {
+			vendor := strings.TrimSpace(readText(filepath.Join(pciDevices, e.Name(), "vendor")))
+			if strings.EqualFold(vendor, "0x1e60") || strings.EqualFold(vendor, "1e60") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func nvidiaPresent(opts Paths, host hoststat.Snapshot) bool {
+	for _, g := range host.GPUs {
+		if strings.Contains(strings.ToLower(g.Vendor), "nvidia") || strings.Contains(strings.ToLower(g.Name), "nvidia") {
+			return true
+		}
+	}
+	dev := opts.Dev
+	if dev == "" {
+		dev = "/dev"
+	}
+	if _, err := os.Stat(filepath.Join(dev, "nvidia0")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(dev, "nvidiactl")); err == nil {
+		return true
+	}
+	proc := opts.Proc
+	if proc == "" {
+		proc = "/proc"
+	}
+	if _, err := os.Stat(filepath.Join(proc, "driver", "nvidia")); err == nil {
+		return true
+	}
+	return false
+}
+
+func openvinoPresent(opts Paths, host hoststat.Snapshot) bool {
+	for _, g := range host.GPUs {
+		if strings.Contains(strings.ToLower(g.Vendor), "intel") {
+			return true
+		}
+	}
+	if host.OpenVINO {
+		return true
+	}
+	proc := opts.Proc
+	if proc == "" {
+		proc = "/proc"
+	}
+	cpuinfo := readText(filepath.Join(proc, "cpuinfo"))
+	if strings.Contains(cpuinfo, "GenuineIntel") && (strings.Contains(cpuinfo, "avx2") || strings.Contains(cpuinfo, "avx512")) {
+		return true
 	}
 	return false
 }

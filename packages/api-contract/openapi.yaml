@@ -4432,6 +4432,11 @@ components:
         memory_total_bytes: { type: integer, format: int64 }
         memory_available_bytes: { type: integer, format: int64 }
         coral: { type: boolean }
+        coral_usb: { type: boolean }
+        coral_pcie: { type: boolean }
+        openvino: { type: boolean }
+        hailo: { type: boolean }
+        nvidia: { type: boolean }
         gpu_present: { type: boolean }
         gpu_vendor: { type: string }
         gpu_name: { type: string }

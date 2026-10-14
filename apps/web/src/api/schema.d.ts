@@ -3342,6 +3342,11 @@ export interface components {
             /** Format: int64 */
             memory_available_bytes?: number;
             coral?: boolean;
+            coral_usb?: boolean;
+            coral_pcie?: boolean;
+            openvino?: boolean;
+            hailo?: boolean;
+            nvidia?: boolean;
             gpu_present?: boolean;
             gpu_vendor?: string;
             gpu_name?: string;

@@ -14,9 +14,10 @@ import {
   RotateCcw,
   Save,
   Sparkles,
+  Zap,
 } from "lucide-react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { serverFrigateRawQuery, serverFrigateRevisionsQuery } from "@/api/queries";
+import { serverAgentQuery, serverFrigateRawQuery, serverFrigateRevisionsQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
@@ -93,6 +94,20 @@ export function ServerFrigateConfigModal({
   // Queries
   const rawQuery = useQuery(serverFrigateRawQuery(server.id));
   const revisionsQuery = useQuery(serverFrigateRevisionsQuery(server.id));
+  const agentQuery = useQuery(serverAgentQuery(server.id));
+
+  const detectedHw = useMemo(() => {
+    const data = agentQuery.data;
+    if (!data || !data.installed) return null;
+    return {
+      nvidia: !!data.nvidia,
+      coralPcie: !!data.coral_pcie,
+      coralUsb: !!data.coral_usb,
+      openvino: !!data.openvino,
+      hailo: !!data.hailo,
+      gpuName: data.gpu_name || (data.gpu_vendor ? `${data.gpu_vendor} GPU` : "NVIDIA GPU"),
+    };
+  }, [agentQuery.data]);
 
   // Local YAML state override
   const [customYaml, setCustomYaml] = useState<string | null>(null);
@@ -344,13 +359,70 @@ export function ServerFrigateConfigModal({
             {/* 2. Tab Detectores IA */}
             {activeTab === "detectors" && (
               <div className="flex flex-col gap-4">
+                {/* Hardware Probe Banner */}
+                <div className="rounded-m3-xl border border-outline-variant/60 bg-surface-2 p-4 flex flex-col gap-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 font-bold text-sm text-on-surface">
+                      <Icon icon={Cpu} size="xs" className="text-primary" />
+                      Capacidades de Hardware Detectadas (Edge Agent)
+                    </div>
+                    {agentQuery.isLoading && <span className="text-xs text-muted">Consultando hardware...</span>}
+                  </div>
+
+                  {detectedHw ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {detectedHw.nvidia && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 px-3 py-1 text-xs font-semibold">
+                          <Icon icon={Activity} size="xs" />
+                          {detectedHw.gpuName}
+                        </span>
+                      )}
+                      {detectedHw.coralPcie && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/30 px-3 py-1 text-xs font-semibold">
+                          <Icon icon={Bot} size="xs" />
+                          Google Coral (PCIe)
+                        </span>
+                      )}
+                      {detectedHw.coralUsb && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/30 px-3 py-1 text-xs font-semibold">
+                          <Icon icon={Bot} size="xs" />
+                          Google Coral (USB)
+                        </span>
+                      )}
+                      {detectedHw.openvino && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 px-3 py-1 text-xs font-semibold">
+                          <Icon icon={Sparkles} size="xs" />
+                          Intel OpenVINO
+                        </span>
+                      )}
+                      {detectedHw.hailo && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/30 px-3 py-1 text-xs font-semibold">
+                          <Icon icon={Zap} size="xs" />
+                          Hailo-8 AI
+                        </span>
+                      )}
+                      {!detectedHw.nvidia && !detectedHw.coralPcie && !detectedHw.coralUsb && !detectedHw.openvino && !detectedHw.hailo && (
+                        <span className="text-xs text-muted">
+                          No se detectaron aceleradores dedicados. Recomendado usar CPU Multithread.
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted">
+                      {agentQuery.isLoading
+                        ? "Consultando telemetría del edge-agent..."
+                        : "El agente no está conectado en este servidor. Se requiere OpenVMS Agent para probe automático de aceleradores."}
+                    </p>
+                  )}
+                </div>
+
                 <div className="rounded-m3-xl border border-outline-variant/60 bg-surface-2 p-4 flex flex-col gap-2">
                   <div className="flex items-center gap-2 font-bold text-sm text-on-surface">
                     <Icon icon={Cpu} size="xs" className="text-primary" />
-                    Aceleración de Hardware e Inferencia
+                    Presets de Detectores Acelerados
                   </div>
                   <p className="text-xs text-muted">
-                    Selecciona el preset de detector acelerado para este servidor según el hardware disponible.
+                    Selecciona un preset para configurar el bloque <code>detectors</code> en el YAML de Frigate.
                   </p>
 
                   <div className="grid gap-3 sm:grid-cols-2 mt-2">
@@ -362,9 +434,16 @@ export function ServerFrigateConfigModal({
                         patchYamlBlock("detectors", block);
                       }}
                     >
-                      <span className="font-bold text-xs flex items-center gap-1.5">
-                        <Icon icon={Cpu} size="xs" /> CPU Standard (Multithread)
-                      </span>
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-bold text-xs flex items-center gap-1.5">
+                          <Icon icon={Cpu} size="xs" /> CPU Standard (Multithread)
+                        </span>
+                        {(!detectedHw || (!detectedHw.nvidia && !detectedHw.coralPcie && !detectedHw.coralUsb && !detectedHw.openvino && !detectedHw.hailo)) && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                            Recomendado
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[11px] text-muted">Inferencia por software para servidores sin TPU/GPU</span>
                     </Button>
 
@@ -376,10 +455,59 @@ export function ServerFrigateConfigModal({
                         patchYamlBlock("detectors", block);
                       }}
                     >
-                      <span className="font-bold text-xs flex items-center gap-1.5">
-                        <Icon icon={Bot} size="xs" className="text-primary" /> Google Coral EdgeTPU (USB)
-                      </span>
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-bold text-xs flex items-center gap-1.5">
+                          <Icon icon={Bot} size="xs" className="text-primary" /> Google Coral EdgeTPU (USB)
+                        </span>
+                        {detectedHw?.coralUsb && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                            Recomendado
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[11px] text-muted">Acelerador USB Coral (latencia &lt; 10ms por frame)</span>
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      className="justify-start text-left h-auto py-3 px-3.5 flex flex-col items-start gap-1"
+                      onClick={() => {
+                        const block = `detectors:\n  coral:\n    type: edgetpu\n    device: pci:0`;
+                        patchYamlBlock("detectors", block);
+                      }}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-bold text-xs flex items-center gap-1.5">
+                          <Icon icon={Bot} size="xs" className="text-blue-400" /> Google Coral EdgeTPU (PCIe)
+                        </span>
+                        {detectedHw?.coralPcie && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                            Recomendado
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-muted">Módulo PCIe / M.2 Coral (máxima velocidad de bus)</span>
+                    </Button>
+
+                    <Button
+                      variant="outlined"
+                      className="justify-start text-left h-auto py-3 px-3.5 flex flex-col items-start gap-1"
+                      onClick={() => {
+                        const block = `detectors:\n  hailo:\n    type: hailo8`;
+                        patchYamlBlock("detectors", block);
+                      }}
+                    >
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-bold text-xs flex items-center gap-1.5">
+                          <Icon icon={Zap} size="xs" className="text-amber-400" /> Hailo-8 AI NPU
+                        </span>
+                        {detectedHw?.hailo && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                            Recomendado
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-muted">Inferencia NPU de 26 TOPS para cámaras simultáneas</span>
                     </Button>
 
                     <Button
@@ -390,9 +518,16 @@ export function ServerFrigateConfigModal({
                         patchYamlBlock("detectors", block);
                       }}
                     >
-                      <span className="font-bold text-xs flex items-center gap-1.5">
-                        <Icon icon={Sparkles} size="xs" className="text-ok" /> Intel OpenVINO (iGPU / Arc)
-                      </span>
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-bold text-xs flex items-center gap-1.5">
+                          <Icon icon={Sparkles} size="xs" className="text-ok" /> Intel OpenVINO (iGPU / Arc)
+                        </span>
+                        {detectedHw?.openvino && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                            Recomendado
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[11px] text-muted">Inferencia rápida en procesadores Intel con gráficos integrados</span>
                     </Button>
 
@@ -404,9 +539,16 @@ export function ServerFrigateConfigModal({
                         patchYamlBlock("detectors", block);
                       }}
                     >
-                      <span className="font-bold text-xs flex items-center gap-1.5">
-                        <Icon icon={Activity} size="xs" className="text-warn" /> NVIDIA TensorRT (CUDA)
-                      </span>
+                      <div className="flex items-center justify-between w-full">
+                        <span className="font-bold text-xs flex items-center gap-1.5">
+                          <Icon icon={Activity} size="xs" className="text-warn" /> NVIDIA TensorRT (CUDA)
+                        </span>
+                        {detectedHw?.nvidia && (
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                            Recomendado
+                          </span>
+                        )}
+                      </div>
                       <span className="text-[11px] text-muted">Aceleración masiva para GPUs NVIDIA GeForce / Quadro</span>
                     </Button>
                   </div>

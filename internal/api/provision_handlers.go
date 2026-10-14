@@ -208,7 +208,16 @@ func serverProvision(s provision.Snapshot) gen.ServerProvision {
 }
 
 func serverAgent(s provision.AgentView) gen.ServerAgent {
-	out := gen.ServerAgent{Installed: s.Installed, Version: s.Version, CurrentVersion: s.Current, Outdated: s.Outdated, BinaryStatus: gen.ServerAgentBinaryStatus(s.BinaryStatus), BinaryUpgradeAvailable: s.BinaryUpgradeAvailable, MemoryTotalBytes: int64ptr(s.MemoryTotal), MemoryAvailableBytes: int64ptr(s.MemoryAvailable), CctvTotalBytes: int64ptr(s.CCTVTotal), CctvFreeBytes: int64ptr(s.CCTVFree), DatabaseTotalBytes: int64ptr(s.DatabaseTotal), DatabaseFreeBytes: int64ptr(s.DatabaseFree), Coral: boolptr(s.Coral), GpuPresent: boolptr(s.GPUPresent)}
+	out := gen.ServerAgent{
+		Installed: s.Installed, Version: s.Version, CurrentVersion: s.Current, Outdated: s.Outdated,
+		BinaryStatus: gen.ServerAgentBinaryStatus(s.BinaryStatus), BinaryUpgradeAvailable: s.BinaryUpgradeAvailable,
+		MemoryTotalBytes: int64ptr(s.MemoryTotal), MemoryAvailableBytes: int64ptr(s.MemoryAvailable),
+		CctvTotalBytes: int64ptr(s.CCTVTotal), CctvFreeBytes: int64ptr(s.CCTVFree),
+		DatabaseTotalBytes: int64ptr(s.DatabaseTotal), DatabaseFreeBytes: int64ptr(s.DatabaseFree),
+		Coral: boolptr(s.Coral), GpuPresent: boolptr(s.GPUPresent),
+		CoralUsb: boolptr(s.CoralUSB), CoralPcie: boolptr(s.CoralPCIe),
+		Openvino: boolptr(s.OpenVINO), Hailo: boolptr(s.Hailo), Nvidia: boolptr(s.Nvidia),
+	}
 	if s.CPUAvailable {
 		out.CpuPercent = float32ptr(float32(s.CPUPercent))
 	}
