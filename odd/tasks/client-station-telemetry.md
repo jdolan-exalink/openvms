@@ -99,3 +99,4 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
   - Per-query capabilities timeout (2000 ms) moved here from CST-08.
   - `lib/telemetry/labels.ts` deleted: unused outside the barrel; i18n keys replace it (single source of Spanish copy).
   - Gaps: per-camera table shows camera ids (names need a permission-scoped query); overlay preference read when Live mounts.
+- 2026-10-14: review follow-ups applied inline (TDD RED 2 failing → GREEN 186/186 telemetry+ClientStation+overlay, typecheck + eslint clean): `estimateBottleneck` names no layer below `MIN_HEALTH_SAMPLES` (consistent with `unknown` health); frame sampler discards gaps > `MAX_FRAME_GAP_MS` (1000 ms) so a hidden tab's paused rAF is not read as a slow frame.

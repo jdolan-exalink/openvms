@@ -15,6 +15,12 @@ export type FrameSampler = {
 const DEFAULT_WINDOW = 256;
 
 /**
+ * A gap longer than this is a paused requestAnimationFrame (hidden tab, minimized window), not
+ * a slow frame: it is discarded so it cannot distort fps and frame time after the tab returns.
+ */
+export const MAX_FRAME_GAP_MS = 1000;
+
+/**
  * Measures requestAnimationFrame cadence, a proxy for how often the browser actually presents
  * a frame. Per frame it only writes one number into a preallocated typed-array ring.
  * `raf`, `cancelRaf` and `now` are injected so the sampler stays testable and platform-neutral.
@@ -34,7 +40,7 @@ export function createFrameSampler(
 
   const onFrame = (): void => {
     const t = now();
-    if (lastFrameAt !== undefined) {
+    if (lastFrameAt !== undefined && t - lastFrameAt <= MAX_FRAME_GAP_MS) {
       deltas[head] = t - lastFrameAt;
       head = (head + 1) % windowSize;
       if (count < windowSize) count += 1;

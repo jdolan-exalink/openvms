@@ -1,4 +1,4 @@
-import { analyzeHealth, MIN_SAMPLES_FOR_CONFIDENCE, stateOf, type HealthLayer, type HealthOptions } from "./performanceClassifier";
+import { analyzeHealth, MIN_HEALTH_SAMPLES, MIN_SAMPLES_FOR_CONFIDENCE, stateOf, type HealthLayer, type HealthOptions } from "./performanceClassifier";
 import type { StreamTelemetryRow, VideoPerformanceMetrics } from "./types";
 
 /**
@@ -56,6 +56,10 @@ export function estimateBottleneck(window: readonly VideoPerformanceMetrics[], r
   const level = (l: HealthLayer) => a.layerLevels[l] ?? 0;
 
   if (n === 0) return { layer: "none", confidence: "low", estimated, evidence: ["no telemetry samples yet"] };
+  // Same floor as classifyHealth: below it the state is unknown, so no layer is blamed either.
+  if (n < MIN_HEALTH_SAMPLES) {
+    return { layer: "none", confidence: "low", estimated, evidence: [`fewer than ${MIN_HEALTH_SAMPLES} samples (${n}); not enough to name a bottleneck`] };
+  }
 
   const top = Math.max(...LAYER_ORDER.map(level));
   if (top === 0) {

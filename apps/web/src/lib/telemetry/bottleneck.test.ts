@@ -26,6 +26,15 @@ function windowOf(n: number, patch: Partial<VideoPerformanceMetrics> | ((i: numb
 }
 
 describe("estimateBottleneck", () => {
+  it("names no layer below MIN_HEALTH_SAMPLES, matching the classifier's unknown state", () => {
+    for (const n of [1, 2]) {
+      const b = estimateBottleneck(windowOf(n, { droppedFrames: 80, droppedFrameRatio: 0.5 }));
+      expect(b).toMatchObject({ layer: "none", confidence: "low" });
+      expect(b.evidence.join(" ")).toMatch(/fewer than 3 samples/);
+    }
+    expect(estimateBottleneck(windowOf(3, { droppedFrames: 80, droppedFrameRatio: 0.5 })).layer).toBe("decode");
+  });
+
   it("reports none with high confidence for a healthy, well-sampled window", () => {
     const b = estimateBottleneck(windowOf(10));
     expect(b).toMatchObject({ layer: "none", confidence: "high", estimated: true });

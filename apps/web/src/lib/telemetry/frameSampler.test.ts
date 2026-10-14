@@ -26,6 +26,18 @@ function fakeRaf() {
 }
 
 describe("frame sampler", () => {
+  it("discards the gap after a paused rAF (hidden tab) instead of reporting it as a slow frame", () => {
+    const f = fakeRaf();
+    const sampler = createFrameSampler(f.raf, f.cancel, f.now);
+    sampler.start();
+    for (let i = 0; i < 11; i++) f.frame(20);
+    f.frame(45_000); // the tab was hidden for 45 s
+    for (let i = 0; i < 10; i++) f.frame(20);
+    const s = sampler.sample();
+    expect(s?.fps).toBeCloseTo(50, 5);
+    expect(s?.p95FrameMs).toBeCloseTo(20, 5);
+  });
+
   it("measures presentation fps and frame time from frame cadence", () => {
     const f = fakeRaf();
     const sampler = createFrameSampler(f.raf, f.cancel, f.now);
