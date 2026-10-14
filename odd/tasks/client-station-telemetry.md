@@ -42,6 +42,7 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 - [ ] CST-08 — (incl. per-query timeout in `collectClientCapabilities` for the startup light profile) `ClientBenchmarkService` (3–5 s progressive load with real OpenVMS substreams, stops before severe degradation) + IndexedDB cache + startup profile reuse/invalidation.
 - [ ] CST-09 — `AdaptiveVideoPolicy`: gradual degradation order, never silently degrade a maximized camera, operator warning; verify no orphan main streams on maximize/unmaximize.
 - [ ] CST-10 — Docs (`docs/live-view-architecture.md` / new telemetry doc) and full checks.
+- [ ] CST-11 — (user request 2026-10-14, after CST-10) Forensic detail enhancement ("Mejora de Detalle Forense") on paused recorded playback reached from Live; reproduce and fix the black image reported by the user when using it, with a regression test. Own PR after PR-6.
 
 ## Acceptance criteria and checks
 
