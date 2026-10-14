@@ -105,6 +105,7 @@ function LiveDesktop() {
   const selectedRef = useRef(selected);
   const qualityOverridesRef = useRef(qualityOverrides);
   const qualityTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const maximizeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const maximizedCameraIdsRef = useRef(new Set<string>());
   const [invalidatedOverrideKeys, setInvalidatedOverrideKeys] = useState<Set<string>>(() => new Set());
   const previousFocusedCameraRef = useRef<string | undefined>(undefined);
@@ -730,6 +731,8 @@ function LiveDesktop() {
   const focusedCameraId = focus !== null ? cameraIdOf(tiles[focus] ?? null) : undefined;
   useEffect(() => {
     const previous = previousFocusedCameraRef.current;
+    clearTimeout(maximizeTimerRef.current);
+    maximizeTimerRef.current = undefined;
     if (previous && previous !== focusedCameraId) {
       maximizedCameraIdsRef.current.delete(previous);
       if (qualityOverridesRef.current[previous]?.source === "maximize") {
@@ -745,12 +748,14 @@ function LiveDesktop() {
     previousFocusedCameraRef.current = focusedCameraId;
     if (focusedCameraId) {
       const cameraId = focusedCameraId;
-      // Promote right away; the quality handoff keeps the old frame until the main stream paints.
-      maximizedCameraIdsRef.current.add(cameraId);
-      if (qualityOverridesRef.current[cameraId]?.source !== "manual") {
-        clearQualityTimer(cameraId);
-        setQualityOverride(cameraId, "main", "maximize");
-      }
+      maximizeTimerRef.current = setTimeout(() => {
+        if (previousFocusedCameraRef.current !== cameraId) return;
+        maximizedCameraIdsRef.current.add(cameraId);
+        if (qualityOverridesRef.current[cameraId]?.source !== "manual") {
+          clearQualityTimer(cameraId);
+          setQualityOverride(cameraId, "main", "maximize");
+        }
+      }, 5_001);
     }
   }, [focusedCameraId]);
 
@@ -779,6 +784,7 @@ function LiveDesktop() {
       }
       if (validCount === 0) {
         clearQualityTimer(cameraId);
+        if (previousFocusedCameraRef.current === cameraId) clearTimeout(maximizeTimerRef.current);
         setQualityOverrides((current) => {
           if (!(cameraId in current)) return current;
           const next = { ...current };
@@ -792,6 +798,7 @@ function LiveDesktop() {
   useEffect(() => () => {
     for (const timer of qualityTimersRef.current.values()) clearTimeout(timer);
     qualityTimersRef.current.clear();
+    clearTimeout(maximizeTimerRef.current);
   }, []);
 
   const qualityOverrideFor = (tile: Tile): Quality | undefined => {

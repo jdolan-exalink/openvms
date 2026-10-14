@@ -9,7 +9,6 @@ import type { Schemas } from "@/api/client";
 import { Icon } from "@/components/Icon";
 import { Chevron, Count, dot, nodeIcon } from "@/components/ExplorerParts";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { VideoTelemetryMeter } from "@/components/VideoTelemetryMeter";
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { ErrorNote, IconButton, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -370,7 +369,6 @@ export function LiveExplorer({
         </Section>
         <ErrorNote error={mutationError} />
       </div>}
-      <VideoTelemetryMeter />
       {confirmDelete && (
         <ConfirmDialog
           title={t("live.deleteFolder")}

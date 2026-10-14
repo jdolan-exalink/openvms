@@ -2,7 +2,6 @@ import { reconnectDelay } from "./backoff";
 import { PlayerStateMachine, type PlayerState, type StateTransition } from "./playerState";
 import { observeFirstFrame, playerMetrics, type PlayerMetrics } from "./playerMetrics";
 import type { ServerBackoff } from "./serverBackoff";
-import { videoTelemetry, type TelemetryHandle, type VideoTelemetryService } from "../telemetry/videoTelemetry";
 import { describeStreamError, streamError, type SessionError } from "./streamErrors";
 
 // Codecs offered to go2rtc, most preferred first (same list go2rtc's own player uses).
@@ -25,13 +24,6 @@ function mediaSourceCtor(): MediaSourceCtor | undefined {
 
 function supportedCodecs(MS: MediaSourceCtor): string {
   return CODECS.filter((c) => MS.isTypeSupported(`video/mp4; codecs="${c}"`)).join();
-}
-
-/** Size of a binary websocket payload (ArrayBuffer, or Blob when binaryType was not applied). */
-function mediaByteLength(data: unknown): number {
-  if (data instanceof ArrayBuffer) return data.byteLength;
-  if (typeof Blob !== "undefined" && data instanceof Blob) return data.size;
-  return 0;
 }
 
 export type SessionQuality = "sub" | "main";
@@ -74,8 +66,6 @@ export type PlayerSessionOptions = {
    */
   resilient?: boolean;
   backoff?: ServerBackoff;
-  /** Telemetry sink for received media bytes and state; defaults to the shared service. */
-  telemetry?: VideoTelemetryService;
 };
 
 /**
@@ -117,7 +107,6 @@ export class PlayerSession {
   private cancelFrame: (() => void) | undefined;
   private connectCount = 0;
   private boxObserver: ResizeObserver | undefined;
-  private readonly telemetry: TelemetryHandle;
 
   constructor(opts: PlayerSessionOptions) {
     this.cameraId = opts.cameraId;
@@ -146,12 +135,6 @@ export class PlayerSession {
     this.video.addEventListener("resize", this.revealFrame);
     this.video.addEventListener("playing", this.revealFrame);
     this.setMuted(opts.muted ?? true);
-    this.telemetry = (opts.telemetry ?? videoTelemetry).register({
-      cameraId: opts.cameraId,
-      quality: opts.quality,
-      getState: () => this.machine.state,
-      video: this.video,
-    });
   }
 
   /** revealFrame shows the element once the decoder has a real picture. */
@@ -309,7 +292,6 @@ export class PlayerSession {
   close(cause = "closed"): void {
     if (this.closed) return;
     this.closed = true;
-    this.telemetry.unregister();
     this.cancelPendingOpen();
     clearInterval(this.frameTimer);
     this.cancelFrame?.();
@@ -541,7 +523,6 @@ export class PlayerSession {
         }
         return;
       }
-      this.telemetry.addBytes(mediaByteLength(ev.data));
       queue.push(ev.data as ArrayBuffer);
       if (queue.length > 60) queue.splice(0, queue.length - 60);
       pump();
