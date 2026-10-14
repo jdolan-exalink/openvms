@@ -8,6 +8,7 @@ export const HEALTH_LABELS: Record<HealthState, string> = {
   acceptable: "Aceptable",
   limit: "Al límite",
   saturated: "Saturado",
+  unknown: "Sin datos",
 };
 
 export const LAYER_LABELS: Record<HealthLayer, string> = {

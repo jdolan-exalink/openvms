@@ -120,6 +120,60 @@ describe("VideoTelemetryService", () => {
     error.mockRestore();
   });
 
+  it("logs a permanently failing source once, not on every tick", () => {
+    const broken: StreamStatsSource = {
+      streamStats() {
+        throw new Error("detached video");
+      },
+    };
+    const t = setup({ streams: [broken as FakeStream] });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    t.service.start();
+    t.tick(1000);
+    t.tick(1000);
+    t.tick(1000);
+    expect(error).toHaveBeenCalledTimes(1);
+    error.mockRestore();
+  });
+
+  it("re-baselines a source that recovers and reports a later failure again", () => {
+    const a = new FakeStream("a");
+    let failing = false;
+    const flaky: StreamStatsSource = {
+      streamStats() {
+        if (failing) throw new Error("transient");
+        return a.streamStats();
+      },
+    };
+    const t = setup({ streams: [flaky as FakeStream] });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    t.service.start();
+    failing = true;
+    t.tick(1000);
+    expect(error).toHaveBeenCalledTimes(1);
+    expect(t.service.getSnapshot().streams).toEqual([]);
+
+    // Recovery tick: counters advanced while the source was unreadable; only a baseline is set.
+    failing = false;
+    a.add({ bytes: 5_000_000, decoded: 300 });
+    t.tick(1000);
+    expect(t.service.getSnapshot().metrics?.receivedMbps).toBe(0);
+    expect(t.service.getSnapshot().streams[0]).toMatchObject({ bitrateBps: 0, fps: 0 });
+
+    // The next tick reports the real delta.
+    a.add({ bytes: 125_000, decoded: 10 });
+    t.tick(1000);
+    expect(t.service.getSnapshot().metrics?.receivedMbps).toBeCloseTo(1, 6);
+    expect(t.service.getSnapshot().streams[0]).toMatchObject({ fps: 10 });
+
+    // A new failure after recovery is reported again.
+    failing = true;
+    t.tick(1000);
+    t.tick(1000);
+    expect(error).toHaveBeenCalledTimes(2);
+    error.mockRestore();
+  });
+
   it("keeps notifying the other subscribers when one of them throws", () => {
     const t = setup();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

@@ -41,7 +41,8 @@ export type DiagnosticsInput = {
 
 export type Diagnostics = {
   schema: typeof DIAGNOSTICS_SCHEMA;
-  generatedAt: string;
+  /** ISO time, or null when the input timestamp was not a valid date. */
+  generatedAt: string | null;
   appVersion?: string;
   commit?: string;
   capabilities?: ClientCapabilities;
@@ -115,6 +116,13 @@ function truncate(text: string): string {
   return text.length > MAX_ERROR_MESSAGE_LENGTH ? `${text.slice(0, MAX_ERROR_MESSAGE_LENGTH)}…` : text;
 }
 
+/** ISO string for an epoch-milliseconds value, or null when it is not a valid date (never throws). */
+function isoOrNull(ms: unknown): string | null {
+  if (typeof ms !== "number" || !Number.isFinite(ms)) return null;
+  const d = new Date(ms);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
 export function buildDiagnostics(input: DiagnosticsInput): Diagnostics {
   const errors = input.recentErrors?.slice(-MAX_RECENT_ERRORS).map((e) => ({
     at: e.at,
@@ -124,7 +132,7 @@ export function buildDiagnostics(input: DiagnosticsInput): Diagnostics {
   const cameras = input.visibleCameras?.map((c) => ({ id: c.id, ...(c.name === undefined ? {} : { name: c.name }) }));
   const raw = {
     schema: DIAGNOSTICS_SCHEMA,
-    generatedAt: new Date(input.generatedAt).toISOString(),
+    generatedAt: isoOrNull(input.generatedAt),
     appVersion: input.appVersion,
     commit: input.commit,
     capabilities: input.capabilities,
@@ -143,6 +151,21 @@ export function buildDiagnostics(input: DiagnosticsInput): Diagnostics {
 // Text
 // ---------------------------------------------------------------------------------------------
 
+const NA = "n/a";
+const INVALID_TIME = "invalid time";
+
+/** Fixed-point number with an optional unit; null, undefined and non-finite values print as n/a. */
+function fmt(n: number | null | undefined, digits = 0, unit = ""): string {
+  return typeof n === "number" && Number.isFinite(n) ? `${n.toFixed(digits)}${unit}` : NA;
+}
+
+/** Plain value; null, undefined and non-finite numbers print as n/a. */
+function show(v: string | number | null | undefined): string | number | undefined {
+  if (v === undefined || v === "") return undefined;
+  if (v === null || (typeof v === "number" && !Number.isFinite(v))) return NA;
+  return v;
+}
+
 function codecLine(c: ClientCapabilities["codecs"][number]): string {
   const parts = c.supported
     ? ["supported", ...(c.smooth === undefined ? [] : [c.smooth ? "smooth" : "not smooth"]), ...(c.powerEfficient ? ["power efficient"] : [])]
@@ -152,9 +175,10 @@ function codecLine(c: ClientCapabilities["codecs"][number]): string {
 
 /** A compact, support-facing block (English keys), derived from an already redacted Diagnostics. */
 export function formatDiagnosticsText(diag: Diagnostics): string {
-  const lines: string[] = ["OpenVMS Client Diagnostics", `Generated: ${diag.generatedAt}`];
-  const push = (label: string, value: string | number | undefined) => {
-    if (value !== undefined && value !== "") lines.push(`${label}: ${value}`);
+  const lines: string[] = ["OpenVMS Client Diagnostics", `Generated: ${diag.generatedAt ?? INVALID_TIME}`];
+  const push = (label: string, value: string | number | null | undefined) => {
+    const v = show(value);
+    if (v !== undefined) lines.push(`${label}: ${v}`);
   };
   push("App", [diag.appVersion, diag.commit && `(${diag.commit})`].filter(Boolean).join(" ") || undefined);
 
@@ -164,10 +188,10 @@ export function formatDiagnosticsText(diag: Diagnostics): string {
     push("Browser", [cap.system.browser, cap.system.browserVersion].filter(Boolean).join(" ") || undefined);
     push("OS", [cap.system.os, cap.system.osVersion].filter(Boolean).join(" ") || undefined);
     push("CPU threads", cap.cpu.logicalProcessors);
-    if (cap.memory.reportedGB !== undefined) push("Memory reported", `${cap.memory.reportedGB} GB${cap.memory.bucketed ? " (bucketed)" : ""}`);
+    if (cap.memory.reportedGB !== undefined) push("Memory reported", cap.memory.reportedGB === null || !Number.isFinite(cap.memory.reportedGB) ? NA : `${cap.memory.reportedGB} GB${cap.memory.bucketed ? " (bucketed)" : ""}`);
     push("GPU/WebGL", cap.gpu.renderer);
     lines.push(`WebGL2: ${cap.gpu.webgl2 ? "Yes" : "No"}`);
-    if (cap.system.screen) push("Screen", `${cap.system.screen.width}x${cap.system.screen.height} @${cap.system.screen.devicePixelRatio}x`);
+    if (cap.system.screen) push("Screen", `${show(cap.system.screen.width)}x${show(cap.system.screen.height)} @${show(cap.system.screen.devicePixelRatio)}x`);
     if (cap.codecs.length > 0) lines.push("", "Video", ...cap.codecs.map(codecLine));
   }
 
@@ -178,10 +202,10 @@ export function formatDiagnosticsText(diag: Diagnostics): string {
     push("Active streams", m.activeStreams);
     push("Main streams", m.mainStreams);
     push("Substreams", m.subStreams);
-    push("Traffic", `${m.receivedMbps.toFixed(1)} Mbps (OpenVMS video only)`);
-    push("Dropped frames", `${(m.droppedFrameRatio * 100).toFixed(1)}%`);
-    if (m.presentationFps !== undefined) push("Render", `${Math.round(m.presentationFps)} FPS`);
-    if (m.renderFrameTimeP95Ms !== undefined) push("Frame time p95", `${m.renderFrameTimeP95Ms.toFixed(1)} ms`);
+    push("Traffic", typeof m.receivedMbps === "number" && Number.isFinite(m.receivedMbps) ? `${fmt(m.receivedMbps, 1)} Mbps (OpenVMS video only)` : NA);
+    push("Dropped frames", fmt(typeof m.droppedFrameRatio === "number" ? m.droppedFrameRatio * 100 : undefined, 1, "%"));
+    if (m.presentationFps !== undefined) push("Render", typeof m.presentationFps === "number" ? fmt(Math.round(m.presentationFps), 0, " FPS") : NA);
+    if (m.renderFrameTimeP95Ms !== undefined) push("Frame time p95", fmt(m.renderFrameTimeP95Ms, 1, " ms"));
   }
 
   if (diag.health) {
@@ -196,7 +220,7 @@ export function formatDiagnosticsText(diag: Diagnostics): string {
   }
   if (diag.recentErrors && diag.recentErrors.length > 0) {
     lines.push("", "Recent errors");
-    for (const e of diag.recentErrors) lines.push(`${new Date(e.at).toISOString()} ${e.code}${e.message ? `: ${e.message}` : ""}`);
+    for (const e of diag.recentErrors) lines.push(`${isoOrNull(e.at) ?? INVALID_TIME} ${e.code}${e.message ? `: ${e.message}` : ""}`);
   }
   return lines.join("\n");
 }

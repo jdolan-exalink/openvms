@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyHealth, createHealthTracker, HEALTH_WINDOW_SIZE } from "./performanceClassifier";
+import { classifyHealth, createHealthTracker, HEALTH_WINDOW_SIZE, MIN_HEALTH_SAMPLES, type HealthState } from "./performanceClassifier";
 import type { StreamTelemetryRow, VideoPerformanceMetrics } from "./types";
 
 function sample(patch: Partial<VideoPerformanceMetrics> = {}, i = 0): VideoPerformanceMetrics {
@@ -121,16 +121,48 @@ describe("classifyHealth", () => {
     expect(h.signals.starvedStreamRatio).toBeCloseTo(0.4);
   });
 
-  it("returns an honest result for an empty or thin window", () => {
+  it("reports unknown, never optimal, for an empty window", () => {
     const empty = classifyHealth([]);
-    expect(empty.state).toBe("optimal");
-    expect(empty.reasons[0]?.code).toBe("insufficient_data");
-    expect(empty.layers.decode).toBe("unknown");
+    expect(empty.state).toBe("unknown");
+    expect(empty.reasons[0]).toMatchObject({ code: "insufficient_data", state: "unknown" });
+    expect(Object.values(empty.layers)).toEqual(["unknown", "unknown", "unknown", "unknown"]);
+  });
+
+  it("requires MIN_HEALTH_SAMPLES samples before giving a verdict", () => {
+    expect(MIN_HEALTH_SAMPLES).toBe(3);
+    const bad = { ...dropped(0.6), stalls: 5, renderFrameTimeP95Ms: 120 };
+    for (const n of [1, 2]) {
+      for (const w of [windowOf(n), windowOf(n, bad)]) {
+        const h = classifyHealth(w);
+        expect(h.state).toBe("unknown");
+        expect(h.reasons[0]?.code).toBe("insufficient_data");
+        expect(Object.values(h.layers)).toEqual(["unknown", "unknown", "unknown", "unknown"]);
+      }
+    }
+    expect(classifyHealth(windowOf(MIN_HEALTH_SAMPLES)).state).toBe("optimal");
+  });
+
+  it("does not let one bad second flip a 3-sample window", () => {
+    const bad = { ...dropped(0.6), stalls: 5, renderFrameTimeP95Ms: 120 };
+    const h = classifyHealth(windowOf(3, (i) => (i === 1 ? bad : {})));
+    expect(h.state).toBe("optimal");
+    expect(h.reasons).toEqual([]);
+  });
+
+  it("still degrades a short window when the problem is sustained (2 of 3 samples)", () => {
+    const h = classifyHealth(windowOf(3, (i) => (i >= 1 ? dropped(0.3) : {})));
+    expect(h.state).toBe("saturated");
+  });
+
+  it("needs at least two sustained samples even for tiny filtered signals", () => {
+    // Only one sample decodes enough frames to judge the drop ratio: it cannot be sustained.
+    const w = windowOf(4, (i) => (i === 0 ? dropped(0.6) : { decodedFrames: 1 }));
+    expect(classifyHealth(w).layers.decode).not.toBe("saturated");
   });
 });
 
 describe("createHealthTracker", () => {
-  const assess = (state: "optimal" | "acceptable" | "limit" | "saturated") => ({ state });
+  const assess = (state: HealthState) => ({ state });
 
   it("downgrades only after consecutive worse windows and upgrades more slowly", () => {
     const t = createHealthTracker({ downgradeAfter: 2, upgradeAfter: 3 });
@@ -148,5 +180,23 @@ describe("createHealthTracker", () => {
     t.update(assess("limit"));
     t.update(assess("optimal"));
     expect(t.update(assess("limit"))).toBe("optimal");
+  });
+
+  it("passes unknown through immediately and resets the streaks", () => {
+    const t = createHealthTracker({ downgradeAfter: 2, upgradeAfter: 3 });
+    t.update(assess("optimal"));
+    t.update(assess("limit"));
+    expect(t.update(assess("unknown"))).toBe("unknown");
+    // The pending downgrade streak was discarded: one worse sample is not enough again.
+    expect(t.update(assess("limit"))).toBe("limit");
+  });
+
+  it("adopts the first known state after unknown without a streak", () => {
+    const t = createHealthTracker({ downgradeAfter: 2, upgradeAfter: 5 });
+    t.update(assess("unknown"));
+    expect(t.state).toBe("unknown");
+    expect(t.update(assess("optimal"))).toBe("optimal");
+    expect(t.update(assess("unknown"))).toBe("unknown");
+    expect(t.update(assess("saturated"))).toBe("saturated");
   });
 });

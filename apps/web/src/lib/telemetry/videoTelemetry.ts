@@ -60,12 +60,21 @@ function delta(current: number, previous: number): number {
   return current >= previous ? current - previous : 0;
 }
 
-/** readStats isolates one faulty source so it cannot abort the tick for every other stream. */
-function readStats(source: StreamStatsSource): StreamStatsSample | undefined {
+/**
+ * readStats isolates one faulty source so it cannot abort the tick for every other stream. A source
+ * that keeps failing is logged once (tracked in `reported`); the mark is cleared as soon as it reads
+ * successfully, so a later new failure is reported again.
+ */
+function readStats(source: StreamStatsSource, reported: WeakSet<StreamStatsSource>): StreamStatsSample | undefined {
   try {
-    return source.streamStats();
+    const sample = source.streamStats();
+    reported.delete(source);
+    return sample;
   } catch (err) {
-    console.error("video telemetry source failed", err);
+    if (!reported.has(source)) {
+      reported.add(source);
+      console.error("video telemetry source failed", err);
+    }
     return undefined;
   }
 }
@@ -74,6 +83,8 @@ export function createVideoTelemetry(opts: VideoTelemetryOptions): VideoTelemetr
   const intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
   const ring = new RingBuffer<VideoPerformanceMetrics>(opts.historyLength ?? DEFAULT_HISTORY);
   const listeners = new Set<() => void>();
+  /** Sources whose current failure was already logged. */
+  const reported = new WeakSet<StreamStatsSource>();
   /** Previous cumulative sample per source; sources that vanish are pruned each tick. */
   let baselines = new Map<StreamStatsSource, StreamStatsSample>();
   let snapshot = EMPTY_SNAPSHOT;
@@ -96,7 +107,7 @@ export function createVideoTelemetry(opts: VideoTelemetryOptions): VideoTelemetr
     let stalls = 0;
 
     for (const source of opts.sessions()) {
-      const s = readStats(source);
+      const s = readStats(source, reported);
       if (!s) continue;
       seen.set(source, s);
       if (s.quality === "main") main += 1;
@@ -165,7 +176,7 @@ export function createVideoTelemetry(opts: VideoTelemetryOptions): VideoTelemetr
       // A fresh baseline: time spent stopped must not show up as a burst of traffic.
       baselines = new Map();
       for (const source of opts.sessions()) {
-        const s = readStats(source);
+        const s = readStats(source, reported);
         if (s) baselines.set(source, s);
       }
       lastTickAt = opts.now();

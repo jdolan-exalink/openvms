@@ -12,10 +12,16 @@ import type { StreamTelemetryRow, VideoPerformanceMetrics } from "./types";
  * stalls and missing streams are what describe video delivery.
  */
 
-export type HealthState = "optimal" | "acceptable" | "limit" | "saturated";
+/** A severity a signal or layer can reach, ordered from best to worst. */
+export type SeverityState = "optimal" | "acceptable" | "limit" | "saturated";
+/**
+ * Overall verdict. `unknown` means there is not enough data to judge (fewer than
+ * MIN_HEALTH_SAMPLES samples); it is never reported as healthy.
+ */
+export type HealthState = SeverityState | "unknown";
 export type HealthLayer = "network" | "transport" | "decode" | "render";
 /** `unknown` means the platform did not expose what that layer needs; it never counts as healthy or sick. */
-export type LayerStatus = HealthState | "unknown";
+export type LayerStatus = HealthState;
 
 export type HealthReasonCode =
   | "dropped_frames"
@@ -30,7 +36,7 @@ export type HealthReasonCode =
 export type HealthReason = {
   layer: HealthLayer;
   code: HealthReasonCode;
-  /** Severity this single signal reached. */
+  /** Severity this single signal reached (`unknown` only for `insufficient_data`). */
   state: HealthState;
   /** The observed value over the window (ratio, fps, ms or count, depending on the code). */
   value: number;
@@ -80,10 +86,15 @@ export const HEALTH_WINDOW_SIZE = 10;
 /** Default presentation fps target (display refresh). */
 export const TARGET_PRESENTATION_FPS = 60;
 /**
- * A signal degrades the window only when at least this share of the samples reached the level,
- * so one bad second never flips the state: sustained loss does.
+ * A signal degrades the window only when at least this share of the samples reached the level
+ * (and never fewer than MIN_SUSTAINED_SAMPLES samples), so one bad second never flips the state:
+ * sustained loss does.
  */
 export const SUSTAINED_FRACTION = 0.3;
+/** A level is sustained only when at least this many samples reached it, whatever the window size. */
+export const MIN_SUSTAINED_SAMPLES = 2;
+/** Below this many samples the assessment is `unknown`: no verdict, healthy or otherwise. */
+export const MIN_HEALTH_SAMPLES = 3;
 /** Samples decoding fewer frames than this are skipped for the dropped-frame ratio (too noisy). */
 export const MIN_DECODED_FRAMES_PER_SAMPLE = 5;
 /** Below this many samples a verdict carries low confidence. */
@@ -112,16 +123,16 @@ export const HEALTH_THRESHOLDS = {
 /** A stream counts as starved when it decodes below this share of the expected fps. */
 export const STARVED_FPS_FACTOR = 0.8;
 
-export const HEALTH_STATES: readonly HealthState[] = ["optimal", "acceptable", "limit", "saturated"];
+export const HEALTH_STATES: readonly SeverityState[] = ["optimal", "acceptable", "limit", "saturated"];
 
 /** 0 = optimal ... 3 = saturated. */
 export type HealthLevel = 0 | 1 | 2 | 3;
 
-export function stateOf(level: number): HealthState {
-  return HEALTH_STATES[Math.max(0, Math.min(3, level))] as HealthState;
+export function stateOf(level: number): SeverityState {
+  return HEALTH_STATES[Math.max(0, Math.min(3, level))] as SeverityState;
 }
 
-export function levelOf(state: HealthState): HealthLevel {
+export function levelOf(state: SeverityState): HealthLevel {
   return HEALTH_STATES.indexOf(state) as HealthLevel;
 }
 
@@ -133,10 +144,13 @@ function levelBelow(value: number, t: LevelThresholds): HealthLevel {
   return value < t[2] ? 3 : value < t[1] ? 2 : value < t[0] ? 1 : 0;
 }
 
-/** The level reached by at least SUSTAINED_FRACTION of the measured samples. */
+/**
+ * The level reached by at least SUSTAINED_FRACTION of the measured samples, and by no fewer than
+ * MIN_SUSTAINED_SAMPLES of them. Too few measured samples to sustain anything count as level 0.
+ */
 function sustainedLevel(levels: number[]): HealthLevel {
-  if (levels.length === 0) return 0;
-  const need = Math.max(1, Math.ceil(SUSTAINED_FRACTION * levels.length));
+  const need = Math.max(MIN_SUSTAINED_SAMPLES, Math.ceil(SUSTAINED_FRACTION * levels.length));
+  if (levels.length < need) return 0;
   const sorted = [...levels].sort((a, b) => b - a);
   return sorted[need - 1] as HealthLevel;
 }
@@ -227,9 +241,20 @@ export function analyzeHealth(input: readonly VideoPerformanceMetrics[], opts: H
   return { window, layerLevels, contributions, signals };
 }
 
-/** Classifies the most recent samples into Optimal / Acceptable / At the limit / Saturated. */
+/**
+ * Classifies the most recent samples into Optimal / Acceptable / At the limit / Saturated, or
+ * Unknown when the window holds fewer than MIN_HEALTH_SAMPLES samples.
+ */
 export function classifyHealth(window: readonly VideoPerformanceMetrics[], opts: HealthOptions = {}): HealthAssessment {
   const a = analyzeHealth(window, opts);
+  if (a.signals.samples < MIN_HEALTH_SAMPLES) {
+    return {
+      state: "unknown",
+      layers: { network: "unknown", transport: "unknown", decode: "unknown", render: "unknown" },
+      reasons: [{ layer: "transport", code: "insufficient_data", state: "unknown", value: a.signals.samples, threshold: MIN_HEALTH_SAMPLES }],
+      signals: a.signals,
+    };
+  }
   const layers = {} as Record<HealthLayer, LayerStatus>;
   for (const layer of ["network", "transport", "decode", "render"] as const) {
     const level = a.layerLevels[layer];
@@ -239,7 +264,6 @@ export function classifyHealth(window: readonly VideoPerformanceMetrics[], opts:
     .filter((c) => c.level >= 1)
     .sort((x, y) => y.level - x.level)
     .map((c) => ({ layer: c.layer, code: c.code, state: stateOf(c.level), value: c.value, threshold: c.thresholds[c.level - 1] as number }));
-  if (a.signals.samples === 0) reasons.push({ layer: "transport", code: "insufficient_data", state: "optimal", value: 0, threshold: 1 });
   const worst = Math.max(0, ...Object.values(a.layerLevels).map((l) => l ?? 0));
   return { state: stateOf(worst), layers, reasons, signals: a.signals };
 }
@@ -257,7 +281,11 @@ export type HealthTracker = {
   readonly state: HealthState | undefined;
 };
 
-/** Debounces the displayed state: degrade quickly, recover slowly, so the label does not flicker. */
+/**
+ * Debounces the displayed state: degrade quickly, recover slowly, so the label does not flicker.
+ * `unknown` is not a severity: it passes through immediately and clears any pending streak, and the
+ * first known state after it is adopted immediately as well (there is nothing to debounce against).
+ */
 export function createHealthTracker(opts: HealthTrackerOptions = {}): HealthTracker {
   const downgradeAfter = opts.downgradeAfter ?? 2;
   const upgradeAfter = opts.upgradeAfter ?? 5;
@@ -269,8 +297,8 @@ export function createHealthTracker(opts: HealthTrackerOptions = {}): HealthTrac
       return current;
     },
     update({ state }) {
-      if (current === undefined || state === current) {
-        current = current ?? state;
+      if (current === undefined || current === "unknown" || state === "unknown" || state === current) {
+        current = state;
         candidate = undefined;
         streak = 0;
         return current;

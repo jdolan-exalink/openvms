@@ -185,6 +185,57 @@ describe("formatDiagnosticsText", () => {
   it("lists recent errors", () => {
     expect(formatDiagnosticsText(full())).toContain("NETWORK: boom");
   });
+
+  it("never throws on non-finite metrics and prints n/a instead", () => {
+    const bad = {
+      ...metrics,
+      receivedMbps: Number.NaN,
+      droppedFrameRatio: Number.POSITIVE_INFINITY,
+      presentationFps: Number.NaN,
+      renderFrameTimeP95Ms: Number.NEGATIVE_INFINITY,
+    };
+    const diag = buildDiagnostics({ generatedAt: 0, telemetry: { metrics: bad, streams: [] }, history: [bad] });
+    let text = "";
+    expect(() => {
+      text = formatDiagnosticsText(diag);
+    }).not.toThrow();
+    expect(text).toContain("Traffic: n/a");
+    expect(text).toContain("Dropped frames: n/a");
+    expect(text).toContain("Render: n/a");
+    expect(text).toContain("Frame time p95: n/a");
+    expect(text).not.toContain("0 FPS");
+    expect(text).not.toContain("null");
+  });
+
+  it("prints n/a for null counters and an unknown performance state", () => {
+    const diag = buildDiagnostics({
+      generatedAt: 0,
+      telemetry: { metrics: { ...metrics, visibleCameras: Number.NaN }, streams: [] },
+      health: classifyHealth([]),
+    });
+    const text = formatDiagnosticsText(diag);
+    expect(text).toContain("Visible cameras: n/a");
+    expect(text).toContain("Performance state: UNKNOWN");
+  });
+
+  it("never throws on invalid timestamps", () => {
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1]) {
+      let diag!: ReturnType<typeof buildDiagnostics>;
+      expect(() => {
+        diag = buildDiagnostics({ generatedAt: bad, recentErrors: [{ at: bad, code: "NETWORK", message: "boom" }] });
+      }).not.toThrow();
+      expect(diag.generatedAt).toBeNull();
+      const text = formatDiagnosticsText(diag);
+      expect(text).toContain("Generated: invalid time");
+      expect(text).toContain("invalid time NETWORK: boom");
+    }
+  });
+
+  it("formats a valid timestamp as ISO", () => {
+    const diag = buildDiagnostics({ generatedAt: 0, recentErrors: [{ at: 1000, code: "X" }] });
+    expect(diag.generatedAt).toBe("1970-01-01T00:00:00.000Z");
+    expect(formatDiagnosticsText(diag)).toContain("1970-01-01T00:00:01.000Z X");
+  });
 });
 
 describe("copyDiagnostics", () => {
