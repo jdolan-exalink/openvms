@@ -283,7 +283,14 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		}
 	}
 	if err := run(ctx, request, func(stage string) { job.update("running", stage, installStageMessage(stage)) }); err != nil {
-		job.update("failed", "failed", "Agent installation failed; remote output was not retained")
+		errLower := strings.ToLower(err.Error())
+		if strings.Contains(errLower, "auth") || strings.Contains(errLower, "password") {
+			job.update("failed", "failed", "SSH authentication failed: invalid password or credentials")
+		} else if strings.Contains(errLower, "connection") {
+			job.update("failed", "failed", "Could not establish SSH. Verify reachability and root SSH access, then inspect the target before retrying.")
+		} else {
+			job.update("failed", "failed", "Agent installation failed; remote output was not retained")
+		}
 		return
 	}
 	job.update("running", "registering", "Registering encrypted agent credentials and TLS trust")
@@ -297,7 +304,8 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 	}
 	job.update("succeeded", "complete", "Agent files installed and credentials registered; HTTPS health is not yet verified")
 	if s.OnAgentInstalled != nil {
-		go s.OnAgentInstalled(context.Background(), actor, job.serverID)
+		// #nosec G118 -- background task outlives caller request context
+		go s.OnAgentInstalled(context.WithoutCancel(ctx), actor, job.serverID)
 	}
 }
 
@@ -538,6 +546,10 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 	}
 	conn, err := dial(installCtx, request.Host, request.Port, request.User, request.Password, request.ExpectedHostKey)
 	if err != nil {
+		errLower := strings.ToLower(err.Error())
+		if strings.Contains(errLower, "unable to authenticate") || strings.Contains(errLower, "password") || strings.Contains(errLower, "auth") {
+			return errors.New("agent install SSH authentication failed: invalid password")
+		}
 		return errors.New("agent install SSH connection failed")
 	}
 	defer conn.Close()

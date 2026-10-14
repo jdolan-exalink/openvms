@@ -31,6 +31,8 @@ type Snapshot struct {
 	DatabaseFree     uint64             `json:"database_free_bytes"`
 	Network          []NetworkInterface `json:"network_interfaces,omitempty"`
 	NetworkSampledAt *time.Time         `json:"network_sampled_at,omitempty"`
+	SampledAt        *time.Time         `json:"sampled_at,omitempty"`
+	OS               string             `json:"os,omitempty"`
 }
 
 // Paths are the files a sample reads. Empty fields use this machine.
@@ -41,6 +43,7 @@ type Paths struct {
 	Dev  string
 	CCTV string
 	DB   string
+	Etc  string
 }
 
 // Sampler caches one reading so overlapping polls do not stack the CPU sample.
@@ -108,6 +111,10 @@ func cloneSnapshot(in Snapshot) Snapshot {
 		sampledAt := *in.NetworkSampledAt
 		out.NetworkSampledAt = &sampledAt
 	}
+	if in.SampledAt != nil {
+		sampledAt := *in.SampledAt
+		out.SampledAt = &sampledAt
+	}
 	return out
 }
 
@@ -122,9 +129,12 @@ func Read(opts Paths, variant string) Snapshot {
 	if opts.DB != "" && opts.DB != host.DiskPath {
 		dbTotal, dbFree = diskUsage(opts.DB)
 	}
+	now := time.Now().UTC()
 	out := Snapshot{
 		Version:         Version,
 		Variant:         variant,
+		SampledAt:       &now,
+		OS:              detectOS(opts.Etc),
 		NTP:             ntpState(opts.Proc),
 		MemoryTotal:     host.MemTotal,
 		MemoryAvailable: host.MemAvailable,

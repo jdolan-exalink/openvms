@@ -166,6 +166,26 @@ export const frigateRevisionsQuery = (serverId: string | undefined, cameraId: st
       ).items,
   });
 
+export const serverFrigateRawQuery = (serverId: string | undefined) =>
+  queryOptions({
+    queryKey: ["servers", serverId, "frigate-raw"],
+    enabled: !!serverId,
+    queryFn: async () =>
+      unwrap(await api.GET("/api/v1/servers/{serverId}/frigate-config/raw", { params: { path: { serverId: serverId as string } } })),
+  });
+
+export const serverFrigateRevisionsQuery = (serverId: string | undefined, includeYaml = false) =>
+  queryOptions({
+    queryKey: ["servers", serverId, "frigate-revisions", "server", includeYaml],
+    enabled: !!serverId,
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/api/v1/servers/{serverId}/frigate-config/revisions", {
+          params: { path: { serverId: serverId as string }, query: { limit: 50, include_yaml: includeYaml } },
+        }),
+      ).items,
+  });
+
 export type EventFilter = {
   site_id?: string[];
   server_id?: string[];

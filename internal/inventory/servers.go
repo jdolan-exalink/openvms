@@ -555,6 +555,34 @@ func (s *Service) ConnInfo(srv db.FrigateServer) (frigate.ConnInfo, error) {
 	return s.connInfo(srv)
 }
 
+// GetServerCredentials returns the decrypted username and password for a server.
+func (s *Service) GetServerCredentials(ctx context.Context, actor authz.Actor, id uuid.UUID) (string, string, error) {
+	var srv db.GetServerRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		srv, err = q.GetServer(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		return c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID))
+	})
+	if err != nil {
+		return "", "", err
+	}
+	info, err := s.connInfo(db.FrigateServer{
+		ID:             srv.ID,
+		BaseUrl:        srv.BaseUrl,
+		AuthMode:       srv.AuthMode,
+		Username:       srv.Username,
+		PasswordSealed: srv.PasswordSealed,
+		TlsSkipVerify:  srv.TlsSkipVerify,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return info.Username, info.Password, nil
+}
+
 func (s *Service) connInfo(srv db.FrigateServer) (frigate.ConnInfo, error) {
 	info := frigate.ConnInfo{BaseURL: srv.BaseUrl, AuthMode: frigate.AuthMode(srv.AuthMode), TLSSkipVerify: srv.TlsSkipVerify}
 	if info.Mode() == frigate.AuthNone {
@@ -744,6 +772,17 @@ func ExtractCameraStreamHosts(rawPaths map[string]any) map[string]CameraStreamHo
 								parsed := parseRTSPStreamInfo(path)
 								if parsed.Host != "" {
 									updateCameraInfo(camName, parsed)
+								} else {
+									// Dereference local go2rtc restreams or stream keys
+									// e.g. rtsp://127.0.0.1:8554/avigilon_id748_sub or avigilon_id748_sub
+									streamKey := extractStreamKeyFromPath(path)
+									if streamKey != "" {
+										if target, found := out[streamKey]; found && target.Host != "" {
+											updateCameraInfo(camName, target)
+										} else if target, found := out[strings.ToLower(streamKey)]; found && target.Host != "" {
+											updateCameraInfo(camName, target)
+										}
+									}
 								}
 							}
 						}
@@ -754,6 +793,26 @@ func ExtractCameraStreamHosts(rawPaths map[string]any) map[string]CameraStreamHo
 	}
 
 	return out
+}
+
+func extractStreamKeyFromPath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if idx := strings.Index(raw, "#"); idx != -1 {
+		raw = raw[:idx]
+	}
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err == nil && u != nil {
+		if src := u.Query().Get("src"); src != "" {
+			return src
+		}
+		if u.Path != "" {
+			return strings.TrimPrefix(u.Path, "/")
+		}
+	}
+	return strings.TrimPrefix(raw, "/")
 }
 
 func isLocalHost(host string) bool {
@@ -771,6 +830,7 @@ func parseRTSPStreamInfo(raw string) CameraStreamHostInfo {
 	if idx := strings.Index(raw, "#"); idx != -1 {
 		raw = raw[:idx]
 	}
+	raw = strings.TrimPrefix(raw, "ffmpeg:")
 	u, err := url.Parse(raw)
 	if err != nil || u == nil {
 		return CameraStreamHostInfo{}

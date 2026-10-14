@@ -126,3 +126,13 @@ func TestGrantable(t *testing.T) {
 		}
 	}
 }
+
+func TestSystemActor(t *testing.T) {
+	a := SystemActor()
+	if !a.System {
+		t.Fatal("SystemActor().System must be true")
+	}
+	if !a.IsPlatform() {
+		t.Fatal("SystemActor().IsPlatform() must be true")
+	}
+}

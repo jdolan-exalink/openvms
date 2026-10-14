@@ -1,7 +1,7 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { RefreshCw, Settings, Sparkles } from "lucide-react";
+import { Check, Settings, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serverAgentQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { api, unwrap, ApiError } from "@/api/client";
@@ -10,10 +10,12 @@ import { can } from "@/lib/perm";
 import { Icon } from "@/components/Icon";
 import { Empty, ErrorNote, LinkButton, PageHeader, Select, StatusBadge, Summary, Table, TextInput, Th } from "@/components/ui";
 import { IaViewModal } from "@/components/IaViewModal";
-function summarize(cameras: { enabled: boolean; status: string }[]) {
+function summarize(cameras: { enabled: boolean; status: string; onvif_profile?: string | null }[]) {
   const online = cameras.filter((c) => c.enabled && c.status === "online").length;
+  const onvifLinked = cameras.filter((c) => Boolean(c.onvif_profile)).length;
   const disabled = cameras.filter((c) => !c.enabled).length;
   const parts = [`${cameras.length} ${cameras.length === 1 ? "cámara" : "cámaras"}`, `${online} en línea`];
+  if (onvifLinked > 0) parts.push(`${onvifLinked} con ONVIF`);
   if (disabled) parts.push(`${disabled} ${disabled === 1 ? "deshabilitada" : "deshabilitadas"}`);
   return parts.join(" · ");
 }
@@ -120,23 +122,91 @@ export function Cameras() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [checkResult, setCheckResult] = useState<string | null>(null);
-  const checkServerCameras = useMutation({
-    mutationFn: async (targetServerId: string) => {
-      setCheckResult(null);
+
+  const [addingDevice, setAddingDevice] = useState<{
+    xaddr: string;
+    host: string;
+    name: string;
+    mainUrl: string;
+    subUrl: string;
+  } | null>(null);
+
+  const addCamera = useMutation({
+    mutationFn: async (vars: { name: string; mainUrl: string; subUrl?: string; onvifHost?: string }) => {
+      if (!discoveryServerId) throw new Error("Servidor no seleccionado");
       return unwrap(
-        await api.POST("/api/v1/servers/{serverId}/onvif/check-cameras", {
-          params: { path: { serverId: targetServerId } },
-          body: { interface_name: interfaceName || undefined },
+        await api.POST("/api/v1/servers/{serverId}/frigate/add-camera", {
+          params: { path: { serverId: discoveryServerId } },
+          body: {
+            name: vars.name,
+            main_stream_url: vars.mainUrl,
+            sub_stream_url: vars.subUrl || undefined,
+            onvif_host: vars.onvifHost || undefined,
+          },
+        })
+      );
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["cameras"] });
+      setAddingDevice(null);
+    },
+  });
+
+  const [linkingCameraFor, setLinkingCameraFor] = useState<{ xaddr: string; selectedCameraId: string } | null>(null);
+
+  const checkCamera = useMutation({
+    mutationFn: async ({ cameraId, endpoint }: { cameraId: string; endpoint: string }) => {
+      return unwrap(
+        await api.POST("/api/v1/cameras/{cameraId}/onvif/check", {
+          params: { path: { cameraId } },
+          body: { endpoint: endpoint || undefined },
         })
       );
     },
     onSuccess: async (res) => {
-      setCheckResult(
-        `Comprobación finalizada: ${res.checked} cámaras revisadas, ${res.matched} vinculadas con ONVIF (${res.updated} actualizadas).`
-      );
+      setCheckResult(`Cámara "${res.display_name}" vinculada con ONVIF (${res.onvif_profile ?? "OK"}).`);
+      setLinkingCameraFor(null);
       await qc.invalidateQueries({ queryKey: ["cameras"] });
     },
+    onError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCheckResult(`Error al vincular con ONVIF: ${msg}`);
+    },
   });
+
+  const matchExistingCamera = (deviceHost: string, deviceXaddrs: string[]) => {
+    if (!deviceHost || !cameras.data) return null;
+    const cleanHost = deviceHost.toLowerCase();
+    const normalizedHost = cleanHost.replace(/\./g, "_");
+
+    return cameras.data.find((c) => {
+      if (discoveryServerId && c.server_id !== discoveryServerId) return false;
+
+      if (c.onvif_endpoint) {
+        try {
+          if (new URL(c.onvif_endpoint).hostname.toLowerCase() === cleanHost) return true;
+        } catch {
+          // Ignore malformed URL
+        }
+      }
+
+      const remote = c.remote_name.toLowerCase();
+      const display = c.display_name.toLowerCase();
+      if (remote.includes(cleanHost) || remote.includes(normalizedHost)) return true;
+      if (display.includes(cleanHost) || display.includes(normalizedHost)) return true;
+
+      for (const x of deviceXaddrs) {
+        if (c.onvif_endpoint && c.onvif_endpoint === x) return true;
+      }
+
+      return false;
+    });
+  };
+
+  const unlinkedCameras =
+    cameras.data?.filter(
+      (c) => (!discoveryServerId || c.server_id === discoveryServerId) && !c.onvif_profile
+    ) ?? [];
 
   const update = (k: keyof CameraFilter, v: string) => {
     setFilter((f) => ({ ...f, [k]: v || undefined }));
@@ -258,7 +328,9 @@ export function Cameras() {
       <section aria-labelledby="onvif-discovery-title" className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-4">
         <div>
           <h2 id="onvif-discovery-title" className="text-lg font-semibold">Descubrir cámaras ONVIF</h2>
-          <p className="text-sm text-on-surface-variant">La búsqueda se ejecuta desde el agente del servidor. No se envían credenciales y los dispositivos encontrados todavía no se agregaron.</p>
+          <p className="text-sm text-on-surface-variant">
+            La búsqueda se ejecuta desde el agente del servidor en su red física. Si las cámaras ya existen en Frigate, usá <strong>Comprobar y vincular ONVIF en cámaras</strong> para enlazarlas automáticamente. Los dispositivos no registrados pueden agregarse como nuevas cámaras o vincularse manualmente.
+          </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="flex flex-col gap-1 text-sm font-medium">Servidor para descubrir cámaras
@@ -301,6 +373,7 @@ export function Cameras() {
                   }}
                 >
                   <option value="">Seleccione una interfaz</option>
+                  <option value="*">Todas las interfaces (*)</option>
                   {filteredInterfaces.map((name) => (
                     <option key={name} value={name}>
                       {name}
@@ -324,17 +397,6 @@ export function Cameras() {
         {(!selectedDiscoveryServer || canManageServer(me.data, selectedDiscoveryServer)) && (
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" className="h-11 rounded-m3-full bg-primary px-5 text-sm font-medium text-on-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={!canDiscover} onClick={() => void searchOnvif()}>{discovery.pending ? "Buscando…" : "Buscar dispositivos ONVIF"}</button>
-            {selectedDiscoveryServer && (
-              <button
-                type="button"
-                className="flex h-11 items-center gap-1.5 rounded-m3-full border border-outline px-4 text-sm font-medium text-primary hover:bg-primary/8 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={checkServerCameras.isPending}
-                onClick={() => checkServerCameras.mutate(selectedDiscoveryServer.id)}
-              >
-                <Icon icon={RefreshCw} size="xs" className={checkServerCameras.isPending ? "animate-spin" : ""} />
-                {checkServerCameras.isPending ? "Comprobando cámaras…" : "Comprobar y vincular ONVIF en cámaras"}
-              </button>
-            )}
             <button
               type="button"
               className="flex h-11 items-center gap-1.5 rounded-m3-full border border-primary/40 bg-primary/10 px-4 text-sm font-semibold text-primary hover:bg-primary/18"
@@ -346,16 +408,209 @@ export function Cameras() {
           </div>
         )}
         {checkResult && <p role="status" className="rounded-m3-lg bg-ok/12 px-4 py-2.5 text-sm text-ok">{checkResult}</p>}
-        <ErrorNote error={checkServerCameras.error} />
         <ErrorNote error={formatDiscoveryError(discovery.error)} />
         {discovery.pending && <p role="status" className="text-sm text-muted">Buscando dispositivos en la red del servidor…</p>}
         {discovery.devices?.length === 0 && <p role="status" className="text-sm text-muted">No se encontraron dispositivos ONVIF en esa interfaz.</p>}
-        {!!discovery.devices?.length && <ul aria-label="Dispositivos ONVIF encontrados" className="flex flex-col gap-2">
-          {discovery.devices.map((device, index) => <li key={`${index}-${device.xaddrs.join("|")}`} className="rounded-m3-lg bg-surface-2 p-3">
-            <p className="text-sm font-medium">Dispositivo encontrado · todavía no se agregó</p>
-            {device.xaddrs.map((xaddr) => <code key={xaddr} className="block break-all text-xs text-on-surface-variant">{displayEndpoint(xaddr) ?? "Endpoint no disponible"}</code>)}
-          </li>)}
-        </ul>}
+        {!!discovery.devices?.length && (
+          <ul aria-label="Dispositivos ONVIF encontrados" className="flex flex-col gap-2">
+            {discovery.devices.map((device, index) => {
+              const primaryEndpoint = device.xaddrs[0] || "";
+              const host = (() => {
+                try {
+                  return new URL(primaryEndpoint).hostname;
+                } catch {
+                  return "";
+                }
+              })();
+              const isAddingThis = addingDevice?.xaddr === primaryEndpoint;
+              const isLinkingThis = linkingCameraFor?.xaddr === primaryEndpoint;
+              const matchedCam = matchExistingCamera(host, device.xaddrs);
+
+              return (
+                <li key={`${index}-${device.xaddrs.join("|")}`} className="flex flex-col gap-2 rounded-m3-lg bg-surface-2 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      {matchedCam ? (
+                        matchedCam.onvif_profile ? (
+                          <div className="flex items-center gap-2">
+                            <p className="flex items-center gap-1 text-sm font-semibold text-ok">
+                              <Icon icon={Check} size="xs" />
+                              Ya vinculada con {matchedCam.display_name}
+                            </p>
+                            <span className="rounded-m3-sm bg-primary/12 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary">
+                              {matchedCam.onvif_profile}
+                            </span>
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="text-sm font-semibold text-primary">
+                              Cámara en inventario: {matchedCam.display_name}
+                            </p>
+                            <p className="text-xs text-muted">
+                              Detectada en Frigate · Lista para vincular ONVIF
+                            </p>
+                          </div>
+                        )
+                      ) : (
+                        <p className="text-sm font-medium">Dispositivo encontrado · todavía no se agregó</p>
+                      )}
+                      {device.xaddrs.map((xaddr) => (
+                        <code key={xaddr} className="block break-all text-xs text-on-surface-variant">
+                          {displayEndpoint(xaddr) ?? "Endpoint no disponible"}
+                        </code>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-m3-full border border-outline-variant px-3 py-1 text-xs font-medium hover:bg-surface-3"
+                        onClick={() => {
+                          setProbeServerId(discoveryServerId);
+                          setProbeEndpoint(primaryEndpoint);
+                        }}
+                      >
+                        Probar
+                      </button>
+
+                      {matchedCam ? (
+                        <button
+                          type="button"
+                          className="rounded-m3-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary/90 disabled:opacity-50"
+                          disabled={checkCamera.isPending}
+                          onClick={() => checkCamera.mutate({ cameraId: matchedCam.id, endpoint: primaryEndpoint })}
+                        >
+                          {checkCamera.isPending ? "Vinculando…" : matchedCam.onvif_profile ? "Recomprobar" : "Vincular ONVIF"}
+                        </button>
+                      ) : (
+                        <>
+                          {unlinkedCameras.length > 0 && (
+                            <button
+                              type="button"
+                              className="rounded-m3-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-medium text-primary hover:bg-primary/20"
+                              onClick={() => {
+                                setAddingDevice(null);
+                                setLinkingCameraFor(isLinkingThis ? null : { xaddr: primaryEndpoint, selectedCameraId: unlinkedCameras[0]?.id || "" });
+                              }}
+                            >
+                              {isLinkingThis ? "Cancelar" : "Vincular a cámara existente"}
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            className="rounded-m3-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary/90"
+                            onClick={() => {
+                              setLinkingCameraFor(null);
+                              const safeHost = host.replace(/[^a-zA-Z0-9]/g, "_");
+                              setAddingDevice({
+                                xaddr: primaryEndpoint,
+                                host,
+                                name: `cam_${safeHost}`,
+                                mainUrl: `rtsp://${host}:554/live/ch0`,
+                                subUrl: "",
+                              });
+                            }}
+                          >
+                            Agregar a Frigate
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {isLinkingThis && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 rounded-m3-md border border-outline-variant bg-surface-1 p-3">
+                      <span className="text-xs font-medium">Seleccionar cámara a vincular:</span>
+                      <Select
+                        aria-label="Cámara existente para vincular ONVIF"
+                        value={linkingCameraFor.selectedCameraId}
+                        onChange={(e) => setLinkingCameraFor({ ...linkingCameraFor, selectedCameraId: e.target.value })}
+                        className="text-xs"
+                      >
+                        {unlinkedCameras.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.display_name} ({c.remote_name})
+                          </option>
+                        ))}
+                      </Select>
+                      <button
+                        type="button"
+                        className="rounded-m3-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary/90 disabled:opacity-50"
+                        disabled={checkCamera.isPending || !linkingCameraFor.selectedCameraId}
+                        onClick={() => {
+                          checkCamera.mutate({ cameraId: linkingCameraFor.selectedCameraId, endpoint: primaryEndpoint });
+                        }}
+                      >
+                        {checkCamera.isPending ? "Vinculando…" : "Confirmar vinculación"}
+                      </button>
+                    </div>
+                  )}
+
+                  {isAddingThis && (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (addingDevice) {
+                          addCamera.mutate({
+                            name: addingDevice.name,
+                            mainUrl: addingDevice.mainUrl,
+                            subUrl: addingDevice.subUrl,
+                            onvifHost: addingDevice.host,
+                          });
+                        }
+                      }}
+                      className="mt-2 flex flex-col gap-2 rounded-m3-md border border-outline-variant bg-surface-1 p-3"
+                    >
+                      <p className="text-xs font-semibold text-ink">Agregar cámara a Frigate y sincronizar:</p>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          Nombre (letras, números, _)
+                          <TextInput
+                            value={addingDevice.name}
+                            onChange={(e) => setAddingDevice({ ...addingDevice, name: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          RTSP Stream Principal
+                          <TextInput
+                            value={addingDevice.mainUrl}
+                            onChange={(e) => setAddingDevice({ ...addingDevice, mainUrl: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          RTSP Substream (opcional)
+                          <TextInput
+                            value={addingDevice.subUrl}
+                            onChange={(e) => setAddingDevice({ ...addingDevice, subUrl: e.target.value })}
+                            placeholder="Opcional para detección liviana"
+                          />
+                        </label>
+                      </div>
+                      <ErrorNote error={addCamera.error} />
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          className="rounded-m3-full px-3 py-1 text-xs font-medium text-muted hover:bg-surface-3"
+                          onClick={() => setAddingDevice(null)}
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={addCamera.isPending}
+                          className="rounded-m3-full bg-primary px-4 py-1.5 text-xs font-medium text-on-primary disabled:opacity-50"
+                        >
+                          {addCamera.isPending ? "Guardando en Frigate…" : "Guardar y sincronizar"}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
       <section aria-labelledby="onvif-probe-title" className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-4">
         <div>
@@ -428,7 +683,7 @@ export function Cameras() {
               <Th className="text-right">FPS</Th>
               <Th>Zonas</Th>
               <Th>Clasificación</Th>
-              <Th className="text-right">Ajustes</Th>
+              <Th className="text-right">Configuración Frigate</Th>
             </tr>
           </thead>
           <tbody>
@@ -438,7 +693,7 @@ export function Cameras() {
                   <div className="flex items-center gap-2 font-medium">
                     {c.display_name}
                     {c.lpr && <span className="rounded-m3-sm bg-secondary-container px-1.5 py-0.5 font-mono text-[10px] text-on-secondary-container">LPR</span>}
-                    {c.onvif_profile && (
+                    {c.onvif_profile ? (
                       <span
                         className="rounded-m3-sm bg-primary/12 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-primary"
                         title={[
@@ -450,6 +705,13 @@ export function Cameras() {
                       >
                         {c.onvif_profile}
                         {c.onvif_version && <span className="ml-1 opacity-75 font-normal">v{c.onvif_version}</span>}
+                      </span>
+                    ) : (
+                      <span
+                        className="rounded-m3-sm border border-outline-variant/60 px-1.5 py-0.5 font-mono text-[10px] text-muted"
+                        title="Sin vincular a ONVIF"
+                      >
+                        Sin ONVIF
                       </span>
                     )}
                   </div>
@@ -484,10 +746,11 @@ export function Cameras() {
                     to="/cameras/$cameraId/frigate"
                     params={{ cameraId: c.id }}
                     aria-label={`Configuración de ${c.display_name}`}
-                    title={t("nav.settings")}
-                    className="size-11 px-0"
+                    title="Configuración Frigate"
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-m3-full px-3 py-1.5 text-xs font-semibold"
                   >
-                    <Icon icon={Settings} size="sm" />
+                    <Icon icon={Settings} size="xs" />
+                    <span>Configurar Frigate</span>
                   </LinkButton>
                 </td>
               </tr>

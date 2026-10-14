@@ -358,11 +358,10 @@ func (h *Handlers) SyncServer(ctx context.Context, r gen.SyncServerRequestObject
 	if err != nil {
 		return nil, err
 	}
-	go func() {
-		sweepCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		_, _ = h.SweepServerCamerasOnvif(sweepCtx, a, r.ServerId, nil)
-	}()
+	sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 25*time.Second)
+	defer cancel()
+	_, _ = h.SweepServerCamerasOnvif(sweepCtx, a, r.ServerId, nil)
+
 	return gen.SyncServer200JSONResponse{Server: toServer(res.Server), Added: res.Added, Updated: res.Updated, Missing: res.Missing}, nil
 }
 

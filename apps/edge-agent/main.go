@@ -50,6 +50,7 @@ func main() {
 	}
 	var discoveryHandler http.Handler
 	var probeHandler http.Handler
+	var opsHandler *onvifdiscover.OpsHandler
 	if enabled {
 		var handlerErr error
 		discoveryHandler, handlerErr = onvifdiscover.NewHandler(secret, onvif.NewDiscovery(onvif.NewUDPTransport(), onvif.DiscoveryConfig{}), discoveryConfig)
@@ -62,6 +63,11 @@ func main() {
 			log.Error("invalid ONVIF probe configuration", "error", handlerErr)
 			os.Exit(1)
 		}
+		opsHandler, handlerErr = onvifdiscover.NewOpsHandler(secret, discoveryConfig)
+		if handlerErr != nil {
+			log.Error("invalid ONVIF ops configuration", "error", handlerErr)
+			os.Exit(1)
+		}
 	}
 	tlsConfig, tlsEnabled, err := loadAgentTLSConfig(os.Getenv("OPENVMS_AGENT_ONVIF_TLS_LISTEN"), os.Getenv("TLS_CERT_FILE"), os.Getenv("TLS_KEY_FILE"))
 	if err != nil {
@@ -70,7 +76,7 @@ func main() {
 	}
 	healthHandler := newAgentHealthHandler(secret, currentAgentHealthInfo(variant))
 	lprReceiver := provisionlpr.NewReceiver(provisionlpr.DefaultConfig(), log)
-	mux := buildMux(secret, variant, sampler, discoveryHandler, probeHandler, lprReceiver, replaceBinary, func() { go restart() })
+	mux := buildMux(secret, variant, sampler, discoveryHandler, probeHandler, opsHandler, lprReceiver, replaceBinary, func() { go restart() })
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Info("listening", "addr", addr, "version", agent.Version)
@@ -252,7 +258,7 @@ func serveAgentServersWith(log *slog.Logger, serve func(*http.Server) error, shu
 	return listenerErr
 }
 
-func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, probeHandler, lprHandler http.Handler, replace func(*http.Request) error, restartUpdate func()) *http.ServeMux {
+func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, probeHandler http.Handler, opsHandler *onvifdiscover.OpsHandler, lprHandler http.Handler, replace func(*http.Request) error, restartUpdate func()) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/metrics", func(w http.ResponseWriter, r *http.Request) {
 		if !bearer(r, secret) {
@@ -278,6 +284,12 @@ func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, 
 	}
 	if probeHandler != nil {
 		mux.Handle("POST /v1/onvif/probe", probeHandler)
+	}
+	if opsHandler != nil {
+		mux.HandleFunc("POST /v1/onvif/sync-time", opsHandler.HandleSyncTime)
+		mux.HandleFunc("POST /v1/onvif/ptz", opsHandler.HandlePTZ)
+		mux.HandleFunc("POST /v1/onvif/video-config", opsHandler.HandleVideoConfig)
+		mux.HandleFunc("POST /v1/onvif/imaging", opsHandler.HandleImaging)
 	}
 	if lprHandler != nil {
 		mux.Handle("/SendKeepalive", lprHandler)

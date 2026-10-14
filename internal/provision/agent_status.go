@@ -31,6 +31,7 @@ type AgentView struct {
 	CPUAvailable           bool
 	NetworkInterfaces      []agent.NetworkInterface
 	NetworkSampledAt       *time.Time
+	SampledAt              *time.Time
 	MemoryTotal            int64
 	MemoryAvailable        int64
 	Coral                  bool
@@ -41,6 +42,7 @@ type AgentView struct {
 	CCTVFree               int64
 	DatabaseTotal          int64
 	DatabaseFree           int64
+	OS                     string
 	Error                  string
 }
 
@@ -161,6 +163,10 @@ func applySnapshot(out *AgentView, snap agent.Snapshot) {
 		sampledAt := *snap.NetworkSampledAt
 		out.NetworkSampledAt = &sampledAt
 	}
+	if snap.SampledAt != nil {
+		sampledAt := *snap.SampledAt
+		out.SampledAt = &sampledAt
+	}
 	out.MemoryTotal = signedSnapshotBytes(snap.MemoryTotal)
 	out.MemoryAvailable = signedSnapshotBytes(snap.MemoryAvailable)
 	out.Coral = snap.Coral
@@ -171,6 +177,7 @@ func applySnapshot(out *AgentView, snap agent.Snapshot) {
 	out.CCTVFree = signedSnapshotBytes(snap.CCTVFree)
 	out.DatabaseTotal = signedSnapshotBytes(snap.DatabaseTotal)
 	out.DatabaseFree = signedSnapshotBytes(snap.DatabaseFree)
+	out.OS = snap.OS
 	out.Error = ""
 }
 

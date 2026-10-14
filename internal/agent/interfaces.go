@@ -171,7 +171,7 @@ func parseDefaultRoute(proc string) (defaultIface string, defaultGateway string,
 			gwVal, err := strconv.ParseUint(gwHex, 16, 32)
 			if err == nil {
 				val := uint32(gwVal)
-				gwIP := net.IPv4(byte(val), byte(val>>8), byte(val>>16), byte(val>>24))
+				gwIP := net.IPv4(byte(val&0xff), byte((val>>8)&0xff), byte((val>>16)&0xff), byte((val>>24)&0xff))
 				return iface, gwIP.String(), nil
 			}
 			return iface, "", nil

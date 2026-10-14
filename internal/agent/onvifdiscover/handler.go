@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -123,23 +124,75 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	targetInterface := input.InterfaceName
-	if !h.allowAll {
-		if _, ok := h.interfaces[input.InterfaceName]; !ok {
-			if input.InterfaceName == "*" && len(h.interfaces) > 0 {
-				for iface := range h.interfaces {
-					targetInterface = iface
-					break
+	var targets []string
+	if input.InterfaceName == "*" {
+		if !h.allowAll {
+			for iface := range h.interfaces {
+				targets = append(targets, iface)
+			}
+		} else {
+			ifaces, err := net.Interfaces()
+			if err == nil {
+				for _, iface := range ifaces {
+					if iface.Flags&net.FlagUp != 0 && iface.Flags&net.FlagMulticast != 0 && iface.Flags&net.FlagLoopback == 0 {
+						addrs, err := iface.Addrs()
+						if err != nil {
+							continue
+						}
+						for _, a := range addrs {
+							var ip net.IP
+							switch v := a.(type) {
+							case *net.IPNet:
+								ip = v.IP
+							case *net.IPAddr:
+								ip = v.IP
+							}
+							if ip4 := ip.To4(); ip4 != nil && !ip4.IsUnspecified() && !ip4.IsMulticast() && !ip4.IsLoopback() {
+								targets = append(targets, iface.Name)
+								break
+							}
+						}
+					}
 				}
-			} else {
+			}
+		}
+		if len(targets) == 0 {
+			targets = []string{"*"}
+		}
+	} else {
+		if !h.allowAll {
+			if _, ok := h.interfaces[input.InterfaceName]; !ok {
 				http.Error(w, "interface not allowed", http.StatusForbidden)
 				return
 			}
 		}
+		targets = []string{input.InterfaceName}
 	}
-	devices, err := h.discoverer.Probe(r.Context(), targetInterface)
-	if err != nil {
-		slog.Error("ONVIF discovery probe failed", "error", err, "interface", input.InterfaceName)
+
+	var devices []onvif.DiscoveredDevice
+	var lastErr error
+	seenEndpoints := make(map[string]bool)
+
+	for _, target := range targets {
+		devs, err := h.discoverer.Probe(r.Context(), target)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		for _, d := range devs {
+			key := d.EndpointReference
+			if key == "" && len(d.XAddrs) > 0 {
+				key = d.XAddrs[0].String()
+			}
+			if !seenEndpoints[key] {
+				seenEndpoints[key] = true
+				devices = append(devices, d)
+			}
+		}
+	}
+
+	if len(devices) == 0 && lastErr != nil && len(targets) == 1 {
+		slog.Error("ONVIF discovery probe failed", "error", lastErr, "interface", input.InterfaceName)
 		if r.Context().Err() != nil {
 			http.Error(w, "request canceled", http.StatusRequestTimeout)
 			return

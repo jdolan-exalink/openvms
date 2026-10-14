@@ -8,9 +8,11 @@ import (
 	"log/slog"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
@@ -493,4 +495,157 @@ func redactPatch(v any) {
 			redactPatch(e)
 		}
 	}
+}
+
+var safeCameraName = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// AddCameraToFrigateInput holds details for auto-provisioning a newly discovered camera into Frigate.
+type AddCameraToFrigateInput struct {
+	Name          string `json:"name"`
+	Title         string `json:"title,omitempty"`
+	MainStreamURL string `json:"main_stream_url"`
+	SubStreamURL  string `json:"sub_stream_url,omitempty"`
+	OnvifHost     string `json:"onvif_host,omitempty"`
+	OnvifPort     int    `json:"onvif_port,omitempty"`
+	OnvifUser     string `json:"onvif_user,omitempty"`
+	OnvifPassword string `json:"onvif_password,omitempty"`
+}
+
+// AddCameraToFrigateResult holds the result of adding a camera to Frigate.
+type AddCameraToFrigateResult struct {
+	Camera          *db.GetCameraRow `json:"camera,omitempty"`
+	RevisionID      uuid.UUID        `json:"revision_id"`
+	RestartRequired bool             `json:"restart_required"`
+}
+
+// AddCameraToFrigate adds a camera definition to Frigate's config.yml, saves a revision,
+// restarts/reloads Frigate, and synchronizes the server inventory so the camera appears in OpenVMS.
+func (s *Service) AddCameraToFrigate(ctx context.Context, actor authz.Actor, serverID uuid.UUID, in AddCameraToFrigateInput) (AddCameraToFrigateResult, error) {
+	in.Name = strings.TrimSpace(in.Name)
+	if in.Name == "" && in.Title != "" {
+		in.Name = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(in.Title), " ", "_"))
+	}
+	if in.Name == "" {
+		return AddCameraToFrigateResult{}, invalid("camera name is required")
+	}
+	if !safeCameraName.MatchString(in.Name) {
+		return AddCameraToFrigateResult{}, invalid("invalid camera name %q: must contain only letters, digits, and underscores", in.Name)
+	}
+	in.MainStreamURL = strings.TrimSpace(in.MainStreamURL)
+	if in.MainStreamURL == "" {
+		return AddCameraToFrigateResult{}, invalid("main_stream_url is required")
+	}
+
+	srv, err := s.secretsServer(ctx, actor, serverID, true)
+	if err != nil {
+		return AddCameraToFrigateResult{}, err
+	}
+	a, err := s.frigateAdapter(ctx, srv)
+	if err != nil {
+		return AddCameraToFrigateResult{}, err
+	}
+	if !a.ConfigEditable() {
+		return AddCameraToFrigateResult{}, frigate.ErrConfigEditUnsupported
+	}
+
+	rawYAML, err := a.RawConfig(ctx)
+	if err != nil {
+		return AddCameraToFrigateResult{}, &FrigateError{Err: fmt.Errorf("read config.yml: %w", err)}
+	}
+
+	var parsed map[string]any
+	if err := yaml.Unmarshal([]byte(rawYAML), &parsed); err != nil {
+		return AddCameraToFrigateResult{}, fmt.Errorf("parse config.yml: %w", err)
+	}
+	if parsed == nil {
+		parsed = make(map[string]any)
+	}
+	var cameras map[string]any
+	if c, ok := parsed["cameras"].(map[string]any); ok {
+		cameras = c
+	} else {
+		cameras = make(map[string]any)
+		parsed["cameras"] = cameras
+	}
+	if _, exists := cameras[in.Name]; exists {
+		return AddCameraToFrigateResult{}, invalid("camera %q already exists in Frigate configuration", in.Name)
+	}
+
+	camMap := make(map[string]any)
+	var inputs []any
+	sub := strings.TrimSpace(in.SubStreamURL)
+	if sub != "" {
+		inputs = append(inputs, map[string]any{
+			"path":  sub,
+			"roles": []any{"detect"},
+		})
+		inputs = append(inputs, map[string]any{
+			"path":  in.MainStreamURL,
+			"roles": []any{"record"},
+		})
+	} else {
+		inputs = append(inputs, map[string]any{
+			"path":  in.MainStreamURL,
+			"roles": []any{"detect", "record"},
+		})
+	}
+	camMap["ffmpeg"] = map[string]any{
+		"inputs": inputs,
+	}
+
+	onvifHost := strings.TrimSpace(in.OnvifHost)
+	if onvifHost != "" {
+		onvifMap := map[string]any{
+			"host": onvifHost,
+		}
+		if in.OnvifPort > 0 {
+			onvifMap["port"] = in.OnvifPort
+		}
+		if in.OnvifUser != "" {
+			onvifMap["user"] = in.OnvifUser
+			onvifMap["password"] = in.OnvifPassword
+		}
+		camMap["onvif"] = onvifMap
+	}
+	cameras[in.Name] = camMap
+
+	newYAML, err := yaml.Marshal(parsed)
+	if err != nil {
+		return AddCameraToFrigateResult{}, fmt.Errorf("marshal updated config.yml: %w", err)
+	}
+
+	saveRes, err := s.SaveServerFrigateRaw(ctx, actor, serverID, string(newYAML), true)
+	if err != nil {
+		return AddCameraToFrigateResult{}, err
+	}
+
+	// Trigger inventory synchronization to discover the new camera
+	if _, err := s.SyncServer(ctx, actor, serverID); err != nil {
+		slog.WarnContext(ctx, "frigate: sync server after add camera failed", "error", err)
+	}
+
+	// Retrieve the created camera
+	cams, err := s.ListCameras(ctx, actor, CameraFilter{ServerID: &serverID})
+	if err != nil {
+		return AddCameraToFrigateResult{RevisionID: saveRes.RevisionID, RestartRequired: saveRes.RestartRequired}, nil
+	}
+	for _, cam := range cams {
+		if cam.RemoteName == in.Name {
+			if in.Title != "" && in.Title != cam.DisplayName {
+				if updated, err := s.UpdateCamera(ctx, actor, cam.ID, CameraUpdate{DisplayName: &in.Title}); err == nil {
+					cam = updated
+				}
+			}
+			return AddCameraToFrigateResult{
+				Camera:          &cam,
+				RevisionID:      saveRes.RevisionID,
+				RestartRequired: saveRes.RestartRequired,
+			}, nil
+		}
+	}
+
+	return AddCameraToFrigateResult{
+		RevisionID:      saveRes.RevisionID,
+		RestartRequired: saveRes.RestartRequired,
+	}, nil
 }

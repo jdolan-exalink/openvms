@@ -310,6 +310,9 @@ func (s *Service) runServerAgentUpdate(actor authz.Actor, job *agentInstallJob, 
 		}
 	}
 	job.update("succeeded", "complete", "Agent update and authenticated HTTPS health verified")
+	if s.OnAgentInstalled != nil {
+		go s.OnAgentInstalled(context.WithoutCancel(ctx), actor, original.ServerID)
+	}
 }
 
 func (s *Service) failServerAgentUpdate(job *agentInstallJob, serverID uuid.UUID, err error) {

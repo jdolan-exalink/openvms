@@ -14,8 +14,9 @@ func TestExtractCameraStreamHosts(t *testing.T) {
 					"ffmpeg:Patio_main#video=h264",
 					"rtsp://admin:123456@10.1.1.224:554/profile1#video=copy",
 				},
-				"Cochera_sub":   "rtsp://admin:Daytona1309*@10.1.1.225:554/profile1",
-				"LocalRestream": "rtsp://127.0.0.1:8554/cam",
+				"Cochera_sub":          "rtsp://admin:Daytona1309*@10.1.1.225:554/profile1",
+				"LocalRestream":        "rtsp://127.0.0.1:8554/cam",
+				"avigilon_id549_sub_1": "rtsp://admin:avigilonpass@172.22.148.57:554/default",
 			},
 		},
 		"cameras": map[string]any{
@@ -24,6 +25,15 @@ func TestExtractCameraStreamHosts(t *testing.T) {
 					"host":     "10.1.1.226",
 					"user":     "admin",
 					"password": "secretpassword",
+				},
+			},
+			"Camara_ID_549_1": map[string]any{
+				"ffmpeg": map[string]any{
+					"inputs": []any{
+						map[string]any{
+							"path": "rtsp://127.0.0.1:8554/avigilon_id549_sub_1",
+						},
+					},
 				},
 			},
 			"Quincho": map[string]any{
@@ -99,6 +109,15 @@ func TestExtractCameraStreamHosts(t *testing.T) {
 	}
 	if quincho.Host != "10.1.1.227" || quincho.Username != "admin" || quincho.Password != "daytona1309" {
 		t.Errorf("Quincho got %+v, want 10.1.1.227/admin/daytona1309", quincho)
+	}
+
+	// Camara_ID_549_1 dereferenced from go2rtc stream avigilon_id549_sub_1
+	c549, ok := hosts["Camara_ID_549_1"]
+	if !ok {
+		t.Fatalf("Camara_ID_549_1 not found in hosts")
+	}
+	if c549.Host != "172.22.148.57" || c549.Username != "admin" || c549.Password != "avigilonpass" {
+		t.Errorf("Camara_ID_549_1 got %+v, want 172.22.148.57/admin/avigilonpass", c549)
 	}
 
 	// LocalRestream should not be present as an external host

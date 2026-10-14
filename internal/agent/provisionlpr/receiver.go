@@ -135,7 +135,7 @@ func (r *Receiver) handleEvent(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Update heartbeat with reading
-	r.heartbeat.RecordEvent(event.CameraID, event.CameraIP, event.Plate, event.EventTime, now)
+	r.heartbeat.RecordFullEvent(event, now)
 	r.log.Info("provision-isr lpr event accepted", "camera_id", event.CameraID, "plate", event.Plate, "ip", event.CameraIP)
 
 	// Enqueue for subscribers

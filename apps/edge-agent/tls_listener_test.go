@@ -121,7 +121,7 @@ func TestAgentTLSHealthRequiresBearerAndExposesBuildMetadata(t *testing.T) {
 		t.Fatalf("wrong-method health status=%d, want 405", w.Code)
 	}
 
-	plain := buildMux("agent-secret", "openvino", nil, nil, nil, nil, func(*http.Request) error { return nil }, func() {})
+	plain := buildMux("agent-secret", "openvino", nil, nil, nil, nil, nil, func(*http.Request) error { return nil }, func() {})
 	r = httptest.NewRequest(http.MethodGet, "/v1/health", nil)
 	r.Header.Set("Authorization", "Bearer agent-secret")
 	w = httptest.NewRecorder()
@@ -213,7 +213,7 @@ func TestAgentTLSMuxExposesProbeWithoutChangingHTTPMux(t *testing.T) {
 		t.Fatalf("TLS probe status = %d, want 202", w.Code)
 	}
 
-	plainMux := buildMux("agent-secret", "", nil, discovery, nil, nil, func(*http.Request) error { return nil }, func() {})
+	plainMux := buildMux("agent-secret", "", nil, discovery, nil, nil, nil, func(*http.Request) error { return nil }, func() {})
 	r = httptest.NewRequest("POST", "/v1/onvif/probe", nil)
 	w = httptest.NewRecorder()
 	plainMux.ServeHTTP(w, r)

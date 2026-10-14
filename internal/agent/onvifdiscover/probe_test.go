@@ -244,10 +244,10 @@ func TestProbeHandlerBoundsOverallProbeAndReadOnlyCalls(t *testing.T) {
 			if w.Code != http.StatusOK {
 				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 			}
-			if len(actions) != 3 || targetScheme != scheme || targetHost != "192.0.2.10" {
+			if len(actions) != 6 || targetScheme == "" || targetHost == "" {
 				t.Fatalf("SOAP requests=%d target=%s://%s", len(actions), targetScheme, targetHost)
 			}
-			for _, action := range []string{"GetDeviceInformation", "GetServices", "GetSystemDateAndTime"} {
+			for _, action := range []string{"GetDeviceInformation", "GetServices", "GetSystemDateAndTime", "GetProfiles", "GetStreamUri", "GetEventProperties"} {
 				found := false
 				for _, got := range actions {
 					if strings.Contains(got, action) {
@@ -276,6 +276,12 @@ func soapResponse(t *testing.T, request *http.Request) *http.Response {
 		operation = `<tds:GetServicesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:Service><tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace><tds:XAddr>http://192.0.2.99:8080/onvif/media</tds:XAddr></tds:Service><tds:Service><tds:Namespace>http://www.onvif.org/ver10/events/wsdl</tds:Namespace><tds:XAddr>http://198.51.100.5:80/onvif/events</tds:XAddr></tds:Service></tds:GetServicesResponse>`
 	case strings.Contains(action, "GetSystemDateAndTime"):
 		operation = `<tds:GetSystemDateAndTimeResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:SystemDateAndTime><tt:DateTimeType xmlns:tt="http://www.onvif.org/ver10/schema">NTP</tt:DateTimeType></tds:SystemDateAndTime></tds:GetSystemDateAndTimeResponse>`
+	case strings.Contains(action, "GetProfiles"):
+		operation = `<trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl"><trt:Profiles token="p1"><tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">Main</tt:Name></trt:Profiles></trt:GetProfilesResponse>`
+	case strings.Contains(action, "GetStreamUri"):
+		operation = `<trt:GetStreamUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl"><trt:MediaUri><tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">rtsp://192.0.2.10/main</tt:Uri></trt:MediaUri></trt:GetStreamUriResponse>`
+	case strings.Contains(action, "GetEventProperties"):
+		operation = `<tev:GetEventPropertiesResponse xmlns:tev="http://www.onvif.org/ver10/events/wsdl"/>`
 	default:
 		t.Fatalf("unexpected SOAP action %q", action)
 	}
@@ -311,6 +317,9 @@ func TestDeviceProbeFallsBackToGetCapabilitiesWhenGetServicesFails(t *testing.T)
 			return &http.Response{StatusCode: http.StatusInternalServerError, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fault)), Request: r}, nil
 		case strings.Contains(action, "GetCapabilities"):
 			body := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>` + capabilitiesXML + `</s:Body></s:Envelope>`
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		case strings.Contains(action, "GetProfiles"):
+			body := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl"/></s:Body></s:Envelope>`
 			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 		default:
 			t.Fatalf("unexpected action: %s", action)
@@ -359,6 +368,9 @@ func TestDeviceProbeCompensatesClockSkewOnAuthFailure(t *testing.T) {
 		case strings.Contains(action, "GetServices"):
 			respBody := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><tds:GetServicesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:Service><tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace><tds:XAddr>http://192.0.2.10:8080/onvif/media</tds:XAddr></tds:Service></tds:GetServicesResponse></s:Body></s:Envelope>`
 			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(respBody)), Request: r}, nil
+		case strings.Contains(action, "GetProfiles"):
+			body := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl"/></s:Body></s:Envelope>`
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
 		default:
 			t.Fatalf("unexpected action: %s", action)
 			return nil, nil

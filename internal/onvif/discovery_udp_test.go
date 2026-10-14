@@ -92,7 +92,7 @@ func TestUDPTransportAutoDetectInterface(t *testing.T) {
 			}
 			return iface, net.IPv4(192, 168, 1, 50), nil
 		},
-		open: func(local *net.UDPAddr) (udpPacketConn, error) {
+		open: func(_ *net.UDPAddr) (udpPacketConn, error) {
 			return &fakePacketConn{}, nil
 		},
 	}
