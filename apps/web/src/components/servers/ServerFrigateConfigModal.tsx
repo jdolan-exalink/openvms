@@ -734,17 +734,31 @@ export function ServerFrigateConfigModal({
                 <div className="rounded-m3-xl border border-outline-variant/60 bg-surface-2 p-4 flex flex-col gap-3">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h4 className="text-sm font-bold">Mosaico Global Birdseye</h4>
-                      <p className="text-xs text-muted">Genera un stream unificado que muestra en vivo las cámaras con actividad relevante.</p>
+                      <h4 className="text-sm font-bold flex items-center gap-2">
+                        <Icon icon={Eye} size="xs" className="text-primary" />
+                        Canal de Stream OpenVMS: BirdEye
+                      </h4>
+                      <p className="text-xs text-muted">Genera un canal de stream unificado en el servidor que conmuta dinámicamente las cámaras con actividad relevante o las muestra en mosaico continuo.</p>
                     </div>
                     <Switch
-                      label="Habilitar Birdseye"
+                      label="Habilitar BirdEye"
                       checked={birdseyeEnabled}
                       onChange={(on) => {
                         const block = `birdseye:\n  enabled: ${on ? "True" : "False"}\n  mode: ${birdseyeMode}`;
                         patchYamlBlock("birdseye", block);
                       }}
                     />
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="font-semibold text-muted">Estado del Canal:</span>
+                    {birdseyeEnabled ? (
+                      <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold">
+                        <Icon icon={CheckCircle2} size="xs" /> Activo en Live Grid (Canal &quot;BirdEye&quot;)
+                      </span>
+                    ) : (
+                      <span className="text-muted">Desactivado</span>
+                    )}
                   </div>
 
                   <Field label="Modo de activación en pantalla">
