@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
+  AlertTriangle,
   Bot,
   CheckCircle2,
   Code2,
@@ -18,6 +19,13 @@ import {
 } from "lucide-react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { serverAgentQuery, serverFrigateRawQuery, serverFrigateRevisionsQuery } from "@/api/queries";
+import {
+  FRIGATE_OBJECT_CATALOG,
+  FRIGATE_OBJECT_CATEGORIES,
+  isFrigateSupportedObject,
+  parseTrackedObjects,
+  toggleTrackedObject,
+} from "./frigateObjects";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
@@ -130,6 +138,7 @@ export function ServerFrigateConfigModal({
 
   const birdseyeEnabled = useMemo(() => extractYamlValue(yamlText, ["birdseye", "enabled"]) === "True" || extractYamlValue(yamlText, ["birdseye", "enabled"]) === "true", [yamlText]);
   const birdseyeMode = useMemo(() => extractYamlValue(yamlText, ["birdseye", "mode"]) ?? "motion", [yamlText]);
+  const trackedObjects = useMemo(() => parseTrackedObjects(yamlText), [yamlText]);
 
   const recordRetainDays = useMemo(() => extractYamlValue(yamlText, ["record", "retain", "days"]) ?? "7", [yamlText]);
   const recordRetainMode = useMemo(() => extractYamlValue(yamlText, ["record", "retain", "mode"]) ?? "motion", [yamlText]);
@@ -567,61 +576,80 @@ export function ServerFrigateConfigModal({
 
             {/* 3. Tab Objetos Globales */}
             {activeTab === "objects" && (
-              <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-5">
                 <div className="flex flex-col gap-1">
-                  <h3 className="text-sm font-bold text-on-surface">Objetos a Rastrear Globalmente</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-bold text-on-surface flex items-center gap-2">
+                      <Icon icon={Sparkles} size="xs" className="text-primary" />
+                      Objetos a Rastrear Globalmente
+                    </h3>
+                    <span className="text-xs text-muted font-mono">
+                      {trackedObjects.length} seleccionados
+                    </span>
+                  </div>
                   <p className="text-xs text-muted">
-                    Clases de IA que Frigate busca y clasifica por defecto en todas las cámaras del servidor.
+                    Catálogo de objetos COCO soportados nativamente por los modelos de inferencia de Frigate. Activa o desactiva las clases que deseas que el servidor detecte en todas las cámaras.
                   </p>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { label: "Persona", tag: "person" },
-                    { label: "Auto / Vehículo", tag: "car" },
-                    { label: "Moto", tag: "motorcycle" },
-                    { label: "Bicicleta", tag: "bicycle" },
-                    { label: "Colectivo / Bus", tag: "bus" },
-                    { label: "Camión", tag: "truck" },
-                    { label: "Perro", tag: "dog" },
-                    { label: "Gato", tag: "cat" },
-                  ].map((item) => {
-                    const isTracked = yamlText.includes(`- ${item.tag}`) || yamlText.includes(`- "${item.tag}"`);
+                {/* Categorized groups */}
+                <div className="flex flex-col gap-4">
+                  {FRIGATE_OBJECT_CATEGORIES.map((cat) => {
+                    const items = FRIGATE_OBJECT_CATALOG.filter((o) => o.category === cat.id);
+                    const trackedCount = items.filter((item) => trackedObjects.includes(item.tag)).length;
                     return (
-                      <Button
-                        key={item.tag}
-                        size="sm"
-                        variant={isTracked ? "primary" : "outlined"}
-                        onClick={() => {
-                          if (isTracked) {
-                            // Remove from track
-                            setYamlText((prev) =>
-                              prev
-                                .replace(new RegExp(`\\s*-\\s*["']?${item.tag}["']?`, "g"), "")
+                      <div key={cat.id} className="rounded-m3-xl border border-outline-variant/60 bg-surface-2 p-3.5 flex flex-col gap-2.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-on-surface uppercase tracking-wider flex items-center gap-2">
+                            {cat.label}
+                            {trackedCount > 0 && (
+                              <span className="rounded-full bg-primary/10 text-primary text-[10px] px-2 py-0.5 font-bold">
+                                {trackedCount} activos
+                              </span>
+                            )}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          {items.map((item) => {
+                            const isTracked = trackedObjects.includes(item.tag);
+                            return (
+                              <Button
+                                key={item.tag}
+                                size="sm"
+                                variant={isTracked ? "primary" : "outlined"}
+                                className="gap-2"
+                                onClick={() => {
+                                  setYamlText((prev) => toggleTrackedObject(prev, item.tag));
+                                }}
+                                title={item.description}
+                              >
+                                <Icon icon={item.icon} size="xs" />
+                                <span>{item.label}</span>
+                                {isTracked && <Icon icon={CheckCircle2} size="xs" className="text-on-primary/90" />}
+                              </Button>
                             );
-                          } else {
-                            // Add to track block
-                            const existingTrack = extractYamlSection(yamlText, "objects");
-                            if (existingTrack) {
-                              const updated = existingTrack.replace(
-                                /track:\s*\n/,
-                                `track:\n    - ${item.tag}\n`
-                              );
-                              setYamlText((prev) => prev.replace(existingTrack, updated));
-                            } else {
-                              const block = `objects:\n  track:\n    - ${item.tag}`;
-                              patchYamlBlock("objects", block);
-                            }
-                          }
-                        }}
-                      >
-                        {item.label}
-                      </Button>
+                          })}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
 
-                <div className="flex flex-col gap-2 mt-3">
+                {/* Custom / Non-standard objects check */}
+                {trackedObjects.some((tag) => !isFrigateSupportedObject(tag)) && (
+                  <div className="rounded-m3-lg bg-warn/10 border border-warn/30 p-3 text-xs text-warn flex items-center gap-2">
+                    <Icon icon={AlertTriangle} size="xs" />
+                    <span>
+                      Hay objetos configurados que no forman parte del dataset estándar de Frigate (COCO 80):{" "}
+                      <strong>
+                        {trackedObjects.filter((t) => !isFrigateSupportedObject(t)).join(", ")}
+                      </strong>. Asegúrate de tener un modelo custom cargado en el detector.
+                    </span>
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2">
                   <span className="text-xs font-bold text-muted uppercase tracking-wider">
                     Definición de objetos en YAML:
                   </span>
