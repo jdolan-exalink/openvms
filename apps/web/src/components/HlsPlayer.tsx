@@ -169,6 +169,7 @@ export const HlsPlayer = forwardRef<
       <>
         <video
           ref={video}
+          crossOrigin="anonymous"
           className={cn("size-full", objectFit === "fill" ? "object-fill" : objectFit === "cover" ? "object-cover" : "object-contain")}
           controls={controls && zoom.scale <= 1}
           muted={muted}

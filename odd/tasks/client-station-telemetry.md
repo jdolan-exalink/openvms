@@ -42,7 +42,7 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 - [x] CST-08 — `ClientBenchmarkService` (3–5 s progressive load with real OpenVMS substreams, stops before severe degradation) + IndexedDB cache + startup profile reuse/invalidation.
 - [x] CST-09 — `AdaptiveVideoPolicy`: gradual degradation order, never silently degrade a maximized camera, operator warning; verify no orphan main streams on maximize/unmaximize.
 - [x] CST-10 — Docs (`docs/live-view-architecture.md` / new telemetry doc) and full checks.
-- [ ] CST-11 — (user request 2026-10-14, after CST-10) Forensic detail enhancement ("Mejora de Detalle Forense") on paused recorded playback reached from Live; reproduce and fix the black image reported by the user when using it, with a regression test. Own PR after PR-6.
+- [x] CST-11 — (user request 2026-10-14, after CST-10) Forensic detail enhancement ("Mejora de Detalle Forense") on paused recorded playback reached from Live; reproduce and fix the black image reported by the user when using it, with a regression test. Own PR after PR-6.
 
 ## Acceptance criteria and checks
 
@@ -62,6 +62,7 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
   4. PR-4 — CST-06 + CST-07 (UI + dev overlay).
   5. PR-5 — CST-08 (benchmark + cache).
   6. PR-6 — CST-09 + CST-10 (adaptive policy + docs).
+  7. PR-7 — CST-11 (forensic enhancement black frame fix).
 
 ## Progress and evidence
 
@@ -106,3 +107,4 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 - 2026-10-14: CST-09 mapping (read-only): only levers today are `quality=sub|main` (gateway reads nothing else; no fps/resolution/low stream; MSE cannot skip frames) → degradation steps 1–2 are blocked on backend/go2rtc support and will be documented as such. Feasible: suspend maximize-hidden tiles (today they stay WARM decoding with `display:none`), trim visual work (frame capture interval, backdrop-blur, drag transitions, overlays), operator warning with estimated bottleneck; gate with the existing no-op `adaptiveStreaming` flag; pure policy + framework-free controller over `telemetryRuntime`.
   - User decision: on unmaximize, release the main stream immediately in persistent mode too (spec §10), replacing the 30 s warm TTL pinned by #36 (`Live.test.tsx` ~716-724 to be updated).
 - 2026-10-14: CST-09 & CST-10 done on `feat/client-station-telemetry-6-policy`. TDD RED → GREEN (`adaptivePolicy.ts`, `adaptivePolicy.test.ts`, Live unmaximize immediate discard, `Live.tsx` warning banner, i18n es/en/pt, architecture docs). Full checks: vitest 20 telemetry/live test files / 317 tests green, `tsc --noEmit` clean, `eslint .` clean, `git diff --check` clean.
+- 2026-10-14: CST-11 done on `feat/client-station-telemetry-7-forensic`. Root cause: `<video>` tags lacked `crossOrigin="anonymous"`, resulting in tainted canvas on `drawImage`; subsequent `getImageData` and `toDataURL` threw `SecurityError` and fell back to broken "mock" data URL. Fixed with `crossOrigin="anonymous"` on `EvidencePlayerModal` and `HlsPlayer`, `drawImage`/`getImageData` error boundary in `ForensicEnhancementEngine`, valid transparent 1x1 PNG fallback in `ForensicComparisonModal`, and regression tests. All tests, typecheck, and lint green.
