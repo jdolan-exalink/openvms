@@ -39,3 +39,21 @@ func TestLiveStreamNoRestreamFailsFast(t *testing.T) {
 		t.Fatalf("want (\"\", errNoStream), got (%q, %v)", s, err)
 	}
 }
+
+func TestLiveSignalRefusal(t *testing.T) {
+	zero, five := float32(0), float32(5)
+	code, msg, refused := liveSignalRefusal(Camera{Status: "offline", FPS: &zero})
+	if !refused || code != CodeCameraNoSignal || msg == "" {
+		t.Fatalf("no signal: got (%q, %q, %v)", code, msg, refused)
+	}
+	for name, cam := range map[string]Camera{
+		"unknown state (no stats yet)": {Status: "unknown"},
+		"unknown fps":                  {Status: "offline"},
+		"online":                       {Status: "online", FPS: &five},
+		"server unreachable":           {Status: "unknown", FPS: &zero},
+	} {
+		if _, _, refused := liveSignalRefusal(cam); refused {
+			t.Errorf("%s must not be refused", name)
+		}
+	}
+}

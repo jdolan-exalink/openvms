@@ -45,6 +45,13 @@ type HealthPoller struct {
 
 	// Adapters is shared with the event syncer; nil creates a private pool.
 	Adapters *Adapters
+
+	// NoSignalHold is how long a reported camera_fps of ~0 must persist before the camera
+	// is marked offline (no video signal at Frigate); zero uses DefaultNoSignalHold.
+	NoSignalHold time.Duration
+
+	signalsOnce sync.Once
+	signals     *SignalTracker
 }
 
 // Storage above this share of used space marks a server degraded (PRD §61 "Disk > 90%").
@@ -62,6 +69,17 @@ func (p *HealthPoller) Run(ctx context.Context) {
 			p.PollOnce(ctx)
 		}
 	}
+}
+
+func (p *HealthPoller) signalTracker() *SignalTracker {
+	p.signalsOnce.Do(func() {
+		hold := p.NoSignalHold
+		if hold <= 0 {
+			hold = DefaultNoSignalHold
+		}
+		p.signals = NewSignalTracker(hold)
+	})
+	return p.signals
 }
 
 func (p *HealthPoller) PollOnce(ctx context.Context) {
@@ -141,11 +159,22 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 		for _, cam := range cams {
 			cs, reported := stats.Cameras[cam.RemoteName]
 			camStatus := "offline"
+			sig := p.signalTracker().Observe(cam.ID, cs.CameraFPS, reported, now)
 			switch {
 			case !cam.Enabled:
 				camStatus = "unknown"
-			case reported && cs.CameraFPS > 0:
+			case sig == SignalHolding:
+				// camera_fps just hit ~0: keep the last verdict until the hold elapses.
+				camStatus = cam.Status
+			case reported && cs.CameraFPS > noSignalFPS:
 				camStatus = "online"
+			}
+			if lost := NoSignal(camStatus, ptr(float32(cs.CameraFPS))) && reported && cam.Enabled; lost != NoSignal(cam.Status, cam.Fps) {
+				if lost {
+					p.Svc.Log.WarnContext(ctx, "camera lost video signal at frigate", "camera_id", cam.ID, "server_id", srv.ID, "camera", cam.RemoteName)
+				} else {
+					p.Svc.Log.InfoContext(ctx, "camera video signal restored at frigate", "camera_id", cam.ID, "server_id", srv.ID, "camera", cam.RemoteName)
+				}
 			}
 			if cam.Enabled && camStatus == "offline" && cam.MissingSince == nil {
 				degraded = true
