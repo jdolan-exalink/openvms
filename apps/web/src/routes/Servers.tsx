@@ -1,6 +1,6 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Settings, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
@@ -9,10 +9,25 @@ import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
+import { ServerFrigateConfigModal } from "@/components/servers/ServerFrigateConfigModal";
 import { Button, Empty, ErrorNote, Field, PageHeader, Pill, Select, StatusBadge, Summary, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 import { useAgentJobs } from "@/lib/agentJobs/AgentJobProvider";
+
+export function isCanonicalIPv4(value: string) {
+  const octets = value.split(".");
+  return octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && String(Number(octet)) === octet && Number(octet) <= 255);
+}
+
+export function extractServerHost(baseUrl: string): string {
+  try {
+    const url = new URL(baseUrl);
+    return isCanonicalIPv4(url.hostname) ? url.hostname : "";
+  } catch {
+    return "";
+  }
+}
 
 export function Servers() {
   const t = useT();
@@ -29,6 +44,7 @@ export function Servers() {
   const siteName = new Map(sites.data?.map((s) => [s.id, s.name]));
   const [editing, setEditing] = useState<Schemas["Server"] | null>(null);
   const [deleting, setDeleting] = useState<Schemas["Server"] | null>(null);
+  const [configuringFrigate, setConfiguringFrigate] = useState<Schemas["Server"] | null>(null);
   const sync = useQuery(syncStatusQuery);
   const syncOf = new Map(sync.data?.map((s) => [s.server_id, s]));
   const policy = useQuery(classifyPolicyQuery);
@@ -50,6 +66,14 @@ export function Servers() {
       {editing && <EditServerModal server={editing} sites={sites.data ?? []} onDone={() => setEditing(null)} />}
       {deleting && <DeleteServerDialog server={deleting} onDone={() => setDeleting(null)} />}
       {registering && <RegisterServer sites={sites.data ?? []} onDone={() => setRegistering(false)} />}
+      {configuringFrigate && (
+        <ServerFrigateConfigModal
+          server={configuringFrigate}
+          open={!!configuringFrigate}
+          onClose={() => setConfiguringFrigate(null)}
+          canRestart={can(me.data, "servers.restart")}
+        />
+      )}
       <ErrorNote error={servers.error} />
       {servers.data?.length === 0 && <Empty>No hay servidores visibles para tu usuario.</Empty>}
       {!!servers.data?.length && (
@@ -128,6 +152,17 @@ export function Servers() {
                 )}
                 {can(me.data, "servers.restart") && <RestartButton server={s} />}
                 {can(me.data, "servers.manage") && <SyncButton server={s} />}
+                {can(me.data, "servers.manage") && (
+                  <Button
+                    size="sm"
+                    variant="tonal"
+                    onClick={() => setConfiguringFrigate(s)}
+                    title="Configuración global de Frigate y parámetros del sistema"
+                  >
+                    <Icon icon={Settings} size="xs" />
+                    Configurar Frigate
+                  </Button>
+                )}
                 {can(me.data, "servers.manage") && (
                   <>
                     <Button size="sm" onClick={() => setEditing(s)} title="Editar servidor">
@@ -853,7 +888,9 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
         </Button>
         {httpsRedirect.failed && <p role="alert" className="text-sm text-bad">{t("servers.agentHttpsRedirectFailed")}</p>}
       </div>}
-      <p className="text-sm text-muted">{t("servers.agentUpdateSSHHostFixed")}</p>
+      <p className="text-sm text-muted">
+        Host SSH de destino: <span className="font-mono font-bold text-on-surface">{extractServerHost(server.base_url) || "Servidor conectado"}</span> ({t("servers.agentUpdateSSHHostFixed")})
+      </p>
       <p className="rounded-m3-lg bg-warn/10 p-3 text-sm">{t("servers.agentSSHHostKeyTOFU")}</p>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label={t("servers.agentInstallPortLabel")}><TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={port} onChange={(event) => setPort(event.target.value)} autoComplete="off" /></Field>
@@ -872,12 +909,39 @@ function AgentUpdateDialog({ server, open, onClose, onJob, otherOperationActive,
       {acceptedAt != null && <JobBusyState busy={timerActive} elapsed={elapsedSeconds} label={t("servers.agentElapsed", { elapsed: formatElapsed(elapsedSeconds) })} />}
       <AgentJobLogConsole logs={logs} isRunning={start.isPending || timerActive} status={snapshot?.status} />
       {snapshot?.status === "succeeded" && !pollBudgetExpired && <p role="status" className="rounded-m3-lg bg-ok/10 p-3 text-sm">{t("servers.agentUpdateSSHSuccess")}</p>}
-      {snapshot?.status === "failed" && <p role="alert" className="text-sm text-bad">{agentUpdateFailureMessage(snapshot.message, t)}</p>}
-      {isRetryableAgentUpdateFailure(snapshot) && <Button className="self-end" variant="outlined" onClick={() => {
-        setJob(null);
-        setAcceptedAt(null);
-        onStart();
-      }}>{t("servers.agentUpdateSSHFreshPasswordRetry")}</Button>}
+      {snapshot?.status === "failed" && (
+        <div className="flex flex-col gap-3">
+          <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad font-medium">
+            {snapshot.message && (
+              snapshot.message.toLowerCase().includes("auth failed") ||
+              snapshot.message.toLowerCase().includes("authentication failed") ||
+              snapshot.message.toLowerCase().includes("invalid password") ||
+              snapshot.message.toLowerCase().includes("unable to authenticate")
+            )
+              ? "Error de contraseña o autenticación SSH. Verificá la contraseña e intentá de nuevo."
+              : agentUpdateFailureMessage(snapshot.message, t)}
+          </p>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {isRetryableAgentUpdateFailure(snapshot) && (
+              <Button
+                variant="primary"
+                onClick={() => {
+                  setJob(null);
+                  setAcceptedAt(null);
+                  onStart();
+                  setTimeout(() => {
+                    passwordInputRef.current?.focus();
+                  }, 50);
+                }}
+              >
+                <Icon icon={RefreshCw} size="xs" />
+                {t("servers.agentUpdateSSHFreshPasswordRetry")}
+              </Button>
+            )}
+            <Button onClick={close}>{t("common.close")}</Button>
+          </div>
+        </div>
+      )}
       {pollBudgetExpired && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
       {(snapshot?.status === "queued" || snapshot?.status === "running") && <p className="text-sm text-muted">{t("servers.agentInstallCloseDoesNotCancel")}</p>}
       <Button className="self-end" onClick={close}>{t("common.close")}</Button>
@@ -909,12 +973,21 @@ function AgentInstallDialog({
   const tracked = jobs.find((entry) => entry.kind === "install" && entry.serverId === server.id && entry.job.id === job?.id);
   const snapshot = tracked?.job ?? job;
   const outcomeUnknown = tracked?.outcome === "unknown";
-  const [form, setForm] = useState({ host: "", port: "22", confirmed: false });
+  const [dismissedJobId, setDismissedJobId] = useState<string | null>(null);
+  const defaultHost = extractServerHost(server.base_url);
+  const [form, setForm] = useState({ host: defaultHost, port: "22", confirmed: false });
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const pendingPasswordRef = useRef("");
   const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
   const secureBrowser = location.protocol === "https:";
   const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
+
+  useEffect(() => {
+    if (!form.host && server.base_url) {
+      setForm((prev) => ({ ...prev, host: extractServerHost(server.base_url) }));
+    }
+  }, [server.base_url]);
+
   const start = useMutation({
     mutationFn: async ({ host, port, password }: { host: string; port: number; password: string }) => {
       const body: Schemas["ServerAgentInstallRequest"] = {
@@ -931,7 +1004,8 @@ function AgentInstallDialog({
     },
     onError: () => { pendingPasswordRef.current = ""; onFailure(); },
   });
-  const hasSubmitted = !!job?.id || start.isPending;
+  const isDismissed = (snapshot?.id != null && snapshot.id === dismissedJobId) || (job?.id != null && job.id === dismissedJobId);
+  const hasSubmitted = (!isDismissed && !!job?.id) || start.isPending;
   const polling = snapshot?.status === "queued" || snapshot?.status === "running";
   const timerActive = polling && !outcomeUnknown;
   const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
@@ -1009,7 +1083,42 @@ function AgentInstallDialog({
               {t("servers.agentInstallSuccessUnverified")}
             </p>
           )}
-          {snapshot?.status === "failed" && <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad">{t("servers.agentInstallFailedCheckHost")}</p>}
+          {snapshot?.status === "failed" && (
+            <div className="flex flex-col gap-3">
+              <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad font-medium">
+                {snapshot.message && (
+                  snapshot.message.toLowerCase().includes("auth failed") ||
+                  snapshot.message.toLowerCase().includes("authentication failed") ||
+                  snapshot.message.toLowerCase().includes("invalid password") ||
+                  snapshot.message.toLowerCase().includes("unable to authenticate")
+                )
+                  ? "Error de contraseña o autenticación SSH. Verificá la contraseña ingresada y volvé a intentar."
+                  : (snapshot.message || t("servers.agentInstallFailedCheckHost"))}
+              </p>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    const currentId = snapshot?.id ?? job?.id;
+                    if (currentId) {
+                      setDismissedJobId(currentId);
+                    } else {
+                      setDismissedJobId("dismissed");
+                    }
+                    setAcceptedAt(null);
+                    onStart();
+                    setTimeout(() => {
+                      passwordInputRef.current?.focus();
+                    }, 50);
+                  }}
+                >
+                  <Icon icon={RefreshCw} size="xs" />
+                  Reintentar con otra contraseña
+                </Button>
+                <Button onClick={close}>{t("common.close")}</Button>
+              </div>
+            </div>
+          )}
           {outcomeUnknown && <p role="alert" className="text-sm text-warn">{t("servers.agentInstallOutcomeUnknown")}</p>}
           {(snapshot?.status === "queued" || snapshot?.status === "running") && <p className="text-sm text-muted">{t("servers.agentInstallCloseDoesNotCancel")}</p>}
           <Button className="self-end" onClick={close}>{t("common.close")}</Button>
@@ -1168,10 +1277,6 @@ function AgentUninstallDialog({
   );
 }
 
-function isCanonicalIPv4(value: string) {
-  const octets = value.split(".");
-  return octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && String(Number(octet)) === octet && Number(octet) <= 255);
-}
 
 function useHTTPSRedirect(passwordInputRef: { current: HTMLInputElement | null }, pendingPasswordRef: { current: string }) {
   const [pending, setPending] = useState(false);
@@ -1839,7 +1944,16 @@ function isAgentBinaryCurrent(agent: Schemas["ServerAgent"]) {
 }
 
 function isRetryableAgentUpdateFailure(job: Schemas["ServerAgentInstallJob"] | null | undefined) {
-  return job?.status === "failed" && job.message === "Could not establish SSH. Verify reachability and root SSH access, then inspect the target before retrying.";
+  if (job?.status !== "failed" || !job.message) return false;
+  if (job.message.includes("SSH host key changed")) return false;
+  const msg = job.message.toLowerCase();
+  return (
+    job.message === "Could not establish SSH. Verify reachability and root SSH access, then inspect the target before retrying." ||
+    msg.includes("auth failed") ||
+    msg.includes("authentication failed") ||
+    msg.includes("invalid password") ||
+    msg.includes("unable to authenticate")
+  );
 }
 
 function DeleteServerDialog({ server, onDone }: { server: Schemas["Server"]; onDone: () => void }) {
