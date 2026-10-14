@@ -88,7 +88,9 @@ export type StreamStatsSample = {
   state: string;
   /** Media bytes received from OpenVMS over the stream transport (control messages excluded). */
   bytesReceived: number;
+  /** Frames handed to the decoder, dropped ones included (`totalVideoFrames`); undefined if not exposed. */
   decodedFrames?: number;
+  /** Frames dropped before presentation (`droppedVideoFrames`); a subset of decodedFrames. */
   droppedFrames?: number;
   /** Decoded picture size; undefined until the first frame is decoded. */
   width?: number;
@@ -120,9 +122,11 @@ export type VideoPerformanceMetrics = {
   subStreams: number;
   /** Received OpenVMS video bitrate over the interval, in megabits per second. */
   receivedMbps: number;
-  /** Frames decoded / dropped during the interval (deltas, not cumulative). */
+  /** Frames decoded during the interval, dropped ones included (delta, not cumulative). */
   decodedFrames: number;
+  /** Frames dropped during the interval; a subset of decodedFrames. */
   droppedFrames: number;
+  /** droppedFrames / decodedFrames over the interval (0 when nothing was decoded). */
   droppedFrameRatio: number;
   presentationFps?: number;
   renderFrameTimeMs?: number;

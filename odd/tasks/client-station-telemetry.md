@@ -80,3 +80,9 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
   - `PlayerSession.streamStats()` (bytes, decoded/dropped frames, resolution, reconnects, stalls, last error) + framework-free `sessionRegistry` (covers private players too); `createVideoTelemetry` 1 Hz deltas, 60-entry `RingBuffer`, rAF `createFrameSampler` (fps, avg/p95 frame time). Not started anywhere yet (PR-4 wires it).
   - Decisions: `activeStreams` = ACTIVE or WARM; totals' frame/stall counts are per-interval deltas; streams without `getVideoPlaybackQuality` report undefined fps; first tick of a stream sets its baseline (bitrate 0).
   - Open note: the global registry relies on every session calling `close()` (true today).
+- 2026-10-14: review of `6a5fe50..1899e78` (lineage `review-62d84d1d2078f9b4`): user granted; reliability approved; acknowledged, authority burned; boundary → `1899e78`. Advisory follow-ups fixed with TDD (RED 3 failing → GREEN 144/144, typecheck + eslint clean):
+  - Frame counters that become defined later now only set a baseline (no fake fps spike).
+  - A throwing telemetry subscriber no longer starves the others or breaks the interval (logged).
+  - Stall-unlisten test is now behavioral (dispatch `waiting` after close).
+  - Own finding: `droppedFrameRatio` was dropped/(decoded+dropped) but `totalVideoFrames` already includes dropped frames → now dropped/decoded; type docs state the semantics.
+  - Accepted risk (documented): the global session registry holds strong refs until `close()`; every session type closes today.

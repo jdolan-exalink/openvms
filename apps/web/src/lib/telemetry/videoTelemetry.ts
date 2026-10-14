@@ -95,8 +95,9 @@ export function createVideoTelemetry(opts: VideoTelemetryOptions): VideoTelemetr
       const prev = baselines.get(source);
       // A stream seen for the first time only establishes its baseline.
       const byteDelta = prev ? delta(s.bytesReceived, prev.bytesReceived) : 0;
-      const decodedDelta = prev && s.decodedFrames !== undefined ? delta(s.decodedFrames, prev.decodedFrames ?? 0) : 0;
-      const droppedDelta = prev && s.droppedFrames !== undefined ? delta(s.droppedFrames, prev.droppedFrames ?? 0) : 0;
+      // Frame counters that just became available only establish their baseline as well.
+      const decodedDelta = s.decodedFrames !== undefined && prev?.decodedFrames !== undefined ? delta(s.decodedFrames, prev.decodedFrames) : 0;
+      const droppedDelta = s.droppedFrames !== undefined && prev?.droppedFrames !== undefined ? delta(s.droppedFrames, prev.droppedFrames) : 0;
       const stallDelta = prev ? delta(s.stalls, prev.stalls) : 0;
       bytes += byteDelta;
       decoded += decodedDelta;
@@ -118,7 +119,8 @@ export function createVideoTelemetry(opts: VideoTelemetryOptions): VideoTelemetr
     baselines = seen;
 
     const presentation = opts.presentation?.sample();
-    const totalFrames = decoded + dropped;
+    // decoded is getVideoPlaybackQuality().totalVideoFrames, which already counts dropped frames.
+    const totalFrames = decoded;
     const metrics: VideoPerformanceMetrics = {
       timestamp,
       visibleCameras: opts.visibleCameras?.() ?? 0,
@@ -136,7 +138,14 @@ export function createVideoTelemetry(opts: VideoTelemetryOptions): VideoTelemetr
     };
     ring.push(metrics);
     snapshot = { metrics, streams: rows };
-    listeners.forEach((l) => l());
+    // One faulty consumer must not starve the others or break the interval.
+    listeners.forEach((l) => {
+      try {
+        l();
+      } catch (err) {
+        console.error("video telemetry listener failed", err);
+      }
+    });
   };
 
   return {

@@ -225,9 +225,11 @@ describe("PlayerSession stream stats", () => {
     const session = create();
     sockets[0]!.onopen?.();
     sockets[0]!.onmessage?.({ data: new ArrayBuffer(8) });
-    const remove = vi.spyOn(session.video, "removeEventListener");
+    session.video.dispatchEvent(new Event("waiting"));
+    expect(session.streamStats().stalls).toBe(1);
     session.close();
-    expect(remove).toHaveBeenCalledWith("waiting", expect.any(Function));
+    session.video.dispatchEvent(new Event("waiting"));
+    expect(session.streamStats().stalls).toBe(1);
   });
 
   it("registers into the registry on construction and unregisters on close", () => {

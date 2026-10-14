@@ -81,7 +81,38 @@ describe("VideoTelemetryService", () => {
     expect(m.receivedMbps).toBeCloseTo(2, 6);
     expect(m.decodedFrames).toBe(10);
     expect(m.droppedFrames).toBe(2);
-    expect(m.droppedFrameRatio).toBeCloseTo(2 / 12, 6);
+    // totalVideoFrames already includes the dropped ones: 2 of 10 frames were dropped.
+    expect(m.droppedFrameRatio).toBeCloseTo(2 / 10, 6);
+  });
+
+  it("treats frame counters that appear later as a fresh baseline, not one interval's frames", () => {
+    const a = new FakeStream("a", "sub", { decodedFrames: undefined, droppedFrames: undefined });
+    const t = setup({ streams: [a] });
+    t.service.start();
+    t.tick(1000);
+    a.sample.decodedFrames = 5_000;
+    a.sample.droppedFrames = 40;
+    t.tick(1000);
+    expect(t.service.getSnapshot().streams[0]).toMatchObject({ fps: 0, droppedFps: 0 });
+    expect(t.service.getSnapshot().metrics).toMatchObject({ decodedFrames: 0, droppedFrames: 0 });
+    a.add({ decoded: 15, dropped: 1 });
+    t.tick(1000);
+    expect(t.service.getSnapshot().streams[0]).toMatchObject({ fps: 15, droppedFps: 1 });
+  });
+
+  it("keeps notifying the other subscribers when one of them throws", () => {
+    const t = setup();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const after = vi.fn();
+    t.service.subscribe(() => {
+      throw new Error("broken consumer");
+    });
+    t.service.subscribe(after);
+    t.service.start();
+    expect(() => t.tick(1000)).not.toThrow();
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
   });
 
   it("normalizes by the real elapsed time when a tick is late", () => {
