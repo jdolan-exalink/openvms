@@ -100,6 +100,26 @@ describe("VideoTelemetryService", () => {
     expect(t.service.getSnapshot().streams[0]).toMatchObject({ fps: 15, droppedFps: 1 });
   });
 
+  it("skips a source whose stats throw instead of aborting the tick for every stream", () => {
+    const a = new FakeStream("a");
+    const broken: StreamStatsSource = {
+      streamStats() {
+        throw new Error("detached video");
+      },
+    };
+    const t = setup({ streams: [a, broken as FakeStream] });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const listener = vi.fn();
+    t.service.subscribe(listener);
+    expect(() => t.service.start()).not.toThrow();
+    a.add({ bytes: 125_000 });
+    expect(() => t.tick(1000)).not.toThrow();
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(t.service.getSnapshot().streams.map((row) => row.cameraId)).toEqual(["a"]);
+    expect(t.service.getSnapshot().metrics?.receivedMbps).toBeCloseTo(1, 6);
+    error.mockRestore();
+  });
+
   it("keeps notifying the other subscribers when one of them throws", () => {
     const t = setup();
     const error = vi.spyOn(console, "error").mockImplementation(() => {});

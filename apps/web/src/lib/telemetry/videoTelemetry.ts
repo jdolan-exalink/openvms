@@ -60,6 +60,16 @@ function delta(current: number, previous: number): number {
   return current >= previous ? current - previous : 0;
 }
 
+/** readStats isolates one faulty source so it cannot abort the tick for every other stream. */
+function readStats(source: StreamStatsSource): StreamStatsSample | undefined {
+  try {
+    return source.streamStats();
+  } catch (err) {
+    console.error("video telemetry source failed", err);
+    return undefined;
+  }
+}
+
 export function createVideoTelemetry(opts: VideoTelemetryOptions): VideoTelemetryService {
   const intervalMs = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
   const ring = new RingBuffer<VideoPerformanceMetrics>(opts.historyLength ?? DEFAULT_HISTORY);
@@ -86,7 +96,8 @@ export function createVideoTelemetry(opts: VideoTelemetryOptions): VideoTelemetr
     let stalls = 0;
 
     for (const source of opts.sessions()) {
-      const s = source.streamStats();
+      const s = readStats(source);
+      if (!s) continue;
       seen.set(source, s);
       if (s.quality === "main") main += 1;
       else sub += 1;
@@ -153,7 +164,10 @@ export function createVideoTelemetry(opts: VideoTelemetryOptions): VideoTelemetr
       if (cancel) return;
       // A fresh baseline: time spent stopped must not show up as a burst of traffic.
       baselines = new Map();
-      for (const source of opts.sessions()) baselines.set(source, source.streamStats());
+      for (const source of opts.sessions()) {
+        const s = readStats(source);
+        if (s) baselines.set(source, s);
+      }
       lastTickAt = opts.now();
       opts.presentation?.start();
       cancel = opts.schedule(tick, intervalMs);
