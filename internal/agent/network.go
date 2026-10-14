@@ -221,6 +221,7 @@ func isLANInterface(name string) bool {
 	for _, prefix := range []string{
 		"docker", "veth", "virbr", "dummy", "tun", "tap",
 		"flannel", "cni", "kube", "vnet", "sit", "ip6tnl",
+		"zt", "wg", "tailscale",
 	} {
 		if strings.HasPrefix(name, prefix) {
 			return false

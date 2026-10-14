@@ -3141,6 +3141,13 @@ export interface components {
             database_total_bytes?: number;
             /** Format: int64 */
             database_free_bytes?: number;
+            /** @description Operating system distribution and version */
+            os?: string;
+            /**
+             * Format: date-time
+             * @description UTC time when the agent sample was taken.
+             */
+            sampled_at?: string;
             error?: string;
         };
         ServerAgentNetworkInterface: {

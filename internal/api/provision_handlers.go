@@ -252,6 +252,9 @@ func serverAgent(s provision.AgentView) gen.ServerAgent {
 	if s.NetworkSampledAt != nil {
 		out.NetworkSampledAt = s.NetworkSampledAt
 	}
+	if s.SampledAt != nil {
+		out.SampledAt = s.SampledAt
+	}
 	if s.BinaryAvailable != nil {
 		identity := serverAgentBinaryIdentity(*s.BinaryAvailable)
 		out.BinaryAvailable = &identity
@@ -274,6 +277,10 @@ func serverAgent(s provision.AgentView) gen.ServerAgent {
 	}
 	if s.GPUName != "" {
 		out.GpuName = &s.GPUName
+	}
+	if s.OS != "" {
+		osName := s.OS
+		out.Os = &osName
 	}
 	if s.Error != "" {
 		out.Error = &s.Error

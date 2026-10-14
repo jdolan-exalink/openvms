@@ -70,9 +70,17 @@ func TestServerAgentProjectsOptionalFreshNetworkAndUnavailableCPU(t *testing.T) 
 			IPAddress: "192.168.1.100", Subnet: "192.168.1.0/24", Netmask: "255.255.255.0",
 			MAC: "00:11:22:33:44:55", Gateway: "192.168.1.1", IsDefault: true, Role: "monitoring",
 		}}, NetworkSampledAt: &sampledAt,
+		SampledAt: &sampledAt,
+		OS: "Debian GNU/Linux 13 (trixie)",
 	})
 	if got.CpuPercent != nil {
 		t.Fatalf("unavailable CPU was projected as a number: %#v", got.CpuPercent)
+	}
+	if got.Os == nil || *got.Os != "Debian GNU/Linux 13 (trixie)" {
+		t.Fatalf("OS field was not projected: %#v", got.Os)
+	}
+	if got.SampledAt == nil || !got.SampledAt.Equal(sampledAt) {
+		t.Fatalf("SampledAt field was not projected: %#v", got.SampledAt)
 	}
 	if got.NetworkInterfaces == nil || len(*got.NetworkInterfaces) != 1 || (*got.NetworkInterfaces)[0].Name != "eth0" || (*got.NetworkInterfaces)[0].RxBytesPerSecond != 125.5 || got.NetworkSampledAt == nil || !got.NetworkSampledAt.Equal(sampledAt) {
 		t.Fatalf("network sample was not projected: %#v", got)
@@ -82,7 +90,7 @@ func TestServerAgentProjectsOptionalFreshNetworkAndUnavailableCPU(t *testing.T) 
 		t.Fatalf("network metadata was not projected: %#v", iface)
 	}
 	legacy := serverAgent(provision.AgentView{Installed: true})
-	if legacy.NetworkInterfaces != nil || legacy.NetworkSampledAt != nil {
+	if legacy.NetworkInterfaces != nil || legacy.NetworkSampledAt != nil || legacy.SampledAt != nil || legacy.Os != nil {
 		t.Fatalf("missing legacy measurements must remain absent: %#v", legacy)
 	}
 }

@@ -139,6 +139,9 @@ br-4b3d3e0117cd: 9413270   14173    0    0    0     0          0         0  3496
 veth15fbffe: 3750452    4114    0    0    0     0          0         0  3812908    5054    0    0    0     0       0          0
 veth3e023d4: 13421822   19190    0    0    0     0          0         0  7249059   30102    0    0    0     0       0          0
 virbr0:       0       0    0    0    0     0          0         0        0       0    0    0    0     0       0          0
+ztbtossngr:   500     5    0    0    0     0          0         0      500       5    0    0    0     0       0          0
+wg0:          200     2    0    0    0     0          0         0      200       2    0    0    0     0       0          0
+tailscale0:   300     3    0    0    0     0          0         0      300       3    0    0    0     0       0          0
   enp3s0: 1000 1 0 0 0 0 0 0 2000 1 0 0 0 0 0 0
 `
 	counters, err := parseNetworkCounters([]byte(proc))
@@ -154,7 +157,7 @@ virbr0:       0       0    0    0    0     0          0         0        0      
 	if _, ok := counters["enp3s0"]; !ok {
 		t.Errorf("expected enp3s0 to be present")
 	}
-	for _, excluded := range []string{"lo", "docker0", "br-4b3d3e0117cd", "veth15fbffe", "veth3e023d4", "virbr0"} {
+	for _, excluded := range []string{"lo", "docker0", "br-4b3d3e0117cd", "veth15fbffe", "veth3e023d4", "virbr0", "ztbtossngr", "wg0", "tailscale0"} {
 		if _, ok := counters[excluded]; ok {
 			t.Errorf("interface %s should have been excluded", excluded)
 		}

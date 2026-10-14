@@ -72,7 +72,15 @@ export function Servers() {
             <li key={s.id} className="flex flex-col gap-4 rounded-m3-xl bg-surface-1 p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-lg font-bold">{s.name}</div>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="text-lg font-bold">{s.name}</span>
+                    <BodyClassifySwitch
+                      scope="server"
+                      id={s.id}
+                      enabled={serverOn.get(s.id) ?? true}
+                      disabled={!can(me.data, "servers.manage")}
+                    />
+                  </div>
                   <div className="font-mono text-xs break-all text-muted">{s.base_url}</div>
                 </div>
                 <div className="flex flex-col items-end gap-1">
@@ -103,19 +111,14 @@ export function Servers() {
                     <SyncCell status={syncOf.get(s.id)} />
                   </span>
                 </Fact>
-                <Fact label="Frigate" className="col-span-2 md:col-span-2">
+                <Fact label="Frigate & Agente" className="col-span-2 md:col-span-2">
                   <div className="font-mono text-xs whitespace-nowrap">
                     <div>{s.frigate_version || "—"}</div>
                     <AgentMonitor serverId={s.id} />
                   </div>
                 </Fact>
-                <Fact label="Clasificación" className="col-span-2 md:col-span-2">
-                  <BodyClassifySwitch
-                    scope="server"
-                    id={s.id}
-                    enabled={serverOn.get(s.id) ?? true}
-                    disabled={!can(me.data, "servers.manage")}
-                  />
+                <Fact label="Red" className="col-span-2 md:col-span-2">
+                  <ServerNetworkFact serverId={s.id} />
                 </Fact>
               </dl>
               <div className="flex flex-wrap items-start justify-end gap-2">
@@ -1384,11 +1387,6 @@ function JobBusyState({ label, elapsed, busy = true }: { label: string; elapsed?
 
 function AgentMonitor({ serverId }: { serverId: string }) {
   const t = useT();
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, []);
   const agentStatus = useQuery({
     queryKey: ["server-agent", serverId],
     queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId } } })),
@@ -1402,12 +1400,6 @@ function AgentMonitor({ serverId }: { serverId: string }) {
   const cpu = typeof metrics.cpu_percent === "number" && Number.isFinite(metrics.cpu_percent)
     ? Math.max(0, Math.min(100, Math.round(metrics.cpu_percent)))
     : null;
-  const sampleAt = metrics.network_sampled_at ? Date.parse(metrics.network_sampled_at) : Number.NaN;
-  const isStale = Number.isFinite(sampleAt) && (now - sampleAt > 15_000 || sampleAt - now > 4_000);
-  const networkIsFresh = Number.isFinite(sampleAt) && !isStale;
-  const network = networkIsFresh ? (metrics.network_interfaces ?? []).filter((entry) =>
-    !!entry.name && isLanInterfaceName(entry.name) && Number.isFinite(entry.rx_bytes_per_second) && entry.rx_bytes_per_second >= 0 && Number.isFinite(entry.tx_bytes_per_second) && entry.tx_bytes_per_second >= 0,
-  ) : [];
 
   const currentVersion = metrics.binary_observed?.version || metrics.version || "—";
   const newVersion = metrics.binary_available?.version;
@@ -1438,6 +1430,12 @@ function AgentMonitor({ serverId }: { serverId: string }) {
           {t("servers.agent")}: {currentVersion}
         </span>
       )}
+      {metrics.installed && (
+        <div className="font-mono text-xs text-muted flex items-center gap-1.5 flex-wrap">
+          <span className="font-semibold text-surface-on/80">SO:</span>
+          <span>{metrics.os || "Debian 13 / Linux"}</span>
+        </div>
+      )}
       {metrics.installed && cpu != null && (
         <>
           <span className="font-sans">{t("servers.agentCpu", { percent: cpu })}</span>
@@ -1451,14 +1449,46 @@ function AgentMonitor({ serverId }: { serverId: string }) {
           {metrics.memory_available_bytes != null && metrics.memory_total_bytes > 0 && <Meter percent={((metrics.memory_total_bytes - metrics.memory_available_bytes) / metrics.memory_total_bytes) * 100} />}
         </>
       )}
-      {metrics.installed && (
-        <LanNetworkMeters
-          serverId={serverId}
-          interfaces={network}
-          sampledAt={metrics.network_sampled_at}
-        />
-      )}
       {metrics.error && <span role="alert" className="font-sans text-bad">{t("servers.agentError", { error: metrics.error })}</span>}
+    </div>
+  );
+}
+
+function ServerNetworkFact({ serverId }: { serverId: string }) {
+  const t = useT();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const agentStatus = useQuery({
+    queryKey: ["server-agent", serverId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId } } })),
+    refetchInterval: 5000,
+    retry: false,
+  });
+  const metrics = agentStatus.data;
+  if (agentStatus.isPending) return <div className="mt-1 text-muted">{t("servers.agent")}…</div>;
+  if (agentStatus.isError || !metrics) return <div className="mt-1 text-muted">{t("servers.agentLifecycleUnknown")}</div>;
+  if (!metrics.installed) return <span className="font-sans text-muted">{t("servers.agentMissing")}</span>;
+
+  const sampleAt = metrics.network_sampled_at ? Date.parse(metrics.network_sampled_at) : Number.NaN;
+  const agentTime = metrics.sampled_at ? Date.parse(metrics.sampled_at) : Number.NaN;
+  const clockDrift = Number.isFinite(agentTime) ? now - agentTime : 0;
+  const sampleAge = Number.isFinite(sampleAt) ? (now - sampleAt - clockDrift) : Number.NaN;
+  const isStale = Number.isFinite(sampleAge) && (sampleAge > 15_000 || sampleAge < -4_000);
+  const networkIsFresh = Number.isFinite(sampleAge) && !isStale;
+  const network = networkIsFresh ? (metrics.network_interfaces ?? []).filter((entry) =>
+    !!entry.name && isLanInterfaceName(entry.name) && Number.isFinite(entry.rx_bytes_per_second) && entry.rx_bytes_per_second >= 0 && Number.isFinite(entry.tx_bytes_per_second) && entry.tx_bytes_per_second >= 0,
+  ) : [];
+
+  return (
+    <div className="mt-1 w-full">
+      <LanNetworkMeters
+        serverId={serverId}
+        interfaces={network}
+        sampledAt={metrics.network_sampled_at}
+      />
     </div>
   );
 }
@@ -1468,6 +1498,7 @@ export function isLanInterfaceName(name: string): boolean {
   const virtualPrefixes = [
     "docker", "veth", "virbr", "dummy", "tun", "tap",
     "flannel", "cni", "kube", "vnet", "sit", "ip6tnl",
+    "zt", "wg", "tailscale",
   ];
   if (virtualPrefixes.some((prefix) => name.startsWith(prefix))) return false;
   if (name.startsWith("br-")) {
@@ -1538,19 +1569,58 @@ export function LanNetworkMeters({
     return <span className="font-sans text-muted">{t("servers.agentNetworkUnavailable")}</span>;
   }
 
+  const cctvIface = lanInterfaces.find((i) => i.role === "cameras")
+    ?? (lanInterfaces.length > 1 ? lanInterfaces.find((i) => !i.is_default) : undefined);
+  const lanIface = lanInterfaces.find((i) => i.role === "monitoring" || (i.is_default && i !== cctvIface))
+    ?? lanInterfaces.find((i) => i !== cctvIface)
+    ?? (lanInterfaces.length === 1 && cctvIface == null ? lanInterfaces[0] : undefined);
+  const extraInterfaces = lanInterfaces.filter((i) => i !== cctvIface && i !== lanIface);
+
   return (
-    <div className="flex flex-col gap-1.5" role="region" aria-label={t("servers.agentNetworkLive")}>
-      {lanInterfaces.map((iface) => {
-        const historyKey = `${serverId}:${iface.name}`;
-        const samples = getNetworkHistory(historyKey);
-        return (
+    <div className="flex flex-col gap-2 w-full" role="region" aria-label={t("servers.agentNetworkLive")}>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+        {cctvIface ? (
           <LanInterfaceCard
-            key={iface.name}
-            iface={iface}
-            samples={samples}
+            key={cctvIface.name}
+            iface={cctvIface}
+            samples={getNetworkHistory(`${serverId}:${cctvIface.name}`)}
           />
-        );
-      })}
+        ) : (
+          <div className="flex flex-col justify-center items-center rounded-m3-md border border-dashed border-surface-3 bg-surface-2/20 px-2.5 py-2 text-xs text-muted min-h-[44px]">
+            <div className="flex items-center gap-1.5 font-semibold text-[10px] uppercase text-sky-400">
+              <Icon icon={Camera} size="xs" />
+              <span>{t("servers.agentNetworkCameras")}</span>
+            </div>
+            <span className="text-[10px] text-muted">No detectada</span>
+          </div>
+        )}
+        {lanIface ? (
+          <LanInterfaceCard
+            key={lanIface.name}
+            iface={lanIface}
+            samples={getNetworkHistory(`${serverId}:${lanIface.name}`)}
+          />
+        ) : (
+          <div className="flex flex-col justify-center items-center rounded-m3-md border border-dashed border-surface-3 bg-surface-2/20 px-2.5 py-2 text-xs text-muted min-h-[44px]">
+            <div className="flex items-center gap-1.5 font-semibold text-[10px] uppercase text-emerald-400">
+              <Icon icon={Activity} size="xs" />
+              <span>{t("servers.agentNetworkMonitoring")}</span>
+            </div>
+            <span className="text-[10px] text-muted">No detectada</span>
+          </div>
+        )}
+      </div>
+      {extraInterfaces.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full">
+          {extraInterfaces.map((iface) => (
+            <LanInterfaceCard
+              key={iface.name}
+              iface={iface}
+              samples={getNetworkHistory(`${serverId}:${iface.name}`)}
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

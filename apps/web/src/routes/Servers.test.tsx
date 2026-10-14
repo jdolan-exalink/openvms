@@ -1139,6 +1139,10 @@ describe("Servers", () => {
       expect(isLanInterfaceName("vnet0")).toBe(false);
       expect(isLanInterfaceName("sit0")).toBe(false);
       expect(isLanInterfaceName("ip6tnl0")).toBe(false);
+      expect(isLanInterfaceName("ztbtossngr")).toBe(false);
+      expect(isLanInterfaceName("zti27oq3eu")).toBe(false);
+      expect(isLanInterfaceName("wg0")).toBe(false);
+      expect(isLanInterfaceName("tailscale0")).toBe(false);
 
       // Included physical/LAN interfaces
       expect(isLanInterfaceName("eth0")).toBe(true);

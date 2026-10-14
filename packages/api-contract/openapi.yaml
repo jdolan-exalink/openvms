@@ -4184,6 +4184,8 @@ components:
         cctv_free_bytes: { type: integer, format: int64 }
         database_total_bytes: { type: integer, format: int64 }
         database_free_bytes: { type: integer, format: int64 }
+        os: { type: string, description: "Operating system distribution and version" }
+        sampled_at: { type: string, format: date-time, description: "UTC time when the agent sample was taken." }
         error: { type: string }
     ServerAgentNetworkInterface:
       type: object
