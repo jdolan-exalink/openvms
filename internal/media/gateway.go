@@ -1277,6 +1277,9 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 					finish(e)
 					return
 				}
+				if codecs, ok := upstreamMSECodecs(data); ok {
+					g.Svc.Log.InfoContext(r.Context(), "live stream codecs", "camera", id, "stream", stream, "quality", quality, "codecs", codecs)
+				}
 			}
 			if err := client.write(mt, data); err != nil {
 				finish(liveEnd{})
@@ -1356,6 +1359,22 @@ func (g *Gateway) liveAuthError(r *http.Request, a authz.Actor, err error) (code
 		g.Svc.Log.WarnContext(r.Context(), "live gateway", "path", r.URL.Path, "error", err)
 		return CodeServerError, "internal error"
 	}
+}
+
+// upstreamMSECodecs recognises go2rtc's {"type":"mse","value":"video/mp4; codecs=..."} frame,
+// which announces the stream's codecs before any media, and returns its bounded value.
+func upstreamMSECodecs(data []byte) (string, bool) {
+	if len(data) > 4<<10 || !bytes.Contains(data, []byte(`"mse"`)) {
+		return "", false
+	}
+	var m struct{ Type, Value string }
+	if json.Unmarshal(data, &m) != nil || m.Type != "mse" {
+		return "", false
+	}
+	if len(m.Value) > maxUpstreamDetail {
+		m.Value = m.Value[:maxUpstreamDetail]
+	}
+	return m.Value, true
 }
 
 // upstreamError recognises go2rtc's own {"type":"error","value":"..."} frame and maps it to
