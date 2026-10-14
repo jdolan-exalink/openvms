@@ -296,6 +296,9 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		return
 	}
 	job.update("succeeded", "complete", "Agent files installed and credentials registered; HTTPS health is not yet verified")
+	if s.OnAgentInstalled != nil {
+		go s.OnAgentInstalled(context.Background(), actor, job.serverID)
+	}
 }
 
 func installStageMessage(stage string) string {

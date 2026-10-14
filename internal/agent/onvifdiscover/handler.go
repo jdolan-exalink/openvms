@@ -123,13 +123,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	targetInterface := input.InterfaceName
 	if !h.allowAll {
 		if _, ok := h.interfaces[input.InterfaceName]; !ok {
-			http.Error(w, "interface not allowed", http.StatusForbidden)
-			return
+			if input.InterfaceName == "*" && len(h.interfaces) > 0 {
+				for iface := range h.interfaces {
+					targetInterface = iface
+					break
+				}
+			} else {
+				http.Error(w, "interface not allowed", http.StatusForbidden)
+				return
+			}
 		}
 	}
-	devices, err := h.discoverer.Probe(r.Context(), input.InterfaceName)
+	devices, err := h.discoverer.Probe(r.Context(), targetInterface)
 	if err != nil {
 		slog.Error("ONVIF discovery probe failed", "error", err, "interface", input.InterfaceName)
 		if r.Context().Err() != nil {

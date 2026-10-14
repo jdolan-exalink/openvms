@@ -66,7 +66,7 @@ func TestUDPTransportBindsAndRoutesOneSessionPerInterface(t *testing.T) {
 	if err = one.Send(context.Background(), []byte("probe")); err != nil {
 		t.Fatal(err)
 	}
-	if locals[0].IP.String() != "192.0.2.4" || locals[0].Port != 0 || conns[0].iface.Index != 7 || conns[0].ttl != 1 || conns[0].destination.String() != "239.255.255.250:3702" {
+	if locals[0].IP.String() != "192.0.2.4" || locals[0].Port != 0 || conns[0].iface.Index != 7 || conns[0].ttl != 4 || conns[0].destination.String() != "239.255.255.250:3702" {
 		t.Fatalf("unsafe socket configuration: local=%v conn=%+v", locals[0], conns[0])
 	}
 	if conns[0] == conns[1] {
@@ -81,6 +81,32 @@ func TestUDPTransportBindsAndRoutesOneSessionPerInterface(t *testing.T) {
 	if !conns[0].closed || !conns[1].closed {
 		t.Fatal("session socket leaked")
 	}
+}
+
+func TestUDPTransportAutoDetectInterface(t *testing.T) {
+	iface := net.Interface{Index: 3, Name: "eth1", Flags: net.FlagUp | net.FlagMulticast}
+	transport := &UDPTransport{
+		resolve: func(name string) (net.Interface, net.IP, error) {
+			if name != "*" && name != "auto" {
+				t.Fatalf("unexpected interface name: %q", name)
+			}
+			return iface, net.IPv4(192, 168, 1, 50), nil
+		},
+		open: func(local *net.UDPAddr) (udpPacketConn, error) {
+			return &fakePacketConn{}, nil
+		},
+	}
+	session, err := transport.Open(context.Background(), "*")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	_ = session.Close()
+
+	sessionAuto, err := transport.Open(context.Background(), "auto")
+	if err != nil {
+		t.Fatalf("Open with auto failed: %v", err)
+	}
+	_ = sessionAuto.Close()
 }
 
 func TestUDPTransportRejectsUnsafeInterfaceBeforeOpeningSocket(t *testing.T) {

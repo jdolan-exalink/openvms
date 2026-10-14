@@ -286,3 +286,100 @@ func soapResponse(t *testing.T, request *http.Request) *http.Response {
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
+
+func TestDeviceProbeFallsBackToGetCapabilitiesWhenGetServicesFails(t *testing.T) {
+	capabilitiesXML := `<tds:GetCapabilitiesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">` +
+		`<tds:Capabilities>` +
+		`<tt:Media><tt:XAddr>http://192.0.2.10:8080/onvif/media</tt:XAddr></tt:Media>` +
+		`</tds:Capabilities>` +
+		`</tds:GetCapabilitiesResponse>`
+
+	var calledActions []string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		action := r.Header.Get("Content-Type")
+		calledActions = append(calledActions, action)
+		switch {
+		case strings.Contains(action, "GetSystemDateAndTime"):
+			body := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><tds:GetSystemDateAndTimeResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:SystemDateAndTime><tt:DateTimeType xmlns:tt="http://www.onvif.org/ver10/schema">NTP</tt:DateTimeType></tds:SystemDateAndTime></tds:GetSystemDateAndTimeResponse></s:Body></s:Envelope>`
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		case strings.Contains(action, "GetDeviceInformation"):
+			body := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:Manufacturer>LegacyCam</tds:Manufacturer><tds:Model>Model1</tds:Model></tds:GetDeviceInformationResponse></s:Body></s:Envelope>`
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		case strings.Contains(action, "GetServices"):
+			// Return SOAP Fault ActionNotSupported as older cameras do
+			fault := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><s:Fault><s:Code><s:Value>s:Sender</s:Value><s:Subcode><s:Value>ter:ActionNotSupported</s:Value></s:Subcode></s:Code></s:Fault></s:Body></s:Envelope>`
+			return &http.Response{StatusCode: http.StatusInternalServerError, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fault)), Request: r}, nil
+		case strings.Contains(action, "GetCapabilities"):
+			body := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>` + capabilitiesXML + `</s:Body></s:Envelope>`
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+		default:
+			t.Fatalf("unexpected action: %s", action)
+			return nil, nil
+		}
+	})
+
+	prober := NewDeviceProbe(transport)
+	ep, err := onvif.ParseEndpoint("http://192.0.2.10/onvif/device_service")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := prober(context.Background(), ep, "admin", "secret")
+	if err != nil {
+		t.Fatalf("prober failed on legacy camera: %v", err)
+	}
+
+	if result.Information.Manufacturer != "LegacyCam" {
+		t.Errorf("manufacturer = %q, want LegacyCam", result.Information.Manufacturer)
+	}
+	if len(result.Services) != 1 || result.Services[0].Namespace != "http://www.onvif.org/ver10/media/wsdl" {
+		t.Errorf("services = %+v, want 1 media service from capabilities fallback", result.Services)
+	}
+}
+
+func TestDeviceProbeCompensatesClockSkewOnAuthFailure(t *testing.T) {
+	skewedYear := 2030
+	var attempts int
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		action := r.Header.Get("Content-Type")
+		attempts++
+		switch {
+		case strings.Contains(action, "GetDeviceInformation"):
+			body, _ := io.ReadAll(r.Body)
+			// Check if Created header contains 2030 (compensated timestamp)
+			if strings.Contains(string(body), "2030-") {
+				respBody := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:Manufacturer>SyncedCam</tds:Manufacturer><tds:Model>ModelSkew</tds:Model></tds:GetDeviceInformationResponse></s:Body></s:Envelope>`
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(respBody)), Request: r}, nil
+			}
+			// First attempt fails with 401 Unauthorized (clock skew)
+			return &http.Response{StatusCode: http.StatusUnauthorized, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("Unauthorized")), Request: r}, nil
+		case strings.Contains(action, "GetSystemDateAndTime"):
+			respBody := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><tds:GetSystemDateAndTimeResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:SystemDateAndTime><tt:DateTimeType xmlns:tt="http://www.onvif.org/ver10/schema">Manual</tt:DateTimeType><tt:UTCDateTime xmlns:tt="http://www.onvif.org/ver10/schema"><tt:Time><tt:Hour>10</tt:Hour><tt:Minute>0</tt:Minute><tt:Second>0</tt:Second></tt:Time><tt:Date><tt:Year>2030</tt:Year><tt:Month>5</tt:Month><tt:Day>1</tt:Day></tt:Date></tt:UTCDateTime></tds:SystemDateAndTime></tds:GetSystemDateAndTimeResponse></s:Body></s:Envelope>`
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(respBody)), Request: r}, nil
+		case strings.Contains(action, "GetServices"):
+			respBody := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><tds:GetServicesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:Service><tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace><tds:XAddr>http://192.0.2.10:8080/onvif/media</tds:XAddr></tds:Service></tds:GetServicesResponse></s:Body></s:Envelope>`
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(respBody)), Request: r}, nil
+		default:
+			t.Fatalf("unexpected action: %s", action)
+			return nil, nil
+		}
+	})
+
+	prober := NewDeviceProbe(transport)
+	ep, err := onvif.ParseEndpoint("http://192.0.2.10/onvif/device_service")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := prober(context.Background(), ep, "admin", "secret")
+	if err != nil {
+		t.Fatalf("prober failed on clock-skewed camera: %v", err)
+	}
+
+	if result.Information.Manufacturer != "SyncedCam" {
+		t.Errorf("manufacturer = %q, want SyncedCam", result.Information.Manufacturer)
+	}
+	if result.Clock.UTC.Date.Year != skewedYear {
+		t.Errorf("camera year = %d, want %d", result.Clock.UTC.Date.Year, skewedYear)
+	}
+}

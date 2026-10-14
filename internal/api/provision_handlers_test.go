@@ -65,13 +65,21 @@ func TestServerAgentProjectsOptionalFreshNetworkAndUnavailableCPU(t *testing.T) 
 	sampledAt := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	got := serverAgent(provision.AgentView{
 		Installed: true, Version: "0.1.0", Current: "0.1.0", BinaryStatus: provision.AgentBinaryUnknown,
-		NetworkInterfaces: []agent.NetworkInterface{{Name: "eth0", RXBytesPerSecond: 125.5, TXBytesPerSecond: 64}}, NetworkSampledAt: &sampledAt,
+		NetworkInterfaces: []agent.NetworkInterface{{
+			Name: "eth0", RXBytesPerSecond: 125.5, TXBytesPerSecond: 64,
+			IPAddress: "192.168.1.100", Subnet: "192.168.1.0/24", Netmask: "255.255.255.0",
+			MAC: "00:11:22:33:44:55", Gateway: "192.168.1.1", IsDefault: true, Role: "monitoring",
+		}}, NetworkSampledAt: &sampledAt,
 	})
 	if got.CpuPercent != nil {
 		t.Fatalf("unavailable CPU was projected as a number: %#v", got.CpuPercent)
 	}
 	if got.NetworkInterfaces == nil || len(*got.NetworkInterfaces) != 1 || (*got.NetworkInterfaces)[0].Name != "eth0" || (*got.NetworkInterfaces)[0].RxBytesPerSecond != 125.5 || got.NetworkSampledAt == nil || !got.NetworkSampledAt.Equal(sampledAt) {
 		t.Fatalf("network sample was not projected: %#v", got)
+	}
+	iface := (*got.NetworkInterfaces)[0]
+	if iface.IpAddress == nil || *iface.IpAddress != "192.168.1.100" || iface.Subnet == nil || *iface.Subnet != "192.168.1.0/24" || iface.Role == nil || *iface.Role != "monitoring" || iface.IsDefault == nil || !*iface.IsDefault {
+		t.Fatalf("network metadata was not projected: %#v", iface)
 	}
 	legacy := serverAgent(provision.AgentView{Installed: true})
 	if legacy.NetworkInterfaces != nil || legacy.NetworkSampledAt != nil {

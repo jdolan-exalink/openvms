@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 )
 
 const (
@@ -100,6 +101,55 @@ func (d *DeviceClient) GetServices(ctx context.Context) ([]Service, error) {
 		return nil, &CallError{Status: StatusFailed, Code: "invalid_services"}
 	}
 	return response.Services, nil
+}
+
+type Capabilities struct {
+	Device    *CapabilityEndpoint `xml:"Device"`
+	Events    *CapabilityEndpoint `xml:"Events"`
+	Imaging   *CapabilityEndpoint `xml:"Imaging"`
+	Media     *CapabilityEndpoint `xml:"Media"`
+	PTZ       *CapabilityEndpoint `xml:"PTZ"`
+	Analytics *CapabilityEndpoint `xml:"Analytics"`
+}
+
+type CapabilityEndpoint struct {
+	XAddr string `xml:"XAddr"`
+}
+
+func (d *DeviceClient) GetCapabilities(ctx context.Context) ([]Service, error) {
+	data, err := d.call(ctx, "GetCapabilities", `<tds:Category>All</tds:Category>`)
+	if err != nil {
+		return nil, err
+	}
+	var response struct {
+		Capabilities Capabilities `xml:"Capabilities"`
+	}
+	if err := decodeOperation(data, "GetCapabilitiesResponse", &response); err != nil {
+		return nil, &CallError{Status: StatusFailed, Code: "invalid_capabilities"}
+	}
+	caps := response.Capabilities
+	var services []Service
+	mapping := []struct {
+		endpoint *CapabilityEndpoint
+		ns       string
+	}{
+		{caps.Media, "http://www.onvif.org/ver10/media/wsdl"},
+		{caps.Device, "http://www.onvif.org/ver10/device/wsdl"},
+		{caps.Events, "http://www.onvif.org/ver10/events/wsdl"},
+		{caps.Imaging, "http://www.onvif.org/ver10/imaging/wsdl"},
+		{caps.PTZ, "http://www.onvif.org/ver10/ptz/wsdl"},
+		{caps.Analytics, "http://www.onvif.org/ver10/analytics/wsdl"},
+	}
+	for _, m := range mapping {
+		if m.endpoint != nil && strings.TrimSpace(m.endpoint.XAddr) != "" {
+			services = append(services, Service{
+				Namespace: m.ns,
+				Endpoint:  strings.TrimSpace(m.endpoint.XAddr),
+				Version:   ServiceVersion{Major: 1, Minor: 0},
+			})
+		}
+	}
+	return services, nil
 }
 
 func (d *DeviceClient) GetSystemDateAndTime(ctx context.Context) (DeviceClock, error) {

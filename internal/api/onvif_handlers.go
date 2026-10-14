@@ -6,7 +6,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
+	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
@@ -199,22 +201,34 @@ func (h *Handlers) CheckServerCamerasOnvif(ctx context.Context, r gen.CheckServe
 	if err != nil {
 		return nil, err
 	}
-	_, err = h.Inv.RequireServerManage(ctx, a, r.ServerId)
+	var ifacePtr *string
+	if r.Body != nil {
+		ifacePtr = r.Body.InterfaceName
+	}
+	res, err := h.SweepServerCamerasOnvif(ctx, a, r.ServerId, ifacePtr)
 	if err != nil {
 		return nil, err
 	}
+	return res, nil
+}
 
-	cams, err := h.Inv.ListServerCameras(ctx, a, r.ServerId)
+func (h *Handlers) SweepServerCamerasOnvif(ctx context.Context, a authz.Actor, serverID uuid.UUID, ifaceName *string) (gen.CheckServerCamerasOnvif200JSONResponse, error) {
+	_, err := h.Inv.RequireServerManage(ctx, a, serverID)
 	if err != nil {
-		return nil, err
+		return gen.CheckServerCamerasOnvif200JSONResponse{}, err
 	}
 
-	iface := "eth0"
-	if r.Body != nil && r.Body.InterfaceName != nil && strings.TrimSpace(*r.Body.InterfaceName) != "" {
-		iface = strings.TrimSpace(*r.Body.InterfaceName)
+	cams, err := h.Inv.ListServerCameras(ctx, a, serverID)
+	if err != nil {
+		return gen.CheckServerCamerasOnvif200JSONResponse{}, err
 	}
 
-	discResult, _ := h.Provision.Discover(ctx, a, r.ServerId, iface)
+	iface := "*"
+	if ifaceName != nil && strings.TrimSpace(*ifaceName) != "" {
+		iface = strings.TrimSpace(*ifaceName)
+	}
+
+	discResult, _ := h.Provision.Discover(ctx, a, serverID, iface)
 	discoveredByIP := make(map[string]provision.DiscoveryDevice)
 	for _, d := range discResult.Devices {
 		for _, xaddr := range d.XAddrs {
@@ -224,7 +238,7 @@ func (h *Handlers) CheckServerCamerasOnvif(ctx context.Context, r gen.CheckServe
 		}
 	}
 
-	streamHosts, _ := h.Inv.GetServerCameraStreamHosts(ctx, a, r.ServerId)
+	streamHosts, _ := h.Inv.GetServerCameraStreamHosts(ctx, a, serverID)
 
 	matched := 0
 	updated := 0
@@ -272,7 +286,7 @@ func (h *Handlers) CheckServerCamerasOnvif(ctx context.Context, r gen.CheckServe
 			matched++
 
 			// Try probe
-			probeRes, probeErr := h.Provision.ProbeOnvif(ctx, a, r.ServerId, creds)
+			probeRes, probeErr := h.Provision.ProbeOnvif(ctx, a, serverID, creds)
 			if probeErr == nil {
 				profile, version, caps := parseOnvifProbeCapabilities(probeRes)
 				capsBytes, _ := json.Marshal(caps)

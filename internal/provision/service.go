@@ -59,6 +59,7 @@ type Service struct {
 	// NewEnrollToken mints the one-time token for a server (agentenroll.Service.CreateToken).
 	AgentMTLS      *AgentMTLS
 	NewEnrollToken func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, error)
+	OnAgentInstalled func(ctx context.Context, actor authz.Actor, serverID uuid.UUID)
 
 	// Authorization and transport seams prove probe denial before secret access or outbound calls.
 	requireServerManage            func(context.Context, authz.Actor, uuid.UUID) error

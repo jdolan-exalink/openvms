@@ -127,21 +127,31 @@ func (s *Service) ProbeOnvif(ctx context.Context, actor authz.Actor, serverID uu
 	if token == "" || net.ParseIP(host) == nil || net.ParseIP(host).To4() == nil || port < 1 || port > 65535 {
 		return OnvifProbeResult{}, ErrAgentProbeFailed
 	}
-	if err := validateAgentTLSConfig(host, config); err != nil {
-		return OnvifProbeResult{}, ErrAgentProbeFailed
-	}
-	useSystemRoots := config.TrustMode == AgentTLSTrustSystem
-	// #nosec G115 -- validateAgentTLSConfig constrains the port to 1..65535 above.
-	client, err := newVerifiedAgentHTTPClient(host, uint16(config.SecurePort), config.CAPEM, useSystemRoots, onvifProbeTimeout, nil, s.probeRoundTripper)
-	if err != nil {
-		return OnvifProbeResult{}, ErrAgentProbeFailed
+	var client AgentProbeDoer
+	if config.TrustMode == AgentTLSTrustPlaintext {
+		plainClient, err := newPlainAgentHTTPClient(host, uint16(port), onvifProbeTimeout, s.probeRoundTripper)
+		if err != nil {
+			return OnvifProbeResult{}, ErrAgentProbeFailed
+		}
+		client = plainClient
+	} else {
+		if err := validateAgentTLSConfig(host, config); err != nil {
+			return OnvifProbeResult{}, ErrAgentProbeFailed
+		}
+		useSystemRoots := config.TrustMode == AgentTLSTrustSystem
+		// #nosec G115 -- validateAgentTLSConfig constrains the port to 1..65535 above.
+		httpsClient, err := newVerifiedAgentHTTPClient(host, uint16(config.SecurePort), config.CAPEM, useSystemRoots, onvifProbeTimeout, nil, s.probeRoundTripper)
+		if err != nil {
+			return OnvifProbeResult{}, ErrAgentProbeFailed
+		}
+		client = httpsClient
 	}
 	return probeAgentWithClient(ctx, client, token, request)
 }
 
 func validateOnvifProbeRequest(in OnvifProbeRequest) error {
 	if len(in.Endpoint) == 0 || len(in.Endpoint) > maxOnvifProbeEndpointBytes || len(in.Username) > maxOnvifProbeUsernameBytes || len(in.Password) > maxOnvifProbePasswordBytes ||
-		((in.Username == "") != (in.Password == "")) {
+		(in.Username == "" && in.Password != "") {
 		return &ValidationError{Msg: "invalid ONVIF probe request"}
 	}
 	ep, err := onvif.ParseEndpoint(in.Endpoint)
@@ -159,19 +169,84 @@ func validateOnvifProbeRequest(in OnvifProbeRequest) error {
 	return nil
 }
 
+// AgentProbeDoer performs HTTP requests against an edge-agent endpoint.
+type AgentProbeDoer interface {
+	Do(ctx context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error)
+}
+
+// PlainAgentHTTPClient communicates with an unencrypted edge-agent over plain HTTP.
+type PlainAgentHTTPClient struct {
+	baseURL string
+	client  *http.Client
+}
+
+func newPlainAgentHTTPClient(registeredIPv4 string, port uint16, timeout time.Duration, testTransport http.RoundTripper) (*PlainAgentHTTPClient, error) {
+	ip := net.ParseIP(registeredIPv4)
+	if ip == nil || ip.To4() == nil || port == 0 || timeout <= 0 {
+		return nil, errors.New("invalid registered agent HTTP configuration")
+	}
+	ipv4 := ip.To4().String()
+	transport := &http.Transport{
+		Proxy:                 nil,
+		ResponseHeaderTimeout: timeout,
+	}
+	var roundTripper http.RoundTripper = transport
+	if testTransport != nil {
+		roundTripper = testTransport
+	}
+	client := &http.Client{
+		Timeout:       timeout,
+		Transport:     roundTripper,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	return &PlainAgentHTTPClient{
+		baseURL: "http://" + net.JoinHostPort(ipv4, strconv.Itoa(int(port))),
+		client:  client,
+	}, nil
+}
+
+func (c *PlainAgentHTTPClient) Do(ctx context.Context, method, path string, headers http.Header, body io.Reader) (*http.Response, error) {
+	if c == nil || c.client == nil {
+		return nil, errors.New("plain agent client is unavailable")
+	}
+	parsed, err := url.ParseRequestURI(path)
+	if err != nil || !strings.HasPrefix(path, "/") || parsed.IsAbs() || parsed.Host != "" || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || strings.ContainsAny(path, "\\\r\n\t") {
+		return nil, errors.New("agent request path must be relative and query-free")
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return nil, errors.New("agent request is invalid")
+	}
+	req.Header = headers.Clone()
+	if req.Header == nil {
+		req.Header = make(http.Header)
+	}
+	return c.client.Do(req)
+}
+
 func probeAgent(ctx context.Context, transport http.RoundTripper, host string, port int32, caPEM []byte, useSystemRoots bool, token string, request OnvifProbeRequest) (OnvifProbeResult, error) {
 	if port < 1 || port > 65535 {
 		return OnvifProbeResult{}, ErrAgentProbeFailed
 	}
-	// #nosec G115 -- the port is range-checked immediately above.
-	client, err := newVerifiedAgentHTTPClient(host, uint16(port), caPEM, useSystemRoots, onvifProbeTimeout, nil, transport)
-	if err != nil {
-		return OnvifProbeResult{}, ErrAgentProbeFailed
+	var client AgentProbeDoer
+	if caPEM == nil && !useSystemRoots {
+		var err error
+		client, err = newPlainAgentHTTPClient(host, uint16(port), onvifProbeTimeout, transport)
+		if err != nil {
+			return OnvifProbeResult{}, ErrAgentProbeFailed
+		}
+	} else {
+		// #nosec G115 -- the port is range-checked immediately above.
+		var err error
+		client, err = newVerifiedAgentHTTPClient(host, uint16(port), caPEM, useSystemRoots, onvifProbeTimeout, nil, transport)
+		if err != nil {
+			return OnvifProbeResult{}, ErrAgentProbeFailed
+		}
 	}
 	return probeAgentWithClient(ctx, client, token, request)
 }
 
-func probeAgentWithClient(ctx context.Context, client *VerifiedAgentHTTPClient, token string, input OnvifProbeRequest) (OnvifProbeResult, error) {
+func probeAgentWithClient(ctx context.Context, client AgentProbeDoer, token string, input OnvifProbeRequest) (OnvifProbeResult, error) {
 	// #nosec G117 -- the credential is sent only to the verified agent over HTTPS and is never logged.
 	body, err := json.Marshal(input)
 	if err != nil || len(body) > maxOnvifProbeRequestBytes || token == "" {
@@ -367,20 +442,19 @@ func sanitizeOnvifProbeResult(result OnvifProbeResult, secrets ...string) OnvifP
 func (s *Service) loadProbeTLSAndAgent(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, int32, string, AgentTLSConfig, error) {
 	var row db.ServerAgent
 	var tlsRow db.ServerAgentTl
+	var tlsErr error
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		var err error
 		row, err = q.GetServerAgent(ctx, serverID)
 		if err != nil {
 			return store.Classify(err)
 		}
-		tlsRow, err = q.GetServerAgentTLS(ctx, serverID)
-		return store.Classify(err)
+		tlsRow, tlsErr = q.GetServerAgentTLS(ctx, serverID)
+		tlsErr = store.Classify(tlsErr)
+		return nil
 	})
-	if errors.Is(err, store.ErrNotFound) {
-		if row.ServerID == uuid.Nil {
-			return "", 0, "", AgentTLSConfig{}, ErrAgentUnprovisioned
-		}
-		return "", 0, "", AgentTLSConfig{}, ErrAgentTLSNotConfigured
+	if errors.Is(err, store.ErrNotFound) || (err == nil && row.ServerID == uuid.Nil) {
+		return "", 0, "", AgentTLSConfig{}, ErrAgentUnprovisioned
 	}
 	if err != nil {
 		return "", 0, "", AgentTLSConfig{}, err
@@ -388,6 +462,12 @@ func (s *Service) loadProbeTLSAndAgent(ctx context.Context, actor authz.Actor, s
 	token, err := s.Sealer.Open(row.TokenSealed, row.ServerID[:])
 	if err != nil {
 		return "", 0, "", AgentTLSConfig{}, ErrAgentProbeFailed
+	}
+	if errors.Is(tlsErr, store.ErrNotFound) {
+		return row.Host, row.Port, string(token), AgentTLSConfig{SecurePort: uint32(row.Port), TrustMode: AgentTLSTrustPlaintext}, nil
+	}
+	if tlsErr != nil {
+		return "", 0, "", AgentTLSConfig{}, tlsErr
 	}
 	return row.Host, row.Port, string(token), configFromRow(tlsRow), nil
 }

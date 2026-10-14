@@ -20,6 +20,7 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
+	"github.com/jdolan-exalink/openvms/internal/agent/provisionlpr"
 	"github.com/jdolan-exalink/openvms/internal/onvif"
 	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
@@ -68,7 +69,8 @@ func main() {
 		os.Exit(1)
 	}
 	healthHandler := newAgentHealthHandler(secret, currentAgentHealthInfo(variant))
-	mux := buildMux(secret, variant, sampler, discoveryHandler, replaceBinary, func() { go restart() })
+	lprReceiver := provisionlpr.NewReceiver(provisionlpr.DefaultConfig(), log)
+	mux := buildMux(secret, variant, sampler, discoveryHandler, probeHandler, lprReceiver, replaceBinary, func() { go restart() })
 	addr := env("OPENVMS_AGENT_LISTEN", "0.0.0.0:7419")
 	srv := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	log.Info("listening", "addr", addr, "version", agent.Version)
@@ -132,7 +134,7 @@ func main() {
 	}()
 
 	if tlsEnabled {
-		tlsServer := newAgentTLSServer(tlsConfig, healthHandler, discoveryHandler, probeHandler)
+		tlsServer := newAgentTLSServer(tlsConfig, healthHandler, discoveryHandler, probeHandler, lprReceiver)
 		log.Info("ONVIF TLS listener enabled", "addr", tlsServer.Addr)
 		if err := serveAgentServers(log, srv, tlsServer); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("agent listener stopped", "error", err)
@@ -250,7 +252,7 @@ func serveAgentServersWith(log *slog.Logger, serve func(*http.Server) error, shu
 	return listenerErr
 }
 
-func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler http.Handler, replace func(*http.Request) error, restartUpdate func()) *http.ServeMux {
+func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, probeHandler, lprHandler http.Handler, replace func(*http.Request) error, restartUpdate func()) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/metrics", func(w http.ResponseWriter, r *http.Request) {
 		if !bearer(r, secret) {
@@ -274,6 +276,32 @@ func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler h
 	if discoveryHandler != nil {
 		mux.Handle("POST /v1/onvif/discover", discoveryHandler)
 	}
+	if probeHandler != nil {
+		mux.Handle("POST /v1/onvif/probe", probeHandler)
+	}
+	if lprHandler != nil {
+		mux.Handle("/SendKeepalive", lprHandler)
+		mux.Handle("/v1/provision-lpr/", lprHandler)
+		mux.Handle("/v1/provision-lpr/event", lprHandler)
+		mux.Handle("/SendLPR", lprHandler)
+		mux.Handle("/LPR", lprHandler)
+		mux.Handle("/Notification/LPR", lprHandler)
+	}
+	configurator := provisionlpr.NewConfigurator()
+	mux.HandleFunc("POST /v1/provision-lpr/configure", func(w http.ResponseWriter, r *http.Request) {
+		if !bearer(r, secret) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var p provisionlpr.CameraConfigParams
+		if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
+			http.Error(w, "invalid request body", http.StatusBadRequest)
+			return
+		}
+		res := configurator.Configure(r.Context(), p)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(res)
+	})
 	return mux
 }
 

@@ -299,3 +299,83 @@ func TestCredentialsDoNotFormatOrSerializeSecrets(t *testing.T) {
 type errorReader struct{}
 
 func (errorReader) Read([]byte) (int, error) { return 0, errors.New("random source unavailable") }
+
+func TestUsernameTokenWithEmptyPassword(t *testing.T) {
+	ep, _ := ParseEndpoint("http://camera.local/service")
+	nonces := bytes.NewReader([]byte("0123456789abcdefghij"))
+	credentials := NewCredentials("admin", "")
+	c := NewClient(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		var envelope struct {
+			Header struct {
+				Security struct {
+					Token struct {
+						Username string `xml:"Username"`
+						Password string `xml:"Password"`
+						Created  string `xml:"Created"`
+					} `xml:"UsernameToken"`
+				} `xml:"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd Security"`
+			} `xml:"http://www.w3.org/2003/05/soap-envelope Header"`
+		}
+		if err := xml.Unmarshal(body, &envelope); err != nil {
+			t.Fatalf("invalid SOAP XML: %v", err)
+		}
+		if envelope.Header.Security.Token.Username != "admin" {
+			t.Errorf("username = %q, want admin", envelope.Header.Security.Token.Username)
+		}
+		if envelope.Header.Security.Token.Password == "" {
+			t.Error("expected non-empty PasswordDigest for empty password")
+		}
+		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), nil
+	}), Config{Timeout: time.Second, Credentials: credentials, nonceSource: nonces, now: func() time.Time { return time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC) }})
+
+	if _, err := c.Call(context.Background(), ep, "urn:test:Read", `<x:Read xmlns:x="urn:test"/>`, ReadOnly); err != nil {
+		t.Fatalf("call with empty password failed: %v", err)
+	}
+}
+
+func TestUsernameTokenTimeOffsetCompensatesClockSkew(t *testing.T) {
+	ep, _ := ParseEndpoint("http://camera.local/service")
+	nonces := bytes.NewReader([]byte("0123456789abcdefghij"))
+	credentials := NewCredentials("admin", "secret")
+	// Skew: camera is 2 hours ahead
+	offset := 2 * time.Hour
+	baseTime := time.Date(2024, 1, 2, 3, 4, 5, 0, time.UTC)
+
+	c := NewClient(roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		var envelope struct {
+			Header struct {
+				Security struct {
+					Token struct {
+						Created string `xml:"Created"`
+					} `xml:"UsernameToken"`
+				} `xml:"http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd Security"`
+			} `xml:"http://www.w3.org/2003/05/soap-envelope Header"`
+		}
+		if err := xml.Unmarshal(body, &envelope); err != nil {
+			t.Fatalf("invalid SOAP XML: %v", err)
+		}
+		wantCreated := baseTime.Add(offset).UTC().Format("2006-01-02T15:04:05Z")
+		if envelope.Header.Security.Token.Created != wantCreated {
+			t.Errorf("Created timestamp = %q, want %q", envelope.Header.Security.Token.Created, wantCreated)
+		}
+		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><x:ReadResponse xmlns:x="urn:test"/></s:Body></s:Envelope>`), nil
+	}), Config{
+		Timeout:     time.Second,
+		Credentials: credentials,
+		TimeOffset:  offset,
+		nonceSource: nonces,
+		now:         func() time.Time { return baseTime },
+	})
+
+	if _, err := c.Call(context.Background(), ep, "urn:test:Read", `<x:Read xmlns:x="urn:test"/>`, ReadOnly); err != nil {
+		t.Fatalf("call failed: %v", err)
+	}
+
+	// Test dynamic SetTimeOffset
+	c.SetTimeOffset(-1 * time.Hour)
+	if c.TimeOffset() != -1*time.Hour {
+		t.Errorf("TimeOffset() = %v, want -1h", c.TimeOffset())
+	}
+}

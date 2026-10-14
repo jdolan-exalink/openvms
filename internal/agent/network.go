@@ -18,11 +18,18 @@ const maxNetworkProcBytes = 64 * 1024
 
 var errNetworkProcTooLarge = errors.New("network counters exceed size limit")
 
-// NetworkInterface reports rates for one non-loopback interface.
+// NetworkInterface reports rates and network details for one non-loopback interface.
 type NetworkInterface struct {
 	Name             string  `json:"name"`
 	RXBytesPerSecond float64 `json:"rx_bytes_per_second"`
 	TXBytesPerSecond float64 `json:"tx_bytes_per_second"`
+	IPAddress        string  `json:"ip_address,omitempty"`
+	Netmask          string  `json:"netmask,omitempty"`
+	Subnet           string  `json:"subnet,omitempty"`
+	MAC              string  `json:"mac_address,omitempty"`
+	Gateway          string  `json:"gateway,omitempty"`
+	IsDefault        bool    `json:"is_default,omitempty"`
+	Role             string  `json:"role,omitempty"` // "cameras" | "monitoring" | "lan"
 }
 
 // NetworkSnapshot is absent until a valid counter interval is observed.
@@ -40,18 +47,19 @@ type networkBaseline struct {
 // NetworkSampler serializes bounded counter reads and derives rates from successful
 // samples using the monotonic component of time.Time.
 type NetworkSampler struct {
-	mu   sync.Mutex
-	read func() ([]byte, error)
-	now  func() time.Time
-	last *networkBaseline
+	mu       sync.Mutex
+	read     func() ([]byte, error)
+	now      func() time.Time
+	last     *networkBaseline
+	discover func() ([]InterfaceInfo, error)
 }
 
 func newNetworkSampler(read func() ([]byte, error), now func() time.Time) *NetworkSampler {
 	return &NetworkSampler{read: read, now: now}
 }
 
-func newProcNetworkSampler(proc string) *NetworkSampler {
-	return newNetworkSampler(func() ([]byte, error) {
+func newProcNetworkSampler(proc string, dbPath ...string) *NetworkSampler {
+	s := newNetworkSampler(func() ([]byte, error) {
 		// #nosec G304 -- proc/sysfs path is sourced from local configuration, not remote input.
 		f, err := os.Open(filepath.Join(proc, "net/dev"))
 		if err != nil {
@@ -67,6 +75,14 @@ func newProcNetworkSampler(proc string) *NetworkSampler {
 		}
 		return b, nil
 	}, time.Now)
+	db := ""
+	if len(dbPath) > 0 {
+		db = dbPath[0]
+	}
+	s.discover = func() ([]InterfaceInfo, error) {
+		return DiscoverInterfacesWithPaths(Paths{Proc: proc, DB: db})
+	}
+	return s
 }
 
 func (s *NetworkSampler) Sample() NetworkSnapshot {
@@ -100,6 +116,17 @@ func (s *NetworkSampler) Sample() NetworkSnapshot {
 		return NetworkSnapshot{}
 	}
 	s.last = &networkBaseline{counters: counters, at: now}
+
+	var detailsMap map[string]InterfaceInfo
+	if s.discover != nil {
+		if details, err := s.discover(); err == nil {
+			detailsMap = make(map[string]InterfaceInfo, len(details))
+			for _, d := range details {
+				detailsMap[d.Name] = d
+			}
+		}
+	}
+
 	interfaces := make([]NetworkInterface, 0, len(counters))
 	seconds := elapsed.Seconds()
 	for name, value := range counters {
@@ -107,10 +134,21 @@ func (s *NetworkSampler) Sample() NetworkSnapshot {
 		if !ok || value.rx < prior.rx || value.tx < prior.tx {
 			continue
 		}
-		interfaces = append(interfaces, NetworkInterface{
-			Name: name, RXBytesPerSecond: float64(value.rx-prior.rx) / seconds,
+		iface := NetworkInterface{
+			Name:             name,
+			RXBytesPerSecond: float64(value.rx-prior.rx) / seconds,
 			TXBytesPerSecond: float64(value.tx-prior.tx) / seconds,
-		})
+		}
+		if d, found := detailsMap[name]; found {
+			iface.IPAddress = d.IPAddress
+			iface.Netmask = d.Netmask
+			iface.Subnet = d.Subnet
+			iface.MAC = d.MAC
+			iface.Gateway = d.Gateway
+			iface.IsDefault = d.IsDefault
+			iface.Role = d.Role
+		}
+		interfaces = append(interfaces, iface)
 	}
 	if len(interfaces) == 0 {
 		return NetworkSnapshot{}
@@ -181,10 +219,28 @@ func isLANInterface(name string) bool {
 		return false
 	}
 	for _, prefix := range []string{
-		"docker", "br-", "veth", "virbr", "dummy", "tun", "tap",
+		"docker", "veth", "virbr", "dummy", "tun", "tap",
 		"flannel", "cni", "kube", "vnet", "sit", "ip6tnl",
 	} {
 		if strings.HasPrefix(name, prefix) {
+			return false
+		}
+	}
+	if strings.HasPrefix(name, "br-") {
+		// Docker bridges use br-<12+ hex characters>
+		if isHexBridgeID(name[3:]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isHexBridgeID(s string) bool {
+	if len(s) < 8 {
+		return false
+	}
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
 			return false
 		}
 	}

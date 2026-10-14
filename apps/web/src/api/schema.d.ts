@@ -3147,6 +3147,14 @@ export interface components {
             name: string;
             rx_bytes_per_second: number;
             tx_bytes_per_second: number;
+            ip_address?: string;
+            mac_address?: string;
+            subnet?: string;
+            netmask?: string;
+            gateway?: string;
+            is_default?: boolean;
+            /** @enum {string} */
+            role?: "cameras" | "monitoring" | "lan";
         };
         /**
          * @description Binary lifecycle state; separate from protocol version and the legacy protocol outdated flag.

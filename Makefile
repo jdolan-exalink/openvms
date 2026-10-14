@@ -1,7 +1,7 @@
 # OpenVMS developer entry points. `make help` lists them.
 SHELL := /bin/bash
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-AGENT_VERSION ?= 0.1.1
+AGENT_VERSION ?= 0.2.0
 INFRA := postgres valkey nats seaweedfs mosquitto frigate-helvecia frigate-cayasta
 
 export DATABASE_URL ?= postgres://openvms:openvms@localhost:5432/openvms?sslmode=disable

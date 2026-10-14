@@ -45,7 +45,8 @@ func (t *UDPTransport) Open(ctx context.Context, interfaceName string) (Datagram
 	if err != nil {
 		return nil, err
 	}
-	if iface.Name != interfaceName || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 {
+	isAuto := interfaceName == "*" || interfaceName == "auto"
+	if (!isAuto && iface.Name != interfaceName) || iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 {
 		return nil, fmt.Errorf("ONVIF interface %q must be named, up, and multicast-capable", interfaceName)
 	}
 	ip4 := ip.To4()
@@ -57,7 +58,7 @@ func (t *UDPTransport) Open(ctx context.Context, interfaceName string) (Datagram
 		return nil, fmt.Errorf("bind ONVIF discovery socket: %w", err)
 	}
 	if err = conn.SetMulticastInterface(&iface); err == nil {
-		err = conn.SetMulticastTTL(1)
+		err = conn.SetMulticastTTL(4)
 	}
 	if err != nil {
 		_ = conn.Close()
@@ -67,6 +68,35 @@ func (t *UDPTransport) Open(ctx context.Context, interfaceName string) (Datagram
 }
 
 func resolveDiscoveryInterface(name string) (net.Interface, net.IP, error) {
+	if name == "*" || name == "auto" {
+		ifaces, err := net.Interfaces()
+		if err != nil {
+			return net.Interface{}, nil, fmt.Errorf("list network interfaces: %w", err)
+		}
+		for _, iface := range ifaces {
+			if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagMulticast == 0 || iface.Flags&net.FlagLoopback != 0 {
+				continue
+			}
+			addresses, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, address := range addresses {
+				var ip net.IP
+				switch value := address.(type) {
+				case *net.IPNet:
+					ip = value.IP
+				case *net.IPAddr:
+					ip = value.IP
+				}
+				if ip4 := ip.To4(); ip4 != nil && !ip4.IsUnspecified() && !ip4.IsMulticast() && !ip4.IsLoopback() {
+					return iface, append(net.IP(nil), ip4...), nil
+				}
+			}
+		}
+		return net.Interface{}, nil, errors.New("no active multicast-capable IPv4 network interface found")
+	}
+
 	iface, err := net.InterfaceByName(name)
 	if err != nil {
 		return net.Interface{}, nil, fmt.Errorf("resolve ONVIF interface %q: %w", name, err)

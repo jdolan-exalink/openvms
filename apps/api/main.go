@@ -201,6 +201,11 @@ func run() error {
 			return postgres.SchemaVersion(ctx, pool)
 		},
 	}
+	provisioner.OnAgentInstalled = func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) {
+		sweepCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		_, _ = handlers.SweepServerCamerasOnvif(sweepCtx, actor, serverID, nil)
+	}
 	// The push feed: one ordered consumer per stream feeds the hub; the handler filters per
 	// connection by tenant and by the same authorized-ID queries the list endpoints use.
 	rtRoutes := realtime.DefaultRoutes()

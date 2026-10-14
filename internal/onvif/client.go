@@ -75,6 +75,7 @@ type Config struct {
 	MaxAttempts  int
 	RetryDelay   time.Duration
 	Credentials  *Credentials
+	TimeOffset   time.Duration
 	nonceSource  io.Reader
 	now          func() time.Time
 }
@@ -127,6 +128,14 @@ func NewClient(transport http.RoundTripper, config Config) *Client {
 	return &Client{transport: transport, config: config, nonceSource: nonceSource, now: now}
 }
 
+func (c *Client) SetTimeOffset(offset time.Duration) {
+	c.config.TimeOffset = offset
+}
+
+func (c *Client) TimeOffset() time.Duration {
+	return c.config.TimeOffset
+}
+
 const (
 	// #nosec G101 -- This is the required WS-Security PasswordDigest profile URI, not a credential.
 	passwordDigestType = "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-username-token-profile-1.0#PasswordDigest"
@@ -162,14 +171,14 @@ func (c *Client) requestBody(operationXML string) ([]byte, error) {
 		return body, nil
 	}
 	creds := c.config.Credentials
-	if creds.username == "" || creds.password == "" {
+	if creds.username == "" {
 		return nil, errors.New("invalid ONVIF credentials")
 	}
 	var nonce [20]byte
 	if _, err := io.ReadFull(c.nonceSource, nonce[:]); err != nil {
 		return nil, errors.New("ONVIF authentication nonce unavailable")
 	}
-	created := c.now().UTC().Format("2006-01-02T15:04:05Z")
+	created := c.now().Add(c.config.TimeOffset).UTC().Format("2006-01-02T15:04:05Z")
 	// #nosec G401 -- ONVIF UsernameToken PasswordDigest is specified as SHA-1; this is not used for signatures.
 	hash := sha1.New()
 	_, _ = hash.Write(nonce[:])

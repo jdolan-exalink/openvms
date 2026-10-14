@@ -4192,6 +4192,15 @@ components:
         name: { type: string, minLength: 1, maxLength: 64 }
         rx_bytes_per_second: { type: number, minimum: 0 }
         tx_bytes_per_second: { type: number, minimum: 0 }
+        ip_address: { type: string }
+        mac_address: { type: string }
+        subnet: { type: string }
+        netmask: { type: string }
+        gateway: { type: string }
+        is_default: { type: boolean }
+        role:
+          type: string
+          enum: [cameras, monitoring, lan]
     ServerAgentBinaryStatus:
       type: string
       enum: [not_installed, current, update_available, unknown, unreachable]

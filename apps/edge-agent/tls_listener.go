@@ -39,7 +39,7 @@ func loadAgentTLSConfig(listen, certFile, keyFile string) (*agentTLSConfig, bool
 	return &agentTLSConfig{Addr: listen, Certificates: []tls.Certificate{cert}}, true, nil
 }
 
-func buildTLSMux(healthHandler, discoveryHandler, probeHandler http.Handler) *http.ServeMux {
+func buildTLSMux(healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler) *http.ServeMux {
 	mux := http.NewServeMux()
 	if healthHandler != nil {
 		mux.Handle("GET /v1/health", healthHandler)
@@ -50,13 +50,21 @@ func buildTLSMux(healthHandler, discoveryHandler, probeHandler http.Handler) *ht
 	if probeHandler != nil {
 		mux.Handle("POST /v1/onvif/probe", probeHandler)
 	}
+	if lprHandler != nil {
+		mux.Handle("/SendKeepalive", lprHandler)
+		mux.Handle("/v1/provision-lpr/", lprHandler)
+		mux.Handle("/v1/provision-lpr/event", lprHandler)
+		mux.Handle("/SendLPR", lprHandler)
+		mux.Handle("/LPR", lprHandler)
+		mux.Handle("/Notification/LPR", lprHandler)
+	}
 	return mux
 }
 
-func newAgentTLSServer(cfg *agentTLSConfig, healthHandler, discoveryHandler, probeHandler http.Handler) *http.Server {
+func newAgentTLSServer(cfg *agentTLSConfig, healthHandler, discoveryHandler, probeHandler, lprHandler http.Handler) *http.Server {
 	return &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           buildTLSMux(healthHandler, discoveryHandler, probeHandler),
+		Handler:           buildTLSMux(healthHandler, discoveryHandler, probeHandler, lprHandler),
 		ReadHeaderTimeout: 5 * time.Second,
 		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12, Certificates: cfg.Certificates},
 	}

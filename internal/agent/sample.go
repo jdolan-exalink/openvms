@@ -72,7 +72,7 @@ func NewSampler(opts Paths) *Sampler {
 	if opts.DB == "" {
 		opts.DB = "/opt/frigate/config"
 	}
-	return &Sampler{opts: opts, network: newProcNetworkSampler(opts.Proc)}
+	return &Sampler{opts: opts, network: newProcNetworkSampler(opts.Proc, opts.DB)}
 }
 
 // Current returns a snapshot no older than one second.
