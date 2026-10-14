@@ -555,6 +555,34 @@ func (s *Service) ConnInfo(srv db.FrigateServer) (frigate.ConnInfo, error) {
 	return s.connInfo(srv)
 }
 
+// GetServerCredentials returns the decrypted username and password for a server.
+func (s *Service) GetServerCredentials(ctx context.Context, actor authz.Actor, id uuid.UUID) (string, string, error) {
+	var srv db.GetServerRow
+	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		var err error
+		srv, err = q.GetServer(ctx, id)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		return c.Require(authz.ServersManage, access.Server(srv.TenantID, srv.SiteID, srv.ID))
+	})
+	if err != nil {
+		return "", "", err
+	}
+	info, err := s.connInfo(db.FrigateServer{
+		ID:             srv.ID,
+		BaseUrl:        srv.BaseUrl,
+		AuthMode:       srv.AuthMode,
+		Username:       srv.Username,
+		PasswordSealed: srv.PasswordSealed,
+		TlsSkipVerify:  srv.TlsSkipVerify,
+	})
+	if err != nil {
+		return "", "", err
+	}
+	return info.Username, info.Password, nil
+}
+
 func (s *Service) connInfo(srv db.FrigateServer) (frigate.ConnInfo, error) {
 	info := frigate.ConnInfo{BaseURL: srv.BaseUrl, AuthMode: frigate.AuthMode(srv.AuthMode), TLSSkipVerify: srv.TlsSkipVerify}
 	if info.Mode() == frigate.AuthNone {

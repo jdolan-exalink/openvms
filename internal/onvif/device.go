@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 const (
@@ -164,6 +165,31 @@ func (d *DeviceClient) GetSystemDateAndTime(ctx context.Context) (DeviceClock, e
 		return DeviceClock{}, &CallError{Status: StatusFailed, Code: "invalid_system_time"}
 	}
 	return response.Clock, nil
+}
+
+func (d *DeviceClient) SetSystemDateAndTime(ctx context.Context, utcTime time.Time) error {
+	utc := utcTime.UTC()
+	content := fmt.Sprintf(`<tds:DateTimeType>Manual</tds:DateTimeType>`+
+		`<tds:DaylightSavings>false</tds:DaylightSavings>`+
+		`<tds:TimeZone><tt:TZ xmlns:tt="http://www.onvif.org/ver10/schema">UTC</tt:TZ></tds:TimeZone>`+
+		`<tds:UTCDateTime>`+
+		`<tt:Time xmlns:tt="http://www.onvif.org/ver10/schema">`+
+		`<tt:Hour>%d</tt:Hour>`+
+		`<tt:Minute>%d</tt:Minute>`+
+		`<tt:Second>%d</tt:Second>`+
+		`</tt:Time>`+
+		`<tt:Date xmlns:tt="http://www.onvif.org/ver10/schema">`+
+		`<tt:Year>%d</tt:Year>`+
+		`<tt:Month>%d</tt:Month>`+
+		`<tt:Day>%d</tt:Day>`+
+		`</tt:Date>`+
+		`</tds:UTCDateTime>`,
+		utc.Hour(), utc.Minute(), utc.Second(),
+		utc.Year(), int(utc.Month()), utc.Day())
+
+	body := `<tds:SetSystemDateAndTime xmlns:tds="` + deviceNamespace + `">` + content + `</tds:SetSystemDateAndTime>`
+	_, err := d.client.Call(ctx, d.endpoint, deviceNamespace+"/SetSystemDateAndTime", body, Mutating)
+	return err
 }
 
 func decodeOperation(data []byte, name string, target any) error {

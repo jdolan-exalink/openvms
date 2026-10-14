@@ -973,6 +973,30 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/servers/{serverId}/frigate/add-camera:
+    parameters:
+      - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [servers]
+      operationId: addCameraToFrigate
+      summary: Add a discovered camera to Frigate configuration and sync inventory
+      description: Adds camera ffmpeg and ONVIF configuration to Frigate config.yml, triggers Frigate reload/restart, and synchronizes inventory. Requires servers.config and servers.config.secrets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AddCameraToFrigateRequest" }
+      responses:
+        "200":
+          description: Camera successfully added and synced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AddCameraToFrigateResponse" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/servers/{serverId}/agent:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1174,6 +1198,102 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Camera" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/onvif/sync-time:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: syncCameraOnvifTime
+      summary: Synchronize camera system date and time with server time via ONVIF
+      description: Sends SetSystemDateAndTime to the camera via the server edge agent. Requires cameras.manage.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraOnvifSyncTimeRequest" }
+      responses:
+        "200":
+          description: Camera date and time synchronized
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraOnvifSyncTimeResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/onvif/ptz:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: controlCameraOnvifPTZ
+      summary: Control camera PTZ via ONVIF
+      description: Sends ContinuousMove, Stop, or GotoPreset commands to the camera. Requires cameras.manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraOnvifPTZRequest" }
+      responses:
+        "200":
+          description: PTZ command executed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraOnvifPTZResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/onvif/video-config:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: operateCameraOnvifVideoConfig
+      summary: Get or set camera video encoder configuration via ONVIF
+      description: Queries or modifies video encoder configuration (resolution, framerate, bitrate). Requires cameras.manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraOnvifVideoConfigRequest" }
+      responses:
+        "200":
+          description: Video config operation result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraOnvifVideoConfigResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/onvif/imaging:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: operateCameraOnvifImaging
+      summary: Get or set camera imaging settings via ONVIF
+      description: Queries or modifies imaging settings (brightness, contrast, saturation, sharpness, IR cut filter, WDR). Requires cameras.manage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraOnvifImagingRequest" }
+      responses:
+        "200":
+          description: Imaging operation result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraOnvifImagingResult" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
@@ -4080,6 +4200,141 @@ components:
         cameras:
           type: array
           items: { $ref: "#/components/schemas/Camera" }
+    AddCameraToFrigateRequest:
+      type: object
+      additionalProperties: false
+      required: [name, main_stream_url]
+      properties:
+        name: { type: string, maxLength: 64 }
+        title: { type: string, maxLength: 128 }
+        main_stream_url: { type: string, maxLength: 2048 }
+        sub_stream_url: { type: string, maxLength: 2048 }
+        onvif_host: { type: string, maxLength: 256 }
+        onvif_port: { type: integer, minimum: 1, maximum: 65535 }
+        onvif_user: { type: string, maxLength: 128 }
+        onvif_password: { type: string, maxLength: 256, writeOnly: true }
+    AddCameraToFrigateResponse:
+      type: object
+      additionalProperties: false
+      required: [revision_id, restart_required]
+      properties:
+        camera: { $ref: "#/components/schemas/Camera" }
+        revision_id: { type: string, format: uuid }
+        restart_required: { type: boolean }
+    CameraOnvifSyncTimeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        endpoint: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 128 }
+        password: { type: string, maxLength: 256, writeOnly: true }
+    CameraOnvifSyncTimeResult:
+      type: object
+      additionalProperties: false
+      required: [success, synced_at]
+      properties:
+        success: { type: boolean }
+        synced_at: { type: string, format: date-time }
+    CameraOnvifPTZRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        endpoint: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 128 }
+        password: { type: string, maxLength: 256, writeOnly: true }
+        profile_token: { type: string, maxLength: 128 }
+        action: { type: string, enum: [continuous_move, stop, goto_preset, get_presets] }
+        pan: { type: number }
+        tilt: { type: number }
+        zoom: { type: number }
+        preset_token: { type: string, maxLength: 128 }
+    CameraOnvifPTZResult:
+      type: object
+      additionalProperties: false
+      required: [success]
+      properties:
+        success: { type: boolean }
+        presets:
+          type: array
+          items:
+            type: object
+            properties:
+              token: { type: string }
+              name: { type: string }
+    CameraOnvifVideoConfigRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        endpoint: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 128 }
+        password: { type: string, maxLength: 256, writeOnly: true }
+        action: { type: string, enum: [get, set] }
+        configuration:
+          type: object
+          properties:
+            token: { type: string }
+            name: { type: string }
+            encoding: { type: string }
+            width: { type: integer }
+            height: { type: integer }
+            fps: { type: number }
+            bitrate: { type: integer }
+    CameraOnvifVideoConfigResult:
+      type: object
+      additionalProperties: false
+      required: [success]
+      properties:
+        success: { type: boolean }
+        configurations:
+          type: array
+          items:
+            type: object
+            properties:
+              token: { type: string }
+              name: { type: string }
+              encoding: { type: string }
+              width: { type: integer }
+              height: { type: integer }
+              fps: { type: number }
+              bitrate: { type: integer }
+    CameraOnvifImagingRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        endpoint: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 128 }
+        password: { type: string, maxLength: 256, writeOnly: true }
+        video_source_token: { type: string, maxLength: 128 }
+        action: { type: string, enum: [get, set] }
+        settings:
+          type: object
+          properties:
+            brightness: { type: number }
+            color_saturation: { type: number }
+            contrast: { type: number }
+            sharpness: { type: number }
+            ir_cut_filter: { type: string }
+            wdr_mode: { type: string }
+            wdr_level: { type: number }
+    CameraOnvifImagingResult:
+      type: object
+      additionalProperties: false
+      required: [success]
+      properties:
+        success: { type: boolean }
+        settings:
+          type: object
+          properties:
+            brightness: { type: number }
+            color_saturation: { type: number }
+            contrast: { type: number }
+            sharpness: { type: number }
+            ir_cut_filter: { type: string }
+            wdr_mode: { type: string }
+            wdr_level: { type: number }
     OnvifProbeRequest:
       type: object
       additionalProperties: false

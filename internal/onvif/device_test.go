@@ -57,6 +57,23 @@ func TestDeviceServicesAndSystemTime(t *testing.T) {
 	}
 }
 
+func TestDeviceSetSystemDateAndTime(t *testing.T) {
+	var receivedBody string
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
+		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><tds:SetSystemDateAndTimeResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"/></s:Body></s:Envelope>`), nil
+	})
+	client := NewDeviceClient(NewClient(transport, Config{Timeout: time.Second}), mustEndpoint(t, "http://camera.local/onvif/device_service"))
+	syncTime := time.Date(2026, 10, 14, 15, 30, 45, 0, time.UTC)
+	if err := client.SetSystemDateAndTime(context.Background(), syncTime); err != nil {
+		t.Fatalf("SetSystemDateAndTime failed: %v", err)
+	}
+	if !strings.Contains(receivedBody, "SetSystemDateAndTime") || !strings.Contains(receivedBody, "2026") || !strings.Contains(receivedBody, "15") {
+		t.Errorf("SetSystemDateAndTime payload missing fields: %s", receivedBody)
+	}
+}
+
 func TestServiceEndpointRejectsCredentialsAndQuery(t *testing.T) {
 	// #nosec G101 -- literal URL credentials verify rejection of unsafe endpoint.
 	svc := Service{Endpoint: "http://user:pass@camera.local/onvif/media?token=x"}

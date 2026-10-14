@@ -815,6 +815,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/frigate/add-camera": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a discovered camera to Frigate configuration and sync inventory
+         * @description Adds camera ffmpeg and ONVIF configuration to Frigate config.yml, triggers Frigate reload/restart, and synchronizes inventory. Requires servers.config and servers.config.secrets.
+         */
+        post: operations["addCameraToFrigate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/agent": {
         parameters: {
             query?: never;
@@ -974,6 +996,94 @@ export interface paths {
          * @description Probes the camera ONVIF endpoint via the server agent and updates stored ONVIF profile, version, and capabilities. Requires cameras.manage on the camera.
          */
         post: operations["checkCameraOnvif"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/onvif/sync-time": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Synchronize camera system date and time with server time via ONVIF
+         * @description Sends SetSystemDateAndTime to the camera via the server edge agent. Requires cameras.manage.
+         */
+        post: operations["syncCameraOnvifTime"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/onvif/ptz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Control camera PTZ via ONVIF
+         * @description Sends ContinuousMove, Stop, or GotoPreset commands to the camera. Requires cameras.manage.
+         */
+        post: operations["controlCameraOnvifPTZ"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/onvif/video-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get or set camera video encoder configuration via ONVIF
+         * @description Queries or modifies video encoder configuration (resolution, framerate, bitrate). Requires cameras.manage.
+         */
+        post: operations["operateCameraOnvifVideoConfig"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/onvif/imaging": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Get or set camera imaging settings via ONVIF
+         * @description Queries or modifies imaging settings (brightness, contrast, saturation, sharpness, IR cut filter, WDR). Requires cameras.manage.
+         */
+        post: operations["operateCameraOnvifImaging"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3056,6 +3166,108 @@ export interface components {
             matched: number;
             updated: number;
             cameras: components["schemas"]["Camera"][];
+        };
+        AddCameraToFrigateRequest: {
+            name: string;
+            title?: string;
+            main_stream_url: string;
+            sub_stream_url?: string;
+            onvif_host?: string;
+            onvif_port?: number;
+            onvif_user?: string;
+            onvif_password?: string;
+        };
+        AddCameraToFrigateResponse: {
+            camera?: components["schemas"]["Camera"];
+            /** Format: uuid */
+            revision_id: string;
+            restart_required: boolean;
+        };
+        CameraOnvifSyncTimeRequest: {
+            endpoint?: string;
+            username?: string;
+            password?: string;
+        };
+        CameraOnvifSyncTimeResult: {
+            success: boolean;
+            /** Format: date-time */
+            synced_at: string;
+        };
+        CameraOnvifPTZRequest: {
+            endpoint?: string;
+            username?: string;
+            password?: string;
+            profile_token?: string;
+            /** @enum {string} */
+            action: "continuous_move" | "stop" | "goto_preset" | "get_presets";
+            pan?: number;
+            tilt?: number;
+            zoom?: number;
+            preset_token?: string;
+        };
+        CameraOnvifPTZResult: {
+            success: boolean;
+            presets?: {
+                token?: string;
+                name?: string;
+            }[];
+        };
+        CameraOnvifVideoConfigRequest: {
+            endpoint?: string;
+            username?: string;
+            password?: string;
+            /** @enum {string} */
+            action: "get" | "set";
+            configuration?: {
+                token?: string;
+                name?: string;
+                encoding?: string;
+                width?: number;
+                height?: number;
+                fps?: number;
+                bitrate?: number;
+            };
+        };
+        CameraOnvifVideoConfigResult: {
+            success: boolean;
+            configurations?: {
+                token?: string;
+                name?: string;
+                encoding?: string;
+                width?: number;
+                height?: number;
+                fps?: number;
+                bitrate?: number;
+            }[];
+        };
+        CameraOnvifImagingRequest: {
+            endpoint?: string;
+            username?: string;
+            password?: string;
+            video_source_token?: string;
+            /** @enum {string} */
+            action: "get" | "set";
+            settings?: {
+                brightness?: number;
+                color_saturation?: number;
+                contrast?: number;
+                sharpness?: number;
+                ir_cut_filter?: string;
+                wdr_mode?: string;
+                wdr_level?: number;
+            };
+        };
+        CameraOnvifImagingResult: {
+            success: boolean;
+            settings?: {
+                brightness?: number;
+                color_saturation?: number;
+                contrast?: number;
+                sharpness?: number;
+                ir_cut_filter?: string;
+                wdr_mode?: string;
+                wdr_level?: number;
+            };
         };
         OnvifProbeRequest: {
             /** @description HTTP(S) ONVIF device endpoint on an IPv4 literal. */
@@ -6076,6 +6288,37 @@ export interface operations {
             502: components["responses"]["FrigateUnreachable"];
         };
     };
+    addCameraToFrigate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AddCameraToFrigateRequest"];
+            };
+        };
+        responses: {
+            /** @description Camera successfully added and synced */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AddCameraToFrigateResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
     getServerAgent: {
         parameters: {
             query?: never;
@@ -6348,6 +6591,130 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Camera"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    syncCameraOnvifTime: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["CameraOnvifSyncTimeRequest"];
+            };
+        };
+        responses: {
+            /** @description Camera date and time synchronized */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraOnvifSyncTimeResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    controlCameraOnvifPTZ: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraOnvifPTZRequest"];
+            };
+        };
+        responses: {
+            /** @description PTZ command executed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraOnvifPTZResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    operateCameraOnvifVideoConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraOnvifVideoConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description Video config operation result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraOnvifVideoConfigResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    operateCameraOnvifImaging: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraOnvifImagingRequest"];
+            };
+        };
+        responses: {
+            /** @description Imaging operation result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraOnvifImagingResult"];
                 };
             };
             400: components["responses"]["BadRequest"];

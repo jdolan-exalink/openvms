@@ -42,7 +42,7 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 		return nil
 	}
 	newMux := func(discovery, probe http.Handler) *http.ServeMux {
-		return buildMux(token, "test", sam, discovery, probe, nil, replace, func() { restarted++ })
+		return buildMux(token, "test", sam, discovery, probe, nil, nil, replace, func() { restarted++ })
 	}
 	post := func(mux *http.ServeMux, path, body, auth string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -146,12 +146,30 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 		}
 	})
 
+	t.Run("ops handler is registered on main mux", func(t *testing.T) {
+		cfg, _, err := onvifdiscover.LoadConfig("eth0", "192.168.1.0/24")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ops, err := onvifdiscover.NewOpsHandler(token, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux := buildMux(token, "test", sam, nil, nil, ops, nil, replace, func() {})
+		if got := post(mux, "/v1/onvif/sync-time", `{}`, "").Code; got != http.StatusUnauthorized {
+			t.Fatalf("expected unauthorized, got=%d", got)
+		}
+		if got := post(mux, "/v1/onvif/ptz", `{}`, "").Code; got != http.StatusUnauthorized {
+			t.Fatalf("expected unauthorized, got=%d", got)
+		}
+	})
+
 	t.Run("provision keepalive and configure routes mounted", func(t *testing.T) {
 		lpr := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		})
-		mux := buildMux(token, "test", sam, nil, nil, lpr, replace, func() {})
+		mux := buildMux(token, "test", sam, nil, nil, nil, lpr, replace, func() {})
 		if got := post(mux, "/SendKeepalive", "", "").Code; got != http.StatusOK {
 			t.Fatalf("keepalive status=%d", got)
 		}

@@ -46,10 +46,39 @@ type OnvifProbeRequest struct {
 	Password string `json:"password,omitempty"`
 }
 
+type OnvifProbeProfile struct {
+	Token     string `json:"token"`
+	Name      string `json:"name"`
+	Encoding  string `json:"encoding"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	FPS       int    `json:"fps"`
+	Bitrate   int    `json:"bitrate"`
+	StreamURI string `json:"stream_uri"`
+}
+
+type OnvifProbeStreams struct {
+	MainURL string `json:"main_url"`
+	SubURL  string `json:"sub_url"`
+}
+
+type OnvifProbeAnalytics struct {
+	SupportedTopics []string `json:"supported_topics"`
+}
+
+type OnvifProbePTZ struct {
+	Supported bool              `json:"supported"`
+	Presets   []onvif.PTZPreset `json:"presets,omitempty"`
+}
+
 type OnvifProbeResult struct {
 	Information OnvifProbeDeviceInformation `json:"device_information"`
 	Services    []OnvifProbeService         `json:"services"`
 	Clock       OnvifProbeClock             `json:"system_time"`
+	Profiles    []OnvifProbeProfile         `json:"profiles,omitempty"`
+	Streams     OnvifProbeStreams           `json:"streams,omitempty"`
+	Analytics   OnvifProbeAnalytics         `json:"analytics,omitempty"`
+	PTZ         OnvifProbePTZ               `json:"ptz,omitempty"`
 }
 
 type OnvifProbeDeviceInformation struct {
@@ -109,8 +138,22 @@ func (s *Service) ProbeOnvif(ctx context.Context, actor authz.Actor, serverID uu
 		if err := s.Inv.RequireServerManageAndConfigSecrets(ctx, actor, serverID); err != nil {
 			return OnvifProbeResult{}, err
 		}
+		if request.Username == "" {
+			if srvUser, srvPass, err := s.Inv.GetServerCredentials(ctx, actor, serverID); err == nil && srvUser != "" {
+				request.Username = srvUser
+				request.Password = srvPass
+			}
+		}
 	}
 
+	client, token, err := s.getAgentClientAndToken(ctx, actor, serverID)
+	if err != nil {
+		return OnvifProbeResult{}, err
+	}
+	return probeAgentWithClient(ctx, client, token, request)
+}
+
+func (s *Service) getAgentClientAndToken(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (AgentProbeDoer, string, error) {
 	var host string
 	var port int32
 	var token string
@@ -122,31 +165,31 @@ func (s *Service) ProbeOnvif(ctx context.Context, actor authz.Actor, serverID uu
 		host, port, token, config, err = s.loadProbeTLSAndAgent(ctx, actor, serverID)
 	}
 	if err != nil {
-		return OnvifProbeResult{}, err
+		return nil, "", err
 	}
 	if token == "" || net.ParseIP(host) == nil || net.ParseIP(host).To4() == nil || port < 1 || port > 65535 {
-		return OnvifProbeResult{}, ErrAgentProbeFailed
+		return nil, "", ErrAgentProbeFailed
 	}
 	var client AgentProbeDoer
 	if config.TrustMode == AgentTLSTrustPlaintext {
 		plainClient, err := newPlainAgentHTTPClient(host, uint16(port), onvifProbeTimeout, s.probeRoundTripper)
 		if err != nil {
-			return OnvifProbeResult{}, ErrAgentProbeFailed
+			return nil, "", ErrAgentProbeFailed
 		}
 		client = plainClient
 	} else {
 		if err := validateAgentTLSConfig(host, config); err != nil {
-			return OnvifProbeResult{}, ErrAgentProbeFailed
+			return nil, "", ErrAgentProbeFailed
 		}
 		useSystemRoots := config.TrustMode == AgentTLSTrustSystem
 		// #nosec G115 -- validateAgentTLSConfig constrains the port to 1..65535 above.
 		httpsClient, err := newVerifiedAgentHTTPClient(host, uint16(config.SecurePort), config.CAPEM, useSystemRoots, onvifProbeTimeout, nil, s.probeRoundTripper)
 		if err != nil {
-			return OnvifProbeResult{}, ErrAgentProbeFailed
+			return nil, "", ErrAgentProbeFailed
 		}
 		client = httpsClient
 	}
-	return probeAgentWithClient(ctx, client, token, request)
+	return client, token, nil
 }
 
 func validateOnvifProbeRequest(in OnvifProbeRequest) error {

@@ -138,6 +138,35 @@ export function Cameras() {
     },
   });
 
+  const [addingDevice, setAddingDevice] = useState<{
+    xaddr: string;
+    host: string;
+    name: string;
+    mainUrl: string;
+    subUrl: string;
+  } | null>(null);
+
+  const addCamera = useMutation({
+    mutationFn: async (vars: { name: string; mainUrl: string; subUrl?: string; onvifHost?: string }) => {
+      if (!discoveryServerId) throw new Error("Servidor no seleccionado");
+      return unwrap(
+        await api.POST("/api/v1/servers/{serverId}/frigate/add-camera", {
+          params: { path: { serverId: discoveryServerId } },
+          body: {
+            name: vars.name,
+            main_stream_url: vars.mainUrl,
+            sub_stream_url: vars.subUrl || undefined,
+            onvif_host: vars.onvifHost || undefined,
+          },
+        })
+      );
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ["cameras"] });
+      setAddingDevice(null);
+    },
+  });
+
   const update = (k: keyof CameraFilter, v: string) => {
     setFilter((f) => ({ ...f, [k]: v || undefined }));
     void navigate({
@@ -350,12 +379,126 @@ export function Cameras() {
         <ErrorNote error={formatDiscoveryError(discovery.error)} />
         {discovery.pending && <p role="status" className="text-sm text-muted">Buscando dispositivos en la red del servidor…</p>}
         {discovery.devices?.length === 0 && <p role="status" className="text-sm text-muted">No se encontraron dispositivos ONVIF en esa interfaz.</p>}
-        {!!discovery.devices?.length && <ul aria-label="Dispositivos ONVIF encontrados" className="flex flex-col gap-2">
-          {discovery.devices.map((device, index) => <li key={`${index}-${device.xaddrs.join("|")}`} className="rounded-m3-lg bg-surface-2 p-3">
-            <p className="text-sm font-medium">Dispositivo encontrado · todavía no se agregó</p>
-            {device.xaddrs.map((xaddr) => <code key={xaddr} className="block break-all text-xs text-on-surface-variant">{displayEndpoint(xaddr) ?? "Endpoint no disponible"}</code>)}
-          </li>)}
-        </ul>}
+        {!!discovery.devices?.length && (
+          <ul aria-label="Dispositivos ONVIF encontrados" className="flex flex-col gap-2">
+            {discovery.devices.map((device, index) => {
+              const primaryEndpoint = device.xaddrs[0] || "";
+              const host = (() => {
+                try {
+                  return new URL(primaryEndpoint).hostname;
+                } catch {
+                  return "";
+                }
+              })();
+              const isAddingThis = addingDevice?.xaddr === primaryEndpoint;
+
+              return (
+                <li key={`${index}-${device.xaddrs.join("|")}`} className="flex flex-col gap-2 rounded-m3-lg bg-surface-2 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">Dispositivo encontrado · todavía no se agregó</p>
+                      {device.xaddrs.map((xaddr) => (
+                        <code key={xaddr} className="block break-all text-xs text-on-surface-variant">
+                          {displayEndpoint(xaddr) ?? "Endpoint no disponible"}
+                        </code>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-m3-full border border-outline-variant px-3 py-1 text-xs font-medium hover:bg-surface-3"
+                        onClick={() => {
+                          setProbeServerId(discoveryServerId);
+                          setProbeEndpoint(primaryEndpoint);
+                        }}
+                      >
+                        Probar
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-m3-full bg-primary px-3 py-1 text-xs font-medium text-on-primary hover:bg-primary/90"
+                        onClick={() => {
+                          const safeHost = host.replace(/[^a-zA-Z0-9]/g, "_");
+                          setAddingDevice({
+                            xaddr: primaryEndpoint,
+                            host,
+                            name: `cam_${safeHost}`,
+                            mainUrl: `rtsp://${host}:554/live/ch0`,
+                            subUrl: "",
+                          });
+                        }}
+                      >
+                        Agregar a Frigate
+                      </button>
+                    </div>
+                  </div>
+
+                  {isAddingThis && (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (addingDevice) {
+                          addCamera.mutate({
+                            name: addingDevice.name,
+                            mainUrl: addingDevice.mainUrl,
+                            subUrl: addingDevice.subUrl,
+                            onvifHost: addingDevice.host,
+                          });
+                        }
+                      }}
+                      className="mt-2 flex flex-col gap-2 rounded-m3-md border border-outline-variant bg-surface-1 p-3"
+                    >
+                      <p className="text-xs font-semibold text-ink">Agregar cámara a Frigate y sincronizar:</p>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          Nombre (letras, números, _)
+                          <TextInput
+                            value={addingDevice.name}
+                            onChange={(e) => setAddingDevice({ ...addingDevice, name: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          RTSP Stream Principal
+                          <TextInput
+                            value={addingDevice.mainUrl}
+                            onChange={(e) => setAddingDevice({ ...addingDevice, mainUrl: e.target.value })}
+                            required
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs font-medium">
+                          RTSP Substream (opcional)
+                          <TextInput
+                            value={addingDevice.subUrl}
+                            onChange={(e) => setAddingDevice({ ...addingDevice, subUrl: e.target.value })}
+                            placeholder="Opcional para detección liviana"
+                          />
+                        </label>
+                      </div>
+                      <ErrorNote error={addCamera.error} />
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        <button
+                          type="button"
+                          className="rounded-m3-full px-3 py-1 text-xs font-medium text-muted hover:bg-surface-3"
+                          onClick={() => setAddingDevice(null)}
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={addCamera.isPending}
+                          className="rounded-m3-full bg-primary px-4 py-1.5 text-xs font-medium text-on-primary disabled:opacity-50"
+                        >
+                          {addCamera.isPending ? "Guardando en Frigate…" : "Guardar y sincronizar"}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </section>
       <section aria-labelledby="onvif-probe-title" className="flex flex-col gap-3 rounded-m3-xl bg-surface-1 p-4">
         <div>

@@ -1,5 +1,5 @@
 import {
-  Activity, ArrowLeft, Camera, Car, CircleCheck, Compass, Eye, HardDrive, History, Layers, Radio,
+  Activity, ArrowLeft, Camera, Car, CircleCheck, Clock, Compass, Eye, HardDrive, History, Layers, Radio,
   RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, TriangleAlert, Video,
 } from "lucide-react";
 import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
@@ -1148,6 +1148,52 @@ function CameraOnvifPanel({
     },
   });
 
+  const [syncTimeResult, setSyncTimeResult] = useState<string | null>(null);
+  const syncTimeMutation = useMutation({
+    mutationFn: async () => {
+      setSyncTimeResult(null);
+      return unwrap(
+        await api.POST("/api/v1/cameras/{cameraId}/onvif/sync-time", {
+          params: { path: { cameraId } },
+          body: {
+            endpoint: endpointInput.trim() || undefined,
+            username: usernameInput || undefined,
+            password: passwordInput || undefined,
+          },
+        })
+      );
+    },
+    onSuccess: (res) => {
+      setSyncTimeResult(`Hora sincronizada correctamente con el servidor (${new Date(res.synced_at).toLocaleString()}).`);
+      void qc.invalidateQueries({ queryKey: ["cameras"] });
+    },
+  });
+
+  const [ptzStatus, setPtzStatus] = useState<string | null>(null);
+  const ptzMutation = useMutation({
+    mutationFn: async (args: { action: "continuous_move" | "stop" | "goto_preset"; pan?: number; tilt?: number; zoom?: number; presetToken?: string }) => {
+      setPtzStatus(null);
+      return unwrap(
+        await api.POST("/api/v1/cameras/{cameraId}/onvif/ptz", {
+          params: { path: { cameraId } },
+          body: {
+            action: args.action,
+            endpoint: endpointInput.trim() || undefined,
+            username: usernameInput || undefined,
+            password: passwordInput || undefined,
+            pan: args.pan,
+            tilt: args.tilt,
+            zoom: args.zoom,
+            preset_token: args.presetToken,
+          },
+        })
+      );
+    },
+    onSuccess: () => {
+      setPtzStatus("Comando PTZ ejecutado correctamente.");
+    },
+  });
+
   const caps = camera?.onvif_capabilities;
   const detectedHost = camera?.onvif_endpoint ? displayEndpointHost(camera.onvif_endpoint) : "";
 
@@ -1354,6 +1400,120 @@ function CameraOnvifPanel({
           </Button>
         </div>
       </div>
+
+      {/* Sincronización de Fecha y Hora */}
+      <div className="flex flex-col gap-2 rounded-m3-lg bg-surface-2 p-4 border border-outline-variant/40">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-ink flex items-center gap-1.5">
+              <Icon icon={Clock} size="xs" />
+              <span>Sincronización de Fecha y Hora con el Servidor</span>
+            </h3>
+            <p className="text-xs text-on-surface-variant">
+              Ajusta el reloj interno de la cámara a la hora UTC exacta del servidor para prevenir errores de autenticación Digest y desfasajes en eventos.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={syncTimeMutation.isPending || !canManage}
+            onClick={() => syncTimeMutation.mutate()}
+          >
+            {syncTimeMutation.isPending ? "Sincronizando…" : "Sincronizar fecha y hora"}
+          </Button>
+        </div>
+        <ErrorNote error={syncTimeMutation.error} />
+        {syncTimeResult && <p role="status" className="text-xs font-medium text-ok">{syncTimeResult}</p>}
+      </div>
+
+      {/* Controles PTZ Directos */}
+      {caps?.has_ptz && (
+        <div className="flex flex-col gap-3 rounded-m3-lg bg-surface-2 p-4 border border-outline-variant/40">
+          <h3 className="text-sm font-semibold text-ink flex items-center gap-1.5">
+            <Icon icon={Compass} size="xs" />
+            <span>Control PTZ Directo (ONVIF)</span>
+          </h3>
+          <p className="text-xs text-on-surface-variant">
+            Control de movimiento panorámico, inclinación y zoom a través del protocolo ONVIF estándar.
+          </p>
+          <div className="flex flex-wrap items-center gap-4">
+            <div className="grid grid-cols-3 gap-1 w-32">
+              <div />
+              <button
+                type="button"
+                className="h-9 rounded-m3-md border border-outline-variant bg-surface-1 font-bold text-xs hover:bg-surface-3 active:bg-primary active:text-on-primary"
+                onClick={() => ptzMutation.mutate({ action: "continuous_move", tilt: 0.5 })}
+                title="Arriba"
+              >
+                ▲
+              </button>
+              <div />
+              <button
+                type="button"
+                className="h-9 rounded-m3-md border border-outline-variant bg-surface-1 font-bold text-xs hover:bg-surface-3 active:bg-primary active:text-on-primary"
+                onClick={() => ptzMutation.mutate({ action: "continuous_move", pan: -0.5 })}
+                title="Izquierda"
+              >
+                ◀
+              </button>
+              <button
+                type="button"
+                className="h-9 rounded-m3-md border border-outline-variant bg-surface-1 font-bold text-xs hover:bg-bad/20 text-bad"
+                onClick={() => ptzMutation.mutate({ action: "stop" })}
+                title="Detener"
+              >
+                ■
+              </button>
+              <button
+                type="button"
+                className="h-9 rounded-m3-md border border-outline-variant bg-surface-1 font-bold text-xs hover:bg-surface-3 active:bg-primary active:text-on-primary"
+                onClick={() => ptzMutation.mutate({ action: "continuous_move", pan: 0.5 })}
+                title="Derecha"
+              >
+                ▶
+              </button>
+              <div />
+              <button
+                type="button"
+                className="h-9 rounded-m3-md border border-outline-variant bg-surface-1 font-bold text-xs hover:bg-surface-3 active:bg-primary active:text-on-primary"
+                onClick={() => ptzMutation.mutate({ action: "continuous_move", tilt: -0.5 })}
+                title="Abajo"
+              >
+                ▼
+              </button>
+              <div />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  className="rounded-m3-md border border-outline-variant bg-surface-1 px-3 py-1.5 text-xs font-medium hover:bg-surface-3"
+                  onClick={() => ptzMutation.mutate({ action: "continuous_move", zoom: 0.5 })}
+                >
+                  Zoom +
+                </button>
+                <button
+                  type="button"
+                  className="rounded-m3-md border border-outline-variant bg-surface-1 px-3 py-1.5 text-xs font-medium hover:bg-surface-3"
+                  onClick={() => ptzMutation.mutate({ action: "continuous_move", zoom: -0.5 })}
+                >
+                  Zoom -
+                </button>
+                <button
+                  type="button"
+                  className="rounded-m3-md border border-bad/30 bg-bad/10 px-3 py-1.5 text-xs font-medium text-bad hover:bg-bad/20"
+                  onClick={() => ptzMutation.mutate({ action: "stop" })}
+                >
+                  Detener
+                </button>
+              </div>
+              {ptzStatus && <p role="status" className="text-xs text-ok">{ptzStatus}</p>}
+              <ErrorNote error={ptzMutation.error} />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -29,10 +29,39 @@ const (
 	probeOverallTimeout   = 10 * time.Second
 )
 
+type ProbeProfile struct {
+	Token     string `json:"token"`
+	Name      string `json:"name"`
+	Encoding  string `json:"encoding"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	FPS       int    `json:"fps"`
+	Bitrate   int    `json:"bitrate"`
+	StreamURI string `json:"stream_uri"`
+}
+
+type ProbeStreams struct {
+	MainURL string `json:"main_url"`
+	SubURL  string `json:"sub_url"`
+}
+
+type ProbeAnalytics struct {
+	SupportedTopics []string `json:"supported_topics"`
+}
+
+type ProbePTZ struct {
+	Supported bool              `json:"supported"`
+	Presets   []onvif.PTZPreset `json:"presets,omitempty"`
+}
+
 type ProbeResult struct {
 	Information onvif.DeviceInformation
 	Services    []onvif.Service
 	Clock       onvif.DeviceClock
+	Profiles    []ProbeProfile
+	Streams     ProbeStreams
+	Analytics   ProbeAnalytics
+	PTZ         ProbePTZ
 }
 
 // DeviceProber executes a bounded, read-only ONVIF device probe.
@@ -54,6 +83,10 @@ type probeResponse struct {
 	Information probeDeviceInformation `json:"device_information"`
 	Services    []probeService         `json:"services"`
 	Clock       probeClock             `json:"system_time"`
+	Profiles    []ProbeProfile         `json:"profiles,omitempty"`
+	Streams     ProbeStreams           `json:"streams,omitempty"`
+	Analytics   ProbeAnalytics         `json:"analytics,omitempty"`
+	PTZ         ProbePTZ               `json:"ptz,omitempty"`
 }
 
 type probeClock struct {
@@ -272,7 +305,101 @@ func NewDeviceProbe(transport http.RoundTripper) DeviceProber {
 			clock, _ = device.GetSystemDateAndTime(ctx)
 		}
 
-		return ProbeResult{Information: info, Services: services, Clock: clock}, nil
+		// Query profiles & stream URIs if media service is present
+		var probeProfiles []ProbeProfile
+		var mainURL, subURL string
+		for _, s := range services {
+			if strings.Contains(s.Namespace, "/media") {
+				if mediaEp, epErr := s.ValidatedEndpoint(); epErr == nil {
+					mediaClient := onvif.NewMediaClient(client, mediaEp)
+					if onvifProfiles, profErr := mediaClient.GetProfiles(ctx); profErr == nil {
+						for _, prof := range onvifProfiles {
+							p := ProbeProfile{
+								Token: prof.Token,
+								Name:  prof.Name,
+							}
+							if prof.VideoEncoderConfiguration != nil {
+								p.Encoding = prof.VideoEncoderConfiguration.Encoding
+								p.Width = prof.VideoEncoderConfiguration.Resolution.Width
+								p.Height = prof.VideoEncoderConfiguration.Resolution.Height
+								p.FPS = prof.VideoEncoderConfiguration.RateControl.FrameRateLimit
+								p.Bitrate = prof.VideoEncoderConfiguration.RateControl.BitrateLimit
+							}
+							if uri, uriErr := mediaClient.GetStreamURI(ctx, prof.Token); uriErr == nil {
+								p.StreamURI = uri
+							}
+							probeProfiles = append(probeProfiles, p)
+						}
+					}
+				}
+				break
+			}
+		}
+
+		// Determine Main and Sub streams
+		for _, p := range probeProfiles {
+			if p.StreamURI == "" {
+				continue
+			}
+			if mainURL == "" {
+				mainURL = p.StreamURI
+			} else if p.Width*p.Height > 0 {
+				for _, m := range probeProfiles {
+					if m.StreamURI == mainURL {
+						if p.Width*p.Height > m.Width*m.Height {
+							mainURL = p.StreamURI
+						}
+						break
+					}
+				}
+			}
+		}
+		for _, p := range probeProfiles {
+			if p.StreamURI != "" && p.StreamURI != mainURL {
+				if subURL == "" {
+					subURL = p.StreamURI
+				}
+			}
+		}
+
+		// PTZ inquiry
+		var ptz ProbePTZ
+		for _, s := range services {
+			if strings.Contains(s.Namespace, "/ptz") {
+				ptz.Supported = true
+				if ptzEp, epErr := s.ValidatedEndpoint(); epErr == nil && len(probeProfiles) > 0 {
+					ptzClient := onvif.NewPTZClient(client, ptzEp)
+					if presets, presetErr := ptzClient.GetPresets(ctx, probeProfiles[0].Token); presetErr == nil {
+						ptz.Presets = presets
+					}
+				}
+				break
+			}
+		}
+
+		// Analytics inquiry
+		var analytics ProbeAnalytics
+		for _, s := range services {
+			if strings.Contains(s.Namespace, "/events") || strings.Contains(s.Namespace, "/analytics") {
+				if evEp, epErr := s.ValidatedEndpoint(); epErr == nil {
+					evClient := onvif.NewEventsClient(client, evEp)
+					if props, propErr := evClient.GetEventProperties(ctx); propErr == nil {
+						analytics.SupportedTopics = props.TopicSet
+					}
+				}
+				break
+			}
+		}
+
+		return ProbeResult{
+			Information: info,
+			Services:    services,
+			Clock:       clock,
+			Profiles:    probeProfiles,
+			Streams:     ProbeStreams{MainURL: mainURL, SubURL: subURL},
+			Analytics:   analytics,
+			PTZ:         ptz,
+		}, nil
 	}
 }
 
@@ -285,8 +412,12 @@ func projectProbeResult(result ProbeResult, networks []netip.Prefix, agentToken,
 			SerialNumber:    sanitizeProbeText(result.Information.SerialNumber, agentToken, username, password),
 			HardwareID:      sanitizeProbeText(result.Information.HardwareID, agentToken, username, password),
 		},
-		Services: make([]probeService, 0, min(len(result.Services), maxProbeServices)),
-		Clock:    projectClock(result.Clock, agentToken, username, password),
+		Services:  make([]probeService, 0, min(len(result.Services), maxProbeServices)),
+		Clock:     projectClock(result.Clock, agentToken, username, password),
+		Profiles:  result.Profiles,
+		Streams:   result.Streams,
+		Analytics: result.Analytics,
+		PTZ:       result.PTZ,
 	}
 	for _, service := range result.Services {
 		if len(out.Services) >= maxProbeServices {
