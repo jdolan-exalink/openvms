@@ -22,6 +22,12 @@ type LPREvent struct {
 	PlateCrop       *string   `json:"plate_crop,omitempty"`
 	RawEndpoint     *string   `json:"raw_endpoint,omitempty"`
 	RawPayloadRef   *string   `json:"raw_payload_ref,omitempty"`
+	VehicleColor    *string   `json:"vehicle_color,omitempty"`
+	VehicleBrand    *string   `json:"vehicle_brand,omitempty"`
+	VehicleModel    *string   `json:"vehicle_model,omitempty"`
+	VehicleType     *string   `json:"vehicle_type,omitempty"`
+	Speed           *float64  `json:"speed,omitempty"`
+	Direction       *string   `json:"direction,omitempty"`
 }
 
 // CameraStatus tracks the health and heartbeat of a Provision-ISR camera.
@@ -34,6 +40,7 @@ type CameraStatus struct {
 	EventCount     int64      `json:"event_count"`
 	LastPlate      string     `json:"last_plate,omitempty"`
 	LastEventTime  *time.Time `json:"last_event_time,omitempty"`
+	RecentEvents   []LPREvent `json:"recent_events,omitempty"`
 }
 
 // Config defines operational parameters for the Provision-ISR LPR receiver.

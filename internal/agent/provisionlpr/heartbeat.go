@@ -42,26 +42,41 @@ func (m *HeartbeatManager) RecordKeepalive(cameraID, cameraIP string, now time.T
 	stat.KeepaliveCount++
 }
 
-// RecordEvent records an LPR reading for the camera, updating last seen and event count.
-func (m *HeartbeatManager) RecordEvent(cameraID, cameraIP, plate string, eventTime, now time.Time) {
-	key := cameraKey(cameraID, cameraIP)
+// RecordFullEvent records a full LPR reading with vehicle attributes and image data for the camera.
+func (m *HeartbeatManager) RecordFullEvent(event LPREvent, now time.Time) {
+	key := cameraKey(event.CameraID, event.CameraIP)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	stat, exists := m.cameras[key]
 	if !exists {
 		stat = &CameraStatus{
-			CameraID: cameraID,
-			CameraIP: cameraIP,
+			CameraID: event.CameraID,
+			CameraIP: event.CameraIP,
 		}
 		m.cameras[key] = stat
 	}
 	stat.Online = true
 	stat.LastSeen = now
 	stat.EventCount++
-	stat.LastPlate = plate
-	t := eventTime
+	stat.LastPlate = event.Plate
+	t := event.EventTime
 	stat.LastEventTime = &t
+
+	stat.RecentEvents = append([]LPREvent{event}, stat.RecentEvents...)
+	if len(stat.RecentEvents) > 20 {
+		stat.RecentEvents = stat.RecentEvents[:20]
+	}
+}
+
+// RecordEvent records an LPR reading for the camera, updating last seen and event count.
+func (m *HeartbeatManager) RecordEvent(cameraID, cameraIP, plate string, eventTime, now time.Time) {
+	m.RecordFullEvent(LPREvent{
+		CameraID:  cameraID,
+		CameraIP:  cameraIP,
+		Plate:     plate,
+		EventTime: eventTime,
+	}, now)
 }
 
 // Status returns the current status of a camera by ID or IP.

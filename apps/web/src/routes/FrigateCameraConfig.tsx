@@ -3,6 +3,7 @@ import {
   RefreshCw, Settings, ShieldCheck, SlidersHorizontal, Sparkles, TriangleAlert, Video,
 } from "lucide-react";
 import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
+import { isProvisionCamera, ProvisionLprSection } from "@/components/provision/ProvisionLprSection";
 import { Icon } from "@/components/Icon";
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -32,6 +33,7 @@ const HISTORY = "__history";
 const GENERAL = "__general";
 const ONVIF = "__onvif";
 const FISHEYE = "__fisheye";
+const PROVISION = "__provision";
 
 function getSectionIcon(section: string) {
   switch (section) {
@@ -39,6 +41,8 @@ function getSectionIcon(section: string) {
       return SlidersHorizontal;
     case ONVIF:
       return ShieldCheck;
+    case PROVISION:
+      return Car;
     case "detect":
     case "ffmpeg":
       return Video;
@@ -479,7 +483,42 @@ export function FrigateCameraConfig() {
               </button>
             </div>
 
-            {/* 6. Streams FFmpeg */}
+            {/* 6. Modo Provision LPR */}
+            {(isProvisionCamera(camera.data) || camera.data?.tags?.includes("provision") || activeSection === PROVISION) && (
+              <div className="flex flex-col gap-1 rounded-m3-xl border border-outline-variant/40 bg-surface-2 p-1.5">
+                <button
+                  type="button"
+                  aria-current={activeSection === PROVISION ? "page" : undefined}
+                  onClick={() => setActive(PROVISION)}
+                  className={cn(
+                    "flex min-h-10 w-full items-center justify-between rounded-m3-lg px-3 text-xs font-bold transition-colors text-left",
+                    activeSection === PROVISION
+                      ? "bg-primary text-on-primary shadow-sm"
+                      : "text-on-surface hover:bg-surface-3"
+                  )}
+                >
+                  <span className="flex items-center gap-2">
+                    <Icon icon={Car} size="xs" />
+                    <span>Provision LPR</span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    {camera.data?.tags?.includes("provision") &&
+                      !camera.data?.onvif_capabilities?.manufacturer?.toLowerCase().includes("provision") && (
+                        <span className="rounded-m3-xs bg-primary/20 text-primary px-1.5 py-0.5 text-[9px] font-mono font-bold">
+                          Forzada
+                        </span>
+                      )}
+                    {camera.data?.onvif_capabilities?.manufacturer?.toLowerCase().includes("provision") && (
+                      <span className="rounded-m3-xs bg-ok/20 text-ok px-1.5 py-0.5 text-[9px] font-mono font-bold">
+                        ONVIF
+                      </span>
+                    )}
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {/* 7. Streams FFmpeg */}
             {sections.includes("ffmpeg") && (
               <button
                 type="button"
@@ -559,6 +598,10 @@ export function FrigateCameraConfig() {
               ? t("common.general")
               : activeSection === ONVIF
               ? "ONVIF"
+              : activeSection === FISHEYE
+              ? "Fisheye"
+              : activeSection === PROVISION
+              ? "Provision LPR"
               : sectionLabel(activeSection ?? "")
           }
           className="flex min-w-0 flex-1 flex-col gap-5 rounded-m3-2xl bg-surface-1 p-5 border border-outline-variant/60 shadow-sm"
@@ -589,6 +632,16 @@ export function FrigateCameraConfig() {
               snapshotUrl={`/media/v1/cameras/${cameraId}/snapshot.jpg`}
               canManage={!readOnly}
             />
+          ) : activeSection === PROVISION ? (
+            camera.data && (
+              <ProvisionLprSection
+                camera={camera.data}
+                onCameraUpdate={() => {
+                  void qc.invalidateQueries({ queryKey: ["cameras", cameraId] });
+                  void qc.invalidateQueries({ queryKey: ["cameras"] });
+                }}
+              />
+            )
           ) : activeSection === HISTORY ? (
             <FrigateHistory
               serverId={doc.data.server_id}
@@ -615,6 +668,8 @@ export function FrigateCameraConfig() {
           {activeSection !== HISTORY &&
             activeSection !== GENERAL &&
             activeSection !== ONVIF &&
+            activeSection !== FISHEYE &&
+            activeSection !== PROVISION &&
             Object.entries(errors).filter(([p]) => p.split(".")[0] === activeSection).length > 0 && (
               <p role="alert" className="text-xs text-bad">
                 Hay valores no válidos en esta sección.
@@ -884,6 +939,7 @@ function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; c
   const [isLpr, setIsLpr] = useState(camera.lpr ?? camera.tags.includes("lpr"));
   const [isPtz, setIsPtz] = useState(camera.onvif_capabilities?.has_ptz ?? camera.tags.includes("ptz"));
   const [isFisheye, setIsFisheye] = useState(camera.tags.includes("fisheye") || camera.tags.includes("ojo_de_pez"));
+  const [isProvision, setIsProvision] = useState(camera.tags.includes("provision") || camera.tags.includes("provision_isr"));
   const [hasAudio, setHasAudio] = useState(camera.tags.includes("audio") || camera.tags.includes("mic"));
   const [isThermal, setIsThermal] = useState(camera.tags.includes("thermal") || camera.tags.includes("termica"));
 
@@ -893,6 +949,13 @@ function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; c
       if (isLpr) parsedTags.add("lpr"); else parsedTags.delete("lpr");
       if (isPtz) parsedTags.add("ptz"); else parsedTags.delete("ptz");
       if (isFisheye) parsedTags.add("fisheye"); else parsedTags.delete("fisheye");
+      if (isProvision) {
+        parsedTags.add("provision");
+        parsedTags.add("lpr");
+      } else {
+        parsedTags.delete("provision");
+        parsedTags.delete("provision_isr");
+      }
       if (hasAudio) parsedTags.add("audio"); else parsedTags.delete("audio");
       if (isThermal) parsedTags.add("thermal"); else parsedTags.delete("thermal");
 
@@ -1017,6 +1080,31 @@ function CameraGeneralForm({ camera, canManage }: { camera: Schemas["Camera"]; c
                 <Icon icon={Eye} size="xs" /> Ojo de Pez (360°)
               </span>
               <span className="text-[11px] text-muted">Lente panorámica y dewarping</span>
+            </div>
+          </label>
+
+          <label
+            className={cn(
+              "flex items-center gap-2.5 rounded-m3-lg border p-3 cursor-pointer select-none transition-colors",
+              isProvision
+                ? "border-primary bg-primary/10 text-ink font-semibold shadow-xs"
+                : "border-outline-variant/60 bg-surface-1 text-on-surface hover:bg-surface-3"
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={isProvision}
+              onChange={(e) => {
+                setIsProvision(e.target.checked);
+                if (e.target.checked) setIsLpr(true);
+              }}
+              className="size-4 rounded accent-primary"
+            />
+            <div className="flex flex-col">
+              <span className="text-xs font-bold flex items-center gap-1.5">
+                <Icon icon={Car} size="xs" /> Provision-ISR LPR
+              </span>
+              <span className="text-[11px] text-muted">Forzar compatibilidad Provision LPR</span>
             </div>
           </label>
 

@@ -167,3 +167,46 @@ func TestParserRegexFallback(t *testing.T) {
 		t.Fatalf("expected XY789ZT, got %q", event.Plate)
 	}
 }
+
+func TestParserVehicleAttributes(t *testing.T) {
+	parser := NewParser()
+	body := []byte(`{
+		"plate": "AE456CD",
+		"vehicle_color": "Blue",
+		"vehicle_brand": "Toyota",
+		"vehicle_model": "Corolla",
+		"vehicle_type": "Sedan",
+		"speed": 45.2,
+		"direction": "North"
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/lpr/event", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	event, err := parser.Parse(req, body, time.Now())
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if event.Plate != "AE456CD" {
+		t.Errorf("Plate = %q, want AE456CD", event.Plate)
+	}
+	if event.VehicleColor == nil || *event.VehicleColor != "Blue" {
+		t.Errorf("VehicleColor = %v, want Blue", event.VehicleColor)
+	}
+	if event.VehicleBrand == nil || *event.VehicleBrand != "Toyota" {
+		t.Errorf("VehicleBrand = %v, want Toyota", event.VehicleBrand)
+	}
+	if event.VehicleModel == nil || *event.VehicleModel != "Corolla" {
+		t.Errorf("VehicleModel = %v, want Corolla", event.VehicleModel)
+	}
+	if event.VehicleType == nil || *event.VehicleType != "Sedan" {
+		t.Errorf("VehicleType = %v, want Sedan", event.VehicleType)
+	}
+	if event.Speed == nil || *event.Speed != 45.2 {
+		t.Errorf("Speed = %v, want 45.2", event.Speed)
+	}
+	if event.Direction == nil || *event.Direction != "North" {
+		t.Errorf("Direction = %v, want North", event.Direction)
+	}
+}

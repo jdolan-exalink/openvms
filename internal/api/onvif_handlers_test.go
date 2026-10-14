@@ -88,6 +88,25 @@ func TestCheckOnvifRoutesAreRegisteredAndRequireActor(t *testing.T) {
 			t.Fatalf("status = %d body=%s; want unauthorized", rw.Code, rw.Body.String())
 		}
 	})
+
+	t.Run("camera_provision_lpr_status", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/cameras/11111111-1111-1111-1111-111111111111/provision-lpr/status", nil)
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, req)
+		if rw.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d body=%s; want unauthorized", rw.Code, rw.Body.String())
+		}
+	})
+
+	t.Run("camera_provision_lpr_configure", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/cameras/11111111-1111-1111-1111-111111111111/provision-lpr/configure", strings.NewReader(`{}`))
+		req.Header.Set("Content-Type", "application/json")
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, req)
+		if rw.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d body=%s; want unauthorized", rw.Code, rw.Body.String())
+		}
+	})
 }
 
 func TestParseOnvifProbeCapabilities(t *testing.T) {

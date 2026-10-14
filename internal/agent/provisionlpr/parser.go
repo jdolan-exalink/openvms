@@ -209,6 +209,36 @@ func (p *Parser) parseXML(data []byte, ev *LPREvent) (bool, error) {
 				if err := decoder.DecodeElement(&img, &se); err == nil && img != "" {
 					ev.PanoramicImage = &img
 				}
+			case isColorKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					ev.VehicleColor = &s
+				}
+			case isBrandKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					ev.VehicleBrand = &s
+				}
+			case isModelKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					ev.VehicleModel = &s
+				}
+			case isTypeKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					ev.VehicleType = &s
+				}
+			case isSpeedKey(name):
+				var sp float64
+				if err := decoder.DecodeElement(&sp, &se); err == nil {
+					ev.Speed = &sp
+				}
+			case isDirectionKey(name):
+				var s string
+				if err := decoder.DecodeElement(&s, &se); err == nil && s != "" {
+					ev.Direction = &s
+				}
 			}
 		}
 	}
@@ -241,6 +271,20 @@ func (p *Parser) parseForm(r *http.Request, body []byte, ev *LPREvent) (bool, er
 			}
 		case isListStatusKey(kLower):
 			ev.ListStatus = &val
+		case isColorKey(kLower):
+			ev.VehicleColor = &val
+		case isBrandKey(kLower):
+			ev.VehicleBrand = &val
+		case isModelKey(kLower):
+			ev.VehicleModel = &val
+		case isTypeKey(kLower):
+			ev.VehicleType = &val
+		case isSpeedKey(kLower):
+			if sp, err := strconv.ParseFloat(val, 64); err == nil {
+				ev.Speed = &sp
+			}
+		case isDirectionKey(kLower):
+			ev.Direction = &val
 		}
 	}
 	return ev.Plate != "", nil
@@ -288,11 +332,24 @@ func extractFromMap(m map[string]any, ev *LPREvent) {
 				ev.PlateCrop = &val
 			case isPanoramaKey(kLower):
 				ev.PanoramicImage = &val
+			case isColorKey(kLower):
+				ev.VehicleColor = &val
+			case isBrandKey(kLower):
+				ev.VehicleBrand = &val
+			case isModelKey(kLower):
+				ev.VehicleModel = &val
+			case isTypeKey(kLower):
+				ev.VehicleType = &val
+			case isDirectionKey(kLower):
+				ev.Direction = &val
 			}
 		case float64:
 			if isConfidenceKey(kLower) {
 				c := val
 				ev.Confidence = &c
+			} else if isSpeedKey(kLower) {
+				s := val
+				ev.Speed = &s
 			}
 		case map[string]any:
 			extractFromMap(val, ev)
@@ -336,6 +393,34 @@ func isCropKey(k string) bool {
 
 func isPanoramaKey(k string) bool {
 	return k == "panoramic_image" || k == "panorama" || k == "scene_image" || k == "scene_pic"
+}
+
+func isColorKey(k string) bool {
+	return k == "color" || k == "vehicle_color" || k == "vehiclecolor" || k == "car_color" ||
+		k == "carcolor" || k == "plate_color" || k == "color_name"
+}
+
+func isBrandKey(k string) bool {
+	return k == "brand" || k == "vehicle_brand" || k == "vehiclebrand" || k == "car_brand" ||
+		k == "carbrand" || k == "make" || k == "carmake" || k == "marca"
+}
+
+func isModelKey(k string) bool {
+	return k == "model" || k == "vehicle_model" || k == "vehiclemodel" || k == "car_model" ||
+		k == "carmodel" || k == "modelo"
+}
+
+func isTypeKey(k string) bool {
+	return k == "vehicle_type" || k == "vehicletype" || k == "car_type" || k == "cartype" ||
+		k == "tipo" || k == "type"
+}
+
+func isSpeedKey(k string) bool {
+	return k == "speed" || k == "vehicle_speed" || k == "vehiclespeed" || k == "velocidad"
+}
+
+func isDirectionKey(k string) bool {
+	return k == "direction" || k == "heading" || k == "direccion"
 }
 
 func looksLikeJSON(b []byte) bool {
