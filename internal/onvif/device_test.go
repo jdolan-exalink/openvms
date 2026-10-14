@@ -101,3 +101,46 @@ func TestDeviceInformationUsesNamespacesInheritedFromSOAPBody(t *testing.T) {
 		t.Fatalf("Body-inherited namespace fields not decoded: %+v", info)
 	}
 }
+
+func TestDeviceGetCapabilities(t *testing.T) {
+	capabilitiesXML := `<tds:GetCapabilitiesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">` +
+		`<tds:Capabilities>` +
+		`<tt:Device><tt:XAddr>http://camera.local/onvif/device_service</tt:XAddr></tt:Device>` +
+		`<tt:Media><tt:XAddr>http://camera.local/onvif/media_service</tt:XAddr></tt:Media>` +
+		`<tt:Events><tt:XAddr>http://camera.local/onvif/event_service</tt:XAddr></tt:Events>` +
+		`<tt:PTZ><tt:XAddr>http://camera.local/onvif/ptz_service</tt:XAddr></tt:PTZ>` +
+		`<tt:Imaging><tt:XAddr>http://camera.local/onvif/imaging_service</tt:XAddr></tt:Imaging>` +
+		`<tt:Analytics><tt:XAddr>http://camera.local/onvif/analytics_service</tt:XAddr></tt:Analytics>` +
+		`</tds:Capabilities>` +
+		`</tds:GetCapabilitiesResponse>`
+
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), "tds:GetCapabilities") {
+			t.Fatalf("expected GetCapabilities in request, got: %s", body)
+		}
+		return response(200, `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>`+capabilitiesXML+`</s:Body></s:Envelope>`), nil
+	})
+
+	client := NewDeviceClient(NewClient(transport, Config{Timeout: time.Second}), mustEndpoint(t, "http://camera.local/onvif/device_service"))
+	services, err := client.GetCapabilities(context.Background())
+	if err != nil {
+		t.Fatalf("GetCapabilities failed: %v", err)
+	}
+
+	if len(services) != 6 {
+		t.Fatalf("expected 6 services from capabilities, got %d", len(services))
+	}
+
+	servicesByNS := make(map[string]string)
+	for _, s := range services {
+		servicesByNS[s.Namespace] = s.Endpoint
+	}
+
+	if servicesByNS["http://www.onvif.org/ver10/media/wsdl"] != "http://camera.local/onvif/media_service" {
+		t.Errorf("media service XAddr = %q, want http://camera.local/onvif/media_service", servicesByNS["http://www.onvif.org/ver10/media/wsdl"])
+	}
+	if servicesByNS["http://www.onvif.org/ver10/ptz/wsdl"] != "http://camera.local/onvif/ptz_service" {
+		t.Errorf("ptz service XAddr = %q, want http://camera.local/onvif/ptz_service", servicesByNS["http://www.onvif.org/ver10/ptz/wsdl"])
+	}
+}
