@@ -154,6 +154,28 @@ func (h *Handlers) CheckCameraOnvif(ctx context.Context, r gen.CheckCameraOnvifR
 	}
 
 	probeRes, err := h.Provision.ProbeOnvif(ctx, a, cam.ServerID, probeReq)
+	if err != nil && (reqEp == nil || *reqEp == "") {
+		if u, parseErr := url.Parse(endpoint); parseErr == nil && u.Port() == "" {
+			candidateEndpoints := []string{
+				"http://" + u.Hostname() + ":8080/onvif/device_service",
+				"http://" + u.Hostname() + ":8000/onvif/device_service",
+				"http://" + u.Hostname() + ":8899/onvif/device_service",
+				"http://" + u.Hostname() + ":5000/onvif/device_service",
+				"http://" + u.Hostname() + "/device_service",
+				"http://" + u.Hostname() + ":8080/device_service",
+			}
+			for _, altEp := range candidateEndpoints {
+				altReq := probeReq
+				altReq.Endpoint = altEp
+				if altRes, altErr := h.Provision.ProbeOnvif(ctx, a, cam.ServerID, altReq); altErr == nil {
+					probeRes = altRes
+					endpoint = altEp
+					err = nil
+					break
+				}
+			}
+		}
+	}
 	if err != nil {
 		return gen.CheckCameraOnvif502JSONResponse{
 			FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "onvif_probe_failed", Message: err.Error()},
@@ -299,6 +321,29 @@ func (h *Handlers) SweepServerCamerasOnvif(ctx context.Context, a authz.Actor, s
 
 			// Try probe
 			probeRes, probeErr := h.Provision.ProbeOnvif(ctx, a, serverID, creds)
+			if probeErr != nil {
+				candidateEndpoints := []string{
+					"http://" + candidateIP + ":8080/onvif/device_service",
+					"http://" + candidateIP + ":8000/onvif/device_service",
+					"http://" + candidateIP + ":8899/onvif/device_service",
+					"http://" + candidateIP + ":5000/onvif/device_service",
+					"http://" + candidateIP + "/device_service",
+					"http://" + candidateIP + ":8080/device_service",
+				}
+				for _, altEp := range candidateEndpoints {
+					if altEp == creds.Endpoint {
+						continue
+					}
+					altCreds := creds
+					altCreds.Endpoint = altEp
+					if altRes, altErr := h.Provision.ProbeOnvif(ctx, a, serverID, altCreds); altErr == nil {
+						probeRes = altRes
+						probeErr = nil
+						endpoint = altEp
+						break
+					}
+				}
+			}
 			if probeErr == nil {
 				profile, version, caps := parseOnvifProbeCapabilities(probeRes)
 				capsBytes, _ := json.Marshal(caps)

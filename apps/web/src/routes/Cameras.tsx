@@ -126,7 +126,7 @@ export function Cameras() {
       return unwrap(
         await api.POST("/api/v1/servers/{serverId}/onvif/check-cameras", {
           params: { path: { serverId: targetServerId } },
-          body: { interface_name: interfaceName || undefined },
+          body: { interface_name: interfaceName || "*" },
         })
       );
     },
@@ -330,6 +330,7 @@ export function Cameras() {
                   }}
                 >
                   <option value="">Seleccione una interfaz</option>
+                  <option value="*">Todas las interfaces (*)</option>
                   {filteredInterfaces.map((name) => (
                     <option key={name} value={name}>
                       {name}
@@ -571,7 +572,7 @@ export function Cameras() {
               <Th className="text-right">FPS</Th>
               <Th>Zonas</Th>
               <Th>Clasificación</Th>
-              <Th className="text-right">Ajustes</Th>
+              <Th className="text-right">Configuración Frigate</Th>
             </tr>
           </thead>
           <tbody>
@@ -627,10 +628,11 @@ export function Cameras() {
                     to="/cameras/$cameraId/frigate"
                     params={{ cameraId: c.id }}
                     aria-label={`Configuración de ${c.display_name}`}
-                    title={t("nav.settings")}
-                    className="size-11 px-0"
+                    title="Configuración Frigate"
+                    className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-m3-full px-3 py-1.5 text-xs font-semibold"
                   >
-                    <Icon icon={Settings} size="sm" />
+                    <Icon icon={Settings} size="xs" />
+                    <span>Configurar Frigate</span>
                   </LinkButton>
                 </td>
               </tr>

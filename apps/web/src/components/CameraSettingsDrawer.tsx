@@ -245,7 +245,7 @@ export function CameraSettingsDrawer({
                   onClick={onClose}
                   className="mt-3 self-start"
                 >
-                  <Icon icon={SlidersHorizontal} size="xs" /> Configuración avanzada (Estilo Avigilon)
+                  <Icon icon={SlidersHorizontal} size="xs" /> Configuración de cámara en Frigate (Analíticas, Zonas, Streams)
                 </LinkButton>
               )}
             </div>

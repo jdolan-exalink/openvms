@@ -21,6 +21,7 @@ const (
 	discoveryMatchesAction = discoveryNamespace + "/ProbeMatches"
 	discoveryTo            = "urn:schemas-xmlsoap-org:ws:2005:04:discovery"
 	discoveryAnonymous     = "http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous"
+	networkNamespace       = "http://www.onvif.org/ver10/network/wsdl"
 	maxDiscoveryPacket     = 64 << 10
 )
 
@@ -84,7 +85,12 @@ func (d *Discovery) Probe(ctx context.Context, interfaceName string) ([]Discover
 	if err != nil {
 		return nil, fmt.Errorf("create discovery message identity: %w", err)
 	}
+	messageIDWildcard, err := newMessageID()
+	if err != nil {
+		return nil, fmt.Errorf("create discovery message identity: %w", err)
+	}
 	payload := buildProbe(messageID)
+	payloadWildcard := buildWildcardProbe(messageIDWildcard)
 	probeCtx, cancel := context.WithTimeout(ctx, d.config.Timeout)
 	defer cancel()
 	session, err := d.transport.Open(probeCtx, interfaceName)
@@ -95,6 +101,7 @@ func (d *Discovery) Probe(ctx context.Context, interfaceName string) ([]Discover
 	if err := session.Send(probeCtx, payload); err != nil {
 		return nil, fmt.Errorf("send ONVIF discovery probe: %w", err)
 	}
+	_ = session.Send(probeCtx, payloadWildcard)
 
 	result := make([]DiscoveredDevice, 0)
 	deviceIndex := make(map[string]int)
@@ -126,7 +133,7 @@ func (d *Discovery) Probe(ctx context.Context, interfaceName string) ([]Discover
 		if len(packet) == 0 || len(packet) > maxDiscoveryPacket {
 			continue
 		}
-		matches, ok := parseProbeMatches(packet, messageID)
+		matches, ok := parseProbeMatches(packet, messageID, messageIDWildcard)
 		if !ok {
 			continue
 		}
@@ -167,7 +174,11 @@ func newMessageID() (string, error) {
 }
 
 func buildProbe(messageID string) []byte {
-	return []byte(`<s:Envelope xmlns:s="` + soapNamespace + `" xmlns:wsadis="` + addressingNamespace + `" xmlns:d="` + discoveryNamespace + `" xmlns:tds="` + deviceNamespace + `"><s:Header><wsadis:Action>` + discoveryProbeAction + `</wsadis:Action><wsadis:MessageID>` + messageID + `</wsadis:MessageID><wsadis:To>` + discoveryTo + `</wsadis:To><wsadis:ReplyTo><wsadis:Address>` + discoveryAnonymous + `</wsadis:Address></wsadis:ReplyTo></s:Header><s:Body><d:Probe><d:Types>tds:Device</d:Types></d:Probe></s:Body></s:Envelope>`)
+	return []byte(`<s:Envelope xmlns:s="` + soapNamespace + `" xmlns:wsadis="` + addressingNamespace + `" xmlns:d="` + discoveryNamespace + `" xmlns:tds="` + deviceNamespace + `" xmlns:dn="` + networkNamespace + `"><s:Header><wsadis:Action>` + discoveryProbeAction + `</wsadis:Action><wsadis:MessageID>` + messageID + `</wsadis:MessageID><wsadis:To>` + discoveryTo + `</wsadis:To><wsadis:ReplyTo><wsadis:Address>` + discoveryAnonymous + `</wsadis:Address></wsadis:ReplyTo></s:Header><s:Body><d:Probe><d:Types>dn:NetworkVideoTransmitter tds:Device</d:Types></d:Probe></s:Body></s:Envelope>`)
+}
+
+func buildWildcardProbe(messageID string) []byte {
+	return []byte(`<s:Envelope xmlns:s="` + soapNamespace + `" xmlns:wsadis="` + addressingNamespace + `" xmlns:d="` + discoveryNamespace + `"><s:Header><wsadis:Action>` + discoveryProbeAction + `</wsadis:Action><wsadis:MessageID>` + messageID + `</wsadis:MessageID><wsadis:To>` + discoveryTo + `</wsadis:To><wsadis:ReplyTo><wsadis:Address>` + discoveryAnonymous + `</wsadis:Address></wsadis:ReplyTo></s:Header><s:Body><d:Probe/></s:Body></s:Envelope>`)
 }
 
 type probeEnvelope struct {
@@ -198,10 +209,23 @@ type parsedProbeMatch struct {
 	ScopeHints        []string
 }
 
-func parseProbeMatches(packet []byte, messageID string) ([]parsedProbeMatch, bool) {
+func parseProbeMatches(packet []byte, messageIDs ...string) ([]parsedProbeMatch, bool) {
 	var envelope probeEnvelope
-	if err := xml.Unmarshal(packet, &envelope); err != nil || envelope.XMLName.Space != soapNamespace || envelope.Header.Action != discoveryMatchesAction || strings.TrimSpace(envelope.Header.RelatesTo) != messageID {
+	if err := xml.Unmarshal(packet, &envelope); err != nil || envelope.XMLName.Space != soapNamespace || envelope.Header.Action != discoveryMatchesAction {
 		return nil, false
+	}
+	relatesTo := strings.TrimSpace(envelope.Header.RelatesTo)
+	if len(messageIDs) > 0 {
+		matched := false
+		for _, mid := range messageIDs {
+			if relatesTo == mid {
+				matched = true
+				break
+			}
+		}
+		if !matched && relatesTo != "" {
+			return nil, false
+		}
 	}
 	result := make([]parsedProbeMatch, 0, len(envelope.Body.Matches.Items))
 	for _, m := range envelope.Body.Matches.Items {
