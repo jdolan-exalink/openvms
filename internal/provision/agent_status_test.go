@@ -24,3 +24,27 @@ func TestApplySnapshotSaturatesUnsignedCounters(t *testing.T) {
 		}
 	}
 }
+
+func TestApplySnapshotMapsAIDetectorHardware(t *testing.T) {
+	view := &AgentView{}
+	applySnapshot(view, agent.Snapshot{
+		CoralPCIe: true,
+		Hailo:     true,
+		Nvidia:    true,
+		OpenVINO:  true,
+		GPUVendor: "NVIDIA",
+		GPUName:   "RTX 4060",
+	})
+	if !view.Coral || !view.CoralPCIe {
+		t.Errorf("expected Coral and CoralPCIe true")
+	}
+	if !view.Hailo {
+		t.Errorf("expected Hailo true")
+	}
+	if !view.Nvidia {
+		t.Errorf("expected Nvidia true")
+	}
+	if !view.OpenVINO {
+		t.Errorf("expected OpenVINO true")
+	}
+}

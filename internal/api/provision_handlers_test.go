@@ -38,6 +38,7 @@ func TestServerAgentProjectsMetricsAndVersion(t *testing.T) {
 		BinaryStatus: provision.AgentBinaryUpdateAvailable, BinaryAvailable: &agent.BinaryIdentity{SHA256: strings.Repeat("a", 64), Architecture: "amd64", Commit: "desired"},
 		BinaryObserved: &agent.BinaryIdentity{SHA256: strings.Repeat("b", 64), Architecture: "amd64", Version: "v1.2.3"}, BinaryOutdated: &outdated, BinaryUpgradeAvailable: true,
 		MemoryTotal: 100, MemoryAvailable: 25, Coral: true, GPUPresent: true, GPUVendor: "NVIDIA", GPUName: "Test GPU",
+		CoralUSB: true, CoralPCIe: false, OpenVINO: true, Hailo: true, Nvidia: true,
 		CCTVTotal: 200, CCTVFree: 80, DatabaseTotal: 300, DatabaseFree: 120, Variant: "tensorrt", NTP: "synced",
 	}
 	got := serverAgent(view)
@@ -49,6 +50,9 @@ func TestServerAgentProjectsMetricsAndVersion(t *testing.T) {
 	}
 	if got.Coral == nil || !*got.Coral || got.GpuName == nil || *got.GpuName != view.GPUName || got.Variant == nil || *got.Variant != view.Variant {
 		t.Fatalf("agent hardware state not projected: %#v", got)
+	}
+	if got.CoralUsb == nil || !*got.CoralUsb || got.CoralPcie == nil || *got.CoralPcie || got.Openvino == nil || !*got.Openvino || got.Hailo == nil || !*got.Hailo || got.Nvidia == nil || !*got.Nvidia {
+		t.Fatalf("agent detector hardware state not projected: %#v", got)
 	}
 	if got.BinaryStatus != gen.ServerAgentBinaryStatusUpdateAvailable || got.BinaryOutdated == nil || !*got.BinaryOutdated || !got.BinaryUpgradeAvailable {
 		t.Fatalf("binary status not projected independently: %#v", got)

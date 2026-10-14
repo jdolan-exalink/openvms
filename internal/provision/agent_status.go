@@ -35,6 +35,11 @@ type AgentView struct {
 	MemoryTotal            int64
 	MemoryAvailable        int64
 	Coral                  bool
+	CoralUSB               bool
+	CoralPCIe              bool
+	OpenVINO               bool
+	Hailo                  bool
+	Nvidia                 bool
 	GPUPresent             bool
 	GPUVendor              string
 	GPUName                string
@@ -169,7 +174,12 @@ func applySnapshot(out *AgentView, snap agent.Snapshot) {
 	}
 	out.MemoryTotal = signedSnapshotBytes(snap.MemoryTotal)
 	out.MemoryAvailable = signedSnapshotBytes(snap.MemoryAvailable)
-	out.Coral = snap.Coral
+	out.Coral = snap.Coral || snap.CoralUSB || snap.CoralPCIe
+	out.CoralUSB = snap.CoralUSB
+	out.CoralPCIe = snap.CoralPCIe
+	out.OpenVINO = snap.OpenVINO
+	out.Hailo = snap.Hailo
+	out.Nvidia = snap.Nvidia
 	out.GPUPresent = snap.GPUPresent
 	out.GPUVendor = snap.GPUVendor
 	out.GPUName = snap.GPUName
