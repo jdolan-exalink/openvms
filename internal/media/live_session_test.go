@@ -102,3 +102,18 @@ func TestRedactURLCredentials(t *testing.T) {
 		t.Errorf("detail not truncated: %d bytes", len(got))
 	}
 }
+
+func TestUpstreamMSECodecs(t *testing.T) {
+	if got, ok := upstreamMSECodecs([]byte(`{"type":"mse","value":"video/mp4; codecs=\"hvc1.1.6.L153.B0\""}`)); !ok || got != `video/mp4; codecs="hvc1.1.6.L153.B0"` {
+		t.Fatalf("got %q %v", got, ok)
+	}
+	if _, ok := upstreamMSECodecs([]byte(`{"type":"error","value":"x"}`)); ok {
+		t.Fatal("error frame is not a codec announcement")
+	}
+	if _, ok := upstreamMSECodecs([]byte("not json")); ok {
+		t.Fatal("garbage is not a codec announcement")
+	}
+	if got, _ := upstreamMSECodecs([]byte(`{"type":"mse","value":"` + strings.Repeat("a", 2000) + `"}`)); len(got) > maxUpstreamDetail {
+		t.Fatalf("codec string not bounded: %d bytes", len(got))
+	}
+}
