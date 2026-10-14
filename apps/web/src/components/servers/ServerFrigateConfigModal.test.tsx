@@ -282,4 +282,35 @@ describe("ServerFrigateConfigModal", () => {
     fireEvent.click(hailoBtn);
     expect(screen.getByText(/type: hailo8/i)).toBeInTheDocument();
   });
+
+  it("switches to Objetos tab, renders categories with icons, and toggles objects", async () => {
+    setupConfigModal();
+
+    renderPage(() => (
+      <ServerFrigateConfigModal
+        server={mockServer}
+        open={true}
+        onClose={() => {}}
+        canRestart={true}
+      />
+    ));
+
+    await screen.findByText(/Configuración de Servidor Frigate/i);
+
+    // Switch to Objetos tab
+    fireEvent.click(screen.getByRole("button", { name: /Objetos/i }));
+
+    // Verify category headers exist
+    expect(await screen.findByText(/Vehículos/i)).toBeInTheDocument();
+    expect(screen.getByText(/Animales/i)).toBeInTheDocument();
+    expect(screen.getByText(/Accesorios & Paquetes/i)).toBeInTheDocument();
+
+    // Verify object buttons exist with labels
+    const dogBtn = screen.getByRole("button", { name: /Perro/i });
+    expect(dogBtn).toBeInTheDocument();
+
+    // Toggle dog (sampleYaml only has person and car)
+    fireEvent.click(dogBtn);
+    expect(screen.getByText(/- dog/i)).toBeInTheDocument();
+  });
 });
