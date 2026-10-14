@@ -9,6 +9,7 @@ import { SettingsLayout } from "./components/SettingsLayout";
 import { parseEventsSearch } from "./lib/eventsSearch";
 
 const Account = lazyRouteComponent(() => import("./routes/Account"), "Account");
+const ClientStation = lazyRouteComponent(() => import("./routes/ClientStation"), "ClientStation");
 const Alarms = lazyRouteComponent(() => import("./routes/Alarms"), "Alarms");
 const Audit = lazyRouteComponent(() => import("./routes/Audit"), "Audit");
 const Branding = lazyRouteComponent(() => import("./routes/Branding"), "Branding");
@@ -203,6 +204,7 @@ export const routeTree = rootRoute.addChildren([
       settingsChild("/audit", Audit),
       settingsChild("/branding", Branding),
       settingsChild("/account", Account),
+      settingsChild("/client-station", ClientStation),
     ]),
   ]),
 ]);

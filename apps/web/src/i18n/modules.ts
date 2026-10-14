@@ -1,5 +1,6 @@
 import account from "./locales/es/account";
 import auth from "./locales/es/auth";
+import clientStation from "./locales/es/clientStation";
 import common from "./locales/es/common";
 import dashboard from "./locales/es/dashboard";
 import events from "./locales/es/events";
@@ -18,6 +19,7 @@ import servers from "./locales/es/servers";
 export const sourceModules = {
   account,
   auth,
+  clientStation,
   common,
   dashboard,
   events,

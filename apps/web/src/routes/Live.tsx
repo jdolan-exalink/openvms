@@ -12,6 +12,8 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { MsePlayer } from "@/components/MsePlayer";
+import { TelemetryOverlay } from "@/components/live/TelemetryOverlay";
+import { telemetryRuntime } from "@/lib/telemetry";
 import { FisheyeViewer } from "@/components/fisheye/FisheyeViewer";
 import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
 import { getEffectiveVirtualViews, getFisheyeConfig } from "@/lib/fisheye/storage";
@@ -729,6 +731,12 @@ function LiveDesktop() {
 
   const gridCameraIds = useMemo(() => [...new Set(tiles.flatMap((t) => { const id = cameraIdOf(t); return id && camById.has(id) ? [id] : []; }))], [tiles, camById]);
   const focusedCameraId = focus !== null ? cameraIdOf(tiles[focus] ?? null) : undefined;
+  // The telemetry runtime reports how many cameras the operator is looking at (one when a tile is maximized).
+  const visibleCameraCount = focus !== null ? Math.min(1, gridCameraIds.length) : gridCameraIds.length;
+  useEffect(() => {
+    telemetryRuntime.setVisibleCameras(visibleCameraCount);
+    return () => telemetryRuntime.setVisibleCameras(0);
+  }, [visibleCameraCount]);
   useEffect(() => {
     const previous = previousFocusedCameraRef.current;
     clearTimeout(maximizeTimerRef.current);
@@ -915,65 +923,68 @@ function LiveDesktop() {
               <IconButton icon={X} title="Cerrar todas las cámaras" aria-label="Cerrar todas las cámaras" className="size-8" onClick={closeAllStreams} />
               {canRec && (fullscreen || !topBar.available) && <div className="ml-auto">{modeToggle}</div>}
             </div>
-            <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
-              <LiveGridFrame role="group" label={tr("live.videoGrid")} mode={rec ? "rec" : "live"}
-                className={cn(
-                  "grid min-h-0 flex-1 gap-2 overflow-y-auto p-1 ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
-                  rec ? "ring-bad/50" : "ring-ok/40",
-                )}
-                style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, "--grid-rows": focus !== null ? 1 : rows } as CSSProperties}
-              >
-                {shown.map((i) => {
-                  const t = tiles[i] ?? null;
-                  const cameraId = cameraIdOf(t);
-                  const cam = cameraId ? camById.get(cameraId) : undefined;
-                  const isHidden = focus !== null && focus !== i;
-                  let recLayer: ReactNode = null;
-                  if (rec && cameraId && cam && !isHidden) {
-                    const id = cameraId;
-                    const state: RecTileState = denied.has(id)
-                      ? "denied"
-                      : tiles.findIndex((x) => cameraIdOf(x) === id) !== i
-                        ? "duplicate"
-                        : recLimited.has(id)
-                          ? "limited"
-                          : recData.loaded.includes(id) && !hasCoverage(id)
-                            ? "empty"
-                            : "player";
-                    recLayer = <RecTile cameraId={id} name={cam.display_name} state={state} transport={transport} isMaster={id === masterId} />;
-                  }
-                  const identityKey = tileIdentityKey(t);
-                  return (
-                    <GridTile
-                      key={identityKey && !duplicates.has(i) ? `camera:${identityKey}` : `cell:${i}`}
-                      index={i}
-                      placement={focus === null && panes[i] ? { gridColumn: `${panes[i].col + 1} / span ${panes[i].colSpan}`, gridRow: `${panes[i].row + 1} / span ${panes[i].rowSpan}` } : undefined}
-                      tile={t}
-                      camera={cam}
-                      isSelected={selected === i}
-                      isFocused={focus === i}
-                      isHidden={isHidden}
-                      recLayer={recLayer}
-                      suspended={rec}
-                      isDuplicate={duplicates.has(i)}
-                      persistent={persistentPlayers}
-                      surface={persistentPlayers && videoSurfaceLayer}
-                      serverId={cam?.server_id}
-                      canViewRecordings={can(me.data, "recordings.view")}
-                      status={cam?.status}
-                      quality={t && "quality" in t ? t.quality : "sub"}
-                      qualityOverride={qualityOverrideFor(t)}
-                      onSelect={() => setSelected(i)}
-                      onToggleFocus={() => t && setFocus(focus === null ? i : null)}
-                      onOpenFisheye={(id) => setFisheyeModalCameraId(id)}
-                      onConfigureFisheye={(id) => setFisheyeConfigCameraId(id)}
-                      fisheyeVersion={fisheyeVersion}
-                      onRemove={() => removeTile(i)}
-                    />
-                  );
-                })}
-              </LiveGridFrame>
-            </SortableContext>
+            <div className="relative flex min-h-0 flex-1 flex-col">
+            <TelemetryOverlay />
+              <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
+                <LiveGridFrame role="group" label={tr("live.videoGrid")} mode={rec ? "rec" : "live"}
+                  className={cn(
+                    "grid min-h-0 flex-1 gap-2 overflow-y-auto p-1 ring-2 md:overflow-hidden md:[grid-template-rows:repeat(var(--grid-rows),minmax(0,1fr))]",
+                    rec ? "ring-bad/50" : "ring-ok/40",
+                  )}
+                  style={{ gridTemplateColumns: `repeat(${gridCols}, minmax(0, 1fr))`, "--grid-rows": focus !== null ? 1 : rows } as CSSProperties}
+                >
+                  {shown.map((i) => {
+                    const t = tiles[i] ?? null;
+                    const cameraId = cameraIdOf(t);
+                    const cam = cameraId ? camById.get(cameraId) : undefined;
+                    const isHidden = focus !== null && focus !== i;
+                    let recLayer: ReactNode = null;
+                    if (rec && cameraId && cam && !isHidden) {
+                      const id = cameraId;
+                      const state: RecTileState = denied.has(id)
+                        ? "denied"
+                        : tiles.findIndex((x) => cameraIdOf(x) === id) !== i
+                          ? "duplicate"
+                          : recLimited.has(id)
+                            ? "limited"
+                            : recData.loaded.includes(id) && !hasCoverage(id)
+                              ? "empty"
+                              : "player";
+                      recLayer = <RecTile cameraId={id} name={cam.display_name} state={state} transport={transport} isMaster={id === masterId} />;
+                    }
+                    const identityKey = tileIdentityKey(t);
+                    return (
+                      <GridTile
+                        key={identityKey && !duplicates.has(i) ? `camera:${identityKey}` : `cell:${i}`}
+                        index={i}
+                        placement={focus === null && panes[i] ? { gridColumn: `${panes[i].col + 1} / span ${panes[i].colSpan}`, gridRow: `${panes[i].row + 1} / span ${panes[i].rowSpan}` } : undefined}
+                        tile={t}
+                        camera={cam}
+                        isSelected={selected === i}
+                        isFocused={focus === i}
+                        isHidden={isHidden}
+                        recLayer={recLayer}
+                        suspended={rec}
+                        isDuplicate={duplicates.has(i)}
+                        persistent={persistentPlayers}
+                        surface={persistentPlayers && videoSurfaceLayer}
+                        serverId={cam?.server_id}
+                        canViewRecordings={can(me.data, "recordings.view")}
+                        status={cam?.status}
+                        quality={t && "quality" in t ? t.quality : "sub"}
+                        qualityOverride={qualityOverrideFor(t)}
+                        onSelect={() => setSelected(i)}
+                        onToggleFocus={() => t && setFocus(focus === null ? i : null)}
+                        onOpenFisheye={(id) => setFisheyeModalCameraId(id)}
+                        onConfigureFisheye={(id) => setFisheyeConfigCameraId(id)}
+                        fisheyeVersion={fisheyeVersion}
+                        onRemove={() => removeTile(i)}
+                      />
+                    );
+                  })}
+                </LiveGridFrame>
+              </SortableContext>
+            </div>
             {rec && <LiveRecDock
                 transport={transport}
                 cameras={timelineCameras}

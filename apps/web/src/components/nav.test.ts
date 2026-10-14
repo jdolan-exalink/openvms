@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { Icon } from "./Icon";
 import navSource from "./nav.ts?raw";
 import type { Schemas } from "@/api/client";
-import { brandIcon, bottomNavModel, isNavItemActive, navGroups, settingsNavGroups } from "./nav";
+import { brandIcon, bottomNavModel, isNavItemActive, isNavItemVisible, navGroups, settingsNavGroups } from "./nav";
 
 const items = [...navGroups, ...settingsNavGroups].flatMap((group) => group.items);
 
@@ -69,5 +69,16 @@ describe("isNavItemActive", () => {
     expect(isNavItemActive(byTo("/settings"), "/sites")).toBe(true);
     expect(isNavItemActive(byTo("/live"), "/live")).toBe(true);
     expect(isNavItemActive(byTo("/live"), "/events")).toBe(false);
+  });
+});
+
+describe("client station nav", () => {
+  it("is listed under administration for every operator, without a permission", () => {
+    const admin = settingsNavGroups.find((g) => g.title === "nav.administration");
+    const item = admin?.items.find((i) => i.to === "/client-station");
+    expect(item?.label).toBe("nav.clientStation");
+    expect(item?.permission).toBeUndefined();
+    expect(item?.feature).toBeUndefined();
+    expect(isNavItemVisible(item!, meWith(), allFeatures)).toBe(true);
   });
 });

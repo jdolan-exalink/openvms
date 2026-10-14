@@ -10,6 +10,7 @@ import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { playerMetrics } from "@/lib/live/playerMetrics";
 import { saveFisheyeConfig } from "@/lib/fisheye/storage";
 import { DEFAULT_FISHEYE_CALIBRATION, DEFAULT_FISHEYE_CONFIG } from "@/lib/fisheye/types";
+import { telemetryRuntime } from "@/lib/telemetry";
 import { Live, useTileOverlayVisibility } from "./Live";
 
 afterEach(() => {
@@ -1464,7 +1465,7 @@ describe("Live with persistent players (P0 acceptance)", () => {
         }),
       ),
     );
-    renderPage(LiveWithSessions);
+    const view = renderPage(LiveWithSessions);
     fireEvent.click(await screen.findByRole("button", { name: /Puerta norte/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Porton sur/ }));
     // Both sessions open asynchronously: wait for both pictures and both sockets, or the
@@ -1474,7 +1475,33 @@ describe("Live with persistent players (P0 acceptance)", () => {
       expect(screen.getByLabelText("Cuadro 2").querySelector("video")).not.toBeNull();
       expect(FakeSocket.created).toBe(2);
     });
+    return view;
   }
+
+  it("keeps the telemetry overlay out of the grid and idle by default", async () => {
+    await renderPersistent();
+    expect(screen.queryByRole("group", { name: "Métricas del videowall" })).not.toBeInTheDocument();
+    expect(telemetryRuntime.consumers()).toBe(0);
+  });
+
+  it("shows the telemetry overlay beside the grid, without taking a tile", async () => {
+    localStorage.setItem("openvms.live.telemetryOverlay", "1");
+    await renderPersistent();
+    const overlay = screen.getByRole("group", { name: "Métricas del videowall" });
+    const grid = screen.getByRole("group", { name: "Grilla de video" });
+    expect(grid.contains(overlay)).toBe(false);
+    expect(overlay.parentElement).toBe(grid.parentElement);
+    expect(screen.getAllByLabelText(/^Cuadro \d+$/)).toHaveLength(4);
+    expect(telemetryRuntime.consumers()).toBe(1);
+  });
+
+  it("reports the visible cameras to the telemetry runtime while mounted", async () => {
+    const spy = vi.spyOn(telemetryRuntime, "setVisibleCameras");
+    const { unmount } = await renderPersistent();
+    expect(spy).toHaveBeenLastCalledWith(2);
+    unmount();
+    expect(spy).toHaveBeenLastCalledWith(0);
+  });
 
   it("closes all streams without changing the selected grid dimensions", async () => {
     await renderPersistent();

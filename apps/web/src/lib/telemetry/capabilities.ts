@@ -66,7 +66,22 @@ export type CapabilitiesEnv = {
 export type CollectOptions = {
   /** `light` checks only the videowall profile per codec, for instant startup analysis. */
   codecs?: "full" | "light";
+  /** Longest wait for each browser query (decodingInfo, getHighEntropyValues). Default 2000 ms. */
+  queryTimeoutMs?: number;
 };
+
+export const DEFAULT_QUERY_TIMEOUT_MS = 2000;
+
+class QueryTimeoutError extends Error {}
+
+/** Rejects when the browser never answers, so one hung query cannot block the whole collection. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new QueryTimeoutError("browser query timed out")), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 export const CCTV_PROFILES: readonly (VideoProfile & { bitrate: number })[] = [
   { label: "360p@10", width: 640, height: 360, fps: 10, bitrate: 600_000 },
@@ -141,10 +156,11 @@ export async function collectClientCapabilities(
   options: CollectOptions = {},
 ): Promise<ClientCapabilities> {
   const e: CapabilitiesEnv = { ...createBrowserEnv(), ...env };
+  const timeoutMs = options.queryTimeoutMs ?? DEFAULT_QUERY_TIMEOUT_MS;
   const [system, gpu, codecs] = await Promise.all([
-    collectSystem(e),
+    collectSystem(e, timeoutMs),
     Promise.resolve(collectGpu(e)),
-    collectCodecs(e, options.codecs ?? "full"),
+    collectCodecs(e, options.codecs ?? "full", timeoutMs),
   ]);
   const cpu = e.navigator.hardwareConcurrency ? { logicalProcessors: e.navigator.hardwareConcurrency } : {};
   return { runtime: "browser", collectedAt: e.now(), system, cpu, memory: collectMemory(e), gpu, codecs };
@@ -181,14 +197,15 @@ export function parseUserAgent(ua: string): ParsedUa {
 
 const BRAND_NAMES: Record<string, string> = { "Google Chrome": "Chrome", "Microsoft Edge": "Edge", Chromium: "Chromium", Opera: "Opera" };
 
-async function collectSystem(e: CapabilitiesEnv): Promise<ClientSystemInfo> {
+async function collectSystem(e: CapabilitiesEnv, timeoutMs: number): Promise<ClientSystemInfo> {
   const ua = e.navigator.userAgent;
   const system: ClientSystemInfo = ua ? { ...parseUserAgent(ua), userAgent: ua } : {};
   const uad = e.navigator.userAgentData;
   if (uad) {
     if (uad.platform) system.os = uad.platform;
     try {
-      const hi = await uad.getHighEntropyValues?.(["platform", "platformVersion", "architecture", "fullVersionList"]);
+      const pending = uad.getHighEntropyValues?.(["platform", "platformVersion", "architecture", "fullVersionList"]);
+      const hi = pending && (await withTimeout(pending, timeoutMs));
       if (hi) {
         if (hi.platform) system.os = hi.platform;
         if (hi.platformVersion) system.osVersion = hi.platformVersion;
@@ -202,7 +219,7 @@ async function collectSystem(e: CapabilitiesEnv): Promise<ClientSystemInfo> {
         }
       }
     } catch {
-      // High entropy hints can be denied; keep the userAgent-derived values.
+      // High entropy hints can be denied or never answer; keep the userAgent-derived values.
     }
   }
   if (e.screen) {
@@ -260,6 +277,7 @@ async function queryCodec(
   e: CapabilitiesEnv,
   spec: CodecSpec,
   profile: VideoProfile & { bitrate: number },
+  timeoutMs: number,
 ): Promise<CodecCapability> {
   const codecString = spec.codecString(profile);
   const { bitrate, ...plain } = profile;
@@ -267,10 +285,13 @@ async function queryCodec(
   const contentType = `video/${spec.container}; codecs="${codecString}"`;
   if (e.mediaCapabilities) {
     try {
-      const info = await e.mediaCapabilities.decodingInfo({
-        type: "media-source",
-        video: { contentType, width: profile.width, height: profile.height, framerate: profile.fps, bitrate },
-      });
+      const info = await withTimeout(
+        e.mediaCapabilities.decodingInfo({
+          type: "media-source",
+          video: { contentType, width: profile.width, height: profile.height, framerate: profile.fps, bitrate },
+        }),
+        timeoutMs,
+      );
       return { ...base, supported: info.supported, smooth: info.smooth, powerEfficient: info.powerEfficient, source: "mediaCapabilities" };
     } catch {
       return { ...base, supported: false, source: "mediaCapabilities" };
@@ -286,7 +307,7 @@ async function queryCodec(
   return { ...base, supported: false, source: "unavailable" };
 }
 
-function collectCodecs(e: CapabilitiesEnv, mode: "full" | "light"): Promise<CodecCapability[]> {
+function collectCodecs(e: CapabilitiesEnv, mode: "full" | "light", timeoutMs: number): Promise<CodecCapability[]> {
   const profiles = mode === "light" ? CCTV_PROFILES.filter((p) => p.label === VIDEOWALL_PROFILE_LABEL) : CCTV_PROFILES;
-  return Promise.all(CODEC_SPECS.flatMap((spec) => profiles.map((p) => queryCodec(e, spec, p))));
+  return Promise.all(CODEC_SPECS.flatMap((spec) => profiles.map((p) => queryCodec(e, spec, p, timeoutMs))));
 }

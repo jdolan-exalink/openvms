@@ -292,3 +292,54 @@ describe("collectClientCapabilities: codecs", () => {
     expect(caps.codecs.every((c) => !c.supported && c.source === "unavailable")).toBe(true);
   });
 });
+
+describe("collectClientCapabilities: per-query timeout", () => {
+  const never = () => new Promise<never>(() => undefined);
+
+  it("marks a codec unsupported when decodingInfo never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = collectClientCapabilities(
+        baseEnv({ mediaCapabilities: { decodingInfo: never } }),
+        { codecs: "light", queryTimeoutMs: 500 },
+      );
+      await vi.advanceTimersByTimeAsync(600);
+      const caps = await pending;
+      expect(caps.codecs).toHaveLength(5);
+      for (const c of caps.codecs) {
+        expect(c.supported).toBe(false);
+        expect(c.source).toBe("mediaCapabilities");
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps userAgent values when getHighEntropyValues never answers", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = collectClientCapabilities(
+        baseEnv({ navigator: { userAgent: CHROME_UA, userAgentData: { platform: "Windows", getHighEntropyValues: never } } }),
+        { codecs: "light", queryTimeoutMs: 500 },
+      );
+      await vi.advanceTimersByTimeAsync(600);
+      const caps = await pending;
+      expect(caps.system.browser).toBe("Chrome");
+      expect(caps.system.os).toBe("Windows");
+      expect(caps.system.architecture).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not delay answers that arrive in time and leaves no timers behind", async () => {
+    vi.useFakeTimers();
+    try {
+      const caps = await collectClientCapabilities(baseEnv(), { codecs: "light", queryTimeoutMs: 500 });
+      expect(caps.codecs.every((c) => c.supported)).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

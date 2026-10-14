@@ -7,4 +7,5 @@ export * from "./videoTelemetry";
 export * from "./performanceClassifier";
 export * from "./bottleneck";
 export * from "./diagnostics";
-export * from "./labels";
+export * from "./runtime";
+export * from "./overlayPreference";

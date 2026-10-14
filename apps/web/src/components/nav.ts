@@ -1,6 +1,6 @@
 import {
   Bell, BellRing, Building, Camera, CarFront, ClipboardList, Download, GitBranch, History, KeyRound, LayoutDashboard, Layers, Map as MapIcon,
-  Palette, Send, Server, ShieldCheck, SlidersHorizontal, UserCog, Users, UsersRound, Video, Zap, BriefcaseBusiness,
+  Palette, Send, Server, ShieldCheck, SlidersHorizontal, UserCog, Users, UsersRound, Video, Zap, BriefcaseBusiness, MonitorCog,
   type LucideIcon,
 } from "lucide-react";
 import type { MessageKey } from "@/i18n";
@@ -65,6 +65,7 @@ export const settingsNavGroups: NavGroup[] = [
       { label: "nav.audit", icon: ClipboardList, to: "/audit", permission: "audit.view" },
       { label: "nav.watermark", icon: Palette, to: "/branding", permission: "tenant.manage" },
       { label: "nav.myAccount", icon: UserCog, to: "/account" },
+      { label: "nav.clientStation", icon: MonitorCog, to: "/client-station" },
     ],
   },
 ];
