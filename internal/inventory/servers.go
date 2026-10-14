@@ -772,6 +772,17 @@ func ExtractCameraStreamHosts(rawPaths map[string]any) map[string]CameraStreamHo
 								parsed := parseRTSPStreamInfo(path)
 								if parsed.Host != "" {
 									updateCameraInfo(camName, parsed)
+								} else {
+									// Dereference local go2rtc restreams or stream keys
+									// e.g. rtsp://127.0.0.1:8554/avigilon_id748_sub or avigilon_id748_sub
+									streamKey := extractStreamKeyFromPath(path)
+									if streamKey != "" {
+										if target, found := out[streamKey]; found && target.Host != "" {
+											updateCameraInfo(camName, target)
+										} else if target, found := out[strings.ToLower(streamKey)]; found && target.Host != "" {
+											updateCameraInfo(camName, target)
+										}
+									}
 								}
 							}
 						}
@@ -782,6 +793,26 @@ func ExtractCameraStreamHosts(rawPaths map[string]any) map[string]CameraStreamHo
 	}
 
 	return out
+}
+
+func extractStreamKeyFromPath(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if idx := strings.Index(raw, "#"); idx != -1 {
+		raw = raw[:idx]
+	}
+	if raw == "" {
+		return ""
+	}
+	u, err := url.Parse(raw)
+	if err == nil && u != nil {
+		if src := u.Query().Get("src"); src != "" {
+			return src
+		}
+		if u.Path != "" {
+			return strings.TrimPrefix(u.Path, "/")
+		}
+	}
+	return strings.TrimPrefix(raw, "/")
 }
 
 func isLocalHost(host string) bool {
@@ -799,6 +830,7 @@ func parseRTSPStreamInfo(raw string) CameraStreamHostInfo {
 	if idx := strings.Index(raw, "#"); idx != -1 {
 		raw = raw[:idx]
 	}
+	raw = strings.TrimPrefix(raw, "ffmpeg:")
 	u, err := url.Parse(raw)
 	if err != nil || u == nil {
 		return CameraStreamHostInfo{}
