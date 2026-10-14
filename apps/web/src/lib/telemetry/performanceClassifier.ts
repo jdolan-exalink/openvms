@@ -136,11 +136,11 @@ export function levelOf(state: SeverityState): HealthLevel {
   return HEALTH_STATES.indexOf(state) as HealthLevel;
 }
 
-function levelAbove(value: number, t: LevelThresholds): HealthLevel {
+export function levelAbove(value: number, t: LevelThresholds): HealthLevel {
   return value >= t[2] ? 3 : value >= t[1] ? 2 : value >= t[0] ? 1 : 0;
 }
 
-function levelBelow(value: number, t: LevelThresholds): HealthLevel {
+export function levelBelow(value: number, t: LevelThresholds): HealthLevel {
   return value < t[2] ? 3 : value < t[1] ? 2 : value < t[0] ? 1 : 0;
 }
 

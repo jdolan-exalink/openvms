@@ -3,9 +3,29 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { json, stubApi } from "@/test-utils";
+import { startupProfile } from "@/lib/telemetry";
 import { routeTree } from "@/router";
 
 afterEach(() => vi.unstubAllGlobals());
+
+describe("startup profile", () => {
+  it("is started once by the app shell, and never runs a benchmark by itself", async () => {
+    const start = vi.spyOn(startupProfile, "start").mockImplementation(() => undefined);
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": () => json({
+        id: "u1", username: "operator", display_name: "Operator", tenant_id: "t1",
+        mfa_enabled: false, must_change_password: false, auth_method: "session",
+        grants: [{ permission: "events.view", effect: "allow", scope_type: "platform" }],
+      }),
+    })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/events"] }), context: { queryClient: client } });
+    render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+    await screen.findByRole("navigation", { name: "Navegación principal" });
+    expect(start).toHaveBeenCalledTimes(1);
+    start.mockRestore();
+  });
+});
 
 describe("primary navigation and context header", () => {
   it("hides the tenant notification bell for the tenant-less platform admin", async () => {

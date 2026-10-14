@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
 import type { ClientCapabilities, StreamStatsSample, StreamStatsSource } from "@/lib/telemetry";
+import { benchmarkCache, buildBenchmarkRecord, startupProfile, type BenchmarkResult } from "@/lib/telemetry";
 import { ClientStation } from "./ClientStation";
 
 const h = vi.hoisted(() => ({
@@ -98,8 +99,10 @@ afterEach(() => {
 
 describe("ClientStation: capabilities", () => {
   it("shows a loading state, then system, CPU, memory and GPU", async () => {
-    let finish: (c: ClientCapabilities) => void = () => undefined;
-    h.collect = () => new Promise<ClientCapabilities>((r) => (finish = r));
+    // The page and the app-wide startup profile both collect: release every pending request.
+    const pending: ((c: ClientCapabilities) => void)[] = [];
+    const finish = (c: ClientCapabilities) => pending.forEach((resolve) => resolve(c));
+    h.collect = () => new Promise<ClientCapabilities>((r) => pending.push(r));
     renderPage(ClientStation);
     expect(await screen.findByText("Detectando capacidades de esta estación…")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Estación cliente" })).toBeInTheDocument();
@@ -268,5 +271,42 @@ describe("ClientStation: overlay toggle", () => {
     localStorage.setItem("openvms.live.telemetryOverlay", "1");
     renderPage(ClientStation);
     expect(await screen.findByRole("switch", { name: "Overlay de desarrollo en Vivo" })).toHaveAttribute("aria-checked", "true");
+  });
+});
+
+describe("ClientStation: benchmark", () => {
+  const cached: BenchmarkResult = {
+    id: "cached-1",
+    startedAt: 1_000,
+    finishedAt: 5_000,
+    durationMs: 4_000,
+    clip: { codec: "avc1.42E01E", width: 640, height: 360, fps: 15 },
+    levels: [
+      { streams: 4, ran: true, state: "optimal", decodedFps: 15, droppedRatio: 0, stalls: 0, decoderErrors: 0, presentationFps: 60, frameTimeP95Ms: 17, reasons: [] },
+      { streams: 9, ran: false, state: "unknown", stalls: 0, decoderErrors: 0, reasons: [] },
+    ],
+    maxStableStreams: 4,
+    clientPerformanceScore: 9,
+    limits: { bindingFactors: [] },
+    stoppedReason: "completed",
+  };
+
+  it("offers the benchmark without running it on open", async () => {
+    renderPage(ClientStation);
+    expect(await screen.findByRole("heading", { name: "Benchmark de estación" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /benchmark$/i })).toBeEnabled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("includes the last benchmark in the copied diagnostics", async () => {
+    await benchmarkCache.save(buildBenchmarkRecord(cached, caps(), "v0.1.0"));
+    await startupProfile.refresh();
+    renderPage(ClientStation);
+    const pre = await screen.findByText(/OpenVMS Client Diagnostics/);
+    await waitFor(() => expect(pre.textContent).toContain("Benchmark (decode/render of a local sample clip, LQ)"));
+    expect(pre.textContent).toContain("4 streams LQ: optimal");
+    expect(pre.textContent).toContain("9 streams LQ: not run");
+    expect(pre.textContent).toContain("not measured: network, HQ main stream");
+    expect(screen.getByText("Último benchmark de este navegador")).toBeInTheDocument();
   });
 });

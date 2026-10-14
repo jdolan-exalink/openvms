@@ -9,3 +9,8 @@ export * from "./bottleneck";
 export * from "./diagnostics";
 export * from "./runtime";
 export * from "./overlayPreference";
+export * from "./benchmark";
+export * from "./benchmarkPlayer";
+export * from "./benchmarkCache";
+export * from "./benchmarkRuntime";
+export * from "./startupProfile";

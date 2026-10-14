@@ -249,4 +249,47 @@ describe("copyDiagnostics", () => {
     await expect(copyDiagnostics("x", { writeText: vi.fn().mockRejectedValue(new Error("denied")) })).resolves.toBe(false);
     await expect(copyDiagnostics("x", undefined)).resolves.toBe(false);
   });
+describe("benchmark in diagnostics", () => {
+  const benchmark = {
+    id: "b1",
+    startedAt: 1_000,
+    finishedAt: 5_000,
+    durationMs: 4_000,
+    clip: { codec: "avc1.42E01E", width: 640, height: 360, fps: 15 },
+    levels: [
+      { streams: 4, ran: true, state: "optimal", decodedFps: 15, droppedRatio: 0, stalls: 0, decoderErrors: 0, presentationFps: 60, frameTimeP95Ms: 17, reasons: [] },
+      { streams: 9, ran: true, state: "limit", decodedFps: 12.5, droppedRatio: 0.062, stalls: 1, decoderErrors: 0, presentationFps: 45, frameTimeP95Ms: 41, reasons: ["dropped_frames"] },
+      { streams: 16, ran: false, state: "unknown", stalls: 0, decoderErrors: 0, reasons: [] },
+    ],
+    maxStableStreams: 4,
+    clientPerformanceScore: 12,
+    limits: { firstDegradedStreams: 9, bindingFactors: ["dropped_frames"] },
+    stoppedReason: "completed",
+  };
+
+  it("keeps the raw benchmark result in the JSON next to the score", () => {
+    const diag = buildDiagnostics({ generatedAt: 6_000, benchmark });
+    expect(diag.benchmark).toMatchObject({ clientPerformanceScore: 12, maxStableStreams: 4, levels: [{ streams: 4 }, { streams: 9 }, { streams: 16 }] });
+  });
+
+  it("prints a support block that says what the benchmark did not measure and never claims HQ", () => {
+    const text = formatDiagnosticsText(buildDiagnostics({ generatedAt: 6_000, benchmark }));
+    expect(text).toContain("Benchmark");
+    expect(text).toContain("sample clip");
+    expect(text).toContain("not measured: network, HQ main stream");
+    expect(text).toContain("4 streams LQ: optimal");
+    expect(text).toContain("9 streams LQ: limit");
+    expect(text).toContain("dropped 6.2%");
+    expect(text).toContain("16 streams LQ: not run");
+    expect(text).toContain("Max stable: 4 streams");
+    expect(text).toContain("Score (internal): 12");
+    expect(text).not.toMatch(/\d+ streams HQ/);
+  });
+
+  it("omits the block without a benchmark and tolerates a malformed one", () => {
+    expect(formatDiagnosticsText(buildDiagnostics({ generatedAt: 6_000 }))).not.toContain("Benchmark");
+    expect(() => formatDiagnosticsText(buildDiagnostics({ generatedAt: 6_000, benchmark: { levels: "nope" } }))).not.toThrow();
+    expect(() => formatDiagnosticsText(buildDiagnostics({ generatedAt: 6_000, benchmark: { levels: [null, { streams: Number.NaN }] } }))).not.toThrow();
+  });
+});
 });

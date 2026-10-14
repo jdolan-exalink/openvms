@@ -173,6 +173,46 @@ function codecLine(c: ClientCapabilities["codecs"][number]): string {
   return `${c.codec.toUpperCase()} ${c.profile.label}: ${parts.join(" / ")}`;
 }
 
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+const numberOrUndefined = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+
+/**
+ * Support block for a station benchmark (the `BenchmarkResult` shape, read defensively because the
+ * payload is opaque and sanitized). It always states the scope: decode/render of a sample clip,
+ * never network and never the HQ main stream.
+ */
+function benchmarkLines(raw: unknown): string[] {
+  if (!isRecord(raw)) return [];
+  const lines = ["", "Benchmark (decode/render of a local sample clip, LQ)", "Scope: not measured: network, HQ main stream"];
+  const clip = isRecord(raw.clip) ? raw.clip : undefined;
+  if (clip) lines.push(`Clip: ${show(clip.codec as string | number | null | undefined) ?? NA} ${show(clip.width as number | null | undefined) ?? NA}x${show(clip.height as number | null | undefined) ?? NA} @${show(clip.fps as number | null | undefined) ?? NA}`);
+  const levels = Array.isArray(raw.levels) ? raw.levels.filter(isRecord) : [];
+  for (const l of levels) {
+    const streams = numberOrUndefined(l.streams);
+    if (streams === undefined) continue;
+    if (l.ran !== true) {
+      lines.push(`${streams} streams LQ: not run`);
+      continue;
+    }
+    const dropped = numberOrUndefined(l.droppedRatio);
+    lines.push(
+      [
+        `${streams} streams LQ: ${typeof l.state === "string" ? l.state : NA}`,
+        `decoded ${fmt(numberOrUndefined(l.decodedFps), 1, " fps")}`,
+        `dropped ${fmt(dropped === undefined ? undefined : dropped * 100, 1, "%")}`,
+        `p95 ${fmt(numberOrUndefined(l.frameTimeP95Ms), 1, " ms")}`,
+        `stalls ${fmt(numberOrUndefined(l.stalls), 0)}`,
+        `decoder errors ${fmt(numberOrUndefined(l.decoderErrors), 0)}`,
+      ].join(", "),
+    );
+  }
+  const stable = numberOrUndefined(raw.maxStableStreams);
+  if (stable !== undefined) lines.push(`Max stable: ${stable} streams (LQ)`);
+  lines.push(`Score (internal): ${fmt(numberOrUndefined(raw.clientPerformanceScore), 0)}`);
+  if (typeof raw.stoppedReason === "string") lines.push(`Stopped: ${raw.stoppedReason}`);
+  return lines;
+}
+
 /** A compact, support-facing block (English keys), derived from an already redacted Diagnostics. */
 export function formatDiagnosticsText(diag: Diagnostics): string {
   const lines: string[] = ["OpenVMS Client Diagnostics", `Generated: ${diag.generatedAt ?? INVALID_TIME}`];
@@ -218,6 +258,7 @@ export function formatDiagnosticsText(diag: Diagnostics): string {
     lines.push(`Estimated bottleneck: ${b.layer} (${b.estimated ? "estimate" : "measured"}, confidence ${b.confidence})`);
     for (const e of b.evidence) lines.push(`- ${e}`);
   }
+  lines.push(...benchmarkLines(diag.benchmark));
   if (diag.recentErrors && diag.recentErrors.length > 0) {
     lines.push("", "Recent errors");
     for (const e of diag.recentErrors) lines.push(`${isoOrNull(e.at) ?? INVALID_TIME} ${e.code}${e.message ? `: ${e.message}` : ""}`);

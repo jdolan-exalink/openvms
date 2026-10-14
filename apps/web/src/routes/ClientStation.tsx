@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { systemInfoQuery } from "@/api/queries";
 import { Sparkline } from "@/components/clientStation/Sparkline";
-import { useClientCapabilities, useVideoTelemetry } from "@/components/clientStation/hooks";
+import { BenchmarkSection } from "@/components/clientStation/BenchmarkSection";
+import { useBenchmark, useClientCapabilities, useVideoTelemetry } from "@/components/clientStation/hooks";
 import { HEALTH_KEYS, HEALTH_TONES, LAYER_KEYS, LAYER_ORDER, REASON_KEYS } from "@/components/clientStation/keys";
 import { Button, Card, Empty, ErrorNote, PageHeader, Pill, Switch, Table, Th } from "@/components/ui";
 import { useT } from "@/i18n";
@@ -12,6 +13,7 @@ import {
   formatDiagnosticsText,
   readOverlayPreference,
   writeOverlayPreference,
+  type BenchmarkResult,
   type ClientCapabilities,
   type CodecCapability,
   type TelemetryView,
@@ -28,6 +30,9 @@ export function ClientStation() {
   const t = useT();
   const caps = useClientCapabilities();
   const view = useVideoTelemetry(true);
+  // The system info endpoint is public, so the version is available to every operator.
+  const info = useQuery(systemInfoQuery);
+  const bench = useBenchmark({ capabilities: caps.capabilities, appVersion: info.data?.version });
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">
       <PageHeader title={t("clientStation.title")} description={t("clientStation.description")} />
@@ -41,7 +46,8 @@ export function ClientStation() {
       )}
       <BandwidthSection view={view} />
       <HealthSection view={view} />
-      <DiagnosticsSection caps={caps.capabilities} view={view} />
+      <BenchmarkSection bench={bench} />
+      <DiagnosticsSection caps={caps.capabilities} view={view} version={info.data?.version} commit={info.data?.commit} benchmark={bench.display?.result} />
       <OverlaySection />
     </div>
   );
@@ -258,10 +264,8 @@ function HealthSection({ view }: { view: TelemetryView }) {
   );
 }
 
-function DiagnosticsSection({ caps, view }: { caps: ClientCapabilities | undefined; view: TelemetryView }) {
+function DiagnosticsSection({ caps, view, version, commit, benchmark }: { caps: ClientCapabilities | undefined; view: TelemetryView; version: string | undefined; commit: string | undefined; benchmark: BenchmarkResult | undefined }) {
   const t = useT();
-  // The system info endpoint is public, so the version is available to every operator.
-  const info = useQuery(systemInfoQuery);
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   // Render must stay pure: the report is stamped with the latest tick, or the time the page opened.
@@ -271,17 +275,18 @@ function DiagnosticsSection({ caps, view }: { caps: ClientCapabilities | undefin
     () =>
       formatDiagnosticsText(
         buildDiagnostics({
-          appVersion: info.data?.version,
-          commit: info.data?.commit,
+          appVersion: version,
+          commit,
           capabilities: caps,
           telemetry: view.snapshot,
           history: view.history,
           health: view.health,
           bottleneck: view.bottleneck,
+          benchmark,
           generatedAt: view.snapshot.metrics?.timestamp ?? openedAt,
         }),
       ),
-    [info.data?.version, info.data?.commit, caps, view, openedAt],
+    [version, commit, caps, view, benchmark, openedAt],
   );
   const onCopy = async () => {
     const ok = await copyDiagnostics(text);

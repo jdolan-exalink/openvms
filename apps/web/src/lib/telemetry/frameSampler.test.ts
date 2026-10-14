@@ -95,4 +95,23 @@ describe("frame sampler", () => {
     sampler.stop();
     expect(f.pendingCount()).toBe(0);
   });
+  it("reports the longest frame, the long-frame count and the discarded paused gaps", () => {
+    const f = fakeRaf();
+    const sampler = createFrameSampler(f.raf, f.cancel, f.now);
+    sampler.start();
+    f.frame(16);
+    f.frame(16);
+    f.frame(120); // a long frame: a visible hitch
+    f.frame(16);
+    f.frame(5_000); // paused rAF: discarded, but counted as a skipped gap
+    f.frame(16);
+    const s = sampler.sample();
+    expect(s?.maxFrameMs).toBe(120);
+    expect(s?.longFrames).toBe(1);
+    expect(s?.skippedGaps).toBe(1);
+    // The next window starts clean.
+    f.frame(16);
+    f.frame(16);
+    expect(sampler.sample()).toMatchObject({ maxFrameMs: 16, longFrames: 0, skippedGaps: 0 });
+  });
 });

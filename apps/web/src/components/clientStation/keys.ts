@@ -1,5 +1,5 @@
 import type { MessageKey } from "@/i18n";
-import type { HealthLayer, HealthReasonCode, HealthState } from "@/lib/telemetry";
+import type { BenchmarkStopReason, HealthLayer, HealthReasonCode, HealthState, ReuseReason } from "@/lib/telemetry";
 import type { PillTone } from "@/components/ui";
 
 /** i18n keys for the telemetry state codes; the English identifiers stay in logic and diagnostics. */
@@ -37,4 +37,20 @@ export const REASON_KEYS: Record<HealthReasonCode, MessageKey> = {
   streams_missing: "clientStation.reasonStreamsMissing",
   bitrate_short: "clientStation.reasonBitrateShort",
   insufficient_data: "clientStation.reasonInsufficientData",
+};
+
+export const REUSE_REASON_KEYS: Record<ReuseReason, MessageKey> = {
+  browser_changed: "clientStation.benchReasonBrowser",
+  browser_version_changed: "clientStation.benchReasonBrowserVersion",
+  gpu_changed: "clientStation.benchReasonGpu",
+  app_version_changed: "clientStation.benchReasonApp",
+  pipeline_changed: "clientStation.benchReasonPipeline",
+  too_old: "clientStation.benchReasonOld",
+};
+
+/** Why a run ended early, for the stop reasons that need an explanation to the operator. */
+export const STOP_REASON_KEYS: Partial<Record<BenchmarkStopReason, MessageKey>> = {
+  saturated: "clientStation.benchStoppedSaturated",
+  decoder_error: "clientStation.benchStoppedDecoder",
+  frame_gap: "clientStation.benchStoppedFrameGap",
 };
