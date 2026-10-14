@@ -207,7 +207,7 @@ func NewDeviceProbe(transport http.RoundTripper) DeviceProber {
 	}
 	return func(ctx context.Context, endpoint onvif.Endpoint, username, password string) (ProbeResult, error) {
 		var credentials *onvif.Credentials
-		if username != "" || password != "" {
+		if username != "" {
 			credentials = onvif.NewCredentials(username, password)
 		}
 		client := onvif.NewClient(transport, onvif.Config{
@@ -217,18 +217,63 @@ func NewDeviceProbe(transport http.RoundTripper) DeviceProber {
 			Credentials:  credentials,
 		})
 		device := onvif.NewDeviceClient(client, endpoint)
+
 		info, err := device.GetDeviceInformation(ctx)
+		var clock onvif.DeviceClock
+		if err != nil && credentials != nil {
+			var callErr *onvif.CallError
+			if errors.As(err, &callErr) && callErr.Code == "authentication_failed" {
+				// Clock skew compensation: Query unauthenticated GetSystemDateAndTime to detect camera clock offset.
+				unauthClient := onvif.NewClient(transport, onvif.Config{
+					Timeout:      probeOperationTimeout,
+					MaxBodyBytes: 64 << 10,
+					MaxAttempts:  1,
+				})
+				unauthDevice := onvif.NewDeviceClient(unauthClient, endpoint)
+				if unauthClock, clockErr := unauthDevice.GetSystemDateAndTime(ctx); clockErr == nil {
+					clock = unauthClock
+					if clock.UTC.Date.Year >= 2000 {
+						camTime := time.Date(
+							clock.UTC.Date.Year, time.Month(clock.UTC.Date.Month), clock.UTC.Date.Day,
+							clock.UTC.Time.Hour, clock.UTC.Time.Minute, clock.UTC.Time.Second, 0, time.UTC,
+						)
+						timeOffset := camTime.Sub(time.Now().UTC())
+						client.SetTimeOffset(timeOffset)
+						// Retry authenticated call with compensated time offset
+						info, err = device.GetDeviceInformation(ctx)
+					}
+				}
+				// If still failing, attempt unauthenticated GetDeviceInformation as last resort
+				if err != nil {
+					if unauthInfo, unauthErr := unauthDevice.GetDeviceInformation(ctx); unauthErr == nil {
+						info = unauthInfo
+						err = nil
+					}
+				}
+			}
+		}
 		if err != nil {
 			return ProbeResult{}, err
 		}
+
+		// Services discovery: Try GetServices (ONVIF 2.0+), fallback to GetCapabilities (ONVIF 1.0)
 		services, err := device.GetServices(ctx)
-		if err != nil {
-			return ProbeResult{}, err
+		if err != nil || len(services) == 0 {
+			if capsServices, capsErr := device.GetCapabilities(ctx); capsErr == nil && len(capsServices) > 0 {
+				services = capsServices
+				err = nil
+			} else if err != nil && len(services) == 0 {
+				// Don't fail the probe if services enumeration fails but we got valid device information
+				services = []onvif.Service{}
+				err = nil
+			}
 		}
-		clock, err := device.GetSystemDateAndTime(ctx)
-		if err != nil {
-			return ProbeResult{}, err
+
+		// If clock wasn't retrieved during skew compensation, retrieve it now
+		if clock.DateTimeType == "" && clock.UTC.Date.Year == 0 {
+			clock, _ = device.GetSystemDateAndTime(ctx)
 		}
+
 		return ProbeResult{Information: info, Services: services, Clock: clock}, nil
 	}
 }
