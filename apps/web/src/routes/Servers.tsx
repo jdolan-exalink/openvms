@@ -982,11 +982,6 @@ function AgentInstallDialog({
   const secureBrowser = location.protocol === "https:";
   const httpsRedirect = useHTTPSRedirect(passwordInputRef, pendingPasswordRef);
 
-  useEffect(() => {
-    if (!form.host && server.base_url) {
-      setForm((prev) => ({ ...prev, host: extractServerHost(server.base_url) }));
-    }
-  }, [server.base_url]);
 
   const start = useMutation({
     mutationFn: async ({ host, port, password }: { host: string; port: number; password: string }) => {

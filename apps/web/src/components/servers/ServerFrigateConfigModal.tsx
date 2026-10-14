@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Activity,
@@ -94,19 +94,18 @@ export function ServerFrigateConfigModal({
   const rawQuery = useQuery(serverFrigateRawQuery(server.id));
   const revisionsQuery = useQuery(serverFrigateRevisionsQuery(server.id));
 
-  // Local YAML state
-  const [yamlText, setYamlText] = useState("");
-  const [initialYaml, setInitialYaml] = useState("");
+  // Local YAML state override
+  const [customYaml, setCustomYaml] = useState<string | null>(null);
+  const initialYaml = rawQuery.data?.yaml ?? "";
+  const yamlText = customYaml ?? initialYaml;
+  const isDirty = customYaml !== null && customYaml !== initialYaml;
 
-  useEffect(() => {
-    if (rawQuery.data?.yaml !== undefined) {
-      setYamlText(rawQuery.data.yaml);
-      setInitialYaml(rawQuery.data.yaml);
-    }
-  }, [rawQuery.data?.yaml]);
-
-  // Track if modified
-  const isDirty = yamlText !== initialYaml;
+  const setYamlText = (next: string | ((prev: string) => string)) => {
+    setCustomYaml((prevCustom) => {
+      const current = prevCustom ?? initialYaml;
+      return typeof next === "function" ? next(current) : next;
+    });
+  };
 
   // Parsed quick values from YAML
   const mqttHost = useMemo(() => extractYamlValue(yamlText, ["mqtt", "host"]) ?? "", [yamlText]);
@@ -149,7 +148,7 @@ export function ServerFrigateConfigModal({
     },
     onSuccess: async () => {
       setSaveSuccess(true);
-      setInitialYaml(yamlText);
+      setCustomYaml(null);
       await qc.invalidateQueries({ queryKey: ["servers", server.id] });
       await qc.invalidateQueries({ queryKey: ["servers", server.id, "frigate-raw"] });
       await qc.invalidateQueries({ queryKey: ["servers", server.id, "frigate-revisions"] });
@@ -168,6 +167,7 @@ export function ServerFrigateConfigModal({
     },
     onSuccess: async () => {
       setConfirmRollback(null);
+      setCustomYaml(null);
       await qc.invalidateQueries({ queryKey: ["servers", server.id] });
       await qc.invalidateQueries({ queryKey: ["servers", server.id, "frigate-raw"] });
       await qc.invalidateQueries({ queryKey: ["servers", server.id, "frigate-revisions"] });
@@ -610,7 +610,7 @@ export function ServerFrigateConfigModal({
                     size="sm"
                     variant="text"
                     disabled={!isDirty}
-                    onClick={() => setYamlText(initialYaml)}
+                    onClick={() => setCustomYaml(null)}
                   >
                     <Icon icon={RotateCcw} size="xs" />
                     Descartar cambios

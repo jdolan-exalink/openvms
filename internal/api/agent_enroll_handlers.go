@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/provision"
@@ -31,7 +32,7 @@ func (h *Handlers) EnrollAgent(ctx context.Context, r gen.EnrollAgentRequestObje
 	if err != nil {
 		return nil, err
 	}
-	if res != nil {
+	if res != nil && res.Record.ServerID != uuid.Nil && h.Provision != nil {
 		// #nosec G118 -- asynchronous sweep outlives HTTP request
 		go func() {
 			sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)

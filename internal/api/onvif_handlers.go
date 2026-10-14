@@ -149,6 +149,12 @@ func (h *Handlers) CheckCameraOnvif(ctx context.Context, r gen.CheckCameraOnvifR
 		}, nil
 	}
 
+	if h.Provision == nil {
+		return gen.CheckCameraOnvif400JSONResponse{
+			BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "provision_unavailable", Message: "Servicio de provisionamiento no disponible."},
+		}, nil
+	}
+
 	probeReq := provision.OnvifProbeRequest{
 		Endpoint: endpoint,
 		Username: username,
@@ -240,6 +246,10 @@ func (h *Handlers) SweepServerCamerasOnvif(ctx context.Context, a authz.Actor, s
 		}
 	} else if a.UserID == uuid.Nil && !a.System {
 		a = authz.SystemActor()
+	}
+
+	if h.Provision == nil || h.Inv == nil {
+		return gen.CheckServerCamerasOnvif200JSONResponse{}, nil
 	}
 
 	cams, err := h.Inv.ListServerCameras(ctx, a, serverID)

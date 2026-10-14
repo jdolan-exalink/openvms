@@ -185,7 +185,9 @@ export function Cameras() {
       if (c.onvif_endpoint) {
         try {
           if (new URL(c.onvif_endpoint).hostname.toLowerCase() === cleanHost) return true;
-        } catch {}
+        } catch {
+          // Ignore malformed URL
+        }
       }
 
       const remote = c.remote_name.toLowerCase();
