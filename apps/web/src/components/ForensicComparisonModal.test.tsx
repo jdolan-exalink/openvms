@@ -190,4 +190,24 @@ describe("ForensicComparisonModal", () => {
     const transformStage = screen.getByTestId("enhanced-layer");
     expect(transformStage.getAttribute("style")).toContain("translate(");
   });
+
+  it("gracefully falls back to valid 1x1 image when canvas toDataURL throws SecurityError", () => {
+    const brokenCanvas = createMockCanvas(640, 480);
+    brokenCanvas.toDataURL = vi.fn(() => {
+      throw new Error("SecurityError: The operation is insecure.");
+    });
+
+    const brokenResult: ForensicResult = {
+      ...mockResult,
+      originalCanvas: brokenCanvas,
+      enhancedCanvas: brokenCanvas,
+    };
+
+    render(
+      <ForensicComparisonModal isOpen={true} onClose={vi.fn()} result={brokenResult} />,
+    );
+
+    const enhancedImg = screen.getByAltText("Mejorada");
+    expect(enhancedImg.getAttribute("src")).toContain("data:image/png;base64,iVBORw0KGgo");
+  });
 });

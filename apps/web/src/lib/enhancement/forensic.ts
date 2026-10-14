@@ -383,9 +383,14 @@ export class ForensicEnhancementEngine {
     const currentH = origCanvas.height;
 
     if (origCtx) {
-      origCtx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, origCanvas.width, origCanvas.height);
-      const origImgData = origCtx.getImageData(0, 0, origCanvas.width, origCanvas.height);
-      currentPixels = new Uint8ClampedArray(origImgData.data);
+      try {
+        origCtx.drawImage(source, sx, sy, sWidth, sHeight, 0, 0, origCanvas.width, origCanvas.height);
+        const origImgData = origCtx.getImageData(0, 0, origCanvas.width, origCanvas.height);
+        currentPixels = new Uint8ClampedArray(origImgData.data);
+      } catch {
+        currentPixels = new Uint8ClampedArray(currentW * currentH * 4);
+        currentPixels.fill(128);
+      }
     } else {
       // Headless / jsdom test environment fallback
       currentPixels = new Uint8ClampedArray(currentW * currentH * 4);

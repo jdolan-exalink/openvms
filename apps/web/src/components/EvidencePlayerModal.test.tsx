@@ -62,6 +62,7 @@ describe("EvidencePlayerModal Enhancement Integration", () => {
 
     const video = document.body.querySelector("video") as HTMLVideoElement;
     expect(video).toBeInTheDocument();
+    expect(video.getAttribute("crossOrigin")).toBe("anonymous");
     expect(video.style.filter).toBe("");
 
     // Open options popover

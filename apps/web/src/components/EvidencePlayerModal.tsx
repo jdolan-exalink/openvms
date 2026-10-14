@@ -650,6 +650,7 @@ function EvidenceVideoTile({
                 onVideoRef(item.id, el);
               }}
               src={videoSrc}
+              crossOrigin="anonymous"
               muted={isMuted}
               playsInline
               autoPlay

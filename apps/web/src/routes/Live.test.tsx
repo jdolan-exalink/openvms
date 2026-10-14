@@ -4,12 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { liveSelectionKey, parseSelection, serializeSelection } from "@/lib/liveGrid";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { FEATURES_OVERRIDE_KEY } from "@/lib/features";
-import { DEFAULT_WARM_SESSION_TTL_MS, PlayerSessionManager } from "@/lib/live/PlayerSessionManager";
+import { PlayerSessionManager } from "@/lib/live/PlayerSessionManager";
 import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { playerMetrics } from "@/lib/live/playerMetrics";
 import { saveFisheyeConfig } from "@/lib/fisheye/storage";
 import { DEFAULT_FISHEYE_CALIBRATION, DEFAULT_FISHEYE_CONFIG } from "@/lib/fisheye/types";
+import { classifyHealth, telemetryRuntime } from "@/lib/telemetry";
 import { Live, useTileOverlayVisibility } from "./Live";
 
 afterEach(() => {
@@ -711,17 +712,7 @@ describe("Live", () => {
       expect(closeSub).not.toHaveBeenCalled();
       expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
 
-      if (persistent) {
-        // The manager keeps the released main session WARM until its TTL evicts it.
-        expect(closeMain).not.toHaveBeenCalled();
-        act(() => { vi.advanceTimersByTime(DEFAULT_WARM_SESSION_TTL_MS - 1); });
-        expect(closeMain).not.toHaveBeenCalled();
-        act(() => { vi.advanceTimersByTime(2); });
-      } else {
-        // A private player owns its session and closes it when the target layer unmounts.
-        expect(closeMain).toHaveBeenCalledTimes(1);
-        act(() => { vi.advanceTimersByTime(DEFAULT_WARM_SESSION_TTL_MS + 1); });
-      }
+      // The main session is discarded and closed immediately on unmaximize in both modes (spec §10).
       expect(closeMain).toHaveBeenCalledTimes(1);
       expect(closeSub).not.toHaveBeenCalled();
       expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
@@ -1464,7 +1455,7 @@ describe("Live with persistent players (P0 acceptance)", () => {
         }),
       ),
     );
-    renderPage(LiveWithSessions);
+    const view = renderPage(LiveWithSessions);
     fireEvent.click(await screen.findByRole("button", { name: /Puerta norte/ }));
     fireEvent.click(await screen.findByRole("button", { name: /Porton sur/ }));
     // Both sessions open asynchronously: wait for both pictures and both sockets, or the
@@ -1474,7 +1465,33 @@ describe("Live with persistent players (P0 acceptance)", () => {
       expect(screen.getByLabelText("Cuadro 2").querySelector("video")).not.toBeNull();
       expect(FakeSocket.created).toBe(2);
     });
+    return view;
   }
+
+  it("keeps the telemetry overlay out of the grid and idle by default", async () => {
+    await renderPersistent();
+    expect(screen.queryByRole("group", { name: "Métricas del videowall" })).not.toBeInTheDocument();
+    expect(telemetryRuntime.consumers()).toBe(0);
+  });
+
+  it("shows the telemetry overlay beside the grid, without taking a tile", async () => {
+    localStorage.setItem("openvms.live.telemetryOverlay", "1");
+    await renderPersistent();
+    const overlay = screen.getByRole("group", { name: "Métricas del videowall" });
+    const grid = screen.getByRole("group", { name: "Grilla de video" });
+    expect(grid.contains(overlay)).toBe(false);
+    expect(overlay.parentElement).toBe(grid.parentElement);
+    expect(screen.getAllByLabelText(/^Cuadro \d+$/)).toHaveLength(4);
+    expect(telemetryRuntime.consumers()).toBe(1);
+  });
+
+  it("reports the visible cameras to the telemetry runtime while mounted", async () => {
+    const spy = vi.spyOn(telemetryRuntime, "setVisibleCameras");
+    const { unmount } = await renderPersistent();
+    expect(spy).toHaveBeenLastCalledWith(2);
+    unmount();
+    expect(spy).toHaveBeenLastCalledWith(0);
+  });
 
   it("closes all streams without changing the selected grid dimensions", async () => {
     await renderPersistent();
@@ -1901,5 +1918,36 @@ describe("Live with persistent players (P0 acceptance)", () => {
       expect(saved?.columns).toBe(1);
       expect(saved?.tiles).toEqual([{ camera_id: "cam-fe-3", quality: "main" }]);
     });
+  });
+
+  it("displays operator warning banner when station is saturated under adaptive streaming and allows dismissal", async () => {
+    localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ adaptiveStreaming: true }));
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    const spy = vi.spyOn(telemetryRuntime, "getView").mockReturnValue({
+      snapshot: { metrics: null, streams: [] },
+      history: [],
+      health: { ...classifyHealth([]), state: "saturated" },
+      state: "saturated",
+      bottleneck: { layer: "decode", confidence: "high", estimated: true, evidence: ["dropped frames"] },
+    });
+
+    renderPage(Live);
+    fireEvent.click(await screen.findByText("Puerta norte"));
+    await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+
+    const banner = await screen.findByText(/Rendimiento del videowall comprometido/);
+    expect(banner.textContent).toContain("Decodificación de video");
+
+    const dismissBtn = screen.getByRole("button", { name: "Descartar advertencia" });
+    fireEvent.click(dismissBtn);
+
+    expect(screen.queryByText(/Rendimiento del videowall comprometido/)).toBeNull();
+    spy.mockRestore();
   });
 });

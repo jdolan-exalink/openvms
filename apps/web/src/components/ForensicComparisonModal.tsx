@@ -70,24 +70,27 @@ export function ForensicComparisonModal({
   } | null>(null);
   const [isPanning, setIsPanning] = useState(false);
 
+  const TRANSPARENT_1X1_PNG =
+    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
   // Convert canvases to data URLs for reliable rendering and export
   const originalCanvas = result?.originalCanvas;
   const enhancedCanvas = result?.enhancedCanvas;
   const originalUrl = useMemo(() => {
     if (!originalCanvas) return "";
     try {
-      return originalCanvas.toDataURL("image/png") || "data:image/png;base64,mock";
+      return originalCanvas.toDataURL("image/png") || TRANSPARENT_1X1_PNG;
     } catch {
-      return "data:image/png;base64,mock";
+      return TRANSPARENT_1X1_PNG;
     }
   }, [originalCanvas]);
 
   const enhancedUrl = useMemo(() => {
     if (!enhancedCanvas) return "";
     try {
-      return enhancedCanvas.toDataURL("image/png") || "data:image/png;base64,mock";
+      return enhancedCanvas.toDataURL("image/png") || TRANSPARENT_1X1_PNG;
     } catch {
-      return "data:image/png;base64,mock";
+      return TRANSPARENT_1X1_PNG;
     }
   }, [enhancedCanvas]);
 

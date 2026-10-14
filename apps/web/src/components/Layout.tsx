@@ -11,6 +11,7 @@ import { parseRecSearch } from "@/lib/liveRec";
 import { PlayerSessionProvider } from "@/lib/live/PlayerSessionProvider";
 import { VideoSurfaceLayer } from "@/lib/live/SurfaceLayer";
 import { useRealtimeFeed } from "@/lib/realtime";
+import { startupProfile } from "@/lib/telemetry";
 import { useFeatures, type FeatureFlags } from "@/lib/features";
 import { useT } from "@/i18n";
 import { AgentJobProvider } from "@/lib/agentJobs/AgentJobProvider";
@@ -43,6 +44,12 @@ export function Layout() {
   const [omniboxOpen, setOmniboxOpen] = useState(false);
   const logout = useLogout();
   const install = useInstallSheet();
+
+  // Light, idle-scheduled station profile (spec section 8). It only reads capabilities and the
+  // cached benchmark; the heavy benchmark is never started from here.
+  useEffect(() => {
+    startupProfile.start();
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {

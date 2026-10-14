@@ -25,6 +25,7 @@ const messages = {
   audit: "Auditoría",
   watermark: "Marca de agua",
   myAccount: "Mi cuenta",
+  clientStation: "Estación cliente",
   operations: "Operaciones",
   brand: "OpenVMS",
   workspace: "Espacio de trabajo",

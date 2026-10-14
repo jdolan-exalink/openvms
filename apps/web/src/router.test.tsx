@@ -51,3 +51,20 @@ describe("router", () => {
     expect(router.state.location.pathname).toBe("/live");
   });
 });
+
+describe("router: client station", () => {
+  it("resolves /client-station inside the settings layout", async () => {
+    stubLiveRoutes();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/client-station"] }), context: { queryClient: client } });
+
+    render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Estación cliente", level: 1 })).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/client-station");
+  });
+});
