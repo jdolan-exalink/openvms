@@ -160,3 +160,37 @@ virbr0:       0       0    0    0    0     0          0         0        0      
 		}
 	}
 }
+
+func TestNetworkSamplerEnrichesInterfaceMetadataAndRole(t *testing.T) {
+	now := time.Unix(100, 0)
+	body := networkFixture
+	s := newNetworkSampler(func() ([]byte, error) { return []byte(body), nil }, func() time.Time { return now })
+	s.discover = func() ([]InterfaceInfo, error) {
+		return []InterfaceInfo{
+			{
+				Name:      "eth0",
+				IPAddress: "192.168.1.100",
+				Netmask:   "255.255.255.0",
+				Subnet:    "192.168.1.0/24",
+				MAC:       "00:11:22:33:44:55",
+				Gateway:   "192.168.1.1",
+				IsDefault: true,
+				Role:      "monitoring",
+			},
+		}, nil
+	}
+	s.Sample()
+	now = now.Add(2 * time.Second)
+	body = strings.ReplaceAll(body, "1000 1", "3000 1")
+	got := s.Sample()
+	if len(got.Interfaces) != 1 {
+		t.Fatalf("expected 1 interface, got %d", len(got.Interfaces))
+	}
+	iface := got.Interfaces[0]
+	if iface.Name != "eth0" || iface.RXBytesPerSecond != 1000 {
+		t.Errorf("rate mismatch: %+v", iface)
+	}
+	if iface.IPAddress != "192.168.1.100" || iface.Subnet != "192.168.1.0/24" || iface.Role != "monitoring" || !iface.IsDefault || iface.Gateway != "192.168.1.1" {
+		t.Errorf("metadata enrichment mismatch: %+v", iface)
+	}
+}

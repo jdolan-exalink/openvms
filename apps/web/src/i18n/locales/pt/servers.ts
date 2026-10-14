@@ -48,6 +48,8 @@ export default {
   agentNetworkAvg: "Média",
   agentNetworkHoverHint: "Passe o cursor para ver o histórico",
   agentNetworkLive: "Ao vivo",
+  agentNetworkCameras: "Câmeras",
+  agentNetworkMonitoring: "Monitoramento",
   agentBinaryOutdated: "O binário instalado do agente está desatualizado",
   agentBinaryOutdatedStatus: "O binário do agente está desatualizado conforme verificação",
   agentStarting: "Iniciando operação do agente…",

@@ -214,9 +214,38 @@ func serverAgent(s provision.AgentView) gen.ServerAgent {
 	if len(s.NetworkInterfaces) > 0 {
 		interfaces := make([]gen.ServerAgentNetworkInterface, 0, len(s.NetworkInterfaces))
 		for _, network := range s.NetworkInterfaces {
-			interfaces = append(interfaces, gen.ServerAgentNetworkInterface{
-				Name: network.Name, RxBytesPerSecond: float32(network.RXBytesPerSecond), TxBytesPerSecond: float32(network.TXBytesPerSecond),
-			})
+			iface := gen.ServerAgentNetworkInterface{
+				Name:             network.Name,
+				RxBytesPerSecond: float32(network.RXBytesPerSecond),
+				TxBytesPerSecond: float32(network.TXBytesPerSecond),
+			}
+			if network.IPAddress != "" {
+				ip := network.IPAddress
+				iface.IpAddress = &ip
+			}
+			if network.MAC != "" {
+				mac := network.MAC
+				iface.MacAddress = &mac
+			}
+			if network.Subnet != "" {
+				subnet := network.Subnet
+				iface.Subnet = &subnet
+			}
+			if network.Netmask != "" {
+				netmask := network.Netmask
+				iface.Netmask = &netmask
+			}
+			if network.Gateway != "" {
+				gw := network.Gateway
+				iface.Gateway = &gw
+			}
+			isDef := network.IsDefault
+			iface.IsDefault = &isDef
+			if network.Role != "" {
+				role := gen.ServerAgentNetworkInterfaceRole(network.Role)
+				iface.Role = &role
+			}
+			interfaces = append(interfaces, iface)
 		}
 		out.NetworkInterfaces = &interfaces
 	}

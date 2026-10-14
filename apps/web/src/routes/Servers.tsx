@@ -1,6 +1,6 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, ArrowDown, ArrowUp, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
+import { Activity, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
@@ -1466,10 +1466,15 @@ function AgentMonitor({ serverId }: { serverId: string }) {
 export function isLanInterfaceName(name: string): boolean {
   if (name === "lo" || name.startsWith("lo:")) return false;
   const virtualPrefixes = [
-    "docker", "br-", "veth", "virbr", "dummy", "tun", "tap",
+    "docker", "veth", "virbr", "dummy", "tun", "tap",
     "flannel", "cni", "kube", "vnet", "sit", "ip6tnl",
   ];
-  return !virtualPrefixes.some((prefix) => name.startsWith(prefix));
+  if (virtualPrefixes.some((prefix) => name.startsWith(prefix))) return false;
+  if (name.startsWith("br-")) {
+    const suffix = name.slice(3);
+    if (suffix.length >= 8 && /^[0-9a-f]+$/i.test(suffix)) return false;
+  }
+  return true;
 }
 
 export function formatNetworkRate(bytesPerSec: number): string {
@@ -1605,13 +1610,30 @@ function LanInterfaceCard({
         {t("servers.agentNetworkRate", { name: iface.name, rx: formatNetworkRate(rx), tx: formatNetworkRate(tx) })}
       </span>
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <span
             aria-hidden
             className="size-1.5 rounded-full bg-ok animate-pulse"
           />
           <span className="font-mono font-bold text-xs text-surface-on">{iface.name}</span>
-          <span className="rounded bg-primary/15 px-1 py-0.2 text-[10px] font-semibold text-primary uppercase">LAN</span>
+          {iface.role === "cameras" ? (
+            <span className="rounded bg-sky-500/15 px-1 py-0.2 text-[10px] font-semibold text-sky-400 uppercase inline-flex items-center gap-1" title={t("servers.agentNetworkCameras")}>
+              <Icon icon={Camera} size="xs" />
+              <span>{t("servers.agentNetworkCameras")}</span>
+            </span>
+          ) : iface.role === "monitoring" ? (
+            <span className="rounded bg-emerald-500/15 px-1 py-0.2 text-[10px] font-semibold text-emerald-400 uppercase inline-flex items-center gap-1" title={t("servers.agentNetworkMonitoring")}>
+              <Icon icon={Activity} size="xs" />
+              <span>{t("servers.agentNetworkMonitoring")}</span>
+            </span>
+          ) : (
+            <span className="rounded bg-primary/15 px-1 py-0.2 text-[10px] font-semibold text-primary uppercase">LAN</span>
+          )}
+          {(iface.subnet || iface.ip_address) && (
+            <span className="font-mono text-[10px] text-muted">
+              {iface.subnet || iface.ip_address}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2.5 font-mono text-[11px]">
           <span className="inline-flex items-center gap-0.5 text-primary" title={t("servers.agentNetworkPeakRx")}>
@@ -1639,7 +1661,7 @@ function LanInterfaceCard({
       {isHovered && (
         <div
           role="tooltip"
-          className="absolute left-0 bottom-full mb-2 z-40 w-60 rounded-m3-lg border border-surface-3 bg-surface-base/95 p-3 shadow-2xl backdrop-blur flex flex-col gap-2.5 pointer-events-none"
+          className="absolute left-0 bottom-full mb-2 z-40 w-64 rounded-m3-lg border border-surface-3 bg-surface-base/95 p-3 shadow-2xl backdrop-blur flex flex-col gap-2.5 pointer-events-none"
         >
           <div className="flex items-center justify-between border-b border-surface-3/60 pb-1.5">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-surface-on">
@@ -1691,6 +1713,43 @@ function LanInterfaceCard({
               <span className="font-mono font-semibold text-surface-on">{formatNetworkRate(peakTx)}</span>
             </div>
           </div>
+
+          {(iface.ip_address || iface.subnet || iface.mac_address || iface.gateway || iface.role) && (
+            <div className="flex flex-col gap-1 border-t border-surface-3/60 pt-2 text-[10px] text-muted">
+              {iface.role && (
+                <div className="flex justify-between">
+                  <span>Rol:</span>
+                  <span className="font-semibold text-surface-on capitalize">
+                    {iface.role === "cameras" ? (t("servers.agentNetworkCameras") + " (CCTV)") : iface.role === "monitoring" ? (t("servers.agentNetworkMonitoring") + " (Gestión)") : "LAN"}
+                  </span>
+                </div>
+              )}
+              {iface.ip_address && (
+                <div className="flex justify-between font-mono">
+                  <span>IP:</span>
+                  <span className="text-surface-on">{iface.ip_address}</span>
+                </div>
+              )}
+              {iface.subnet && (
+                <div className="flex justify-between font-mono">
+                  <span>Subred:</span>
+                  <span className="text-surface-on">{iface.subnet}</span>
+                </div>
+              )}
+              {iface.gateway && (
+                <div className="flex justify-between font-mono">
+                  <span>Gateway:</span>
+                  <span className="text-surface-on">{iface.gateway}</span>
+                </div>
+              )}
+              {iface.mac_address && (
+                <div className="flex justify-between font-mono">
+                  <span>MAC:</span>
+                  <span className="text-surface-on">{iface.mac_address}</span>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

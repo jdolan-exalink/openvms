@@ -1212,6 +1212,60 @@ describe("Servers", () => {
       fireEvent.mouseLeave(card);
       await waitFor(() => expect(screen.queryByRole("tooltip")).not.toBeInTheDocument());
     });
+
+    it("LanNetworkMeters displays cameras and monitoring roles with IP and subnet metadata", async () => {
+      clearNetworkHistory();
+      const multiNicInterfaces = [
+        {
+          name: "eth0",
+          rx_bytes_per_second: 5242880,
+          tx_bytes_per_second: 51200,
+          ip_address: "192.168.2.10",
+          subnet: "192.168.2.0/24",
+          mac_address: "00:11:22:33:44:01",
+          is_default: false,
+          role: "cameras" as const,
+        },
+        {
+          name: "eth1",
+          rx_bytes_per_second: 12288,
+          tx_bytes_per_second: 36864,
+          ip_address: "10.0.0.50",
+          subnet: "10.0.0.0/24",
+          gateway: "10.0.0.1",
+          mac_address: "00:11:22:33:44:02",
+          is_default: true,
+          role: "monitoring" as const,
+        },
+      ];
+
+      renderPage(() => (
+        <LanNetworkMeters
+          serverId="srv-sodecar"
+          interfaces={multiNicInterfaces}
+          sampledAt={new Date().toISOString()}
+        />
+      ));
+
+      expect(await screen.findByText("eth0")).toBeInTheDocument();
+      expect(screen.getByText("eth1")).toBeInTheDocument();
+
+      // Check role badges
+      expect(screen.getByText(/Cámaras|Cameras/i)).toBeInTheDocument();
+      expect(screen.getByText(/Monitoreo|Monitoring/i)).toBeInTheDocument();
+
+      // Check subnets
+      expect(screen.getByText("192.168.2.0/24")).toBeInTheDocument();
+      expect(screen.getByText("10.0.0.0/24")).toBeInTheDocument();
+
+      // Tooltip contains detailed network breakdown
+      const cameraCard = screen.getByRole("group", { name: /eth0 RX/i });
+      fireEvent.mouseEnter(cameraCard);
+      const tooltip = await screen.findByRole("tooltip");
+      expect(within(tooltip).getByText("192.168.2.10")).toBeInTheDocument();
+      expect(within(tooltip).getByText("00:11:22:33:44:01")).toBeInTheDocument();
+      fireEvent.mouseLeave(cameraCard);
+    });
   });
 
   describe("Agent uninstallation", () => {
