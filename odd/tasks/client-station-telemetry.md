@@ -35,8 +35,8 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 - [x] CST-01 — Telemetry model + `ClientCapabilitiesService`: platform-neutral types; system/screen/CPU/memory/WebGL+GPU detection; MediaCapabilities codec matrix (H.264, HEVC, VP8, VP9, AV1 × CCTV profiles) with supported/smooth/powerEfficient. Route: inline (new isolated module).
 - [x] CST-02 — Per-session stream stats: bytes received from the socket, `getVideoPlaybackQuality` (decoded/dropped), video resolution, reconnects; `PlayerSessionManager.sessions()` accessor. Route: delegated writer.
 - [x] CST-03 — `VideoTelemetryService`: 1 Hz aggregator, 60 s ring buffer, totals and per-camera bitrate/fps, main/sub counts, presentation frame-time sampler. Route: delegated writer.
-- [ ] CST-04 — `PerformanceClassifier` (Óptimo/Aceptable/Al límite/Saturado) and bottleneck estimator (network / transport / decode / render), pure functions with stated confidence.
-- [ ] CST-05 — `DiagnosticsExporter`: redacted JSON + text for "Copiar diagnóstico".
+- [x] CST-04 — `PerformanceClassifier` (Óptimo/Aceptable/Al límite/Saturado) and bottleneck estimator (network / transport / decode / render), pure functions with stated confidence.
+- [x] CST-05 — `DiagnosticsExporter`: redacted JSON + text for "Copiar diagnóstico".
 - [ ] CST-06 — UI: "Estación cliente" settings section (capabilities, codecs, bandwidth meter with 60 s chart, health, advanced panel, copy diagnostics).
 - [ ] CST-07 — Developer overlay on the Live grid, toggleable at negligible cost.
 - [ ] CST-08 — (incl. per-query timeout in `collectClientCapabilities` for the startup light profile) `ClientBenchmarkService` (3–5 s progressive load with real OpenVMS substreams, stops before severe degradation) + IndexedDB cache + startup profile reuse/invalidation.
@@ -86,3 +86,7 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
   - Stall-unlisten test is now behavioral (dispatch `waiting` after close).
   - Own finding: `droppedFrameRatio` was dropped/(decoded+dropped) but `totalVideoFrames` already includes dropped frames → now dropped/decoded; type docs state the semantics.
   - Accepted risk (documented): the global session registry holds strong refs until `close()`; every session type closes today.
+- 2026-10-14: PR-2 opened as #39 (base: PR-1 branch until #38 merges). Review of `origin/main..856f958` (lineage `review-a4a25e1db5e9fd81`): user granted; approved; acknowledged; boundary → `856f958`. Advisory R3-001 (a throwing `streamStats()` aborts the whole tick) accepted as hardening, applied in PR-3.
+- 2026-10-14: CST-04 + CST-05 done on `feat/client-station-telemetry-3-classifier` (route: delegated writer — 4 modules + tests). RED: new test files failed on missing modules; 3 classifier expectations then corrected (writer arithmetic, thresholds unchanged). GREEN: `npx vitest run src/lib/telemetry` 104/104, typecheck, eslint, `git diff --check` clean; parent spot check green. ~1130 authored lines (source ~665, tests ~470).
+  - `classifyHealth` (10-sample window, sustained ≥30% rule, layers network/transport/decode/render, presentation fps alone caps at `acceptable`), `estimateBottleneck` (always `estimated` unless direct metrics; network only vs an expected bitrate), `createHealthTracker` hysteresis (downgrade after 2, upgrade after 5), `buildDiagnostics`/`formatDiagnosticsText` with recursive redaction and caps, `copyDiagnostics`, Spanish `labels.ts`.
+  - Thresholds are untuned defaults (`HEALTH_THRESHOLDS`); the benchmark PR may adjust them.

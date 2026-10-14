@@ -4,3 +4,7 @@ export * from "./sessionRegistry";
 export * from "./ringBuffer";
 export * from "./frameSampler";
 export * from "./videoTelemetry";
+export * from "./performanceClassifier";
+export * from "./bottleneck";
+export * from "./diagnostics";
+export * from "./labels";
