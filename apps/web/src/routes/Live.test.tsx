@@ -608,7 +608,7 @@ describe("Live", () => {
     expect(saved?.tiles.slice(0, 3).map((tile) => tile && "quality" in tile ? tile.quality : null)).toEqual(["sub", "sub", "main"]);
   });
 
-  it("waits more than five seconds after maximize before switching and restores sub on unmaximize", async () => {
+  it("promotes to main immediately on maximize and restores sub on unmaximize", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({
       "/api/v1/me": meResponse,
@@ -624,9 +624,6 @@ describe("Live", () => {
     vi.useFakeTimers();
     fireEvent.doubleClick(tile);
 
-    act(() => { vi.advanceTimersByTime(5_000); });
-    expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(false);
-    act(() => { vi.advanceTimersByTime(1); });
     expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(true);
 
     fireEvent.doubleClick(tile);
@@ -634,6 +631,25 @@ describe("Live", () => {
     expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
     act(() => { vi.advanceTimersByTime(10_000); });
     expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
+  });
+
+  it("pins the telemetry meter below the scrolling camera list", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      ...emptyCatalogs,
+    })));
+
+    renderPage(Live);
+    const row = await screen.findByText("Puerta norte");
+    const sidebar = document.querySelector('[data-live-sidebar="true"]') as HTMLElement;
+    const meter = within(sidebar).getByTestId("video-telemetry-meter");
+    expect(meter).toHaveClass("shrink-0");
+    const scroller = row.closest(".overflow-y-auto") as HTMLElement;
+    expect(scroller).not.toBeNull();
+    expect(scroller.contains(meter)).toBe(false);
+    expect(scroller.nextElementSibling).toBe(meter);
   });
 
   it("keeps a tile saved on main at a single main session after maximize ends", async () => {
@@ -652,7 +668,6 @@ describe("Live", () => {
     vi.useFakeTimers();
 
     fireEvent.doubleClick(tile);
-    act(() => { vi.advanceTimersByTime(5_001); });
     fireEvent.doubleClick(tile);
     act(() => { vi.advanceTimersByTime(10_000); });
 
@@ -691,8 +706,7 @@ describe("Live", () => {
       vi.useFakeTimers();
 
       fireEvent.doubleClick(tile);
-      act(() => { vi.advanceTimersByTime(5_001); });
-      expect(subLifecycle(acquire.mock.calls)).toBe(0);
+        expect(subLifecycle(acquire.mock.calls)).toBe(0);
       expect(subLifecycle(release.mock.calls)).toBe(0);
       expect(baseVideo.isConnected).toBe(true);
       expect(tile.querySelector('[data-testid="quality-target-surface"]')).toHaveAttribute("data-quality", "main");
@@ -727,6 +741,64 @@ describe("Live", () => {
       expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
       expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
       expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
+    });
+  });
+
+  describe.each([{ persistent: false }, { persistent: true }])("rapid focus changes across cameras (persistentPlayers=$persistent)", ({ persistent }) => {
+    it("releases every superseded main session and never leaves more than one main target active", async () => {
+      if (persistent) localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true }));
+      stubBrowserAPIs();
+      localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+        { camera_id: "cam-1", quality: "sub" }, { camera_id: "cam-2", quality: "sub" }, { camera_id: "cam-3", quality: "sub" }, null,
+      ]));
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte"), camera("cam-2", "Porton sur"), camera("cam-3", "Patio")] }),
+        ...emptyCatalogs,
+      })));
+
+      renderPage(() => (
+        <PlayerSessionProvider userId="u1">
+          <Live />
+        </PlayerSessionProvider>
+      ));
+      // Tiles can remount while the selection loads, so always resolve them fresh.
+      const tileAt = (n: number) => screen.getByLabelText(`Cuadro ${n}`);
+      for (const n of [1, 2, 3]) await waitFor(() => expect(tileAt(n).querySelector("video")).not.toBeNull());
+      await waitFor(() => expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(3));
+      const mainClosers = new Map<FakeSocket, ReturnType<typeof vi.spyOn>>();
+      const trackMain = () => {
+        for (const socket of FakeSocket.instances) {
+          if (socket.url.includes("quality=main") && !mainClosers.has(socket)) mainClosers.set(socket, vi.spyOn(socket, "close"));
+        }
+      };
+      const openMainSockets = () => [...mainClosers.entries()].filter(([, close]) => close.mock.calls.length === 0).length;
+      const mainCalls = (calls: unknown[][]) => calls.filter(([, quality]) => quality === "main").length;
+      const acquire = vi.spyOn(PlayerSessionManager.prototype, "acquire");
+      const release = vi.spyOn(PlayerSessionManager.prototype, "release");
+      vi.useFakeTimers();
+
+      for (const n of [1, 2, 3]) {
+        fireEvent.doubleClick(tileAt(n));
+        trackMain();
+        expect(document.querySelectorAll('[data-testid="quality-target-surface"][data-quality="main"]')).toHaveLength(1);
+        fireEvent.doubleClick(tileAt(n));
+        trackMain();
+        expect(document.querySelectorAll('[data-testid="quality-target-surface"]')).toHaveLength(0);
+        // Private players close their main socket as soon as the target unmounts; persistent ones keep it WARM.
+        expect(openMainSockets()).toBe(persistent ? mainClosers.size : 0);
+      }
+
+      expect(mainClosers.size).toBe(3);
+      if (persistent) {
+        // The manager reuses the sub sessions of the tiles hidden while another one was maximized.
+        expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(3);
+        expect(mainCalls(release.mock.calls)).toBe(mainCalls(acquire.mock.calls));
+        act(() => { vi.advanceTimersByTime(DEFAULT_WARM_SESSION_TTL_MS + 1); });
+      }
+      expect(openMainSockets()).toBe(0);
+      for (const close of mainClosers.values()) expect(close).toHaveBeenCalledTimes(1);
+      expect(document.querySelectorAll('[data-testid="quality-target-surface"]')).toHaveLength(0);
     });
   });
 
@@ -771,7 +843,6 @@ describe("Live", () => {
     vi.useFakeTimers();
 
     fireEvent.doubleClick(tile);
-    act(() => { vi.advanceTimersByTime(5_001); });
     fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
     fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
     act(() => { vi.advanceTimersByTime(30_000); });
@@ -844,7 +915,6 @@ describe("Live", () => {
     expect(replaced.querySelectorAll("video")).toHaveLength(1);
 
     fireEvent.doubleClick(replaced);
-    act(() => { vi.advanceTimersByTime(5_001); });
     expect(screen.getByLabelText("Cuadro 1").querySelectorAll("video")).toHaveLength(2);
   });
 
@@ -1596,7 +1666,10 @@ describe("Live with persistent players (P0 acceptance)", () => {
     expect(screen.getByLabelText("Cuadro 2")).not.toHaveClass("hidden");
     expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video1);
     expect(screen.getByLabelText("Cuadro 2").querySelector("video")).toBe(video2);
-    expect(FakeSocket.created).toBe(2);
+    // Maximize now promotes to main immediately: exactly one extra (main) socket, no sub reconnects.
+    expect(FakeSocket.created).toBe(3);
+    expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(2);
+    expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
     expect(playerMetrics.get("cam-1", "sub")?.connectAttempts).toBe(1);
     expect(playerMetrics.get("cam-1", "sub")?.reconnectCount).toBe(0);
     expect(playerMetrics.get("cam-2", "sub")?.reconnectCount).toBe(0);
