@@ -201,7 +201,7 @@ func run() error {
 			return postgres.SchemaVersion(ctx, pool)
 		},
 	}
-	provisioner.OnAgentInstalled = func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) {
+	provisioner.OnAgentInstalled = func(_ context.Context, actor authz.Actor, serverID uuid.UUID) {
 		sweepCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		_, _ = handlers.SweepServerCamerasOnvif(sweepCtx, actor, serverID, nil)

@@ -42,7 +42,7 @@ func TestHeartbeatManagerTracksOnlineAndOffline(t *testing.T) {
 	}
 
 	// AllStatuses
-	statuses := hm.AllStatuses(t0.Add(45*time.Second))
+	statuses := hm.AllStatuses(t0.Add(45 * time.Second))
 	if len(statuses) != 1 || !statuses[0].Online {
 		t.Fatalf("unexpected AllStatuses: %+v", statuses)
 	}

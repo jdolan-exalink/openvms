@@ -147,7 +147,7 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 	})
 
 	t.Run("provision keepalive and configure routes mounted", func(t *testing.T) {
-		lpr := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lpr := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"status":"ok"}`))
 		})

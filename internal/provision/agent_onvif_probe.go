@@ -464,7 +464,12 @@ func (s *Service) loadProbeTLSAndAgent(ctx context.Context, actor authz.Actor, s
 		return "", 0, "", AgentTLSConfig{}, ErrAgentProbeFailed
 	}
 	if errors.Is(tlsErr, store.ErrNotFound) {
-		return row.Host, row.Port, string(token), AgentTLSConfig{SecurePort: uint32(row.Port), TrustMode: AgentTLSTrustPlaintext}, nil
+		var securePort uint32
+		if row.Port > 0 {
+			// #nosec G115 -- safe positive port conversion
+			securePort = uint32(row.Port)
+		}
+		return row.Host, row.Port, string(token), AgentTLSConfig{SecurePort: securePort, TrustMode: AgentTLSTrustPlaintext}, nil
 	}
 	if tlsErr != nil {
 		return "", 0, "", AgentTLSConfig{}, tlsErr

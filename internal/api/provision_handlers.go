@@ -168,8 +168,9 @@ func (h *Handlers) UpdateServerAgent(ctx context.Context, r gen.UpdateServerAgen
 	if err != nil {
 		return nil, err
 	}
+	// #nosec G118 -- asynchronous sweep outlives HTTP request
 	go func() {
-		sweepCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
 		_, _ = h.SweepServerCamerasOnvif(sweepCtx, a, r.ServerId, nil)
 	}()

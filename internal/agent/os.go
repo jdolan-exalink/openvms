@@ -14,10 +14,12 @@ func detectOS(etcDir string) string {
 	if etcDir == "" {
 		etcDir = "/etc"
 	}
-	path := filepath.Join(etcDir, "os-release")
+	path := filepath.Clean(filepath.Join(etcDir, "os-release"))
+	// #nosec G304 -- reading host release information
 	f, err := os.Open(path)
 	if err != nil {
 		if etcDir == "/etc" {
+			// #nosec G304 -- reading host release information fallback
 			f, err = os.Open("/usr/lib/os-release")
 		}
 		if err != nil {

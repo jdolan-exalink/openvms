@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 )
@@ -38,8 +39,13 @@ func TestReceiverEventDeduplicationAndSubscription(t *testing.T) {
 	cfg.DeduplicationWindow = 10 * time.Second
 	receiver := NewReceiver(cfg, nil)
 
-	var receivedEvents []LPREvent
+	var (
+		mu             sync.Mutex
+		receivedEvents []LPREvent
+	)
 	receiver.Subscribe(func(ev LPREvent) {
+		mu.Lock()
+		defer mu.Unlock()
 		receivedEvents = append(receivedEvents, ev)
 	})
 
@@ -59,11 +65,19 @@ func TestReceiverEventDeduplicationAndSubscription(t *testing.T) {
 	// Give background worker a brief moment to process
 	time.Sleep(50 * time.Millisecond)
 
-	if len(receivedEvents) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(receivedEvents))
+	mu.Lock()
+	count := len(receivedEvents)
+	var firstPlate string
+	if count > 0 {
+		firstPlate = receivedEvents[0].Plate
 	}
-	if receivedEvents[0].Plate != "AF123BC" {
-		t.Fatalf("expected plate AF123BC, got %q", receivedEvents[0].Plate)
+	mu.Unlock()
+
+	if count != 1 {
+		t.Fatalf("expected 1 event, got %d", count)
+	}
+	if firstPlate != "AF123BC" {
+		t.Fatalf("expected plate AF123BC, got %q", firstPlate)
 	}
 
 	// Send duplicate immediately: must return 200 OK to camera, but NOT emit to subscriber
@@ -78,8 +92,13 @@ func TestReceiverEventDeduplicationAndSubscription(t *testing.T) {
 	}
 
 	time.Sleep(50 * time.Millisecond)
-	if len(receivedEvents) != 1 {
-		t.Fatalf("expected duplicate to be suppressed, got %d events", len(receivedEvents))
+
+	mu.Lock()
+	countAfterDup := len(receivedEvents)
+	mu.Unlock()
+
+	if countAfterDup != 1 {
+		t.Fatalf("expected duplicate to be suppressed, got %d events", countAfterDup)
 	}
 }
 

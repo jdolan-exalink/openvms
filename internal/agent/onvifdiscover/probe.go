@@ -261,11 +261,9 @@ func NewDeviceProbe(transport http.RoundTripper) DeviceProber {
 		if err != nil || len(services) == 0 {
 			if capsServices, capsErr := device.GetCapabilities(ctx); capsErr == nil && len(capsServices) > 0 {
 				services = capsServices
-				err = nil
 			} else if err != nil && len(services) == 0 {
 				// Don't fail the probe if services enumeration fails but we got valid device information
 				services = []onvif.Service{}
-				err = nil
 			}
 		}
 

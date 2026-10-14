@@ -71,7 +71,7 @@ func TestServerAgentProjectsOptionalFreshNetworkAndUnavailableCPU(t *testing.T) 
 			MAC: "00:11:22:33:44:55", Gateway: "192.168.1.1", IsDefault: true, Role: "monitoring",
 		}}, NetworkSampledAt: &sampledAt,
 		SampledAt: &sampledAt,
-		OS: "Debian GNU/Linux 13 (trixie)",
+		OS:        "Debian GNU/Linux 13 (trixie)",
 	})
 	if got.CpuPercent != nil {
 		t.Fatalf("unavailable CPU was projected as a number: %#v", got.CpuPercent)

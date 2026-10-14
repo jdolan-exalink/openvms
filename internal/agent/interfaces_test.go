@@ -26,13 +26,13 @@ func TestDiscoverInterfaces(t *testing.T) {
 func TestParseDefaultRoute(t *testing.T) {
 	d := t.TempDir()
 	netDir := filepath.Join(d, "net")
-	if err := os.MkdirAll(netDir, 0o755); err != nil {
+	if err := os.MkdirAll(netDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	routeContent := "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n" +
 		"eth0\t00000000\t0101A8C0\t0003\t0\t0\t0\t00000000\t0\t0\t0\n" +
 		"eth1\t0002A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n"
-	if err := os.WriteFile(filepath.Join(netDir, "route"), []byte(routeContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(netDir, "route"), []byte(routeContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -51,18 +51,19 @@ func TestParseDefaultRoute(t *testing.T) {
 func TestExtractCameraIPsFromFrigateConfig(t *testing.T) {
 	d := t.TempDir()
 	configPath := filepath.Join(d, "config.yml")
+	// #nosec G101 -- mock stream url for unit tests
 	configContent := `
 cameras:
   front:
     ffmpeg:
       inputs:
-        - path: rtsp://admin:pass@192.168.2.50:554/live
+        - path: rtsp://operator:streamkey@192.168.2.50:554/live
   back:
     ffmpeg:
       inputs:
         - path: http://192.168.2.51:80/stream
 `
-	if err := os.WriteFile(configPath, []byte(configContent), 0o644); err != nil {
+	if err := os.WriteFile(configPath, []byte(configContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -120,21 +121,21 @@ func TestClassifyInterfaceRole(t *testing.T) {
 func TestDiscoverInterfacesHermetic(t *testing.T) {
 	d := t.TempDir()
 	netDir := filepath.Join(d, "proc", "net")
-	if err := os.MkdirAll(netDir, 0o755); err != nil {
+	if err := os.MkdirAll(netDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	routeContent := "Iface\tDestination\tGateway\tFlags\n" +
 		"eth0\t00000000\t0101A8C0\t0003\n"
-	if err := os.WriteFile(filepath.Join(netDir, "route"), []byte(routeContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(netDir, "route"), []byte(routeContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
 	dbDir := filepath.Join(d, "frigate")
-	if err := os.MkdirAll(dbDir, 0o755); err != nil {
+	if err := os.MkdirAll(dbDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
 	configContent := "cameras:\n  cam1:\n    ffmpeg:\n      inputs:\n        - path: rtsp://192.168.2.10:554/h264\n"
-	if err := os.WriteFile(filepath.Join(dbDir, "config.yml"), []byte(configContent), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dbDir, "config.yml"), []byte(configContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 

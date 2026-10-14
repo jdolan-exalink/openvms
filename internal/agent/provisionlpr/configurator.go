@@ -25,11 +25,11 @@ type CameraConfigParams struct {
 
 // ConfigResult contains the outcome of an automated or manual configuration attempt.
 type ConfigResult struct {
-	Success        bool   `json:"success"`
-	Method         string `json:"method"` // "cgi_api", "manual_instructions"
-	Message        string `json:"message"`
-	WebUIPath      string `json:"web_ui_path"`
-	Parameters     map[string]string `json:"parameters"`
+	Success    bool              `json:"success"`
+	Method     string            `json:"method"` // "cgi_api", "manual_instructions"
+	Message    string            `json:"message"`
+	WebUIPath  string            `json:"web_ui_path"`
+	Parameters map[string]string `json:"parameters"`
 }
 
 // Configurator provides automated push and guided configuration for Provision-ISR cameras.

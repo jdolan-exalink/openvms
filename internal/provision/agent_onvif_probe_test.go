@@ -187,7 +187,7 @@ func TestProbeOnvifAgentPlaintextFallback(t *testing.T) {
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(validAgentProbeJSON))}, nil
 	})
 	svc := &Service{
-		requireServerManage: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		requireServerManage:        func(context.Context, authz.Actor, uuid.UUID) error { return nil },
 		requireServerConfigSecrets: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
 		loadProbeAgent: func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error) {
 			return "192.0.2.10", 7419, "agent-token", AgentTLSConfig{SecurePort: 7419, TrustMode: AgentTLSTrustPlaintext}, nil

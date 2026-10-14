@@ -16,7 +16,7 @@ VERSION_ID="13"
 VERSION="13 (trixie)"
 ID=debian
 `
-	if err := os.WriteFile(filepath.Join(tempDir, "os-release"), []byte(debianRelease), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "os-release"), []byte(debianRelease), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := detectOS(tempDir); got != "Debian GNU/Linux 13 (trixie)" {
@@ -30,7 +30,7 @@ VERSION_ID="24.04"
 VERSION="24.04.1 LTS (Noble Numbat)"
 ID=ubuntu
 `
-	if err := os.WriteFile(filepath.Join(tempDir, "os-release"), []byte(ubuntuRelease), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "os-release"), []byte(ubuntuRelease), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := detectOS(tempDir); got != "Ubuntu 24.04.1 LTS" {
@@ -41,7 +41,7 @@ ID=ubuntu
 	noPrettyRelease := `NAME="Debian GNU/Linux"
 VERSION_ID="13"
 `
-	if err := os.WriteFile(filepath.Join(tempDir, "os-release"), []byte(noPrettyRelease), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(tempDir, "os-release"), []byte(noPrettyRelease), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if got := detectOS(tempDir); got != "Debian GNU/Linux 13" {

@@ -57,8 +57,8 @@ type Service struct {
 	// AgentMTLS and NewEnrollToken turn on mutual-TLS enrollment for SSH-installed agents. Both
 	// are set only when the agent listener is configured; either nil keeps installs unchanged.
 	// NewEnrollToken mints the one-time token for a server (agentenroll.Service.CreateToken).
-	AgentMTLS      *AgentMTLS
-	NewEnrollToken func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, error)
+	AgentMTLS        *AgentMTLS
+	NewEnrollToken   func(ctx context.Context, actor authz.Actor, serverID uuid.UUID) (string, error)
 	OnAgentInstalled func(ctx context.Context, actor authz.Actor, serverID uuid.UUID)
 
 	// Authorization and transport seams prove probe denial before secret access or outbound calls.

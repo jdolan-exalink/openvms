@@ -297,7 +297,8 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 	}
 	job.update("succeeded", "complete", "Agent files installed and credentials registered; HTTPS health is not yet verified")
 	if s.OnAgentInstalled != nil {
-		go s.OnAgentInstalled(context.Background(), actor, job.serverID)
+		// #nosec G118 -- background task outlives caller request context
+		go s.OnAgentInstalled(context.WithoutCancel(ctx), actor, job.serverID)
 	}
 }
 

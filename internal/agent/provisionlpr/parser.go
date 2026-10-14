@@ -82,10 +82,8 @@ func (p *Parser) Parse(r *http.Request, body []byte, receivedAt time.Time) (LPRE
 	if event.Plate == "" {
 		if match := labeledPlateRegex.FindSubmatch(body); len(match) > 1 {
 			event.Plate = NormalizePlate(string(match[1]))
-			parsed = true
 		} else if match := alphaNumPlateRegex.FindSubmatch(body); len(match) > 1 {
 			event.Plate = NormalizePlate(string(match[1]))
-			parsed = true
 		}
 	}
 
@@ -114,7 +112,7 @@ func (p *Parser) parseMultipart(boundary string, body []byte, ev *LPREvent) (boo
 
 	for {
 		part, err := mr.NextPart()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
