@@ -82,13 +82,25 @@ export const VIDEOWALL_PROFILE_LABEL = "360p@15";
 
 type CodecSpec = { codec: VideoCodec; container: "mp4" | "webm"; codecString: (p: VideoProfile) => string };
 
-// H.264 uses Baseline for tile-sized profiles and High 4.0 for larger ones.
+/** byHeight picks the codec string whose declared level covers the profile's resolution. */
+function byHeight(p: VideoProfile, sd: string, hd: string, fhd: string, uhd: string): string {
+  if (p.height <= 360) return sd;
+  if (p.height <= 720) return hd;
+  return p.height <= 1080 ? fhd : uhd;
+}
+
+// Each string declares a level that covers the queried resolution: a level below it lets a
+// strict platform answer unsupported/not smooth for a codec it actually plays.
 const CODEC_SPECS: readonly CodecSpec[] = [
-  { codec: "h264", container: "mp4", codecString: (p) => (p.height <= 360 ? "avc1.42E01E" : "avc1.640028") },
-  { codec: "hevc", container: "mp4", codecString: () => "hvc1.1.6.L120.90" },
+  // H.264: Baseline 3.0 for tiles, High 4.0 up to 1080p30, High 5.1 for 4K.
+  { codec: "h264", container: "mp4", codecString: (p) => byHeight(p, "avc1.42E01E", "avc1.640028", "avc1.640028", "avc1.640033") },
+  // HEVC Main: level 4.0 up to 1080p, 5.0 for 4K.
+  { codec: "hevc", container: "mp4", codecString: (p) => byHeight(p, "hvc1.1.6.L120.90", "hvc1.1.6.L120.90", "hvc1.1.6.L120.90", "hvc1.1.6.L150.90") },
   { codec: "vp8", container: "webm", codecString: () => "vp8" },
-  { codec: "vp9", container: "webm", codecString: () => "vp09.00.10.08" },
-  { codec: "av1", container: "mp4", codecString: () => "av01.0.04M.08" },
+  // VP9 profile 0: levels 2.1 / 3.1 / 4.0 / 5.0.
+  { codec: "vp9", container: "webm", codecString: (p) => byHeight(p, "vp09.00.21.08", "vp09.00.31.08", "vp09.00.40.08", "vp09.00.50.08") },
+  // AV1 Main: seq_level_idx 1 (2.1) / 5 (3.1) / 8 (4.0) / 12 (5.0).
+  { codec: "av1", container: "mp4", codecString: (p) => byHeight(p, "av01.0.01M.08", "av01.0.05M.08", "av01.0.08M.08", "av01.0.12M.08") },
 ];
 
 export function describeCpu(caps: Pick<ClientCapabilities, "cpu">): string {
@@ -196,7 +208,7 @@ async function collectSystem(e: CapabilitiesEnv): Promise<ClientSystemInfo> {
   if (e.screen) {
     system.screen = { width: e.screen.width, height: e.screen.height, devicePixelRatio: e.devicePixelRatio ?? 1 };
     // `isExtended` needs no permission; getScreenDetails() does, so it is never called.
-    if (typeof e.screen.isExtended === "boolean") system.screens = e.screen.isExtended ? 2 : 1;
+    if (typeof e.screen.isExtended === "boolean") system.multipleScreens = e.screen.isExtended;
   }
   if (e.viewport) system.viewport = { ...e.viewport };
   return system;

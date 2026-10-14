@@ -36,8 +36,10 @@ export type ClientSystemInfo = {
   browserVersion?: string;
   userAgent?: string;
   screen?: { width: number; height: number; devicePixelRatio: number };
-  /** Number of screens, only when available without a permission prompt. */
+  /** Exact number of screens; only a native client can know it (browsers need a permission prompt). */
   screens?: number;
+  /** Whether the desktop spans more than one screen (browser `screen.isExtended`), without a count. */
+  multipleScreens?: boolean;
   viewport?: { width: number; height: number };
 };
 

@@ -127,13 +127,14 @@ describe("collectClientCapabilities: system", () => {
     expect(caps.system).toMatchObject({ os: "Windows", browser: "Chrome", browserVersion: "126.0.0.0" });
   });
 
-  it("reports screens only when isExtended is exposed", async () => {
+  it("reports only whether there are multiple screens, never an invented exact count", async () => {
     const extended = await collectClientCapabilities(baseEnv({ screen: { width: 1, height: 1, isExtended: true } }));
-    expect(extended.system.screens).toBe(2);
+    expect(extended.system.multipleScreens).toBe(true);
+    expect(extended.system.screens).toBeUndefined();
     const plain = await collectClientCapabilities(baseEnv({ screen: { width: 1, height: 1, isExtended: false } }));
-    expect(plain.system.screens).toBe(1);
+    expect(plain.system.multipleScreens).toBe(false);
     const unknown = await collectClientCapabilities(baseEnv({ screen: { width: 1, height: 1 } }));
-    expect(unknown.system.screens).toBeUndefined();
+    expect(unknown.system.multipleScreens).toBeUndefined();
   });
 });
 
@@ -206,6 +207,23 @@ describe("collectClientCapabilities: gpu", () => {
 });
 
 describe("collectClientCapabilities: codecs", () => {
+  it("declares a codec level high enough for each profile's resolution", async () => {
+    type Config = { video: { contentType: string; height: number } };
+    const decodingInfo = vi.fn<(config: Config) => Promise<{ supported: boolean }>>(async () => ({ supported: true }));
+    await collectClientCapabilities(baseEnv({ mediaCapabilities: { decodingInfo } }));
+    const byHeight = (prefix: string) =>
+      Object.fromEntries(
+        decodingInfo.mock.calls
+          .map(([config]) => config.video)
+          .filter((video) => video.contentType.includes(prefix))
+          .map((video) => [video.height, /codecs="([^"]+)"/.exec(video.contentType)?.[1]]),
+      );
+    expect(byHeight("avc1")).toEqual({ 360: "avc1.42E01E", 720: "avc1.640028", 1080: "avc1.640028", 2160: "avc1.640033" });
+    expect(byHeight("hvc1")).toEqual({ 360: "hvc1.1.6.L120.90", 720: "hvc1.1.6.L120.90", 1080: "hvc1.1.6.L120.90", 2160: "hvc1.1.6.L150.90" });
+    expect(byHeight("vp09")).toEqual({ 360: "vp09.00.21.08", 720: "vp09.00.31.08", 1080: "vp09.00.40.08", 2160: "vp09.00.50.08" });
+    expect(byHeight("av01")).toEqual({ 360: "av01.0.01M.08", 720: "av01.0.05M.08", 1080: "av01.0.08M.08", 2160: "av01.0.12M.08" });
+  });
+
   it("queries the full codec x profile matrix through mediaCapabilities", async () => {
     const decodingInfo = vi.fn(async () => ({ supported: true, smooth: false, powerEfficient: true }));
     const caps = await collectClientCapabilities(baseEnv({ mediaCapabilities: { decodingInfo } }));
