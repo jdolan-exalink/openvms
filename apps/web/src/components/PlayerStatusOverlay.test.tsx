@@ -15,6 +15,12 @@ describe("PlayerStatusOverlay", () => {
     expect(screen.queryByRole("button", { name: "Reintentar" })).toBeNull();
   });
 
+  it("tells the user the camera has no signal at Frigate instead of leaving a black tile", () => {
+    const error = streamError("camera_no_signal");
+    render(<PlayerStatusOverlay cameraId="cam-1" snapshot={snap({ state: "RECONNECTING", message: error.label, error })} />);
+    expect(screen.getByText("Cámara sin señal (Frigate)")).toBeInTheDocument();
+  });
+
   it("prefers the in-memory last frame over the cold snapshot", () => {
     const { container } = render(<PlayerStatusOverlay cameraId="cam-1" snapshot={snap({ state: "SUSPENDED", poster: "blob:frame" })} />);
     expect(container.querySelector("img")?.getAttribute("src")).toBe("blob:frame");

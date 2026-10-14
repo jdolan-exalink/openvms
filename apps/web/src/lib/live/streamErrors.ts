@@ -4,6 +4,7 @@
  */
 export type StreamErrorCode =
   | "camera_offline"
+  | "camera_no_signal"
   | "upstream_unreachable"
   | "unauthorized"
   | "forbidden"
@@ -19,10 +20,14 @@ export type SessionError = {
   label: string;
   /** True when automatic retries (with backoff) can recover; false stops until "Reintentar". */
   retryable: boolean;
+  /** Fixed wait before the next attempt, replacing the exponential backoff (slow-changing conditions). */
+  retryDelayMs?: number;
 };
 
 const ERRORS: Readonly<Record<StreamErrorCode, SessionError>> = {
   camera_offline: { code: "camera_offline", label: "Cámara sin conexión", retryable: true },
+  // Frigate reports ~0 fps for the camera: the input is cut. It may come back, but slowly.
+  camera_no_signal: { code: "camera_no_signal", label: "Cámara sin señal (Frigate)", retryable: true, retryDelayMs: 30_000 },
   upstream_unreachable: { code: "upstream_unreachable", label: "Servidor no disponible", retryable: true },
   unauthorized: { code: "unauthorized", label: "Sesión expirada", retryable: false },
   forbidden: { code: "forbidden", label: "Sin permiso", retryable: false },

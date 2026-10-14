@@ -96,6 +96,19 @@ describe("PlayerSession stream errors", () => {
     session.close();
   });
 
+  it("retries camera_no_signal on a long fixed delay instead of hammering the gateway", () => {
+    const session = start();
+    sockets[0]!.error("camera_no_signal");
+    sockets[0]!.onclose?.();
+    expect(session.state).toBe("RECONNECTING");
+    expect(session.getSnapshot()).toMatchObject({ message: "Cámara sin señal (Frigate)", error: { code: "camera_no_signal", retryable: true } });
+    vi.advanceTimersByTime(29_000);
+    expect(sockets).toHaveLength(1);
+    vi.advanceTimersByTime(2_000);
+    expect(sockets).toHaveLength(2);
+    session.close();
+  });
+
   it("treats a 1008 close without an error frame as an expired session", () => {
     const session = start();
     sockets[0]!.onopen?.();
