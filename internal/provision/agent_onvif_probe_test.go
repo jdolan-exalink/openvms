@@ -163,7 +163,7 @@ func TestValidateOnvifProbeRequestRequiresBoundedIPv4EndpointAndCredentialPair(t
 		{Endpoint: "http://[2001:db8::1]/device"},
 		{Endpoint: "http://192.0.2.8/device#fragment"},
 		{Endpoint: "http://192.0.2.8:65536/device"},
-		{Endpoint: "http://192.0.2.8/device", Username: "only-user"},
+		{Endpoint: "http://192.0.2.8/device", Password: "only-password"},
 		{Endpoint: "http://192.0.2.8/device", Username: "u", Password: strings.Repeat("p", maxOnvifProbePasswordBytes+1)},
 	} {
 		if err := validateOnvifProbeRequest(input); err == nil {
@@ -172,6 +172,45 @@ func TestValidateOnvifProbeRequestRequiresBoundedIPv4EndpointAndCredentialPair(t
 	}
 	if err := validateOnvifProbeRequest(OnvifProbeRequest{Endpoint: "https://192.0.2.8/onvif/device_service", Username: "u", Password: "p"}); err != nil {
 		t.Fatalf("valid IPv4 HTTPS endpoint rejected: %v", err)
+	}
+	if err := validateOnvifProbeRequest(OnvifProbeRequest{Endpoint: "http://192.0.2.8/onvif/device_service", Username: "admin", Password: ""}); err != nil {
+		t.Fatalf("valid IPv4 endpoint with blank password rejected: %v", err)
+	}
+}
+
+func TestProbeOnvifAgentPlaintextFallback(t *testing.T) {
+	var calls int
+	var captured *http.Request
+	transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		captured = r.Clone(r.Context())
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(validAgentProbeJSON))}, nil
+	})
+	svc := &Service{
+		requireServerManage: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		requireServerConfigSecrets: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		loadProbeAgent: func(context.Context, authz.Actor, uuid.UUID) (string, int32, string, AgentTLSConfig, error) {
+			return "192.0.2.10", 7419, "agent-token", AgentTLSConfig{SecurePort: 7419, TrustMode: AgentTLSTrustPlaintext}, nil
+		},
+		probeRoundTripper: transport,
+	}
+	got, err := svc.ProbeOnvif(context.Background(), authz.Actor{}, uuid.New(), OnvifProbeRequest{
+		Endpoint: "http://192.0.2.8/onvif/device_service", Username: "admin", Password: "",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || captured == nil {
+		t.Fatalf("calls = %d, captured = %#v", calls, captured)
+	}
+	if captured.URL.Scheme != "http" || captured.URL.Host != "192.0.2.10:7419" || captured.URL.Path != "/v1/onvif/probe" {
+		t.Fatalf("unexpected plaintext destination: %s", captured.URL)
+	}
+	if captured.Header.Get("Authorization") != "Bearer agent-token" {
+		t.Fatalf("missing auth header: %v", captured.Header)
+	}
+	if got.Information.Manufacturer != "Acme" {
+		t.Fatalf("unexpected probe result: %#v", got)
 	}
 }
 

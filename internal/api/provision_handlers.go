@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
@@ -167,6 +168,11 @@ func (h *Handlers) UpdateServerAgent(ctx context.Context, r gen.UpdateServerAgen
 	if err != nil {
 		return nil, err
 	}
+	go func() {
+		sweepCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		_, _ = h.SweepServerCamerasOnvif(sweepCtx, a, r.ServerId, nil)
+	}()
 	return gen.UpdateServerAgent200JSONResponse(serverAgent(view)), nil
 }
 

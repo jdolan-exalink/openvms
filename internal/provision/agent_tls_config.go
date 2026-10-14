@@ -21,8 +21,9 @@ import (
 const maxAgentCAPEM = 64 << 10
 
 const (
-	AgentTLSTrustSystem = "system"
-	AgentTLSTrustCustom = "custom"
+	AgentTLSTrustSystem    = "system"
+	AgentTLSTrustCustom    = "custom"
+	AgentTLSTrustPlaintext = "plaintext_http"
 )
 
 var ErrAgentTLSNotConfigured = errors.New("agent TLS is not configured")
