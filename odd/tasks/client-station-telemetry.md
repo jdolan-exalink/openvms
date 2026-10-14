@@ -33,8 +33,8 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 ## Tasks
 
 - [x] CST-01 — Telemetry model + `ClientCapabilitiesService`: platform-neutral types; system/screen/CPU/memory/WebGL+GPU detection; MediaCapabilities codec matrix (H.264, HEVC, VP8, VP9, AV1 × CCTV profiles) with supported/smooth/powerEfficient. Route: inline (new isolated module).
-- [ ] CST-02 — Per-session stream stats: bytes received from the socket, `getVideoPlaybackQuality` (decoded/dropped), video resolution, reconnects; `PlayerSessionManager.sessions()` accessor. Route: delegated writer.
-- [ ] CST-03 — `VideoTelemetryService`: 1 Hz aggregator, 60 s ring buffer, totals and per-camera bitrate/fps, main/sub counts, presentation frame-time sampler. Route: delegated writer.
+- [x] CST-02 — Per-session stream stats: bytes received from the socket, `getVideoPlaybackQuality` (decoded/dropped), video resolution, reconnects; `PlayerSessionManager.sessions()` accessor. Route: delegated writer.
+- [x] CST-03 — `VideoTelemetryService`: 1 Hz aggregator, 60 s ring buffer, totals and per-camera bitrate/fps, main/sub counts, presentation frame-time sampler. Route: delegated writer.
 - [ ] CST-04 — `PerformanceClassifier` (Óptimo/Aceptable/Al límite/Saturado) and bottleneck estimator (network / transport / decode / render), pure functions with stated confidence.
 - [ ] CST-05 — `DiagnosticsExporter`: redacted JSON + text for "Copiar diagnóstico".
 - [ ] CST-06 — UI: "Estación cliente" settings section (capabilities, codecs, bandwidth meter with 60 s chart, health, advanced panel, copy diagnostics).
@@ -75,3 +75,8 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 - 2026-10-14: second review pass (candidate incl. `6a5fe50`, lineage `review-4334db557835c9b7`): user granted; reliability approved; acknowledged, authority burned. Two advisory WARNINGs verified as real and fixed in CST-01 (TDD RED 2 failing → GREEN 18/18, typecheck + eslint clean):
   - Codec strings now declare a level that covers each profile (H.264 High 5.1 for 4K; HEVC L150 for 4K; VP9 2.1/3.1/4.0/5.0; AV1 2.1/3.1/4.0/5.0) instead of a fixed low level that strict platforms could reject.
   - Browser no longer invents `screens: 2` from `screen.isExtended`; it sets `multipleScreens` (boolean). `screens` stays as the exact count a native client can fill.
+- 2026-10-14: PR-1 opened as #38. PR-2 branch `feat/client-station-telemetry-2-stream-stats` stacked on PR-1.
+- 2026-10-14: CST-02 + CST-03 done (route: delegated writer — 4 new modules + PlayerSession). RED: new test files failed on missing modules; GREEN: `npx vitest run src/lib/telemetry src/lib/live` 142/142, `npm test` 1161/1161, typecheck and eslint clean, `git diff --check` clean; parent spot check re-ran telemetry/live tests, typecheck, lint green. ~860 authored lines (4 small modules + their tests); not compressed.
+  - `PlayerSession.streamStats()` (bytes, decoded/dropped frames, resolution, reconnects, stalls, last error) + framework-free `sessionRegistry` (covers private players too); `createVideoTelemetry` 1 Hz deltas, 60-entry `RingBuffer`, rAF `createFrameSampler` (fps, avg/p95 frame time). Not started anywhere yet (PR-4 wires it).
+  - Decisions: `activeStreams` = ACTIVE or WARM; totals' frame/stall counts are per-interval deltas; streams without `getVideoPlaybackQuality` report undefined fps; first tick of a stream sets its baseline (bitrate 0).
+  - Open note: the global registry relies on every session calling `close()` (true today).

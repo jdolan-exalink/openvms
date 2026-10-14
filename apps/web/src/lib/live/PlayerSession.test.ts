@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PlayerSession } from "./PlayerSession";
 import { createPlayerMetrics } from "./playerMetrics";
 import { ServerBackoff } from "./serverBackoff";
+import { createSessionRegistry, type SessionRegistry } from "../telemetry/sessionRegistry";
 
 class FakeSocket {
   onopen: (() => void) | null = null;
@@ -128,5 +129,112 @@ describe("PlayerSession suspension", () => {
     session.setSuspended("offscreen", false);
     expect(sockets).toHaveLength(2);
     session.close();
+  });
+});
+
+describe("PlayerSession stream stats", () => {
+  function create(registry?: SessionRegistry) {
+    const session = new PlayerSession({
+      cameraId: "cam-9",
+      quality: "main",
+      resilient: true,
+      random: () => 0,
+      backoff: new ServerBackoff({ random: () => 0 }),
+      metrics: createPlayerMetrics(),
+      registry,
+      createSocket: () => {
+        const s = new FakeSocket();
+        sockets.push(s);
+        return s as unknown as WebSocket;
+      },
+    });
+    session.connect();
+    return session;
+  }
+
+  /** Replaces the video's playback quality reading (jsdom has no getVideoPlaybackQuality). */
+  function fakeQuality(session: PlayerSession, quality: { totalVideoFrames: number; droppedVideoFrames: number }) {
+    (session.video as unknown as { getVideoPlaybackQuality: () => unknown }).getVideoPlaybackQuality = () => quality;
+  }
+
+  it("counts binary bytes from ArrayBuffer and Blob messages but not control messages", () => {
+    const session = create();
+    sockets[0]!.onopen?.();
+    sockets[0]!.onmessage?.({ data: JSON.stringify({ type: "info", value: "ignored" }) });
+    expect(session.streamStats().bytesReceived).toBe(0);
+    sockets[0]!.onmessage?.({ data: new ArrayBuffer(1000) });
+    sockets[0]!.onmessage?.({ data: new ArrayBuffer(24) });
+    sockets[0]!.onmessage?.({ data: new Blob([new Uint8Array(76)]) });
+    expect(session.streamStats().bytesReceived).toBe(1100);
+    session.close();
+  });
+
+  it("keeps bytes monotonic across a reconnect", () => {
+    const session = create();
+    sockets[0]!.onopen?.();
+    sockets[0]!.onmessage?.({ data: new ArrayBuffer(500) });
+    sockets[0]!.onclose?.();
+    vi.advanceTimersByTime(5_000);
+    sockets[1]!.onopen?.();
+    sockets[1]!.onmessage?.({ data: new ArrayBuffer(300) });
+    expect(session.streamStats()).toMatchObject({ bytesReceived: 800, reconnects: 1 });
+    session.close();
+  });
+
+  it("reports identity, state and the last error code", () => {
+    const session = create();
+    sockets[0]!.error("camera_offline");
+    expect(session.streamStats()).toMatchObject({ cameraId: "cam-9", quality: "main", state: "RECONNECTING", lastErrorCode: "camera_offline", reconnects: 0 });
+    session.close();
+  });
+
+  it("reads decoded and dropped frames and the picture size from the video when available", () => {
+    const session = create();
+    fakeQuality(session, { totalVideoFrames: 300, droppedVideoFrames: 7 });
+    Object.defineProperty(session.video, "videoWidth", { value: 1920, configurable: true });
+    Object.defineProperty(session.video, "videoHeight", { value: 1080, configurable: true });
+    expect(session.streamStats()).toMatchObject({ decodedFrames: 300, droppedFrames: 7, width: 1920, height: 1080 });
+    session.close();
+  });
+
+  it("leaves frame counters and size undefined when the platform does not expose them", () => {
+    const session = create();
+    const stats = session.streamStats();
+    expect(stats.decodedFrames).toBeUndefined();
+    expect(stats.droppedFrames).toBeUndefined();
+    expect(stats.width).toBeUndefined();
+    expect(stats.height).toBeUndefined();
+    expect(stats.lastErrorCode).toBeUndefined();
+    session.close();
+  });
+
+  it("counts stalls only while the session is active", () => {
+    const session = create();
+    session.video.dispatchEvent(new Event("waiting"));
+    expect(session.streamStats().stalls).toBe(0);
+    sockets[0]!.onopen?.();
+    sockets[0]!.onmessage?.({ data: new ArrayBuffer(8) });
+    expect(session.state).toBe("ACTIVE");
+    session.video.dispatchEvent(new Event("waiting"));
+    session.video.dispatchEvent(new Event("waiting"));
+    expect(session.streamStats().stalls).toBe(2);
+    session.close();
+  });
+
+  it("stops listening for stalls after close", () => {
+    const session = create();
+    sockets[0]!.onopen?.();
+    sockets[0]!.onmessage?.({ data: new ArrayBuffer(8) });
+    const remove = vi.spyOn(session.video, "removeEventListener");
+    session.close();
+    expect(remove).toHaveBeenCalledWith("waiting", expect.any(Function));
+  });
+
+  it("registers into the registry on construction and unregisters on close", () => {
+    const registry = createSessionRegistry();
+    const session = create(registry);
+    expect(registry.list()).toEqual([session]);
+    session.close();
+    expect(registry.list()).toEqual([]);
   });
 });

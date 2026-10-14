@@ -2,6 +2,8 @@ import { reconnectDelay } from "./backoff";
 import { PlayerStateMachine, type PlayerState, type StateTransition } from "./playerState";
 import { observeFirstFrame, playerMetrics, type PlayerMetrics } from "./playerMetrics";
 import type { ServerBackoff } from "./serverBackoff";
+import { sessionRegistry as defaultRegistry, type SessionRegistry } from "../telemetry/sessionRegistry";
+import type { StreamStatsSample, StreamStatsSource } from "../telemetry/types";
 import { describeStreamError, streamError, type SessionError } from "./streamErrors";
 
 // Codecs offered to go2rtc, most preferred first (same list go2rtc's own player uses).
@@ -66,6 +68,8 @@ export type PlayerSessionOptions = {
    */
   resilient?: boolean;
   backoff?: ServerBackoff;
+  /** Where this session lists itself for telemetry; defaults to the process-wide registry. */
+  registry?: SessionRegistry;
 };
 
 /**
@@ -75,7 +79,7 @@ export type PlayerSessionOptions = {
  * between DOM containers with attach()/detach() without touching the pipeline, so moving a
  * tile on screen never reconnects the stream.
  */
-export class PlayerSession {
+export class PlayerSession implements StreamStatsSource {
   readonly cameraId: string;
   readonly quality: SessionQuality;
   readonly video: HTMLVideoElement;
@@ -107,6 +111,11 @@ export class PlayerSession {
   private cancelFrame: (() => void) | undefined;
   private connectCount = 0;
   private boxObserver: ResizeObserver | undefined;
+  private readonly registry: SessionRegistry;
+  /** Binary media bytes received over every socket this session has opened (monotonic). */
+  private bytesReceived = 0;
+  /** `waiting` events seen while the session was ACTIVE. */
+  private stalls = 0;
 
   constructor(opts: PlayerSessionOptions) {
     this.cameraId = opts.cameraId;
@@ -134,13 +143,44 @@ export class PlayerSession {
     this.video.addEventListener("loadeddata", this.revealFrame);
     this.video.addEventListener("resize", this.revealFrame);
     this.video.addEventListener("playing", this.revealFrame);
+    this.video.addEventListener("waiting", this.onWaiting);
     this.setMuted(opts.muted ?? true);
+    this.registry = opts.registry ?? defaultRegistry;
+    this.registry.register(this);
   }
 
   /** revealFrame shows the element once the decoder has a real picture. */
   private revealFrame = (): void => {
     if (this.video.videoWidth > 0) this.video.style.opacity = "1";
   };
+
+  /** A stall is the video running out of buffered data while the stream should be playing. */
+  private onWaiting = (): void => {
+    if (this.machine.state === "ACTIVE") this.stalls += 1;
+  };
+
+  /**
+   * streamStats returns cumulative counters plus current values for telemetry. It is cheap and
+   * allocates only the returned object; frame counters stay undefined when the platform does not
+   * expose them.
+   */
+  streamStats(): StreamStatsSample {
+    const v = this.video;
+    const quality = typeof v.getVideoPlaybackQuality === "function" ? v.getVideoPlaybackQuality() : undefined;
+    return {
+      cameraId: this.cameraId,
+      quality: this.quality,
+      state: this.machine.state,
+      bytesReceived: this.bytesReceived,
+      decodedFrames: quality?.totalVideoFrames,
+      droppedFrames: quality?.droppedVideoFrames,
+      width: v.videoWidth > 0 ? v.videoWidth : undefined,
+      height: v.videoHeight > 0 ? v.videoHeight : undefined,
+      reconnects: Math.max(0, this.connectCount - 1),
+      stalls: this.stalls,
+      lastErrorCode: this.snapshot.error?.code,
+    };
+  }
 
   // ---- observable state -------------------------------------------------------------
 
@@ -300,6 +340,8 @@ export class PlayerSession {
     this.video.removeEventListener("loadeddata", this.revealFrame);
     this.video.removeEventListener("resize", this.revealFrame);
     this.video.removeEventListener("playing", this.revealFrame);
+    this.video.removeEventListener("waiting", this.onWaiting);
+    this.registry.unregister(this);
     this.boxObserver?.disconnect();
     this.boxObserver = undefined;
     this.dropSocket();
@@ -523,6 +565,8 @@ export class PlayerSession {
         }
         return;
       }
+      const media = ev.data as ArrayBuffer | Blob;
+      this.bytesReceived += media instanceof Blob ? media.size : media.byteLength;
       queue.push(ev.data as ArrayBuffer);
       if (queue.length > 60) queue.splice(0, queue.length - 60);
       pump();

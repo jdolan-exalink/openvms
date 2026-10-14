@@ -75,18 +75,79 @@ export type ClientCapabilities = {
   codecs: CodecCapability[];
 };
 
-/** Aggregated live video statistics for one sampling interval (types only for now). */
+/**
+ * Cumulative counters and current values for one live video stream, read cheaply from the
+ * player (no per-frame work). Counters are monotonic per session; consumers derive rates from
+ * deltas and must tolerate resets (a reconnect may restart the decoder counters).
+ * Optional fields mean "not exposed by the platform" and are never invented.
+ */
+export type StreamStatsSample = {
+  cameraId: string;
+  quality: "sub" | "main";
+  /** Player lifecycle state (for example `ACTIVE`, `WARM`, `RECONNECTING`). */
+  state: string;
+  /** Media bytes received from OpenVMS over the stream transport (control messages excluded). */
+  bytesReceived: number;
+  decodedFrames?: number;
+  droppedFrames?: number;
+  /** Decoded picture size; undefined until the first frame is decoded. */
+  width?: number;
+  height?: number;
+  /** Connections beyond the first one. */
+  reconnects: number;
+  /** Times playback ran out of buffered data while the stream was active. */
+  stalls: number;
+  lastErrorCode?: string;
+};
+
+/** Anything that can report the stats of one live stream (a player session, a native stream, ...). */
+export type StreamStatsSource = {
+  streamStats(): StreamStatsSample;
+};
+
+/**
+ * Aggregated live video statistics for one sampling interval.
+ *
+ * Network scope: every byte and rate here is OpenVMS video traffic only. It is never the
+ * total traffic of the machine's network interface.
+ */
 export type VideoPerformanceMetrics = {
   timestamp: number;
   visibleCameras: number;
+  /** Streams currently delivering media (player state `ACTIVE` or `WARM`). */
   activeStreams: number;
   mainStreams: number;
   subStreams: number;
+  /** Received OpenVMS video bitrate over the interval, in megabits per second. */
   receivedMbps: number;
+  /** Frames decoded / dropped during the interval (deltas, not cumulative). */
   decodedFrames: number;
   droppedFrames: number;
   droppedFrameRatio: number;
   presentationFps?: number;
   renderFrameTimeMs?: number;
+  renderFrameTimeP95Ms?: number;
+  /** Stalls during the interval. */
   stalls?: number;
+};
+
+/** One row of the per-camera bandwidth table. */
+export type StreamTelemetryRow = {
+  cameraId: string;
+  quality: "sub" | "main";
+  state: string;
+  width?: number;
+  height?: number;
+  /** Decoded frames per second over the interval; undefined when the platform does not report frames. */
+  fps?: number;
+  droppedFps?: number;
+  /** Received bitrate of this stream over the interval, in bits per second. */
+  bitrateBps: number;
+};
+
+/** What a UI reads (useSyncExternalStore): replaced by a new object once per tick. */
+export type VideoTelemetrySnapshot = {
+  /** Latest interval; null until the first tick. */
+  metrics: VideoPerformanceMetrics | null;
+  streams: readonly StreamTelemetryRow[];
 };
