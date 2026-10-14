@@ -173,6 +173,40 @@ suspend/resume on 25/32 grids, hidden-tab suspend, canvas capture from MSE video
 close delivery. Expanded view hides other tiles, so their sessions stay alive while Live
 is open. No WebSocket end-to-end test with a fake Frigate; audit dedupe is per API process.
 
+## Client Station Telemetry & Adaptive Video Policy (LV-15 / Telemetry)
+
+Spec: `docs/telemetria-client.md`. Implemented in `apps/web/src/lib/telemetry/`.
+
+### Architecture
+
+1. **Hardware & Capability Probing (`capabilities.ts`):**
+   - Probes OS, browser, logical CPU cores, reported device memory, WebGL/WebGL2 context + unmasked GPU renderer.
+   - Probes `MediaCapabilities.decodingInfo` across standard CCTV profiles (360p15, 720p15, 1080p15, 1080p25, 4K15, 4K25) for H.264, HEVC, VP8, VP9, and AV1.
+   - Never infers hardware decoding strictly from codec support; values are labeled as capabilities/probes.
+2. **Per-Session Stream Metrics & Aggregation (`sessionRegistry.ts`, `videoTelemetry.ts`):**
+   - Every active live player session registers with `sessionRegistry`.
+   - 1 Hz tick samples bytes received, decoded/dropped video frames (`getVideoPlaybackQuality`), resolution, and stalls.
+   - 60 s circular ring buffer (`RingBuffer`) tracks station bitrate, FPS, drops, and stall deltas.
+   - rAF frame sampler measures presentation FPS, avg frame time, and p95 frame time.
+3. **Performance Classification & Bottleneck Estimation (`performanceClassifier.ts`, `bottleneck.ts`):**
+   - Evaluates a 10-sample sliding window into 4 layers: Network, Reception/Transport, Video Decode, and Render/Composition.
+   - Health states: `optimal`, `acceptable`, `limit`, `saturated`, or `unknown` (when < 3 samples).
+   - Bottleneck estimator identifies likely bottleneck layer (`network`, `transport`, `decode`, `render`) with confidence and evidence.
+4. **Client Benchmark Service & Cache (`benchmark.ts`, `benchmarkCache.ts`, `startupProfile.ts`):**
+   - Measures decode and render capacity using a bundled synthetic H.264 CBP 3.0 clip (`/benchmark/videowall-360p15.mp4`, 640×360@15 fps).
+   - Progressive load testing across 4, 9, 16, 25, 32, and 48 streams in a visible container.
+   - Aborts early on saturation, decoder errors, or excessive frame gaps (UI freeze > 250 ms).
+   - Persists results to IndexedDB (`openvms.telemetry` db, `benchmarks` store) keyed by hardware/browser/OS/GPU fingerprint.
+   - Light startup profile runs via `requestIdleCallback` to reuse cached benchmark results without heavy startup runs.
+5. **Adaptive Video Policy (`adaptivePolicy.ts`, `routes/Live.tsx`):**
+   - Gated behind `adaptiveStreaming` flag (`OPENVMS_FEATURES=adaptiveStreaming`).
+   - Maximized stream protection: a prioritized maximized stream is never silently degraded.
+   - Immediate main stream release: returning from a maximized view to grid immediately discards and evicts the main stream, even in persistent mode (no 30 s WARM dwell for HQ).
+   - Hidden stream suspension: when a tile is focused or under station saturation, hidden tiles suspend transport and decode while retaining their last-frame poster.
+   - Visual work trimming: eliminates transitions and heavy visual overhead when health reaches `limit` or `saturated`.
+   - Operator warnings: displays warning banner identifying the bottleneck when the station is saturated.
+   - Unsupported degradation levers: secondary stream FPS throttling and sub-stream resolution drops require future backend/go2rtc support and are declared as pending backend support.
+
 ## Changelog (P0)
 
 - Endpoint: `GET /api/v1/features`.

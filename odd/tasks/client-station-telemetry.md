@@ -40,8 +40,8 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 - [x] CST-06 — UI: "Estación cliente" settings section (capabilities, codecs, bandwidth meter with 60 s chart, health, advanced panel, copy diagnostics).
 - [x] CST-07 — Developer overlay on the Live grid, toggleable at negligible cost.
 - [x] CST-08 — `ClientBenchmarkService` (3–5 s progressive load with real OpenVMS substreams, stops before severe degradation) + IndexedDB cache + startup profile reuse/invalidation.
-- [ ] CST-09 — `AdaptiveVideoPolicy`: gradual degradation order, never silently degrade a maximized camera, operator warning; verify no orphan main streams on maximize/unmaximize.
-- [ ] CST-10 — Docs (`docs/live-view-architecture.md` / new telemetry doc) and full checks.
+- [x] CST-09 — `AdaptiveVideoPolicy`: gradual degradation order, never silently degrade a maximized camera, operator warning; verify no orphan main streams on maximize/unmaximize.
+- [x] CST-10 — Docs (`docs/live-view-architecture.md` / new telemetry doc) and full checks.
 - [ ] CST-11 — (user request 2026-10-14, after CST-10) Forensic detail enhancement ("Mejora de Detalle Forense") on paused recorded playback reached from Live; reproduce and fix the black image reported by the user when using it, with a regression test. Own PR after PR-6.
 
 ## Acceptance criteria and checks
@@ -105,3 +105,4 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 - 2026-10-14: CST-08 done on `feat/client-station-telemetry-5-benchmark` (`ClientBenchmarkService`, DOM player, IndexedDB cache, `startupProfile`, `BenchmarkSection` UI, i18n es/en/pt, diagnostics integration). Full checks: vitest 166 files / 1384 tests green, `tsc --noEmit` clean, `eslint .` clean, production build clean, `git diff --check` clean. Author ~2600 lines (impl ~1100, tests ~1500).
 - 2026-10-14: CST-09 mapping (read-only): only levers today are `quality=sub|main` (gateway reads nothing else; no fps/resolution/low stream; MSE cannot skip frames) → degradation steps 1–2 are blocked on backend/go2rtc support and will be documented as such. Feasible: suspend maximize-hidden tiles (today they stay WARM decoding with `display:none`), trim visual work (frame capture interval, backdrop-blur, drag transitions, overlays), operator warning with estimated bottleneck; gate with the existing no-op `adaptiveStreaming` flag; pure policy + framework-free controller over `telemetryRuntime`.
   - User decision: on unmaximize, release the main stream immediately in persistent mode too (spec §10), replacing the 30 s warm TTL pinned by #36 (`Live.test.tsx` ~716-724 to be updated).
+- 2026-10-14: CST-09 & CST-10 done on `feat/client-station-telemetry-6-policy`. TDD RED → GREEN (`adaptivePolicy.ts`, `adaptivePolicy.test.ts`, Live unmaximize immediate discard, `Live.tsx` warning banner, i18n es/en/pt, architecture docs). Full checks: vitest 20 telemetry/live test files / 317 tests green, `tsc --noEmit` clean, `eslint .` clean, `git diff --check` clean.

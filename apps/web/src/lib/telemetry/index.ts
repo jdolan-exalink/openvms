@@ -14,3 +14,4 @@ export * from "./benchmarkPlayer";
 export * from "./benchmarkCache";
 export * from "./benchmarkRuntime";
 export * from "./startupProfile";
+export * from "./adaptivePolicy";

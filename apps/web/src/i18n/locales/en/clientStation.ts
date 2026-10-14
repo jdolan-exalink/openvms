@@ -142,5 +142,8 @@ const messages = {
   benchReasonPipeline: "the video pipeline configuration changed",
   benchReasonOld: "the result is more than 30 days old",
   benchNever: "No benchmark has been run in this browser yet.",
+  adaptiveWarning: "Videowall performance degraded ({bottleneck}). Consider reducing the number of cameras.",
+  adaptiveWarningGeneric: "Videowall performance saturated. Consider reducing the number of active cameras.",
+  adaptiveDismiss: "Dismiss warning",
 } as const;
 export default messages;

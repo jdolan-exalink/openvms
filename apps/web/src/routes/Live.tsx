@@ -13,7 +13,8 @@ import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/a
 import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { MsePlayer } from "@/components/MsePlayer";
 import { TelemetryOverlay } from "@/components/live/TelemetryOverlay";
-import { telemetryRuntime } from "@/lib/telemetry";
+import { telemetryRuntime, useAdaptiveVideoPolicy } from "@/lib/telemetry";
+import { LAYER_KEYS } from "@/components/clientStation/keys";
 import { FisheyeViewer } from "@/components/fisheye/FisheyeViewer";
 import { FisheyeSection } from "@/components/fisheye/FisheyeSection";
 import { getEffectiveVirtualViews, getFisheyeConfig } from "@/lib/fisheye/storage";
@@ -173,7 +174,7 @@ function LiveDesktop() {
     return () => setContextSidebarCollapsed(false);
   }, []);
   const topBar = useTopBarActionsPortalTarget();
-  const { persistentPlayers, videoSurfaceLayer } = useFeatures();
+  const { persistentPlayers, videoSurfaceLayer, adaptiveStreaming } = useFeatures();
   const playerSessionManager = usePlayerSessionManager();
   const [fullscreen, setFullscreen] = useState(false);
   useEffect(() => {
@@ -737,6 +738,14 @@ function LiveDesktop() {
     telemetryRuntime.setVisibleCameras(visibleCameraCount);
     return () => telemetryRuntime.setVisibleCameras(0);
   }, [visibleCameraCount]);
+  const adaptivePolicy = useAdaptiveVideoPolicy({
+    enabled: adaptiveStreaming,
+    isMaximized: focus !== null,
+    totalCameras: gridCameraIds.length,
+  });
+  const [dismissedWarningCode, setDismissedWarningCode] = useState<string | null>(null);
+  const warningDismissed = Boolean(adaptivePolicy.operatorWarning && dismissedWarningCode === adaptivePolicy.operatorWarning.code);
+
   useEffect(() => {
     const previous = previousFocusedCameraRef.current;
     clearTimeout(maximizeTimerRef.current);
@@ -751,6 +760,7 @@ function LiveDesktop() {
           delete next[previous];
           return next;
         });
+        playerSessionManager?.discard(previous, "main");
       }
     }
     previousFocusedCameraRef.current = focusedCameraId;
@@ -765,7 +775,7 @@ function LiveDesktop() {
         }
       }, 5_001);
     }
-  }, [focusedCameraId]);
+  }, [focusedCameraId, playerSessionManager]);
 
   useEffect(() => {
     const activeIdentities = new Map<string, Set<string>>();
@@ -924,7 +934,26 @@ function LiveDesktop() {
               {canRec && (fullscreen || !topBar.available) && <div className="ml-auto">{modeToggle}</div>}
             </div>
             <div className="relative flex min-h-0 flex-1 flex-col">
-            <TelemetryOverlay />
+              <TelemetryOverlay />
+              {adaptivePolicy.operatorWarning && !warningDismissed && (
+                <div role="status" className="mb-1 flex shrink-0 items-center justify-between gap-2 rounded-m3-md border border-warn/30 bg-warn/15 px-3 py-1.5 text-xs text-warn">
+                  <span>
+                    {tr(adaptivePolicy.operatorWarning.messageKey, {
+                      bottleneck: adaptivePolicy.operatorWarning.bottleneck
+                        ? tr(LAYER_KEYS[adaptivePolicy.operatorWarning.bottleneck])
+                        : tr("clientStation.bottleneckNone"),
+                    })}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setDismissedWarningCode(adaptivePolicy.operatorWarning?.code ?? "hardware_saturated")}
+                    aria-label={tr("clientStation.adaptiveDismiss")}
+                    className="font-semibold underline hover:opacity-80"
+                  >
+                    {tr("clientStation.adaptiveDismiss")}
+                  </button>
+                </div>
+              )}
               <SortableContext items={shown.map((i) => tileDragId(i))} strategy={persistentPlayers ? rectSwappingStrategy : rectSortingStrategy}>
                 <LiveGridFrame role="group" label={tr("live.videoGrid")} mode={rec ? "rec" : "live"}
                   className={cn(
@@ -964,7 +993,8 @@ function LiveDesktop() {
                         isFocused={focus === i}
                         isHidden={isHidden}
                         recLayer={recLayer}
-                        suspended={rec}
+                        suspended={rec || (isHidden && adaptivePolicy.suspendHidden)}
+                        trimVisualWork={adaptivePolicy.trimVisualWork}
                         isDuplicate={duplicates.has(i)}
                         persistent={persistentPlayers}
                         surface={persistentPlayers && videoSurfaceLayer}
@@ -1228,6 +1258,7 @@ function GridTile({
   isDuplicate,
   recLayer,
   suspended,
+  trimVisualWork,
   persistent,
   surface,
   serverId,
@@ -1254,8 +1285,10 @@ function GridTile({
   isDuplicate: boolean;
   /** REC mode: recorded-playback layer covering the live player. */
   recLayer: ReactNode;
-  /** REC mode: the live session is kept but its transport paused. */
+  /** REC mode or adaptive policy: the live session is kept but its transport paused. */
   suspended: boolean;
+  /** Adaptive policy: reduce GPU work / transitions. */
+  trimVisualWork?: boolean;
   persistent: boolean;
   surface: boolean;
   serverId?: string;
@@ -1274,7 +1307,7 @@ function GridTile({
   const { visible: overlayVisible, reveal: revealOverlay, scheduleHide: scheduleOverlayHide } = useTileOverlayVisibility();
   const [fisheyeActionsAt, setFisheyeActionsAt] = useState<{ x: number; y: number; opener: HTMLButtonElement } | null>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
-  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition, ...placement };
+  const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition: trimVisualWork ? undefined : transition, ...placement };
   // Touch: two quick taps expand the tile like a double click. The dblclick some browsers synthesize after it is ignored.
   const touchTap = useTouchDoubleTap(onToggleFocus);
   return (
