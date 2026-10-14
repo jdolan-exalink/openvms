@@ -39,7 +39,7 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 - [ ] CST-05 — `DiagnosticsExporter`: redacted JSON + text for "Copiar diagnóstico".
 - [ ] CST-06 — UI: "Estación cliente" settings section (capabilities, codecs, bandwidth meter with 60 s chart, health, advanced panel, copy diagnostics).
 - [ ] CST-07 — Developer overlay on the Live grid, toggleable at negligible cost.
-- [ ] CST-08 — `ClientBenchmarkService` (3–5 s progressive load with real OpenVMS substreams, stops before severe degradation) + IndexedDB cache + startup profile reuse/invalidation.
+- [ ] CST-08 — (incl. per-query timeout in `collectClientCapabilities` for the startup light profile) `ClientBenchmarkService` (3–5 s progressive load with real OpenVMS substreams, stops before severe degradation) + IndexedDB cache + startup profile reuse/invalidation.
 - [ ] CST-09 — `AdaptiveVideoPolicy`: gradual degradation order, never silently degrade a maximized camera, operator warning; verify no orphan main streams on maximize/unmaximize.
 - [ ] CST-10 — Docs (`docs/live-view-architecture.md` / new telemetry doc) and full checks.
 
@@ -68,3 +68,6 @@ The videowall shows ~26 substreams and switches to main on maximize, but nothing
 - 2026-10-14: user-requested 48-camera preset added (`8×6`, id `p8x6`, between 6×6 and 8×8); `presentationForCount` now picks it for 37–48 cameras. Route inline; RED (3 failing) → GREEN; presentations + Live + components suites 488/488. Commit `3137894` (rides in PR-1).
 - 2026-10-14: CST-01 done (route: delegated writer — types, service and tests are 3 non-trivial files). RED: tests written first, run failed on missing module (import resolution); GREEN: `npx vitest run src/lib/telemetry` 17/17, `npm run typecheck` clean, eslint clean, `git diff --check` clean; parent spot check re-ran tests/typecheck/lint green. ~650 authored lines (tests 276, impl 280, types 90) — above the heuristic because of the codec/GPU/UA test matrix; not compressed.
   - Writer decisions: H.264 `avc1.42E01E` for 360p, `avc1.640028` above; mp4 for h264/hevc/av1, webm for vp8/vp9; profile bitrates 0.6–12 Mbps; `memory.bucketed`; probes webgl2+webgl and loses both contexts; `screens` only from `screen.isExtended` (no permission prompt).
+- 2026-10-14: native review of PR-1 slice (`origin/main..26216d2`): assess medium, `slice_budget_reached`; user granted; lens `review-reliability` approved; acknowledged, authority burned (lineage `review-1422ebf89da5c47e`). Reviewed boundary advances to `26216d2`.
+  - Advisory R3-legacy-catalog-migration (WARNING): verified not a defect — `loadCatalog` always prepends `DEFAULT_PRESENTATIONS` from code and only reads customs from storage, so old catalogs show 8×6.
+  - Advisory R3-unbounded-startup-collect (SUGGESTION): accepted as follow-up — add a per-query timeout to `collectClientCapabilities` before it runs at startup (folded into CST-08).
