@@ -243,10 +243,11 @@ func run() error {
 	}
 
 	poller := &inventory.HealthPoller{
-		Svc:         inv,
-		Adapters:    adapters,
-		Interval:    cfg.HealthInterval,
-		Concurrency: 8,
+		Svc:          inv,
+		Adapters:     adapters,
+		Interval:     cfg.HealthInterval,
+		NoSignalHold: cfg.NoSignalHold,
+		Concurrency:  8,
 		OnChange: func(ctx context.Context, c inventory.StatusChange) {
 			log.InfoContext(ctx, "server status changed", "server_id", c.ServerID, "from", c.From, "to", c.To, "error", c.Error)
 			data, _ := json.Marshal(c)

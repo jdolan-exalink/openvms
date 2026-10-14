@@ -47,6 +47,9 @@ type Config struct {
 	CredentialTrustedProxyCIDRs []netip.Prefix
 	// HealthInterval is how often the worker polls each Frigate server.
 	HealthInterval time.Duration
+	// NoSignalHold is how long a Frigate camera must report camera_fps ~0 before it is
+	// marked without signal and live view is refused (default two health polls).
+	NoSignalHold time.Duration
 	// EventSyncInterval is how often the worker pulls review items from each Frigate.
 	EventSyncInterval time.Duration
 	// EventBackfill is how far back a newly registered Frigate is imported.
@@ -156,6 +159,7 @@ func Load(service string) (Config, error) {
 		DefaultSiteTZ:               str("OPENVMS_DEFAULT_SITE_TZ", "America/Argentina/Cordoba"),
 		TrustForwardedFor:           boolean("TRUST_FORWARDED_FOR", false),
 		HealthInterval:              duration("HEALTH_INTERVAL", 30*time.Second),
+		NoSignalHold:                duration("CAMERA_NO_SIGNAL_HOLD", 60*time.Second),
 		EventSyncInterval:           duration("EVENT_SYNC_INTERVAL", 5*time.Second),
 		EventBackfill:               duration("EVENT_BACKFILL", 24*time.Hour),
 		SessionTTL:                  duration("SESSION_TTL", 12*time.Hour),

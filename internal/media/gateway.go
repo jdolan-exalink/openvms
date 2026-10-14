@@ -30,6 +30,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
+	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/platform/httpx"
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -1173,6 +1174,10 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if code, msg, refused := liveSignalRefusal(cam); refused {
+		reject(code, msg) // Frigate gets no video from the camera: do not dial go2rtc for black frames
+		return
+	}
 	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
 	if err != nil {
 		g.Svc.Log.WarnContext(r.Context(), "live gateway", "camera", id, "error", err)
@@ -1331,6 +1336,15 @@ func (g *Gateway) live(w http.ResponseWriter, r *http.Request) {
 		client.closeWith(websocket.CloseNormalClosure, "")
 	}
 	upstream.closeWith(websocket.CloseNormalClosure, "")
+}
+
+// liveSignalRefusal refuses a live view before any upstream dial when the health poller
+// found that Frigate receives no video from the camera. Unknown state never refuses.
+func liveSignalRefusal(cam Camera) (code, msg string, refused bool) {
+	if inventory.NoSignal(cam.Status, cam.FPS) {
+		return CodeCameraNoSignal, "the camera has no video signal at its Frigate server", true
+	}
+	return "", "", false
 }
 
 // sendLiveError writes the error frame, then a close frame, and counts it.
