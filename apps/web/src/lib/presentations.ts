@@ -167,6 +167,7 @@ function defaultPresentations(): Presentation[] {
     standardGrid("p4x4", 4, 4),
     standardGrid("p5x5", 5, 5),
     standardGrid("p6x6", 6, 6),
+    standardGrid("p8x6", 8, 6), // 48-camera videowall
     standardGrid("p8x8", 8, 8),
   ];
 }
