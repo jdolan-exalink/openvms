@@ -1493,7 +1493,7 @@ describe("Live", () => {
     expect(group).toContainElement(screen.getByRole("button", { name: "Pantalla completa" }));
     expect(screen.queryByText(/Doble clic agrega/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Presentación" }));
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim()).slice(0, 8)).toEqual(["1", "3", "2×2", "3×3", "4×4", "5×5", "6×6", "8×8"]);
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent?.trim()).slice(0, 9)).toEqual(["1", "3", "2×2", "3×3", "4×4", "5×5", "6×6", "8×6", "8×8"]);
     expect(screen.getByRole("menuitem", { name: "Editar presentaciones..." })).toBeInTheDocument();
   });
 
@@ -1686,11 +1686,12 @@ describe("Live with persistent players (P0 acceptance)", () => {
     expect(FakeSocket.created).toBe(2);
   });
 
-  it("offers the 5×5, 6×6 and 8×8 presentations from the layout menu", async () => {
+  it("offers the 5×5, 6×6, 8×6 and 8×8 presentations from the layout menu", async () => {
     await renderPersistent();
     fireEvent.click(screen.getByRole("button", { name: "Presentación" }));
     expect(screen.getByRole("menuitem", { name: "5×5" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "6×6" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "8×6" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "8×8" })).toBeInTheDocument();
   });
 
