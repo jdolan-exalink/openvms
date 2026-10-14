@@ -44,9 +44,16 @@ type Actor struct {
 	TenantID *uuid.UUID
 	// SessionID is set when the request is authenticated by a browser session.
 	SessionID *uuid.UUID
+	// System marks internal background jobs that have full system authorization.
+	System bool
 }
 
-func (a Actor) IsPlatform() bool { return a.TenantID == nil }
+func (a Actor) IsPlatform() bool { return a.System || a.TenantID == nil }
+
+// SystemActor returns an actor representing internal background processing.
+func SystemActor() Actor {
+	return Actor{Username: "system", System: true}
+}
 
 // Resource is anything a permission can be checked against, with its ancestry.
 // Fill only the fields that apply to Kind; Covering derives the scopes from them.

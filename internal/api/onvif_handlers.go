@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -231,9 +233,13 @@ func (h *Handlers) CheckServerCamerasOnvif(ctx context.Context, r gen.CheckServe
 }
 
 func (h *Handlers) SweepServerCamerasOnvif(ctx context.Context, a authz.Actor, serverID uuid.UUID, ifaceName *string) (gen.CheckServerCamerasOnvif200JSONResponse, error) {
-	_, err := h.Inv.RequireServerManage(ctx, a, serverID)
-	if err != nil {
-		return gen.CheckServerCamerasOnvif200JSONResponse{}, err
+	if !a.System && a.UserID != uuid.Nil {
+		_, err := h.Inv.RequireServerManage(ctx, a, serverID)
+		if err != nil {
+			return gen.CheckServerCamerasOnvif200JSONResponse{}, err
+		}
+	} else if a.UserID == uuid.Nil && !a.System {
+		a = authz.SystemActor()
 	}
 
 	cams, err := h.Inv.ListServerCameras(ctx, a, serverID)
@@ -259,128 +265,153 @@ func (h *Handlers) SweepServerCamerasOnvif(ctx context.Context, a authz.Actor, s
 	streamHosts, _ := h.Inv.GetServerCameraStreamHosts(ctx, a, serverID)
 	srvUser, srvPass, _ := h.Inv.GetServerCredentials(ctx, a, serverID)
 
-	matched := 0
-	updated := 0
-	outCameras := make([]gen.Camera, 0, len(cams))
+	type camResult struct {
+		camera  gen.Camera
+		matched bool
+		updated bool
+	}
 
-	for _, cam := range cams {
-		var candidateIP string
-		var creds provision.OnvifProbeRequest
+	results := make([]camResult, len(cams))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 8)
 
-		streamInfo := findStreamInfo(streamHosts, cam.RemoteName, cam.DisplayName)
-		if streamInfo.Username != "" {
-			creds.Username = streamInfo.Username
-			creds.Password = streamInfo.Password
-		}
-		if creds.Username == "" {
-			for _, rawURL := range []string{cam.LiveStream, cam.HqStream} {
-				if u, err := url.Parse(rawURL); err == nil && u.User != nil {
-					creds.Username = u.User.Username()
-					creds.Password, _ = u.User.Password()
-					if creds.Username != "" {
-						break
-					}
-				}
+	for i, cam := range cams {
+		wg.Add(1)
+		go func(idx int, c db.GetCameraRow) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			var candidateIP string
+			var creds provision.OnvifProbeRequest
+
+			streamInfo := findStreamInfo(streamHosts, c.RemoteName, c.DisplayName)
+			if streamInfo.Username != "" {
+				creds.Username = streamInfo.Username
+				creds.Password = streamInfo.Password
 			}
-		}
-		if creds.Username == "" && srvUser != "" {
-			creds.Username = srvUser
-			creds.Password = srvPass
-		}
-
-		if cam.OnvifEndpoint != nil && *cam.OnvifEndpoint != "" {
-			if u, err := url.Parse(*cam.OnvifEndpoint); err == nil {
-				candidateIP = u.Hostname()
-			}
-		}
-
-		if candidateIP == "" && streamInfo.Host != "" {
-			candidateIP = streamInfo.Host
-		}
-
-		if candidateIP == "" {
-			for ip := range discoveredByIP {
-				if strings.Contains(strings.ToLower(cam.RemoteName), strings.ToLower(ip)) ||
-					strings.Contains(strings.ToLower(cam.DisplayName), strings.ToLower(ip)) {
-					candidateIP = ip
-					break
-				}
-			}
-		}
-
-		if candidateIP != "" {
-			endpoint := "http://" + candidateIP + "/onvif/device_service"
-			if disc, ok := discoveredByIP[candidateIP]; ok && len(disc.XAddrs) > 0 {
-				endpoint = disc.XAddrs[0]
-			} else if cam.OnvifEndpoint != nil && *cam.OnvifEndpoint != "" {
-				endpoint = *cam.OnvifEndpoint
-			}
-			creds.Endpoint = endpoint
-
-			matched++
-
-			// Try probe
-			probeRes, probeErr := h.Provision.ProbeOnvif(ctx, a, serverID, creds)
-			if probeErr != nil {
-				candidateEndpoints := []string{
-					"http://" + candidateIP + ":8080/onvif/device_service",
-					"http://" + candidateIP + ":8000/onvif/device_service",
-					"http://" + candidateIP + ":8899/onvif/device_service",
-					"http://" + candidateIP + ":5000/onvif/device_service",
-					"http://" + candidateIP + "/device_service",
-					"http://" + candidateIP + ":8080/device_service",
-				}
-				for _, altEp := range candidateEndpoints {
-					if altEp == creds.Endpoint {
-						continue
-					}
-					altCreds := creds
-					altCreds.Endpoint = altEp
-					if altRes, altErr := h.Provision.ProbeOnvif(ctx, a, serverID, altCreds); altErr == nil {
-						probeRes = altRes
-						probeErr = nil
-						endpoint = altEp
-						break
-					}
-				}
-			}
-			if probeErr == nil {
-				profile, version, caps := parseOnvifProbeCapabilities(probeRes)
-				capsBytes, _ := json.Marshal(caps)
-				up, err := h.Inv.UpdateCameraOnvif(ctx, a, cam.ID, &endpoint, &profile, &version, capsBytes)
-				if err == nil {
-					updated++
-					outCameras = append(outCameras, toCamera(up))
-					continue
-				}
-			} else {
-				// Infer profile from scopes or default
-				profile := "ONVIF"
-				if disc, ok := discoveredByIP[candidateIP]; ok {
-					for _, sc := range disc.Scopes {
-						if strings.Contains(sc, "Profile/T") {
-							profile = "ONVIF-T"
+			if creds.Username == "" {
+				for _, rawURL := range []string{c.LiveStream, c.HqStream} {
+					if u, err := url.Parse(rawURL); err == nil && u.User != nil {
+						creds.Username = u.User.Username()
+						creds.Password, _ = u.User.Password()
+						if creds.Username != "" {
 							break
 						}
-						if strings.Contains(sc, "Profile/Streaming") {
-							profile = "ONVIF-S"
+					}
+				}
+			}
+			if creds.Username == "" && srvUser != "" {
+				creds.Username = srvUser
+				creds.Password = srvPass
+			}
+
+			if c.OnvifEndpoint != nil && *c.OnvifEndpoint != "" {
+				if u, err := url.Parse(*c.OnvifEndpoint); err == nil {
+					candidateIP = u.Hostname()
+				}
+			}
+
+			if candidateIP == "" && streamInfo.Host != "" {
+				candidateIP = streamInfo.Host
+			}
+
+			if candidateIP == "" {
+				for ip := range discoveredByIP {
+					if strings.Contains(strings.ToLower(c.RemoteName), strings.ToLower(ip)) ||
+						strings.Contains(strings.ToLower(c.DisplayName), strings.ToLower(ip)) {
+						candidateIP = ip
+						break
+					}
+				}
+			}
+
+			if candidateIP != "" {
+				endpoint := "http://" + candidateIP + "/onvif/device_service"
+				if disc, ok := discoveredByIP[candidateIP]; ok && len(disc.XAddrs) > 0 {
+					endpoint = disc.XAddrs[0]
+				} else if c.OnvifEndpoint != nil && *c.OnvifEndpoint != "" {
+					endpoint = *c.OnvifEndpoint
+				}
+				creds.Endpoint = endpoint
+
+				// Try probe
+				probeRes, probeErr := h.Provision.ProbeOnvif(ctx, a, serverID, creds)
+				if probeErr != nil {
+					candidateEndpoints := []string{
+						"http://" + candidateIP + ":8080/onvif/device_service",
+						"http://" + candidateIP + ":8000/onvif/device_service",
+						"http://" + candidateIP + ":8899/onvif/device_service",
+						"http://" + candidateIP + ":5000/onvif/device_service",
+						"http://" + candidateIP + "/device_service",
+						"http://" + candidateIP + ":8080/device_service",
+					}
+					for _, altEp := range candidateEndpoints {
+						if altEp == creds.Endpoint {
+							continue
+						}
+						altCreds := creds
+						altCreds.Endpoint = altEp
+						if altRes, altErr := h.Provision.ProbeOnvif(ctx, a, serverID, altCreds); altErr == nil {
+							probeRes = altRes
+							probeErr = nil
+							endpoint = altEp
+							break
 						}
 					}
 				}
-				version := "2.0"
-				profiles := []string{profile}
-				caps := gen.CameraOnvifCapabilities{Profiles: &profiles}
-				capsBytes, _ := json.Marshal(caps)
-				up, err := h.Inv.UpdateCameraOnvif(ctx, a, cam.ID, &endpoint, &profile, &version, capsBytes)
-				if err == nil {
-					updated++
-					outCameras = append(outCameras, toCamera(up))
-					continue
+				if probeErr == nil {
+					profile, version, caps := parseOnvifProbeCapabilities(probeRes)
+					capsBytes, _ := json.Marshal(caps)
+					up, err := h.Inv.UpdateCameraOnvif(ctx, a, c.ID, &endpoint, &profile, &version, capsBytes)
+					if err == nil {
+						results[idx] = camResult{camera: toCamera(up), matched: true, updated: true}
+						return
+					}
+				} else {
+					// Infer profile from scopes or default
+					profile := "ONVIF"
+					if disc, ok := discoveredByIP[candidateIP]; ok {
+						for _, sc := range disc.Scopes {
+							if strings.Contains(sc, "Profile/T") {
+								profile = "ONVIF-T"
+								break
+							}
+							if strings.Contains(sc, "Profile/Streaming") {
+								profile = "ONVIF-S"
+							}
+						}
+					}
+					version := "2.0"
+					profiles := []string{profile}
+					caps := gen.CameraOnvifCapabilities{Profiles: &profiles}
+					capsBytes, _ := json.Marshal(caps)
+					up, err := h.Inv.UpdateCameraOnvif(ctx, a, c.ID, &endpoint, &profile, &version, capsBytes)
+					if err == nil {
+						results[idx] = camResult{camera: toCamera(up), matched: true, updated: true}
+						return
+					}
 				}
+				results[idx] = camResult{camera: toCamera(c), matched: true, updated: false}
+				return
 			}
-		}
 
-		outCameras = append(outCameras, toCamera(cam))
+			results[idx] = camResult{camera: toCamera(c), matched: false, updated: false}
+		}(i, cam)
+	}
+	wg.Wait()
+
+	matched := 0
+	updated := 0
+	outCameras := make([]gen.Camera, len(results))
+	for i, res := range results {
+		if res.matched {
+			matched++
+		}
+		if res.updated {
+			updated++
+		}
+		outCameras[i] = res.camera
 	}
 
 	return gen.CheckServerCamerasOnvif200JSONResponse{
@@ -499,6 +530,37 @@ func (h *Handlers) AddCameraToFrigate(ctx context.Context, r gen.AddCameraToFrig
 	if res.Camera != nil {
 		cam := toCamera(*res.Camera)
 		resp.Camera = &cam
+
+		var ep *string
+		if onvifHost != "" {
+			port := 80
+			if onvifPort > 0 {
+				port = onvifPort
+			}
+			e := fmt.Sprintf("http://%s:%d/onvif/device_service", onvifHost, port)
+			ep = &e
+		}
+		var uPtr, pPtr *string
+		if onvifUser != "" {
+			uPtr = &onvifUser
+		}
+		if onvifPass != "" {
+			pPtr = &onvifPass
+		}
+		checkObj, checkErr := h.CheckCameraOnvif(ctx, gen.CheckCameraOnvifRequestObject{
+			CameraId: res.Camera.ID,
+			Body: &gen.CheckCameraOnvifJSONRequestBody{
+				Endpoint: ep,
+				Username: uPtr,
+				Password: pPtr,
+			},
+		})
+		if checkErr == nil {
+			if okResp, ok := checkObj.(gen.CheckCameraOnvif200JSONResponse); ok {
+				camCopy := gen.Camera(okResp)
+				resp.Camera = &camCopy
+			}
+		}
 	}
 	return resp, nil
 }

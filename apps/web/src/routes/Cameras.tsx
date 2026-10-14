@@ -1,7 +1,7 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useSearch } from "@tanstack/react-router";
-import { Check, RefreshCw, Settings, Sparkles } from "lucide-react";
+import { Check, Settings, Sparkles } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { type CameraFilter, camerasQuery, classifyPolicyQuery, meQuery, serverAgentQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { api, unwrap, ApiError } from "@/api/client";
@@ -122,23 +122,6 @@ export function Cameras() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [checkResult, setCheckResult] = useState<string | null>(null);
-  const checkServerCameras = useMutation({
-    mutationFn: async (targetServerId: string) => {
-      setCheckResult(null);
-      return unwrap(
-        await api.POST("/api/v1/servers/{serverId}/onvif/check-cameras", {
-          params: { path: { serverId: targetServerId } },
-          body: { interface_name: interfaceName || "*" },
-        })
-      );
-    },
-    onSuccess: async (res) => {
-      setCheckResult(
-        `Comprobación finalizada: ${res.checked} cámaras revisadas, ${res.matched} vinculadas con ONVIF (${res.updated} actualizadas).`
-      );
-      await qc.invalidateQueries({ queryKey: ["cameras"] });
-    },
-  });
 
   const [addingDevice, setAddingDevice] = useState<{
     xaddr: string;
@@ -412,17 +395,6 @@ export function Cameras() {
         {(!selectedDiscoveryServer || canManageServer(me.data, selectedDiscoveryServer)) && (
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" className="h-11 rounded-m3-full bg-primary px-5 text-sm font-medium text-on-primary disabled:cursor-not-allowed disabled:opacity-50" disabled={!canDiscover} onClick={() => void searchOnvif()}>{discovery.pending ? "Buscando…" : "Buscar dispositivos ONVIF"}</button>
-            {selectedDiscoveryServer && (
-              <button
-                type="button"
-                className="flex h-11 items-center gap-1.5 rounded-m3-full border border-outline px-4 text-sm font-medium text-primary hover:bg-primary/8 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={checkServerCameras.isPending}
-                onClick={() => checkServerCameras.mutate(selectedDiscoveryServer.id)}
-              >
-                <Icon icon={RefreshCw} size="xs" className={checkServerCameras.isPending ? "animate-spin" : ""} />
-                {checkServerCameras.isPending ? "Comprobando cámaras…" : "Comprobar y vincular ONVIF en cámaras"}
-              </button>
-            )}
             <button
               type="button"
               className="flex h-11 items-center gap-1.5 rounded-m3-full border border-primary/40 bg-primary/10 px-4 text-sm font-semibold text-primary hover:bg-primary/18"
@@ -434,7 +406,6 @@ export function Cameras() {
           </div>
         )}
         {checkResult && <p role="status" className="rounded-m3-lg bg-ok/12 px-4 py-2.5 text-sm text-ok">{checkResult}</p>}
-        <ErrorNote error={checkServerCameras.error} />
         <ErrorNote error={formatDiscoveryError(discovery.error)} />
         {discovery.pending && <p role="status" className="text-sm text-muted">Buscando dispositivos en la red del servidor…</p>}
         {discovery.devices?.length === 0 && <p role="status" className="text-sm text-muted">No se encontraron dispositivos ONVIF en esa interfaz.</p>}

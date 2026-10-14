@@ -37,6 +37,9 @@ type Checker struct {
 // Load reads every grant that reaches the actor. Grants outside the actor's tenant are
 // ignored, so a misconfigured grant can never widen a tenant user's reach.
 func Load(ctx context.Context, q *db.Queries, actor authz.Actor) (*Checker, error) {
+	if actor.System {
+		return &Checker{Actor: actor, q: q}, nil
+	}
 	rows, err := q.ListGrantsForUser(ctx, actor.UserID)
 	if err != nil {
 		return nil, err
@@ -61,6 +64,9 @@ func Load(ctx context.Context, q *db.Queries, actor authz.Actor) (*Checker, erro
 func (c *Checker) Grants() []authz.Grant { return c.grants }
 
 func (c *Checker) Can(p authz.Permission, r authz.Resource) bool {
+	if c.Actor.System {
+		return true
+	}
 	return authz.Decide(c.grants, p, r.Covering())
 }
 

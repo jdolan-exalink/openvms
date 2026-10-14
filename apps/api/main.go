@@ -204,6 +204,9 @@ func run() error {
 	provisioner.OnAgentInstalled = func(_ context.Context, actor authz.Actor, serverID uuid.UUID) {
 		sweepCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
+		if !actor.System && actor.UserID == uuid.Nil {
+			actor = authz.SystemActor()
+		}
 		_, _ = handlers.SweepServerCamerasOnvif(sweepCtx, actor, serverID, nil)
 	}
 	// The push feed: one ordered consumer per stream feeds the hub; the handler filters per

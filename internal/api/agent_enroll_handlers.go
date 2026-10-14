@@ -2,8 +2,10 @@ package api
 
 import (
 	"context"
+	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
+	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/provision"
 )
 
@@ -28,6 +30,14 @@ func (h *Handlers) EnrollAgent(ctx context.Context, r gen.EnrollAgentRequestObje
 	res, err := h.AgentEnroll.Enroll(ctx, r.Body.Token, []byte(r.Body.CsrPem))
 	if err != nil {
 		return nil, err
+	}
+	if res != nil {
+		// #nosec G118 -- asynchronous sweep outlives HTTP request
+		go func() {
+			sweepCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+			defer cancel()
+			_, _ = h.SweepServerCamerasOnvif(sweepCtx, authz.SystemActor(), res.Record.ServerID, nil)
+		}()
 	}
 	return gen.EnrollAgent200JSONResponse{
 		CertificatePem: string(res.Issued.CertPEM),
