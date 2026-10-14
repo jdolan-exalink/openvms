@@ -1468,21 +1468,25 @@ describe("Live with persistent players (P0 acceptance)", () => {
     return view;
   }
 
-  it("keeps the telemetry overlay out of the grid and idle by default", async () => {
-    await renderPersistent();
+  it("keeps the telemetry overlay out of the grid by default and registers the sidebar meter consumer", async () => {
+    const { unmount } = await renderPersistent();
     expect(screen.queryByRole("group", { name: "Métricas del videowall" })).not.toBeInTheDocument();
+    expect(telemetryRuntime.consumers()).toBe(1);
+    unmount();
     expect(telemetryRuntime.consumers()).toBe(0);
   });
 
   it("shows the telemetry overlay beside the grid, without taking a tile", async () => {
     localStorage.setItem("openvms.live.telemetryOverlay", "1");
-    await renderPersistent();
+    const { unmount } = await renderPersistent();
     const overlay = screen.getByRole("group", { name: "Métricas del videowall" });
     const grid = screen.getByRole("group", { name: "Grilla de video" });
     expect(grid.contains(overlay)).toBe(false);
     expect(overlay.parentElement).toBe(grid.parentElement);
     expect(screen.getAllByLabelText(/^Cuadro \d+$/)).toHaveLength(4);
-    expect(telemetryRuntime.consumers()).toBe(1);
+    expect(telemetryRuntime.consumers()).toBe(2);
+    unmount();
+    expect(telemetryRuntime.consumers()).toBe(0);
   });
 
   it("reports the visible cameras to the telemetry runtime while mounted", async () => {
