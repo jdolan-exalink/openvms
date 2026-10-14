@@ -58,6 +58,16 @@ export function createTelemetryRuntime(deps: TelemetryRuntimeDeps): TelemetryRun
   const listeners = new Set<() => void>();
   const service = createVideoTelemetry({ ...deps, visibleCameras: () => visible });
 
+  const notify = (): void => {
+    listeners.forEach((l) => {
+      try {
+        l();
+      } catch (err) {
+        console.error("telemetry runtime listener failed", err);
+      }
+    });
+  };
+
   const onTick = (): void => {
     const snapshot = service.getSnapshot();
     const history = service.history();
@@ -69,13 +79,7 @@ export function createTelemetryRuntime(deps: TelemetryRuntimeDeps): TelemetryRun
       state: tracker.update(health),
       bottleneck: estimateBottleneck(history, snapshot.streams),
     };
-    listeners.forEach((l) => {
-      try {
-        l();
-      } catch (err) {
-        console.error("telemetry runtime listener failed", err);
-      }
-    });
+    notify();
   };
 
   return {
@@ -95,6 +99,7 @@ export function createTelemetryRuntime(deps: TelemetryRuntimeDeps): TelemetryRun
       // Stale numbers would mislead the next consumer: start from a clean slate.
       view = emptyView();
       tracker = createHealthTracker();
+      notify();
     },
     consumers: () => holders,
     setVisibleCameras(count) {

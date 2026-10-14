@@ -32,9 +32,10 @@ describe("frame sampler", () => {
     sampler.start();
     for (let i = 0; i < 11; i++) f.frame(20);
     f.frame(45_000); // the tab was hidden for 45 s
-    for (let i = 0; i < 10; i++) f.frame(20);
+    // After the gap the cadence changes: measuring must resume from the new frame, not stop.
+    for (let i = 0; i < 10; i++) f.frame(10);
     const s = sampler.sample();
-    expect(s?.fps).toBeCloseTo(50, 5);
+    expect(s?.avgFrameMs).toBeCloseTo((10 * 20 + 10 * 10) / 20, 5);
     expect(s?.p95FrameMs).toBeCloseTo(20, 5);
   });
 

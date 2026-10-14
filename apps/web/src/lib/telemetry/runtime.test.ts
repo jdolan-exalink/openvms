@@ -109,9 +109,13 @@ describe("telemetry runtime", () => {
     advance();
     advance();
     advance();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
     runtime.release();
     expect(runtime.getView().history).toEqual([]);
     expect(runtime.getView().state).toBe("unknown");
+    // Subscribers still attached must learn about the reset, not keep showing stale numbers.
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 
   it("reports the visible camera count from the provider, or 0", () => {
