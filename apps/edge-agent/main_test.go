@@ -41,8 +41,8 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 		}
 		return nil
 	}
-	newMux := func(discovery http.Handler) *http.ServeMux {
-		return buildMux(token, "test", sam, discovery, replace, func() { restarted++ })
+	newMux := func(discovery, probe http.Handler) *http.ServeMux {
+		return buildMux(token, "test", sam, discovery, probe, nil, replace, func() { restarted++ })
 	}
 	post := func(mux *http.ServeMux, path, body, auth string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
@@ -64,7 +64,7 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 	}
 
 	t.Run("disabled discovery leaves metrics and update intact", func(t *testing.T) {
-		mux := newMux(nil)
+		mux := newMux(nil, nil)
 		if got := get(mux, "/v1/metrics", token).Code; got != http.StatusOK {
 			t.Fatalf("metrics status=%d", got)
 		}
@@ -76,6 +76,9 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 		}
 		if got := post(mux, "/v1/onvif/discover", `{"interface_name":"eth0"}`, token).Code; got != http.StatusNotFound {
 			t.Fatalf("disabled discovery status=%d", got)
+		}
+		if got := post(mux, "/v1/onvif/probe", `{"endpoint":"http://192.168.1.10/onvif"}`, token).Code; got != http.StatusNotFound {
+			t.Fatalf("disabled probe status=%d", got)
 		}
 		if got := post(mux, "/v1/update", "fake-binary", "").Code; got != http.StatusUnauthorized {
 			t.Fatalf("unauthorized update status=%d", got)
@@ -104,7 +107,7 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mux := newMux(handler)
+		mux := newMux(handler, nil)
 		if got := post(mux, "/v1/onvif/discover", `{"interface_name":"eth0"}`, "").Code; got != http.StatusUnauthorized {
 			t.Fatalf("unauthorized discovery status=%d", got)
 		}
@@ -114,6 +117,49 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 		}
 		if get(mux, "/v1/metrics", token).Code != http.StatusOK {
 			t.Fatal("metrics route changed when discovery enabled")
+		}
+	})
+
+	t.Run("probe handler is registered and authenticated on main mux", func(t *testing.T) {
+		cfg, _, err := onvifdiscover.LoadConfig("eth0", "192.168.1.0/24")
+		if err != nil {
+			t.Fatal(err)
+		}
+		probeCalled := false
+		probeHandler, err := onvifdiscover.NewProbeHandler(token, cfg, func(context.Context, onvif.Endpoint, string, string) (onvifdiscover.ProbeResult, error) {
+			probeCalled = true
+			return onvifdiscover.ProbeResult{
+				Information: onvif.DeviceInformation{Manufacturer: "Acme", Model: "Cam1"},
+				Services:    []onvif.Service{{Namespace: "urn:test", Endpoint: "http://192.168.1.50"}},
+			}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mux := newMux(nil, probeHandler)
+		if got := post(mux, "/v1/onvif/probe", `{"endpoint":"http://192.168.1.50/onvif"}`, "").Code; got != http.StatusUnauthorized {
+			t.Fatalf("unauthorized probe status=%d", got)
+		}
+		w := post(mux, "/v1/onvif/probe", `{"endpoint":"http://192.168.1.50/onvif"}`, token)
+		if w.Code != http.StatusOK || !probeCalled || !strings.Contains(w.Body.String(), "Acme") {
+			t.Fatalf("probe status=%d called=%v body=%s", w.Code, probeCalled, w.Body.String())
+		}
+	})
+
+	t.Run("provision keepalive and configure routes mounted", func(t *testing.T) {
+		lpr := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"status":"ok"}`))
+		})
+		mux := buildMux(token, "test", sam, nil, nil, lpr, replace, func() {})
+		if got := post(mux, "/SendKeepalive", "", "").Code; got != http.StatusOK {
+			t.Fatalf("keepalive status=%d", got)
+		}
+		if got := post(mux, "/v1/provision-lpr/configure", `{"target_host":"10.0.15.2"}`, "").Code; got != http.StatusUnauthorized {
+			t.Fatalf("expected unauthorized without token, got=%d", got)
+		}
+		if got := post(mux, "/v1/provision-lpr/configure", `{"target_host":"10.0.15.2"}`, token).Code; got != http.StatusOK {
+			t.Fatalf("configure status=%d", got)
 		}
 	})
 }
