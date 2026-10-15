@@ -1,126 +1,38 @@
-import { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   Eye, Pin, PinOff, ExternalLink, ShieldAlert,
   CarFront, User, Scan, Radio,
 } from "lucide-react";
-import { api, type Schemas } from "@/api/client";
 import { MsePlayer } from "@/components/MsePlayer";
 import { IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import type { LiveVisionRef } from "@/lib/liveGrid";
+import { useVisionSlots, visionSourceFromId, type VisionAISlot } from "@/lib/visionAi";
 
 export interface LiveVisionTileProps {
   vision: LiveVisionRef;
+  /** The tile is the focused one in the Live grid: use the main stream. */
   isFocused?: boolean;
   className?: string;
 }
 
-export function LiveVisionTile({ vision, className }: LiveVisionTileProps) {
-  const [pinnedCameraId, setPinnedCameraId] = useState<string | null>(null);
+export function LiveVisionTile({ vision, isFocused = false, className }: LiveVisionTileProps) {
+  // Pinning freezes the slot's current assignment (client side).
+  const [pinnedSlot, setPinnedSlot] = useState<VisionAISlot | null>(null);
 
-  // Cameras query
-  const camerasQuery = useQuery({
-    queryKey: ["cameras"],
-    queryFn: async () => {
-      const res = await api.GET("/api/v1/cameras");
-      return res.data?.items ?? [];
-    },
-  });
+  const slotsQuery = useVisionSlots(visionSourceFromId(vision.id), "1");
+  const rankedSlot = slotsQuery.data?.slots[0];
 
-  const cameras: Schemas["Camera"][] = useMemo(() => camerasQuery.data ?? [], [camerasQuery.data]);
-
-  // Ranked candidate cameras based on the virtual source filter/layout
-  const activeEvent = useMemo(() => {
-    const primaryCam = cameras[0];
-    if (!primaryCam) return null;
-    const secondaryCam = cameras[1] ?? primaryCam;
-
-    const vId = vision.id.toLowerCase();
-
-    // LPR virtual source
-    if (vId.includes("lpr")) {
-      const cam = secondaryCam;
-      return {
-        cameraId: cam.id,
-        cameraName: cam.display_name,
-        object: "license_plate",
-        label: "LPR: AB123CD",
-        confidence: 0.94,
-        plate: "AB123CD",
-        vehicleType: "PICKUP",
-        vehicleColor: "BLANCO",
-        watchlist: true,
-        score: 110,
-        zone: "Ingreso Norte",
-      };
-    }
-
-    // Personas virtual source
-    if (vId.includes("persona")) {
-      const cam = primaryCam;
-      return {
-        cameraId: cam.id,
-        cameraName: cam.display_name,
-        object: "person",
-        label: "PERSONA",
-        confidence: 0.96,
-        score: 95,
-        zone: "Perímetro Restringido",
-      };
-    }
-
-    // Vehículos virtual source
-    if (vId.includes("vehiculo")) {
-      const cam = secondaryCam;
-      return {
-        cameraId: cam.id,
-        cameraName: cam.display_name,
-        object: "car",
-        label: "VEHÍCULO",
-        confidence: 0.91,
-        score: 82,
-        zone: "Estacionamiento",
-      };
-    }
-
-    // Alarmas virtual source
-    if (vId.includes("alarma")) {
-      const cam = primaryCam;
-      return {
-        cameraId: cam.id,
-        cameraName: cam.display_name,
-        object: "alarm",
-        label: "ALARMA CRÍTICA",
-        confidence: 0.99,
-        alarm: "CRITICAL",
-        score: 150,
-        zone: "Acceso Principal",
-      };
-    }
-
-    // Default / General Vision AI
-    const cam = primaryCam;
-    return {
-      cameraId: cam.id,
-      cameraName: cam.display_name,
-      object: "person",
-      label: "PERSONA",
-      confidence: 0.97,
-      score: 98,
-      zone: "Acceso Norte",
-    };
-  }, [cameras, vision.id]);
-
-  const displayedCameraId = pinnedCameraId ?? activeEvent?.cameraId;
-  const displayedCamera = cameras.find((c) => c.id === displayedCameraId);
+  const activeSlot = pinnedSlot ?? (rankedSlot?.camera_id ? rankedSlot : null);
+  const cameraId = activeSlot?.camera_id ?? null;
+  const object = activeSlot?.object;
 
   const togglePin = () => {
-    if (pinnedCameraId) {
-      setPinnedCameraId(null);
-    } else if (activeEvent) {
-      setPinnedCameraId(activeEvent.cameraId);
+    if (pinnedSlot) {
+      setPinnedSlot(null);
+    } else if (activeSlot) {
+      setPinnedSlot(activeSlot);
     }
   };
 
@@ -130,11 +42,12 @@ export function LiveVisionTile({ vision, className }: LiveVisionTileProps) {
       data-testid="live-vision-tile"
       data-vision-id={vision.id}
     >
-      {displayedCamera ? (
+      {cameraId && activeSlot ? (
         <div className="size-full relative">
           <MsePlayer
-            cameraId={displayedCamera.id}
-            quality="sub"
+            key={cameraId}
+            cameraId={cameraId}
+            quality={isFocused ? "main" : "sub"}
             persistent={true}
             surface={true}
             active={true}
@@ -153,43 +66,37 @@ export function LiveVisionTile({ vision, className }: LiveVisionTileProps) {
             </div>
 
             {/* Active Detection pill */}
-            {activeEvent && (
+            {object && (
               <div
                 className={cn(
                   "flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold backdrop-blur shadow-sm",
-                  activeEvent.alarm
+                  activeSlot.alarm
                     ? "bg-bad/20 text-bad border border-bad/40"
-                    : activeEvent.watchlist
-                    ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
                     : "bg-primary/20 text-primary border border-primary/30",
                 )}
               >
-                {activeEvent.object === "person" && <User className="size-3" />}
-                {activeEvent.object === "car" && <CarFront className="size-3" />}
-                {activeEvent.object === "license_plate" && <Scan className="size-3" />}
-                {activeEvent.object === "alarm" && <ShieldAlert className="size-3" />}
-                <span>{activeEvent.label}</span>
-                <span className="opacity-75">· {Math.round(activeEvent.confidence * 100)}%</span>
+                {object === "person" && <User className="size-3" />}
+                {object === "car" && <CarFront className="size-3" />}
+                {object === "license_plate" && <Scan className="size-3" />}
+                {activeSlot.alarm && <ShieldAlert className="size-3" />}
+                <span className="uppercase">{object}</span>
+                {activeSlot.confidence !== undefined && (
+                  <span className="opacity-75">· {Math.round(activeSlot.confidence * 100)}%</span>
+                )}
               </div>
             )}
 
             {/* Camera display name */}
             <div className="rounded-full bg-surface-1/80 backdrop-blur px-2 py-0.5 text-[11px] text-on-surface-variant font-mono">
-              {displayedCamera.display_name}
+              {activeSlot.camera_name}
             </div>
           </div>
 
-          {/* LPR Plate Bottom-Left Banner (if LPR active) */}
-          {activeEvent?.plate && (
+          {/* LPR Plate Bottom-Left Banner (only when the slot carries a plate) */}
+          {activeSlot.plate && (
             <div className="absolute bottom-2 left-2 z-10 flex items-center gap-2 rounded-m3-md bg-surface-1/90 backdrop-blur px-3 py-1.5 border border-line shadow-lg pointer-events-none">
               <div className="rounded bg-primary/20 px-2 py-0.5 font-mono text-sm font-bold tracking-wider text-primary border border-primary/40">
-                {activeEvent.plate}
-              </div>
-              <div className="flex flex-col text-[10px] leading-tight text-on-surface-variant">
-                <span className="font-semibold text-on-surface">{activeEvent.vehicleType} · {activeEvent.vehicleColor}</span>
-                {activeEvent.watchlist && (
-                  <span className="text-amber-400 font-bold uppercase tracking-wider">⚠️ Watchlist match</span>
-                )}
+                {activeSlot.plate}
               </div>
             </div>
           )}
@@ -198,11 +105,11 @@ export function LiveVisionTile({ vision, className }: LiveVisionTileProps) {
           <div className="absolute top-2 right-12 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
             {/* Pin Camera Button */}
             <IconButton
-              icon={pinnedCameraId ? PinOff : Pin}
+              icon={pinnedSlot ? PinOff : Pin}
               size="sm"
-              variant={pinnedCameraId ? "tonal" : "standard"}
-              title={pinnedCameraId ? "Desfijar cámara" : "Fijar cámara"}
-              aria-label={pinnedCameraId ? "Desfijar cámara" : "Fijar cámara"}
+              variant={pinnedSlot ? "tonal" : "standard"}
+              title={pinnedSlot ? "Desfijar cámara" : "Fijar cámara"}
+              aria-label={pinnedSlot ? "Desfijar cámara" : "Fijar cámara"}
               onClick={togglePin}
               className="bg-surface-1/80 backdrop-blur text-on-surface size-7 hover:bg-surface-1"
             />
