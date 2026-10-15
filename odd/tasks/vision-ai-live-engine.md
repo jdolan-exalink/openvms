@@ -104,8 +104,11 @@ allocation engine, rotate as new events arrive, and render live video.
   hide); LPR "requires permission" notice also shown when events simply carry no plate (no permission signal
   in API); no test for the "Sin lecturas de patente recientes" branch.
 
+- CI hygiene on PR1 branch: `e371abf` sqlc regen (lpr_reads crop columns, pre-existing drift from b527d59);
+  `1b6b61a` integration tests count the birdseye camera + revive fix. Go integration green.
+- #54 merged into main (`dde6553`). #55 retargeted to main (+835/-625, 16 files).
+- Remaining CI failures pre-existing on main, untouched by this feature: gofmt/gosec in internal/agent and
+  internal/provision; Layout.test bottom-nav.
+
 ## Next step
-PRs open (stacked-to-main): #54 backend (`feat/vision-ai-live-engine-01-backend`, a08b2e3..80be18a, base main)
-and #55 web (`feat/vision-ai-live-engine`, base #54 branch; retarget to main after #54 merges). Both
-request size:exception (generated code). Remaining: merge decisions, review advisories follow-up,
-mobile nav / Layout.test decision.
+Review/merge #55. Follow-ups: review advisories, mobile nav decision, pre-existing lint in agent/provision.
