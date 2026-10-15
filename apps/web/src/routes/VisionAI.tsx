@@ -1,12 +1,15 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Eye, Pin, PinOff, Maximize2, Minimize2, History, LayoutGrid, Sparkles,
   CarFront, Bell, Check, X, Bug, Layers, RefreshCw, Scan,
 } from "lucide-react";
+import { meQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { can } from "@/lib/perm";
 import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
 import { useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource } from "@/lib/visionAi";
 
@@ -42,6 +45,8 @@ export function VisionAI() {
   const source = sourceFor(mode, presetSource);
   const layout = layoutFor(mode, layoutCount);
   const slotsQuery = useVisionSlots(source, layout);
+  const me = useQuery(meQuery);
+  const canViewSnapshots = can(me.data, "snapshots.view");
 
   // Pins are client side: they freeze the slot's current assignment. Slot numbers only mean the
   // same thing inside one source+layout, so pins are scoped to that key.
@@ -432,6 +437,7 @@ export function VisionAI() {
                   }}
                   className="p-3 hover:bg-surface-2 transition-colors cursor-pointer flex flex-col gap-1.5"
                 >
+                  <EventSnapshot slot={sl} snapshots={canViewSnapshots} />
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-xs text-ink truncate">{sl.camera_name}</span>
                     {sl.score !== undefined && (
@@ -567,6 +573,38 @@ function SlotRenderer({
           <div className="font-mono text-[10px] text-white/70">{formatElapsed(slot.display_seconds)}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Detection image of an active event: snapshot when allowed, else thumbnail, else the object icon. */
+function EventSnapshot({ slot, snapshots }: { slot: VisionAISlot; snapshots: boolean }) {
+  const eventId = slot.event_id;
+  if (!eventId) return null;
+  return <EventSnapshotImage key={eventId} slot={slot} eventId={eventId} snapshots={snapshots} />;
+}
+
+function EventSnapshotImage({ slot, eventId, snapshots }: { slot: VisionAISlot; eventId: string; snapshots: boolean }) {
+  const thumbnail = `/api/v1/events/${eventId}/thumbnail`;
+  // Snapshot first (when allowed), the thumbnail once on error, then the icon placeholder.
+  const [stage, setStage] = useState<"primary" | "thumbnail" | "none">("primary");
+  const useSnapshot = snapshots && stage === "primary";
+  const src = stage === "none" ? null : useSnapshot ? `/media/v1/events/${eventId}/snapshot.jpg` : thumbnail;
+  return (
+    <div className="aspect-video w-full overflow-hidden rounded-m3-sm bg-surface-3">
+      {src ? (
+        <img
+          src={src}
+          alt={`Detección: ${slot.object ?? "evento"} en ${slot.camera_name ?? "cámara"}`}
+          loading="lazy"
+          className="size-full object-cover"
+          onError={() => setStage(useSnapshot ? "thumbnail" : "none")}
+        />
+      ) : (
+        <div data-testid={`vision-event-placeholder-${eventId}`} className="flex size-full items-center justify-center text-muted">
+          <ObjectIcon object={slot.object} className="size-6 opacity-50" />
+        </div>
+      )}
     </div>
   );
 }

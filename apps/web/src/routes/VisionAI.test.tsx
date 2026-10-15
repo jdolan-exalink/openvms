@@ -261,6 +261,39 @@ describe("VisionAI Page", () => {
     expect(badge.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
 
+  describe("active events snapshots", () => {
+    const openSidebar = async () => {
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: /Eventos Activos/i }));
+      return within(await screen.findByTestId("vision-events-sidebar"));
+    };
+
+    it("uses the snapshot when the user can view snapshots", async () => {
+      mePermissions = [...mePermissions, "snapshots.view"];
+      const sidebar = await openSidebar();
+      const img = await sidebar.findByRole("img", { name: "Detección: person en Cam cam-1" });
+      expect(img).toHaveAttribute("src", "/media/v1/events/ev-cam-1/snapshot.jpg");
+      expect(img).toHaveAttribute("loading", "lazy");
+    });
+
+    it("uses the thumbnail without snapshot permission", async () => {
+      const sidebar = await openSidebar();
+      const img = await sidebar.findByRole("img", { name: "Detección: person en Cam cam-1" });
+      expect(img).toHaveAttribute("src", "/api/v1/events/ev-cam-1/thumbnail");
+    });
+
+    it("falls back to the thumbnail once, then to the icon placeholder", async () => {
+      mePermissions = [...mePermissions, "snapshots.view"];
+      const sidebar = await openSidebar();
+      const img = await sidebar.findByRole("img", { name: "Detección: person en Cam cam-1" });
+      fireEvent.error(img);
+      await waitFor(() => expect(sidebar.getByRole("img", { name: "Detección: person en Cam cam-1" })).toHaveAttribute("src", "/api/v1/events/ev-cam-1/thumbnail"));
+      fireEvent.error(sidebar.getByRole("img", { name: "Detección: person en Cam cam-1" }));
+      await waitFor(() => expect(sidebar.queryByRole("img", { name: "Detección: person en Cam cam-1" })).not.toBeInTheDocument());
+      expect(sidebar.getByTestId("vision-event-placeholder-ev-cam-1")).toBeInTheDocument();
+    });
+  });
+
   it("renders header, filters and layout modes", async () => {
     setup();
     expect(await screen.findByText(/VISION AI/i)).toBeInTheDocument();
