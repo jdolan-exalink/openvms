@@ -40,7 +40,7 @@ export function parseVisionPrefs(raw: string | null): VisionPrefs {
   const activeObjects = { ...defaults.activeObjects };
   if (rec.activeObjects && typeof rec.activeObjects === "object") {
     for (const [name, value] of Object.entries(rec.activeObjects)) {
-      if (name in activeObjects && typeof value === "boolean") activeObjects[name] = value;
+      if (Object.hasOwn(defaults.activeObjects, name) && typeof value === "boolean") activeObjects[name] = value;
     }
   }
   return {

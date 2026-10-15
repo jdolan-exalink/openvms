@@ -34,6 +34,13 @@ describe("parseVisionPrefs", () => {
     expect(parseVisionPrefs("42")).toEqual(DEFAULT_VISION_PREFS);
   });
 
+  it("ignores inherited object names such as toString or constructor", () => {
+    const raw = JSON.stringify({ activeObjects: { toString: true, constructor: false, person: false } });
+    const parsed = parseVisionPrefs(raw);
+    expect(Object.keys(parsed.activeObjects).sort()).toEqual(Object.keys(DEFAULT_VISION_PREFS.activeObjects).sort());
+    expect(parsed.activeObjects.person).toBe(false);
+  });
+
   it("drops unknown values per field and keeps the valid ones", () => {
     const raw = JSON.stringify({ mode: "bogus", presetSource: "vehiculos", layoutCount: 7, activeObjects: { person: false, car: "yes", ghost: true } });
     expect(parseVisionPrefs(raw)).toEqual({

@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { focusManager } from "@tanstack/react-query";
 import { json, renderPage, stubApi } from "@/test-utils";
+import { DEFAULT_VISION_PREFS, loadVisionPrefs, saveVisionPrefs, visionPrefsKey } from "@/lib/visionAiPrefs";
 import { VisionAI } from "./VisionAI";
 
 vi.mock("@/components/MsePlayer", () => ({
@@ -127,6 +129,29 @@ describe("VisionAI Page", () => {
       expect(lastQuery()?.get("layout")).toBe("4");
     } finally {
       meResponse.id = "u1";
+    }
+  });
+
+  it("loads the new user's saved view when the signed-in user changes without a reload", async () => {
+    saveVisionPrefs(visionPrefsKey("t1", "u2"), { ...DEFAULT_VISION_PREFS, mode: "dynamic", presetSource: "personas" });
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      setup();
+      await screen.findByText("Cam cam-1");
+      fireEvent.click(screen.getByRole("button", { name: "Vehículos" }));
+      await waitFor(() => expect(lastQuery()?.get("source")).toBe("vehiculos"));
+
+      meResponse.id = "u2";
+      vi.setSystemTime(Date.now() + 61_000);
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+      await waitFor(() => expect(lastQuery()?.get("source")).toBe("personas"));
+      expect(lastQuery()?.get("layout")).toBe("16");
+      expect(loadVisionPrefs(visionPrefsKey("t1", "u2")).presetSource).toBe("personas");
+    } finally {
+      focusManager.setFocused(undefined);
+      meResponse.id = "u1";
+      vi.useRealTimers();
     }
   });
 

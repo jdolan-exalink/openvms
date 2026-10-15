@@ -70,9 +70,11 @@ export function VisionAI() {
   const [hydratedKey, setHydratedKey] = useState<string | null>(null);
   if (prefsKey && hydratedKey !== prefsKey) {
     setHydratedKey(prefsKey);
-    // A change made while `me` was still loading wins over the saved view.
+    // On the first load, a change made while `me` was still loading wins over the saved view. When
+    // the signed-in user or tenant changes later, always load that user's own view.
+    const firstLoad = hydratedKey === null;
     const untouched = JSON.stringify({ mode, presetSource, layoutCount, activeObjects }) === JSON.stringify(DEFAULT_VISION_PREFS);
-    if (untouched) {
+    if (!firstLoad || untouched) {
       const saved = loadVisionPrefs(prefsKey);
       setMode(saved.mode);
       setPresetSource(saved.presetSource);
