@@ -38,5 +38,10 @@ The headless-browser run of `/vision-ai` against real data showed:
   ok; `golangci-lint` visionai 0 issues; web typecheck+lint clean; full `pnpm test` 175 files / 1480 tests.
 - LPR source: empty during the run — no `lpr_reads` in the last 10 min on this stack (expected empty state).
 
+- Native review (lineage review-c61b5aeaa1968b8f): APPROVED, acknowledged. Advisories addressed in a test
+  commit: margin boundary (exactly at margin keeps incumbent, one point past evicts; mutation `>`→`>=`
+  verified to fail the test) and negative `already_visible_penalty` assertion. Open-alarm advisory: the
+  `OpenAlarm` field no longer exists, so alarm rows cannot affect ranking structurally.
+
 ## Next step
-RDD assess, push + PR (user decision).
+Push + PR (user decision).
