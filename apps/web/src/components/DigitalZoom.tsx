@@ -33,16 +33,35 @@ type ZoomFrameProps = {
   /** Notified whenever the zoom changes, including a reset to 1× on unmount. */
   onZoom?: (zoom: DigitalZoom) => void;
   /**
+   * Zoom owned by the caller (the live tile), so every quality layer of one tile shows the same
+   * zoom/pan. When set, `resetKey` no longer clears it: the owner resets it.
+   */
+  zoom?: DigitalZoom;
+  /** Called with each zoom the user produces when `zoom` is controlled. */
+  onZoomChange?: (zoom: DigitalZoom) => void;
+  /**
    * Picture rendered inside the transformed stage (recordings).
    * Live video is attached imperatively to `stageRef` instead.
    */
   picture?: (zoom: DigitalZoom) => ReactNode;
   /** When false, nothing local is scaled (the surface layer scales its own stage). */
   scalePicture?: boolean;
+  /**
+   * Picture element sampled by the auto enhancement when the video is not inside this frame
+   * (the surface layer hosts it). Defaults to the first `<video>`/`<canvas>` in the stage.
+   */
+  mediaSource?: () => HTMLVideoElement | HTMLCanvasElement | null;
+  /** Receives the CSS filter of the current enhancement ("none" when neutral), for pictures hosted elsewhere. */
+  onEnhance?: (filter: string) => void;
   /** Enable dynamic visual enhancement engine and UI controls. Defaults to true. */
   enhanceable?: boolean;
   children?: ReactNode;
 };
+
+/** locateMedia finds the picture to sample: the supplied element, else the first video/canvas in the stage. */
+function locateMedia(source: (() => HTMLVideoElement | HTMLCanvasElement | null) | undefined, stage: HTMLElement): HTMLVideoElement | HTMLCanvasElement | null {
+  return source?.() ?? stage.querySelector<HTMLVideoElement | HTMLCanvasElement>("video, canvas");
+}
 
 const touchPoint = (event: { clientX: number; clientY: number }) => ({ x: event.clientX, y: event.clientY });
 
@@ -60,13 +79,27 @@ export function ZoomFrame({
   resetKey,
   className,
   onZoom,
+  zoom: controlledZoom,
+  onZoomChange,
   picture,
   scalePicture = true,
+  mediaSource,
+  onEnhance,
   enhanceable = true,
   children,
 }: ZoomFrameProps) {
   const [frameEl, setFrameEl] = useState<HTMLDivElement | null>(null);
-  const [zoom, setZoom] = useState<DigitalZoom>(IDENTITY_ZOOM);
+  const [ownZoom, setOwnZoom] = useState<DigitalZoom>(IDENTITY_ZOOM);
+  const controlled = controlledZoom !== undefined;
+  const zoom = controlledZoom ?? ownZoom;
+  const onZoomChangeRef = useRef(onZoomChange);
+  useEffect(() => {
+    onZoomChangeRef.current = onZoomChange;
+  }, [onZoomChange]);
+  const setZoom = useCallback((next: DigitalZoom) => {
+    setOwnZoom(next);
+    onZoomChangeRef.current?.(next);
+  }, []);
   const [dragging, setDragging] = useState(false);
   const [trackedKey, setTrackedKey] = useState(resetKey);
   const zoomRef = useRef(zoom);
@@ -111,13 +144,18 @@ export function ZoomFrame({
     setAdjustments({ ...engine.getAdjustments() });
   }, [engine]);
 
+  const mediaSourceRef = useRef(mediaSource);
+  useEffect(() => {
+    mediaSourceRef.current = mediaSource;
+  }, [mediaSource]);
+
   const updateEnhancements = useCallback((currentZoom: DigitalZoom) => {
     if (!enhanceable || enhancementMode === "off") return;
     const el = frameEl;
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const roi = extractRoiRect(currentZoom, rect.width, rect.height);
-    const mediaEl = (stageRef?.current ?? el).querySelector<HTMLVideoElement | HTMLCanvasElement>("video, canvas");
+    const mediaEl = locateMedia(mediaSourceRef.current, stageRef?.current ?? el);
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (mediaEl) {
       const adj = engine.update(mediaEl, roi, now);
@@ -161,7 +199,7 @@ export function ZoomFrame({
         if (el) {
           const rect = el.getBoundingClientRect();
           const roi = extractRoiRect(zoomRef.current, rect.width, rect.height);
-          const mediaEl = (stageRef?.current ?? el).querySelector<HTMLVideoElement | HTMLCanvasElement>("video, canvas");
+          const mediaEl = locateMedia(mediaSourceRef.current, stageRef?.current ?? el);
           if (mediaEl) {
             const adj = engine.update(mediaEl, roi, now);
             setAdjustments((prev) => (hasSignificantChange(prev, adj) ? { ...adj } : prev));
@@ -179,7 +217,7 @@ export function ZoomFrame({
 
   if (trackedKey !== resetKey) {
     setTrackedKey(resetKey);
-    setZoom(IDENTITY_ZOOM);
+    if (!controlled) setOwnZoom(IDENTITY_ZOOM);
   }
 
   useEffect(() => {
@@ -190,9 +228,10 @@ export function ZoomFrame({
     onZoomRef.current = onZoom;
   }, [onZoom]);
 
+  // Also runs when `onZoom` changes (another session behind the same frame) so the new target gets the zoom.
   useEffect(() => {
     onZoomRef.current?.(zoom);
-  }, [zoom]);
+  }, [zoom, onZoom]);
 
   useEffect(() => {
     return () => onZoomRef.current?.(IDENTITY_ZOOM);
@@ -216,7 +255,7 @@ export function ZoomFrame({
     };
     frameEl.addEventListener("wheel", onWheel, { passive: false });
     return () => frameEl.removeEventListener("wheel", onWheel);
-  }, [frameEl]);
+  }, [frameEl, setZoom]);
 
   const applyZoom = (next: DigitalZoom) => {
     zoomRef.current = next;
@@ -326,6 +365,17 @@ export function ZoomFrame({
 
   const zoomed = zoom.scale > 1;
   const cssFilter = enhanceable ? generateCssFilterString(adjustments) : "none";
+  const onEnhanceRef = useRef(onEnhance);
+  useEffect(() => {
+    onEnhanceRef.current = onEnhance;
+  }, [onEnhance]);
+  // Also runs when `onEnhance` changes (another session behind the frame) so the new target gets the filter.
+  useEffect(() => {
+    onEnhanceRef.current?.(cssFilter);
+  }, [cssFilter, onEnhance]);
+  useEffect(() => {
+    return () => onEnhanceRef.current?.("none");
+  }, []);
   const stageStyle: React.CSSProperties | undefined =
     zoomed || cssFilter !== "none"
       ? {

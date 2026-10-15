@@ -71,3 +71,31 @@ describe("ZoomFrame touch gestures", () => {
     expect(last().scale).toBe(1);
   });
 });
+
+describe("ZoomFrame with tile-owned zoom", () => {
+  const zoomed: DigitalZoom = { scale: 2, x: -100, y: -50 };
+
+  it("renders the controlled zoom and keeps it when resetKey changes", () => {
+    const view = render(<ZoomFrame resetKey="cam:sub" zoom={zoomed} picture={() => <video />} />);
+    const stage = () => view.container.querySelector("video")!.parentElement as HTMLElement;
+    expect(stage().style.transform).toBe("translate(-100px, -50px) scale(2)");
+    view.rerender(<ZoomFrame resetKey="cam:main" zoom={zoomed} picture={() => <video />} />);
+    expect(stage().style.transform).toBe("translate(-100px, -50px) scale(2)");
+  });
+
+  it("reports user zoom through onZoomChange", () => {
+    const changes: DigitalZoom[] = [];
+    const view = render(<ZoomFrame resetKey="cam:sub" zoom={{ scale: 1, x: 0, y: 0 }} onZoomChange={(z) => changes.push(z)} />);
+    fireEvent.wheel(view.container.firstElementChild as HTMLElement, { deltaY: -300, clientX: 100, clientY: 50 });
+    expect(changes.at(-1)?.scale).toBeGreaterThan(1);
+  });
+
+  it("notifies onZoom again when the session behind the frame changes", () => {
+    const first = vi.fn();
+    const second = vi.fn();
+    const view = render(<ZoomFrame resetKey="cam:sub" zoom={zoomed} onZoom={first} scalePicture={false} />);
+    expect(first).toHaveBeenLastCalledWith(zoomed);
+    view.rerender(<ZoomFrame resetKey="cam:main" zoom={zoomed} onZoom={second} scalePicture={false} />);
+    expect(second).toHaveBeenCalledWith(zoomed);
+  });
+});

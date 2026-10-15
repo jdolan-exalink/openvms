@@ -609,7 +609,7 @@ describe("Live", () => {
     expect(saved?.tiles.slice(0, 3).map((tile) => tile && "quality" in tile ? tile.quality : null)).toEqual(["sub", "sub", "main"]);
   });
 
-  it("waits more than five seconds after maximize before switching and restores sub on unmaximize", async () => {
+  it("promotes to main immediately on maximize and restores sub on unmaximize", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({
       "/api/v1/me": meResponse,
@@ -625,9 +625,6 @@ describe("Live", () => {
     vi.useFakeTimers();
     fireEvent.doubleClick(tile);
 
-    act(() => { vi.advanceTimersByTime(5_000); });
-    expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(false);
-    act(() => { vi.advanceTimersByTime(1); });
     expect(FakeSocket.urls.some((url) => url.includes("quality=main"))).toBe(true);
 
     fireEvent.doubleClick(tile);
@@ -653,7 +650,6 @@ describe("Live", () => {
     vi.useFakeTimers();
 
     fireEvent.doubleClick(tile);
-    act(() => { vi.advanceTimersByTime(5_001); });
     fireEvent.doubleClick(tile);
     act(() => { vi.advanceTimersByTime(10_000); });
 
@@ -692,7 +688,6 @@ describe("Live", () => {
       vi.useFakeTimers();
 
       fireEvent.doubleClick(tile);
-      act(() => { vi.advanceTimersByTime(5_001); });
       expect(subLifecycle(acquire.mock.calls)).toBe(0);
       expect(subLifecycle(release.mock.calls)).toBe(0);
       expect(baseVideo.isConnected).toBe(true);
@@ -718,6 +713,118 @@ describe("Live", () => {
       expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(1);
       expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
       expect(parseSelection(localStorage.getItem(liveSelectionKey("t1", "u1")), new Set(["cam-1"]))?.tiles[0]).toEqual({ camera_id: "cam-1", quality: "sub" });
+    });
+  });
+
+  describe.each([{ persistent: false }, { persistent: true }])("tile quality badge (persistentPlayers=$persistent)", ({ persistent }) => {
+    it("shows SUB, then the handoff, then MAIN once the target has a drawable frame, then SUB again", async () => {
+      if (persistent) localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true }));
+      stubBrowserAPIs();
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+        ...emptyCatalogs,
+      })));
+      renderPage(() => (
+        <PlayerSessionProvider userId="u1">
+          <Live />
+        </PlayerSessionProvider>
+      ));
+      fireEvent.click(await screen.findByText("Puerta norte"));
+      await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+      const tile = await screen.findByLabelText("Cuadro 1");
+      await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+      const badge = () => within(tile).getByTestId("quality-badge");
+      expect(badge()).toHaveTextContent("SUB");
+      expect(badge()).toHaveAttribute("aria-label", "Calidad: secundaria");
+
+      fireEvent.doubleClick(tile);
+      expect(badge()).toHaveTextContent("SUB → MAIN");
+      expect(badge()).toHaveAttribute("data-quality", "switching");
+
+      const targetVideo = tile.querySelector('[data-testid="quality-target-surface"] video') as HTMLVideoElement;
+      Object.defineProperty(targetVideo, "readyState", { value: 4, configurable: true });
+      Object.defineProperty(targetVideo, "videoWidth", { value: 1280, configurable: true });
+      act(() => { targetVideo.dispatchEvent(new Event("loadeddata")); });
+      await waitFor(() => expect(badge()).toHaveTextContent(/^MAIN$/));
+      expect(badge()).toHaveAttribute("aria-label", "Calidad: principal");
+
+      fireEvent.doubleClick(tile);
+      expect(badge()).toHaveTextContent(/^SUB$/);
+    });
+  });
+
+  it("shows the quality badge on a fisheye tile and the handoff while main is requested", async () => {
+    stubBrowserAPIs();
+    localStorage.setItem(liveSelectionKey("t1", "u1"), serializeSelection(2, [
+      { camera_id: "cam-fish", quality: "sub" }, null, null, null,
+    ]));
+    saveFisheyeConfig({
+      cameraId: "cam-fish",
+      enabled: true,
+      lensType: "fisheye_360",
+      mountType: "ceiling",
+      projectionModel: "equidistant",
+      calibration: DEFAULT_FISHEYE_CALIBRATION,
+      views: [],
+      defaultMode: "virtual_ptz",
+    });
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-fish", "Fisheye camera")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    await screen.findAllByText("Fisheye camera", { selector: ".truncate" });
+    const tile = await screen.findByLabelText("Cuadro 1");
+    expect(await within(tile).findByTestId("quality-badge")).toHaveTextContent("SUB");
+    fireEvent.doubleClick(tile);
+    expect(within(tile).getByTestId("quality-badge")).toHaveTextContent("SUB → MAIN");
+  });
+
+  describe.each([{ persistent: false }, { persistent: true }])("digital zoom belongs to the tile across the quality handoff (persistentPlayers=$persistent)", ({ persistent }) => {
+    it("applies the same zoom to the main target layer as to the zoomed sub layer", async () => {
+      if (persistent) localStorage.setItem(FEATURES_OVERRIDE_KEY, JSON.stringify({ persistentPlayers: true }));
+      stubBrowserAPIs();
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+        x: 0, y: 0, left: 0, top: 0, right: 400, bottom: 300, width: 400, height: 300, toJSON: () => ({}),
+      } as DOMRect);
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+        ...emptyCatalogs,
+      })));
+      renderPage(() => (
+        <PlayerSessionProvider userId="u1">
+          <Live />
+        </PlayerSessionProvider>
+      ));
+      fireEvent.click(await screen.findByText("Puerta norte"));
+      await screen.findByRole("button", { name: "Calidad de Puerta norte" });
+      const tile = await screen.findByLabelText("Cuadro 1");
+      await waitFor(() => expect(tile.querySelector("video")).not.toBeNull());
+      const baseStage = tile.querySelector("video")!.parentElement!;
+      const baseFrame = baseStage.parentElement!;
+
+      fireEvent.wheel(baseFrame, { deltaY: -300, clientX: 200, clientY: 150 });
+      await waitFor(() => expect(baseStage.style.transform).toContain("scale("));
+      const zoomed = baseStage.style.transform;
+
+      fireEvent.doubleClick(tile);
+      const target = tile.querySelector('[data-testid="quality-target-surface"]')!;
+      await waitFor(() => expect(target.querySelector("video")).not.toBeNull());
+      expect((target.querySelector("video")!.parentElement as HTMLElement).style.transform).toBe(zoomed);
+
+      // Zooming further while the target is still loading moves both layers together.
+      fireEvent.wheel(baseFrame, { deltaY: -300, clientX: 200, clientY: 150 });
+      await waitFor(() => expect(baseStage.style.transform).not.toBe(zoomed));
+      expect((target.querySelector("video")!.parentElement as HTMLElement).style.transform).toBe(baseStage.style.transform);
+
+      // Back to the grid: the sub layer keeps the tile zoom (it is not reset by the handoff).
+      const expected = baseStage.style.transform;
+      fireEvent.doubleClick(tile);
+      expect(tile.querySelector('[data-testid="quality-target-surface"]')).toBeNull();
+      expect(baseStage.style.transform).toBe(expected);
     });
   });
 
@@ -762,7 +869,6 @@ describe("Live", () => {
     vi.useFakeTimers();
 
     fireEvent.doubleClick(tile);
-    act(() => { vi.advanceTimersByTime(5_001); });
     fireEvent.click(screen.getByRole("button", { name: "Calidad de Puerta norte" }));
     fireEvent.click(screen.getByRole("button", { name: "Principal por 30 s" }));
     act(() => { vi.advanceTimersByTime(30_000); });
@@ -835,7 +941,6 @@ describe("Live", () => {
     expect(replaced.querySelectorAll("video")).toHaveLength(1);
 
     fireEvent.doubleClick(replaced);
-    act(() => { vi.advanceTimersByTime(5_001); });
     expect(screen.getByLabelText("Cuadro 1").querySelectorAll("video")).toHaveLength(2);
   });
 
@@ -1617,7 +1722,10 @@ describe("Live with persistent players (P0 acceptance)", () => {
     expect(screen.getByLabelText("Cuadro 2")).not.toHaveClass("hidden");
     expect(screen.getByLabelText("Cuadro 1").querySelector("video")).toBe(video1);
     expect(screen.getByLabelText("Cuadro 2").querySelector("video")).toBe(video2);
-    expect(FakeSocket.created).toBe(2);
+    // Maximize now promotes to main immediately: exactly one extra (main) socket, no sub reconnects.
+    expect(FakeSocket.created).toBe(3);
+    expect(FakeSocket.urls.filter((url) => url.includes("quality=sub"))).toHaveLength(2);
+    expect(FakeSocket.urls.filter((url) => url.includes("quality=main"))).toHaveLength(1);
     expect(playerMetrics.get("cam-1", "sub")?.connectAttempts).toBe(1);
     expect(playerMetrics.get("cam-1", "sub")?.reconnectCount).toBe(0);
     expect(playerMetrics.get("cam-2", "sub")?.reconnectCount).toBe(0);
