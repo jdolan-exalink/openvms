@@ -41,6 +41,10 @@ allocation engine, rotate as new events arrive, and render live video.
 - [ ] VAI-04 — Web `LiveVisionTile`: consume API by source, rotate camera, fix `isFocused` prop,
       tests. Route: delegated writer (same as VAI-03).
 
+- [ ] VAI-05 — Backend follow-ups from native review advisories (lineage review-1d2bc2ffb268cbfd):
+      NULL `PlatesAllowed` scan for actors without `lpr.view` (500), document/test the 1h start-age
+      cap, pinned-slot release test. Route: delegated writer (with VAI-03/04, separate commit).
+
 ## Acceptance criteria and checks
 - `go vet ./...`, `go test -race ./internal/visionai/... ./internal/api/...` green; `gofmt -l` clean.
 - `pnpm --filter web typecheck`, `pnpm --filter web lint`, VisionAI/LiveVisionTile/Live vitest green.
@@ -67,5 +71,8 @@ allocation engine, rotate as new events arrive, and render live video.
   != resolved; platform actors allowed (like events service); pins client-side.
 - RDD assess on PR1 slice: medium, `slice_budget_reached` → review due.
 
+- Native review PR1 slice (base 9a33433..4e97ba8 tree): consent granted, 1 lens (reliability),
+  APPROVED, acknowledged, authority burned. Advisories → VAI-05. Reviewed boundary = docs commit.
+
 ## Next step
-Native review of PR1 slice, then VAI-03/VAI-04.
+VAI-05, VAI-03, VAI-04 (one writer).
