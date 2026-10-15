@@ -32,12 +32,17 @@ type Snapshot struct {
 	GPUName          string             `json:"gpu_name"`
 	CCTVTotal        uint64             `json:"cctv_total_bytes"`
 	CCTVFree         uint64             `json:"cctv_free_bytes"`
-	DatabaseTotal    uint64             `json:"database_total_bytes"`
-	DatabaseFree     uint64             `json:"database_free_bytes"`
-	Network          []NetworkInterface `json:"network_interfaces,omitempty"`
-	NetworkSampledAt *time.Time         `json:"network_sampled_at,omitempty"`
-	SampledAt        *time.Time         `json:"sampled_at,omitempty"`
-	OS               string             `json:"os,omitempty"`
+	DatabaseTotal        uint64             `json:"database_total_bytes"`
+	DatabaseFree         uint64             `json:"database_free_bytes"`
+	StorageBufferPercent int                `json:"storage_buffer_percent"`
+	StorageWatchdog      bool               `json:"storage_watchdog"`
+	StorageOver85Percent bool               `json:"storage_over_85_percent"`
+	DatabaseCritical     bool               `json:"database_critical"`
+	PrunedSegmentsCount  uint64             `json:"pruned_segments_count"`
+	Network              []NetworkInterface `json:"network_interfaces,omitempty"`
+	NetworkSampledAt     *time.Time         `json:"network_sampled_at,omitempty"`
+	SampledAt            *time.Time         `json:"sampled_at,omitempty"`
+	OS                   string             `json:"os,omitempty"`
 }
 
 // Paths are the files a sample reads. Empty fields use this machine.
@@ -155,6 +160,18 @@ func Read(opts Paths, variant string) Snapshot {
 		DatabaseTotal:   dbTotal,
 		DatabaseFree:    dbFree,
 	}
+	watchdogCfg := StorageWatchdogConfig{
+		Enabled:             true,
+		SafetyBufferPercent: DefaultStorageSafetyBufferPercent,
+		RecordingsPath:      opts.CCTV,
+		DBPath:              opts.DB,
+	}
+	watchdogStatus, _ := EnforceStorageSafety(watchdogCfg, cctvTotal, cctvFree, dbTotal, dbFree)
+	out.StorageBufferPercent = watchdogStatus.SafetyBufferPercent
+	out.StorageWatchdog = watchdogStatus.Enabled
+	out.StorageOver85Percent = watchdogStatus.OverSafetyThreshold
+	out.DatabaseCritical = watchdogStatus.DBCritical
+	out.PrunedSegmentsCount = watchdogStatus.PrunedSegmentsCount
 	if host.CPUAvailable {
 		cpu := host.CPUPercent
 		out.CPUPercent = &cpu

@@ -47,6 +47,11 @@ type AgentView struct {
 	CCTVFree               int64
 	DatabaseTotal          int64
 	DatabaseFree           int64
+	StorageBufferPercent   int
+	StorageWatchdog        bool
+	StorageOver85Percent   bool
+	DatabaseCritical       bool
+	PrunedSegmentsCount    int64
 	OS                     string
 	Error                  string
 }
@@ -187,6 +192,11 @@ func applySnapshot(out *AgentView, snap agent.Snapshot) {
 	out.CCTVFree = signedSnapshotBytes(snap.CCTVFree)
 	out.DatabaseTotal = signedSnapshotBytes(snap.DatabaseTotal)
 	out.DatabaseFree = signedSnapshotBytes(snap.DatabaseFree)
+	out.StorageBufferPercent = snap.StorageBufferPercent
+	out.StorageWatchdog = snap.StorageWatchdog
+	out.StorageOver85Percent = snap.StorageOver85Percent
+	out.DatabaseCritical = snap.DatabaseCritical
+	out.PrunedSegmentsCount = int64(snap.PrunedSegmentsCount)
 	out.OS = snap.OS
 	out.Error = ""
 }

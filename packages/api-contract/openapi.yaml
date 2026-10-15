@@ -4444,6 +4444,11 @@ components:
         cctv_free_bytes: { type: integer, format: int64 }
         database_total_bytes: { type: integer, format: int64 }
         database_free_bytes: { type: integer, format: int64 }
+        storage_buffer_percent: { type: integer, description: "Percentage of storage reserved as safety buffer against corruption (default 15%)." }
+        storage_watchdog: { type: boolean, description: "Whether edge agent storage watchdog is enabled." }
+        storage_over_85_percent: { type: boolean, description: "True when storage usage exceeds 85% (free space < 15% safety buffer)." }
+        database_critical: { type: boolean, description: "True when database mount has less than 15% free space remaining." }
+        pruned_segments_count: { type: integer, format: int64, description: "Total number of emergency pruned old recording segments." }
         os: { type: string, description: "Operating system distribution and version" }
         sampled_at: { type: string, format: date-time, description: "UTC time when the agent sample was taken." }
         error: { type: string }

@@ -120,6 +120,15 @@ function setupConfigModal(customHandler?: (req: Request) => Promise<Response>) {
         hailo: true,
         gpu_present: true,
         gpu_name: "NVIDIA RTX 4060",
+        cctv_total_bytes: 1_000_000_000_000,
+        cctv_free_bytes: 400_000_000_000,
+        database_total_bytes: 100_000_000_000,
+        database_free_bytes: 50_000_000_000,
+        storage_buffer_percent: 15,
+        storage_watchdog: true,
+        storage_over_85_percent: false,
+        database_critical: false,
+        pruned_segments_count: 0,
       });
     }
 
@@ -338,5 +347,82 @@ describe("ServerFrigateConfigModal", () => {
     const select = screen.getByRole("combobox");
     fireEvent.change(select, { target: { value: "continuous" } });
     expect(screen.getByText(/mode: continuous/i)).toBeInTheDocument();
+  });
+
+  it("switches to Grabación tab, displays 15% safety buffer and active watchdog by default", async () => {
+    setupConfigModal();
+
+    renderPage(() => (
+      <ServerFrigateConfigModal
+        server={mockServer}
+        open={true}
+        onClose={() => {}}
+        canRestart={true}
+      />
+    ));
+
+    await screen.findByText(/Configuración de Servidor Frigate/i);
+
+    // Switch to Grabación tab
+    fireEvent.click(screen.getByRole("button", { name: /Grabación/i }));
+
+    // Verify dynamic retention title and default active switch
+    expect(
+      await screen.findByText(/Optimización Dinámica y Protección de Almacenamiento/i)
+    ).toBeInTheDocument();
+
+    const toggle = screen.getByRole("switch", {
+      name: /Activar Protección & Retención Dinámica/i,
+    });
+    expect(toggle).toBeChecked();
+
+    // Verify 15% safety buffer and storage gauge
+    expect(screen.getByText(/15% Reserva de Seguridad/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/850.00 GB Útiles/i)[0]).toBeInTheDocument();
+    expect(screen.getByText(/150.00 GB Reservados/i)).toBeInTheDocument();
+
+    // Verify dynamic attainable days calculation
+    expect(screen.getByText(/Días Estimados de Retención/i)).toBeInTheDocument();
+    expect(screen.getByText(/Base de Datos Protegida/i)).toBeInTheDocument();
+  });
+
+  it("allows toggling dynamic retention switch and applying calculated days to YAML", async () => {
+    setupConfigModal();
+
+    renderPage(() => (
+      <ServerFrigateConfigModal
+        server={mockServer}
+        open={true}
+        onClose={() => {}}
+        canRestart={true}
+      />
+    ));
+
+    await screen.findByText(/Configuración de Servidor Frigate/i);
+
+    // Switch to Grabación tab
+    fireEvent.click(screen.getByRole("button", { name: /Grabación/i }));
+
+    const toggle = await screen.findByRole("switch", {
+      name: /Activar Protección & Retención Dinámica/i,
+    });
+    expect(toggle).toBeChecked();
+
+    // Click apply calculated retention to YAML
+    const applyBtn = screen.getByRole("button", {
+      name: /Aplicar Retención Calculada al YAML/i,
+    });
+    expect(applyBtn).toBeInTheDocument();
+    fireEvent.click(applyBtn);
+
+    // Check YAML preview has updated days (e.g. 13 days for 3 cameras with 850GB at 2Mbps)
+    expect(screen.getByText(/days: 13/i)).toBeInTheDocument();
+
+    // Toggle off
+    fireEvent.click(toggle);
+    expect(toggle).not.toBeChecked();
+    expect(
+      screen.getByText(/Cálculo dinámico y protección de almacenamiento desactivados/i)
+    ).toBeInTheDocument();
   });
 });

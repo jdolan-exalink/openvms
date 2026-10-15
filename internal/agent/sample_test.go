@@ -154,3 +154,14 @@ func TestAIDetectorHardwareProbing(t *testing.T) {
 		t.Fatalf("expected OpenVINO detected with Intel CPU + AVX2, got: %+v", snap)
 	}
 }
+
+func TestReadIncludesStorageWatchdogFields(t *testing.T) {
+	root := t.TempDir()
+	snap := Read(Paths{CCTV: root, DB: root}, "cpu")
+	if snap.StorageBufferPercent != 15 {
+		t.Errorf("expected StorageBufferPercent=15, got %d", snap.StorageBufferPercent)
+	}
+	if !snap.StorageWatchdog {
+		t.Errorf("expected StorageWatchdog=true by default")
+	}
+}

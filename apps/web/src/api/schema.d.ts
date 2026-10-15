@@ -3358,6 +3358,19 @@ export interface components {
             database_total_bytes?: number;
             /** Format: int64 */
             database_free_bytes?: number;
+            /** @description Percentage of storage reserved as safety buffer against corruption (default 15%). */
+            storage_buffer_percent?: number;
+            /** @description Whether edge agent storage watchdog is enabled. */
+            storage_watchdog?: boolean;
+            /** @description True when storage usage exceeds 85% (free space < 15% safety buffer). */
+            storage_over_85_percent?: boolean;
+            /** @description True when database mount has less than 15% free space remaining. */
+            database_critical?: boolean;
+            /**
+             * Format: int64
+             * @description Total number of emergency pruned old recording segments.
+             */
+            pruned_segments_count?: number;
             /** @description Operating system distribution and version */
             os?: string;
             /**
