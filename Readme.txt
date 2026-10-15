@@ -69,7 +69,7 @@ Variables opcionales (con su valor por defecto):
     LOGIN_MAX_FAILURES=5      intentos fallidos antes de bloquear la cuenta
     LOGIN_LOCKOUT=15m         duración del bloqueo
     OPENVMS_ADMIN_USERNAME=admin        usuario del primer administrador (ver sección 6)
-    OPENVMS_ADMIN_PASSWORD=openvms123   su contraseña inicial: CAMBIARLA (ver sección 6)
+    OPENVMS_ADMIN_PASSWORD=             contraseña inicial; vacía = se genera una al azar (ver sección 6)
     OPENVMS_DEFAULT_TENANT=openvms      organización inicial (ver sección 6)
     OPENVMS_DEFAULT_SITE="Sitio principal"   sitio inicial dentro de esa organización
 
@@ -97,18 +97,22 @@ frigate-cayasta) para demo. Los simulados se pueden apagar sin problema:
 En una instalación nueva, la API crea sola el administrador de plataforma al arrancar:
 
     usuario:     admin                  (OPENVMS_ADMIN_USERNAME)
-    contraseña:  openvms123             (OPENVMS_ADMIN_PASSWORD)
+    contraseña:  al azar, se muestra una sola vez en el log de la API
 
-Para elegir otra contraseña desde el inicio, definir en .env antes de levantar:
+No hay contraseña por defecto. Para ver la generada (solo aparece en el primer arranque):
+
+    docker compose logs api | grep "initial admin"
+
+Entrar con ese usuario y esa contraseña; el sistema obliga a cambiarla en el primer ingreso.
+Guardarla enseguida: no se vuelve a registrar.
+
+Para elegir la contraseña en vez de generarla, definir en .env antes de levantar:
 
     OPENVMS_ADMIN_PASSWORD=<clave de al menos 10 caracteres, con letras y números>
 
 Notas:
 - Solo se crea si no existe ese usuario y ningún administrador de plataforma tiene
   contraseña: nunca pisa ni reinicia una instalación existente.
-- Si queda la contraseña por defecto (openvms123), el sistema obliga a cambiarla en el
-  primer ingreso y la API registra un WARN en cada arranque mientras siga activa. Es una
-  clave pública: cambiarla de inmediato, sobre todo si el servidor es accesible desde internet.
 - Si OPENVMS_ADMIN_PASSWORD no cumple la política de contraseñas, la API lo registra como
   error y no crea el usuario (sigue funcionando; usar vmsctl).
 - Después, activar la verificación en dos pasos en "Mi cuenta".

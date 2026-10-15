@@ -78,7 +78,7 @@ type Config struct {
 	ExportServerBandwidthMbps int
 
 	// AdminUsername and AdminPassword (OPENVMS_ADMIN_USERNAME / OPENVMS_ADMIN_PASSWORD) seed the
-	// first platform admin on a fresh install. The default password is public and forces a change.
+	// first platform admin on a fresh install. An empty password makes the API generate and log a random one.
 	AdminUsername string
 	AdminPassword string
 	// DefaultTenant and DefaultSite (OPENVMS_DEFAULT_TENANT / OPENVMS_DEFAULT_SITE) name the
@@ -148,7 +148,7 @@ func Load(service string) (Config, error) {
 		ShutdownTimeout:             duration("SHUTDOWN_TIMEOUT", 15*time.Second),
 		WorkerURL:                   str("WORKER_URL", "http://worker:8081"),
 		AdminUsername:               str("OPENVMS_ADMIN_USERNAME", "admin"),
-		AdminPassword:               str("OPENVMS_ADMIN_PASSWORD", "openvms123"),
+		AdminPassword:               str("OPENVMS_ADMIN_PASSWORD", ""),
 		DefaultTenant:               str("OPENVMS_DEFAULT_TENANT", "openvms"),
 		DefaultSite:                 str("OPENVMS_DEFAULT_SITE", "Sitio principal"),
 		TrustForwardedFor:           boolean("TRUST_FORWARDED_FOR", false),

@@ -10,7 +10,7 @@ func TestInitialAdminDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.AdminUsername != "admin" || c.AdminPassword != "openvms123" {
+	if c.AdminUsername != "admin" || c.AdminPassword != "" {
 		t.Fatalf("defaults = %q/%q", c.AdminUsername, c.AdminPassword)
 	}
 }

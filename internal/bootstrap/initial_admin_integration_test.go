@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -42,19 +43,34 @@ func listUsers(t *testing.T, st *store.Store) []db.User {
 	return users
 }
 
-func TestEnsureInitialAdminCreatesDefaultAdmin(t *testing.T) {
-	ctx := context.Background()
-	st := adminFixture(t)
+var loggedPassword = regexp.MustCompile(`password=(\S+)`)
+
+func randomAdmin(t *testing.T) (st *store.Store, password string, buf *bytes.Buffer) {
+	t.Helper()
+	st = adminFixture(t)
 	log, buf := captureLog()
-	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", bootstrap.DefaultAdminPassword, log); err != nil {
+	if err := bootstrap.EnsureInitialAdmin(context.Background(), st, "admin", "", log); err != nil {
 		t.Fatal(err)
 	}
-	users := listUsers(t, st)
-	if len(users) != 1 || users[0].Username != "admin" || users[0].TenantID != nil {
-		t.Fatalf("users = %+v, want one platform admin", users)
+	m := loggedPassword.FindAllStringSubmatch(buf.String(), -1)
+	if len(m) != 1 {
+		t.Fatalf("want the password logged exactly once, got %q", buf.String())
 	}
-	if !users[0].MustChangePassword {
-		t.Fatal("default password must force a change")
+	return st, m[0][1], buf
+}
+
+func TestEnsureInitialAdminGeneratesRandomPassword(t *testing.T) {
+	ctx := context.Background()
+	st, password, buf := randomAdmin(t)
+	if !strings.Contains(buf.String(), "level=WARN") {
+		t.Fatalf("want a WARN, got %q", buf.String())
+	}
+	if err := identity.CheckPolicy(password, "admin"); err != nil {
+		t.Fatalf("generated password fails the policy: %v", err)
+	}
+	users := listUsers(t, st)
+	if len(users) != 1 || users[0].Username != "admin" || users[0].TenantID != nil || !users[0].MustChangePassword {
+		t.Fatalf("users = %+v, want one platform admin forced to change", users)
 	}
 	var grants []db.PermissionGrant
 	if err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
@@ -68,12 +84,24 @@ func TestEnsureInitialAdminCreatesDefaultAdmin(t *testing.T) {
 		t.Fatalf("grants = %d, want %d", len(grants), len(authz.Catalog))
 	}
 	svc := &identity.Service{Store: st, Log: pgtest.Discard(), SessionTTL: time.Hour, IdleTimeout: time.Hour, MaxFailures: 5, LockFor: time.Minute}
-	res, err := svc.Login(ctx, identity.LoginInput{Username: "admin", Password: bootstrap.DefaultAdminPassword})
-	if err != nil || res.Token == "" {
-		t.Fatalf("login with default password: %v", err)
+	if res, err := svc.Login(ctx, identity.LoginInput{Username: "admin", Password: password}); err != nil || res.Token == "" {
+		t.Fatalf("login with the logged password: %v", err)
 	}
-	if !strings.Contains(buf.String(), "level=WARN") || strings.Contains(buf.String(), bootstrap.DefaultAdminPassword) {
-		t.Fatalf("want a WARN without the password, got %q", buf.String())
+	// A second start creates nothing and never logs a password again.
+	log2, buf2 := captureLog()
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "", log2); err != nil {
+		t.Fatal(err)
+	}
+	if len(listUsers(t, st)) != 1 || strings.Contains(buf2.String(), password) || strings.Contains(buf2.String(), "password=") {
+		t.Fatalf("second start: %q", buf2.String())
+	}
+}
+
+func TestEnsureInitialAdminPasswordsDiffer(t *testing.T) {
+	_, a, _ := randomAdmin(t)
+	_, b, _ := randomAdmin(t)
+	if a == b {
+		t.Fatal("two installs got the same generated password")
 	}
 }
 
@@ -100,7 +128,7 @@ func TestEnsureInitialAdminNeverResets(t *testing.T) {
 	ctx := context.Background()
 	st := adminFixture(t)
 	log, _ := captureLog()
-	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", bootstrap.DefaultAdminPassword, log); err != nil {
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "Clave-Inicial-2026", log); err != nil {
 		t.Fatal(err)
 	}
 	if err := bootstrap.SetPassword(ctx, st, "admin", "Otra-Clave-Larga-2026"); err != nil {
@@ -108,7 +136,7 @@ func TestEnsureInitialAdminNeverResets(t *testing.T) {
 	}
 	log2, buf := captureLog()
 	for i := 0; i < 2; i++ {
-		if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", bootstrap.DefaultAdminPassword, log2); err != nil {
+		if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "Clave-Inicial-2026", log2); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -131,7 +159,7 @@ func TestEnsureInitialAdminSkipsWhenAnotherPlatformUserHasPassword(t *testing.T)
 	if err := bootstrap.SetPassword(ctx, st, "root", "Clave-Larga-2026"); err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", bootstrap.DefaultAdminPassword, log); err != nil {
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "Clave-Inicial-2026", log); err != nil {
 		t.Fatal(err)
 	}
 	if users := listUsers(t, st); len(users) != 1 || users[0].Username != "root" {
@@ -160,7 +188,7 @@ func TestEnsureInitialAdminConcurrent(t *testing.T) {
 	log, _ := captureLog()
 	errs := make(chan error, 4)
 	for i := 0; i < cap(errs); i++ {
-		go func() { errs <- bootstrap.EnsureInitialAdmin(ctx, st, "admin", bootstrap.DefaultAdminPassword, log) }()
+		go func() { errs <- bootstrap.EnsureInitialAdmin(ctx, st, "admin", "Clave-Inicial-2026", log) }()
 	}
 	for i := 0; i < cap(errs); i++ {
 		if err := <-errs; err != nil {
@@ -169,27 +197,5 @@ func TestEnsureInitialAdminConcurrent(t *testing.T) {
 	}
 	if users := listUsers(t, st); len(users) != 1 {
 		t.Fatalf("users = %d, want 1", len(users))
-	}
-}
-
-func TestEnsureInitialAdminWarnsEvenWhenAnotherUserSortsFirst(t *testing.T) {
-	ctx := context.Background()
-	st := adminFixture(t)
-	log, _ := captureLog()
-	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", bootstrap.DefaultAdminPassword, log); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := bootstrap.PlatformAdmin(ctx, st, "aaron"); err != nil {
-		t.Fatal(err)
-	}
-	if err := bootstrap.SetPassword(ctx, st, "aaron", "Clave-Larga-2026"); err != nil {
-		t.Fatal(err)
-	}
-	log2, buf := captureLog()
-	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", bootstrap.DefaultAdminPassword, log2); err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(buf.String(), "level=WARN") {
-		t.Fatalf("want WARN, got %q", buf.String())
 	}
 }

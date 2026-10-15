@@ -87,36 +87,59 @@ func ensurePlatformAdmin(ctx context.Context, q *db.Queries, username string) (d
 	return u, nil
 }
 
-// DefaultAdminPassword is the initial admin password when OPENVMS_ADMIN_PASSWORD is unset.
-// It is public: an install still using it is warned about on every start.
-const DefaultAdminPassword = "openvms123"
+// generatedPasswordLen is the length of the random initial admin password.
+const generatedPasswordLen = 20
+
+// GeneratePassword returns a random alphanumeric password with lower, upper and digit
+// characters, so it satisfies identity.CheckPolicy.
+func GeneratePassword() (string, error) {
+	const lower, upper, digits = "abcdefghjkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789"
+	all := lower + upper + digits
+	for {
+		b := make([]byte, generatedPasswordLen)
+		if _, err := rand.Read(b); err != nil {
+			return "", err
+		}
+		for i := range b {
+			b[i] = all[int(b[i])%len(all)]
+		}
+		pw := string(b)
+		if strings.ContainsAny(pw, lower) && strings.ContainsAny(pw, upper) && strings.ContainsAny(pw, digits) {
+			return pw, nil
+		}
+	}
+}
 
 // EnsureInitialAdmin creates the platform admin on a fresh install so the first login needs
 // no vmsctl step. It creates or modifies nothing when a user with that name exists or any
-// platform user already has a password, so an existing install is never reset. A default
-// password forces a change at first login; a password failing the policy is logged and
-// skipped. It warns while the named admin still uses the default password.
+// platform user already has a password, so an existing install is never reset. With an empty
+// password it generates a random one, forces a change at first login and logs it once at WARN
+// (the only disclosure); a configured password is used as is. A configured password failing
+// the policy is logged and skipped.
 func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password string, log *slog.Logger) error {
-	if err := identity.CheckPolicy(password, username); err != nil {
-		log.Error("initial admin not created: OPENVMS_ADMIN_PASSWORD rejected", "username", username, "error", err)
-		return nil
+	generated := password == ""
+	if !generated {
+		if err := identity.CheckPolicy(password, username); err != nil {
+			log.Error("initial admin not created: OPENVMS_ADMIN_PASSWORD rejected", "username", username, "error", err)
+			return nil
+		}
 	}
-	created, defaultInUse := false, false
+	created := false
 	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		users, err := q.ListUsers(ctx, db.ListUsersParams{IncludePlatform: true})
 		if err != nil {
 			return err
 		}
-		hasPassword, exists := false, false
 		for _, u := range users {
-			if strings.EqualFold(u.Username, username) {
-				exists = true
-				defaultInUse = u.TenantID == nil && identity.VerifyPassword(u.PasswordHash, DefaultAdminPassword)
+			if strings.EqualFold(u.Username, username) || (u.TenantID == nil && u.PasswordHash != "") {
+				return nil
 			}
-			hasPassword = hasPassword || (u.TenantID == nil && u.PasswordHash != "")
 		}
-		if exists || hasPassword {
-			return nil
+		if generated {
+			// The password is logged only after the transaction commits.
+			if password, err = GeneratePassword(); err != nil {
+				return err
+			}
 		}
 		u, err := ensurePlatformAdmin(ctx, q, username)
 		if err != nil {
@@ -126,11 +149,10 @@ func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password
 		if err != nil {
 			return err
 		}
-		mustChange := password == DefaultAdminPassword
-		if err := q.SetPassword(ctx, db.SetPasswordParams{ID: u.ID, PasswordHash: hash, MustChangePassword: mustChange}); err != nil {
+		if err := q.SetPassword(ctx, db.SetPasswordParams{ID: u.ID, PasswordHash: hash, MustChangePassword: generated}); err != nil {
 			return err
 		}
-		created, defaultInUse = true, mustChange
+		created = true
 		return nil
 	})
 	if errors.Is(store.Classify(err), store.ErrConflict) {
@@ -139,11 +161,11 @@ func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password
 	if err != nil {
 		return err
 	}
-	if created {
+	switch {
+	case created && generated:
+		log.Warn("initial admin created: log in with this one-time password and change it after first login", "username", username, "password", password)
+	case created:
 		log.Info("initial admin created", "username", username)
-	}
-	if defaultInUse {
-		log.Warn("initial admin still uses the default password; change it", "username", username)
 	}
 	return nil
 }
