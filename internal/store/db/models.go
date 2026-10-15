@@ -382,6 +382,8 @@ type LprRead struct {
 	SeenAt          time.Time
 	FirstSeenAt     time.Time
 	UpdatedAt       time.Time
+	CropKey         string
+	CropAttempts    int32
 }
 
 type MapBuilding struct {
