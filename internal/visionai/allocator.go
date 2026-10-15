@@ -242,7 +242,7 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 
 		// Find an empty slot or the best candidate slot to replace
 		bestSlotIdx := -1
-		var lowestScore float64 = 1e9
+		lowestScore := 1e9
 
 		for i, s := range a.slots {
 			if s.Pinned {
