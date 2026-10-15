@@ -88,6 +88,7 @@ describe("useRealtimeFeed", () => {
     const afterOpen = keys().length;
     act(() => ws.message({ type: "event.created", tenant_id: "t", data: {} }));
     expect(keys().slice(afterOpen)).toContain(JSON.stringify(["events"]));
+    expect(keys().slice(afterOpen)).toContain(JSON.stringify(["vision-ai"]));
     const afterEvent = keys().length;
     act(() => ws.message({ type: "server.status", tenant_id: "t", data: {} }));
     expect(keys().slice(afterEvent)).toEqual(expect.arrayContaining([JSON.stringify(["servers"]), JSON.stringify(["health"])]));

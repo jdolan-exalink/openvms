@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from "react";
 
 /** Query-key prefixes to refresh per frame type. Unknown types are ignored. */
 const invalidationsByType: Record<string, readonly (readonly string[])[]> = {
-  "event.created": [["events"], ["plates"]],
+  "event.created": [["events"], ["plates"], ["vision-ai"]],
   "server.status": [["servers"], ["health"], ["cameras"], ["maps"]],
   "server.status_changed": [["servers"], ["health"], ["cameras"], ["maps"]],
   "alarm.updated": [["alarms"], ["maps"]],
