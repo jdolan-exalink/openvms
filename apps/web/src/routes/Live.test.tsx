@@ -1345,7 +1345,7 @@ describe("Live", () => {
 
     renderPage(Live);
 
-    const item = await screen.findByRole("button", { name: /Perímetro/ });
+    const item = await screen.findByRole("button", { name: /^Perímetro$/ });
     expect(item).not.toHaveAttribute("aria-current", "true");
     fireEvent.click(item);
     expect(item).toHaveAttribute("aria-current", "true");
@@ -1373,7 +1373,7 @@ describe("Live", () => {
     await screen.findByRole("button", { name: /Turno noche/ });
     fireEvent.change(screen.getByLabelText("Buscar en el explorador"), { target: { value: "perí" } });
     expect(screen.queryByRole("button", { name: /Turno noche/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Perímetro/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Perímetro$/ })).toBeInTheDocument();
   });
 
   it("opens the edge explorer with a tap and closes it with a tap outside, ignoring touch hover", async () => {

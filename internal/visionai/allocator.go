@@ -1,0 +1,270 @@
+package visionai
+
+import (
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// SlotAllocator manages dynamic assignment of events to visual slots.
+type SlotAllocator struct {
+	mu      sync.RWMutex
+	config  VisionConfig
+	scoring *ScoringEngine
+	slots   []SlotAssignment
+	history map[uuid.UUID]CameraHistory
+}
+
+// NewSlotAllocator creates and initializes an allocator for the given configuration.
+func NewSlotAllocator(config VisionConfig) *SlotAllocator {
+	slotCount := parseSlotCount(config.Layout)
+	slots := make([]SlotAssignment, slotCount)
+	for i := range slots {
+		slots[i] = SlotAssignment{
+			SlotIndex: i,
+		}
+	}
+
+	return &SlotAllocator{
+		config:  config,
+		scoring: NewScoringEngine(),
+		slots:   slots,
+		history: make(map[uuid.UUID]CameraHistory),
+	}
+}
+
+func parseSlotCount(layout string) int {
+	switch strings.ToLower(strings.TrimSpace(layout)) {
+	case "focus":
+		return 5
+	case "1":
+		return 1
+	case "4":
+		return 4
+	case "9":
+		return 9
+	case "16":
+		return 16
+	case "25":
+		return 25
+	default:
+		n, err := strconv.Atoi(layout)
+		if err == nil && n > 0 && n <= 36 {
+			return n
+		}
+		return 4
+	}
+}
+
+// SetPin pins or unpins a slot index.
+func (a *SlotAllocator) SetPin(slotIndex int, pinned bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if slotIndex >= 0 && slotIndex < len(a.slots) {
+		a.slots[slotIndex].Pinned = pinned
+	}
+}
+
+// Slots returns a snapshot of current slot assignments.
+func (a *SlotAllocator) Slots() []SlotAssignment {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	res := make([]SlotAssignment, len(a.slots))
+	copy(res, a.slots)
+	return res
+}
+
+// matchesConfig checks if an event satisfies the configured object, site, camera, and zone filters.
+func (a *SlotAllocator) matchesConfig(ev VisionEvent) bool {
+	// Objects filter
+	if len(a.config.Objects) > 0 {
+		matched := false
+		for _, o := range a.config.Objects {
+			if strings.EqualFold(o, ev.Object) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	// Sites filter
+	if len(a.config.Sites) > 0 {
+		matched := false
+		for _, s := range a.config.Sites {
+			if s == ev.SiteID {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	// Cameras filter
+	if len(a.config.Cameras) > 0 {
+		matched := false
+		for _, c := range a.config.Cameras {
+			if c == ev.CameraID {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+
+	return true
+}
+
+type scoredCandidate struct {
+	event     VisionEvent
+	score     float64
+	breakdown map[string]float64
+}
+
+// Allocate processes candidates, ranks them, and assigns them to eligible slots.
+func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssignment {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	// 1. Filter and score candidates
+	var candidates []scoredCandidate
+	for _, ev := range events {
+		if !a.matchesConfig(ev) {
+			continue
+		}
+
+		hist := a.history[ev.CameraID]
+		score, breakdown := a.scoring.CalculateScore(ev, hist, a.config, now)
+		candidates = append(candidates, scoredCandidate{
+			event:     ev,
+			score:     score,
+			breakdown: breakdown,
+		})
+	}
+
+	// Sort candidates descending by score
+	sort.Slice(candidates, func(i, j int) bool {
+		return candidates[i].score > candidates[j].score
+	})
+
+	minDisplay := time.Duration(a.config.MinDisplaySeconds) * time.Second
+	if minDisplay <= 0 {
+		minDisplay = 5 * time.Second
+	}
+	maxDisplay := time.Duration(a.config.MaxDisplaySeconds) * time.Second
+	if maxDisplay <= 0 {
+		maxDisplay = 30 * time.Second
+	}
+
+	// Check if any active slot already holds a candidate camera to update it
+	allocatedCams := make(map[uuid.UUID]int)
+	for i, s := range a.slots {
+		if s.CameraID != uuid.Nil {
+			allocatedCams[s.CameraID] = i
+		}
+	}
+
+	for _, cand := range candidates {
+		camID := cand.event.CameraID
+
+		// If this camera is already displayed in a slot, update its score and reason without moving it
+		if slotIdx, found := allocatedCams[camID]; found {
+			a.slots[slotIdx].Score = cand.score
+			a.slots[slotIdx].Reason = SlotReason{
+				Object:     cand.event.Object,
+				Confidence: cand.event.Confidence,
+				Zone:       cand.event.Zone,
+				Plate:      cand.event.Plate,
+				Alarm:      cand.event.AlarmSeverity,
+				Attributes: cand.event.Attributes,
+				Breakdown:  cand.breakdown,
+			}
+			continue
+		}
+
+		// Find an empty slot or the best candidate slot to replace
+		bestSlotIdx := -1
+		var lowestScore float64 = 1e9
+
+		for i, s := range a.slots {
+			if s.Pinned {
+				continue
+			}
+
+			if s.CameraID == uuid.Nil {
+				bestSlotIdx = i
+				break
+			}
+
+			// If the slot has not reached min display time, cannot replace it yet
+			if now.Before(s.MinDisplayUntil) {
+				continue
+			}
+
+			// If current slot reached max display time or candidate score is strictly higher
+			if now.After(s.MaxDisplayUntil) || cand.score > s.Score {
+				if s.Score < lowestScore {
+					lowestScore = s.Score
+					bestSlotIdx = i
+				}
+			}
+		}
+
+		if bestSlotIdx >= 0 {
+			// Evict previous camera if any
+			prevCam := a.slots[bestSlotIdx].CameraID
+			if prevCam != uuid.Nil {
+				hist := a.history[prevCam]
+				hist.CurrentlyVisible = false
+				hist.LastExitedAt = now
+				a.history[prevCam] = hist
+				delete(allocatedCams, prevCam)
+			}
+
+			// Assign candidate to slot
+			a.slots[bestSlotIdx] = SlotAssignment{
+				SlotIndex:  bestSlotIdx,
+				CameraID:   camID,
+				CameraName: cand.event.CameraName,
+				Score:      cand.score,
+				Reason: SlotReason{
+					Object:     cand.event.Object,
+					Confidence: cand.event.Confidence,
+					Zone:       cand.event.Zone,
+					Plate:      cand.event.Plate,
+					Alarm:      cand.event.AlarmSeverity,
+					Attributes: cand.event.Attributes,
+					Breakdown:  cand.breakdown,
+				},
+				Pinned:          false,
+				AssignedAt:      now,
+				MinDisplayUntil: now.Add(minDisplay),
+				MaxDisplayUntil: now.Add(maxDisplay),
+			}
+
+			// Update new camera history
+			hist := a.history[camID]
+			hist.CurrentlyVisible = true
+			hist.VisibleSince = now
+			a.history[camID] = hist
+
+			allocatedCams[camID] = bestSlotIdx
+		}
+	}
+
+	res := make([]SlotAssignment, len(a.slots))
+	copy(res, a.slots)
+	return res
+}

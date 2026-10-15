@@ -1,5 +1,5 @@
 import {
-  Bell, BellRing, Building, Camera, CarFront, ClipboardList, Download, GitBranch, History, KeyRound, LayoutDashboard, Layers, Map as MapIcon,
+  Bell, BellRing, Building, Camera, CarFront, ClipboardList, Download, Eye, GitBranch, History, KeyRound, LayoutDashboard, Layers, Map as MapIcon,
   Palette, Send, Server, ShieldCheck, SlidersHorizontal, UserCog, Users, UsersRound, Video, Zap, BriefcaseBusiness, MonitorCog,
   type LucideIcon,
 } from "lucide-react";
@@ -24,7 +24,12 @@ export type NavGroup = { title?: MessageKey; items: NavItem[] };
 
 // Main sidebar from PRD §80: only operational pages plus one entry into the settings area.
 export const navGroups: NavGroup[] = [
-  { items: [{ label: "nav.live", icon: Video, to: "/live", permission: "live.view" }] },
+  {
+    items: [
+      { label: "nav.live", icon: Video, to: "/live", permission: "live.view" },
+      { label: "nav.visionAI", icon: Eye, to: "/vision-ai", permission: "live.view" },
+    ],
+  },
   {
     title: "nav.investigation",
     items: [

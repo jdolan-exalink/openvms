@@ -32,6 +32,7 @@ const Channels = lazyRouteComponent(() => import("./routes/Channels"), "Channels
 const Servers = lazyRouteComponent(() => import("./routes/Servers"), "Servers");
 const Sites = lazyRouteComponent(() => import("./routes/Sites"), "Sites");
 const Users = lazyRouteComponent(() => import("./routes/Users"), "Users");
+const VisionAI = lazyRouteComponent(() => import("./routes/VisionAI"), "VisionAI");
 const PublicEvidenceShare = lazyRouteComponent(() => import("./routes/PublicEvidenceShare"), "PublicEvidenceShare");
 
 export type RouterContext = { queryClient: QueryClient };
@@ -182,6 +183,7 @@ export const routeTree = rootRoute.addChildren([
   appRoute.addChildren([
     indexRoute,
     liveRoute,
+    child("/vision-ai", VisionAI),
     mapsRoute,
     alarmsRoute,
     eventsRoute,
