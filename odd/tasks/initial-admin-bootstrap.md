@@ -55,8 +55,19 @@ Today the first admin needs a manual `docker compose exec api /vmsctl bootstrap 
   tenant is recreated on next restart.
 - Checks: gofmt empty; golangci-lint 0 issues; go vet/build clean; `go test -race ./...` OK; integration
   bootstrap + api OK; generated code in sync.
-- BLOCKED: `.env.example` cannot be read/edited from this environment (permission rule on `.env*`); lines
-  prepared, pending user action.
+- `.env.example`: not editable from this environment (permission rule on `.env*`); applied by the user
+  via `!` commands: `1d0016d` (admin/tenant/site), `ca40caf` (random password), `eddf309` (site TZ).
+- Native review 1 (lineage review-3cc63d7b152f5f95, 4 lenses): CRITICAL R1-default-admin-credential (public
+  default password → first visitor takes over). User chose random password. Correction `678b59c` (+ `.env.example`
+  `ca40caf`); targeted validator APPROVED; acknowledged.
+- Advisories fixed `b48e7df`: upgrade never adds an admin when any platform user exists (CountAllPlatformUsers);
+  existence before policy; soft-deleted sole tenant not recreated (CountAllTenants); best-effort startup; INFO
+  on conflict; `OPENVMS_DEFAULT_SITE_TZ` (+ `.env.example` `eddf309`). RED→GREEN per item.
+- Native review 2 (lineage review-3c53275816c431fb, 4 lenses): APPROVED, acknowledged. User-selected follow-ups
+  `c5698b6`: bounded startup retry (5 attempts, 1/2/4/8 s, ERROR with recovery hint) and WARN on admin-name
+  collision with a tenant user. Other advisories (TZ default duplication, empty-TZ comment/test, `Local` TZ,
+  test helper nil error) left as follow-ups; tzdata concern moot (distroless static ships tzdata).
+- Checks: gofmt empty; golangci-lint 0; vet/build clean; `go test -race ./...` OK; integration bootstrap+api OK.
 
 ## Next step
-Apply `.env.example` lines (user), RDD review, PR.
+Open PR (single PR; size noted).
