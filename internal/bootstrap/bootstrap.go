@@ -126,7 +126,9 @@ func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password
 			return err
 		}
 		if _, err := q.GetUserByUsername(ctx, username); err == nil {
-			return nil // a tenant user holds the name
+			log.Warn("no platform admin was created: the username belongs to a tenant user; "+
+				"set OPENVMS_ADMIN_USERNAME to another name or run `vmsctl bootstrap`", "username", username)
+			return nil
 		} else if !errors.Is(store.Classify(err), store.ErrNotFound) {
 			return err
 		}

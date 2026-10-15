@@ -248,3 +248,26 @@ func TestEnsureInitialAdminExistingAdminIgnoresWeakConfiguredPassword(t *testing
 		t.Fatalf("policy checked despite existing admin: %q", buf.String())
 	}
 }
+
+func TestEnsureInitialAdminWarnsOnTenantUserNameCollision(t *testing.T) {
+	ctx := context.Background()
+	st := adminFixture(t)
+	if err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		tn, err := q.CreateTenant(ctx, db.CreateTenantParams{Slug: "muni", Name: "Muni"})
+		if err != nil {
+			return err
+		}
+		_, err = q.CreateUser(ctx, db.CreateUserParams{TenantID: &tn.ID, Username: "admin", DisplayName: "admin"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	log, buf := captureLog()
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "", log); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "tenant user") || !strings.Contains(out, "OPENVMS_ADMIN_USERNAME") || strings.Contains(out, "password=") {
+		t.Fatalf("log = %q", out)
+	}
+}
