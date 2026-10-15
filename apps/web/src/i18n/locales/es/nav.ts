@@ -1,5 +1,6 @@
 const messages = {
   live: "En vivo",
+  visionAI: "Vision AI",
   investigation: "Investigación",
   maps: "Mapas",
   alarms: "Alarmas",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId, tilesForFisheyeMultiView, cleanFisheyeVirtualViewTiles,
+  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeVisionInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId, tilesForFisheyeMultiView, cleanFisheyeVirtualViewTiles, visionDragId, placeVisionAt, isVisionTile, tileIdentityKey,
 } from "./liveGrid";
 
 describe("resizeTiles", () => {
@@ -101,6 +101,21 @@ describe("resolveDragEnd", () => {
     expect(swapped).toEqual([{ camera_id: "cam-1", quality: "sub" }, { map }]);
   });
 
+  it("resolves dropping a vision instance onto a tile as a placement", () => {
+    const vision = { id: "vis-1", name: "Vision AI - Personas" };
+    expect(resolveDragEnd(visionDragId(vision), tileDragId(1))).toEqual({ type: "place-vision", index: 1, vision });
+    expect(resolveDragEnd("tvision:not-json", tileDragId(0))).toBeNull();
+    expect(resolveDragEnd(visionDragId(vision), LIVE_GRID_DROP_ID)).toBeNull();
+  });
+
+  it("places a vision instance in a cell", () => {
+    const vision = { id: "vis-1", name: "Vision AI - Personas" };
+    const placed = placeVisionAt([null, { camera_id: "cam-1", quality: "sub" }], 0, vision);
+    expect(placed[0]).toEqual({ vision });
+    expect(isVisionTile(placed[0]!)).toBe(true);
+    expect(tileIdentityKey(placed[0]!)).toBe("vision:vis-1");
+  });
+
   it("resolves dropping a server or a folder onto the grid as a fill", () => {
     expect(resolveDragEnd("tserver:srv-1", tileDragId(0))).toEqual({ type: "fill-server", serverId: "srv-1" });
     expect(resolveDragEnd("tfolder:fld-1", LIVE_GRID_DROP_ID)).toEqual({ type: "fill-folder", folderId: "fld-1" });
@@ -199,6 +214,16 @@ describe("serializeSelection / parseSelection", () => {
     const withMap = serializeSelection(2, [{ map: { site_id: "s", name: "Planta", floor_id: "f" } }, { camera_id: "cam-1", quality: "sub" }]);
     expect(parseSelection(withMap, validIds)?.tiles).toEqual([
       { map: { site_id: "s", name: "Planta", floor_id: "f" } },
+      { camera_id: "cam-1", quality: "sub" },
+      null,
+      null,
+    ]);
+  });
+
+  it("keeps a vision tile beside authorized cameras", () => {
+    const withVision = serializeSelection(2, [{ vision: { id: "vis-1", name: "Vision AI" } }, { camera_id: "cam-1", quality: "sub" }]);
+    expect(parseSelection(withVision, validIds)?.tiles).toEqual([
+      { vision: { id: "vis-1", name: "Vision AI" } },
       { camera_id: "cam-1", quality: "sub" },
       null,
       null,
@@ -325,4 +350,35 @@ describe("cleanFisheyeVirtualViewTiles", () => {
       null,
     ]);
   });
+
+  describe("placeVisionInOpenCell", () => {
+    const v1 = { id: "vis-1", name: "Vision AI" };
+    const v2 = { id: "vis-2", name: "Vision AI - LPR" };
+
+    it("places vision in the first empty cell", () => {
+      const tiles: Tile[] = [{ camera_id: "cam-1", quality: "sub" }, null, null, null];
+      const res = placeVisionInOpenCell(tiles, v1);
+      expect(res.index).toBe(1);
+      expect(res.tiles[1]).toEqual({ vision: v1 });
+    });
+
+    it("returns existing index if vision is already on the grid without duplicating", () => {
+      const tiles: Tile[] = [{ camera_id: "cam-1", quality: "sub" }, { vision: v1 }, null, null];
+      const res = placeVisionInOpenCell(tiles, v1);
+      expect(res.index).toBe(1);
+      expect(res.tiles).toEqual(tiles);
+    });
+
+    it("replaces index 0 if grid is completely full", () => {
+      const tiles: Tile[] = [
+        { camera_id: "cam-1", quality: "sub" },
+        { camera_id: "cam-2", quality: "sub" },
+      ];
+      const res = placeVisionInOpenCell(tiles, v2);
+      expect(res.index).toBe(0);
+      expect(res.tiles[0]).toEqual({ vision: v2 });
+      expect(res.tiles[1]).toEqual({ camera_id: "cam-2", quality: "sub" });
+    });
+  });
 });
+

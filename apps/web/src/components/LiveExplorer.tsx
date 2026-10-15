@@ -2,7 +2,7 @@ import { useDndContext, useDraggable, useDroppable } from "@dnd-kit/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   Bookmark, Building2, ChevronsDown, ChevronsUp, Cloud, Compass, Copy, ExternalLink, Fish, Folder as FolderGlyph, FolderOpen, FolderPlus, FolderTree, Grid2X2, GripVertical, History, LayoutGrid,
-  type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, SlidersHorizontal, Trash2, Video,
+  type LucideIcon, Map as MapIcon, Pencil, Pin, Search, Server as ServerGlyph, Settings, SlidersHorizontal, Sparkles, Trash2, Video,
 } from "lucide-react";
 import { createContext, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { Schemas } from "@/api/client";
@@ -15,7 +15,7 @@ import { ErrorNote, IconButton, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { buildTree, type Camera, type Folder, type FolderNode, loadPrefs, type ServerNode, savePrefs, treeCameraDropId, treeFolderId, treeRootDropId, treeServerDragId } from "@/lib/explorer";
 import { LiveDetectionsPanel, LiveLprPanel, LiveMapsPanel } from "@/components/LiveSidePanels";
-import { cameraDragId, feviewDragId, type LiveMapRef } from "@/lib/liveGrid";
+import { cameraDragId, feviewDragId, type LiveMapRef, visionDragId, type LiveVisionRef } from "@/lib/liveGrid";
 import { getEffectiveVirtualViews } from "@/lib/fisheye/storage";
 import { useFisheyeConfig } from "@/lib/fisheye/useFisheyeConfig";
 import { detectFisheyeProfile } from "@/lib/fisheye/profiles";
@@ -82,10 +82,20 @@ function addToViewItem(actions: ExplorerActions, ids: string[], t: ReturnType<ty
     ],
   };
 }
+export const VIRTUAL_VISION_SOURCES: LiveVisionRef[] = [
+  { id: "visionai:general", name: "Vision AI", layout: "focus" },
+  { id: "visionai:personas", name: "Vision AI - Personas", layout: "matrix" },
+  { id: "visionai:vehiculos", name: "Vision AI - Vehículos", layout: "matrix" },
+  { id: "visionai:lpr", name: "Vision AI - LPR", layout: "lpr" },
+  { id: "visionai:perimetro", name: "Vision AI - Perímetro", layout: "matrix" },
+  { id: "visionai:alarmas", name: "Vision AI - Alarmas", layout: "alarm" },
+];
+
 type DragData =
   | { kind: "camera"; serverId: string }
   | { kind: "folder"; serverId: string }
-  | { kind: "server"; serverId: string };
+  | { kind: "server"; serverId: string }
+  | { kind: "vision"; vision: LiveVisionRef };
 
 /** Drag state seen from one server's subtree: only same-server, manageable nodes accept a drop. */
 function useDropState(serverId: string, canManage: boolean, accepts: ("camera" | "folder")[]) {
@@ -142,6 +152,7 @@ export function LiveExplorer({
   canLpr,
   canMaps,
   onPlaceMap,
+  onPlaceVision,
   views,
   activeViewId,
   onOpenView,
@@ -173,6 +184,8 @@ export function LiveExplorer({
   canMaps: boolean;
   /** Click or drop a map onto the current grid. */
   onPlaceMap: (map: LiveMapRef) => void;
+  /** Click or drop a virtual Vision AI source onto the current grid. */
+  onPlaceVision?: (vision: LiveVisionRef) => void;
   /** Saved views shown inside the camera tree, the way a site lists its views. */
   views: Schemas["View"][];
   activeViewId: string;
@@ -208,6 +221,10 @@ export function LiveExplorer({
   );
   const total = tree.reduce((n, s) => n + s.count, 0);
   const placedViews = useMemo(() => placeViews(views, tree, sites, query), [views, tree, sites, query]);
+  const filteredVirtualSources = useMemo(
+    () => VIRTUAL_VISION_SOURCES.filter((s) => !query || s.name.toLowerCase().includes(query)),
+    [query],
+  );
   const saveViewItem = (): MenuItem[] => (canCreateView ? [{ id: "save-view", label: t("live.saveGridAsView"), icon: LayoutGrid, onSelect: onCreateView }] : []);
 
   const navigate = useNavigate();
@@ -297,6 +314,22 @@ export function LiveExplorer({
       {tab === "detections" && <LiveDetectionsPanel canEvents={canEvents} onPick={onPick} />}
       {tab === "lpr" && <LiveLprPanel canLpr={canLpr} onPick={onPick} />}
       {tab === "cameras" && <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-y-auto overflow-x-hidden">
+        <Section
+          title="Fuentes Virtuales"
+          icon={Sparkles}
+          open={prefs.sections.virtual ?? true}
+          onToggle={() => update((p) => ({ ...p, sections: { ...p.sections, virtual: !(p.sections.virtual ?? true) } }))}
+          count={filteredVirtualSources.length}
+        >
+          <div className="flex min-w-0 flex-col gap-0.5">
+            {filteredVirtualSources.map((source) => (
+              <VirtualSourceRow key={source.id} source={source} onPlace={onPlaceVision} />
+            ))}
+            {filteredVirtualSources.length === 0 && (
+              <p className="py-2 text-xs text-muted">{query ? t("live.noResults") : "No hay fuentes virtuales"}</p>
+            )}
+          </div>
+        </Section>
         <Section
           title={t("live.cameras")}
           icon={FolderTree}
@@ -1005,6 +1038,103 @@ function FisheyeViewRow({
           {view.yaw}°
         </span>
       </button>
+    </div>
+  );
+}
+
+function VirtualSourceRow({
+  source,
+  onPlace,
+}: {
+  source: LiveVisionRef;
+  onPlace?: (vision: LiveVisionRef) => void;
+}) {
+  const { bind, navigate } = useMenuCtx();
+  const clickTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(clickTimer.current), []);
+
+  const touchTap = useTouchDoubleTap(() => {
+    clearTimeout(clickTimer.current);
+    onPlace?.(source);
+  });
+
+  const { setNodeRef: setDragRef, attributes, listeners, isDragging } = useDraggable({
+    id: visionDragId(source),
+    data: { kind: "vision", vision: source } satisfies DragData,
+  });
+
+  const menu = bind(() => [
+    {
+      id: "place_vision",
+      label: "Colocar en la grilla",
+      icon: LayoutGrid,
+      onSelect: () => onPlace?.(source),
+    } satisfies MenuItem,
+    {
+      id: "open_vision_page",
+      label: "Abrir página Vision AI",
+      icon: ExternalLink,
+      onSelect: () => void navigate({ to: "/vision-ai" }),
+    } satisfies MenuItem,
+  ]);
+
+  return (
+    <div className="flex min-w-0 items-center gap-1 border-t-2 border-transparent">
+      <button
+        ref={setDragRef}
+        type="button"
+        onClick={() => {
+          clearTimeout(clickTimer.current);
+          if (touchTap.justHandled()) return;
+          clickTimer.current = setTimeout(() => onPlace?.(source), 220);
+        }}
+        onDoubleClick={() => {
+          clearTimeout(clickTimer.current);
+          if (touchTap.justHandled()) return;
+          onPlace?.(source);
+        }}
+        title={`Arrastrar o colocar ${source.name}`}
+        className={cn(
+          "flex min-w-0 flex-1 cursor-grab items-center gap-1.5 rounded-m3-sm px-2 py-1.5 text-left text-xs hover:bg-on-surface/8 text-on-surface",
+          isDragging && "opacity-50",
+        )}
+        {...attributes}
+        {...listeners}
+        {...menu}
+        onPointerDown={(e) => {
+          menu.onPointerDown(e);
+          touchTap.handlers.onPointerDown(e);
+        }}
+        onPointerUp={(e) => {
+          menu.onPointerUp(e);
+          touchTap.handlers.onPointerUp(e);
+        }}
+        onPointerCancel={(e) => {
+          menu.onPointerCancel(e);
+          touchTap.handlers.onPointerCancel(e);
+        }}
+        onKeyDown={(e) => {
+          menu.onKeyDown(e);
+          if (!e.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(e);
+        }}
+      >
+        <Icon icon={Sparkles} size="xs" className="shrink-0 text-emerald-400" />
+        <span className="size-1.5 shrink-0 rounded-full bg-emerald-500 animate-pulse" aria-hidden />
+        <span className="min-w-0 truncate font-medium">{source.name}</span>
+        {source.layout && (
+          <span className="ml-auto text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-surface-2 text-on-surface-variant shrink-0">
+            {source.layout}
+          </span>
+        )}
+      </button>
+      <Link
+        to="/vision-ai"
+        title="Abrir en Vision AI"
+        aria-label={`Abrir ${source.name} en Vision AI`}
+        className="relative inline-flex size-7 shrink-0 items-center justify-center rounded-full text-on-surface-variant hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
+      >
+        <Icon icon={ExternalLink} size="xs" />
+      </Link>
     </div>
   );
 }

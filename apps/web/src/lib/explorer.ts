@@ -209,11 +209,11 @@ export function applyReorder(cams: Camera[], folders: Folder[], r: Reorder): { c
   };
 }
 
-export type ExplorerPrefs = { closed: Record<string, boolean>; sections: { cameras: boolean; views: boolean } };
+export type ExplorerPrefs = { closed: Record<string, boolean>; sections: { cameras: boolean; views: boolean; virtual?: boolean } };
 const PREFS_KEY = "openvms.live.explorer.v1";
 const SIDEBAR_KEY = "openvms.live.sidebar.collapsed";
 const PIN_KEY = "openvms.live.sidebar.pinned";
-const defaultPrefs = (): ExplorerPrefs => ({ closed: {}, sections: { cameras: true, views: true } });
+const defaultPrefs = (): ExplorerPrefs => ({ closed: {}, sections: { cameras: true, views: true, virtual: true } });
 
 export function loadPrefs(): ExplorerPrefs {
   try {
@@ -222,7 +222,7 @@ export function loadPrefs(): ExplorerPrefs {
     if (!raw || typeof raw !== "object") return d;
     return {
       closed: raw.closed && typeof raw.closed === "object" ? raw.closed : d.closed,
-      sections: { cameras: raw.sections?.cameras !== false, views: raw.sections?.views !== false },
+      sections: { cameras: raw.sections?.cameras !== false, views: raw.sections?.views !== false, virtual: raw.sections?.virtual !== false },
     };
   } catch {
     return defaultPrefs();

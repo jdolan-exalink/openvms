@@ -11,6 +11,7 @@ import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useStat
 import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { LiveMapTile } from "@/components/maps/LiveMapTile";
+import { LiveVisionTile } from "@/components/live/LiveVisionTile";
 import { MsePlayer } from "@/components/MsePlayer";
 import { QualityBadge } from "@/components/QualityBadge";
 import { TelemetryOverlay } from "@/components/live/TelemetryOverlay";
@@ -36,9 +37,9 @@ import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/P
 import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, resizeTiles, resolveDragEnd, reorderTiles, tileIdentityKey,
-  serializeSelection, swapTiles, tileDragId, tilesForFisheyeMultiView,
-  type Quality, type Tile,
+  cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, isVisionTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, placeVisionAt, placeVisionInOpenCell, resizeTiles, resolveDragEnd, reorderTiles, tileIdentityKey,
+  serializeSelection, swapTiles, tileDragId, tilesForFisheyeMultiView, visionFromDragId,
+  type Quality, type Tile, type LiveVisionRef,
 } from "@/lib/liveGrid";
 import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
 import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
@@ -95,6 +96,8 @@ function LiveDesktop() {
   const [catalog, setCatalog] = useState<Presentation[]>(loadCatalog);
   const [editorOpen, setEditorOpen] = useState(false);
   const [tiles, setTiles] = useState<Tile[]>(() => Array(4).fill(null));
+  const [keepVisionVisible, setKeepVisionVisible] = useState(false);
+  const visionTile = useMemo(() => tiles.find(isVisionTile), [tiles]);
   const [selected, setSelected] = useState(0);
   const [focus, setFocus] = useState<number | null>(null);
   const [qualityOverrides, setQualityOverrides] = useState<Record<string, { quality: Quality; identities: string[]; source: "manual" | "maximize" }>>({});
@@ -440,6 +443,23 @@ function LiveDesktop() {
     if (empty >= 0) setSelected(empty);
   };
 
+  const placeVision = (vision: LiveVisionRef, index?: number) => {
+    if (index === undefined) {
+      const res = placeVisionInOpenCell(tilesRef.current, vision);
+      tilesRef.current = res.tiles;
+      setTiles(res.tiles);
+      setSelected(res.index);
+      selectedRef.current = res.index;
+      return;
+    }
+    const next = placeVisionAt(tilesRef.current, index, vision);
+    const empty = next.findIndex((cell, i) => cell === null && i !== index);
+    tilesRef.current = next;
+    if (empty >= 0) selectedRef.current = empty;
+    setTiles(next);
+    if (empty >= 0) setSelected(empty);
+  };
+
   const populateEmptyGridWithFisheyeMultiView = (cameraId: string, virtualViews: VirtualFisheyeView[], defaultQuality: "sub" | "main" = "sub") => {
     const totalCount = 1 + virtualViews.length;
     const pres = presentationForCount(catalog, totalCount);
@@ -490,6 +510,7 @@ function LiveDesktop() {
       }
     }
     else if (resolution.type === "place-map") placeMap(resolution.map, resolution.index);
+    else if (resolution.type === "place-vision") placeVision(resolution.vision, resolution.index);
     else if (resolution.type === "reorder") reorder(resolution.from, resolution.to);
     else if (resolution.type === "fill-server") showGroup(camerasOfServer(resolution.serverId), servers.data?.find((server) => server.id === resolution.serverId)?.name ?? tr("live.theServer"));
     else showGroup(camerasOfFolder(resolution.folderId), folderApi.folders.find((folder) => folder.id === resolution.folderId)?.name ?? tr("live.theFolder"));
@@ -840,9 +861,11 @@ function LiveDesktop() {
       ? folderApi.folders.find((f) => f.id === activeDrag.slice("tfolder:".length))?.name
         : activeDrag?.startsWith("tserver:")
         ? servers.data?.find((server) => server.id === activeDrag.slice("tserver:".length))?.name
-        : activeDrag
-          ? mapFromDragId(activeDrag)?.name
-          : undefined;
+        : activeDrag?.startsWith("tvision:")
+          ? visionFromDragId(activeDrag)?.name
+          : activeDrag
+            ? mapFromDragId(activeDrag)?.name
+            : undefined;
   const modeToggle = <LiveModeToggle rec={rec} onChange={setMode} />;
   // The pinned explorer is a fixed panel that covers the header's left edge, so the portaled
   // toggle starts at the panel's right edge instead of underneath it.
@@ -868,6 +891,7 @@ function LiveDesktop() {
       canLpr={can(me.data, "lpr.view")}
       canMaps={can(me.data, "maps.view")}
       onPlaceMap={placeMap}
+      onPlaceVision={placeVision}
       views={views.data ?? []}
       activeViewId={viewId}
       onOpenView={loadView}
@@ -926,9 +950,38 @@ function LiveDesktop() {
               <LayoutMenu catalog={catalog} active={{ columns, panes }} onSelect={applyPresentation} onEdit={() => setEditorOpen(true)} />
               <FullscreenButton active={fullscreen} onClick={toggleFullscreen} />
               <IconButton icon={X} title="Cerrar todas las cámaras" aria-label="Cerrar todas las cámaras" className="size-8" onClick={closeAllStreams} />
+              {visionTile && (
+                <label className="ml-2 flex items-center gap-1.5 text-xs text-on-surface cursor-pointer select-none rounded-m3-sm bg-surface-1 px-2.5 py-1 border border-line">
+                  <input
+                    type="checkbox"
+                    checked={keepVisionVisible}
+                    onChange={(e) => setKeepVisionVisible(e.target.checked)}
+                    className="size-3.5 rounded border-line text-primary focus:ring-primary"
+                  />
+                  <span>Mantener Vision AI visible</span>
+                </label>
+              )}
               {canRec && (fullscreen || !topBar.available) && <div className="ml-auto">{modeToggle}</div>}
             </div>
             <div className="relative flex min-h-0 flex-1 flex-col">
+              {keepVisionVisible && visionTile && focus !== null && tiles[focus] != null && !isVisionTile(tiles[focus]!) && (
+                <div
+                  data-testid="vision-always-on-top-pip"
+                  className="fixed bottom-6 right-6 z-30 w-80 max-w-[40vw] aspect-video rounded-m3-lg border-2 border-primary/50 shadow-2xl overflow-hidden bg-black"
+                >
+                  <div className="absolute top-1 right-1 z-20">
+                    <IconButton
+                      icon={X}
+                      size="sm"
+                      title="Cerrar PiP de Vision AI"
+                      aria-label="Cerrar PiP de Vision AI"
+                      className="size-6 bg-black/60 text-white hover:bg-black/80 rounded-full"
+                      onClick={() => setKeepVisionVisible(false)}
+                    />
+                  </div>
+                  <LiveVisionTile vision={visionTile.vision} />
+                </div>
+              )}
               <TelemetryOverlay />
               {adaptivePolicy.operatorWarning && !warningDismissed && (
                 <div role="status" className="mb-1 flex shrink-0 items-center justify-between gap-2 rounded-m3-md border border-warn/30 bg-warn/15 px-3 py-1.5 text-xs text-warn">
@@ -1395,6 +1448,20 @@ function GridTile({
             icon={X}
             title={tr("live.removeMap")}
             aria-label={tr("live.removeNamed", { name: tile.map.name })}
+            className={tileAction + " absolute right-2 top-2 z-[3]"}
+            onClick={(event) => {
+              event.stopPropagation();
+              onRemove();
+            }}
+          />
+        </>
+      ) : tile && isVisionTile(tile) ? (
+        <>
+          <LiveVisionTile vision={tile.vision} isFocused={isFocused} />
+          <IconButton
+            icon={X}
+            title="Quitar Vision AI"
+            aria-label={`Quitar ${tile.vision.name}`}
             className={tileAction + " absolute right-2 top-2 z-[3]"}
             onClick={(event) => {
               event.stopPropagation();

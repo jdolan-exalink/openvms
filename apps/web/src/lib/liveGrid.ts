@@ -9,9 +9,11 @@ import { parsePanes, type Pane } from "./presentations";
 
 export type Quality = "sub" | "main";
 export type LiveMapRef = { site_id: string; floor_id?: string; name: string };
+export type LiveVisionRef = { id: string; name: string; layout?: string };
 export type CameraTile = { camera_id: string; quality: Quality; fisheye_view_id?: string };
 export type MapGridTile = { map: LiveMapRef };
-export type Tile = CameraTile | MapGridTile | null;
+export type VisionGridTile = { vision: LiveVisionRef };
+export type Tile = CameraTile | MapGridTile | VisionGridTile | null;
 
 export function cameraIdOf(tile: Tile): string | undefined {
   return tile && "camera_id" in tile ? tile.camera_id : undefined;
@@ -20,11 +22,16 @@ export function cameraIdOf(tile: Tile): string | undefined {
 export function tileIdentityKey(tile: Tile): string | undefined {
   if (!tile) return undefined;
   if (isMapTile(tile)) return `map:${tile.map.site_id}:${tile.map.floor_id ?? ""}`;
+  if (isVisionTile(tile)) return `vision:${tile.vision.id}`;
   return tile.fisheye_view_id ? `${tile.camera_id}#${tile.fisheye_view_id}` : tile.camera_id;
 }
 
 export function isMapTile(tile: Tile): tile is MapGridTile {
   return !!tile && "map" in tile;
+}
+
+export function isVisionTile(tile: Tile): tile is VisionGridTile {
+  return !!tile && "vision" in tile;
 }
 
 export function isCameraTile(tile: Tile): tile is CameraTile {
@@ -125,6 +132,7 @@ function cameraIdFromDragId(id: string | number): string | null {
 export type DragResolution =
   | { type: "place"; index: number; cameraId: string; fisheyeViewId?: string }
   | { type: "place-map"; index: number; map: LiveMapRef }
+  | { type: "place-vision"; index: number; vision: LiveVisionRef }
   | { type: "reorder"; from: number; to: number }
   | { type: "fill-server"; serverId: string }
   | { type: "fill-folder"; folderId: string }
@@ -136,6 +144,7 @@ export const LIVE_GRID_DROP_ID = "live-grid";
 const SERVER_DRAG_PREFIX = "tserver:";
 const FOLDER_DRAG_PREFIX = "tfolder:";
 const MAP_PREFIX = "tmap:";
+const VISION_PREFIX = "tvision:";
 export const FEVIEW_DRAG_PREFIX = "tfeview:";
 
 export function feviewDragId(cameraId: string, viewId: string): string {
@@ -182,6 +191,30 @@ export function placeMapAt(tiles: Tile[], index: number, map: LiveMapRef): Tile[
   return tiles.map((tile, i) => (i === index ? { map } : tile));
 }
 
+/** visionDragId identifies a Vision AI instance dragged from the live sidebar onto a cell. */
+export function visionDragId(vision: LiveVisionRef): string {
+  return VISION_PREFIX + encodeURIComponent(JSON.stringify({ id: vision.id, name: vision.name, layout: vision.layout }));
+}
+
+/** visionFromDragId reads a vision drag id. Invalid ids return null. */
+export function visionFromDragId(id: string | number): LiveVisionRef | null {
+  const raw = stripPrefix(id, VISION_PREFIX);
+  if (raw === null) return null;
+  try {
+    const parsed = JSON.parse(decodeURIComponent(raw)) as { id?: unknown; name?: unknown; layout?: unknown };
+    if (typeof parsed.id !== "string" || typeof parsed.name !== "string" || !parsed.name) return null;
+    return { id: parsed.id, name: parsed.name, layout: typeof parsed.layout === "string" ? parsed.layout : undefined };
+  } catch {
+    return null;
+  }
+}
+
+/** placeVisionAt puts the Vision AI instance in one cell. */
+export function placeVisionAt(tiles: Tile[], index: number, vision: LiveVisionRef): Tile[] {
+  if (index < 0 || index >= tiles.length) return tiles;
+  return tiles.map((tile, i) => (i === index ? { vision } : tile));
+}
+
 function stripPrefix(id: string | number, prefix: string): string | null {
   const s = String(id);
   return s.startsWith(prefix) ? s.slice(prefix.length) : null;
@@ -205,6 +238,11 @@ export function resolveDragEnd(activeId: string | number, overId: string | numbe
     const map = mapFromDragId(activeId);
     if (!map || toIndex === null) return null;
     return { type: "place-map", index: toIndex, map };
+  }
+  if (stripPrefix(activeId, VISION_PREFIX) !== null) {
+    const vision = visionFromDragId(activeId);
+    if (!vision || toIndex === null) return null;
+    return { type: "place-vision", index: toIndex, vision };
   }
   if (toIndex === null) return null;
   const feview = feviewFromDragId(activeId);
@@ -253,6 +291,21 @@ export function placeInOpenCell(tiles: Tile[], cameraId: string, quality: Qualit
   return { tiles: placeCameraUnique(tiles, index, cameraId, quality, fisheyeViewId), index };
 }
 
+/**
+ * placeVisionInOpenCell puts a Vision AI instance in the first empty cell of the current grid.
+ * If already placed, returns the existing cell index without duplicating.
+ * A full grid replaces the first cell.
+ */
+export function placeVisionInOpenCell(tiles: Tile[], vision: LiveVisionRef): { tiles: Tile[]; index: number } {
+  const matchKey = `vision:${vision.id}`;
+  const existing = tiles.findIndex((tile) => tileIdentityKey(tile) === matchKey);
+  if (existing >= 0) return { tiles, index: existing };
+  const empty = tiles.findIndex((tile) => tile === null);
+  const index = empty >= 0 ? empty : 0;
+  if (index >= tiles.length) return { tiles, index: -1 };
+  return { tiles: placeVisionAt(tiles, index, vision), index };
+}
+
 export function fitTiles(tiles: Tile[], count: number): Tile[] {
   const next = tiles.slice(0, Math.max(0, count));
   while (next.length < count) next.push(null);
@@ -294,11 +347,18 @@ export function parseSelection(raw: string | null, validCameraIds: ReadonlySet<s
   if (typeof resolvedRows !== "number" || !Number.isInteger(resolvedRows) || resolvedRows < 1) return null;
   const cleaned: Tile[] = tiles.map((t): Tile => {
     if (!t || typeof t !== "object") return null;
-    const record = t as { camera_id?: unknown; quality?: unknown; map?: unknown };
+    const record = t as { camera_id?: unknown; quality?: unknown; map?: unknown; vision?: unknown };
     if (record.map && typeof record.map === "object") {
       const map = record.map as { site_id?: unknown; floor_id?: unknown; name?: unknown };
       if (typeof map.site_id !== "string" || typeof map.name !== "string" || !map.name) return null;
       return { map: { site_id: map.site_id, name: map.name, floor_id: typeof map.floor_id === "string" ? map.floor_id : undefined } };
+    }
+    if (record.vision && typeof record.vision === "object") {
+      const v = record.vision as { id?: unknown; name?: unknown; layout?: unknown };
+      if (typeof v.id === "string" && typeof v.name === "string" && v.name) {
+        return { vision: { id: v.id, name: v.name, layout: typeof v.layout === "string" ? v.layout : undefined } };
+      }
+      return null;
     }
     if (typeof record.camera_id !== "string" || !validCameraIds.has(record.camera_id)) return null;
     const feViewId = typeof (record as { fisheye_view_id?: unknown }).fisheye_view_id === "string" ? (record as { fisheye_view_id: string }).fisheye_view_id : undefined;
