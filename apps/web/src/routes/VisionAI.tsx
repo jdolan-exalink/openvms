@@ -581,7 +581,9 @@ function SlotRenderer({
 function EventSnapshot({ slot, snapshots }: { slot: VisionAISlot; snapshots: boolean }) {
   const eventId = slot.event_id;
   if (!eventId) return null;
-  return <EventSnapshotImage key={eventId} slot={slot} eventId={eventId} snapshots={snapshots} />;
+  // Keyed by permission too: if the thumbnail failed before permissions loaded, the snapshot still gets
+  // its chance once snapshots.view is known.
+  return <EventSnapshotImage key={`${eventId}:${snapshots}`} slot={slot} eventId={eventId} snapshots={snapshots} />;
 }
 
 function EventSnapshotImage({ slot, eventId, snapshots }: { slot: VisionAISlot; eventId: string; snapshots: boolean }) {

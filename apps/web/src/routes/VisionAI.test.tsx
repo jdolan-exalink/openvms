@@ -48,6 +48,8 @@ function slot(n: number, cam: string | null, extra: Slot = {}): Slot {
 }
 
 let slotsBody: { slots: Slot[] };
+/** When set, /api/v1/me answers only after it resolves (simulates permissions loading late). */
+let meGate: Promise<void> | null = null;
 let slotRequests: URL[];
 let slotsStatus: number;
 let platesVisible: boolean;
@@ -76,6 +78,7 @@ describe("VisionAI Page", () => {
       vi.fn(async (input: Request) => {
         const url = new URL(input.url);
         if (url.pathname === "/api/v1/vision-ai/slots") slotRequests.push(url);
+        if (url.pathname === "/api/v1/me" && meGate) await meGate;
         return routes(input);
       }),
     );
@@ -280,6 +283,25 @@ describe("VisionAI Page", () => {
       const sidebar = await openSidebar();
       const img = await sidebar.findByRole("img", { name: "Detección: person en Cam cam-1" });
       expect(img).toHaveAttribute("src", "/api/v1/events/ev-cam-1/thumbnail");
+    });
+
+    it("requests the snapshot once permissions load, even if the early thumbnail failed", async () => {
+      mePermissions = [...mePermissions, "snapshots.view"];
+      let releaseMe = () => {};
+      meGate = new Promise<void>((resolve) => (releaseMe = resolve));
+      try {
+        const sidebar = await openSidebar();
+        const img = await sidebar.findByRole("img", { name: "Detección: person en Cam cam-1" });
+        expect(img).toHaveAttribute("src", "/api/v1/events/ev-cam-1/thumbnail");
+        fireEvent.error(img);
+        await waitFor(() => expect(sidebar.getByTestId("vision-event-placeholder-ev-cam-1")).toBeInTheDocument());
+        releaseMe();
+        await waitFor(() =>
+          expect(sidebar.getByRole("img", { name: "Detección: person en Cam cam-1" })).toHaveAttribute("src", "/media/v1/events/ev-cam-1/snapshot.jpg"),
+        );
+      } finally {
+        meGate = null;
+      }
     });
 
     it("falls back to the thumbnail once, then to the icon placeholder", async () => {
