@@ -77,3 +77,22 @@ func TestRowToEvents(t *testing.T) {
 		}
 	})
 }
+
+func TestAnyShared(t *testing.T) {
+	a, b, c := uuid.New(), uuid.New(), uuid.New()
+	cases := map[string]struct {
+		events, lpr []uuid.UUID
+		want        bool
+	}{
+		"overlap":            {[]uuid.UUID{a, b}, []uuid.UUID{b, c}, true},
+		"disjoint":           {[]uuid.UUID{a}, []uuid.UUID{b, c}, false},
+		"no lpr cameras":     {[]uuid.UUID{a}, nil, false},
+		"no event cameras":   {nil, []uuid.UUID{a}, false},
+		"lpr only elsewhere": {[]uuid.UUID{a}, []uuid.UUID{c}, false},
+	}
+	for name, tc := range cases {
+		if got := anyShared(tc.events, tc.lpr); got != tc.want {
+			t.Errorf("%s: anyShared = %v, want %v", name, got, tc.want)
+		}
+	}
+}

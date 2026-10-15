@@ -34,7 +34,7 @@ func TestEnforceStorageSafetyWithinLimits(t *testing.T) {
 func TestEnforceStorageSafetyDisabledDoesNotPrune(t *testing.T) {
 	tmp := t.TempDir()
 	file1 := filepath.Join(tmp, "segment1.mp4")
-	if err := os.WriteFile(file1, []byte("data"), 0o644); err != nil {
+	if err := os.WriteFile(file1, []byte("data"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -71,13 +71,13 @@ func TestEnforceStorageSafetyPrunesOldestWhenOver85(t *testing.T) {
 	f3 := filepath.Join(tmp, "2026-10-12_01.mp4")
 
 	content := make([]byte, 100)
-	if err := os.WriteFile(f1, content, 0o644); err != nil {
+	if err := os.WriteFile(f1, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(f2, content, 0o644); err != nil {
+	if err := os.WriteFile(f2, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(f3, content, 0o644); err != nil {
+	if err := os.WriteFile(f3, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 

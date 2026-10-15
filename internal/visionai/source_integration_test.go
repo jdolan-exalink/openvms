@@ -43,12 +43,12 @@ func TestPGSourceStartAgeCap(t *testing.T) {
 	stale := seedEvent(t, env, cam, "age-1", 2*time.Hour, false)
 	fresh := seedEvent(t, env, cam, "age-2", 30*time.Minute, false)
 
-	rows, err := visionai.PGSource{Store: env.Store}.RecentEvents(context.Background(), env.Admin, 10*time.Minute, time.Now())
+	set, err := visionai.PGSource{Store: env.Store}.RecentEvents(context.Background(), env.Admin, 10*time.Minute, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := map[uuid.UUID]bool{}
-	for _, r := range rows {
+	for _, r := range set.Rows {
 		got[r.ID] = true
 	}
 	if got[stale] {
@@ -65,11 +65,25 @@ func TestPGSourceWithoutLPRAccess(t *testing.T) {
 	id := seedEvent(t, env, cam, "lpr-1", time.Minute, false)
 
 	// "operador" holds events.view on the camera but not lpr.view.
-	rows, err := visionai.PGSource{Store: env.Store}.RecentEvents(context.Background(), env.Actor(t, "operador"), 10*time.Minute, time.Now())
+	set, err := visionai.PGSource{Store: env.Store}.RecentEvents(context.Background(), env.Actor(t, "operador"), 10*time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("actor without lpr.view must not fail: %v", err)
 	}
-	assertSeededWithoutPlates(t, rows, id)
+	assertSeededWithoutPlates(t, set.Rows, id)
+	if set.PlatesVisible {
+		t.Fatalf("operador holds no lpr.view: PlatesVisible must be false")
+	}
+}
+
+func TestPGSourcePlatesVisibleForAdmin(t *testing.T) {
+	env := demofix.Setup(t)
+	set, err := visionai.PGSource{Store: env.Store}.RecentEvents(context.Background(), env.Admin, 10*time.Minute, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !set.PlatesVisible {
+		t.Fatalf("admin holds lpr.view: PlatesVisible must be true")
+	}
 }
 
 func TestLoadRowsNilLPRCameraList(t *testing.T) {

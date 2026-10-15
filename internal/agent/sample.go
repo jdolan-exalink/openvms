@@ -15,23 +15,23 @@ import (
 
 // Snapshot is what the edge agent reports once a second.
 type Snapshot struct {
-	Version          string             `json:"version"`
-	Variant          string             `json:"variant"`
-	NTP              string             `json:"ntp"`
-	CPUPercent       *float64           `json:"cpu_percent,omitempty"`
-	MemoryTotal      uint64             `json:"memory_total_bytes"`
-	MemoryAvailable  uint64             `json:"memory_available_bytes"`
-	Coral            bool               `json:"coral"`
-	CoralUSB         bool               `json:"coral_usb"`
-	CoralPCIe        bool               `json:"coral_pcie"`
-	OpenVINO         bool               `json:"openvino"`
-	Hailo            bool               `json:"hailo"`
-	Nvidia           bool               `json:"nvidia"`
-	GPUPresent       bool               `json:"gpu_present"`
-	GPUVendor        string             `json:"gpu_vendor"`
-	GPUName          string             `json:"gpu_name"`
-	CCTVTotal        uint64             `json:"cctv_total_bytes"`
-	CCTVFree         uint64             `json:"cctv_free_bytes"`
+	Version              string             `json:"version"`
+	Variant              string             `json:"variant"`
+	NTP                  string             `json:"ntp"`
+	CPUPercent           *float64           `json:"cpu_percent,omitempty"`
+	MemoryTotal          uint64             `json:"memory_total_bytes"`
+	MemoryAvailable      uint64             `json:"memory_available_bytes"`
+	Coral                bool               `json:"coral"`
+	CoralUSB             bool               `json:"coral_usb"`
+	CoralPCIe            bool               `json:"coral_pcie"`
+	OpenVINO             bool               `json:"openvino"`
+	Hailo                bool               `json:"hailo"`
+	Nvidia               bool               `json:"nvidia"`
+	GPUPresent           bool               `json:"gpu_present"`
+	GPUVendor            string             `json:"gpu_vendor"`
+	GPUName              string             `json:"gpu_name"`
+	CCTVTotal            uint64             `json:"cctv_total_bytes"`
+	CCTVFree             uint64             `json:"cctv_free_bytes"`
 	DatabaseTotal        uint64             `json:"database_total_bytes"`
 	DatabaseFree         uint64             `json:"database_free_bytes"`
 	StorageBufferPercent int                `json:"storage_buffer_percent"`

@@ -12,14 +12,15 @@ import (
 )
 
 type fakeSource struct {
-	rows  []EventRow
-	err   error
-	calls int
+	rows          []EventRow
+	platesVisible bool
+	err           error
+	calls         int
 }
 
-func (f *fakeSource) RecentEvents(context.Context, authz.Actor, time.Duration, time.Time) ([]EventRow, error) {
+func (f *fakeSource) RecentEvents(context.Context, authz.Actor, time.Duration, time.Time) (EventSet, error) {
 	f.calls++
-	return f.rows, f.err
+	return EventSet{Rows: f.rows, PlatesVisible: f.platesVisible}, f.err
 }
 
 func tenantActor() authz.Actor {
@@ -42,6 +43,19 @@ func TestServiceSlots(t *testing.T) {
 		svc.Clock = func() time.Time { return clock }
 		return svc, &clock
 	}
+
+	t.Run("reports plate visibility from the source", func(t *testing.T) {
+		for _, visible := range []bool{true, false} {
+			svc, _ := newSvc(&fakeSource{platesVisible: visible})
+			res, err := svc.Slots(ctx, tenantActor(), "lpr", "4")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.PlatesVisible != visible {
+				t.Fatalf("PlatesVisible = %v, want %v", res.PlatesVisible, visible)
+			}
+		}
+	})
 
 	t.Run("ranks real events into slots, person above car", func(t *testing.T) {
 		src := &fakeSource{rows: []EventRow{

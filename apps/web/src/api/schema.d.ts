@@ -3855,6 +3855,8 @@ export interface components {
             layout: components["schemas"]["VisionAILayout"];
             /** Format: date-time */
             generated_at: string;
+            /** @description True when the caller holds lpr.view on at least one of the cameras it can see for events; false means plate text is never exposed to this caller. */
+            plates_visible: boolean;
             /** @description One entry per layout slot, in slot order (focus has 5, the hero first). */
             slots: components["schemas"]["VisionAISlot"][];
         };

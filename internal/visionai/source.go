@@ -46,9 +46,34 @@ type EventRow struct {
 	PlatesAllowed bool
 }
 
+// EventSet is what an EventSource returns for one actor.
+type EventSet struct {
+	Rows []EventRow
+	// PlatesVisible is true when the actor holds lpr.view on at least one of the cameras it can
+	// see events for. It is independent of whether any row currently carries a plate.
+	PlatesVisible bool
+}
+
 // EventSource loads the recent events an actor may see.
 type EventSource interface {
-	RecentEvents(ctx context.Context, actor authz.Actor, window time.Duration, now time.Time) ([]EventRow, error)
+	RecentEvents(ctx context.Context, actor authz.Actor, window time.Duration, now time.Time) (EventSet, error)
+}
+
+// anyShared reports whether the two camera lists have at least one camera in common.
+func anyShared(eventCams, lprCams []uuid.UUID) bool {
+	if len(eventCams) == 0 || len(lprCams) == 0 {
+		return false
+	}
+	seen := make(map[uuid.UUID]struct{}, len(lprCams))
+	for _, id := range lprCams {
+		seen[id] = struct{}{}
+	}
+	for _, id := range eventCams {
+		if _, ok := seen[id]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // RowToEvents maps an event row to one VisionEvent per label.
@@ -119,8 +144,8 @@ LIMIT 500`
 // RecentEvents returns events that are running or ended within window, on cameras the actor holds
 // events.view for, newest first. Still-open events older than maxStartAge (one hour) are dropped
 // even though they are "running": Frigate leaves stale open rows behind.
-func (p PGSource) RecentEvents(ctx context.Context, actor authz.Actor, window time.Duration, now time.Time) ([]EventRow, error) {
-	var out []EventRow
+func (p PGSource) RecentEvents(ctx context.Context, actor authz.Actor, window time.Duration, now time.Time) (EventSet, error) {
+	var out EventSet
 	err := p.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		c, err := access.Load(ctx, db.New(tx), actor)
 		if err != nil {
@@ -134,7 +159,8 @@ func (p PGSource) RecentEvents(ctx context.Context, actor authz.Actor, window ti
 		if err != nil {
 			return err
 		}
-		out, err = loadRows(ctx, tx, cams, lprCams, window, now)
+		out.PlatesVisible = anyShared(cams, lprCams)
+		out.Rows, err = loadRows(ctx, tx, cams, lprCams, window, now)
 		return err
 	})
 	return out, err

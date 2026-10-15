@@ -150,4 +150,26 @@ describe("LiveVisionTile", () => {
     await waitFor(() => expect(screen.getByTestId("mse-player")).toHaveAttribute("data-camera-id", "cam-7"));
     expect(screen.getByRole("button", { name: /Fijar cámara/i })).toBeInTheDocument();
   });
+
+  it("does not restore an old pin when switching A -> B -> A", async () => {
+    const tile = (id: string, client: QueryClient) => (
+      <QueryClientProvider client={client}>
+        <LiveVisionTile vision={{ id, name: id }} />
+      </QueryClientProvider>
+    );
+    slotsBody = { slots: [filled("cam-1")] };
+    const view = renderWithQuery(<LiveVisionTile vision={{ id: "visionai:general", name: "A" }} />);
+    await screen.findByTestId("mse-player");
+    fireEvent.click(screen.getByRole("button", { name: /Fijar cámara/i }));
+    expect(await screen.findByRole("button", { name: /Desfijar cámara/i })).toBeInTheDocument();
+
+    slotsBody = { slots: [filled("cam-7")] };
+    view.rerender(tile("visionai:personas", view.queryClient));
+    await waitFor(() => expect(screen.getByTestId("mse-player")).toHaveAttribute("data-camera-id", "cam-7"));
+
+    slotsBody = { slots: [filled("cam-5")] };
+    view.rerender(tile("visionai:general", view.queryClient));
+    await waitFor(() => expect(screen.getByTestId("mse-player")).toHaveAttribute("data-camera-id", "cam-5"));
+    expect(screen.getByRole("button", { name: /Fijar cámara/i })).toBeInTheDocument();
+  });
 });
