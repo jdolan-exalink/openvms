@@ -110,5 +110,7 @@ allocation engine, rotate as new events arrive, and render live video.
 - Remaining CI failures pre-existing on main, untouched by this feature: gofmt/gosec in internal/agent and
   internal/provision; Layout.test bottom-nav.
 
+- #55 merged into main (`7c8c7c2`). Feature delivered.
+
 ## Next step
-Review/merge #55. Follow-ups: review advisories, mobile nav decision, pre-existing lint in agent/provision.
+Follow-ups tracked in `odd/tasks/vision-ai-followups-and-ci.md`.
