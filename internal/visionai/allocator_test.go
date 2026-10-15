@@ -85,7 +85,7 @@ func TestSlotAllocator(t *testing.T) {
 		// 2 seconds later (within 5s min display), new event cam5 arrives with slightly higher score
 		allocator.Allocate([]VisionEvent{
 			{CameraID: cam5, CameraName: "Cam 5", Object: "person", Confidence: 0.8, Timestamp: now.Add(2 * time.Second)},
-		}, now.Add(2 * time.Second))
+		}, now.Add(2*time.Second))
 
 		slots := allocator.Slots()
 		// None of the 4 slots should be replaced yet because min display time (5s) has not elapsed
@@ -98,7 +98,7 @@ func TestSlotAllocator(t *testing.T) {
 		// 6 seconds later (now.Add(6s)), min display time passed, cam5 should now replace one of the slots
 		allocator.Allocate([]VisionEvent{
 			{CameraID: cam5, CameraName: "Cam 5", Object: "person", Confidence: 0.8, Timestamp: now.Add(6 * time.Second)},
-		}, now.Add(6 * time.Second))
+		}, now.Add(6*time.Second))
 
 		hasCam5 := false
 		for _, s := range allocator.Slots() {
@@ -134,6 +134,59 @@ func TestSlotAllocator(t *testing.T) {
 		slots := allocator.Slots()
 		if len(slots) != 5 {
 			t.Fatalf("expected 5 slots for focus mode, got %d", len(slots))
+		}
+	})
+
+	t.Run("require flags filter plate, zone and alarm events", func(t *testing.T) {
+		base := []VisionEvent{
+			{ID: "a", CameraID: cam1, Object: "car", Confidence: 0.9, Plate: "AB123CD", StartTime: now},
+			{ID: "b", CameraID: cam2, Object: "person", Confidence: 0.9, Zone: "yard", StartTime: now},
+			{ID: "c", CameraID: cam3, Object: "person", Confidence: 0.9, AlarmSeverity: "high", StartTime: now},
+			{ID: "d", CameraID: cam4, Object: "person", Confidence: 0.9, StartTime: now},
+		}
+		for name, tc := range map[string]struct {
+			mut  func(*VisionConfig)
+			want uuid.UUID
+		}{
+			"plate": {func(c *VisionConfig) { c.RequirePlate = true }, cam1},
+			"zone":  {func(c *VisionConfig) { c.RequireZone = true }, cam2},
+			"alarm": {func(c *VisionConfig) { c.RequireAlarm = true }, cam3},
+		} {
+			c := cfg
+			c.Objects = nil
+			tc.mut(&c)
+			slots := NewSlotAllocator(c).Allocate(base, now)
+			if slots[0].CameraID != tc.want || slots[1].CameraID != uuid.Nil {
+				t.Fatalf("%s: slots = %v / %v, want only %v", name, slots[0].CameraID, slots[1].CameraID, tc.want)
+			}
+		}
+	})
+
+	t.Run("keeps only the best candidate per camera and records its event id", func(t *testing.T) {
+		allocator := NewSlotAllocator(cfg)
+		slots := allocator.Allocate([]VisionEvent{
+			{ID: "low", CameraID: cam1, Object: "car", Confidence: 0.5, StartTime: now},
+			{ID: "high", CameraID: cam1, Object: "person", Confidence: 0.9, StartTime: now},
+		}, now)
+		if slots[0].EventID != "high" || slots[0].Reason.Object != "person" {
+			t.Fatalf("slot 0 = event %q object %q, want high/person", slots[0].EventID, slots[0].Reason.Object)
+		}
+		if slots[1].CameraID != uuid.Nil {
+			t.Fatalf("camera must occupy a single slot")
+		}
+	})
+
+	t.Run("releases unpinned slots past max display with no candidate left", func(t *testing.T) {
+		allocator := NewSlotAllocator(cfg)
+		allocator.Allocate([]VisionEvent{{ID: "x", CameraID: cam1, Object: "person", Confidence: 0.9, StartTime: now}}, now)
+		allocator.SetPin(1, true)
+
+		// Still inside max display: kept even without candidates.
+		if got := allocator.Allocate(nil, now.Add(20*time.Second))[0].CameraID; got != cam1 {
+			t.Fatalf("slot released too early")
+		}
+		if got := allocator.Allocate(nil, now.Add(31*time.Second))[0].CameraID; got != uuid.Nil {
+			t.Fatalf("expected slot 0 released after max display, got %v", got)
 		}
 	})
 }

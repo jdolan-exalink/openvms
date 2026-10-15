@@ -104,6 +104,10 @@ func Setup(t *testing.T) *Env {
 		t.Fatal(err)
 	}
 	for _, cam := range cams {
+		if cam.RemoteName == "birdseye" {
+			// Synthesized per server by inventory; not one of the demo's seven cameras.
+			continue
+		}
 		env.Cameras[names[cam.ServerID.String()]+"/"+cam.RemoteName] = cam
 	}
 	if len(env.Cameras) != 7 {

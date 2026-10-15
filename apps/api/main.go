@@ -64,6 +64,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/secrets"
 	dbstore "github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
+	"github.com/jdolan-exalink/openvms/internal/visionai"
 	"github.com/jdolan-exalink/openvms/migrations"
 )
 
@@ -175,6 +176,7 @@ func run() error {
 		Alarms:        alarmsSvc,
 		Media:         mediaSvc,
 		Maps:          mapsSvc,
+		VisionAI:      visionai.NewService(visionai.PGSource{Store: st}),
 		Features:      cfg.Features,
 		Branding:      brandingSvc,
 		ClipWatermark: clipWatermarkSvc,

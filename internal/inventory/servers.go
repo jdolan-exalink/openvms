@@ -272,6 +272,10 @@ func (s *Service) CreateServer(ctx context.Context, actor authz.Actor, in Create
 }
 
 func upsertCamera(ctx context.Context, q *db.Queries, tenantID, siteID, serverID uuid.UUID, cam frigate.Camera) (bool, error) {
+	if cam.Zones == nil {
+		// The synthesized birdseye camera has no zones; cameras.zones is NOT NULL.
+		cam.Zones = []string{}
+	}
 	return q.UpsertCamera(ctx, db.UpsertCameraParams{
 		TenantID: tenantID, SiteID: siteID, ServerID: serverID,
 		RemoteName: cam.Name, DisplayName: displayName(cam.Name), Enabled: cam.Enabled,

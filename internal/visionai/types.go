@@ -44,6 +44,7 @@ type SlotAssignment struct {
 	SlotIndex       int        `json:"slot"`
 	CameraID        uuid.UUID  `json:"camera_id"`
 	CameraName      string     `json:"camera_name"`
+	EventID         string     `json:"event_id,omitempty"`
 	Score           float64    `json:"score"`
 	Reason          SlotReason `json:"reason"`
 	Pinned          bool       `json:"pinned"`
@@ -74,6 +75,9 @@ type VisionConfig struct {
 	Servers           []uuid.UUID     `json:"servers,omitempty"`
 	Cameras           []uuid.UUID     `json:"cameras,omitempty"`
 	Zones             []string        `json:"zones,omitempty"`
+	RequirePlate      bool            `json:"require_plate,omitempty"`
+	RequireZone       bool            `json:"require_zone,omitempty"`
+	RequireAlarm      bool            `json:"require_alarm,omitempty"`
 	ReplacementMode   ReplacementMode `json:"replacement_mode"`
 	MinDisplaySeconds int             `json:"min_display_seconds"`
 	MaxDisplaySeconds int             `json:"max_display_seconds"`

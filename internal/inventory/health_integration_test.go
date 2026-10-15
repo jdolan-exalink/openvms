@@ -4,6 +4,7 @@ package inventory_test
 
 import (
 	"context"
+	"github.com/google/uuid"
 	"sync"
 	"testing"
 	"time"
@@ -64,9 +65,13 @@ func TestHealthPollerOnCameraChange(t *testing.T) {
 		t.Fatalf("expected camera status changes, got 0")
 	}
 	foundOnline := false
+	// The synthesized birdseye camera never reports as active, so only cameras that came
+	// online here are expected to move from online to unknown in step 3.
+	wentOnline := map[uuid.UUID]bool{}
 	for _, c := range camChanges {
 		if c.ServerID == serverID && c.From == "offline" && c.To == "online" {
 			foundOnline = true
+			wentOnline[c.CameraID] = true
 			if c.TenantID != env.Demo.TenantID || c.SiteID != plaza.SiteID {
 				t.Errorf("unexpected tenant/site in camera status change: %+v", c)
 			}
@@ -94,7 +99,7 @@ func TestHealthPollerOnCameraChange(t *testing.T) {
 	defer mu.Unlock()
 	foundUnknown := false
 	for _, c := range camChanges {
-		if c.ServerID == serverID && c.To == "unknown" {
+		if c.ServerID == serverID && c.To == "unknown" && wentOnline[c.CameraID] {
 			foundUnknown = true
 			if c.From != "online" {
 				t.Errorf("expected from=online, got from=%s", c.From)

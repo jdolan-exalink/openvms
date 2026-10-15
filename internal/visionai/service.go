@@ -2,217 +2,105 @@ package visionai
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strings"
+	"sort"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jdolan-exalink/openvms/internal/store"
+	"github.com/jdolan-exalink/openvms/internal/authz"
 )
 
-var (
-	ErrConfigNotFound = errors.New("vision config not found")
-	ErrInvalidSlot    = errors.New("invalid slot index")
+const (
+	// EventWindow is how long after ending an event still competes for a slot.
+	EventWindow = 10 * time.Minute
+	// SessionIdleTTL is how long an unused allocator session is kept.
+	SessionIdleTTL = 10 * time.Minute
 )
 
-// Service provides high-level operations for Vision AI sessions, event ingestion,
-// and real-time slot broadcast.
+// Result is the slot grid computed for one request.
+type Result struct {
+	Source      string
+	Layout      string
+	GeneratedAt time.Time
+	Slots       []SlotAssignment
+}
+
+type session struct {
+	allocator *SlotAllocator
+	lastUsed  time.Time
+}
+
+// Service ranks real events into per-session slot grids. Allocation state (min display,
+// cooldown, replacement) lives in memory per tenant|user|source|layout and is evicted when idle.
 type Service struct {
-	mu         sync.RWMutex
-	store      *store.Store
-	allocators map[string]*SlotAllocator // key: tenantID:configID
-	configs    map[string]VisionConfig   // key: tenantID:configID
-	subscribers map[string][]chan []SlotAssignment // key: tenantID:configID
-	events     map[uuid.UUID][]VisionEvent // key: tenantID, sliding window
+	// Clock returns the current time; tests replace it.
+	Clock func() time.Time
+
+	source   EventSource
+	mu       sync.Mutex
+	sessions map[string]*session
 }
 
-// NewService instantiates a new Vision AI Service.
-func NewService(st *store.Store) *Service {
-	return &Service{
-		store:       st,
-		allocators:  make(map[string]*SlotAllocator),
-		configs:     make(map[string]VisionConfig),
-		subscribers: make(map[string][]chan []SlotAssignment),
-		events:      make(map[uuid.UUID][]VisionEvent),
-	}
+// NewService builds a Service over an event source.
+func NewService(source EventSource) *Service {
+	return &Service{Clock: time.Now, source: source, sessions: make(map[string]*session)}
 }
 
-func sessionKey(tenantID uuid.UUID, configID string) string {
-	return fmt.Sprintf("%s:%s", tenantID, configID)
-}
-
-// GetDefaultConfig returns or creates the default Vision AI configuration for a tenant.
-func (s *Service) GetDefaultConfig(ctx context.Context, tenantID uuid.UUID) (VisionConfig, error) {
+// SessionCount reports the live allocator sessions.
+func (s *Service) SessionCount() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	key := sessionKey(tenantID, "default")
-	if cfg, ok := s.configs[key]; ok {
-		return cfg, nil
-	}
-
-	def := DefaultVisionConfig(tenantID)
-	s.configs[key] = def
-	s.allocators[key] = NewSlotAllocator(def)
-	return def, nil
+	return len(s.sessions)
 }
 
-// ListConfigs returns all saved Vision configurations for a tenant.
-func (s *Service) ListConfigs(ctx context.Context, tenantID uuid.UUID) ([]VisionConfig, error) {
+func sessionKey(a authz.Actor, source, layout string) string {
+	tenant := "platform"
+	if !a.IsPlatform() {
+		tenant = a.TenantID.String()
+	}
+	return tenant + "|" + a.UserID.String() + "|" + source + "|" + layout
+}
+
+// session returns the actor's allocator for the config, creating it on first use, and evicts
+// sessions idle longer than SessionIdleTTL.
+func (s *Service) session(a authz.Actor, cfg VisionConfig, now time.Time) *SlotAllocator {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	key := sessionKey(tenantID, "default")
-	if _, ok := s.configs[key]; !ok {
-		def := DefaultVisionConfig(tenantID)
-		s.configs[key] = def
-		s.allocators[key] = NewSlotAllocator(def)
-	}
-
-	var res []VisionConfig
-	for k, cfg := range s.configs {
-		if cfg.TenantID == tenantID {
-			res = append(res, cfg)
+	for k, sess := range s.sessions {
+		if now.Sub(sess.lastUsed) > SessionIdleTTL {
+			delete(s.sessions, k)
 		}
-		_ = k
 	}
-	return res, nil
-}
-
-// SaveConfig saves or updates a configuration and updates its allocator.
-func (s *Service) SaveConfig(ctx context.Context, cfg VisionConfig) (VisionConfig, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if cfg.ID == "" {
-		cfg.ID = uuid.New().String()
-	}
-
-	key := sessionKey(cfg.TenantID, cfg.ID)
-	s.configs[key] = cfg
-	s.allocators[key] = NewSlotAllocator(cfg)
-	return cfg, nil
-}
-
-// DeleteConfig removes a configuration and its active allocator.
-func (s *Service) DeleteConfig(ctx context.Context, tenantID uuid.UUID, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	key := sessionKey(tenantID, id)
-	if _, ok := s.configs[key]; !ok {
-		return ErrConfigNotFound
-	}
-
-	delete(s.configs, key)
-	delete(s.allocators, key)
-	return nil
-}
-
-// GetSlots returns current slot assignments for a given configuration.
-func (s *Service) GetSlots(ctx context.Context, tenantID uuid.UUID, configID string) ([]SlotAssignment, error) {
-	s.mu.Lock()
-	key := sessionKey(tenantID, configID)
-	alloc, ok := s.allocators[key]
+	key := sessionKey(a, cfg.ID, cfg.Layout)
+	sess, ok := s.sessions[key]
 	if !ok {
-		if configID == "default" {
-			def := DefaultVisionConfig(tenantID)
-			s.configs[key] = def
-			alloc = NewSlotAllocator(def)
-			s.allocators[key] = alloc
-		} else {
-			s.mu.Unlock()
-			return nil, ErrConfigNotFound
+		if !a.IsPlatform() {
+			cfg.TenantID = *a.TenantID
 		}
+		sess = &session{allocator: NewSlotAllocator(cfg)}
+		s.sessions[key] = sess
 	}
-	s.mu.Unlock()
-
-	return alloc.Slots(), nil
+	sess.lastUsed = now
+	return sess.allocator
 }
 
-// SetPin pins or unpins a slot in a configuration session.
-func (s *Service) SetPin(ctx context.Context, tenantID uuid.UUID, configID string, slotIndex int, pinned bool) error {
-	s.mu.Lock()
-	key := sessionKey(tenantID, configID)
-	alloc, ok := s.allocators[key]
-	if !ok {
-		s.mu.Unlock()
-		return ErrConfigNotFound
+// Slots loads the actor's recent events, ranks them and returns the current slot grid.
+func (s *Service) Slots(ctx context.Context, actor authz.Actor, source, layout string) (Result, error) {
+	cfg, err := PresetConfig(source, layout)
+	if err != nil {
+		return Result{}, err
 	}
-	s.mu.Unlock()
-
-	alloc.SetPin(slotIndex, pinned)
-	s.broadcast(tenantID, configID, alloc.Slots())
-	return nil
-}
-
-// IngestEvent feeds a new VisionEvent, updates all allocators for the tenant, and broadcasts diffs.
-func (s *Service) IngestEvent(ctx context.Context, ev VisionEvent) {
-	s.mu.Lock()
-	tenantID := ev.TenantID
-	now := time.Now()
-
-	// Maintain sliding window of events (keep recent 5 minutes)
-	cutoff := now.Add(-5 * time.Minute)
-	currentEvents := s.events[tenantID]
-	var kept []VisionEvent
-	for _, old := range currentEvents {
-		if old.Timestamp.After(cutoff) {
-			kept = append(kept, old)
-		}
+	now := s.Clock()
+	rows, err := s.source.RecentEvents(ctx, actor, EventWindow, now)
+	if err != nil {
+		return Result{}, err
 	}
-	kept = append(kept, ev)
-	s.events[tenantID] = kept
-
-	// Find all allocators for this tenant
-	var targets []struct {
-		configID string
-		alloc    *SlotAllocator
+	var events []VisionEvent
+	for _, r := range rows {
+		events = append(events, RowToEvents(r, cfg)...)
 	}
-	for key, alloc := range s.allocators {
-		tIDStr, cID, ok := strings.Cut(key, ":")
-		if !ok {
-			continue
-		}
-		tID, err := uuid.Parse(tIDStr)
-		if err == nil && tID == tenantID {
-			targets = append(targets, struct {
-				configID string
-				alloc    *SlotAllocator
-			}{configID: cID, alloc: alloc})
-		}
-	}
-	s.mu.Unlock()
+	// Rows arrive newest first; keep the order stable for equal scores.
+	sort.SliceStable(events, func(i, j int) bool { return events[i].StartTime.After(events[j].StartTime) })
 
-	for _, target := range targets {
-		updatedSlots := target.alloc.Allocate(kept, now)
-		s.broadcast(tenantID, target.configID, updatedSlots)
-	}
-}
-
-// Subscribe returns a channel receiving slot assignment updates for a specific session.
-func (s *Service) Subscribe(tenantID uuid.UUID, configID string) <-chan []SlotAssignment {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	key := sessionKey(tenantID, configID)
-	ch := make(chan []SlotAssignment, 10)
-	s.subscribers[key] = append(s.subscribers[key], ch)
-	return ch
-}
-
-func (s *Service) broadcast(tenantID uuid.UUID, configID string, slots []SlotAssignment) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	key := sessionKey(tenantID, configID)
-	subs := s.subscribers[key]
-	for _, ch := range subs {
-		select {
-		case ch <- slots:
-		default:
-		}
-	}
+	slots := s.session(actor, cfg, now).Allocate(events, now)
+	return Result{Source: source, Layout: layout, GeneratedAt: now, Slots: slots}, nil
 }

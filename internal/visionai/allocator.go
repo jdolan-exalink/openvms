@@ -110,6 +110,16 @@ func (a *SlotAllocator) matchesConfig(ev VisionEvent) bool {
 		}
 	}
 
+	if a.config.RequirePlate && ev.Plate == "" {
+		return false
+	}
+	if a.config.RequireZone && ev.Zone == "" {
+		return false
+	}
+	if a.config.RequireAlarm && ev.AlarmSeverity == "" {
+		return false
+	}
+
 	// Cameras filter
 	if len(a.config.Cameras) > 0 {
 		matched := false
@@ -131,6 +141,28 @@ type scoredCandidate struct {
 	event     VisionEvent
 	score     float64
 	breakdown map[string]float64
+}
+
+func (c scoredCandidate) reason() SlotReason {
+	return SlotReason{
+		Object:     c.event.Object,
+		Confidence: c.event.Confidence,
+		Zone:       c.event.Zone,
+		Plate:      c.event.Plate,
+		Alarm:      c.event.AlarmSeverity,
+		Attributes: c.event.Attributes,
+		Breakdown:  c.breakdown,
+	}
+}
+
+// release empties a slot and records the camera's exit for cooldown scoring. Caller holds a.mu.
+func (a *SlotAllocator) release(i int, now time.Time) {
+	cam := a.slots[i].CameraID
+	hist := a.history[cam]
+	hist.CurrentlyVisible = false
+	hist.LastExitedAt = now
+	a.history[cam] = hist
+	a.slots[i] = SlotAssignment{SlotIndex: i}
 }
 
 // Allocate processes candidates, ranks them, and assigns them to eligible slots.
@@ -159,6 +191,27 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 		return candidates[i].score > candidates[j].score
 	})
 
+	// A camera occupies at most one slot: keep only its best-scoring candidate.
+	seenCams := make(map[uuid.UUID]bool, len(candidates))
+	best := candidates[:0]
+	for _, c := range candidates {
+		if seenCams[c.event.CameraID] {
+			continue
+		}
+		seenCams[c.event.CameraID] = true
+		best = append(best, c)
+	}
+	candidates = best
+
+	// Release unpinned slots that outlived their max display and have no candidate anymore, so the
+	// grid empties when activity stops instead of showing stale cameras forever.
+	for i, s := range a.slots {
+		if s.CameraID == uuid.Nil || s.Pinned || seenCams[s.CameraID] || !now.After(s.MaxDisplayUntil) {
+			continue
+		}
+		a.release(i, now)
+	}
+
 	minDisplay := time.Duration(a.config.MinDisplaySeconds) * time.Second
 	if minDisplay <= 0 {
 		minDisplay = 5 * time.Second
@@ -182,21 +235,14 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 		// If this camera is already displayed in a slot, update its score and reason without moving it
 		if slotIdx, found := allocatedCams[camID]; found {
 			a.slots[slotIdx].Score = cand.score
-			a.slots[slotIdx].Reason = SlotReason{
-				Object:     cand.event.Object,
-				Confidence: cand.event.Confidence,
-				Zone:       cand.event.Zone,
-				Plate:      cand.event.Plate,
-				Alarm:      cand.event.AlarmSeverity,
-				Attributes: cand.event.Attributes,
-				Breakdown:  cand.breakdown,
-			}
+			a.slots[slotIdx].EventID = cand.event.ID
+			a.slots[slotIdx].Reason = cand.reason()
 			continue
 		}
 
 		// Find an empty slot or the best candidate slot to replace
 		bestSlotIdx := -1
-		var lowestScore float64 = 1e9
+		lowestScore := 1e9
 
 		for i, s := range a.slots {
 			if s.Pinned {
@@ -235,19 +281,12 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 
 			// Assign candidate to slot
 			a.slots[bestSlotIdx] = SlotAssignment{
-				SlotIndex:  bestSlotIdx,
-				CameraID:   camID,
-				CameraName: cand.event.CameraName,
-				Score:      cand.score,
-				Reason: SlotReason{
-					Object:     cand.event.Object,
-					Confidence: cand.event.Confidence,
-					Zone:       cand.event.Zone,
-					Plate:      cand.event.Plate,
-					Alarm:      cand.event.AlarmSeverity,
-					Attributes: cand.event.Attributes,
-					Breakdown:  cand.breakdown,
-				},
+				SlotIndex:       bestSlotIdx,
+				CameraID:        camID,
+				CameraName:      cand.event.CameraName,
+				EventID:         cand.event.ID,
+				Score:           cand.score,
+				Reason:          cand.reason(),
 				Pinned:          false,
 				AssignedAt:      now,
 				MinDisplayUntil: now.Add(minDisplay),
