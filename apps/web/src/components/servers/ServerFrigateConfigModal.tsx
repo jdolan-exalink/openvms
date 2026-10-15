@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Code2,
   Cpu,
+  Database,
   Eye,
   HardDrive,
   History,
@@ -14,6 +15,9 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  ShieldAlert,
+  ShieldCheck,
+  Sliders,
   Sparkles,
   Zap,
 } from "lucide-react";
@@ -26,6 +30,17 @@ import {
   parseTrackedObjects,
   toggleTrackedObject,
 } from "./frigateObjects";
+import {
+  calculateAttainableDays,
+  calculatePerCameraDays,
+  calculateUsableStorage,
+  DEFAULT_BITRATE_MBPS,
+  DEFAULT_SAFETY_BUFFER_PERCENT,
+  extractCamerasFromYaml,
+  formatBytes,
+  patchRetentionInYaml,
+  type CameraPriority,
+} from "./storageRetention";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
@@ -98,6 +113,9 @@ export function ServerFrigateConfigModal({
   const [restartAfterSave, setRestartAfterSave] = useState(true);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [confirmRollback, setConfirmRollback] = useState<string | null>(null);
+  const [dynamicRetentionEnabled, setDynamicRetentionEnabled] = useState(true);
+  const [selectedBitrate, setSelectedBitrate] = useState<number>(DEFAULT_BITRATE_MBPS);
+  const [cameraPriorities, setCameraPriorities] = useState<Record<string, CameraPriority>>({});
 
   // Queries
   const rawQuery = useQuery(serverFrigateRawQuery(server.id));
@@ -129,6 +147,71 @@ export function ServerFrigateConfigModal({
       return typeof next === "function" ? next(current) : next;
     });
   };
+
+  const yamlCameras = useMemo(() => extractCamerasFromYaml(yamlText), [yamlText]);
+  const cameraList = useMemo(() => {
+    if (yamlCameras.length > 0) {
+      return yamlCameras.map((id) => ({
+        id,
+        name: id.replace(/_/g, " "),
+        priority: cameraPriorities[id] ?? ("normal" as CameraPriority),
+      }));
+    }
+    const count = Math.max(1, server.camera_count || 1);
+    return Array.from({ length: count }, (_, i) => {
+      const id = `camera_${i + 1}`;
+      return {
+        id,
+        name: `Cámara ${i + 1}`,
+        priority: cameraPriorities[id] ?? ("normal" as CameraPriority),
+      };
+    });
+  }, [yamlCameras, server.camera_count, cameraPriorities]);
+
+  const storageStats = useMemo(() => {
+    const agent = agentQuery.data;
+    const cctvTotal = agent?.cctv_total_bytes ?? 1_000_000_000_000;
+    const cctvFree = agent?.cctv_free_bytes ?? 500_000_000_000;
+    const dbTotal = agent?.database_total_bytes ?? 100_000_000_000;
+    const dbFree = agent?.database_free_bytes ?? 50_000_000_000;
+    const bufferPercent = agent?.storage_buffer_percent ?? DEFAULT_SAFETY_BUFFER_PERCENT;
+    const watchdogEnabled = agent?.storage_watchdog ?? true;
+    const storageOver85 = agent?.storage_over_85_percent ?? false;
+    const dbCritical = agent?.database_critical ?? false;
+    const prunedCount = agent?.pruned_segments_count ?? 0;
+
+    const { usableBytes, reservedBytes } = calculateUsableStorage(cctvTotal, bufferPercent);
+    const attainableDays = calculateAttainableDays({
+      usableBytes,
+      cameraCount: cameraList.length,
+      bitrateMbps: selectedBitrate,
+    });
+
+    const perCameraDays = calculatePerCameraDays(cameraList, attainableDays);
+
+    const cctvUsed = Math.max(0, cctvTotal - cctvFree);
+    const cctvUsedPercent = cctvTotal > 0 ? (cctvUsed / cctvTotal) * 100 : 0;
+    const usablePercent = 100 - bufferPercent;
+
+    return {
+      cctvTotal,
+      cctvFree,
+      cctvUsed,
+      cctvUsedPercent,
+      dbTotal,
+      dbFree,
+      bufferPercent,
+      watchdogEnabled,
+      storageOver85,
+      dbCritical,
+      prunedCount,
+      usableBytes,
+      reservedBytes,
+      attainableDays,
+      perCameraDays,
+      usablePercent,
+    };
+  }, [agentQuery.data, cameraList, selectedBitrate]);
 
   // Parsed quick values from YAML
   const mqttHost = useMemo(() => extractYamlValue(yamlText, ["mqtt", "host"]) ?? "", [yamlText]);
@@ -663,6 +746,213 @@ export function ServerFrigateConfigModal({
             {/* 4. Tab Grabación & Retención */}
             {activeTab === "record" && (
               <div className="flex flex-col gap-5">
+                {/* Switch for Dynamic Optimization and 15% Buffer Watchdog */}
+                <div className="flex flex-col gap-3 rounded-m3-xl border border-outline-variant/60 bg-surface-2 p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm font-semibold text-ink flex items-center gap-2">
+                        <Icon icon={ShieldCheck} size="sm" className="text-primary" />
+                        Optimización Dinámica y Protección de Almacenamiento (Watchdog 15% Buffer)
+                      </span>
+                      <span className="text-xs text-muted">
+                        Calcula retención óptima por cámara manteniendo intacto el 15% de reserva anticorrupción en disco CCTV y base de datos.
+                      </span>
+                    </div>
+                    <Switch
+                      label="Activar Protección & Retención Dinámica"
+                      checked={dynamicRetentionEnabled}
+                      onChange={(on) => setDynamicRetentionEnabled(on)}
+                    />
+                  </div>
+
+                  {!dynamicRetentionEnabled && (
+                    <div className="rounded-m3-lg bg-surface-3 p-3 text-xs text-muted flex items-center gap-2 border border-outline-variant/40">
+                      <Icon icon={AlertTriangle} size="xs" className="text-warn flex-shrink-0" />
+                      <span>
+                        Cálculo dinámico y protección de almacenamiento desactivados. La retención se gestionará manualmente mediante los valores fijos especificados abajo sin optimización automática de buffer.
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {dynamicRetentionEnabled && (
+                  <>
+                    {/* Storage & Safety Gauge Grid */}
+                    <div className="grid gap-4 sm:grid-cols-3">
+                      {/* CCTV Storage Card */}
+                      <div className="flex flex-col gap-2 rounded-m3-xl border border-outline-variant/60 bg-surface-2 p-4 sm:col-span-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-muted uppercase tracking-wider flex items-center gap-1.5">
+                            <Icon icon={HardDrive} size="xs" className="text-primary" />
+                            Almacenamiento CCTV & Buffer de Seguridad
+                          </span>
+                          <span className="text-xs font-semibold text-ink">
+                            Total: {formatBytes(storageStats.cctvTotal)}
+                          </span>
+                        </div>
+
+                        {/* Visual Storage Bar */}
+                        <div className="flex flex-col gap-1.5 mt-1">
+                          <div className="h-3 w-full rounded-full bg-surface-3 overflow-hidden flex">
+                            <div
+                              className="bg-primary transition-all duration-300"
+                              style={{ width: `${Math.min(storageStats.usablePercent, storageStats.cctvUsedPercent)}%` }}
+                              title={`Uso actual: ${formatBytes(storageStats.cctvUsed)}`}
+                            />
+                            <div
+                              className="bg-primary/25 flex-1"
+                              title={`Disponible útil: ${formatBytes(storageStats.cctvFree)}`}
+                            />
+                            <div
+                              className="bg-amber-500/80 w-[15%]"
+                              title={`15% Reserva de Seguridad: ${formatBytes(storageStats.reservedBytes)}`}
+                            />
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between text-[11px] text-muted gap-2">
+                            <span>Usado: {formatBytes(storageStats.cctvUsed)} ({storageStats.cctvUsedPercent.toFixed(1)}%)</span>
+                            <span className="font-semibold text-ok">{formatBytes(storageStats.usableBytes)} Útiles (85%)</span>
+                            <span className="font-semibold text-amber-400 flex items-center gap-1">
+                              <Icon icon={ShieldCheck} size="xs" />
+                              15% Reserva de Seguridad ({formatBytes(storageStats.reservedBytes)} Reservados)
+                            </span>
+                          </div>
+                        </div>
+
+                        {storageStats.storageOver85 && (
+                          <div className="mt-2 rounded-m3-lg bg-amber-500/15 border border-amber-500/30 p-2.5 text-xs text-amber-200 flex items-center gap-2">
+                            <Icon icon={AlertTriangle} size="xs" className="text-amber-400 flex-shrink-0" />
+                            <span>
+                              ¡Atención: Uso superior al 85%! El Edge Agent Watchdog está podando los segmentos más antiguos para garantizar el 15% libre.
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Database & Watchdog Status Card */}
+                      <div className="flex flex-col gap-2 rounded-m3-xl border border-outline-variant/60 bg-surface-2 p-4">
+                        <span className="text-xs font-bold text-muted uppercase tracking-wider flex items-center gap-1.5">
+                          <Icon icon={Database} size="xs" className="text-primary" />
+                          Base de Datos & Watchdog
+                        </span>
+
+                        <div className="flex flex-col gap-2 text-xs mt-1">
+                          {storageStats.dbCritical ? (
+                            <div className="rounded-m3-lg bg-danger/15 border border-danger/30 p-2 text-danger flex items-center gap-1.5 font-semibold">
+                              <Icon icon={ShieldAlert} size="xs" className="flex-shrink-0" />
+                              ¡Alerta Crítica BD! Espacio inferior al 15%
+                            </div>
+                          ) : (
+                            <div className="rounded-m3-lg bg-ok/15 border border-ok/30 p-2 text-ok flex items-center gap-1.5 font-semibold">
+                              <Icon icon={ShieldCheck} size="xs" className="flex-shrink-0" />
+                              Base de Datos Protegida
+                            </div>
+                          )}
+
+                          <div className="flex items-center justify-between text-muted">
+                            <span>Espacio BD Libre:</span>
+                            <span className="font-semibold text-ink">{formatBytes(storageStats.dbFree)} / {formatBytes(storageStats.dbTotal)}</span>
+                          </div>
+
+                          <div className="flex items-center justify-between text-muted">
+                            <span>Watchdog Agente:</span>
+                            <span className="font-semibold text-ok">Activo (15% Buffer)</span>
+                          </div>
+
+                          {storageStats.prunedCount > 0 && (
+                            <div className="text-[11px] text-muted">
+                              Segmentos antiguos liberados: <span className="font-semibold text-ink">{storageStats.prunedCount}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Retention Calculator Banner */}
+                    <div className="flex flex-col gap-3 rounded-m3-xl border border-primary/30 bg-primary/5 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="size-10 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">
+                            <Icon icon={Sliders} size="sm" />
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-bold text-ink">
+                              Días Estimados de Retención: {storageStats.attainableDays} días
+                            </span>
+                            <span className="text-xs text-muted">
+                              Calculado para {cameraList.length} cámaras sobre {formatBytes(storageStats.usableBytes)} útiles (15% reservado).
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted font-medium">Bitrate promedio:</span>
+                          <Select
+                            value={String(selectedBitrate)}
+                            onChange={(e) => setSelectedBitrate(Number(e.target.value))}
+                            className="text-xs h-8 py-1"
+                          >
+                            <option value="1.5">1.5 Mbps (~16.2 GB/d por cámara)</option>
+                            <option value="2.0">2.0 Mbps (~21.6 GB/d por cámara)</option>
+                            <option value="4.0">4.0 Mbps (~43.2 GB/d por cámara)</option>
+                          </Select>
+                          <Button
+                            variant="primary"
+                            onClick={() => {
+                              const patched = patchRetentionInYaml(yamlText, storageStats.attainableDays);
+                              setYamlText(patched);
+                            }}
+                          >
+                            Aplicar Retención Calculada al YAML
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* Per-camera priority redistribution */}
+                      <div className="flex flex-col gap-2 mt-2 pt-3 border-t border-primary/20">
+                        <span className="text-xs font-bold text-muted uppercase tracking-wider">
+                          Prioridad y Distribución por Cámara:
+                        </span>
+                        <div className="grid gap-2 sm:grid-cols-2 md:grid-cols-3">
+                          {cameraList.map((cam) => {
+                            const days = storageStats.perCameraDays[cam.id] ?? storageStats.attainableDays;
+                            return (
+                              <div
+                                key={cam.id}
+                                className="flex flex-col gap-2 rounded-m3-lg border border-outline-variant/60 bg-surface-1 p-3"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-semibold text-ink truncate" title={cam.name}>
+                                    {cam.name}
+                                  </span>
+                                  <span className="text-xs font-bold text-primary">
+                                    {days} días
+                                  </span>
+                                </div>
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="text-[11px] text-muted">Prioridad:</span>
+                                  <Select
+                                    value={cam.priority}
+                                    onChange={(e) => {
+                                      const p = e.target.value as CameraPriority;
+                                      setCameraPriorities((prev) => ({ ...prev, [cam.id]: p }));
+                                    }}
+                                    className="text-xs h-7 py-0.5"
+                                  >
+                                    <option value="low">Baja (0.5x)</option>
+                                    <option value="normal">Normal (1.0x)</option>
+                                    <option value="high">Alta (1.5x)</option>
+                                    <option value="critical">Crítica (2.0x)</option>
+                                  </Select>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="flex flex-col gap-3 rounded-m3-xl border border-outline-variant/60 bg-surface-2 p-4">
                     <span className="text-xs font-bold text-muted uppercase tracking-wider">

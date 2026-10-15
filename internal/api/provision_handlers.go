@@ -217,6 +217,11 @@ func serverAgent(s provision.AgentView) gen.ServerAgent {
 		Coral: boolptr(s.Coral), GpuPresent: boolptr(s.GPUPresent),
 		CoralUsb: boolptr(s.CoralUSB), CoralPcie: boolptr(s.CoralPCIe),
 		Openvino: boolptr(s.OpenVINO), Hailo: boolptr(s.Hailo), Nvidia: boolptr(s.Nvidia),
+		StorageBufferPercent: intptr(s.StorageBufferPercent),
+		StorageWatchdog:      boolptr(s.StorageWatchdog),
+		StorageOver85Percent: boolptr(s.StorageOver85Percent),
+		DatabaseCritical:     boolptr(s.DatabaseCritical),
+		PrunedSegmentsCount:  int64ptr(s.PrunedSegmentsCount),
 	}
 	if s.CPUAvailable {
 		out.CpuPercent = float32ptr(float32(s.CPUPercent))
@@ -308,6 +313,7 @@ func serverAgentBinaryIdentity(in agent.BinaryIdentity) gen.ServerAgentBinaryIde
 	}
 	return out
 }
+func intptr(v int) *int             { return &v }
 func int64ptr(v int64) *int64       { return &v }
 func float32ptr(v float32) *float32 { return &v }
 func boolptr(v bool) *bool          { return &v }

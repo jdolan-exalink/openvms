@@ -48,3 +48,18 @@ func TestApplySnapshotMapsAIDetectorHardware(t *testing.T) {
 		t.Errorf("expected OpenVINO true")
 	}
 }
+
+func TestApplySnapshotMapsStorageWatchdog(t *testing.T) {
+	view := &AgentView{}
+	applySnapshot(view, agent.Snapshot{
+		StorageBufferPercent: 15,
+		StorageWatchdog:      true,
+		StorageOver85Percent: true,
+		DatabaseCritical:     true,
+		PrunedSegmentsCount:  42,
+	})
+	if view.StorageBufferPercent != 15 || !view.StorageWatchdog || !view.StorageOver85Percent || !view.DatabaseCritical || view.PrunedSegmentsCount != 42 {
+		t.Errorf("unexpected storage watchdog mapping: %+v", view)
+	}
+}
+

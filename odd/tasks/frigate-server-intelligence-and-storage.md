@@ -21,8 +21,8 @@ Enhance server and Frigate management in OpenVMS with:
 - [x] FSI-02 — UI Detectores IA in `ServerFrigateConfigModal`: display detected hardware badges per server and 1-click detector configuration presets (TensorRT, Coral USB, Coral PCIe, OpenVINO, Hailo-8, CPU fallback).
 - [x] FSI-03 — UI Objetos Globales: complete COCO 80 / Frigate supported object catalog with Lucide icons, category grouping (Personas, Vehículos, Animales, Accesorios), visual pill selection, and YAML sync.
 - [x] FSI-04 — Birdseye Stream Channel: auto-provision/link `BirdEye` stream per Frigate server into OpenVMS channel list and Live grid.
-- [ ] FSI-05 — Dynamic Storage & Retention Calculator: UI in Frigate Config calculating attainable recording days based on CCTV storage minus 15% safety buffer and camera stream bitrates, with per-camera priority sliders.
-- [ ] FSI-06 — Edge-Agent Storage Watchdog & Safety Pruning: background disk guard enforcing the 15% safety buffer on CCTV and DB mounts; emergency old segment pruning if Frigate fails to cycle and disk > 85%.
+- [x] FSI-05 — Dynamic Storage & Retention Calculator: UI in Frigate Config calculating attainable recording days based on CCTV storage minus 15% safety buffer and camera stream bitrates, with per-camera priority sliders.
+- [x] FSI-06 — Edge-Agent Storage Watchdog & Safety Pruning: background disk guard enforcing the 15% safety buffer on CCTV and DB mounts; emergency old segment pruning if Frigate fails to cycle and disk > 85%.
 - [ ] FSI-07 — Event & LPR Plate Crop Synchronization: sync Frigate events, snapshots, thumbnails, and license plate crops into OpenVMS backend and media viewer.
 
 ## Delivery Strategy
