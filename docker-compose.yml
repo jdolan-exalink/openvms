@@ -24,6 +24,9 @@ x-go-env: &go-env
   # First platform admin on a fresh install (never resets an existing one). Change the default.
   OPENVMS_ADMIN_USERNAME: ${OPENVMS_ADMIN_USERNAME:-admin}
   OPENVMS_ADMIN_PASSWORD: ${OPENVMS_ADMIN_PASSWORD:-openvms123}
+  # Tenant and site created on first start only when the install has no tenant at all.
+  OPENVMS_DEFAULT_TENANT: ${OPENVMS_DEFAULT_TENANT:-openvms}
+  OPENVMS_DEFAULT_SITE: ${OPENVMS_DEFAULT_SITE:-Sitio principal}
   SESSION_TTL: ${SESSION_TTL:-12h}
   SESSION_IDLE: ${SESSION_IDLE:-2h}
 

@@ -81,6 +81,10 @@ type Config struct {
 	// first platform admin on a fresh install. The default password is public and forces a change.
 	AdminUsername string
 	AdminPassword string
+	// DefaultTenant and DefaultSite (OPENVMS_DEFAULT_TENANT / OPENVMS_DEFAULT_SITE) name the
+	// tenant and site created when the install has no tenant at all.
+	DefaultTenant string
+	DefaultSite   string
 
 	// WorkerURL is the worker probe address. The API reads ONNX throughput from it.
 	WorkerURL string
@@ -145,6 +149,8 @@ func Load(service string) (Config, error) {
 		WorkerURL:                   str("WORKER_URL", "http://worker:8081"),
 		AdminUsername:               str("OPENVMS_ADMIN_USERNAME", "admin"),
 		AdminPassword:               str("OPENVMS_ADMIN_PASSWORD", "openvms123"),
+		DefaultTenant:               str("OPENVMS_DEFAULT_TENANT", "openvms"),
+		DefaultSite:                 str("OPENVMS_DEFAULT_SITE", "Sitio principal"),
 		TrustForwardedFor:           boolean("TRUST_FORWARDED_FOR", false),
 		HealthInterval:              duration("HEALTH_INTERVAL", 30*time.Second),
 		EventSyncInterval:           duration("EVENT_SYNC_INTERVAL", 5*time.Second),

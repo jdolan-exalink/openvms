@@ -145,6 +145,9 @@ func run() error {
 	if err := bootstrap.EnsureInitialAdmin(ctx, st, cfg.AdminUsername, cfg.AdminPassword, log); err != nil {
 		return fmt.Errorf("initial admin: %w", err)
 	}
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, cfg.DefaultTenant, cfg.DefaultSite, log); err != nil {
+		return fmt.Errorf("default tenant: %w", err)
+	}
 	inv := inventory.New(st, sealer, log)
 	inv.Blobs = store
 	adapters := inventory.NewAdapters(inv)

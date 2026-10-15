@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -143,6 +144,53 @@ func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password
 	}
 	if defaultInUse {
 		log.Warn("initial admin still uses the default password; change it", "username", username)
+	}
+	return nil
+}
+
+var (
+	nonSlugRe     = regexp.MustCompile(`[^a-z0-9]+`)
+	tenantSlugRe  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
+	defaultSiteTZ = "America/Argentina/Cordoba"
+)
+
+// EnsureDefaultTenant creates one tenant and one site inside it on an install that has no
+// tenant at all, so the first admin has somewhere to register servers. Any existing tenant
+// makes it a no-op: nothing is renamed, recreated or added, so renames made from the web
+// survive restarts. Names that are empty or yield no valid slug are logged and skipped.
+// Startup creation has no acting user, so it writes no audit entry.
+func EnsureDefaultTenant(ctx context.Context, st *store.Store, tenantName, siteName string, log *slog.Logger) error {
+	tenantName, siteName = strings.TrimSpace(tenantName), strings.TrimSpace(siteName)
+	slug := strings.Trim(nonSlugRe.ReplaceAllString(strings.ToLower(tenantName), "-"), "-")
+	if siteName == "" || !tenantSlugRe.MatchString(slug) {
+		log.Error("default tenant not created: OPENVMS_DEFAULT_TENANT and OPENVMS_DEFAULT_SITE need a usable name",
+			"tenant", tenantName, "site", siteName)
+		return nil
+	}
+	created := false
+	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		existing, err := q.ListTenants(ctx, nil)
+		if err != nil || len(existing) > 0 {
+			return err
+		}
+		t, err := q.CreateTenant(ctx, db.CreateTenantParams{Slug: slug, Name: tenantName})
+		if err != nil {
+			return err
+		}
+		if _, err := q.CreateSite(ctx, db.CreateSiteParams{TenantID: t.ID, Name: siteName, Timezone: defaultSiteTZ}); err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
+	if errors.Is(store.Classify(err), store.ErrConflict) {
+		return nil // a concurrent start created it first
+	}
+	if err != nil {
+		return err
+	}
+	if created {
+		log.Info("default tenant created", "tenant", tenantName, "site", siteName)
 	}
 	return nil
 }
