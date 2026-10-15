@@ -20,7 +20,7 @@ Fixed layouts (1/4/9/16) either waste space with "Sin evento asignado" placehold
 - Mode: strict (source: user global CLAUDE.md). Runner: `cd apps/web && pnpm vitest run <file>`.
 
 ## Tasks
-- [ ] VDM-01 — `dynamicGridShape(n)` helper + "Dinámica" mode in VisionAI.tsx rendering only filled slots.
+- [x] VDM-01 — `dynamicGridShape(n)` helper + "Dinámica" mode in VisionAI.tsx rendering only filled slots.
       Route: delegated writer.
 
 ## Acceptance criteria and checks
@@ -32,6 +32,12 @@ Fixed layouts (1/4/9/16) either waste space with "Sin evento asignado" placehold
 
 ## Progress and evidence
 - Branch `feat/vision-ai-dynamic-matrix` from main.
+- VDM-01 `4b4dba0`: `lib/visionAiGrid.ts` `dynamicGridShape` (+ tests for every boundary); "Dinámica" mode
+  (layout=16, size picker hidden, only filled slots in slot order, players keyed by camera, empty state).
+  RED: import unresolved + 5 page tests failing on "Dinámica" button → GREEN 42/42; full `pnpm test` 1508.
+  Modes are not persisted (plain useState), so neither is Dinámica; pins share key with the 4×4 matrix.
+- Live (rebuilt web): with >16 active cameras the grid fills 4×4 with 16 live tiles; no console errors.
+  Shrinking (fewer cameras) not observable live at current activity — covered by tests.
 
 ## Next step
-VDM-01.
+RDD assess, push + PR (user decision).
