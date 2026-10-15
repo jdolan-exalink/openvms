@@ -3,20 +3,23 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Eye, Pin, PinOff, Maximize2, Minimize2, History, LayoutGrid, Sparkles,
-  CarFront, Bell, Check, X, Bug, Layers, RefreshCw, Scan,
+  CarFront, Bell, Check, X, Bug, Layers, RefreshCw, Scan, LayoutDashboard,
 } from "lucide-react";
 import { meQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
+import { dynamicGridShape } from "@/lib/visionAiGrid";
 import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
 import { useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource } from "@/lib/visionAi";
 
-export type VisionMode = "matrix" | "focus" | "lpr" | "alarm";
+export type VisionMode = "matrix" | "focus" | "lpr" | "alarm" | "dynamic";
 
 /** Matrix mode with LPR/alarm sources lists the best candidates, so it asks for a wide grid. */
 const LPR_LAYOUT: VisionAILayout = "9";
+/** Dynamic mode asks for every slot and renders only the filled ones. */
+const DYNAMIC_LAYOUT: VisionAILayout = "16";
 
 function sourceFor(mode: VisionMode, preset: VisionAISource): VisionAISource {
   if (mode === "lpr") return "lpr";
@@ -27,6 +30,7 @@ function sourceFor(mode: VisionMode, preset: VisionAISource): VisionAISource {
 function layoutFor(mode: VisionMode, layoutCount: number): VisionAILayout {
   if (mode === "focus") return "focus";
   if (mode === "lpr") return LPR_LAYOUT;
+  if (mode === "dynamic") return DYNAMIC_LAYOUT;
   return String(layoutCount) as VisionAILayout;
 }
 
@@ -103,7 +107,7 @@ export function VisionAI() {
   // Ranked slots from the server, with the client-side object chips and pins applied. The chips
   // only narrow the matrix/focus views; LPR and alarm modes already come filtered by source.
   const serverSlots = slotsQuery.data?.slots ?? [];
-  const chipsApply = mode === "matrix" || mode === "focus";
+  const chipsApply = mode === "matrix" || mode === "focus" || mode === "dynamic";
   const slots: VisionAISlot[] = serverSlots.map((sl) => {
     const pinned = pins[sl.slot];
     if (pinned) return { ...pinned, slot: sl.slot, pinned: true };
@@ -113,6 +117,7 @@ export function VisionAI() {
     return sl;
   });
   const filled = slots.filter((sl) => sl.camera_id);
+  const dynamicShape = dynamicGridShape(filled.length);
   const lprSlots = filled.filter((sl) => sl.plate);
   const hasAnyCamera = serverSlots.some((sl) => sl.camera_id) || Object.keys(pins).length > 0;
 
@@ -234,6 +239,14 @@ export function VisionAI() {
             </button>
             <button
               type="button"
+              onClick={() => setMode("dynamic")}
+              className={cn("flex items-center gap-1 px-2 py-1 rounded-m3-sm text-xs font-medium transition-colors", mode === "dynamic" && "bg-surface text-primary shadow-xs")}
+            >
+              <LayoutDashboard className="size-3.5" />
+              <span>Dinámica</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setMode("focus")}
               className={cn("flex items-center gap-1 px-2 py-1 rounded-m3-sm text-xs font-medium transition-colors", mode === "focus" && "bg-surface text-primary shadow-xs")}
             >
@@ -258,7 +271,7 @@ export function VisionAI() {
             </button>
           </div>
 
-          {/* Matrix size selectors */}
+          {/* Matrix size selectors (not applicable to the dynamic grid) */}
           {mode === "matrix" && (
             <div className="flex items-center rounded-m3-md border border-line bg-surface-2 p-0.5">
               {[1, 4, 9, 16].map((count) => (
@@ -321,11 +334,27 @@ export function VisionAI() {
                 Reintentar
               </Button>
             </div>
-          ) : !hasAnyCamera ? (
+          ) : !hasAnyCamera || (mode === "dynamic" && filled.length === 0) ? (
             <div className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
               <Eye className="size-6 opacity-40" />
               <span>Sin eventos recientes</span>
               <span className="text-xs">Las cámaras aparecerán aquí cuando haya actividad.</span>
+            </div>
+          ) : mode === "dynamic" ? (
+            /* Dynamic Mode: only filled slots, grid sized to the active count */
+            <div
+              data-testid="vision-dynamic-grid"
+              className="grid h-full w-full gap-1 p-1 overflow-hidden"
+              style={{
+                gridTemplateColumns: `repeat(${dynamicShape.cols}, minmax(0, 1fr))`,
+                gridTemplateRows: `repeat(${dynamicShape.rows}, minmax(0, 1fr))`,
+              }}
+            >
+              {filled.map((sl) => (
+                <div key={sl.camera_id} className="relative min-h-0 rounded-m3-md overflow-hidden bg-black/70 border border-line/50">
+                  {renderSlot(sl, filled.length === 1 ? "main" : "sub")}
+                </div>
+              ))}
             </div>
           ) : mode === "focus" ? (
             /* Focus Mode: 1 Hero Slot + Strip of Thumbnails */

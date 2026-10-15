@@ -316,6 +316,67 @@ describe("VisionAI Page", () => {
     });
   });
 
+  describe("dynamic mode", () => {
+    const gridOf = () => screen.getByTestId("vision-dynamic-grid");
+    const sparse = (cams: string[]) => ({
+      slots: Array.from({ length: 16 }, (_, i) => (cams[i] ? slot(i, cams[i]!) : slot(i, null))),
+    });
+
+    it("requests layout 16 and hides the size picker", async () => {
+      setup();
+      await screen.findByText("Cam cam-1");
+      fireEvent.click(screen.getByRole("button", { name: "Dinámica" }));
+      await waitFor(() => expect(lastQuery()?.get("layout")).toBe("16"));
+      expect(screen.queryByRole("button", { name: "3×3" })).not.toBeInTheDocument();
+    });
+
+    it("renders only filled slots in a 2x2 grid without placeholders", async () => {
+      slotsBody = sparse(["cam-1", "cam-2", "cam-3"]);
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Dinámica" }));
+      await waitFor(() => expect(playerCams()).toEqual(["cam-1", "cam-2", "cam-3"]));
+      expect(screen.queryByText("Sin evento asignado")).not.toBeInTheDocument();
+      expect(gridOf().style.gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
+      expect(gridOf().style.gridTemplateRows).toBe("repeat(2, minmax(0, 1fr))");
+    });
+
+    it("re-shapes the grid when the active count grows", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        slotsBody = sparse(["cam-1", "cam-2", "cam-3"]);
+        setup();
+        fireEvent.click(await screen.findByRole("button", { name: "Dinámica" }));
+        await waitFor(() => expect(playerCams()).toHaveLength(3));
+
+        slotsBody = sparse(["cam-1", "cam-2", "cam-3", "cam-4", "cam-5"]);
+        await vi.advanceTimersByTimeAsync(2100);
+        await waitFor(() => expect(playerCams()).toHaveLength(5));
+        expect(gridOf().style.gridTemplateColumns).toBe("repeat(3, minmax(0, 1fr))");
+        expect(gridOf().style.gridTemplateRows).toBe("repeat(2, minmax(0, 1fr))");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("applies the object chips to the displayed cameras", async () => {
+      slotsBody = sparse(["cam-1", "cam-2"]);
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Dinámica" }));
+      await waitFor(() => expect(playerCams()).toHaveLength(2));
+      fireEvent.click(screen.getByRole("button", { name: "Persona" }));
+      expect(await screen.findByText(/Sin eventos recientes/i)).toBeInTheDocument();
+      expect(playerCams()).toEqual([]);
+    });
+
+    it("shows the empty state with no active cameras", async () => {
+      slotsBody = sparse([]);
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Dinámica" }));
+      expect(await screen.findByText(/Sin eventos recientes/i)).toBeInTheDocument();
+      expect(screen.queryByTestId("vision-dynamic-grid")).not.toBeInTheDocument();
+    });
+  });
+
   it("renders header, filters and layout modes", async () => {
     setup();
     expect(await screen.findByText(/VISION AI/i)).toBeInTheDocument();
