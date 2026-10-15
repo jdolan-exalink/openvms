@@ -53,7 +53,8 @@ Importante: el comando es `docker compose` (con espacio, Compose v2). El paquete
 
     git clone https://github.com/jdolan-exalink/openvms.git /root/openvms
     cd /root/openvms
-    git checkout v0.3.0        # instalar una versión etiquetada (ver `git tag`), no main
+    git tag --sort=-creatordate | head -3   # versiones publicadas, la más nueva primero
+    git checkout <versión>     # por ejemplo v0.3.0; instalar una versión etiquetada, no main
 
 
 4. Configuración (.env)
@@ -68,8 +69,9 @@ Crear /root/openvms/.env a partir de .env.example. Lo importante:
     WEB_PORT=8000
     # ":80" sirve HTTP. Con un dominio público (vms.ejemplo.com) Caddy obtiene TLS solo.
     SITE_ADDRESS=:80
-    # IP del servidor para HTTPS en el puerto 8443 (la misma del certificado del paso 5).
-    # Si no se define vale 10.1.1.24, que es la IP de otra instalación.
+    # IP del servidor para HTTPS en el puerto 8443. OBLIGATORIA para usar HTTPS por IP: tiene que
+    # ser la MISMA <IP del servidor> que se pasa al script del certificado en el paso 5. Si no se
+    # define vale 10.1.1.24 (la IP de la instalación de desarrollo) y HTTPS no responde en este servidor.
     OPENVMS_HTTPS_SITE_IPV4=<IP del servidor>
 
     chmod 600 .env
@@ -96,8 +98,16 @@ días) para la IP del servidor. El contenedor web lo monta y sin él no arranca
 
 El directorio no debe existir (el script no sobreescribe). El navegador pide aceptar el
 certificado la primera vez que se entra por https://IP:8443; por http://IP:8000 no hace
-falta. Para renovarlo: borrar deploy/docker/local-tls, volver a correr el script y
-`docker compose up -d web`.
+falta. Para ver cuándo vence:
+
+    openssl x509 -enddate -noout -in deploy/docker/local-tls/tls.crt
+
+Para renovarlo (antes de que venza, o si cambia la IP), recrear el contenedor web; un
+`docker compose up -d web` solo no alcanza porque sigue usando los archivos viejos:
+
+    rm -rf deploy/docker/local-tls
+    sh deploy/docker/bootstrap-local-tls.sh <IP del servidor> deploy/docker/local-tls
+    docker compose up -d --force-recreate web
 
     docker compose up -d --build
     docker compose ps          # todos "running" / "healthy"
