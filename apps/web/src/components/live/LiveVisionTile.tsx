@@ -2,11 +2,12 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   Eye, Pin, PinOff, ExternalLink, ShieldAlert,
-  CarFront, User, Scan, Radio,
+  Radio,
 } from "lucide-react";
 import { MsePlayer } from "@/components/MsePlayer";
 import { IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { ObjectIcon } from "@/lib/visionAiIcons";
 import type { LiveVisionRef } from "@/lib/liveGrid";
 import { useVisionSlots, visionSourceFromId, type VisionAISlot } from "@/lib/visionAi";
 
@@ -79,10 +80,8 @@ export function LiveVisionTile({ vision, isFocused = false, className }: LiveVis
                     : "bg-primary/20 text-primary border border-primary/30",
                 )}
               >
-                {object === "person" && <User className="size-3" />}
-                {object === "car" && <CarFront className="size-3" />}
-                {object === "license_plate" && <Scan className="size-3" />}
-                {activeSlot.alarm && <ShieldAlert className="size-3" />}
+                <ObjectIcon object={object} className="size-3" />
+                {activeSlot.alarm && <ShieldAlert aria-hidden="true" className="size-3" />}
                 <span className="uppercase">{object}</span>
                 {activeSlot.confidence !== undefined && (
                   <span className="opacity-75">· {Math.round(activeSlot.confidence * 100)}%</span>

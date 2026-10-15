@@ -15,13 +15,16 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   useNavigate: () => navigateMock,
 }));
 
+let mePermissions = ["live.view", "cameras.view", "events.view", "recordings.view"];
 const meResponse = {
   id: "u1",
   username: "operator",
   display_name: "Operator",
   role: "admin",
   tenant_id: "t1",
-  permissions: ["live.view", "cameras.view", "events.view", "recordings.view"],
+  get grants() {
+    return mePermissions.map((permission) => ({ permission, effect: "allow", scope: { kind: "global" } }));
+  },
 };
 
 type Slot = Record<string, unknown>;
@@ -51,6 +54,7 @@ let platesVisible: boolean;
 
 beforeEach(() => {
   localStorage.clear();
+  mePermissions = ["live.view", "cameras.view", "events.view", "recordings.view"];
   navigateMock.mockReset();
   slotRequests = [];
   slotsStatus = 200;
@@ -223,6 +227,38 @@ describe("VisionAI Page", () => {
     const sidebar = await screen.findByTestId("vision-events-sidebar");
     expect(within(sidebar).getByText("Cam cam-1")).toBeInTheDocument();
     expect(within(sidebar).getByText("AB123CD")).toBeInTheDocument();
+  });
+
+  it("shows an icon on every preset and object chip", async () => {
+    setup();
+    await screen.findByText("Cam cam-1");
+    const presetIcons: Record<string, string> = {
+      Todo: "lucide-layout-grid", Personas: "lucide-users", "Vehículos": "lucide-car", LPR: "lucide-rectangle-horizontal",
+      "Perímetro": "lucide-fence", Alarmas: "lucide-bell",
+    };
+    for (const [name, cls] of Object.entries(presetIcons)) {
+      const btn = screen.getAllByRole("button", { name })[0]!;
+      const svg = btn.querySelector("svg");
+      expect(svg, name).toHaveClass(cls);
+      expect(svg).toHaveAttribute("aria-hidden", "true");
+    }
+    const chipIcons: Record<string, string> = {
+      Persona: "lucide-user", Auto: "lucide-car", Moto: "lucide-bike", "Camión": "lucide-truck",
+      Rostro: "lucide-scan-face",
+    };
+    for (const [name, cls] of Object.entries(chipIcons)) {
+      expect(screen.getByRole("button", { name }).querySelector("svg"), name).toHaveClass(cls);
+    }
+    const lprChip = screen.getAllByRole("button", { name: "LPR" }).find((b) => b.hasAttribute("data-active"));
+    expect(lprChip?.querySelector("svg")).toHaveClass("lucide-rectangle-horizontal");
+  });
+
+  it("shows the object icon in the slot badge", async () => {
+    setup();
+    await screen.findByText("Cam cam-1");
+    const badge = screen.getByText(/^person 90%$/i);
+    expect(badge.querySelector("svg")).toHaveClass("lucide-user");
+    expect(badge.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
 
   it("renders header, filters and layout modes", async () => {

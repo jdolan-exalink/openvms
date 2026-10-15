@@ -7,6 +7,7 @@ import {
 import { MsePlayer } from "@/components/MsePlayer";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
 import { useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource } from "@/lib/visionAi";
 
 export type VisionMode = "matrix" | "focus" | "lpr" | "alarm";
@@ -164,12 +165,21 @@ export function VisionAI() {
 
           {/* Quick Presets */}
           <div className="flex items-center gap-1">
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("todo")}>Todo</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("personas")}>Personas</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("vehiculos")}>Vehículos</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("lpr")}>LPR</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("perimetro")}>Perímetro</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("alarmas")}>Alarmas</Button>
+            {[
+              { key: "todo", label: "Todo" },
+              { key: "personas", label: "Personas" },
+              { key: "vehiculos", label: "Vehículos" },
+              { key: "lpr", label: "LPR" },
+              { key: "perimetro", label: "Perímetro" },
+              { key: "alarmas", label: "Alarmas" },
+            ].map(({ key, label }) => {
+              return (
+                <Button key={key} size="sm" variant="tonal" onClick={() => applyPreset(key)} className="flex items-center gap-1">
+                  <PresetIcon preset={key} className="size-3.5" />
+                  {label}
+                </Button>
+              );
+            })}
           </div>
 
           <div className="h-4 w-px bg-line" />
@@ -198,7 +208,8 @@ export function VisionAI() {
                       : "bg-surface-2 text-on-surface-variant border-line hover:bg-surface-3",
                   )}
                 >
-                  {label} {active && <Check className="size-3" />}
+                  <ObjectIcon object={key} className="size-3.5" />
+                  {label} {active && <Check aria-hidden="true" className="size-3" />}
                 </button>
               );
             })}
@@ -430,7 +441,8 @@ export function VisionAI() {
                     )}
                   </div>
                   <div className="flex items-center justify-between text-[11px] text-muted">
-                    <span className="uppercase font-medium text-emerald-600">
+                    <span className="inline-flex items-center gap-1 uppercase font-medium text-emerald-600">
+                      <ObjectIcon object={sl.object} className="size-3" />
                       {sl.object}
                       {sl.confidence !== undefined && ` (${Math.round(sl.confidence * 100)}%)`}
                     </span>
@@ -537,7 +549,8 @@ function SlotRenderer({
       <div className="relative z-10 flex items-center justify-between p-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent text-white text-xs">
         <div className="flex items-center gap-1.5 min-w-0">
           {slot.object && (
-            <span className="font-bold uppercase tracking-wider text-[10px] bg-emerald-500/80 px-1.5 py-0.5 rounded-m3-xs text-black">
+            <span className="inline-flex items-center gap-1 font-bold uppercase tracking-wider text-[10px] bg-emerald-500/80 px-1.5 py-0.5 rounded-m3-xs text-black">
+              <ObjectIcon object={slot.object} className="size-3" />
               {slot.object}
               {slot.confidence !== undefined && ` ${Math.round(slot.confidence * 100)}%`}
             </span>
