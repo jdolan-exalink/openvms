@@ -36,12 +36,12 @@ allocation engine, rotate as new events arrive, and render live video.
       `gofmt`/subscriber leak. Route: delegated writer (4+ files).
 - [x] VAI-02 — API: OpenAPI `getVisionAISlots`, regenerate Go + TS, handler, `apps/api/main.go`
       wiring, handler tests. Route: delegated writer (same writer as VAI-01).
-- [ ] VAI-03 — Web `/vision-ai`: consume API (polling + realtime invalidation), player sizing fix,
+- [x] VAI-03 — Web `/vision-ai`: consume API (polling + realtime invalidation), player sizing fix,
       client pins, tests. Route: delegated writer.
-- [ ] VAI-04 — Web `LiveVisionTile`: consume API by source, rotate camera, fix `isFocused` prop,
+- [x] VAI-04 — Web `LiveVisionTile`: consume API by source, rotate camera, fix `isFocused` prop,
       tests. Route: delegated writer (same as VAI-03).
 
-- [ ] VAI-05 — Backend follow-ups from native review advisories (lineage review-1d2bc2ffb268cbfd):
+- [x] VAI-05 — Backend follow-ups from native review advisories (lineage review-1d2bc2ffb268cbfd):
       NULL `PlatesAllowed` scan for actors without `lpr.view` (500), document/test the 1h start-age
       cap, pinned-slot release test. Route: delegated writer (with VAI-03/04, separate commit).
 
@@ -74,5 +74,18 @@ allocation engine, rotate as new events arrive, and render live video.
 - Native review PR1 slice (base 9a33433..4e97ba8 tree): consent granted, 1 lens (reliability),
   APPROVED, acknowledged, authority burned. Advisories → VAI-05. Reviewed boundary = docs commit.
 
+- VAI-05 `26c34d0` fix(visionai): nil LPR camera list → NULL bool scan (RED `cannot scan NULL into *bool`
+  → GREEN via non-nil slice + COALESCE); start-age cap documented + tested; pinned slot 0 release test.
+- VAI-03 `36c3a50` feat(web): `/vision-ai` driven by `useVisionAISlots` (`lib/visionAi.ts`), 2s polling +
+  `event.created` → `["vision-ai"]` invalidation, players `className="size-full"`, client pins, empty/error
+  states, Perímetro preset. VisionAI.test RED 12/13 → GREEN 13/13.
+- VAI-04 `400240f` feat(web): LiveVisionTile source from `visionai:<source>`, layout 1, `isFocused` → main
+  stream. Test RED 8/8 → GREEN 8/8.
+- Checks: gofmt clean on touched pkgs; `go vet ./...` clean; unit + integration (`VisionAI|PGSource|LoadRows`)
+  ok; `pnpm typecheck`/`lint` clean; parent spot-check VisionAI+LiveVisionTile vitest 21/21 pass.
+  Full `pnpm test`: 1474/1475 — failing `Layout.test.tsx` bottom-nav expects `Alarmas` but gets
+  `Vision AI`; pre-existing on main (nav entry added in 519805c; branch does not touch nav/Layout).
+- RDD assess slice 80be18a..400240f: medium, `slice_budget_reached` → review due.
+
 ## Next step
-VAI-05, VAI-03, VAI-04 (one writer).
+Native review of PR2 slice; then open PRs (stacked-to-main) on user's go-ahead.
