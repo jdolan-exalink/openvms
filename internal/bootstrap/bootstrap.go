@@ -118,28 +118,26 @@ func GeneratePassword() (string, error) {
 // the policy is logged and skipped.
 func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password string, log *slog.Logger) error {
 	generated := password == ""
-	if !generated {
-		if err := identity.CheckPolicy(password, username); err != nil {
-			log.Error("initial admin not created: OPENVMS_ADMIN_PASSWORD rejected", "username", username, "error", err)
-			return nil
-		}
-	}
 	created := false
 	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
-		users, err := q.ListUsers(ctx, db.ListUsersParams{IncludePlatform: true})
-		if err != nil {
+		// Existence first: on an existing install the configured password is irrelevant.
+		n, err := q.CountAllPlatformUsers(ctx)
+		if err != nil || n > 0 {
 			return err
 		}
-		for _, u := range users {
-			if strings.EqualFold(u.Username, username) || (u.TenantID == nil && u.PasswordHash != "") {
-				return nil
-			}
+		if _, err := q.GetUserByUsername(ctx, username); err == nil {
+			return nil // a tenant user holds the name
+		} else if !errors.Is(store.Classify(err), store.ErrNotFound) {
+			return err
 		}
 		if generated {
 			// The password is logged only after the transaction commits.
 			if password, err = GeneratePassword(); err != nil {
 				return err
 			}
+		} else if err := identity.CheckPolicy(password, username); err != nil {
+			log.Error("initial admin not created: OPENVMS_ADMIN_PASSWORD rejected", "username", username, "error", err)
+			return nil
 		}
 		u, err := ensurePlatformAdmin(ctx, q, username)
 		if err != nil {
@@ -156,7 +154,8 @@ func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password
 		return nil
 	})
 	if errors.Is(store.Classify(err), store.ErrConflict) {
-		return nil // a concurrent start created it first
+		log.Info("initial admin already created by a concurrent start", "username", username)
+		return nil
 	}
 	if err != nil {
 		return err
@@ -181,7 +180,7 @@ var (
 // makes it a no-op: nothing is renamed, recreated or added, so renames made from the web
 // survive restarts. Names that are empty or yield no valid slug are logged and skipped.
 // Startup creation has no acting user, so it writes no audit entry.
-func EnsureDefaultTenant(ctx context.Context, st *store.Store, tenantName, siteName string, log *slog.Logger) error {
+func EnsureDefaultTenant(ctx context.Context, st *store.Store, tenantName, siteName, timezone string, log *slog.Logger) error {
 	tenantName, siteName = strings.TrimSpace(tenantName), strings.TrimSpace(siteName)
 	slug := strings.Trim(nonSlugRe.ReplaceAllString(strings.ToLower(tenantName), "-"), "-")
 	if siteName == "" || !tenantSlugRe.MatchString(slug) {
@@ -189,24 +188,31 @@ func EnsureDefaultTenant(ctx context.Context, st *store.Store, tenantName, siteN
 			"tenant", tenantName, "site", siteName)
 		return nil
 	}
+	if _, err := time.LoadLocation(timezone); err != nil || timezone == "" {
+		if timezone != "" {
+			log.Error("invalid OPENVMS_DEFAULT_SITE_TZ; using the default", "timezone", timezone, "default", defaultSiteTZ)
+		}
+		timezone = defaultSiteTZ
+	}
 	created := false
 	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
-		existing, err := q.ListTenants(ctx, nil)
-		if err != nil || len(existing) > 0 {
+		n, err := q.CountAllTenants(ctx)
+		if err != nil || n > 0 {
 			return err
 		}
 		t, err := q.CreateTenant(ctx, db.CreateTenantParams{Slug: slug, Name: tenantName})
 		if err != nil {
 			return err
 		}
-		if _, err := q.CreateSite(ctx, db.CreateSiteParams{TenantID: t.ID, Name: siteName, Timezone: defaultSiteTZ}); err != nil {
+		if _, err := q.CreateSite(ctx, db.CreateSiteParams{TenantID: t.ID, Name: siteName, Timezone: timezone}); err != nil {
 			return err
 		}
 		created = true
 		return nil
 	})
 	if errors.Is(store.Classify(err), store.ErrConflict) {
-		return nil // a concurrent start created it first
+		log.Info("default tenant already created by a concurrent start", "tenant", tenantName)
+		return nil
 	}
 	if err != nil {
 		return err

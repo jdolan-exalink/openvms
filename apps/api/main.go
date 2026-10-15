@@ -142,11 +142,12 @@ func run() error {
 	}
 
 	st := &dbstore.Store{Pool: pool}
+	// First-start seeding is best effort: a failure here must not crash-loop the API.
 	if err := bootstrap.EnsureInitialAdmin(ctx, st, cfg.AdminUsername, cfg.AdminPassword, log); err != nil {
-		return fmt.Errorf("initial admin: %w", err)
+		log.Error("initial admin bootstrap failed; use vmsctl bootstrap", "error", err)
 	}
-	if err := bootstrap.EnsureDefaultTenant(ctx, st, cfg.DefaultTenant, cfg.DefaultSite, log); err != nil {
-		return fmt.Errorf("default tenant: %w", err)
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, cfg.DefaultTenant, cfg.DefaultSite, cfg.DefaultSiteTZ, log); err != nil {
+		log.Error("default tenant bootstrap failed", "error", err)
 	}
 	inv := inventory.New(st, sealer, log)
 	inv.Blobs = store

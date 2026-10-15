@@ -72,6 +72,7 @@ Variables opcionales (con su valor por defecto):
     OPENVMS_ADMIN_PASSWORD=             contraseña inicial; vacía = se genera una al azar (ver sección 6)
     OPENVMS_DEFAULT_TENANT=openvms      organización inicial (ver sección 6)
     OPENVMS_DEFAULT_SITE="Sitio principal"   sitio inicial dentro de esa organización
+    OPENVMS_DEFAULT_SITE_TZ=America/Argentina/Cordoba   zona horaria de ese sitio
 
 
 5. Levantar
@@ -111,8 +112,8 @@ Para elegir la contraseña en vez de generarla, definir en .env antes de levanta
     OPENVMS_ADMIN_PASSWORD=<clave de al menos 10 caracteres, con letras y números>
 
 Notas:
-- Solo se crea si no existe ese usuario y ningún administrador de plataforma tiene
-  contraseña: nunca pisa ni reinicia una instalación existente.
+- Solo se crea si la instalación no tiene ningún usuario de plataforma (ni siquiera borrado):
+  nunca pisa ni reinicia una instalación existente ni agrega un admin al actualizar.
 - Si OPENVMS_ADMIN_PASSWORD no cumple la política de contraseñas, la API lo registra como
   error y no crea el usuario (sigue funcionando; usar vmsctl).
 - Después, activar la verificación en dos pasos en "Mi cuenta".
@@ -120,8 +121,11 @@ Notas:
 Organización y sitio iniciales: si la instalación no tiene ninguna organización, la API crea
 también una (OPENVMS_DEFAULT_TENANT, por defecto "openvms") con un sitio (OPENVMS_DEFAULT_SITE,
 por defecto "Sitio principal"), para poder registrar servidores sin pasos previos. Si ya existe
-alguna organización no hace nada: nunca crea, renombra ni restaura. Los nombres se pueden
-cambiar después desde la web y el cambio se respeta en los reinicios.
+alguna organización (aunque esté borrada) no hace nada: nunca crea, renombra ni restaura. Los
+nombres se pueden cambiar después desde la web y el cambio se respeta en los reinicios.
+La zona horaria del sitio es OPENVMS_DEFAULT_SITE_TZ (por defecto America/Argentina/Cordoba;
+si no es válida se registra un error y se usa la de por defecto). Si esta creación inicial
+falla, la API arranca igual y lo registra en el log.
 
 Alternativa manual (instalaciones con contraseña propia o para crear el admin con otro nombre):
 

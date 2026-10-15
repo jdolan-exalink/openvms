@@ -45,3 +45,16 @@ func TestDefaultTenantDefaultsAndOverride(t *testing.T) {
 		t.Fatalf("override = %q/%q (%v)", c.DefaultTenant, c.DefaultSite, err)
 	}
 }
+
+func TestDefaultSiteTimezone(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://x")
+	t.Setenv("OPENVMS_DEFAULT_SITE_TZ", "")
+	c, err := Load("test")
+	if err != nil || c.DefaultSiteTZ != "America/Argentina/Cordoba" {
+		t.Fatalf("default = %q (%v)", c.DefaultSiteTZ, err)
+	}
+	t.Setenv("OPENVMS_DEFAULT_SITE_TZ", "Europe/Madrid")
+	if c, err = Load("test"); err != nil || c.DefaultSiteTZ != "Europe/Madrid" {
+		t.Fatalf("override = %q (%v)", c.DefaultSiteTZ, err)
+	}
+}

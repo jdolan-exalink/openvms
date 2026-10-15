@@ -49,7 +49,7 @@ func TestEnsureDefaultTenantCreatesTenantAndSite(t *testing.T) {
 	ctx := context.Background()
 	st := adminFixture(t)
 	log, buf := captureLog()
-	if err := bootstrap.EnsureDefaultTenant(ctx, st, "Mi Municipio", "Sitio principal", log); err != nil {
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, "Mi Municipio", "Sitio principal", "America/Argentina/Cordoba", log); err != nil {
 		t.Fatal(err)
 	}
 	got := readTenants(t, st)
@@ -62,7 +62,7 @@ func TestEnsureDefaultTenantCreatesTenantAndSite(t *testing.T) {
 	if !strings.Contains(buf.String(), "default tenant created") {
 		t.Fatalf("log = %q", buf.String())
 	}
-	if err := bootstrap.EnsureDefaultTenant(ctx, st, "Mi Municipio", "Sitio principal", log); err != nil {
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, "Mi Municipio", "Sitio principal", "America/Argentina/Cordoba", log); err != nil {
 		t.Fatal(err)
 	}
 	if again := readTenants(t, st); len(again.tenants) != 1 || again.sites != 1 {
@@ -80,7 +80,7 @@ func TestEnsureDefaultTenantLeavesExistingTenantsAlone(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", log); err != nil {
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", "America/Argentina/Cordoba", log); err != nil {
 		t.Fatal(err)
 	}
 	if got := readTenants(t, st); len(got.tenants) != 1 || got.tenants[0].Slug != "otro" || got.sites != 0 {
@@ -92,7 +92,7 @@ func TestEnsureDefaultTenantKeepsRename(t *testing.T) {
 	ctx := context.Background()
 	st := adminFixture(t)
 	log, _ := captureLog()
-	if err := bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", log); err != nil {
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", "America/Argentina/Cordoba", log); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
@@ -105,7 +105,7 @@ func TestEnsureDefaultTenantKeepsRename(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", log); err != nil {
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", "America/Argentina/Cordoba", log); err != nil {
 		t.Fatal(err)
 	}
 	if got := readTenants(t, st); len(got.tenants) != 1 || got.tenants[0].Name != "Renombrado" {
@@ -119,7 +119,9 @@ func TestEnsureDefaultTenantConcurrent(t *testing.T) {
 	log, _ := captureLog()
 	errs := make(chan error, 4)
 	for i := 0; i < cap(errs); i++ {
-		go func() { errs <- bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", log) }()
+		go func() {
+			errs <- bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", "America/Argentina/Cordoba", log)
+		}()
 	}
 	for i := 0; i < cap(errs); i++ {
 		if err := <-errs; err != nil {
@@ -136,7 +138,7 @@ func TestEnsureDefaultTenantSkipsEmptyNames(t *testing.T) {
 	st := adminFixture(t)
 	for _, c := range [][2]string{{"  ", "Sitio"}, {"openvms", ""}, {"!!!", "Sitio"}} {
 		log, buf := captureLog()
-		if err := bootstrap.EnsureDefaultTenant(ctx, st, c[0], c[1], log); err != nil {
+		if err := bootstrap.EnsureDefaultTenant(ctx, st, c[0], c[1], "America/Argentina/Cordoba", log); err != nil {
 			t.Fatalf("%q: %v", c, err)
 		}
 		if !strings.Contains(buf.String(), "level=ERROR") {
@@ -145,5 +147,66 @@ func TestEnsureDefaultTenantSkipsEmptyNames(t *testing.T) {
 	}
 	if got := readTenants(t, st); len(got.tenants) != 0 {
 		t.Fatalf("tenants = %+v", got.tenants)
+	}
+}
+
+func TestEnsureDefaultTenantNotResurrectedAfterSoftDelete(t *testing.T) {
+	ctx := context.Background()
+	st := adminFixture(t)
+	log, _ := captureLog()
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", "America/Argentina/Cordoba", log); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Pool.Exec(ctx, "UPDATE tenants SET deleted_at = now()"); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio principal", "America/Argentina/Cordoba", log); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := st.Pool.QueryRow(ctx, "SELECT count(*) FROM tenants").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("tenants = %d (%v), want the soft-deleted one only", n, err)
+	}
+}
+
+func siteTimezone(t *testing.T, st *store.Store) string {
+	t.Helper()
+	ctx := context.Background()
+	var tz string
+	if err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		ts, err := q.ListTenants(ctx, nil)
+		if err != nil || len(ts) != 1 {
+			return err
+		}
+		sites, err := q.ListSitesGeo(ctx, ts[0].ID)
+		if err != nil || len(sites) != 1 {
+			return err
+		}
+		site, err := q.GetSite(ctx, sites[0].ID)
+		tz = site.Timezone
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return tz
+}
+
+func TestEnsureDefaultTenantTimezone(t *testing.T) {
+	ctx := context.Background()
+	st := adminFixture(t)
+	log, _ := captureLog()
+	if err := bootstrap.EnsureDefaultTenant(ctx, st, "openvms", "Sitio", "Europe/Madrid", log); err != nil {
+		t.Fatal(err)
+	}
+	if tz := siteTimezone(t, st); tz != "Europe/Madrid" {
+		t.Fatalf("timezone = %q", tz)
+	}
+	st2 := adminFixture(t)
+	log2, buf := captureLog()
+	if err := bootstrap.EnsureDefaultTenant(ctx, st2, "openvms", "Sitio", "Nope/Nowhere", log2); err != nil {
+		t.Fatal(err)
+	}
+	if tz := siteTimezone(t, st2); tz != "America/Argentina/Cordoba" || !strings.Contains(buf.String(), "level=ERROR") {
+		t.Fatalf("timezone = %q, log = %q", tz, buf.String())
 	}
 }

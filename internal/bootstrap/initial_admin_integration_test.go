@@ -199,3 +199,52 @@ func TestEnsureInitialAdminConcurrent(t *testing.T) {
 		t.Fatalf("users = %d, want 1", len(users))
 	}
 }
+
+func TestEnsureInitialAdminSkipsWhenPasswordlessPlatformUserExists(t *testing.T) {
+	ctx := context.Background()
+	st := adminFixture(t)
+	log, buf := captureLog()
+	if _, _, err := bootstrap.PlatformAdmin(ctx, st, "root"); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "", log); err != nil {
+		t.Fatal(err)
+	}
+	if users := listUsers(t, st); len(users) != 1 || users[0].Username != "root" || strings.Contains(buf.String(), "password=") {
+		t.Fatalf("upgrade added an admin: %+v %q", users, buf.String())
+	}
+}
+
+func TestEnsureInitialAdminSkipsWhenOnlySoftDeletedPlatformUserExists(t *testing.T) {
+	ctx := context.Background()
+	st := adminFixture(t)
+	log, _ := captureLog()
+	if _, _, err := bootstrap.PlatformAdmin(ctx, st, "root"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Pool.Exec(ctx, "UPDATE users SET deleted_at = now()"); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "", log); err != nil {
+		t.Fatal(err)
+	}
+	if users := listUsers(t, st); len(users) != 0 {
+		t.Fatalf("users = %+v, want none", users)
+	}
+}
+
+func TestEnsureInitialAdminExistingAdminIgnoresWeakConfiguredPassword(t *testing.T) {
+	ctx := context.Background()
+	st := adminFixture(t)
+	log, _ := captureLog()
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "Clave-Inicial-2026", log); err != nil {
+		t.Fatal(err)
+	}
+	log2, buf := captureLog()
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "corta", log2); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "level=ERROR") {
+		t.Fatalf("policy checked despite existing admin: %q", buf.String())
+	}
+}

@@ -37,6 +37,19 @@ func (q *Queries) ClearGroupMembers(ctx context.Context, groupID uuid.UUID) erro
 	return err
 }
 
+const countAllPlatformUsers = `-- name: CountAllPlatformUsers :one
+SELECT count(*) FROM users WHERE tenant_id IS NULL
+`
+
+// Platform users in any state, soft-deleted included: the first-start bootstrap must not
+// recreate an admin an operator removed.
+func (q *Queries) CountAllPlatformUsers(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAllPlatformUsers)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAPIToken = `-- name: CreateAPIToken :one
 INSERT INTO api_tokens (user_id, name, token_hash, expires_at)
 VALUES ($1, $2, $3, $4)

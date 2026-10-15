@@ -85,6 +85,8 @@ type Config struct {
 	// tenant and site created when the install has no tenant at all.
 	DefaultTenant string
 	DefaultSite   string
+	// DefaultSiteTZ (OPENVMS_DEFAULT_SITE_TZ) is the IANA timezone of that site.
+	DefaultSiteTZ string
 
 	// WorkerURL is the worker probe address. The API reads ONNX throughput from it.
 	WorkerURL string
@@ -151,6 +153,7 @@ func Load(service string) (Config, error) {
 		AdminPassword:               str("OPENVMS_ADMIN_PASSWORD", ""),
 		DefaultTenant:               str("OPENVMS_DEFAULT_TENANT", "openvms"),
 		DefaultSite:                 str("OPENVMS_DEFAULT_SITE", "Sitio principal"),
+		DefaultSiteTZ:               str("OPENVMS_DEFAULT_SITE_TZ", "America/Argentina/Cordoba"),
 		TrustForwardedFor:           boolean("TRUST_FORWARDED_FOR", false),
 		HealthInterval:              duration("HEALTH_INTERVAL", 30*time.Second),
 		EventSyncInterval:           duration("EVENT_SYNC_INTERVAL", 5*time.Second),

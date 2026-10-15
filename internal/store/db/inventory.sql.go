@@ -61,6 +61,19 @@ func (q *Queries) ClearServerViewCells(ctx context.Context, serverID uuid.UUID) 
 	return result.RowsAffected(), nil
 }
 
+const countAllTenants = `-- name: CountAllTenants :one
+SELECT count(*) FROM tenants
+`
+
+// Tenants in any state, soft-deleted included: the first-start bootstrap must not
+// resurrect a tenant an operator removed.
+func (q *Queries) CountAllTenants(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAllTenants)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countCamerasInTenant = `-- name: CountCamerasInTenant :one
 SELECT count(*)::int FROM cameras WHERE id = ANY($1::uuid[]) AND tenant_id = $2 AND deleted_at IS NULL
 `
