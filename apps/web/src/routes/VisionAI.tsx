@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -12,9 +12,10 @@ import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 import { dynamicGridShape } from "@/lib/visionAiGrid";
 import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
+import { DEFAULT_VISION_PREFS, loadVisionPrefs, saveVisionPrefs, visionPrefsKey, type VisionMode } from "@/lib/visionAiPrefs";
 import { useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource } from "@/lib/visionAi";
 
-export type VisionMode = "matrix" | "focus" | "lpr" | "alarm" | "dynamic";
+export type { VisionMode };
 
 /** Matrix mode with LPR/alarm sources lists the best candidates, so it asks for a wide grid. */
 const LPR_LAYOUT: VisionAILayout = "9";
@@ -40,9 +41,9 @@ export function VisionAI() {
   const navigate = useNavigate();
 
   // State
-  const [mode, setMode] = useState<VisionMode>("matrix");
-  const [presetSource, setPresetSource] = useState<VisionAISource>("general");
-  const [layoutCount, setLayoutCount] = useState<number>(4);
+  const [mode, setMode] = useState<VisionMode>(DEFAULT_VISION_PREFS.mode);
+  const [presetSource, setPresetSource] = useState<VisionAISource>(DEFAULT_VISION_PREFS.presetSource);
+  const [layoutCount, setLayoutCount] = useState<number>(DEFAULT_VISION_PREFS.layoutCount);
   const [fullscreen, setFullscreen] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -61,14 +62,27 @@ export function VisionAI() {
   const pins = pinState.key === pinKey ? pinState.pins : {};
 
   // Active object filters
-  const [activeObjects, setActiveObjects] = useState<Record<string, boolean>>({
-    person: true,
-    car: true,
-    motorcycle: true,
-    truck: false,
-    license_plate: true,
-    face: false,
-  });
+  const [activeObjects, setActiveObjects] = useState<Record<string, boolean>>({ ...DEFAULT_VISION_PREFS.activeObjects });
+
+  // The view is remembered per tenant+user. Nothing is read or written until `me` is known; the
+  // saved view is applied once per user (state adjusted during render, before children see it).
+  const prefsKey = me.data ? visionPrefsKey(me.data.tenant_id ?? null, me.data.id) : null;
+  const [hydratedKey, setHydratedKey] = useState<string | null>(null);
+  if (prefsKey && hydratedKey !== prefsKey) {
+    setHydratedKey(prefsKey);
+    // A change made while `me` was still loading wins over the saved view.
+    const untouched = JSON.stringify({ mode, presetSource, layoutCount, activeObjects }) === JSON.stringify(DEFAULT_VISION_PREFS);
+    if (untouched) {
+      const saved = loadVisionPrefs(prefsKey);
+      setMode(saved.mode);
+      setPresetSource(saved.presetSource);
+      setLayoutCount(saved.layoutCount);
+      setActiveObjects(saved.activeObjects);
+    }
+  }
+  useEffect(() => {
+    if (prefsKey && hydratedKey === prefsKey) saveVisionPrefs(prefsKey, { mode, presetSource, layoutCount, activeObjects });
+  }, [prefsKey, hydratedKey, mode, presetSource, layoutCount, activeObjects]);
 
   // Presets
   const applyPreset = (preset: string) => {

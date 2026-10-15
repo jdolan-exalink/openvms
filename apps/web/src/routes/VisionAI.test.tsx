@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { VisionAI } from "./VisionAI";
@@ -100,6 +100,34 @@ describe("VisionAI Page", () => {
     await screen.findByText("Cam cam-1");
     expect(lastQuery()?.get("source")).toBe("general");
     expect(lastQuery()?.get("layout")).toBe("4");
+  });
+
+  it("restores the saved view for the same user and ignores it for another user", async () => {
+    const first = setup();
+    await screen.findByText("Cam cam-1");
+    fireEvent.click(screen.getByRole("button", { name: "Vehículos" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dinámica" }));
+    await waitFor(() => expect(lastQuery()?.get("layout")).toBe("16"));
+    expect(lastQuery()?.get("source")).toBe("vehiculos");
+    first.unmount();
+
+    slotRequests = [];
+    setup();
+    await waitFor(() => expect(lastQuery()?.get("layout")).toBe("16"));
+    expect(lastQuery()?.get("source")).toBe("vehiculos");
+    expect(screen.getByRole("button", { name: "Dinámica" })).toHaveClass("text-primary");
+    cleanup();
+
+    meResponse.id = "u2";
+    try {
+      slotRequests = [];
+      setup();
+      await screen.findByText("Cam cam-1");
+      expect(lastQuery()?.get("source")).toBe("general");
+      expect(lastQuery()?.get("layout")).toBe("4");
+    } finally {
+      meResponse.id = "u1";
+    }
   });
 
   it("maps presets, modes and layout selectors to source and layout", async () => {
