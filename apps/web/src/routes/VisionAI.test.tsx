@@ -15,13 +15,16 @@ vi.mock("@tanstack/react-router", async (importOriginal) => ({
   useNavigate: () => navigateMock,
 }));
 
+let mePermissions = ["live.view", "cameras.view", "events.view", "recordings.view"];
 const meResponse = {
   id: "u1",
   username: "operator",
   display_name: "Operator",
   role: "admin",
   tenant_id: "t1",
-  permissions: ["live.view", "cameras.view", "events.view", "recordings.view"],
+  get grants() {
+    return mePermissions.map((permission) => ({ permission, effect: "allow", scope: { kind: "global" } }));
+  },
 };
 
 type Slot = Record<string, unknown>;
@@ -45,12 +48,15 @@ function slot(n: number, cam: string | null, extra: Slot = {}): Slot {
 }
 
 let slotsBody: { slots: Slot[] };
+/** When set, /api/v1/me answers only after it resolves (simulates permissions loading late). */
+let meGate: Promise<void> | null = null;
 let slotRequests: URL[];
 let slotsStatus: number;
 let platesVisible: boolean;
 
 beforeEach(() => {
   localStorage.clear();
+  mePermissions = ["live.view", "cameras.view", "events.view", "recordings.view"];
   navigateMock.mockReset();
   slotRequests = [];
   slotsStatus = 200;
@@ -72,6 +78,7 @@ describe("VisionAI Page", () => {
       vi.fn(async (input: Request) => {
         const url = new URL(input.url);
         if (url.pathname === "/api/v1/vision-ai/slots") slotRequests.push(url);
+        if (url.pathname === "/api/v1/me" && meGate) await meGate;
         return routes(input);
       }),
     );
@@ -223,6 +230,90 @@ describe("VisionAI Page", () => {
     const sidebar = await screen.findByTestId("vision-events-sidebar");
     expect(within(sidebar).getByText("Cam cam-1")).toBeInTheDocument();
     expect(within(sidebar).getByText("AB123CD")).toBeInTheDocument();
+  });
+
+  it("shows an icon on every preset and object chip", async () => {
+    setup();
+    await screen.findByText("Cam cam-1");
+    const presetIcons: Record<string, string> = {
+      Todo: "lucide-layout-grid", Personas: "lucide-users", "Vehículos": "lucide-car", LPR: "lucide-rectangle-horizontal",
+      "Perímetro": "lucide-fence", Alarmas: "lucide-bell",
+    };
+    for (const [name, cls] of Object.entries(presetIcons)) {
+      const btn = screen.getAllByRole("button", { name })[0]!;
+      const svg = btn.querySelector("svg");
+      expect(svg, name).toHaveClass(cls);
+      expect(svg).toHaveAttribute("aria-hidden", "true");
+    }
+    const chipIcons: Record<string, string> = {
+      Persona: "lucide-user", Auto: "lucide-car", Moto: "lucide-bike", "Camión": "lucide-truck",
+      Rostro: "lucide-scan-face",
+    };
+    for (const [name, cls] of Object.entries(chipIcons)) {
+      expect(screen.getByRole("button", { name }).querySelector("svg"), name).toHaveClass(cls);
+    }
+    const lprChip = screen.getAllByRole("button", { name: "LPR" }).find((b) => b.hasAttribute("data-active"));
+    expect(lprChip?.querySelector("svg")).toHaveClass("lucide-rectangle-horizontal");
+  });
+
+  it("shows the object icon in the slot badge", async () => {
+    setup();
+    await screen.findByText("Cam cam-1");
+    const badge = screen.getByText(/^person 90%$/i);
+    expect(badge.querySelector("svg")).toHaveClass("lucide-user");
+    expect(badge.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  });
+
+  describe("active events snapshots", () => {
+    const openSidebar = async () => {
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: /Eventos Activos/i }));
+      return within(await screen.findByTestId("vision-events-sidebar"));
+    };
+
+    it("uses the snapshot when the user can view snapshots", async () => {
+      mePermissions = [...mePermissions, "snapshots.view"];
+      const sidebar = await openSidebar();
+      const img = await sidebar.findByRole("img", { name: "Detección: person en Cam cam-1" });
+      expect(img).toHaveAttribute("src", "/media/v1/events/ev-cam-1/snapshot.jpg");
+      expect(img).toHaveAttribute("loading", "lazy");
+    });
+
+    it("uses the thumbnail without snapshot permission", async () => {
+      const sidebar = await openSidebar();
+      const img = await sidebar.findByRole("img", { name: "Detección: person en Cam cam-1" });
+      expect(img).toHaveAttribute("src", "/api/v1/events/ev-cam-1/thumbnail");
+    });
+
+    it("requests the snapshot once permissions load, even if the early thumbnail failed", async () => {
+      mePermissions = [...mePermissions, "snapshots.view"];
+      let releaseMe = () => {};
+      meGate = new Promise<void>((resolve) => (releaseMe = resolve));
+      try {
+        const sidebar = await openSidebar();
+        const img = await sidebar.findByRole("img", { name: "Detección: person en Cam cam-1" });
+        expect(img).toHaveAttribute("src", "/api/v1/events/ev-cam-1/thumbnail");
+        fireEvent.error(img);
+        await waitFor(() => expect(sidebar.getByTestId("vision-event-placeholder-ev-cam-1")).toBeInTheDocument());
+        releaseMe();
+        await waitFor(() =>
+          expect(sidebar.getByRole("img", { name: "Detección: person en Cam cam-1" })).toHaveAttribute("src", "/media/v1/events/ev-cam-1/snapshot.jpg"),
+        );
+      } finally {
+        meGate = null;
+      }
+    });
+
+    it("falls back to the thumbnail once, then to the icon placeholder", async () => {
+      mePermissions = [...mePermissions, "snapshots.view"];
+      const sidebar = await openSidebar();
+      const img = await sidebar.findByRole("img", { name: "Detección: person en Cam cam-1" });
+      fireEvent.error(img);
+      await waitFor(() => expect(sidebar.getByRole("img", { name: "Detección: person en Cam cam-1" })).toHaveAttribute("src", "/api/v1/events/ev-cam-1/thumbnail"));
+      fireEvent.error(sidebar.getByRole("img", { name: "Detección: person en Cam cam-1" }));
+      await waitFor(() => expect(sidebar.queryByRole("img", { name: "Detección: person en Cam cam-1" })).not.toBeInTheDocument());
+      expect(sidebar.getByTestId("vision-event-placeholder-ev-cam-1")).toBeInTheDocument();
+    });
   });
 
   it("renders header, filters and layout modes", async () => {

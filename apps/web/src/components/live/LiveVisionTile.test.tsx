@@ -172,4 +172,12 @@ describe("LiveVisionTile", () => {
     await waitFor(() => expect(screen.getByTestId("mse-player")).toHaveAttribute("data-camera-id", "cam-5"));
     expect(screen.getByRole("button", { name: /Fijar cámara/i })).toBeInTheDocument();
   });
+  it("shows the object icon in the detection badge", async () => {
+    slotsBody = { slots: [filled("cam-1", { object: "motorcycle" })] };
+    renderWithQuery(<LiveVisionTile vision={{ id: "visionai:general", name: "Vision AI" }} />);
+    await screen.findByTestId("mse-player");
+    const badge = screen.getByText("motorcycle").parentElement!;
+    expect(badge.querySelector("svg")).toHaveClass("lucide-bike");
+    expect(badge.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  });
 });

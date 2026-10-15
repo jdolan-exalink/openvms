@@ -1,12 +1,16 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Eye, Pin, PinOff, Maximize2, Minimize2, History, LayoutGrid, Sparkles,
   CarFront, Bell, Check, X, Bug, Layers, RefreshCw, Scan,
 } from "lucide-react";
+import { meQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import { can } from "@/lib/perm";
+import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
 import { useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource } from "@/lib/visionAi";
 
 export type VisionMode = "matrix" | "focus" | "lpr" | "alarm";
@@ -41,6 +45,8 @@ export function VisionAI() {
   const source = sourceFor(mode, presetSource);
   const layout = layoutFor(mode, layoutCount);
   const slotsQuery = useVisionSlots(source, layout);
+  const me = useQuery(meQuery);
+  const canViewSnapshots = can(me.data, "snapshots.view");
 
   // Pins are client side: they freeze the slot's current assignment. Slot numbers only mean the
   // same thing inside one source+layout, so pins are scoped to that key.
@@ -164,12 +170,21 @@ export function VisionAI() {
 
           {/* Quick Presets */}
           <div className="flex items-center gap-1">
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("todo")}>Todo</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("personas")}>Personas</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("vehiculos")}>Vehículos</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("lpr")}>LPR</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("perimetro")}>Perímetro</Button>
-            <Button size="sm" variant="tonal" onClick={() => applyPreset("alarmas")}>Alarmas</Button>
+            {[
+              { key: "todo", label: "Todo" },
+              { key: "personas", label: "Personas" },
+              { key: "vehiculos", label: "Vehículos" },
+              { key: "lpr", label: "LPR" },
+              { key: "perimetro", label: "Perímetro" },
+              { key: "alarmas", label: "Alarmas" },
+            ].map(({ key, label }) => {
+              return (
+                <Button key={key} size="sm" variant="tonal" onClick={() => applyPreset(key)} className="flex items-center gap-1">
+                  <PresetIcon preset={key} className="size-3.5" />
+                  {label}
+                </Button>
+              );
+            })}
           </div>
 
           <div className="h-4 w-px bg-line" />
@@ -198,7 +213,8 @@ export function VisionAI() {
                       : "bg-surface-2 text-on-surface-variant border-line hover:bg-surface-3",
                   )}
                 >
-                  {label} {active && <Check className="size-3" />}
+                  <ObjectIcon object={key} className="size-3.5" />
+                  {label} {active && <Check aria-hidden="true" className="size-3" />}
                 </button>
               );
             })}
@@ -421,6 +437,7 @@ export function VisionAI() {
                   }}
                   className="p-3 hover:bg-surface-2 transition-colors cursor-pointer flex flex-col gap-1.5"
                 >
+                  <EventSnapshot slot={sl} snapshots={canViewSnapshots} />
                   <div className="flex items-center justify-between">
                     <span className="font-semibold text-xs text-ink truncate">{sl.camera_name}</span>
                     {sl.score !== undefined && (
@@ -430,7 +447,8 @@ export function VisionAI() {
                     )}
                   </div>
                   <div className="flex items-center justify-between text-[11px] text-muted">
-                    <span className="uppercase font-medium text-emerald-600">
+                    <span className="inline-flex items-center gap-1 uppercase font-medium text-emerald-600">
+                      <ObjectIcon object={sl.object} className="size-3" />
                       {sl.object}
                       {sl.confidence !== undefined && ` (${Math.round(sl.confidence * 100)}%)`}
                     </span>
@@ -537,7 +555,8 @@ function SlotRenderer({
       <div className="relative z-10 flex items-center justify-between p-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent text-white text-xs">
         <div className="flex items-center gap-1.5 min-w-0">
           {slot.object && (
-            <span className="font-bold uppercase tracking-wider text-[10px] bg-emerald-500/80 px-1.5 py-0.5 rounded-m3-xs text-black">
+            <span className="inline-flex items-center gap-1 font-bold uppercase tracking-wider text-[10px] bg-emerald-500/80 px-1.5 py-0.5 rounded-m3-xs text-black">
+              <ObjectIcon object={slot.object} className="size-3" />
               {slot.object}
               {slot.confidence !== undefined && ` ${Math.round(slot.confidence * 100)}%`}
             </span>
@@ -554,6 +573,40 @@ function SlotRenderer({
           <div className="font-mono text-[10px] text-white/70">{formatElapsed(slot.display_seconds)}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Detection image of an active event: snapshot when allowed, else thumbnail, else the object icon. */
+function EventSnapshot({ slot, snapshots }: { slot: VisionAISlot; snapshots: boolean }) {
+  const eventId = slot.event_id;
+  if (!eventId) return null;
+  // Keyed by permission too: if the thumbnail failed before permissions loaded, the snapshot still gets
+  // its chance once snapshots.view is known.
+  return <EventSnapshotImage key={`${eventId}:${snapshots}`} slot={slot} eventId={eventId} snapshots={snapshots} />;
+}
+
+function EventSnapshotImage({ slot, eventId, snapshots }: { slot: VisionAISlot; eventId: string; snapshots: boolean }) {
+  const thumbnail = `/api/v1/events/${eventId}/thumbnail`;
+  // Snapshot first (when allowed), the thumbnail once on error, then the icon placeholder.
+  const [stage, setStage] = useState<"primary" | "thumbnail" | "none">("primary");
+  const useSnapshot = snapshots && stage === "primary";
+  const src = stage === "none" ? null : useSnapshot ? `/media/v1/events/${eventId}/snapshot.jpg` : thumbnail;
+  return (
+    <div className="aspect-video w-full overflow-hidden rounded-m3-sm bg-surface-3">
+      {src ? (
+        <img
+          src={src}
+          alt={`Detección: ${slot.object ?? "evento"} en ${slot.camera_name ?? "cámara"}`}
+          loading="lazy"
+          className="size-full object-cover"
+          onError={() => setStage(useSnapshot ? "thumbnail" : "none")}
+        />
+      ) : (
+        <div data-testid={`vision-event-placeholder-${eventId}`} className="flex size-full items-center justify-center text-muted">
+          <ObjectIcon object={slot.object} className="size-6 opacity-50" />
+        </div>
+      )}
     </div>
   );
 }
