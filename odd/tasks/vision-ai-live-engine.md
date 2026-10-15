@@ -45,6 +45,9 @@ allocation engine, rotate as new events arrive, and render live video.
       NULL `PlatesAllowed` scan for actors without `lpr.view` (500), document/test the 1h start-age
       cap, pinned-slot release test. Route: delegated writer (with VAI-03/04, separate commit).
 
+- [x] VAI-06 — Fix web-slice review advisories (lineage review-8abd2b31e82ca4ca): LPR empty/no-permission
+      state, tile pin reset on source change, fixture-independent integration assertions. Route: delegated writer.
+
 ## Acceptance criteria and checks
 - `go vet ./...`, `go test -race ./internal/visionai/... ./internal/api/...` green; `gofmt -l` clean.
 - `pnpm --filter web typecheck`, `pnpm --filter web lint`, VisionAI/LiveVisionTile/Live vitest green.
@@ -87,5 +90,15 @@ allocation engine, rotate as new events arrive, and render live video.
   `Vision AI`; pre-existing on main (nav entry added in 519805c; branch does not touch nav/Layout).
 - RDD assess slice 80be18a..400240f: medium, `slice_budget_reached` → review due.
 
+- Native review PR2 slice (80be18a..8cb9a2e): consent granted, reliability lens, APPROVED, acknowledged,
+  authority burned. Advisories → VAI-06.
+- VAI-06 `29d3acf` fix(web): RED "Unable to find … lecturas de patente no disponibles" and tile pin
+  `data-camera-id` mismatch → GREEN. Checks: typecheck/lint clean; vitest VisionAI/LiveVisionTile/Live 99/99
+  (parent spot-check 23/23); `go test -race -tags integration ./internal/visionai/ -run 'PGSource|LoadRows'` ok.
+- RDD assess 8cb9a2e..29d3acf: medium, `under_budget` (109 lines) → pending in slice, no review due.
+- Known pre-existing failure (not in scope): `Layout.test.tsx` bottom-nav expects `Alarmas`, gets `Vision AI`
+  (nav entry from 519805c on main).
+
 ## Next step
-Native review of PR2 slice; then open PRs (stacked-to-main) on user's go-ahead.
+User decision: push + open PRs (stacked-to-main: PR1 backend a08b2e3..80be18a, PR2 web 26c34d0..29d3acf).
+Optional: decide whether Vision AI belongs in the mobile bottom nav and fix Layout.test accordingly.
