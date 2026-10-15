@@ -18,7 +18,8 @@ servidor de pruebas 10.1.1.126. La documentación de desarrollo está en README.
 - Acceso de red desde el VMS a cada Frigate:
     * puerto 8971 (con login) o 5000 (sin login, solo redes de confianza),
     * el VMS pide /api, /live/mse (video en vivo), /vod (grabaciones) y /exports.
-- Puerto de entrada para los usuarios: 8000 (HTTP) o 80/443 si se usa un dominio.
+- Puerto de entrada para los usuarios: 8000 (HTTP), 8443 (HTTPS por IP con certificado
+  local, ver paso 5) o 80/443 si se usa un dominio.
 
 
 2. Instalar Docker (Debian)
@@ -35,13 +36,24 @@ servidor de pruebas 10.1.1.126. La documentación de desarrollo está en README.
     apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     systemctl enable --now docker
 
+Ubuntu 24.04 puede usar los paquetes de Ubuntu en lugar del repositorio de Docker:
+
+    apt-get update
+    apt-get install -y docker.io docker-compose-v2 docker-buildx git
+    systemctl enable --now docker
+    docker compose version     # debe mostrar v2.x
+
+Importante: el comando es `docker compose` (con espacio, Compose v2). El paquete
+`docker-compose` (con guion, Compose v1) NO sirve: rechaza docker-compose.yml con
+"'name' does not match any of the regexes" y "unsupported option: 'create_host_path'".
+
 
 3. Copiar el código
 -------------------
 
-    mkdir -p /root/openvms
-    # copiar el repositorio (git clone, scp o rsync) dentro de /root/openvms
+    git clone https://github.com/jdolan-exalink/openvms.git /root/openvms
     cd /root/openvms
+    git checkout v0.3.0        # instalar una versión etiquetada (ver `git tag`), no main
 
 
 4. Configuración (.env)
@@ -56,6 +68,9 @@ Crear /root/openvms/.env a partir de .env.example. Lo importante:
     WEB_PORT=8000
     # ":80" sirve HTTP. Con un dominio público (vms.ejemplo.com) Caddy obtiene TLS solo.
     SITE_ADDRESS=:80
+    # IP del servidor para HTTPS en el puerto 8443 (la misma del certificado del paso 5).
+    # Si no se define vale 10.1.1.24, que es la IP de otra instalación.
+    OPENVMS_HTTPS_SITE_IPV4=<IP del servidor>
 
     chmod 600 .env
 
@@ -72,6 +87,17 @@ Variables opcionales (con su valor por defecto):
 
 5. Levantar
 -----------
+
+Antes del primer arranque, generar el certificado HTTPS local (autofirmado, válido 365
+días) para la IP del servidor. El contenedor web lo monta y sin él no arranca
+("bind source path does not exist: .../deploy/docker/local-tls/tls.crt"):
+
+    sh deploy/docker/bootstrap-local-tls.sh <IP del servidor> deploy/docker/local-tls
+
+El directorio no debe existir (el script no sobreescribe). El navegador pide aceptar el
+certificado la primera vez que se entra por https://IP:8443; por http://IP:8000 no hace
+falta. Para renovarlo: borrar deploy/docker/local-tls, volver a correr el script y
+`docker compose up -d web`.
 
     docker compose up -d --build
     docker compose ps          # todos "running" / "healthy"
