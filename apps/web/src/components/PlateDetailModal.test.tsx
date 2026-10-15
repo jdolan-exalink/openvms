@@ -203,4 +203,24 @@ describe("PlateDetailModal", () => {
     expect(await screen.findByText("No se pudo generar el clip.")).toBeInTheDocument();
     expect(await screen.findByText("ffmpeg: boom")).toBeInTheDocument();
   });
+
+  it("renders plate crop image and download button with snapshots.download", async () => {
+    const readWithCrop: Schemas["PlateRead"] = { ...read, has_crop: true };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: Request) => {
+        const url = new URL(input.url);
+        if (url.pathname === "/api/v1/tenants/t1/branding") return brandingResponse();
+        return stubApi({ "/api/v1/me": () => meResponse("lpr.view", "snapshots.view", "snapshots.download") })(input);
+      }),
+    );
+    renderPage(() => <PlateDetailModal read={readWithCrop} onClose={() => {}} />);
+
+    expect(await screen.findByText("OpenVMS Blob")).toBeInTheDocument();
+    const cropImg = screen.getByRole("img", { name: "Recorte de la matrícula AB123CD" });
+    expect(cropImg).toHaveAttribute("src", "/media/v1/lpr/reads/r1/snapshot.jpg?crop=1&quality=100");
+
+    const cropDownload = screen.getByRole("link", { name: "Descargar recorte" });
+    expect(cropDownload).toHaveAttribute("href", "/media/v1/lpr/reads/r1/snapshot.jpg?crop=1&quality=100&download=1");
+  });
 });

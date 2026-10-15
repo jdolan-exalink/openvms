@@ -1,6 +1,6 @@
 import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Activity, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Settings, Terminal, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Settings, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { ServerFrigateConfigModal } from "@/components/servers/ServerFrigateConfigModal";
+import { calculateAttainableDays, calculateUsableStorage, formatBytes } from "@/components/servers/storageRetention";
 import { Button, Empty, ErrorNote, Field, PageHeader, Pill, Select, StatusBadge, Summary, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
@@ -128,7 +129,7 @@ export function Servers() {
                   </Link>
                 </Fact>
                 <Fact label="Almacenamiento">
-                  <StorageBar storage={s.storage} />
+                  <StorageBar storage={s.storage} serverId={s.id} cameraCount={s.camera_count} />
                 </Fact>
                 <Fact label="Eventos">
                   <span className="text-xs">
@@ -2075,17 +2076,59 @@ function summarize(total: number, visible: { status: string }[]) {
   return [head, ...parts].join(" · ");
 }
 
-function StorageBar({ storage }: { storage?: Schemas["ServerStorage"] }) {
-  if (!storage || storage.total_mb <= 0) return <span className="text-xs text-muted">—</span>;
-  const pct = Math.round((storage.used_mb / storage.total_mb) * 100);
+function StorageBar({
+  storage,
+  serverId,
+  cameraCount,
+}: {
+  storage?: Schemas["ServerStorage"];
+  serverId?: string;
+  cameraCount?: number;
+}) {
+  const agentQuery = useQuery({
+    queryKey: ["server-agent", serverId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/servers/{serverId}/agent", { params: { path: { serverId: serverId! } } })),
+    enabled: !!serverId,
+    refetchInterval: 10000,
+    retry: false,
+  });
+
+  const agent = agentQuery.data;
+  const totalBytes = agent?.cctv_total_bytes ?? (storage && storage.total_mb > 0 ? storage.total_mb * 1024 * 1024 : 0);
+  const freeBytes = agent?.cctv_free_bytes ?? (storage && storage.free_mb > 0 ? storage.free_mb * 1024 * 1024 : 0);
+  const bufferPercent = agent?.storage_buffer_percent ?? 15;
+  const storageOver85 = agent?.storage_over_85_percent ?? false;
+
+  if (totalBytes <= 0) return <span className="text-xs text-muted">—</span>;
+
+  const usedBytes = Math.max(0, totalBytes - freeBytes);
+  const usedPct = Math.round((usedBytes / totalBytes) * 100);
+  const usablePercent = 100 - bufferPercent;
+
+  // Estimate continuous days with 15% safety buffer
+  const cams = Math.max(1, cameraCount || 1);
+  const { usableBytes } = calculateUsableStorage(totalBytes, bufferPercent);
+  const estDays = calculateAttainableDays({ usableBytes, cameraCount: cams, bitrateMbps: 2.0 });
+
   return (
-    <div className="flex flex-col gap-1" title={`${pct}% usado`}>
-      <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
-        <div className={pct > 90 ? "h-full rounded-full bg-warn" : "h-full rounded-full bg-primary"} style={{ width: `${pct}%` }} />
+    <div className="flex flex-col gap-1 min-w-36" title={`${usedPct}% usado · 15% reserva de seguridad`}>
+      <div className="h-2 overflow-hidden rounded-full bg-surface-3 flex">
+        <div
+          className={usedPct > usablePercent ? "h-full bg-danger transition-all" : "h-full bg-primary transition-all"}
+          style={{ width: `${Math.min(usablePercent, usedPct)}%` }}
+        />
+        <div className="h-full bg-primary/20 flex-1" />
+        <div className="h-full bg-amber-500/80 w-[15%]" title="15% Buffer de Seguridad Anticorrupción" />
       </div>
-      <span className="font-mono text-[11px] text-muted tabular-nums">
-        {(storage.used_mb / 1024).toFixed(0)} / {(storage.total_mb / 1024).toFixed(0)} GB
-      </span>
+      <div className="flex items-center justify-between font-mono text-[10px] text-muted tabular-nums">
+        <span>{formatBytes(usedBytes)} / {formatBytes(totalBytes)}</span>
+        <span className="font-semibold text-primary">~{estDays}d</span>
+      </div>
+      {storageOver85 && (
+        <span className="text-[10px] text-amber-400 font-semibold flex items-center gap-1">
+          <Icon icon={AlertTriangle} size="xs" /> &gt;85% (Watchdog)
+        </span>
+      )}
     </div>
   );
 }

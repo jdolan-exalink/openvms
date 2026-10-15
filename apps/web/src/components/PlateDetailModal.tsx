@@ -221,21 +221,60 @@ export function PlateDetailModal({ read, onClose }: { read: Schemas["PlateRead"]
         {tab === "photo" && (
           <div id={panelId("photo")} role="tabpanel" aria-labelledby={tabId("photo")} tabIndex={0} className="flex flex-col gap-4">
             {canViewPhoto ? (
-              <div className="relative overflow-hidden rounded-m3-lg">
-                <img
-                  src={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?quality=100`}
-                  alt={tr("plates.photoAlt", { plate: read.plate_normalized })}
-                  className="max-h-[70vh] w-full bg-video object-contain"
-                />
-                <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
-              </div>
+              <>
+                <div className="flex flex-col gap-2 rounded-m3-lg bg-surface-2 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+                      {tr("plates.cropTitle")}
+                    </span>
+                    {read.has_crop && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                        OpenVMS Blob
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative flex max-h-48 items-center justify-center overflow-hidden rounded-m3-md bg-video p-2">
+                    <img
+                      src={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?crop=1&quality=100`}
+                      alt={tr("plates.cropAlt", { plate: read.plate_normalized || read.plate })}
+                      className="max-h-44 w-auto object-contain"
+                    />
+                  </div>
+                  {canDownloadPhoto && (
+                    <div className="flex justify-end">
+                      <a
+                        href={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?crop=1&quality=100&download=1`}
+                        className={downloadLinkClass}
+                      >
+                        <Download className="size-4" aria-hidden /> {tr("plates.downloadCrop")}
+                      </a>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-col gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+                    {tr("plates.fullPhotoTitle")}
+                  </span>
+                  <div className="relative overflow-hidden rounded-m3-lg">
+                    <img
+                      src={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?quality=100`}
+                      alt={tr("plates.photoAlt", { plate: read.plate_normalized })}
+                      className="max-h-[70vh] w-full bg-video object-contain"
+                    />
+                    <WatermarkOverlay tenantId={tenantId} hasLogo={hasLogo} ownerName={ownerName} seenAt={read.seen_at} timezone={timezone} />
+                  </div>
+                  {canDownloadPhoto && (
+                    <div className="flex justify-start">
+                      <a href={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?quality=100&download=1`} className={downloadLinkClass}>
+                        <Download className="size-4" aria-hidden /> {tr("plates.downloadPhoto")}
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </>
             ) : (
               <p className="text-sm text-muted">{tr("plates.noPhoto")}</p>
-            )}
-            {canDownloadPhoto && (
-              <a href={`/media/v1/lpr/reads/${read.id}/snapshot.jpg?quality=100&download=1`} className={downloadLinkClass}>
-                <Download className="size-4" aria-hidden /> {tr("plates.downloadPhoto")}
-              </a>
             )}
           </div>
         )}

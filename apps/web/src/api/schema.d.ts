@@ -3857,6 +3857,8 @@ export interface components {
             event_id?: string | null;
             /** @description Type and color of the vehicle that carried this plate, once enrichment has finished. */
             vehicle?: components["schemas"]["VehicleAttributes"];
+            /** @description True when the license plate crop is permanently archived in OpenVMS object storage. */
+            has_crop?: boolean;
         };
         PlateReadPage: {
             items: components["schemas"]["PlateRead"][];

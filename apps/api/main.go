@@ -292,6 +292,7 @@ func run() error {
 		SessionIdle:                 cfg.SessionIdle,
 		Media: (&media.Gateway{
 			Svc: mediaSvc, Actor: api.ActorFrom, Branding: brandingSvc, Session: api.RevalidatorFrom,
+			Blobs: store,
 			Live: media.LiveConfig{
 				AuditWindow: cfg.LiveAuditWindow, RevalidateInterval: cfg.LiveRevalidateInterval,
 				PingInterval: cfg.LivePingInterval, PongWait: cfg.LivePongWait,
