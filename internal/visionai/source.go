@@ -39,8 +39,6 @@ type EventRow struct {
 	EndTime    *time.Time
 	// LPRScore is the best plate read score linked to the event, if any.
 	LPRScore *float32
-	// OpenAlarm is true while a linked alarm is not resolved.
-	OpenAlarm bool
 	// PlatesAllowed is true when the actor holds lpr.view on the camera; plate text and scores
 	// are never exposed otherwise.
 	PlatesAllowed bool
@@ -86,12 +84,11 @@ func RowToEvents(r EventRow, cfg VisionConfig) []VisionEvent {
 	if plate != "" && r.LPRScore != nil {
 		confidence = float64(*r.LPRScore)
 	}
+	// Priority comes from Frigate's review severity. The alarms table is not a signal here: rules
+	// create one per event and many deployments never close them, which would flag everything.
 	typ, severity := "detection", ""
-	switch {
-	case r.OpenAlarm:
-		typ, severity = "alarm", "critical"
-	case r.Severity == "alert":
-		severity = "high"
+	if r.Severity == "alert" {
+		typ, severity = "alarm", "high"
 	}
 	if typ == "detection" && plate != "" {
 		typ = "lpr"
@@ -132,7 +129,6 @@ const recentEventsSQL = `SELECT e.id, e.tenant_id, e.site_id, e.server_id, e.cam
   e.severity, e.labels, e.zones, e.plates, e.start_time, e.end_time,
   (SELECT max(r.score) FROM lpr_reads r
      WHERE r.server_id = e.server_id AND r.remote_event_id = ANY(e.detection_ids)),
-  EXISTS (SELECT 1 FROM alarms a WHERE a.event_id = e.id AND a.status <> 'resolved'),
   COALESCE(e.camera_id = ANY($4), false)
 FROM events e
 JOIN cameras c ON c.id = e.camera_id
@@ -182,7 +178,7 @@ func loadRows(ctx context.Context, tx pgx.Tx, cams, lprCams []uuid.UUID, window 
 		var r EventRow
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.SiteID, &r.ServerID, &r.CameraID, &r.CameraName,
 			&r.Severity, &r.Labels, &r.Zones, &r.Plates, &r.StartTime, &r.EndTime,
-			&r.LPRScore, &r.OpenAlarm, &r.PlatesAllowed); err != nil {
+			&r.LPRScore, &r.PlatesAllowed); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
