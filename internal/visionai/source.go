@@ -108,7 +108,7 @@ const recentEventsSQL = `SELECT e.id, e.tenant_id, e.site_id, e.server_id, e.cam
   (SELECT max(r.score) FROM lpr_reads r
      WHERE r.server_id = e.server_id AND r.remote_event_id = ANY(e.detection_ids)),
   EXISTS (SELECT 1 FROM alarms a WHERE a.event_id = e.id AND a.status <> 'resolved'),
-  e.camera_id = ANY($4)
+  COALESCE(e.camera_id = ANY($4), false)
 FROM events e
 JOIN cameras c ON c.id = e.camera_id
 WHERE e.camera_id = ANY($1) AND c.deleted_at IS NULL AND c.enabled
@@ -117,7 +117,8 @@ ORDER BY e.start_time DESC
 LIMIT 500`
 
 // RecentEvents returns events that are running or ended within window, on cameras the actor holds
-// events.view for, newest first.
+// events.view for, newest first. Still-open events older than maxStartAge (one hour) are dropped
+// even though they are "running": Frigate leaves stale open rows behind.
 func (p PGSource) RecentEvents(ctx context.Context, actor authz.Actor, window time.Duration, now time.Time) ([]EventRow, error) {
 	var out []EventRow
 	err := p.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
@@ -133,21 +134,32 @@ func (p PGSource) RecentEvents(ctx context.Context, actor authz.Actor, window ti
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, recentEventsSQL, cams, now.Add(-maxStartAge), now.Add(-window), lprCams)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var r EventRow
-			if err := rows.Scan(&r.ID, &r.TenantID, &r.SiteID, &r.ServerID, &r.CameraID, &r.CameraName,
-				&r.Severity, &r.Labels, &r.Zones, &r.Plates, &r.StartTime, &r.EndTime,
-				&r.LPRScore, &r.OpenAlarm, &r.PlatesAllowed); err != nil {
-				return err
-			}
-			out = append(out, r)
-		}
-		return rows.Err()
+		out, err = loadRows(ctx, tx, cams, lprCams, window, now)
+		return err
 	})
 	return out, err
+}
+
+// loadRows runs the recent-events query. lprCams may be nil (no lpr.view anywhere): pgx sends a nil
+// slice as NULL, so it is normalized to empty here and the comparison is also COALESCEd in SQL.
+func loadRows(ctx context.Context, tx pgx.Tx, cams, lprCams []uuid.UUID, window time.Duration, now time.Time) ([]EventRow, error) {
+	if lprCams == nil {
+		lprCams = []uuid.UUID{}
+	}
+	rows, err := tx.Query(ctx, recentEventsSQL, cams, now.Add(-maxStartAge), now.Add(-window), lprCams)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EventRow
+	for rows.Next() {
+		var r EventRow
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.SiteID, &r.ServerID, &r.CameraID, &r.CameraName,
+			&r.Severity, &r.Labels, &r.Zones, &r.Plates, &r.StartTime, &r.EndTime,
+			&r.LPRScore, &r.OpenAlarm, &r.PlatesAllowed); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }

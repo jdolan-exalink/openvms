@@ -1332,7 +1332,8 @@ export interface paths {
         /**
          * Ranked camera slots for the Vision AI grid
          * @description Ranks the caller's recent events (running, or ended within the last 10 minutes, on cameras
-         *     the caller holds events.view for) and assigns the best cameras to the slots of the requested
+         *     the caller holds events.view for; still-open events that started more than one hour ago
+         *     are treated as stale and ignored) and assigns the best cameras to the slots of the requested
          *     layout. Allocation state (minimum display time, cooldown, replacement) is kept in memory per
          *     user, source and layout, so repeated polling yields stable, rotating slots. Plate text is
          *     only present on cameras where the caller holds lpr.view. Empty slots have a null camera_id.
