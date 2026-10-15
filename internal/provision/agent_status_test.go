@@ -63,3 +63,20 @@ func TestApplySnapshotMapsStorageWatchdog(t *testing.T) {
 	}
 }
 
+func TestApplySnapshotSaturatesPrunedSegmentsCount(t *testing.T) {
+	for name, tc := range map[string]struct {
+		in   uint64
+		want int64
+	}{
+		"within range": {in: 42, want: 42},
+		"max int64":    {in: math.MaxInt64, want: math.MaxInt64},
+		"above max":    {in: math.MaxInt64 + 1, want: math.MaxInt64},
+		"max uint64":   {in: math.MaxUint64, want: math.MaxInt64},
+	} {
+		view := &AgentView{}
+		applySnapshot(view, agent.Snapshot{PrunedSegmentsCount: tc.in})
+		if view.PrunedSegmentsCount != tc.want {
+			t.Errorf("%s: PrunedSegmentsCount = %d, want %d", name, view.PrunedSegmentsCount, tc.want)
+		}
+	}
+}

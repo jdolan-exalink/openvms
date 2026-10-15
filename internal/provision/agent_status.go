@@ -196,7 +196,7 @@ func applySnapshot(out *AgentView, snap agent.Snapshot) {
 	out.StorageWatchdog = snap.StorageWatchdog
 	out.StorageOver85Percent = snap.StorageOver85Percent
 	out.DatabaseCritical = snap.DatabaseCritical
-	out.PrunedSegmentsCount = int64(snap.PrunedSegmentsCount)
+	out.PrunedSegmentsCount = signedSnapshotBytes(snap.PrunedSegmentsCount)
 	out.OS = snap.OS
 	out.Error = ""
 }
