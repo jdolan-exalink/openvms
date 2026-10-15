@@ -27,7 +27,13 @@ Today the first admin needs a manual `docker compose exec api /vmsctl bootstrap 
   `go test -race -tags integration ./internal/bootstrap/ ./internal/api/`.
 
 ## Tasks
-- [ ] IAB-01 — Config + startup bootstrap + WARN + tests + .env.example + Readme. Route: delegated writer.
+- [x] IAB-01 — Config + startup bootstrap + WARN + tests + .env.example + Readme. Route: delegated writer.
+
+- [x] IAB-02 — Default tenant + site on first startup (user decision: "Crear tenant y sitio"):
+      `OPENVMS_DEFAULT_TENANT` (default `openvms`) and `OPENVMS_DEFAULT_SITE` (default `Sitio principal`),
+      created only when no tenant exists (never touch existing tenants/sites; renaming later from the web
+      must not be undone on restart), documented in `.env.example` and Readme.txt. Route: same writer,
+      after IAB-01 (same files).
 
 ## Acceptance criteria and checks
 - `gofmt -l` empty, `golangci-lint run` 0 issues, `go vet`, `go test -race ./...`, integration bootstrap.
@@ -38,6 +44,19 @@ Today the first admin needs a manual `docker compose exec api /vmsctl bootstrap 
 
 ## Progress and evidence
 - Branch `feat/initial-admin-bootstrap` from main.
+- IAB-01 `8cb27cd` + `6c72e64`: `EnsureInitialAdmin` (one tx; skips if named user exists or any platform user
+  has a password; weak password → error log, skip; must_change only for default; WARN while default still
+  verifies, password never logged); config `OPENVMS_ADMIN_USERNAME/PASSWORD`; compose `x-go-env`; Readme §6.
+  RED: `undefined: bootstrap.EnsureInitialAdmin` → GREEN (7 integration tests incl. 4 concurrent calls).
+- IAB-02 `2a5c593` + `500f8e1`: `EnsureDefaultTenant` (only when ListTenants is empty; tenant + site in one
+  tx; conflict = exists; slug from name; site tz America/Argentina/Cordoba); config `OPENVMS_DEFAULT_TENANT/
+  SITE`; Readme. RED: `undefined: bootstrap.EnsureDefaultTenant` → GREEN (5 tests incl. rename kept,
+  concurrency). Deviations: sqlc queries directly (no acting user → no audit entry); a soft-deleted sole
+  tenant is recreated on next restart.
+- Checks: gofmt empty; golangci-lint 0 issues; go vet/build clean; `go test -race ./...` OK; integration
+  bootstrap + api OK; generated code in sync.
+- BLOCKED: `.env.example` cannot be read/edited from this environment (permission rule on `.env*`); lines
+  prepared, pending user action.
 
 ## Next step
-IAB-01.
+Apply `.env.example` lines (user), RDD review, PR.
