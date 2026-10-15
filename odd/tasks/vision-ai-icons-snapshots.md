@@ -20,8 +20,8 @@ the detection image, so the operator cannot tell at a glance what was detected.
 - Mode: strict (source: user global CLAUDE.md). Runner: `cd apps/web && pnpm vitest run <file>`.
 
 ## Tasks
-- [ ] VIS-01 — Object icon map + icons on chips, presets and slot/tile object badges. Route: delegated writer.
-- [ ] VIS-02 — Detection snapshots in "Eventos Activos" sidebar. Route: same writer.
+- [x] VIS-01 — Object icon map + icons on chips, presets and slot/tile object badges. Route: delegated writer.
+- [x] VIS-02 — Detection snapshots in "Eventos Activos" sidebar. Route: same writer.
 
 ## Acceptance criteria and checks
 - `pnpm typecheck`, `pnpm lint`, VisionAI/LiveVisionTile tests, full `pnpm test` green.
@@ -32,6 +32,14 @@ the detection image, so the operator cannot tell at a glance what was detected.
 
 ## Progress and evidence
 - Branch `feat/vision-ai-icons-snapshots` from main `7882e54`.
+- VIS-01 `607935b`: shared `lib/visionAiIcons.ts` (ObjectIcon/PresetIcon, aria-hidden); icons on presets,
+  object chips, slot HUD badge and Live tile badge.
+- VIS-02 `8a0db45`: sidebar snapshots (`snapshot.jpg` with `snapshots.view`, else thumbnail; error → thumbnail
+  → icon), lazy, 16:9, keyed by event id. Gated on permission only (slot has no `has_snapshot`).
+- TDD: 6 new tests RED (missing svg; "Unable to find role=img … Detección: person en Cam cam-1") → GREEN.
+- Checks: typecheck/lint clean; VisionAI+LiveVisionTile 31 passed; full `pnpm test` 175 files / 1486 tests.
+- Live (rebuilt web on the real stack): icons visible; 4/4 sidebar snapshots HTTP 200 and rendered
+  (naturalWidth > 0), Frigate boxes visible; no console errors.
 
 ## Next step
-VIS-01, VIS-02.
+RDD assess, push + PR (user decision).
