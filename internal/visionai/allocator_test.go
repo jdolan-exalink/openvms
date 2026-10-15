@@ -82,9 +82,10 @@ func TestSlotAllocator(t *testing.T) {
 			{CameraID: cam4, CameraName: "Cam 4", Object: "person", Confidence: 0.6, Timestamp: now},
 		}, now)
 
-		// 2 seconds later (within 5s min display), new event cam5 arrives with slightly higher score
+		// 2 seconds later (within 5s min display), new event cam5 arrives with a clearly higher score
+		// (beyond the replacement margin).
 		allocator.Allocate([]VisionEvent{
-			{CameraID: cam5, CameraName: "Cam 5", Object: "person", Confidence: 0.8, Timestamp: now.Add(2 * time.Second)},
+			{CameraID: cam5, CameraName: "Cam 5", Object: "license_plate", Confidence: 0.8, Timestamp: now.Add(2 * time.Second)},
 		}, now.Add(2*time.Second))
 
 		slots := allocator.Slots()
@@ -97,7 +98,7 @@ func TestSlotAllocator(t *testing.T) {
 
 		// 6 seconds later (now.Add(6s)), min display time passed, cam5 should now replace one of the slots
 		allocator.Allocate([]VisionEvent{
-			{CameraID: cam5, CameraName: "Cam 5", Object: "person", Confidence: 0.8, Timestamp: now.Add(6 * time.Second)},
+			{CameraID: cam5, CameraName: "Cam 5", Object: "license_plate", Confidence: 0.8, Timestamp: now.Add(6 * time.Second)},
 		}, now.Add(6*time.Second))
 
 		hasCam5 := false

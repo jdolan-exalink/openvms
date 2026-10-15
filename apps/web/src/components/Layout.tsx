@@ -35,7 +35,8 @@ export function Layout() {
   const search = useRouterState({ select: (state) => state.location.search }) as Record<string, unknown>;
   const isLive = pathname === "/live";
   const isMaps = pathname === "/maps";
-  const fitWorkspace = isLive || isMaps;
+  const isVisionAI = pathname === "/vision-ai";
+  const fitWorkspace = isLive || isMaps || isVisionAI;
   const liveRec = isLive && parseRecSearch(search).rec && can(me.data, "recordings.view");
   const t = useT();
   const pageContextRaw = getPageContext(pathname);

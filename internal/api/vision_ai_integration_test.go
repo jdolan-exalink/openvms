@@ -104,7 +104,7 @@ func TestVisionAISlotsEndpoint(t *testing.T) {
 		t.Errorf("admin holds lpr.view: plates_visible must be true")
 	}
 	top := admin.Slots[0]
-	if *top.CameraId != allowed.ID || deref(top.Alarm) != "critical" || deref(top.Plate) != "AB123CD" ||
+	if *top.CameraId != allowed.ID || deref(top.Alarm) != "high" || deref(top.Plate) != "AB123CD" ||
 		*top.Confidence < 0.92 || *top.Confidence > 0.94 || deref(top.Zone) != "street" {
 		t.Fatalf("top slot should be the alarmed plate event: %+v", top)
 	}

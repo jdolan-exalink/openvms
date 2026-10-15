@@ -53,16 +53,13 @@ func TestRowToEvents(t *testing.T) {
 		}
 	})
 
-	t.Run("alarm severity mapping", func(t *testing.T) {
+	t.Run("alarm severity comes from the Frigate review severity only", func(t *testing.T) {
+		// Alarms are created per event by rules and often never closed, so an open alarm row must
+		// not flag every event as critical; Frigate's alert/detection split is the signal.
 		r := row
-		r.OpenAlarm = true
-		if e := RowToEvents(r, cfg)[0]; e.AlarmSeverity != "critical" || e.Type != "alarm" {
-			t.Fatalf("open alarm: %+v", e)
-		}
-		r = row
 		r.Severity = "alert"
-		if e := RowToEvents(r, cfg)[0]; e.AlarmSeverity != "high" {
-			t.Fatalf("alert without alarm: %+v", e)
+		if e := RowToEvents(r, cfg)[0]; e.AlarmSeverity != "high" || e.Type != "alarm" {
+			t.Fatalf("alert: %+v", e)
 		}
 		if e := RowToEvents(row, cfg)[0]; e.AlarmSeverity != "" {
 			t.Fatalf("plain detection: %+v", e)

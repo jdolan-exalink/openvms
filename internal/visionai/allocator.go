@@ -155,6 +155,16 @@ func (c scoredCandidate) reason() SlotReason {
 	}
 }
 
+// replaceMargin is how much a newcomer must outscore an on-screen camera to evict it before its
+// max display time; it keeps equally ranked activity from churning the grid on every poll.
+const replaceMargin = 10.0
+
+// incumbentStanding is the slot's score without the already-visible penalty, which only exists to
+// rank duplicates and must not make an on-screen camera lose to an equally ranked newcomer.
+func incumbentStanding(s SlotAssignment) float64 {
+	return s.Score - s.Reason.Breakdown["already_visible_penalty"]
+}
+
 // release empties a slot and records the camera's exit for cooldown scoring. Caller holds a.mu.
 func (a *SlotAllocator) release(i int, now time.Time) {
 	cam := a.slots[i].CameraID
@@ -259,10 +269,11 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 				continue
 			}
 
-			// If current slot reached max display time or candidate score is strictly higher
-			if now.After(s.MaxDisplayUntil) || cand.score > s.Score {
-				if s.Score < lowestScore {
-					lowestScore = s.Score
+			// Before max display a newcomer must clearly beat the incumbent's standing score.
+			standing := incumbentStanding(s)
+			if now.After(s.MaxDisplayUntil) || cand.score > standing+replaceMargin {
+				if standing < lowestScore {
+					lowestScore = standing
 					bestSlotIdx = i
 				}
 			}
