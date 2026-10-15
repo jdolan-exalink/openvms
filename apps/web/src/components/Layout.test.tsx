@@ -226,6 +226,12 @@ describe("primary navigation and context header", () => {
     expect(more).toHaveFocus();
   });
 
+  it("fits Vision AI to the viewport like Live so its video grid fills the workspace", async () => {
+    await renderAt("/vision-ai", ["live.view", "events.view", "lpr.view"]);
+    const main = document.querySelector('[data-shell-region="main-workspace"]');
+    expect(main).toHaveClass("flex", "min-h-0", "flex-col", "overflow-hidden");
+  });
+
   it("closes the More sheet from the close button and marks the active sheet destination", async () => {
     await renderAt("/servers", ["live.view", "events.view", "servers.view", "alarms.view", "lpr.view"]);
     fireEvent.click(screen.getByRole("button", { name: "Más" }));
