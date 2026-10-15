@@ -1,7 +1,10 @@
 package inventory
 
 import (
+	"context"
 	"testing"
+
+	"github.com/jdolan-exalink/openvms/internal/frigate"
 )
 
 func TestExtractCameraStreamHosts(t *testing.T) {
@@ -123,5 +126,56 @@ func TestExtractCameraStreamHosts(t *testing.T) {
 	// LocalRestream should not be present as an external host
 	if local, ok := hosts["LocalRestream"]; ok && local.Host != "" {
 		t.Errorf("LocalRestream should have empty host, got %+v", local)
+	}
+}
+
+func TestDisplayNameBirdEye(t *testing.T) {
+	if got := displayName("birdseye"); got != "BirdEye" {
+		t.Fatalf("expected BirdEye, got %q", got)
+	}
+	if got := displayName("BIRDSEYE"); got != "BirdEye" {
+		t.Fatalf("expected BirdEye, got %q", got)
+	}
+	if got := displayName("acceso_norte"); got != "Acceso norte" {
+		t.Fatalf("expected Acceso norte, got %q", got)
+	}
+}
+
+type mockAdapterForDiscover struct {
+	frigate.Adapter
+}
+
+func (m *mockAdapterForDiscover) Capabilities(_ context.Context) (frigate.Capabilities, error) {
+	return frigate.Capabilities{}, nil
+}
+
+func (m *mockAdapterForDiscover) ListCameras(_ context.Context) ([]frigate.Camera, error) {
+	return []frigate.Camera{{Name: "acceso", Enabled: true, LiveStream: "acceso_sub", HQStream: "acceso_main"}}, nil
+}
+
+func (m *mockAdapterForDiscover) Version() string { return "0.17.0" }
+func (m *mockAdapterForDiscover) Name() string    { return "v017" }
+
+func TestDiscoverIncludesBirdEyeChannel(t *testing.T) {
+	s := &Service{
+		Connect: func(_ context.Context, _ frigate.ConnInfo) (frigate.Adapter, error) {
+			return &mockAdapterForDiscover{}, nil
+		},
+	}
+	res, err := s.discover(context.Background(), frigate.ConnInfo{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var foundBirdseye bool
+	for _, cam := range res.Cameras {
+		if cam.Name == "birdseye" {
+			foundBirdseye = true
+			if cam.LiveStream != "birdseye" || cam.HQStream != "birdseye" || !cam.Enabled {
+				t.Fatalf("unexpected birdseye camera: %+v", cam)
+			}
+		}
+	}
+	if !foundBirdseye {
+		t.Fatalf("expected birdseye camera in discovered cameras: %+v", res.Cameras)
 	}
 }

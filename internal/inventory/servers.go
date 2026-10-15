@@ -75,6 +75,21 @@ func (s *Service) discover(ctx context.Context, info frigate.ConnInfo) (ProbeRes
 	if err != nil {
 		return ProbeResult{}, &FrigateError{Err: err}
 	}
+	hasBirdseye := false
+	for _, c := range cams {
+		if strings.EqualFold(c.Name, "birdseye") {
+			hasBirdseye = true
+			break
+		}
+	}
+	if !hasBirdseye {
+		cams = append(cams, frigate.Camera{
+			Name:       "birdseye",
+			Enabled:    true,
+			LiveStream: "birdseye",
+			HQStream:   "birdseye",
+		})
+	}
 	return ProbeResult{Version: a.Version(), Adapter: a.Name(), Capabilities: caps, Cameras: cams}, nil
 }
 
@@ -264,8 +279,12 @@ func upsertCamera(ctx context.Context, q *db.Queries, tenantID, siteID, serverID
 	})
 }
 
-// displayName turns "acceso_norte" into "Acceso norte" as a starting label.
+// displayName turns "acceso_norte" into "Acceso norte" as a starting label,
+// and maps Frigate's virtual mosaic channel "birdseye" to "BirdEye".
 func displayName(remote string) string {
+	if strings.EqualFold(remote, "birdseye") {
+		return "BirdEye"
+	}
 	s := strings.ReplaceAll(strings.ReplaceAll(remote, "_", " "), "-", " ")
 	if s == "" {
 		return remote

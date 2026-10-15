@@ -313,4 +313,30 @@ describe("ServerFrigateConfigModal", () => {
     fireEvent.click(dogBtn);
     expect(screen.getByText(/- dog/i)).toBeInTheDocument();
   });
+
+  it("switches to Birdseye tab and updates BirdEye channel mode", async () => {
+    setupConfigModal();
+
+    renderPage(() => (
+      <ServerFrigateConfigModal
+        server={mockServer}
+        open={true}
+        onClose={() => {}}
+        canRestart={true}
+      />
+    ));
+
+    await screen.findByText(/Configuración de Servidor Frigate/i);
+
+    // Switch to Birdseye tab
+    fireEvent.click(screen.getByRole("button", { name: /Birdseye/i }));
+
+    expect(await screen.findByText(/Canal de Stream OpenVMS: BirdEye/i)).toBeInTheDocument();
+    expect(screen.getByText(/Activo en Live Grid/i)).toBeInTheDocument();
+
+    // Toggle BirdEye mode
+    const select = screen.getByRole("combobox");
+    fireEvent.change(select, { target: { value: "continuous" } });
+    expect(screen.getByText(/mode: continuous/i)).toBeInTheDocument();
+  });
 });
