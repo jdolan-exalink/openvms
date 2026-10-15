@@ -68,6 +68,8 @@ Variables opcionales (con su valor por defecto):
     SESSION_IDLE=2h           cierre de sesión por inactividad
     LOGIN_MAX_FAILURES=5      intentos fallidos antes de bloquear la cuenta
     LOGIN_LOCKOUT=15m         duración del bloqueo
+    OPENVMS_ADMIN_USERNAME=admin        usuario del primer administrador (ver sección 6)
+    OPENVMS_ADMIN_PASSWORD=openvms123   su contraseña inicial: CAMBIARLA (ver sección 6)
 
 
 5. Levantar
@@ -90,11 +92,31 @@ frigate-cayasta) para demo. Los simulados se pueden apagar sin problema:
 6. Primer administrador
 -----------------------
 
+En una instalación nueva, la API crea sola el administrador de plataforma al arrancar:
+
+    usuario:     admin                  (OPENVMS_ADMIN_USERNAME)
+    contraseña:  openvms123             (OPENVMS_ADMIN_PASSWORD)
+
+Para elegir otra contraseña desde el inicio, definir en .env antes de levantar:
+
+    OPENVMS_ADMIN_PASSWORD=<clave de al menos 10 caracteres, con letras y números>
+
+Notas:
+- Solo se crea si no existe ese usuario y ningún administrador de plataforma tiene
+  contraseña: nunca pisa ni reinicia una instalación existente.
+- Si queda la contraseña por defecto (openvms123), el sistema obliga a cambiarla en el
+  primer ingreso y la API registra un WARN en cada arranque mientras siga activa. Es una
+  clave pública: cambiarla de inmediato, sobre todo si el servidor es accesible desde internet.
+- Si OPENVMS_ADMIN_PASSWORD no cumple la política de contraseñas, la API lo registra como
+  error y no crea el usuario (sigue funcionando; usar vmsctl).
+- Después, activar la verificación en dos pasos en "Mi cuenta".
+
+Alternativa manual (instalaciones con contraseña propia o para crear el admin con otro nombre):
+
     docker compose exec api /vmsctl bootstrap -password 'UnaClaveLarga-2026'
 
 Crea el usuario "admin" de plataforma con todos los permisos, le pone esa contraseña
-e imprime además un token de API. Entrar a http://<servidor>:8000 con admin y esa
-contraseña, y activar la verificación en dos pasos en "Mi cuenta".
+e imprime además un token de API.
 
 Otros comandos:
 
