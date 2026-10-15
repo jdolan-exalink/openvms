@@ -40,6 +40,10 @@ the detection image, so the operator cannot tell at a glance what was detected.
 - Checks: typecheck/lint clean; VisionAI+LiveVisionTile 31 passed; full `pnpm test` 175 files / 1486 tests.
 - Live (rebuilt web on the real stack): icons visible; 4/4 sidebar snapshots HTTP 200 and rendered
   (naturalWidth > 0), Frigate boxes visible; no console errors.
+- Native review (lineage review-ce28cd4812be8d3b): APPROVED, acknowledged. WARNING fixed: thumbnail failing
+  before `me` loaded left the placeholder stuck; snapshot image now keyed by event id + permission. Test
+  RED ("Unable to find role=img") → GREEN. Suggestions (event-change re-render test, me fixture shape) left
+  as follow-ups.
 
 ## Next step
-RDD assess, push + PR (user decision).
+Push + PR (user decision).
