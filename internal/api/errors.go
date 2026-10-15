@@ -19,6 +19,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
 	"github.com/jdolan-exalink/openvms/internal/store"
+	"github.com/jdolan-exalink/openvms/internal/visionai"
 )
 
 // errUnauthenticated is returned by handlers that somehow run without an actor.
@@ -33,6 +34,7 @@ func statusFor(err error) (int, string, string) {
 	var nve *notify.ValidationError
 	var mve *maps.ValidationError
 	var pve *provision.ValidationError
+	var vae *visionai.ValidationError
 	var we *notify.WahaError
 	var fe *inventory.FrigateError
 	switch {
@@ -50,6 +52,10 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", mve.Msg
 	case errors.As(err, &pve):
 		return http.StatusBadRequest, "invalid", pve.Msg
+	case errors.As(err, &vae):
+		return http.StatusBadRequest, "invalid", vae.Msg
+	case errors.Is(err, errVisionAIUnavailable):
+		return http.StatusServiceUnavailable, "unavailable", "vision ai is not available"
 	case errors.Is(err, provision.ErrAgentTLSNotConfigured):
 		return http.StatusNotFound, "agent_tls_not_configured", "agent TLS is not configured"
 	case errors.Is(err, provision.ErrAgentInstallJobNotFound):

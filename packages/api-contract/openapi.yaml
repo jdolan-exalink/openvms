@@ -17,6 +17,7 @@ tags:
   - name: cameras
   - name: permissions
   - name: events
+  - name: vision-ai
   - name: lpr
   - name: audit
   - name: live
@@ -1660,6 +1661,29 @@ paths:
               schema: { $ref: "#/components/schemas/EventPage" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+  /api/v1/vision-ai/slots:
+    get:
+      tags: [vision-ai]
+      operationId: getVisionAISlots
+      summary: Ranked camera slots for the Vision AI grid
+      description: |
+        Ranks the caller's recent events (running, or ended within the last 10 minutes, on cameras
+        the caller holds events.view for) and assigns the best cameras to the slots of the requested
+        layout. Allocation state (minimum display time, cooldown, replacement) is kept in memory per
+        user, source and layout, so repeated polling yields stable, rotating slots. Plate text is
+        only present on cameras where the caller holds lpr.view. Empty slots have a null camera_id.
+      parameters:
+        - { name: source, in: query, schema: { $ref: "#/components/schemas/VisionAISource" } }
+        - { name: layout, in: query, schema: { $ref: "#/components/schemas/VisionAILayout" } }
+      responses:
+        "200":
+          description: The slot grid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VisionAISlots" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
   /api/v1/events/sync-status:
     get:
       tags: [events]
@@ -4934,6 +4958,46 @@ components:
         next_cursor:
           type: string
           description: Pass as cursor to get the next page. Absent on the last page.
+    VisionAISource:
+      type: string
+      enum: [general, personas, vehiculos, lpr, perimetro, alarmas]
+      default: general
+    VisionAILayout:
+      type: string
+      enum: ["1", "4", "9", "16", focus]
+      default: "4"
+    VisionAISlots:
+      type: object
+      required: [source, layout, generated_at, slots]
+      properties:
+        source: { $ref: "#/components/schemas/VisionAISource" }
+        layout: { $ref: "#/components/schemas/VisionAILayout" }
+        generated_at: { type: string, format: date-time }
+        slots:
+          type: array
+          description: One entry per layout slot, in slot order (focus has 5, the hero first).
+          items: { $ref: "#/components/schemas/VisionAISlot" }
+    VisionAISlot:
+      type: object
+      required: [slot, camera_id, pinned]
+      properties:
+        slot: { type: integer, minimum: 0 }
+        camera_id: { type: string, format: uuid, nullable: true, description: "Null for an empty slot; every field below is then absent." }
+        pinned: { type: boolean }
+        camera_name: { type: string }
+        event_id: { type: string, description: "Event that put the camera in the slot." }
+        object: { type: string, description: "Detected label of that event (person, car, ...)." }
+        confidence: { type: number, format: double, minimum: 0, maximum: 1, description: "LPR read score when available, otherwise a neutral default (0.75)." }
+        zone: { type: string }
+        plate: { type: string, description: "Only on cameras where the caller holds lpr.view." }
+        alarm: { type: string, description: "Alarm severity (critical, high, ...) when the event is an alarm." }
+        score: { type: number, format: double }
+        assigned_at: { type: string, format: date-time }
+        display_seconds: { type: integer, minimum: 0, description: "Seconds the camera has been in the slot." }
+        breakdown:
+          type: object
+          description: Score contributions by term (object, confidence, zone, alarm, recency, ...).
+          additionalProperties: { type: number, format: double }
     EventSyncStatus:
       type: object
       required: [server_id, last_error, event_count]

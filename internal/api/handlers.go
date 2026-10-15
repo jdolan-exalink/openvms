@@ -22,6 +22,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/provision"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/search"
+	"github.com/jdolan-exalink/openvms/internal/visionai"
 )
 
 // RealtimeConnTracker tracks active real-time websocket clients.
@@ -54,6 +55,7 @@ type Handlers struct {
 	Rules           *rules.Service
 	Notify          *notify.Service
 	Maps            *maps.Service
+	VisionAI        *visionai.Service
 	Features        config.Features
 	Log             *slog.Logger
 	WorkerURL       string

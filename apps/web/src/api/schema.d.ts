@@ -1322,6 +1322,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/vision-ai/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ranked camera slots for the Vision AI grid
+         * @description Ranks the caller's recent events (running, or ended within the last 10 minutes, on cameras
+         *     the caller holds events.view for) and assigns the best cameras to the slots of the requested
+         *     layout. Allocation state (minimum display time, cooldown, replacement) is kept in memory per
+         *     user, source and layout, so repeated polling yields stable, rotating slots. Plate text is
+         *     only present on cameras where the caller holds lpr.view. Empty slots have a null camera_id.
+         */
+        get: operations["getVisionAISlots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/events/sync-status": {
         parameters: {
             query?: never;
@@ -3814,6 +3838,58 @@ export interface components {
             items: components["schemas"]["Event"][];
             /** @description Pass as cursor to get the next page. Absent on the last page. */
             next_cursor?: string;
+        };
+        /**
+         * @default general
+         * @enum {string}
+         */
+        VisionAISource: "general" | "personas" | "vehiculos" | "lpr" | "perimetro" | "alarmas";
+        /**
+         * @default 4
+         * @enum {string}
+         */
+        VisionAILayout: "1" | "4" | "9" | "16" | "focus";
+        VisionAISlots: {
+            source: components["schemas"]["VisionAISource"];
+            layout: components["schemas"]["VisionAILayout"];
+            /** Format: date-time */
+            generated_at: string;
+            /** @description One entry per layout slot, in slot order (focus has 5, the hero first). */
+            slots: components["schemas"]["VisionAISlot"][];
+        };
+        VisionAISlot: {
+            slot: number;
+            /**
+             * Format: uuid
+             * @description Null for an empty slot; every field below is then absent.
+             */
+            camera_id: string | null;
+            pinned: boolean;
+            camera_name?: string;
+            /** @description Event that put the camera in the slot. */
+            event_id?: string;
+            /** @description Detected label of that event (person, car, ...). */
+            object?: string;
+            /**
+             * Format: double
+             * @description LPR read score when available, otherwise a neutral default (0.75).
+             */
+            confidence?: number;
+            zone?: string;
+            /** @description Only on cameras where the caller holds lpr.view. */
+            plate?: string;
+            /** @description Alarm severity (critical, high, ...) when the event is an alarm. */
+            alarm?: string;
+            /** Format: double */
+            score?: number;
+            /** Format: date-time */
+            assigned_at?: string;
+            /** @description Seconds the camera has been in the slot. */
+            display_seconds?: number;
+            /** @description Score contributions by term (object, confidence, zone, alarm, recency, ...). */
+            breakdown?: {
+                [key: string]: number;
+            };
         };
         EventSyncStatus: {
             /** Format: uuid */
@@ -7220,6 +7296,32 @@ export interface operations {
             };
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
+        };
+    };
+    getVisionAISlots: {
+        parameters: {
+            query?: {
+                source?: components["schemas"]["VisionAISource"];
+                layout?: components["schemas"]["VisionAILayout"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The slot grid */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisionAISlots"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
         };
     };
     listEventSyncStatus: {
