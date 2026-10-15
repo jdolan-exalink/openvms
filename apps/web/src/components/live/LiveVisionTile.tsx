@@ -19,8 +19,10 @@ export interface LiveVisionTileProps {
 
 export function LiveVisionTile({ vision, isFocused = false, className }: LiveVisionTileProps) {
   // Pinning freezes the slot's current assignment (client side).
-  // The pin is scoped to the source it was taken from: a different source drops it.
+  // The pin belongs to the source it was taken from: changing source clears it, so returning to a
+  // previous source starts unpinned (state is reset during render, before children see it).
   const [pin, setPin] = useState<{ sourceId: string; slot: VisionAISlot } | null>(null);
+  if (pin && pin.sourceId !== vision.id) setPin(null);
   const pinnedSlot = pin && pin.sourceId === vision.id ? pin.slot : null;
 
   const slotsQuery = useVisionSlots(visionSourceFromId(vision.id), "1");
