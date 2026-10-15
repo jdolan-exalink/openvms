@@ -10,8 +10,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"math"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -190,6 +193,7 @@ func (s *Syncer) SyncServer(ctx context.Context, srv db.FrigateServer) error {
 	// Failures are logged inside; they never fail the pull.
 	s.closeStaleReviews(ctx, srv, a, cams)
 	s.copyThumbnails(ctx, srv, a)
+	s.copyPlateCrops(ctx, srv, a)
 	return nil
 }
 
@@ -726,6 +730,77 @@ ORDER BY e.start_time DESC LIMIT $3`, srv.ID, maxThumbAttempts, thumbsPerPull)
 		})
 		if uerr != nil {
 			s.Log.ErrorContext(ctx, "events: store thumbnail key", "event_id", p.id, "error", uerr)
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+	}
+}
+
+// PlateCropKey is where the license plate crop of a plate read lives in object storage.
+func PlateCropKey(tenantID, serverID, readID uuid.UUID) string {
+	return fmt.Sprintf("tenant/%s/plates/%s/%s.jpg", tenantID, serverID, readID)
+}
+
+// copyPlateCrops copies plate crops of recognized plate reads to object storage so they survive
+// Frigate's retention cycles, emergency pruning, and server outages.
+func (s *Syncer) copyPlateCrops(ctx context.Context, srv db.FrigateServer, a frigate.Adapter) {
+	type pending struct {
+		id            uuid.UUID
+		remoteEventID string
+	}
+	var todo []pending
+	err := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		rows, err := tx.Query(ctx, `
+SELECT id, remote_event_id FROM lpr_reads
+WHERE server_id = $1 AND crop_key = '' AND crop_attempts < $2
+ORDER BY seen_at DESC LIMIT $3`, srv.ID, maxThumbAttempts, thumbsPerPull)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var p pending
+			if err := rows.Scan(&p.id, &p.remoteEventID); err != nil {
+				return err
+			}
+			todo = append(todo, p)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		s.Log.ErrorContext(ctx, "events: list pending plate crops", "server_id", srv.ID, "error", err)
+		return
+	}
+	for _, p := range todo {
+		resp, err := a.Media().Open(ctx, "/api/events/"+url.PathEscape(p.remoteEventID)+"/snapshot.jpg", url.Values{"crop": {"1"}}, nil)
+		key := ""
+		if err == nil {
+			if resp.StatusCode == http.StatusOK {
+				body, rerr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+				if rerr == nil && len(body) > 0 {
+					key = PlateCropKey(srv.TenantID, srv.ID, p.id)
+					ct := resp.Header.Get("Content-Type")
+					if ct == "" {
+						ct = "image/jpeg"
+					}
+					if err = s.Blobs.Put(ctx, key, body, ct); err != nil {
+						key = ""
+					}
+				}
+			}
+			resp.Body.Close()
+		}
+		if err != nil && !errors.Is(err, frigate.ErrNotFound) {
+			s.Log.DebugContext(ctx, "events: copy plate crop", "read_id", p.id, "error", err)
+		}
+		uerr := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE lpr_reads SET crop_key = $2, crop_attempts = crop_attempts + 1 WHERE id = $1`, p.id, key)
+			return err
+		})
+		if uerr != nil {
+			s.Log.ErrorContext(ctx, "events: store plate crop key", "read_id", p.id, "error", uerr)
 			return
 		}
 		if ctx.Err() != nil {

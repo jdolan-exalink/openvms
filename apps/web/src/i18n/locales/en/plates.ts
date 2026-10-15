@@ -35,5 +35,9 @@ const messages = {
   clipDone: "Ready",
   clipFailed: "Failed",
   clipUnsupported: "Your browser cannot play this video.",
+  cropTitle: "License plate crop (OpenVMS)",
+  cropAlt: "License plate crop for {plate}",
+  downloadCrop: "Download plate crop",
+  fullPhotoTitle: "Full camera snapshot",
 } as const;
 export default messages;

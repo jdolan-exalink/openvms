@@ -239,6 +239,7 @@ func (h *Handlers) ListPlateReads(ctx context.Context, r gen.ListPlateReadsReque
 			Id: pr.ID, SiteId: pr.SiteID, SiteName: pr.SiteName, ServerId: pr.ServerID, ServerName: pr.ServerName,
 			CameraId: pr.CameraID, CameraName: pr.CameraName, Plate: pr.Plate, PlateNormalized: pr.Normalized,
 			Score: score, Label: pr.Label, Zones: pr.Zones, SeenAt: pr.SeenAt, EventId: pr.EventID,
+			HasCrop: &pr.HasCrop,
 		}
 		if pr.Vehicle != nil {
 			item.Vehicle = &gen.VehicleAttributes{

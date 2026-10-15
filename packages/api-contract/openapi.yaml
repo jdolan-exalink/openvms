@@ -4969,6 +4969,9 @@ components:
         vehicle:
           $ref: "#/components/schemas/VehicleAttributes"
           description: Type and color of the vehicle that carried this plate, once enrichment has finished.
+        has_crop:
+          type: boolean
+          description: "True when the license plate crop is permanently archived in OpenVMS object storage."
     PlateReadPage:
       type: object
       required: [items]
