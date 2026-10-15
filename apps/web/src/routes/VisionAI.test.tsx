@@ -2,6 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { focusManager } from "@tanstack/react-query";
 import { json, renderPage, stubApi } from "@/test-utils";
+import { VISION_SLOTS_REFETCH_MS } from "@/lib/visionAi";
 import { DEFAULT_VISION_PREFS, loadVisionPrefs, saveVisionPrefs, visionPrefsKey } from "@/lib/visionAiPrefs";
 import { VisionAI } from "./VisionAI";
 
@@ -368,9 +369,10 @@ describe("VisionAI Page", () => {
         await waitFor(() => expect(sidebar.getByTestId("vision-event-placeholder-ev-cam-1")).toBeInTheDocument());
 
         slotsBody = { slots: [slot(0, "cam-1", { event_id: "ev-next" }), slot(1, null), slot(2, null), slot(3, null)] };
-        await vi.advanceTimersByTimeAsync(2100);
+        await vi.advanceTimersByTimeAsync(VISION_SLOTS_REFETCH_MS + 100);
         await waitFor(() => expect(sidebar.getByRole("img", { name })).toHaveAttribute("src", "/media/v1/events/ev-next/snapshot.jpg"));
         expect(sidebar.queryByTestId("vision-event-placeholder-ev-next")).not.toBeInTheDocument();
+        expect(sidebar.queryByTestId("vision-event-placeholder-ev-cam-1")).not.toBeInTheDocument();
       } finally {
         vi.useRealTimers();
       }
