@@ -214,6 +214,8 @@ describe("primary navigation and context header", () => {
     expect(more).toHaveAttribute("aria-expanded", "true");
     expect(within(sheet).getByRole("link", { name: "Servidores" })).toBeInTheDocument();
     expect(within(sheet).getByRole("link", { name: "Configuración" })).toBeInTheDocument();
+    // Vision AI lives behind "More" so Alarmas keeps its primary slot.
+    expect(within(sheet).getByRole("link", { name: "Vision AI" })).toBeInTheDocument();
     // Primary destinations stay in the bar only.
     expect(within(sheet).queryByRole("link", { name: "Eventos" })).not.toBeInTheDocument();
     expect(within(sheet).queryByRole("link", { name: "En vivo" })).not.toBeInTheDocument();
