@@ -38,6 +38,10 @@ Fixed layouts (1/4/9/16) either waste space with "Sin evento asignado" placehold
   Modes are not persisted (plain useState), so neither is Dinámica; pins share key with the 4×4 matrix.
 - Live (rebuilt web): with >16 active cameras the grid fills 4×4 with 16 live tiles; no console errors.
   Shrinking (fewer cameras) not observable live at current activity — covered by tests.
+- Native review (lineage review-45c3fb2af6afc5da): APPROVED, acknowledged. Addressed: duplicate camera keys
+  (pinned camera also in a ranked slot) → dynamic tiles deduped by camera; cap at 16 tiles; page test for
+  shrinking with a middle slot emptied (order kept, first player node not remounted). RED: dedupe and cap
+  tests failed; shrink test passed first (behavior already correct, coverage added). 45/45 GREEN.
 
 ## Next step
-RDD assess, push + PR (user decision).
+Push + PR (user decision).
