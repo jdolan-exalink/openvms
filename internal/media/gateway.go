@@ -28,6 +28,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/branding"
+	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/platform/httpx"
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
@@ -35,6 +36,12 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 	"github.com/jdolan-exalink/openvms/internal/watermark"
 )
+
+// Blobs stores media snapshots and plate crops; *objectstore.Store implements it.
+type Blobs interface {
+	Put(ctx context.Context, key string, body []byte, contentType string) error
+	Get(ctx context.Context, key string) ([]byte, string, error)
+}
 
 // Audit actions for video access (PRD §66).
 const (
@@ -64,6 +71,7 @@ type ActorFunc func(ctx context.Context) (authz.Actor, bool)
 type Gateway struct {
 	Svc   *Service
 	Actor ActorFunc
+	Blobs Blobs
 	// Branding resolves the owner name/logo burned into a plate detail photo download
 	// (PDW-3). Nil disables watermarking (download=1 still 500s with a logged error rather
 	// than silently shipping an un-watermarked file).
@@ -324,6 +332,7 @@ type lprRead struct {
 	ID            uuid.UUID
 	RemoteEventID string
 	SeenAt        time.Time
+	CropKey       string
 }
 
 func (g *Gateway) lprReadCamera(w http.ResponseWriter, r *http.Request, p authz.Permission) (authz.Actor, Camera, lprRead, bool) {
@@ -339,8 +348,8 @@ func (g *Gateway) lprReadCamera(w http.ResponseWriter, r *http.Request, p authz.
 	lr := lprRead{ID: id}
 	var cameraID uuid.UUID
 	err = g.Svc.Store.TxRaw(r.Context(), store.ScopeFor(a), func(tx pgx.Tx) error {
-		return tx.QueryRow(r.Context(), `SELECT camera_id, remote_event_id, seen_at FROM lpr_reads WHERE id = $1`, id).
-			Scan(&cameraID, &lr.RemoteEventID, &lr.SeenAt)
+		return tx.QueryRow(r.Context(), `SELECT camera_id, remote_event_id, seen_at, crop_key FROM lpr_reads WHERE id = $1`, id).
+			Scan(&cameraID, &lr.RemoteEventID, &lr.SeenAt, &lr.CropKey)
 	})
 	if err != nil {
 		g.fail(w, r, a, store.Classify(err))
@@ -378,23 +387,80 @@ func (g *Gateway) lprReadSnapshot(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	isCrop := r.URL.Query().Get("crop") == "1"
+	isDownload := r.URL.Query().Get("download") == "1"
+
+	// If a crop is requested without download watermark and already archived in OpenVMS object storage, serve directly:
+	if isCrop && !isDownload && lr.CropKey != "" && g.Blobs != nil {
+		if body, ct, err := g.Blobs.Get(r.Context(), lr.CropKey); err == nil && len(body) > 0 {
+			w.Header().Set("Content-Type", ct)
+			w.Header().Set("Cache-Control", "private, max-age=3600")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(body)
+			return
+		}
+	}
+
 	ad, err := g.Svc.Adapters.Get(r.Context(), cam.Server)
 	if err != nil {
+		// Fallback to archived crop if Frigate is unreachable:
+		if isCrop && !isDownload && lr.CropKey != "" && g.Blobs != nil {
+			if body, ct, berr := g.Blobs.Get(r.Context(), lr.CropKey); berr == nil && len(body) > 0 {
+				w.Header().Set("Content-Type", ct)
+				w.Header().Set("Cache-Control", "private, max-age=3600")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(body)
+				return
+			}
+		}
 		g.fail(w, r, a, err)
 		return
 	}
 	q := url.Values{"quality": {snapshotQuality(r.URL.Query().Get("quality"))}}
-	if r.URL.Query().Get("crop") == "1" {
+	if isCrop {
 		q.Set("crop", "1")
 	} else if r.URL.Query().Get("bbox") != "0" {
 		q.Set("bbox", "1")
 	}
 	resp, err := ad.Media().Open(r.Context(), "/api/events/"+url.PathEscape(lr.RemoteEventID)+"/snapshot.jpg", q, r.Header)
 	if err != nil {
+		// Fallback to archived crop if Frigate media endpoint failed:
+		if isCrop && !isDownload && lr.CropKey != "" && g.Blobs != nil {
+			if body, ct, berr := g.Blobs.Get(r.Context(), lr.CropKey); berr == nil && len(body) > 0 {
+				w.Header().Set("Content-Type", ct)
+				w.Header().Set("Cache-Control", "private, max-age=3600")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(body)
+				return
+			}
+		}
 		g.fail(w, r, a, err)
 		return
 	}
-	if r.URL.Query().Get("download") != "1" {
+	if !isDownload {
+		// When serving a fresh crop from Frigate, opportunistic archive to Blobs if not yet stored
+		if isCrop && lr.CropKey == "" && g.Blobs != nil && resp.StatusCode == http.StatusOK {
+			body, rerr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+			resp.Body.Close()
+			if rerr == nil && len(body) > 0 {
+				key := events.PlateCropKey(cam.TenantID, cam.Server.ID, lr.ID)
+				ct := resp.Header.Get("Content-Type")
+				if ct == "" {
+					ct = "image/jpeg"
+				}
+				if perr := g.Blobs.Put(r.Context(), key, body, ct); perr == nil {
+					_ = g.Svc.Store.TxRaw(r.Context(), store.ScopeFor(a), func(tx pgx.Tx) error {
+						_, uerr := tx.Exec(r.Context(), `UPDATE lpr_reads SET crop_key = $2 WHERE id = $1`, lr.ID, key)
+						return uerr
+					})
+				}
+				w.Header().Set("Content-Type", ct)
+				w.Header().Set("Cache-Control", "private, max-age=3600")
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(body)
+				return
+			}
+		}
 		relay(w, resp, "private, max-age=3600")
 		return
 	}

@@ -34,6 +34,11 @@ export function PlateReadCard({
           <span className="block truncate text-[11px] font-medium text-ink">{read.camera_name}</span>
           <span className="block font-mono text-[10px] text-muted">{fmtDateTime(read.seen_at)}</span>
         </span>
+        {read.has_crop && (
+          <span className="ml-auto rounded bg-emerald-500/10 px-1.5 py-0.5 text-[9px] font-medium text-emerald-600 dark:text-emerald-400" title="Almacenado permanentemente en OpenVMS">
+            Storage
+          </span>
+        )}
       </span>
       <VehicleFacts labels={read.label ? [read.label] : []} vehicle={read.vehicle} serverName={read.server_name} />
     </>

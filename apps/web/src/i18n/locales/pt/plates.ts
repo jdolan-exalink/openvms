@@ -35,5 +35,9 @@ const messages = {
   clipDone: "Pronta",
   clipFailed: "Falhou",
   clipUnsupported: "Seu navegador não pode reproduzir este vídeo.",
+  cropTitle: "Recorte de placa (OpenVMS)",
+  cropAlt: "Recorte da placa {plate}",
+  downloadCrop: "Baixar recorte",
+  fullPhotoTitle: "Captura completa da câmera",
 } as const;
 export default messages;
