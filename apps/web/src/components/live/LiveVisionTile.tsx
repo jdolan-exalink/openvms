@@ -19,7 +19,9 @@ export interface LiveVisionTileProps {
 
 export function LiveVisionTile({ vision, isFocused = false, className }: LiveVisionTileProps) {
   // Pinning freezes the slot's current assignment (client side).
-  const [pinnedSlot, setPinnedSlot] = useState<VisionAISlot | null>(null);
+  // The pin is scoped to the source it was taken from: a different source drops it.
+  const [pin, setPin] = useState<{ sourceId: string; slot: VisionAISlot } | null>(null);
+  const pinnedSlot = pin && pin.sourceId === vision.id ? pin.slot : null;
 
   const slotsQuery = useVisionSlots(visionSourceFromId(vision.id), "1");
   const rankedSlot = slotsQuery.data?.slots[0];
@@ -30,9 +32,9 @@ export function LiveVisionTile({ vision, isFocused = false, className }: LiveVis
 
   const togglePin = () => {
     if (pinnedSlot) {
-      setPinnedSlot(null);
+      setPin(null);
     } else if (activeSlot) {
-      setPinnedSlot(activeSlot);
+      setPin({ sourceId: vision.id, slot: activeSlot });
     }
   };
 

@@ -197,6 +197,14 @@ describe("VisionAI Page", () => {
     expect(screen.getByText(/Patente Detectada/i)).toBeInTheDocument();
   });
 
+  it("shows a no-permission notice in LPR mode when filled slots carry no plate", async () => {
+    slotsBody = { slots: [slot(0, "cam-1"), slot(1, "cam-2"), slot(2, null), slot(3, null)] };
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Modo LPR" }));
+    expect(await screen.findByText(/lecturas de patente no disponibles/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("vision-lpr-hud")).not.toBeInTheDocument();
+  });
+
   it("lists active events in the sidebar", async () => {
     setup();
     fireEvent.click(await screen.findByRole("button", { name: /Eventos Activos/i }));

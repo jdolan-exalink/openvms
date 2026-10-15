@@ -133,4 +133,21 @@ describe("LiveVisionTile", () => {
     fireEvent.click(screen.getByRole("button", { name: /Desfijar cámara/i }));
     await waitFor(() => expect(screen.getByTestId("mse-player")).toHaveAttribute("data-camera-id", "cam-9"));
   });
+
+  it("drops the pin when the vision source changes", async () => {
+    slotsBody = { slots: [filled("cam-1")] };
+    const view = renderWithQuery(<LiveVisionTile vision={{ id: "visionai:general", name: "Vision AI" }} />);
+    await screen.findByTestId("mse-player");
+    fireEvent.click(screen.getByRole("button", { name: /Fijar cámara/i }));
+    expect(await screen.findByRole("button", { name: /Desfijar cámara/i })).toBeInTheDocument();
+
+    slotsBody = { slots: [filled("cam-7")] };
+    view.rerender(
+      <QueryClientProvider client={view.queryClient}>
+        <LiveVisionTile vision={{ id: "visionai:personas", name: "Personas" }} />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(screen.getByTestId("mse-player")).toHaveAttribute("data-camera-id", "cam-7"));
+    expect(screen.getByRole("button", { name: /Fijar cámara/i })).toBeInTheDocument();
+  });
 });

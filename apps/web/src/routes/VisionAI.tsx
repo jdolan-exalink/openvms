@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Eye, Pin, PinOff, Maximize2, Minimize2, History, LayoutGrid, Sparkles,
-  CarFront, Bell, Check, X, Bug, Layers, RefreshCw,
+  CarFront, Bell, Check, X, Bug, Layers, RefreshCw, Scan,
 } from "lucide-react";
 import { MsePlayer } from "@/components/MsePlayer";
 import { Button, IconButton } from "@/components/ui";
@@ -107,6 +107,7 @@ export function VisionAI() {
     return sl;
   });
   const filled = slots.filter((sl) => sl.camera_id);
+  const lprSlots = filled.filter((sl) => sl.plate);
   const hasAnyCamera = serverSlots.some((sl) => sl.camera_id) || Object.keys(pins).length > 0;
 
   const togglePin = (slotIndex: number) => {
@@ -338,25 +339,39 @@ export function VisionAI() {
             </div>
           ) : mode === "lpr" ? (
             /* Specialized LPR Mode */
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 h-full overflow-y-auto">
-              {slots.filter((sl) => sl.camera_id && sl.plate).map((sl) => (
-                <div key={sl.slot} className="flex flex-col rounded-m3-lg bg-surface border border-line overflow-hidden shadow-xs">
-                  <div className="relative aspect-video bg-black/80">{renderSlot(sl, "main")}</div>
-                  <div data-testid="vision-lpr-hud" className="p-3 bg-surface-2 flex items-center justify-between gap-3 border-t border-line">
-                    <div>
-                      <div className="text-[10px] uppercase font-mono tracking-wider text-muted">Patente Detectada</div>
-                      <div className="text-xl font-bold font-mono text-ink tracking-widest">{sl.plate}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xs font-semibold text-primary">{sl.camera_name}</div>
-                      {sl.confidence !== undefined && (
-                        <div className="text-[10px] text-muted">Confianza: {Math.round(sl.confidence * 100)}%</div>
-                      )}
+            lprSlots.length === 0 ? (
+              <div data-testid="vision-lpr-empty" className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
+                <Scan className="size-6 opacity-40" />
+                {filled.length > 0 ? (
+                  <>
+                    <span>Lecturas de patente no disponibles</span>
+                    <span className="text-xs">No hay patentes visibles para tu usuario (se requiere permiso de LPR).</span>
+                  </>
+                ) : (
+                  <span>Sin lecturas de patente recientes</span>
+                )}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 h-full overflow-y-auto">
+                {lprSlots.map((sl) => (
+                  <div key={sl.slot} className="flex flex-col rounded-m3-lg bg-surface border border-line overflow-hidden shadow-xs">
+                    <div className="relative aspect-video bg-black/80">{renderSlot(sl, "main")}</div>
+                    <div data-testid="vision-lpr-hud" className="p-3 bg-surface-2 flex items-center justify-between gap-3 border-t border-line">
+                      <div>
+                        <div className="text-[10px] uppercase font-mono tracking-wider text-muted">Patente Detectada</div>
+                        <div className="text-xl font-bold font-mono text-ink tracking-widest">{sl.plate}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs font-semibold text-primary">{sl.camera_name}</div>
+                        {sl.confidence !== undefined && (
+                          <div className="text-[10px] text-muted">Confianza: {Math.round(sl.confidence * 100)}%</div>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
           ) : (
             /* Standard Matrix Mode (1, 4, 9, 16) */
             <div

@@ -62,22 +62,20 @@ func TestPGSourceStartAgeCap(t *testing.T) {
 func TestPGSourceWithoutLPRAccess(t *testing.T) {
 	env := demofix.Setup(t)
 	cam := env.Cameras["frigate-h01/acceso_norte"]
-	seedEvent(t, env, cam, "lpr-1", time.Minute, false)
+	id := seedEvent(t, env, cam, "lpr-1", time.Minute, false)
 
 	// "operador" holds events.view on the camera but not lpr.view.
 	rows, err := visionai.PGSource{Store: env.Store}.RecentEvents(context.Background(), env.Actor(t, "operador"), 10*time.Minute, time.Now())
 	if err != nil {
 		t.Fatalf("actor without lpr.view must not fail: %v", err)
 	}
-	if len(rows) != 1 || rows[0].PlatesAllowed {
-		t.Fatalf("want 1 row with plates disallowed, got %+v", rows)
-	}
+	assertSeededWithoutPlates(t, rows, id)
 }
 
 func TestLoadRowsNilLPRCameraList(t *testing.T) {
 	env := demofix.Setup(t)
 	cam := env.Cameras["frigate-h01/acceso_norte"]
-	seedEvent(t, env, cam, "nil-1", time.Minute, false)
+	id := seedEvent(t, env, cam, "nil-1", time.Minute, false)
 
 	var rows []visionai.EventRow
 	err := env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
@@ -88,7 +86,20 @@ func TestLoadRowsNilLPRCameraList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("nil lpr camera list must not fail: %v", err)
 	}
-	if len(rows) != 1 || rows[0].PlatesAllowed {
-		t.Fatalf("want 1 row with plates disallowed, got %+v", rows)
+	assertSeededWithoutPlates(t, rows, id)
+}
+
+// assertSeededWithoutPlates checks the seeded event is present with plates
+// disallowed, without depending on how many other rows the fixture holds.
+func assertSeededWithoutPlates(t *testing.T, rows []visionai.EventRow, id uuid.UUID) {
+	t.Helper()
+	for _, r := range rows {
+		if r.ID == id {
+			if r.PlatesAllowed {
+				t.Fatalf("seeded event %s must have plates disallowed", id)
+			}
+			return
+		}
 	}
+	t.Fatalf("seeded event %s missing from rows %+v", id, rows)
 }
