@@ -37,6 +37,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/bootstrap"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/control"
@@ -141,6 +142,9 @@ func run() error {
 	}
 
 	st := &dbstore.Store{Pool: pool}
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, cfg.AdminUsername, cfg.AdminPassword, log); err != nil {
+		return fmt.Errorf("initial admin: %w", err)
+	}
 	inv := inventory.New(st, sealer, log)
 	inv.Blobs = store
 	adapters := inventory.NewAdapters(inv)

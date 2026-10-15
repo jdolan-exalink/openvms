@@ -8,6 +8,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,20 +53,8 @@ func PlatformAdmin(ctx context.Context, st *store.Store, username string) (authz
 	var actor authz.Actor
 	var token string
 	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
-		u, err := q.GetUserByUsername(ctx, username)
+		u, err := ensurePlatformAdmin(ctx, q, username)
 		if err != nil {
-			if !errors.Is(store.Classify(err), store.ErrNotFound) {
-				return err
-			}
-			u, err = q.CreateUser(ctx, db.CreateUserParams{Username: username, DisplayName: username})
-			if err != nil {
-				return fmt.Errorf("create user: %w", err)
-			}
-		}
-		if u.TenantID != nil {
-			return fmt.Errorf("user %q belongs to a tenant; pick another name", username)
-		}
-		if _, err := reconcileCatalogGrants(ctx, q, u.ID); err != nil {
 			return err
 		}
 		token, err = IssueToken(ctx, q, u.ID, "bootstrap", 0)
@@ -72,6 +62,89 @@ func PlatformAdmin(ctx context.Context, st *store.Store, username string) (authz
 		return err
 	})
 	return actor, token, err
+}
+
+// ensurePlatformAdmin creates (or reuses) a platform user and reconciles every
+// platform catalog grant. It issues no token.
+func ensurePlatformAdmin(ctx context.Context, q *db.Queries, username string) (db.User, error) {
+	u, err := q.GetUserByUsername(ctx, username)
+	if err != nil {
+		if !errors.Is(store.Classify(err), store.ErrNotFound) {
+			return db.User{}, err
+		}
+		u, err = q.CreateUser(ctx, db.CreateUserParams{Username: username, DisplayName: username})
+		if err != nil {
+			return db.User{}, fmt.Errorf("create user: %w", err)
+		}
+	}
+	if u.TenantID != nil {
+		return db.User{}, fmt.Errorf("user %q belongs to a tenant; pick another name", username)
+	}
+	if _, err := reconcileCatalogGrants(ctx, q, u.ID); err != nil {
+		return db.User{}, err
+	}
+	return u, nil
+}
+
+// DefaultAdminPassword is the initial admin password when OPENVMS_ADMIN_PASSWORD is unset.
+// It is public: an install still using it is warned about on every start.
+const DefaultAdminPassword = "openvms123"
+
+// EnsureInitialAdmin creates the platform admin on a fresh install so the first login needs
+// no vmsctl step. It creates or modifies nothing when a user with that name exists or any
+// platform user already has a password, so an existing install is never reset. A default
+// password forces a change at first login; a password failing the policy is logged and
+// skipped. It warns while the named admin still uses the default password.
+func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password string, log *slog.Logger) error {
+	if err := identity.CheckPolicy(password, username); err != nil {
+		log.Error("initial admin not created: OPENVMS_ADMIN_PASSWORD rejected", "username", username, "error", err)
+		return nil
+	}
+	created, defaultInUse := false, false
+	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		users, err := q.ListUsers(ctx, db.ListUsersParams{IncludePlatform: true})
+		if err != nil {
+			return err
+		}
+		hasPassword, exists := false, false
+		for _, u := range users {
+			if strings.EqualFold(u.Username, username) {
+				exists = true
+				defaultInUse = u.TenantID == nil && identity.VerifyPassword(u.PasswordHash, DefaultAdminPassword)
+			}
+			hasPassword = hasPassword || (u.TenantID == nil && u.PasswordHash != "")
+		}
+		if exists || hasPassword {
+			return nil
+		}
+		u, err := ensurePlatformAdmin(ctx, q, username)
+		if err != nil {
+			return err
+		}
+		hash, err := identity.HashPassword(password)
+		if err != nil {
+			return err
+		}
+		mustChange := password == DefaultAdminPassword
+		if err := q.SetPassword(ctx, db.SetPasswordParams{ID: u.ID, PasswordHash: hash, MustChangePassword: mustChange}); err != nil {
+			return err
+		}
+		created, defaultInUse = true, mustChange
+		return nil
+	})
+	if errors.Is(store.Classify(err), store.ErrConflict) {
+		return nil // a concurrent start created it first
+	}
+	if err != nil {
+		return err
+	}
+	if created {
+		log.Info("initial admin created", "username", username)
+	}
+	if defaultInUse {
+		log.Warn("initial admin still uses the default password; change it", "username", username)
+	}
+	return nil
 }
 
 // SyncPlatformAdmin adds missing platform-scope catalog ALLOW grants to an

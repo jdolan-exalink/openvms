@@ -77,6 +77,11 @@ type Config struct {
 	ExportGlobalBandwidthMbps int
 	ExportServerBandwidthMbps int
 
+	// AdminUsername and AdminPassword (OPENVMS_ADMIN_USERNAME / OPENVMS_ADMIN_PASSWORD) seed the
+	// first platform admin on a fresh install. The default password is public and forces a change.
+	AdminUsername string
+	AdminPassword string
+
 	// WorkerURL is the worker probe address. The API reads ONNX throughput from it.
 	WorkerURL string
 }
@@ -138,6 +143,8 @@ func Load(service string) (Config, error) {
 		NATSURL:                     str("NATS_URL", "nats://localhost:4222"),
 		ShutdownTimeout:             duration("SHUTDOWN_TIMEOUT", 15*time.Second),
 		WorkerURL:                   str("WORKER_URL", "http://worker:8081"),
+		AdminUsername:               str("OPENVMS_ADMIN_USERNAME", "admin"),
+		AdminPassword:               str("OPENVMS_ADMIN_PASSWORD", "openvms123"),
 		TrustForwardedFor:           boolean("TRUST_FORWARDED_FOR", false),
 		HealthInterval:              duration("HEALTH_INTERVAL", 30*time.Second),
 		EventSyncInterval:           duration("EVENT_SYNC_INTERVAL", 5*time.Second),
