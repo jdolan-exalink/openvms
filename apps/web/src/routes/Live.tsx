@@ -12,6 +12,7 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { MsePlayer } from "@/components/MsePlayer";
+import { QualityBadge } from "@/components/QualityBadge";
 import { TelemetryOverlay } from "@/components/live/TelemetryOverlay";
 import { telemetryRuntime, useAdaptiveVideoPolicy } from "@/lib/telemetry";
 import { LAYER_KEYS } from "@/components/clientStation/keys";
@@ -49,6 +50,7 @@ import { useTouchDoubleTap } from "@/lib/useTouchDoubleTap";
 import { useCameraFolders } from "@/lib/useCameraFolders";
 import { useRecSession } from "@/lib/useRecSession";
 import { usePlayerSessionManager } from "@/lib/live/PlayerSessionProvider";
+import { IDENTITY_ZOOM, type DigitalZoom } from "@/lib/live/digitalZoom";
 
 /** copyViewName picks «Nombre (copia)» or «Nombre (copia 2)» so a duplicate stays unique. */
 /** Empties a restored tile whose saved fisheye view no longer exists (e.g. removed quadrant views). */
@@ -108,7 +110,6 @@ function LiveDesktop() {
   const selectedRef = useRef(selected);
   const qualityOverridesRef = useRef(qualityOverrides);
   const qualityTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
-  const maximizeTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const maximizedCameraIdsRef = useRef(new Set<string>());
   const [invalidatedOverrideKeys, setInvalidatedOverrideKeys] = useState<Set<string>>(() => new Set());
   const previousFocusedCameraRef = useRef<string | undefined>(undefined);
@@ -748,8 +749,6 @@ function LiveDesktop() {
 
   useEffect(() => {
     const previous = previousFocusedCameraRef.current;
-    clearTimeout(maximizeTimerRef.current);
-    maximizeTimerRef.current = undefined;
     if (previous && previous !== focusedCameraId) {
       maximizedCameraIdsRef.current.delete(previous);
       if (qualityOverridesRef.current[previous]?.source === "maximize") {
@@ -766,14 +765,12 @@ function LiveDesktop() {
     previousFocusedCameraRef.current = focusedCameraId;
     if (focusedCameraId) {
       const cameraId = focusedCameraId;
-      maximizeTimerRef.current = setTimeout(() => {
-        if (previousFocusedCameraRef.current !== cameraId) return;
-        maximizedCameraIdsRef.current.add(cameraId);
-        if (qualityOverridesRef.current[cameraId]?.source !== "manual") {
-          clearQualityTimer(cameraId);
-          setQualityOverride(cameraId, "main", "maximize");
-        }
-      }, 5_001);
+      // Promote right away; the quality handoff keeps the old frame until the main stream paints.
+      maximizedCameraIdsRef.current.add(cameraId);
+      if (qualityOverridesRef.current[cameraId]?.source !== "manual") {
+        clearQualityTimer(cameraId);
+        setQualityOverride(cameraId, "main", "maximize");
+      }
     }
   }, [focusedCameraId, playerSessionManager]);
 
@@ -802,7 +799,6 @@ function LiveDesktop() {
       }
       if (validCount === 0) {
         clearQualityTimer(cameraId);
-        if (previousFocusedCameraRef.current === cameraId) clearTimeout(maximizeTimerRef.current);
         setQualityOverrides((current) => {
           if (!(cameraId in current)) return current;
           const next = { ...current };
@@ -816,7 +812,6 @@ function LiveDesktop() {
   useEffect(() => () => {
     for (const timer of qualityTimersRef.current.values()) clearTimeout(timer);
     qualityTimersRef.current.clear();
-    clearTimeout(maximizeTimerRef.current);
   }, []);
 
   const qualityOverrideFor = (tile: Tile): Quality | undefined => {
@@ -1158,6 +1153,7 @@ function FisheyeQualityLayers({
   quality,
   qualityOverride,
   identity,
+  onTargetReady,
 }: {
   cameraId: string;
   config: ReturnType<typeof getFisheyeConfig>;
@@ -1168,6 +1164,8 @@ function FisheyeQualityLayers({
   quality: Quality;
   qualityOverride?: Quality;
   identity: string;
+  /** The target quality has a drawable frame and is now the visible one. */
+  onTargetReady?: (quality: Quality) => void;
 }) {
   const [frameReady, setFrameReady] = useState<{ requested: Quality | undefined; quality: Quality | null }>({ requested: undefined, quality: null });
   const readyQuality = frameReady.requested === qualityOverride ? frameReady.quality : null;
@@ -1196,7 +1194,10 @@ function FisheyeQualityLayers({
             initialMode={initialMode}
             targetViewId={targetViewId}
             quality={qualityOverride}
-            onFirstFrame={() => setFrameReady({ requested: qualityOverride, quality: qualityOverride })}
+            onFirstFrame={() => {
+              setFrameReady({ requested: qualityOverride, quality: qualityOverride });
+              onTargetReady?.(qualityOverride);
+            }}
             className="size-full"
           />
         </div>
@@ -1213,6 +1214,9 @@ function QualityTargetSurface({
   serverId,
   active,
   suspended,
+  zoom,
+  onZoomChange,
+  onReady,
 }: {
   cameraId: string;
   quality: Quality;
@@ -1221,6 +1225,10 @@ function QualityTargetSurface({
   serverId?: string;
   active: boolean;
   suspended: boolean;
+  zoom: DigitalZoom;
+  onZoomChange: (zoom: DigitalZoom) => void;
+  /** The target has a drawable frame and is now the visible layer. */
+  onReady: (quality: Quality) => void;
 }) {
   const [ready, setReady] = useState(false);
   return (
@@ -1239,9 +1247,14 @@ function QualityTargetSurface({
         suspended={suspended}
         objectFit="fill"
         className="size-full"
-        onFirstFrame={() => setReady(true)}
+        onFirstFrame={() => {
+          setReady(true);
+          onReady(quality);
+        }}
         hideStatusOverlay
         hideSurfaceUntilFrame
+        zoom={zoom}
+        onZoomChange={onZoomChange}
       />
     </div>
   );
@@ -1305,6 +1318,21 @@ function GridTile({
 }) {
   const tr = useT();
   const { visible: overlayVisible, reveal: revealOverlay, scheduleHide: scheduleOverlayHide } = useTileOverlayVisibility();
+  // Digital zoom/pan belongs to the tile, not to a quality layer, so it survives the sub -> main handoff.
+  const [tileZoom, setTileZoom] = useState<DigitalZoom>(IDENTITY_ZOOM);
+  const tileCameraId = tile && "camera_id" in tile ? tile.camera_id : null;
+  const [zoomCameraId, setZoomCameraId] = useState(tileCameraId);
+  if (zoomCameraId !== tileCameraId) {
+    setZoomCameraId(tileCameraId);
+    setTileZoom(IDENTITY_ZOOM);
+  }
+  // Quality badge: the target counts as visible only after its first drawable frame.
+  const [targetReady, setTargetReady] = useState<Quality | null>(null);
+  const handoffRequested = qualityOverride !== undefined && qualityOverride !== quality;
+  if (!handoffRequested && targetReady !== null) setTargetReady(null);
+  const targetVisible = handoffRequested && targetReady === qualityOverride;
+  const visibleQuality: Quality = targetVisible ? qualityOverride : quality;
+  const pendingQuality: Quality | null = handoffRequested && !targetVisible ? qualityOverride : null;
   const [fisheyeActionsAt, setFisheyeActionsAt] = useState<{ x: number; y: number; opener: HTMLButtonElement } | null>(null);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: tileDragId(index), disabled: persistent && (isHidden || isFocused) });
   const style: CSSProperties = { transform: CSS.Transform.toString(transform), transition: trimVisualWork ? undefined : transition, ...placement };
@@ -1418,11 +1446,12 @@ function GridTile({
                   quality={quality}
                   qualityOverride={qualityOverride}
                   identity={`${tile.camera_id}-${tile.fisheye_view_id ?? "root"}-${feConfig.defaultMode}-${fisheyeVersion ?? 0}`}
+                  onTargetReady={setTargetReady}
                 />
               );
             }
 
-            const basePlayer = <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" />;
+            const basePlayer = <MsePlayer cameraId={tile.camera_id} quality={quality} persistent={persistent} surface={surface} serverId={serverId} active={!isHidden} suspended={suspended} objectFit="fill" className="size-full" zoom={tileZoom} onZoomChange={setTileZoom} />;
             // The wrapper is rendered whether or not a target layer exists, so the base player keeps its
             // position in the tree and is never remounted (its session closed) when the target appears or goes away.
             const showTarget = qualityOverride !== undefined && qualityOverride !== quality;
@@ -1439,6 +1468,9 @@ function GridTile({
                     serverId={serverId}
                     active={!isHidden}
                     suspended={suspended}
+                    zoom={tileZoom}
+                    onZoomChange={setTileZoom}
+                    onReady={setTargetReady}
                   />
                 )}
               </div>
@@ -1472,6 +1504,7 @@ function GridTile({
                       {specificView.yaw}°
                     </span>
                   )}
+                  <QualityBadge visible={visibleQuality} pending={pendingQuality} />
                   <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">
                     <span className={cn("size-2 rounded-full", status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-warn")} />
                     <Icon icon={status === "online" ? CircleCheck : status === "offline" ? CircleX : CircleHelp} size={12} className={status === "offline" ? "text-bad" : undefined} />

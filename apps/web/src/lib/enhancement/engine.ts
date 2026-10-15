@@ -13,6 +13,17 @@ import type {
   RoiRect,
 } from "./types";
 
+const ROI_EPSILON = 0.005;
+
+function sameRoi(a: RoiRect, b: RoiRect): boolean {
+  return (
+    Math.abs(a.x - b.x) < ROI_EPSILON &&
+    Math.abs(a.y - b.y) < ROI_EPSILON &&
+    Math.abs(a.width - b.width) < ROI_EPSILON &&
+    Math.abs(a.height - b.height) < ROI_EPSILON
+  );
+}
+
 export class ImageEnhancementEngineImpl implements ImageEnhancementEngine {
   private _mode: EnhancementMode = "auto";
   private currentAdjustments: EnhancementAdjustments = { ...DEFAULT_ADJUSTMENTS };
@@ -21,6 +32,9 @@ export class ImageEnhancementEngineImpl implements ImageEnhancementEngine {
 
   private lastAnalysisTime = 0;
   private readonly analysisIntervalMs = 250; // Throttled analysis (4 Hz) to prevent UI/CPU overhead
+  /** Minimum gap between two analyses forced by a changed visible region (zoom/pan). */
+  private readonly regionChangeIntervalMs = 50;
+  private lastAnalysedRoi: RoiRect | null = null;
   private lastStats: ImageStats | null = null;
 
   get mode(): EnhancementMode {
@@ -92,8 +106,13 @@ export class ImageEnhancementEngineImpl implements ImageEnhancementEngine {
     }
 
     // AUTO mode:
-    if (nowMs - this.lastAnalysisTime >= this.analysisIntervalMs) {
+    // A different visible region (zoom/pan) is analysed right away, so zooming into a dark area
+    // brightens it without waiting for the next tick; the cost stays one small sample.
+    const sinceLast = nowMs - this.lastAnalysisTime;
+    const regionChanged = this.lastAnalysedRoi !== null && !sameRoi(this.lastAnalysedRoi, roi);
+    if (sinceLast >= this.analysisIntervalMs || (regionChanged && sinceLast >= this.regionChangeIntervalMs)) {
       this.lastAnalysisTime = nowMs;
+      this.lastAnalysedRoi = { ...roi };
       const stats = this.analyze(source, roi);
       if (stats) {
         this.targetAdjustments = this.calculateAdjustments(stats, roi);
@@ -112,6 +131,7 @@ export class ImageEnhancementEngineImpl implements ImageEnhancementEngine {
     this.currentAdjustments = { ...DEFAULT_ADJUSTMENTS };
     this.lastStats = null;
     this.lastAnalysisTime = 0;
+    this.lastAnalysedRoi = null;
   }
 
   destroy(): void {

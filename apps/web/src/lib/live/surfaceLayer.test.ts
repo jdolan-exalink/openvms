@@ -178,4 +178,19 @@ describe("VideoSurfaceLayerController", () => {
     layer.setPictureZoom(session, { scale: 1, x: 0, y: 0 });
     expect(stage.style.transform).toBe("");
   });
+
+  it("applies the enhancement filter to the inner stage and clears it", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const layer = new VideoSurfaceLayerController();
+    layer.setHost(host);
+    const { session, video } = fakeSession();
+    layer.register(session, slotAt({ left: 0, top: 0, width: 160, height: 90 }));
+    const stage = video.parentElement as HTMLElement;
+    layer.setPictureFilter(session, "brightness(120%)");
+    expect(stage.style.filter).toBe("brightness(120%)");
+    expect(video.style.filter).toBe("");
+    layer.setPictureFilter(session, "none");
+    expect(stage.style.filter).toBe("");
+  });
 });

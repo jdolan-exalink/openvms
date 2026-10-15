@@ -43,6 +43,9 @@ type MsePlayerProps = {
   hideStatusOverlay?: boolean;
   /** Keep a persistent video-surface-layer target non-occluding until its first drawable frame. */
   hideSurfaceUntilFrame?: boolean;
+  /** Zoom/pan owned by the tile so the sub and main layers of one tile always show the same picture region. */
+  zoom?: DigitalZoom;
+  onZoomChange?: (zoom: DigitalZoom) => void;
 };
 
 /**
@@ -163,7 +166,7 @@ function useInViewport(ref: React.RefObject<HTMLElement | null>): boolean {
 }
 
 /** PersistentMsePlayer shows a manager-owned session; unmounting only detaches the `<video>`. */
-function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, onFirstFrame, hideStatusOverlay, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, onFirstFrame, hideStatusOverlay, objectFit, zoom, onZoomChange }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const frame = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const layer = useSurfaceLayer();
@@ -180,14 +183,14 @@ function PersistentMsePlayer({ cameraId, quality = "sub", serverId, active, susp
     };
   }, [session, muted, layer, objectFit]);
   return (
-    <ZoomFrame frameRef={frame} stageRef={stage} resetKey={`${cameraId}:${quality}`} className={className}>
+    <ZoomFrame frameRef={frame} stageRef={stage} resetKey={`${cameraId}:${quality}`} className={className} zoom={zoom} onZoomChange={onZoomChange}>
       <PlayerChrome snapshot={snapshot} cameraId={cameraId} onRetry={() => session?.retryNow()} hideStatusOverlay={hideStatusOverlay} />
     </ZoomFrame>
   );
 }
 
 /** SurfaceMsePlayer leaves the `<video>` in the VideoSurfaceLayer and only reserves its slot here. */
-function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, onFirstFrame, hideStatusOverlay, hideSurfaceUntilFrame = false, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspended, className, muted = true, onError, onFirstFrame, hideStatusOverlay, hideSurfaceUntilFrame = false, objectFit, zoom, onZoomChange }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const frame = useRef<HTMLDivElement>(null);
   const layer = useSurfaceLayer();
   const [surfaceReady, setSurfaceReady] = useState(!hideSurfaceUntilFrame);
@@ -203,18 +206,25 @@ function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspend
     session?.setObjectFit(objectFit);
   }, [session, objectFit]);
   const onZoom = useCallback(
-    (zoom: DigitalZoom) => {
-      if (session) layer?.setPictureZoom(session, zoom);
+    (next: DigitalZoom) => {
+      if (session) layer?.setPictureZoom(session, next);
     },
     [session, layer],
   );
+  const onEnhance = useCallback(
+    (filter: string) => {
+      if (session) layer?.setPictureFilter(session, filter);
+    },
+    [session, layer],
+  );
+  const mediaSource = useCallback(() => session?.video ?? null, [session]);
   useEffect(() => {
     if (!session || !layer) return;
     return () => layer.setPictureZoom(session, IDENTITY_ZOOM);
   }, [session, layer]);
   const showing = snapshot.state === "ACTIVE" || snapshot.state === "WARM";
   return (
-    <ZoomFrame frameRef={frame} resetKey={`${cameraId}:${quality}`} className={className} scalePicture={false} onZoom={onZoom}>
+    <ZoomFrame frameRef={frame} resetKey={`${cameraId}:${quality}`} className={className} scalePicture={false} onZoom={onZoom} mediaSource={mediaSource} onEnhance={onEnhance} zoom={zoom} onZoomChange={onZoomChange}>
       <SurfaceSlot session={session} className="absolute inset-0" visible={surfaceReady} />
       {!hideStatusOverlay && !showing && <PlayerStatusOverlay cameraId={cameraId} snapshot={snapshot} onRetry={() => session?.retryNow()} />}
     </ZoomFrame>
@@ -222,7 +232,7 @@ function SurfaceMsePlayer({ cameraId, quality = "sub", serverId, active, suspend
 }
 
 /** PrivateMsePlayer owns its session: it closes with the component (the legacy behaviour). */
-function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, onError, onFirstFrame, hideStatusOverlay, objectFit }: Omit<MsePlayerProps, "persistent" | "surface">) {
+function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, onError, onFirstFrame, hideStatusOverlay, objectFit, zoom, onZoomChange }: Omit<MsePlayerProps, "persistent" | "surface">) {
   const stage = useRef<HTMLDivElement>(null);
   const session = useRef<PlayerSession | null>(null);
   const [snapshot, setSnapshot] = useState<SessionSnapshot>(IDLE_SNAPSHOT);
@@ -266,7 +276,7 @@ function PrivateMsePlayer({ cameraId, quality = "sub", className, muted = true, 
   }, [cameraId, quality, objectFit]);
 
   return (
-    <ZoomFrame stageRef={stage} resetKey={`${cameraId}:${quality}`} className={className}>
+    <ZoomFrame stageRef={stage} resetKey={`${cameraId}:${quality}`} className={className} zoom={zoom} onZoomChange={onZoomChange}>
       <PlayerChrome snapshot={snapshot} hideStatusOverlay={hideStatusOverlay} />
     </ZoomFrame>
   );

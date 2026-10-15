@@ -166,6 +166,16 @@ export class VideoSurfaceLayerController {
     entry.stage.style.transform = zoomTransform(zoom);
   }
 
+  /**
+   * setPictureFilter applies the visual-enhancement CSS filter to the inner stage of a session
+   * (the stage is zoomed too, so the filter follows the zoomed picture). "none" clears it.
+   */
+  setPictureFilter(session: PlayerSession, filter: string): void {
+    const entry = this.entries.get(session);
+    if (!entry) return;
+    entry.stage.style.filter = filter === "none" ? "" : filter;
+  }
+
   /** layoutNow repositions every video synchronously (used by tests and after registration). */
   layoutNow(): boolean {
     let changed = false;
