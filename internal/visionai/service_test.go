@@ -2,108 +2,137 @@ package visionai
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/jdolan-exalink/openvms/internal/authz"
 )
 
-func TestVisionService(t *testing.T) {
-	tenantID := uuid.New()
-	cam1 := uuid.New()
+type fakeSource struct {
+	rows  []EventRow
+	err   error
+	calls int
+}
 
-	svc := NewService(nil)
+func (f *fakeSource) RecentEvents(context.Context, authz.Actor, time.Duration, time.Time) ([]EventRow, error) {
+	f.calls++
+	return f.rows, f.err
+}
 
+func tenantActor() authz.Actor {
+	tid := uuid.New()
+	return authz.Actor{UserID: uuid.New(), TenantID: &tid}
+}
+
+func row(cam uuid.UUID, name string, start time.Time, labels ...string) EventRow {
+	return EventRow{ID: uuid.New(), CameraID: cam, CameraName: name, Severity: "detection", Labels: labels, StartTime: start}
+}
+
+func TestServiceSlots(t *testing.T) {
+	now := time.Date(2026, 10, 15, 10, 0, 0, 0, time.UTC)
+	cam1, cam2 := uuid.New(), uuid.New()
 	ctx := context.Background()
 
-	t.Run("creates default config and returns initialized slots", func(t *testing.T) {
-		configs, err := svc.ListConfigs(ctx, tenantID)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if len(configs) < 1 {
-			t.Fatalf("expected at least default config, got %d", len(configs))
-		}
+	newSvc := func(src *fakeSource) (*Service, *time.Time) {
+		clock := now
+		svc := NewService(src)
+		svc.Clock = func() time.Time { return clock }
+		return svc, &clock
+	}
 
-		def := configs[0]
-		slots, err := svc.GetSlots(ctx, tenantID, def.ID)
+	t.Run("ranks real events into slots, person above car", func(t *testing.T) {
+		src := &fakeSource{rows: []EventRow{
+			row(cam1, "Car cam", now.Add(-10*time.Second), "car"),
+			row(cam2, "Person cam", now.Add(-5*time.Second), "person"),
+		}}
+		svc, _ := newSvc(src)
+		res, err := svc.Slots(ctx, tenantActor(), "general", "4")
 		if err != nil {
-			t.Fatalf("unexpected error getting slots: %v", err)
+			t.Fatal(err)
 		}
-		if len(slots) != 4 {
-			t.Fatalf("expected 4 default slots, got %d", len(slots))
+		if len(res.Slots) != 4 || res.Slots[0].CameraID != cam2 || res.Slots[1].CameraID != cam1 {
+			t.Fatalf("unexpected slots: %+v", res.Slots)
+		}
+		if res.Source != "general" || res.Layout != "4" || !res.GeneratedAt.Equal(now) {
+			t.Fatalf("unexpected envelope: %+v", res)
 		}
 	})
 
-	t.Run("ingests events and updates slots in real time", func(t *testing.T) {
-		defConfig, _ := svc.GetDefaultConfig(ctx, tenantID)
-
-		subCh := svc.Subscribe(tenantID, defConfig.ID)
-
-		now := time.Now()
-		svc.IngestEvent(ctx, VisionEvent{
-			TenantID:   tenantID,
-			CameraID:   cam1,
-			CameraName: "Cam 1",
-			Object:     "person",
-			Confidence: 0.95,
-			Timestamp:  now,
-		})
-
-		select {
-		case update := <-subCh:
-			if len(update) != 4 {
-				t.Fatalf("expected 4 slots in update, got %d", len(update))
-			}
-			if update[0].CameraID != cam1 {
-				t.Fatalf("expected slot 0 to hold cam1, got %v", update[0].CameraID)
-			}
-		case <-time.After(500 * time.Millisecond):
-			t.Fatalf("timed out waiting for slot update broadcast")
+	t.Run("source preset filters events", func(t *testing.T) {
+		src := &fakeSource{rows: []EventRow{row(cam1, "Car cam", now, "car"), row(cam2, "Person cam", now, "person")}}
+		svc, _ := newSvc(src)
+		res, err := svc.Slots(ctx, tenantActor(), "personas", "4")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Slots[0].CameraID != cam2 || res.Slots[1].CameraID != uuid.Nil {
+			t.Fatalf("personas must only show the person camera: %+v", res.Slots)
 		}
 	})
 
-	t.Run("pins a slot through service", func(t *testing.T) {
-		defConfig, _ := svc.GetDefaultConfig(ctx, tenantID)
-
-		err := svc.SetPin(ctx, tenantID, defConfig.ID, 0, true)
-		if err != nil {
-			t.Fatalf("unexpected error pinning slot: %v", err)
+	t.Run("same actor keeps allocator state across calls; other actors are isolated", func(t *testing.T) {
+		src := &fakeSource{rows: []EventRow{row(cam1, "A", now, "person")}}
+		svc, clock := newSvc(src)
+		a := tenantActor()
+		if _, err := svc.Slots(ctx, a, "general", "4"); err != nil {
+			t.Fatal(err)
 		}
-
-		slots, _ := svc.GetSlots(ctx, tenantID, defConfig.ID)
-		if !slots[0].Pinned {
-			t.Fatalf("expected slot 0 to be pinned")
+		// Events vanish, but the slot is protected until max display passes.
+		src.rows = nil
+		*clock = now.Add(10 * time.Second)
+		res, _ := svc.Slots(ctx, a, "general", "4")
+		if res.Slots[0].CameraID != cam1 {
+			t.Fatalf("session state lost between calls")
+		}
+		other, _ := svc.Slots(ctx, tenantActor(), "general", "4")
+		if other.Slots[0].CameraID != uuid.Nil {
+			t.Fatalf("session leaked across actors")
+		}
+		if svc.SessionCount() != 2 {
+			t.Fatalf("sessions = %d, want 2", svc.SessionCount())
 		}
 	})
 
-	t.Run("saves custom configuration and initializes its allocator", func(t *testing.T) {
-		custom := VisionConfig{
-			TenantID:          tenantID,
-			Name:              "Vision AI Perimetro",
-			Mode:              "focus",
-			Layout:            "focus",
-			Objects:           []string{"person"},
-			Zones:             []string{"perimeter"},
-			MinDisplaySeconds: 10,
-			MaxDisplaySeconds: 60,
-			CooldownSeconds:   15,
+	t.Run("idle sessions are evicted on access", func(t *testing.T) {
+		src := &fakeSource{rows: []EventRow{row(cam1, "A", now, "person")}}
+		svc, clock := newSvc(src)
+		a := tenantActor()
+		_, _ = svc.Slots(ctx, a, "general", "4")
+		*clock = now.Add(SessionIdleTTL + time.Second)
+		_, _ = svc.Slots(ctx, tenantActor(), "general", "4")
+		if svc.SessionCount() != 1 {
+			t.Fatalf("sessions = %d, want idle one evicted", svc.SessionCount())
 		}
+	})
 
-		saved, err := svc.SaveConfig(ctx, custom)
-		if err != nil {
-			t.Fatalf("unexpected error saving config: %v", err)
+	t.Run("validates source and layout before touching the source", func(t *testing.T) {
+		src := &fakeSource{}
+		svc, _ := newSvc(src)
+		var ve *ValidationError
+		if _, err := svc.Slots(ctx, tenantActor(), "bogus", "4"); !errors.As(err, &ve) {
+			t.Fatalf("err = %v", err)
 		}
-		if saved.ID == "" {
-			t.Fatalf("expected generated ID")
+		if src.calls != 0 {
+			t.Fatalf("source queried despite invalid input")
 		}
+	})
 
-		slots, err := svc.GetSlots(ctx, tenantID, saved.ID)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
+	t.Run("source errors propagate", func(t *testing.T) {
+		boom := errors.New("boom")
+		svc, _ := newSvc(&fakeSource{err: boom})
+		if _, err := svc.Slots(ctx, tenantActor(), "general", "4"); !errors.Is(err, boom) {
+			t.Fatalf("err = %v", err)
 		}
-		if len(slots) != 5 {
-			t.Fatalf("expected 5 slots for focus mode, got %d", len(slots))
+	})
+
+	t.Run("platform actors get their own session scope", func(t *testing.T) {
+		src := &fakeSource{rows: []EventRow{row(cam1, "A", now, "person")}}
+		svc, _ := newSvc(src)
+		if _, err := svc.Slots(ctx, authz.Actor{UserID: uuid.New()}, "general", "1"); err != nil {
+			t.Fatal(err)
 		}
 	})
 }

@@ -1,8 +1,14 @@
 package visionai
 
 import (
+	"math"
 	"strings"
 	"time"
+)
+
+const (
+	recencyActiveBonus = 20.0
+	recencyEndedFloor  = -30.0
 )
 
 // CameraHistory tracks when a camera was shown and when it exited.
@@ -76,12 +82,24 @@ func (s *ScoringEngine) CalculateScore(event VisionEvent, history CameraHistory,
 		breakdown["watchlist"] = 80.0
 	}
 
-	// 6. Already visible penalty
+	// 6. Recency: running events rank above ended ones, which decay by one point per ten seconds
+	// down to a floor. Events with unknown timing (zero StartTime) get no term.
+	if !event.StartTime.IsZero() {
+		if event.EndTime == nil {
+			breakdown["recency"] = recencyActiveBonus
+		} else if since := now.Sub(*event.EndTime).Seconds(); since > 0 {
+			breakdown["recency"] = math.Max(recencyEndedFloor, -since/10)
+		} else {
+			breakdown["recency"] = 0
+		}
+	}
+
+	// 7. Already visible penalty
 	if history.CurrentlyVisible {
 		breakdown["already_visible_penalty"] = -15.0
 	}
 
-	// 7. Cooldown penalty
+	// 8. Cooldown penalty
 	if !history.LastExitedAt.IsZero() {
 		cooldown := time.Duration(config.CooldownSeconds) * time.Second
 		if cooldown == 0 {

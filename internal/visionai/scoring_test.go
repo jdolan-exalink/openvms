@@ -143,4 +143,35 @@ func TestScoringEngine(t *testing.T) {
 			t.Fatalf("expected cooldown penalty -50.0, got %f", breakdown["cooldown_penalty"])
 		}
 	})
+
+	t.Run("active events outrank ended ones and ended events decay", func(t *testing.T) {
+		start := now.Add(-time.Minute)
+		active := VisionEvent{Object: "person", Confidence: 1, StartTime: start}
+		endedRecently := active
+		endedAt := now.Add(-100 * time.Second)
+		endedRecently.EndTime = &endedAt
+		endedLong := active
+		longAgo := now.Add(-time.Hour)
+		endedLong.EndTime = &longAgo
+
+		_, ba := engine.CalculateScore(active, CameraHistory{}, cfg, now)
+		_, br := engine.CalculateScore(endedRecently, CameraHistory{}, cfg, now)
+		_, bl := engine.CalculateScore(endedLong, CameraHistory{}, cfg, now)
+		if ba["recency"] != 20 {
+			t.Fatalf("active recency = %v, want 20", ba["recency"])
+		}
+		if br["recency"] != -10 {
+			t.Fatalf("recently ended recency = %v, want -10", br["recency"])
+		}
+		if bl["recency"] != -30 {
+			t.Fatalf("long ended recency = %v, want clamp -30", bl["recency"])
+		}
+	})
+
+	t.Run("events without a start time get no recency term", func(t *testing.T) {
+		_, breakdown := engine.CalculateScore(VisionEvent{Object: "person", Confidence: 1}, CameraHistory{}, cfg, now)
+		if _, ok := breakdown["recency"]; ok {
+			t.Fatalf("unexpected recency term for event with unknown timing: %+v", breakdown)
+		}
+	})
 }
