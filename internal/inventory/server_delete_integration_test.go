@@ -185,8 +185,9 @@ func TestDeleteServerHardDeletesEverything(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SERVER_REMOVED audit entry: %v", err)
 		}
-		if events != 1 || cameras != 4 {
-			t.Errorf("audit counts events=%d cameras=%d, want 1 and 4", events, cameras)
+		// Four demo cameras plus the synthesized birdseye camera Frigate reports per server.
+		if events != 1 || cameras != 5 {
+			t.Errorf("audit counts events=%d cameras=%d, want 1 and 5", events, cameras)
 		}
 		if n := count(t, env, `SELECT count(*) FROM audit_log WHERE action = 'SERVER_ADDED' AND target_id = $1`, doomed); n == 0 {
 			t.Error("earlier audit rows of the server were lost")
