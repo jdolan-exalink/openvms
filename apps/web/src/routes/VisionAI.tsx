@@ -342,7 +342,7 @@ export function VisionAI() {
             lprSlots.length === 0 ? (
               <div data-testid="vision-lpr-empty" className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
                 <Scan className="size-6 opacity-40" />
-                {filled.length > 0 ? (
+                {slotsQuery.data && !slotsQuery.data.plates_visible ? (
                   <>
                     <span>Lecturas de patente no disponibles</span>
                     <span className="text-xs">No hay patentes visibles para tu usuario (se requiere permiso de LPR).</span>

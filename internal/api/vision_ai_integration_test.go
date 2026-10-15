@@ -100,6 +100,9 @@ func TestVisionAISlotsEndpoint(t *testing.T) {
 	if len(am) != 2 {
 		t.Fatalf("admin must see exactly the two running events, got %d cameras", len(am))
 	}
+	if !admin.PlatesVisible {
+		t.Errorf("admin holds lpr.view: plates_visible must be true")
+	}
 	top := admin.Slots[0]
 	if *top.CameraId != allowed.ID || deref(top.Alarm) != "critical" || deref(top.Plate) != "AB123CD" ||
 		*top.Confidence < 0.92 || *top.Confidence > 0.94 || deref(top.Zone) != "street" {
@@ -112,6 +115,10 @@ func TestVisionAISlotsEndpoint(t *testing.T) {
 	}
 	if om := cameras(op); len(om) != 1 || om[allowed.ID].CameraId == nil {
 		t.Fatalf("operador must only see the permitted camera: %v", om)
+	}
+
+	if op.PlatesVisible {
+		t.Errorf("operador holds no lpr.view: plates_visible must be false")
 	}
 
 	// operador holds events.view but not lpr.view: the plate event is listed without plate text.

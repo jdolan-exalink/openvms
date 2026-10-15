@@ -39,7 +39,7 @@ func (h *Handlers) GetVisionAISlots(ctx context.Context, r gen.GetVisionAISlotsR
 func toVisionAISlots(res visionai.Result) gen.GetVisionAISlots200JSONResponse {
 	out := gen.GetVisionAISlots200JSONResponse{
 		Source: gen.VisionAISource(res.Source), Layout: gen.VisionAILayout(res.Layout),
-		GeneratedAt: res.GeneratedAt, Slots: make([]gen.VisionAISlot, 0, len(res.Slots)),
+		GeneratedAt: res.GeneratedAt, PlatesVisible: res.PlatesVisible, Slots: make([]gen.VisionAISlot, 0, len(res.Slots)),
 	}
 	for _, s := range res.Slots {
 		slot := gen.VisionAISlot{Slot: s.SlotIndex, Pinned: s.Pinned}

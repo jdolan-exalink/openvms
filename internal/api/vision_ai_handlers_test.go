@@ -13,10 +13,13 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/visionai"
 )
 
-type fakeVisionSource struct{ rows []visionai.EventRow }
+type fakeVisionSource struct {
+	rows          []visionai.EventRow
+	platesVisible bool
+}
 
-func (f fakeVisionSource) RecentEvents(context.Context, authz.Actor, time.Duration, time.Time) ([]visionai.EventRow, error) {
-	return f.rows, nil
+func (f fakeVisionSource) RecentEvents(context.Context, authz.Actor, time.Duration, time.Time) (visionai.EventSet, error) {
+	return visionai.EventSet{Rows: f.rows, PlatesVisible: f.platesVisible}, nil
 }
 
 func visionCtx() context.Context {
@@ -76,6 +79,19 @@ func TestGetVisionAISlots(t *testing.T) {
 		_, err := (&Handlers{}).GetVisionAISlots(visionCtx(), gen.GetVisionAISlotsRequestObject{})
 		if status, _, _ := statusFor(err); status != http.StatusServiceUnavailable {
 			t.Fatalf("status = %d, err %v", status, err)
+		}
+	})
+
+	t.Run("plates_visible mirrors the source signal", func(t *testing.T) {
+		for _, visible := range []bool{true, false} {
+			hh := &Handlers{VisionAI: visionai.NewService(fakeVisionSource{platesVisible: visible})}
+			resp, err := hh.GetVisionAISlots(visionCtx(), gen.GetVisionAISlotsRequestObject{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := resp.(gen.GetVisionAISlots200JSONResponse).PlatesVisible; got != visible {
+				t.Fatalf("plates_visible = %v, want %v", got, visible)
+			}
 		}
 	})
 }

@@ -4969,11 +4969,12 @@ components:
       default: "4"
     VisionAISlots:
       type: object
-      required: [source, layout, generated_at, slots]
+      required: [source, layout, generated_at, plates_visible, slots]
       properties:
         source: { $ref: "#/components/schemas/VisionAISource" }
         layout: { $ref: "#/components/schemas/VisionAILayout" }
         generated_at: { type: string, format: date-time }
+        plates_visible: { type: boolean, description: "True when the caller holds lpr.view on at least one of the cameras it can see for events; false means plate text is never exposed to this caller." }
         slots:
           type: array
           description: One entry per layout slot, in slot order (focus has 5, the hero first).

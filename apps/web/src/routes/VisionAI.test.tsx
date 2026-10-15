@@ -47,12 +47,14 @@ function slot(n: number, cam: string | null, extra: Slot = {}): Slot {
 let slotsBody: { slots: Slot[] };
 let slotRequests: URL[];
 let slotsStatus: number;
+let platesVisible: boolean;
 
 beforeEach(() => {
   localStorage.clear();
   navigateMock.mockReset();
   slotRequests = [];
   slotsStatus = 200;
+  platesVisible = true;
   slotsBody = { slots: [slot(0, "cam-1"), slot(1, "cam-2", { object: "car", plate: "AB123CD" }), slot(2, null), slot(3, null)] };
 });
 
@@ -62,7 +64,7 @@ describe("VisionAI Page", () => {
       "/api/v1/me": () => json(meResponse),
       "/api/v1/vision-ai/slots": () =>
         slotsStatus === 200
-          ? json({ source: "general", layout: "4", generated_at: "2026-10-15T10:00:00Z", ...slotsBody })
+          ? json({ source: "general", layout: "4", generated_at: "2026-10-15T10:00:00Z", plates_visible: platesVisible, ...slotsBody })
           : json({ code: "boom", message: "motor no disponible" }, slotsStatus),
     });
     vi.stubGlobal(
@@ -197,12 +199,22 @@ describe("VisionAI Page", () => {
     expect(screen.getByText(/Patente Detectada/i)).toBeInTheDocument();
   });
 
-  it("shows a no-permission notice in LPR mode when filled slots carry no plate", async () => {
+  it("shows the no-permission notice in LPR mode only when plates_visible is false", async () => {
+    platesVisible = false;
     slotsBody = { slots: [slot(0, "cam-1"), slot(1, "cam-2"), slot(2, null), slot(3, null)] };
     setup();
     fireEvent.click(await screen.findByRole("button", { name: "Modo LPR" }));
     expect(await screen.findByText(/lecturas de patente no disponibles/i)).toBeInTheDocument();
+    expect(screen.queryByText(/sin lecturas de patente recientes/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("vision-lpr-hud")).not.toBeInTheDocument();
+  });
+
+  it("shows 'Sin lecturas de patente recientes' when plates are visible but no slot has one", async () => {
+    slotsBody = { slots: [slot(0, "cam-1"), slot(1, "cam-2"), slot(2, null), slot(3, null)] };
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Modo LPR" }));
+    expect(await screen.findByText(/sin lecturas de patente recientes/i)).toBeInTheDocument();
+    expect(screen.queryByText(/lecturas de patente no disponibles/i)).not.toBeInTheDocument();
   });
 
   it("lists active events in the sidebar", async () => {

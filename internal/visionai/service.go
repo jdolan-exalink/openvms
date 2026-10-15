@@ -21,7 +21,9 @@ type Result struct {
 	Source      string
 	Layout      string
 	GeneratedAt time.Time
-	Slots       []SlotAssignment
+	// PlatesVisible mirrors EventSet.PlatesVisible.
+	PlatesVisible bool
+	Slots         []SlotAssignment
 }
 
 type session struct {
@@ -90,17 +92,17 @@ func (s *Service) Slots(ctx context.Context, actor authz.Actor, source, layout s
 		return Result{}, err
 	}
 	now := s.Clock()
-	rows, err := s.source.RecentEvents(ctx, actor, EventWindow, now)
+	set, err := s.source.RecentEvents(ctx, actor, EventWindow, now)
 	if err != nil {
 		return Result{}, err
 	}
 	var events []VisionEvent
-	for _, r := range rows {
+	for _, r := range set.Rows {
 		events = append(events, RowToEvents(r, cfg)...)
 	}
 	// Rows arrive newest first; keep the order stable for equal scores.
 	sort.SliceStable(events, func(i, j int) bool { return events[i].StartTime.After(events[j].StartTime) })
 
 	slots := s.session(actor, cfg, now).Allocate(events, now)
-	return Result{Source: source, Layout: layout, GeneratedAt: now, Slots: slots}, nil
+	return Result{Source: source, Layout: layout, GeneratedAt: now, PlatesVisible: set.PlatesVisible, Slots: slots}, nil
 }
