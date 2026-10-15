@@ -105,5 +105,7 @@ allocation engine, rotate as new events arrive, and render live video.
   in API); no test for the "Sin lecturas de patente recientes" branch.
 
 ## Next step
-User decision: push + open PRs (stacked-to-main: PR1 backend a08b2e3..80be18a, PR2 web 26c34d0..29d3acf).
-Optional: decide whether Vision AI belongs in the mobile bottom nav and fix Layout.test accordingly.
+PRs open (stacked-to-main): #54 backend (`feat/vision-ai-live-engine-01-backend`, a08b2e3..80be18a, base main)
+and #55 web (`feat/vision-ai-live-engine`, base #54 branch; retarget to main after #54 merges). Both
+request size:exception (generated code). Remaining: merge decisions, review advisories follow-up,
+mobile nav / Layout.test decision.
