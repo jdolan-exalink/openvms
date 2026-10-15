@@ -358,6 +358,41 @@ describe("VisionAI Page", () => {
       }
     });
 
+    it("shrinks in slot order and keeps the remaining players mounted", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        slotsBody = sparse(["cam-1", "cam-2", "cam-3", "cam-4", "cam-5"]);
+        setup();
+        fireEvent.click(await screen.findByRole("button", { name: "Dinámica" }));
+        await waitFor(() => expect(playerCams()).toHaveLength(5));
+        const firstPlayer = screen.getAllByTestId("mse-player")[0];
+
+        slotsBody = sparse(["cam-1", "cam-2", "", "cam-4", "cam-5"]);
+        await vi.advanceTimersByTimeAsync(2100);
+        await waitFor(() => expect(playerCams()).toEqual(["cam-1", "cam-2", "cam-4", "cam-5"]));
+        expect(gridOf().style.gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
+        expect(gridOf().style.gridTemplateRows).toBe("repeat(2, minmax(0, 1fr))");
+        expect(screen.getAllByTestId("mse-player")[0]).toBe(firstPlayer);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("shows a camera only once even if it fills two slots", async () => {
+      slotsBody = sparse(["cam-1", "cam-1", "cam-2"]);
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Dinámica" }));
+      await waitFor(() => expect(playerCams()).toEqual(["cam-1", "cam-2"]));
+      expect(gridOf().style.gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
+    });
+
+    it("never draws more tiles than the 4x4 grid holds", async () => {
+      slotsBody = { slots: Array.from({ length: 18 }, (_, i) => slot(i, `cam-${i + 1}`)) };
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Dinámica" }));
+      await waitFor(() => expect(playerCams()).toHaveLength(16));
+    });
+
     it("applies the object chips to the displayed cameras", async () => {
       slotsBody = sparse(["cam-1", "cam-2"]);
       setup();

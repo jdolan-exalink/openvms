@@ -18,8 +18,10 @@ export type VisionMode = "matrix" | "focus" | "lpr" | "alarm" | "dynamic";
 
 /** Matrix mode with LPR/alarm sources lists the best candidates, so it asks for a wide grid. */
 const LPR_LAYOUT: VisionAILayout = "9";
+
 /** Dynamic mode asks for every slot and renders only the filled ones. */
 const DYNAMIC_LAYOUT: VisionAILayout = "16";
+const DYNAMIC_MAX_TILES = 16;
 
 function sourceFor(mode: VisionMode, preset: VisionAISource): VisionAISource {
   if (mode === "lpr") return "lpr";
@@ -117,7 +119,10 @@ export function VisionAI() {
     return sl;
   });
   const filled = slots.filter((sl) => sl.camera_id);
-  const dynamicShape = dynamicGridShape(filled.length);
+  // Dynamic tiles are keyed by camera: a pinned camera may also hold a ranked slot, so keep its first
+  // occurrence only, and never draw past the 4x4 grid the shape is capped to.
+  const dynamicTiles = filled.filter((sl, i) => filled.findIndex((o) => o.camera_id === sl.camera_id) === i).slice(0, DYNAMIC_MAX_TILES);
+  const dynamicShape = dynamicGridShape(dynamicTiles.length);
   const lprSlots = filled.filter((sl) => sl.plate);
   const hasAnyCamera = serverSlots.some((sl) => sl.camera_id) || Object.keys(pins).length > 0;
 
@@ -334,7 +339,7 @@ export function VisionAI() {
                 Reintentar
               </Button>
             </div>
-          ) : !hasAnyCamera || (mode === "dynamic" && filled.length === 0) ? (
+          ) : !hasAnyCamera || (mode === "dynamic" && dynamicTiles.length === 0) ? (
             <div className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
               <Eye className="size-6 opacity-40" />
               <span>Sin eventos recientes</span>
@@ -350,9 +355,9 @@ export function VisionAI() {
                 gridTemplateRows: `repeat(${dynamicShape.rows}, minmax(0, 1fr))`,
               }}
             >
-              {filled.map((sl) => (
+              {dynamicTiles.map((sl) => (
                 <div key={sl.camera_id} className="relative min-h-0 rounded-m3-md overflow-hidden bg-black/70 border border-line/50">
-                  {renderSlot(sl, filled.length === 1 ? "main" : "sub")}
+                  {renderSlot(sl, dynamicTiles.length === 1 ? "main" : "sub")}
                 </div>
               ))}
             </div>
