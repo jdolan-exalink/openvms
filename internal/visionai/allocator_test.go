@@ -189,4 +189,18 @@ func TestSlotAllocator(t *testing.T) {
 			t.Fatalf("expected slot 0 released after max display, got %v", got)
 		}
 	})
+
+	t.Run("keeps a pinned occupied slot past max display", func(t *testing.T) {
+		allocator := NewSlotAllocator(cfg)
+		allocator.Allocate([]VisionEvent{{ID: "x", CameraID: cam1, Object: "person", Confidence: 0.9, StartTime: now}}, now)
+		allocator.SetPin(0, true)
+
+		if got := allocator.Allocate(nil, now.Add(31*time.Second))[0].CameraID; got != cam1 {
+			t.Fatalf("pinned slot 0 released past max display, got %v", got)
+		}
+		allocator.SetPin(0, false)
+		if got := allocator.Allocate(nil, now.Add(32*time.Second))[0].CameraID; got != uuid.Nil {
+			t.Fatalf("unpinned slot 0 should be released, got %v", got)
+		}
+	})
 }

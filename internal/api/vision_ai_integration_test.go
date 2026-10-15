@@ -114,6 +114,11 @@ func TestVisionAISlotsEndpoint(t *testing.T) {
 		t.Fatalf("operador must only see the permitted camera: %v", om)
 	}
 
+	// operador holds events.view but not lpr.view: the plate event is listed without plate text.
+	if ps := cameras(op)[allowed.ID]; deref(ps.Plate) != "" {
+		t.Fatalf("actor without lpr.view must not see plates: %+v", ps)
+	}
+
 	if code, pe := get(env.AdminToken, "?source=personas"); code != 200 || len(cameras(pe)) != 1 {
 		t.Fatalf("personas = %d, %d cameras", code, len(cameras(pe)))
 	}

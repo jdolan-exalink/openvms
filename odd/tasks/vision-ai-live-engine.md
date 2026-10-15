@@ -36,10 +36,17 @@ allocation engine, rotate as new events arrive, and render live video.
       `gofmt`/subscriber leak. Route: delegated writer (4+ files).
 - [x] VAI-02 — API: OpenAPI `getVisionAISlots`, regenerate Go + TS, handler, `apps/api/main.go`
       wiring, handler tests. Route: delegated writer (same writer as VAI-01).
-- [ ] VAI-03 — Web `/vision-ai`: consume API (polling + realtime invalidation), player sizing fix,
+- [x] VAI-03 — Web `/vision-ai`: consume API (polling + realtime invalidation), player sizing fix,
       client pins, tests. Route: delegated writer.
-- [ ] VAI-04 — Web `LiveVisionTile`: consume API by source, rotate camera, fix `isFocused` prop,
+- [x] VAI-04 — Web `LiveVisionTile`: consume API by source, rotate camera, fix `isFocused` prop,
       tests. Route: delegated writer (same as VAI-03).
+
+- [x] VAI-05 — Backend follow-ups from native review advisories (lineage review-1d2bc2ffb268cbfd):
+      NULL `PlatesAllowed` scan for actors without `lpr.view` (500), document/test the 1h start-age
+      cap, pinned-slot release test. Route: delegated writer (with VAI-03/04, separate commit).
+
+- [x] VAI-06 — Fix web-slice review advisories (lineage review-8abd2b31e82ca4ca): LPR empty/no-permission
+      state, tile pin reset on source change, fixture-independent integration assertions. Route: delegated writer.
 
 ## Acceptance criteria and checks
 - `go vet ./...`, `go test -race ./internal/visionai/... ./internal/api/...` green; `gofmt -l` clean.
@@ -67,5 +74,41 @@ allocation engine, rotate as new events arrive, and render live video.
   != resolved; platform actors allowed (like events service); pins client-side.
 - RDD assess on PR1 slice: medium, `slice_budget_reached` → review due.
 
+- Native review PR1 slice (base 9a33433..4e97ba8 tree): consent granted, 1 lens (reliability),
+  APPROVED, acknowledged, authority burned. Advisories → VAI-05. Reviewed boundary = docs commit.
+
+- VAI-05 `26c34d0` fix(visionai): nil LPR camera list → NULL bool scan (RED `cannot scan NULL into *bool`
+  → GREEN via non-nil slice + COALESCE); start-age cap documented + tested; pinned slot 0 release test.
+- VAI-03 `36c3a50` feat(web): `/vision-ai` driven by `useVisionAISlots` (`lib/visionAi.ts`), 2s polling +
+  `event.created` → `["vision-ai"]` invalidation, players `className="size-full"`, client pins, empty/error
+  states, Perímetro preset. VisionAI.test RED 12/13 → GREEN 13/13.
+- VAI-04 `400240f` feat(web): LiveVisionTile source from `visionai:<source>`, layout 1, `isFocused` → main
+  stream. Test RED 8/8 → GREEN 8/8.
+- Checks: gofmt clean on touched pkgs; `go vet ./...` clean; unit + integration (`VisionAI|PGSource|LoadRows`)
+  ok; `pnpm typecheck`/`lint` clean; parent spot-check VisionAI+LiveVisionTile vitest 21/21 pass.
+  Full `pnpm test`: 1474/1475 — failing `Layout.test.tsx` bottom-nav expects `Alarmas` but gets
+  `Vision AI`; pre-existing on main (nav entry added in 519805c; branch does not touch nav/Layout).
+- RDD assess slice 80be18a..400240f: medium, `slice_budget_reached` → review due.
+
+- Native review PR2 slice (80be18a..8cb9a2e): consent granted, reliability lens, APPROVED, acknowledged,
+  authority burned. Advisories → VAI-06.
+- VAI-06 `29d3acf` fix(web): RED "Unable to find … lecturas de patente no disponibles" and tile pin
+  `data-camera-id` mismatch → GREEN. Checks: typecheck/lint clean; vitest VisionAI/LiveVisionTile/Live 99/99
+  (parent spot-check 23/23); `go test -race -tags integration ./internal/visionai/ -run 'PGSource|LoadRows'` ok.
+- RDD assess 8cb9a2e..29d3acf: medium, `under_budget` (109 lines) → pending in slice, no review due.
+- Known pre-existing failure (not in scope): `Layout.test.tsx` bottom-nav expects `Alarmas`, gets `Vision AI`
+  (nav entry from 519805c on main).
+
+- Native review final slice (8cb9a2e..bb8a869, lineage review-18c3b3e9eb0cf4b1): APPROVED, acknowledged.
+  Non-blocking advisories (follow-up, not done): tile pin reappears on A→B→A source switch (clear instead of
+  hide); LPR "requires permission" notice also shown when events simply carry no plate (no permission signal
+  in API); no test for the "Sin lecturas de patente recientes" branch.
+
+- CI hygiene on PR1 branch: `e371abf` sqlc regen (lpr_reads crop columns, pre-existing drift from b527d59);
+  `1b6b61a` integration tests count the birdseye camera + revive fix. Go integration green.
+- #54 merged into main (`dde6553`). #55 retargeted to main (+835/-625, 16 files).
+- Remaining CI failures pre-existing on main, untouched by this feature: gofmt/gosec in internal/agent and
+  internal/provision; Layout.test bottom-nav.
+
 ## Next step
-Native review of PR1 slice, then VAI-03/VAI-04.
+Review/merge #55. Follow-ups: review advisories, mobile nav decision, pre-existing lint in agent/provision.
