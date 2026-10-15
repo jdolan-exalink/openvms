@@ -99,6 +99,11 @@ allocation engine, rotate as new events arrive, and render live video.
 - Known pre-existing failure (not in scope): `Layout.test.tsx` bottom-nav expects `Alarmas`, gets `Vision AI`
   (nav entry from 519805c on main).
 
+- Native review final slice (8cb9a2e..bb8a869, lineage review-18c3b3e9eb0cf4b1): APPROVED, acknowledged.
+  Non-blocking advisories (follow-up, not done): tile pin reappears on A→B→A source switch (clear instead of
+  hide); LPR "requires permission" notice also shown when events simply carry no plate (no permission signal
+  in API); no test for the "Sin lecturas de patente recientes" branch.
+
 ## Next step
 User decision: push + open PRs (stacked-to-main: PR1 backend a08b2e3..80be18a, PR2 web 26c34d0..29d3acf).
 Optional: decide whether Vision AI belongs in the mobile bottom nav and fix Layout.test accordingly.
