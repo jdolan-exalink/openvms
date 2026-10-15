@@ -70,6 +70,8 @@ Variables opcionales (con su valor por defecto):
     LOGIN_LOCKOUT=15m         duración del bloqueo
     OPENVMS_ADMIN_USERNAME=admin        usuario del primer administrador (ver sección 6)
     OPENVMS_ADMIN_PASSWORD=openvms123   su contraseña inicial: CAMBIARLA (ver sección 6)
+    OPENVMS_DEFAULT_TENANT=openvms      organización inicial (ver sección 6)
+    OPENVMS_DEFAULT_SITE="Sitio principal"   sitio inicial dentro de esa organización
 
 
 5. Levantar
@@ -110,6 +112,12 @@ Notas:
 - Si OPENVMS_ADMIN_PASSWORD no cumple la política de contraseñas, la API lo registra como
   error y no crea el usuario (sigue funcionando; usar vmsctl).
 - Después, activar la verificación en dos pasos en "Mi cuenta".
+
+Organización y sitio iniciales: si la instalación no tiene ninguna organización, la API crea
+también una (OPENVMS_DEFAULT_TENANT, por defecto "openvms") con un sitio (OPENVMS_DEFAULT_SITE,
+por defecto "Sitio principal"), para poder registrar servidores sin pasos previos. Si ya existe
+alguna organización no hace nada: nunca crea, renombra ni restaura. Los nombres se pueden
+cambiar después desde la web y el cambio se respeta en los reinicios.
 
 Alternativa manual (instalaciones con contraseña propia o para crear el admin con otro nombre):
 
