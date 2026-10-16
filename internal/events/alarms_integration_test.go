@@ -31,6 +31,15 @@ func newAlarmFixture(t *testing.T) *alarmFixture {
 	t.Helper()
 	env, syncer, _ := setup(t)
 	f := &alarmFixture{t: t, env: env, syncer: syncer}
+	for name, m := range env.Mocks {
+		for _, r := range m.Server.Store.List(frigatemock.Query{}) {
+			for _, o := range r.Data.Objects {
+				if o == fixtureLabel {
+					t.Fatalf("demo seed review %s on %s uses fixtureLabel %q; pick a label the seed never produces", r.ID, name, fixtureLabel)
+				}
+			}
+		}
+	}
 	syncer.OnAlarm = func(_ context.Context, alarms []events.OpenedAlarm) {
 		f.mu.Lock()
 		defer f.mu.Unlock()
@@ -47,6 +56,11 @@ func (f *alarmFixture) enableAt(at time.Time) {
 	}
 }
 
+// fixtureLabel is a label the demo seed never produces. Seeded alerts open alarms at random
+// instants relative to "now" on the first sync; an event sharing their camera and label could merge
+// into one of them (CorrelationKey) instead of opening its own alarm, which made these tests flaky.
+const fixtureLabel = "drone"
+
 // put stores (or replaces) a recent open review with the given severity on h01/plaza.
 func (f *alarmFixture) put(id, severity string, start time.Time) {
 	ts := float64(start.UnixMicro()) / 1e6
@@ -54,7 +68,7 @@ func (f *alarmFixture) put(id, severity string, start time.Time) {
 		ID: id, Camera: "plaza", StartTime: ts, Severity: severity,
 		ThumbPath: "/media/frigate/clips/review/thumb-plaza-" + id + ".webp",
 		Data: frigatemock.ReviewData{
-			Detections: []string{fmt.Sprintf("%f-%s", ts, id)}, Objects: []string{"person"},
+			Detections: []string{fmt.Sprintf("%f-%s", ts, id)}, Objects: []string{fixtureLabel},
 			SubLabels: []string{}, Zones: []string{}, Audio: []string{},
 		},
 	})
