@@ -274,7 +274,10 @@ export function Alarms() {
                     {fmtDateTime(a.event_start_time)}
                   </td>
                   <td>
-                    <Pill tone={badge.tone}>{badge.label}</Pill>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <Pill tone={badge.tone}>{badge.label}</Pill>
+                      {a.late && <Pill tone="warn">Tardía</Pill>}
+                    </div>
                     {a.status === "acknowledged" && a.acknowledged_by_name && (
                       <div className="text-[11px] text-muted">
                         por {a.acknowledged_by_name}

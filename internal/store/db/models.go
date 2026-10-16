@@ -380,6 +380,7 @@ type FrigateServer struct {
 	DeletedAt      *time.Time
 	DeletedBy      *uuid.UUID
 	AuthMode       string
+	EventAlarmMode string
 }
 
 type LprRead struct {

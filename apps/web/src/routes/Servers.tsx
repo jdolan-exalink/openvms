@@ -1981,6 +1981,7 @@ function DeleteServerDialog({ server, onDone }: { server: Schemas["Server"]; onD
 // connection, and a blank password keeps the stored one.
 function EditServerModal({ server, sites, onDone }: { server: Schemas["Server"]; sites: Schemas["Site"][]; onDone: () => void }) {
   const qc = useQueryClient();
+  const initialAlarmMode: Schemas["EventAlarmMode"] = server.event_alarm_mode ?? "rules_only";
   const [form, setForm] = useState({
     name: server.name,
     site_id: server.site_id,
@@ -1989,6 +1990,7 @@ function EditServerModal({ server, sites, onDone }: { server: Schemas["Server"];
     username: server.username,
     password: "",
     tls_skip_verify: server.tls_skip_verify,
+    event_alarm_mode: initialAlarmMode,
   });
   const creds = form.auth_mode === "credentials";
   const set = (k: keyof typeof form) => (e: { target: { value: string } }) => setForm({ ...form, [k]: e.target.value });
@@ -2001,6 +2003,7 @@ function EditServerModal({ server, sites, onDone }: { server: Schemas["Server"];
     if (creds && form.username !== server.username) body.username = form.username;
     if (creds && form.password) body.password = form.password;
     if (form.tls_skip_verify !== server.tls_skip_verify) body.tls_skip_verify = form.tls_skip_verify;
+    if (form.event_alarm_mode !== initialAlarmMode) body.event_alarm_mode = form.event_alarm_mode;
     return body;
   };
   const save = useMutation({
@@ -2052,6 +2055,15 @@ function EditServerModal({ server, sites, onDone }: { server: Schemas["Server"];
               </Field>
             </>
           )}
+          <Field label="Modo de alarmas de eventos">
+            <Select
+              value={form.event_alarm_mode}
+              onChange={(e) => setForm({ ...form, event_alarm_mode: e.target.value as Schemas["EventAlarmMode"] })}
+            >
+              <option value="rules_only">Solo por reglas</option>
+              <option value="all_alerts">Todas las alertas de Frigate</option>
+            </Select>
+          </Field>
           <Switch className="self-center" label="Aceptar certificado autofirmado" checked={form.tls_skip_verify} onChange={(next) => setForm({ ...form, tls_skip_verify: next })} />
         </div>
         <ErrorNote error={save.error} />

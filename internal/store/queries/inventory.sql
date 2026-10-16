@@ -98,13 +98,15 @@ WHERE fs.id = @id AND fs.deleted_at IS NULL
 FOR UPDATE OF fs;
 
 -- name: CreateServer :exec
-INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, auth_mode, username, password_sealed, tls_skip_verify, frigate_version, capabilities)
-VALUES (@id, @tenant_id, @site_id, @name, @base_url, @auth_mode, @username, @password_sealed, @tls_skip_verify, @frigate_version, @capabilities);
+INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, auth_mode, username, password_sealed, tls_skip_verify, frigate_version, capabilities, event_alarm_mode)
+VALUES (@id, @tenant_id, @site_id, @name, @base_url, @auth_mode, @username, @password_sealed, @tls_skip_verify, @frigate_version, @capabilities, coalesce(sqlc.narg('event_alarm_mode')::text, 'rules_only'));
 
 -- name: UpdateServer :exec
 UPDATE frigate_servers SET
     name = @name, site_id = @site_id, base_url = @base_url, auth_mode = @auth_mode, username = @username,
-    password_sealed = @password_sealed, tls_skip_verify = @tls_skip_verify, updated_at = now()
+    password_sealed = @password_sealed, tls_skip_verify = @tls_skip_verify,
+    event_alarm_mode = coalesce(sqlc.narg('event_alarm_mode')::text, event_alarm_mode),
+    updated_at = now()
 WHERE id = @id AND deleted_at IS NULL;
 
 -- name: UpdateServerDiscovery :exec

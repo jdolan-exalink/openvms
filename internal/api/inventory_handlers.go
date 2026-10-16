@@ -223,9 +223,11 @@ func toCaps(c inventory.ServerView) gen.Capabilities {
 }
 
 func toServer(s inventory.ServerView) gen.Server {
+	mode := gen.EventAlarmMode(s.EventAlarmMode)
 	out := gen.Server{
 		Id: s.ID, TenantId: s.TenantID, SiteId: s.SiteID, Name: s.Name, BaseUrl: s.BaseUrl, AuthMode: gen.AuthMode(s.AuthMode), Username: s.Username,
 		TlsSkipVerify: s.TlsSkipVerify, FrigateVersion: s.FrigateVersion, Capabilities: toCaps(s),
+		EventAlarmMode: &mode,
 		Status: gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,
 		LastError: s.LastError, CameraCount: int(s.CameraCount), CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
@@ -291,6 +293,14 @@ func (h *Handlers) ProbeServer(ctx context.Context, r gen.ProbeServerRequestObje
 	return out, nil
 }
 
+func eventAlarmMode(m *gen.EventAlarmMode) *string {
+	if m == nil {
+		return nil
+	}
+	s := string(*m)
+	return &s
+}
+
 func (h *Handlers) CreateServer(ctx context.Context, r gen.CreateServerRequestObject) (gen.CreateServerResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
@@ -303,7 +313,8 @@ func (h *Handlers) CreateServer(ctx context.Context, r gen.CreateServerRequestOb
 	}
 	s, err := h.Inv.CreateServer(ctx, a, inventory.CreateServerInput{
 		SiteID: b.SiteId, Name: b.Name, ImportCameras: importCams,
-		Conn: connInput(b.BaseUrl, b.AuthMode, b.Username, b.Password, b.TlsSkipVerify),
+		EventAlarmMode: eventAlarmMode(b.EventAlarmMode),
+		Conn:           connInput(b.BaseUrl, b.AuthMode, b.Username, b.Password, b.TlsSkipVerify),
 	})
 	if err != nil {
 		return nil, err
@@ -331,6 +342,7 @@ func (h *Handlers) UpdateServer(ctx context.Context, r gen.UpdateServerRequestOb
 	b := r.Body
 	s, err := h.Inv.UpdateServer(ctx, a, r.ServerId, inventory.UpdateServerInput{
 		Name: b.Name, SiteID: b.SiteId, BaseURL: b.BaseUrl, AuthMode: authMode(b.AuthMode), Username: b.Username, Password: b.Password, TLSSkipVerify: b.TlsSkipVerify,
+		EventAlarmMode: eventAlarmMode(b.EventAlarmMode),
 	})
 	if err != nil {
 		return nil, err

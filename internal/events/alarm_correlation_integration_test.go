@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/events"
+	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
@@ -101,3 +102,72 @@ func TestRuleAlarmsCorrelateAndStaySeparateFromEventAlarms(t *testing.T) {
 		t.Fatalf("event alarms=%d event_count=%d, want a separate alarm of its own (1, 2)", a, count)
 	}
 }
+
+func TestServerEventAlarmModeMigrationAndDefaults(t *testing.T) {
+	f := newAlarmFixture(t)
+	ctx := context.Background()
+
+	// Demo servers simulate existing servers and use all_alerts; a newly registered server via
+	// CreateServer defaults to rules_only and can be toggled with UpdateServer.
+	srv, err := f.env.Svc.CreateServer(ctx, f.env.Admin, inventory.CreateServerInput{
+		SiteID:        f.env.Cameras["frigate-h01/plaza"].SiteID,
+		Name:          "frigate-new-default",
+		ImportCameras: false,
+		Conn: inventory.ConnInput{
+			BaseURL:  f.env.Mocks["frigate-h01"].URL,
+			Username: "admin",
+			Password: "h-pass",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateServer: %v", err)
+	}
+	if srv.EventAlarmMode != "rules_only" {
+		t.Fatalf("new server EventAlarmMode = %q, want rules_only", srv.EventAlarmMode)
+	}
+
+	mode := "all_alerts"
+	updated, err := f.env.Svc.UpdateServer(ctx, f.env.Admin, srv.ID, inventory.UpdateServerInput{
+		EventAlarmMode: &mode,
+	})
+	if err != nil {
+		t.Fatalf("UpdateServer: %v", err)
+	}
+	if updated.EventAlarmMode != "all_alerts" {
+		t.Fatalf("updated server EventAlarmMode = %q, want all_alerts", updated.EventAlarmMode)
+	}
+}
+
+func TestSyncerHonorsServerEventAlarmModeRulesOnly(t *testing.T) {
+	f := newAlarmFixture(t)
+	ctx := context.Background()
+	svc := rules.NewService(f.env.Store, nopPublisher{}, pgtest.Discard())
+	svc.Debounce = time.Millisecond
+	f.syncer.Rules = svc
+	f.enableAt(time.Now().Add(-time.Hour))
+	f.addRule(map[string]any{"labels": []string{"zebra"}}, map[string]any{"create_alarm": true})
+
+	h01ID := f.env.Cameras["frigate-h01/plaza"].ServerID
+	mode := "rules_only"
+	if _, err := f.env.Svc.UpdateServer(ctx, f.env.Admin, h01ID, inventory.UpdateServerInput{
+		EventAlarmMode: &mode,
+	}); err != nil {
+		t.Fatalf("UpdateServer to rules_only: %v", err)
+	}
+
+	now := time.Now()
+	f.putLabelled("mode-ro-1", "zebra", now.Add(-2*time.Minute))
+	f.putLabelled("mode-ro-2", "giraffe", now.Add(-time.Minute))
+	f.sync()
+
+	if a, _, _ := f.alarmStats("event", "zebra"); a != 0 {
+		t.Fatalf("event alarms for zebra in rules_only mode = %d, want 0", a)
+	}
+	if a, _, _ := f.alarmStats("event", "giraffe"); a != 0 {
+		t.Fatalf("event alarms for giraffe in rules_only mode = %d, want 0", a)
+	}
+	if a, count, linked := f.alarmStats("rule", "zebra"); a != 1 || count != 1 || linked != 1 {
+		t.Fatalf("rule alarms for zebra in rules_only mode = (%d, %d, %d), want (1, 1, 1)", a, count, linked)
+	}
+}
+

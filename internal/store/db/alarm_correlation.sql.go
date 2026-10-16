@@ -171,12 +171,12 @@ func (q *Queries) GetAlarmSettings(ctx context.Context) (GetAlarmSettingsRow, er
 
 const insertCorrelatedAlarm = `-- name: InsertCorrelatedAlarm :one
 INSERT INTO alarms (tenant_id, site_id, camera_id, event_id, source, correlation_key,
-                    first_event_at, last_event_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+                    first_event_at, last_event_at, late)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)
 ON CONFLICT (tenant_id, correlation_key)
     WHERE status NOT IN ('resolved', 'closed') AND correlation_key IS NOT NULL
 DO NOTHING
-RETURNING id, status, created_at
+RETURNING id, status, created_at, late
 `
 
 type InsertCorrelatedAlarmParams struct {
@@ -187,12 +187,14 @@ type InsertCorrelatedAlarmParams struct {
 	Source         string
 	CorrelationKey *string
 	At             time.Time
+	Late           bool
 }
 
 type InsertCorrelatedAlarmRow struct {
 	ID        uuid.UUID
 	Status    string
 	CreatedAt time.Time
+	Late      bool
 }
 
 func (q *Queries) InsertCorrelatedAlarm(ctx context.Context, arg InsertCorrelatedAlarmParams) (InsertCorrelatedAlarmRow, error) {
@@ -204,9 +206,15 @@ func (q *Queries) InsertCorrelatedAlarm(ctx context.Context, arg InsertCorrelate
 		arg.Source,
 		arg.CorrelationKey,
 		arg.At,
+		arg.Late,
 	)
 	var i InsertCorrelatedAlarmRow
-	err := row.Scan(&i.ID, &i.Status, &i.CreatedAt)
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.Late,
+	)
 	return i, err
 }
 

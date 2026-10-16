@@ -1094,6 +1094,20 @@ describe("Servers", () => {
       expect(await patch!.clone().json()).toEqual({ site_id: "s2", password: "s3cret" });
     });
 
+    it("switches event_alarm_mode between all_alerts and rules_only in EditServerModal", async () => {
+      const fetchMock = setup(manager);
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: "Editar" }));
+      const dialog = await screen.findByRole("dialog", { name: /Editar servidor/ });
+      const modeSelect = within(dialog).getByLabelText("Modo de alarmas de eventos");
+      expect(modeSelect).toHaveValue("rules_only");
+      fireEvent.change(modeSelect, { target: { value: "all_alerts" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+      const [patch] = writes(fetchMock, "PATCH");
+      expect(await patch!.clone().json()).toEqual({ event_alarm_mode: "all_alerts" });
+    });
+
     it("asks for confirmation and deletes only after confirming", async () => {
       const fetchMock = setup(manager);
       renderPage(Servers);

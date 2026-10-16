@@ -313,9 +313,10 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 				}
 			}
 			// On every upsert, not only inserts: a detection promoted to alert opens its
-			// alarm later. A downgrade leaves an existing alarm untouched.
-			if ev.Severity == "alert" {
-				res, err := openAlarm(ctx, tx, ev)
+			// alarm later. A downgrade leaves an existing alarm untouched. Servers in
+			// rules_only mode rely exclusively on rules (source='rule') to open alarms.
+			if ev.Severity == "alert" && srv.EventAlarmMode != "rules_only" {
+				res, err := openAlarm(ctx, tx, ev, s.clock())
 				if err != nil {
 					return err
 				}
@@ -385,7 +386,7 @@ func (u *alarmUpdates) add(a OpenedAlarm) {
 // of its camera and label or opens a new one. It is idempotent per event, so re-reads change
 // nothing, and does nothing for events that started before alarms were enabled (alarm_settings:
 // there is no backfill).
-func openAlarm(ctx context.Context, tx pgx.Tx, ev NewEvent) (alarmResult, error) {
+func openAlarm(ctx context.Context, tx pgx.Tx, ev NewEvent, now time.Time) (alarmResult, error) {
 	var out alarmResult
 	settings, err := db.New(tx).GetAlarmSettings(ctx)
 	if err != nil {
@@ -396,7 +397,7 @@ func openAlarm(ctx context.Context, tx pgx.Tx, ev NewEvent) (alarmResult, error)
 	}
 	res, err := alarms.Correlate(ctx, tx, alarms.CorrelateInput{
 		TenantID: ev.TenantID, SiteID: ev.SiteID, CameraID: ev.CameraID, EventID: ev.ID,
-		Source: "event", Labels: ev.Labels, At: ev.Start,
+		Source: "event", Labels: ev.Labels, At: ev.Start, Now: now,
 	})
 	if err != nil {
 		return out, fmt.Errorf("correlate alarm for event %s: %w", ev.ID, err)

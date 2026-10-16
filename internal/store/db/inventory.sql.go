@@ -167,8 +167,8 @@ func (q *Queries) CreateCameraGroup(ctx context.Context, arg CreateCameraGroupPa
 }
 
 const createServer = `-- name: CreateServer :exec
-INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, auth_mode, username, password_sealed, tls_skip_verify, frigate_version, capabilities)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO frigate_servers (id, tenant_id, site_id, name, base_url, auth_mode, username, password_sealed, tls_skip_verify, frigate_version, capabilities, event_alarm_mode)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, coalesce($12::text, 'rules_only'))
 `
 
 type CreateServerParams struct {
@@ -183,6 +183,7 @@ type CreateServerParams struct {
 	TlsSkipVerify  bool
 	FrigateVersion string
 	Capabilities   json.RawMessage
+	EventAlarmMode *string
 }
 
 func (q *Queries) CreateServer(ctx context.Context, arg CreateServerParams) error {
@@ -198,6 +199,7 @@ func (q *Queries) CreateServer(ctx context.Context, arg CreateServerParams) erro
 		arg.TlsSkipVerify,
 		arg.FrigateVersion,
 		arg.Capabilities,
+		arg.EventAlarmMode,
 	)
 	return err
 }
@@ -392,7 +394,7 @@ func (q *Queries) GetCameraGroup(ctx context.Context, id uuid.UUID) (CameraGroup
 }
 
 const getServer = `-- name: GetServer :one
-SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode,
+SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
     COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
@@ -428,6 +430,7 @@ type GetServerRow struct {
 	DeletedAt          *time.Time
 	DeletedBy          *uuid.UUID
 	AuthMode           string
+	EventAlarmMode     string
 	CameraCount        int32
 	AgentLastSeenAt    *time.Time
 	AgentVersion       *string
@@ -459,6 +462,7 @@ func (q *Queries) GetServer(ctx context.Context, id uuid.UUID) (GetServerRow, er
 		&i.DeletedAt,
 		&i.DeletedBy,
 		&i.AuthMode,
+		&i.EventAlarmMode,
 		&i.CameraCount,
 		&i.AgentLastSeenAt,
 		&i.AgentVersion,
@@ -469,7 +473,7 @@ func (q *Queries) GetServer(ctx context.Context, id uuid.UUID) (GetServerRow, er
 }
 
 const getServerForUpdate = `-- name: GetServerForUpdate :one
-SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode,
+SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
     COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
@@ -506,6 +510,7 @@ type GetServerForUpdateRow struct {
 	DeletedAt          *time.Time
 	DeletedBy          *uuid.UUID
 	AuthMode           string
+	EventAlarmMode     string
 	CameraCount        int32
 	AgentLastSeenAt    *time.Time
 	AgentVersion       *string
@@ -537,6 +542,7 @@ func (q *Queries) GetServerForUpdate(ctx context.Context, id uuid.UUID) (GetServ
 		&i.DeletedAt,
 		&i.DeletedBy,
 		&i.AuthMode,
+		&i.EventAlarmMode,
 		&i.CameraCount,
 		&i.AgentLastSeenAt,
 		&i.AgentVersion,
@@ -547,7 +553,7 @@ func (q *Queries) GetServerForUpdate(ctx context.Context, id uuid.UUID) (GetServ
 }
 
 const getServerRow = `-- name: GetServerRow :one
-SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode FROM frigate_servers WHERE id = $1 AND deleted_at IS NULL
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers WHERE id = $1 AND deleted_at IS NULL
 `
 
 // Full row with the sealed credentials, for code that connects to Frigate.
@@ -575,6 +581,7 @@ func (q *Queries) GetServerRow(ctx context.Context, id uuid.UUID) (FrigateServer
 		&i.DeletedAt,
 		&i.DeletedBy,
 		&i.AuthMode,
+		&i.EventAlarmMode,
 	)
 	return i, err
 }
@@ -663,7 +670,7 @@ func (q *Queries) GetTenantBySlug(ctx context.Context, slug string) (Tenant, err
 }
 
 const listAllActiveServers = `-- name: ListAllActiveServers :many
-SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode FROM frigate_servers WHERE deleted_at IS NULL ORDER BY id
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers WHERE deleted_at IS NULL ORDER BY id
 `
 
 func (q *Queries) ListAllActiveServers(ctx context.Context) ([]FrigateServer, error) {
@@ -696,6 +703,7 @@ func (q *Queries) ListAllActiveServers(ctx context.Context) ([]FrigateServer, er
 			&i.DeletedAt,
 			&i.DeletedBy,
 			&i.AuthMode,
+			&i.EventAlarmMode,
 		); err != nil {
 			return nil, err
 		}
@@ -1014,7 +1022,7 @@ func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]
 }
 
 const listServers = `-- name: ListServers :many
-SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode,
+SELECT fs.id, fs.tenant_id, fs.site_id, fs.name, fs.base_url, fs.username, fs.password_sealed, fs.tls_skip_verify, fs.frigate_version, fs.capabilities, fs.status, fs.last_seen_at, fs.last_checked_at, fs.last_error, fs.stats, fs.created_at, fs.updated_at, fs.deleted_at, fs.deleted_by, fs.auth_mode, fs.event_alarm_mode,
     (SELECT count(*) FROM cameras c WHERE c.server_id = fs.id AND c.deleted_at IS NULL)::int AS camera_count,
     ah.last_seen_at AS agent_last_seen_at, ah.version AS agent_version, ah.status AS agent_status,
     COALESCE(acx.expires, to_timestamp(0))::timestamptz AS agent_cert_expires_at
@@ -1058,6 +1066,7 @@ type ListServersRow struct {
 	DeletedAt          *time.Time
 	DeletedBy          *uuid.UUID
 	AuthMode           string
+	EventAlarmMode     string
 	CameraCount        int32
 	AgentLastSeenAt    *time.Time
 	AgentVersion       *string
@@ -1095,6 +1104,7 @@ func (q *Queries) ListServers(ctx context.Context, arg ListServersParams) ([]Lis
 			&i.DeletedAt,
 			&i.DeletedBy,
 			&i.AuthMode,
+			&i.EventAlarmMode,
 			&i.CameraCount,
 			&i.AgentLastSeenAt,
 			&i.AgentVersion,
@@ -1665,8 +1675,10 @@ func (q *Queries) UpdateCameraOnvif(ctx context.Context, arg UpdateCameraOnvifPa
 const updateServer = `-- name: UpdateServer :exec
 UPDATE frigate_servers SET
     name = $1, site_id = $2, base_url = $3, auth_mode = $4, username = $5,
-    password_sealed = $6, tls_skip_verify = $7, updated_at = now()
-WHERE id = $8 AND deleted_at IS NULL
+    password_sealed = $6, tls_skip_verify = $7,
+    event_alarm_mode = coalesce($8::text, event_alarm_mode),
+    updated_at = now()
+WHERE id = $9 AND deleted_at IS NULL
 `
 
 type UpdateServerParams struct {
@@ -1677,6 +1689,7 @@ type UpdateServerParams struct {
 	Username       string
 	PasswordSealed []byte
 	TlsSkipVerify  bool
+	EventAlarmMode *string
 	ID             uuid.UUID
 }
 
@@ -1689,6 +1702,7 @@ func (q *Queries) UpdateServer(ctx context.Context, arg UpdateServerParams) erro
 		arg.Username,
 		arg.PasswordSealed,
 		arg.TlsSkipVerify,
+		arg.EventAlarmMode,
 		arg.ID,
 	)
 	return err

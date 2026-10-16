@@ -3945,6 +3945,10 @@ components:
           type: boolean
           default: false
           description: Accept Frigate's self-signed certificate.
+    EventAlarmMode:
+      type: string
+      enum: [all_alerts, rules_only]
+      description: Controls whether Frigate alert events open event-source alarms directly (all_alerts) or only through rules (rules_only).
     ServerCreate:
       allOf:
         - $ref: "#/components/schemas/ServerProbe"
@@ -3953,6 +3957,7 @@ components:
           properties:
             name: { type: string, minLength: 1, maxLength: 200, example: Frigate-H01 }
             import_cameras: { type: boolean, default: true }
+            event_alarm_mode: { $ref: "#/components/schemas/EventAlarmMode" }
     ServerUpdate:
       type: object
       properties:
@@ -3963,6 +3968,7 @@ components:
         username: { type: string, minLength: 1 }
         password: { type: string, minLength: 1, format: password }
         tls_skip_verify: { type: boolean }
+        event_alarm_mode: { $ref: "#/components/schemas/EventAlarmMode" }
     Capabilities:
       type: object
       required: [review, preview, exports, lpr, face_recognition, semantic_search, audio, ptz]
@@ -4017,6 +4023,7 @@ components:
         tls_skip_verify: { type: boolean }
         frigate_version: { type: string }
         capabilities: { $ref: "#/components/schemas/Capabilities" }
+        event_alarm_mode: { $ref: "#/components/schemas/EventAlarmMode" }
         status: { $ref: "#/components/schemas/HealthStatus" }
         last_seen_at: { type: string, format: date-time, nullable: true }
         last_checked_at: { type: string, format: date-time, nullable: true }
@@ -5339,6 +5346,9 @@ components:
         closed_by: { type: string, format: uuid, nullable: true }
         closed_by_name: { type: string, nullable: true }
         closed_at: { type: string, format: date-time, nullable: true }
+        late:
+          type: boolean
+          description: True when the alarm was opened from an event older than the auto-close window at ingestion time.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AlarmTransition:
