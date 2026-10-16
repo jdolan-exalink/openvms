@@ -30,9 +30,9 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
   web `cd apps/web && pnpm vitest run <file>`.
 
 ## Tasks
-- [ ] P2-01 — Conditions: `camera_group_ids`, `schedule` (site TZ, overnight windows, DST), and per-rule
+- [x] P2-01 — Conditions: `camera_group_ids`, `schedule` (site TZ, overnight windows, DST), and per-rule
       `cooldown_seconds` in `internal/rules`; unit + integration tests. Route: delegated writer.
-- [ ] P2-02 — Wire `rules.ZoneResolver` in `apps/worker` + store/maps lookup so `map_zone_ids` conditions
+- [x] P2-02 — Wire `rules.ZoneResolver` in `apps/worker` + store/maps lookup so `map_zone_ids` conditions
       match in production; integration test. Route: same writer.
 - [ ] P2-03 — Migration + backend: `rules.version` (optimistic locking), `rule_versions` (RLS, version snapshot
       history), dedicated `rules.read` / `rules.manage` permissions (seeded onto existing roles), and rule
@@ -60,6 +60,15 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
 
 ## Progress and evidence
 - Branch `feat/alarms-phase2-rules` created from `main` (`30b3e2d`).
+- P2-01 done in `bccf614`; P2-02 done in `7bc28de`. Checks (2026-10-16): `go vet ./internal/rules/ ./apps/worker/`
+  ok; `go test -race ./internal/rules/` ok; `go test -race -tags integration ./internal/rules/` ok.
+- RDD: assessed `high` (process_boundary in `apps/worker/main.go`), consent granted, 4-lens review
+  `review-7e3ddcaf755fa39d` approved and acknowledged. Reviewed boundary advances to `7bc28de`.
+- Advisory follow-ups (non-blocking, not yet in scope): site-timezone lookup errors swallowed silently
+  (`service.go:444-459`); schedule TZ precedence / silent never-match edge semantics (`rule.go:158-202`);
+  duplicate ZoneResolver wiring (`apps/worker/main.go:120`); ZoneResolver per-event DB load; frigate zone
+  cross-camera match (`zones.go:123-125`); potentially flaky 1s cooldown integration test; day-of-week `7`
+  alias undocumented; unbounded `cooldown_seconds` (to be covered by P2-03 validation).
 
 ## Next step
-P2-01.
+P2-03 (route: delegated writer).
