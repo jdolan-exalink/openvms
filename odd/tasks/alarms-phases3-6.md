@@ -44,7 +44,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [x] P3-02 authored source diff: 74 lines (72 additions, 2 deletions; tracker is separate documentation).
 - [x] P3-02 runtime harness: N/A — browser tests verify the playback link's camera/time target and permission gate; no Frigate recording runtime is provided to assert actual retained video availability.
 - [x] P3-02 rollback boundary: revert `apps/web/src/routes/Alarms.tsx` and `apps/web/src/routes/Alarms.test.tsx`; no API/database changes.
-- [ ] P3-02 work-unit commit identity: pending commit.
+- [x] P3-02 work-unit commit: `6c15cc5` (`feat(alarms): link alarms to contextual playback`) on `feat/https-agent-ingress`.
 - Known blocker: Phase 4 wizard needs a product decision. P3-04 is conditional on confirmed gap.
 
 ## Next step
