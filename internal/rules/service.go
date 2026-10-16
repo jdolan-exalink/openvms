@@ -99,7 +99,7 @@ type CreateRuleRequest struct {
 
 type UpdateRuleRequest struct {
 	// ExpectedVersion is the rule version the caller based the change on (optimistic locking).
-	// It is required; a stale value yields ErrVersionConflict.
+	// It is optional: 0 skips the check, a stale value yields ErrVersionConflict.
 	ExpectedVersion int          `json:"version"`
 	Name            *string      `json:"name,omitempty"`
 	TriggerType     *TriggerType `json:"trigger_type,omitempty"`
@@ -233,8 +233,8 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 		return Rule{}, &access.ForbiddenError{Permission: authz.RulesManage}
 	}
 
-	if req.ExpectedVersion < 1 {
-		return Rule{}, &ValidationError{Msg: "the current rule version is required (If-Match header)"}
+	if req.ExpectedVersion < 0 {
+		return Rule{}, &ValidationError{Msg: "the rule version must be a positive integer (If-Match header)"}
 	}
 	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
 		return Rule{}, &ValidationError{Msg: "name is required"}
@@ -286,7 +286,7 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 		if err != nil {
 			return store.Classify(err)
 		}
-		if int(current.Version) != req.ExpectedVersion {
+		if req.ExpectedVersion != 0 && int(current.Version) != req.ExpectedVersion {
 			return ErrVersionConflict
 		}
 		// Validate the merged rule only when the patch touches what the validator

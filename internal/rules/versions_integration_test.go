@@ -120,7 +120,7 @@ func TestRuleVersionsRecordedOnCreateAndUpdate(t *testing.T) {
 	}
 }
 
-func TestRuleUpdateRequiresExpectedVersion(t *testing.T) {
+func TestRuleUpdateWithoutExpectedVersionSkipsCheck(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	created, err := f.svc.CreateRule(ctx, f.ruleManager(), rules.CreateRuleRequest{
@@ -130,10 +130,17 @@ func TestRuleUpdateRequiresExpectedVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := "y"
-	_, err = f.svc.UpdateRule(ctx, f.ruleManager(), created.ID, rules.UpdateRuleRequest{Name: &name})
+	updated, err := f.svc.UpdateRule(ctx, f.ruleManager(), created.ID, rules.UpdateRuleRequest{Name: &name})
+	if err != nil {
+		t.Fatalf("update without version: %v", err)
+	}
+	if updated.Version != created.Version+1 {
+		t.Fatalf("version = %d, want %d", updated.Version, created.Version+1)
+	}
+	_, err = f.svc.UpdateRule(ctx, f.ruleManager(), created.ID, rules.UpdateRuleRequest{ExpectedVersion: -1, Name: &name})
 	var ve *rules.ValidationError
 	if !errors.As(err, &ve) {
-		t.Fatalf("err = %v, want ValidationError", err)
+		t.Fatalf("negative version err = %v, want ValidationError", err)
 	}
 }
 

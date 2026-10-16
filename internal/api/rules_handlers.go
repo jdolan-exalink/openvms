@@ -326,8 +326,12 @@ func (h *Handlers) MarkAllNotificationsRead(ctx context.Context, _ gen.MarkAllNo
 }
 
 // parseRuleVersion reads the rule version from an If-Match value: a plain or quoted integer.
-func parseRuleVersion(ifMatch string) (int, error) {
-	raw := strings.TrimPrefix(strings.TrimSpace(ifMatch), "W/")
+// An absent or blank header returns 0, meaning "no version check".
+func parseRuleVersion(ifMatch *string) (int, error) {
+	if ifMatch == nil || strings.TrimSpace(*ifMatch) == "" {
+		return 0, nil
+	}
+	raw := strings.TrimPrefix(strings.TrimSpace(*ifMatch), "W/")
 	raw = strings.Trim(raw, `"`)
 	v, err := strconv.Atoi(raw)
 	if err != nil || v < 1 {

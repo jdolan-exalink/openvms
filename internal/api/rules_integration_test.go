@@ -206,17 +206,21 @@ func TestRuleUpdateOptimisticLocking(t *testing.T) {
 	r := createTestRule(t, te, token, map[string]any{"labels": []string{"person"}})
 	path := "/api/v1/rules/" + r.Id.String()
 
-	// Missing If-Match is a client error.
-	if code, body := te.request("PATCH", path, token, map[string]any{"name": "x"}); code != 400 {
-		t.Fatalf("missing If-Match code = %d, want 400: %s", code, body)
+	// Missing If-Match is allowed: the update proceeds without the version check and still bumps the version.
+	if code, body := te.request("PATCH", path, token, map[string]any{"name": "Sin version"}); code != 200 {
+		t.Fatalf("missing If-Match code = %d, want 200: %s", code, body)
+	}
+	// The unconditional update bumped the version to 2, so version 1 is now stale.
+	if code, body := te.requestH("PATCH", path, token, map[string]any{"name": "x"}, map[string]string{"If-Match": "1"}); code != 409 {
+		t.Fatalf("stale update after unconditional PATCH code = %d, want 409: %s", code, body)
 	}
 	// Current version wins and bumps the version.
-	code, body := te.requestH("PATCH", path, token, map[string]any{"name": "Primera"}, map[string]string{"If-Match": "1"})
+	code, body := te.requestH("PATCH", path, token, map[string]any{"name": "Primera"}, map[string]string{"If-Match": "2"})
 	if code != 200 {
 		t.Fatalf("first update code = %d, want 200: %s", code, body)
 	}
 	// Replaying the stale version conflicts.
-	if code, body := te.requestH("PATCH", path, token, map[string]any{"name": "Segunda"}, map[string]string{"If-Match": `"1"`}); code != 409 {
+	if code, body := te.requestH("PATCH", path, token, map[string]any{"name": "Segunda"}, map[string]string{"If-Match": `"2"`}); code != 409 {
 		t.Fatalf("stale update code = %d, want 409: %s", code, body)
 	}
 	// Unknown rule stays 404 even with a version.

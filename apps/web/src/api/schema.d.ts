@@ -2267,7 +2267,7 @@ export interface paths {
         head?: never;
         /**
          * Update rule
-         * @description Requires rules.manage. Optimistic locking: If-Match must carry the rule's current version (plain or quoted integer). A stale version returns 409; a successful update increments the version and records a snapshot. The merged rule is validated and invalid conditions return 400.
+         * @description Requires rules.manage. Optimistic locking is optional: when If-Match carries the rule's current version (plain or quoted integer) a stale value returns 409 and a malformed one returns 400; without it the update proceeds unchecked. A successful update increments the version and records a snapshot. The merged rule is validated and invalid conditions return 400.
          */
         patch: operations["updateRule"];
         trace?: never;
@@ -9106,9 +9106,9 @@ export interface operations {
     updateRule: {
         parameters: {
             query?: never;
-            header: {
+            header?: {
                 /** @description Current rule version, e.g. 3 or "3". */
-                "If-Match": string;
+                "If-Match"?: string;
             };
             path: {
                 ruleId: string;
