@@ -348,7 +348,9 @@ func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 		invalidConfig(w, err)
 		return
 	}
-	s.cfg = next
+	if !s.IgnoreConfigSet {
+		s.cfg = next
+	}
 	s.setCalls = append(s.setCalls, call)
 	if body.UpdateTopic != "" && s.versionAtLeast(0, 17) {
 		parts := strings.Split(body.UpdateTopic, "/")

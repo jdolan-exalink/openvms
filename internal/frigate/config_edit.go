@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -20,6 +21,15 @@ import (
 // ErrConfigEditUnsupported means the server runs a Frigate older than 0.16, whose config API
 // cannot be edited safely from the VMS. Reads keep working.
 var ErrConfigEditUnsupported = errors.New("editing the Frigate configuration requires Frigate 0.16 or later")
+
+// ErrManagedZoneSyncUnsupported means safe managed-zone sync requires the structured Frigate 0.17 config API.
+var ErrManagedZoneSyncUnsupported = errors.New("managed camera-zone sync requires Frigate 0.17 or later")
+
+// ErrConfigPermissionRequired means a caller attempted a managed-zone write without servers.config authorization.
+var ErrConfigPermissionRequired = errors.New("servers.config permission is required for Frigate writes")
+
+// ErrConfigReadBackMismatch means Frigate accepted a patch but did not retain the requested value.
+var ErrConfigReadBackMismatch = errors.New("Frigate camera-zone read-back did not match the requested value")
 
 // ConfigValidationError is a rejected patch or a configuration Frigate refused (HTTP 400).
 type ConfigValidationError struct{ Message string }
@@ -414,6 +424,50 @@ func (a *v017) ApplyCameraPatch(ctx context.Context, camera string, patch map[st
 		results = append(results, res)
 	}
 	return results, nil
+}
+
+// UpsertManagedCameraZone patches one VMS-owned zone and verifies the effective config. It
+// requires the structured 0.17 API because 0.16's dotted query route cannot safely express
+// zone objects. Frigate's config_data merge preserves other zones and camera settings.
+func (a *v017) UpsertManagedCameraZone(ctx context.Context, camera, zoneName string, zone map[string]any, hasConfigPermission bool) error {
+	if !hasConfigPermission {
+		return ErrConfigPermissionRequired
+	}
+	if !supportsConfigData(a.version) {
+		return ErrManagedZoneSyncUnsupported
+	}
+	if !safeName.MatchString(camera) {
+		return &ConfigValidationError{Message: fmt.Sprintf("invalid camera name %q", camera)}
+	}
+	if !safeName.MatchString(zoneName) {
+		return &ConfigValidationError{Message: fmt.Sprintf("invalid zone name %q", zoneName)}
+	}
+	if len(zone) == 0 {
+		return &ConfigValidationError{Message: "managed zone config is empty"}
+	}
+	if p, bad := FindRedacted(zone); bad {
+		return &ConfigValidationError{Message: fmt.Sprintf("%s holds a redacted value; redacted values are never written back", p)}
+	}
+	remoteName := zoneName
+	if !strings.HasPrefix(remoteName, "ovms_") {
+		remoteName = "ovms_" + remoteName
+	}
+	results, err := a.ApplyCameraPatch(ctx, camera, map[string]any{"zones": map[string]any{remoteName: zone}})
+	if err != nil {
+		return err
+	}
+	if len(results) != 1 || results[0].Section != "zones" || !results[0].AppliedLive || results[0].RequiresRestart {
+		return fmt.Errorf("managed camera-zone patch did not apply live")
+	}
+	cfg, err := a.CameraConfig(ctx, camera, false)
+	if err != nil {
+		return err
+	}
+	zones, ok := cfg["zones"].(map[string]any)
+	if !ok || !reflect.DeepEqual(zones[remoteName], zone) {
+		return ErrConfigReadBackMismatch
+	}
+	return nil
 }
 
 func (a *v017) setViaBody(ctx context.Context, camera, section string, value any, live bool) error {
