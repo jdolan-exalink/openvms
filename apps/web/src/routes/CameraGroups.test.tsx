@@ -13,7 +13,17 @@ const cameraGroup = (id: string, name: string, camera_ids: string[] = [], extra:
   camera_ids,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
+  member_count_total: camera_ids.length,
+  member_count_hidden: 0,
+  version: 1,
   ...extra,
+});
+
+const dynamicGroup = cameraGroup("cg3", "Exteriores", ["c1"], {
+  filter: { tags: ["exterior"], name_contains: "norte" },
+  member_count_total: 4,
+  member_count_hidden: 3,
+  version: 5,
 });
 
 const camera = (id: string, name: string) => ({
@@ -25,7 +35,7 @@ const camera = (id: string, name: string) => ({
   enabled: true,
 });
 
-function setup(perms: string[]) {
+function setup(perms: string[], withDynamic = false, opts: { routes?: Record<string, () => Response>; putStatus?: number } = {}) {
   const routes = stubApi({
     "/api/v1/me": () =>
       json({
@@ -38,15 +48,19 @@ function setup(perms: string[]) {
         items: [
           cameraGroup("cg1", "Perímetro", ["c1"]),
           cameraGroup("cg2", "Acceso", ["c1", "c2"]),
+          ...(withDynamic ? [dynamicGroup] : []),
         ],
       }),
+    "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Helvecia" }] }),
+    "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", name: "frigate-h01" }] }),
+    ...opts.routes,
     "/api/v1/cameras": () =>
       json({
         items: [camera("c1", "Entrada"), camera("c2", "Estacionamiento")],
       }),
   });
 
-  const writes: { method: string; url: string; body: unknown }[] = [];
+  const writes: { method: string; url: string; body: unknown; ifMatch?: string | null }[] = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (req: Request) => {
@@ -55,7 +69,11 @@ function setup(perms: string[]) {
           method: req.method,
           url: new URL(req.url).pathname,
           body: req.method === "DELETE" ? null : await req.clone().json(),
+          ifMatch: req.headers.get("If-Match"),
         });
+        if (req.method === "PUT" && opts.putStatus === 409) {
+          return json({ code: "conflict", message: "camera group was modified by someone else; reload and retry with the current version" }, 409);
+        }
         return json(cameraGroup("cg1", "Perímetro"));
       }
       return routes(req);
@@ -90,9 +108,10 @@ describe("CameraGroups", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
 
     await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0]).toEqual({
+    expect(writes[0]).toMatchObject({
       method: "POST",
       url: "/api/v1/camera-groups",
+      ifMatch: null,
       body: {
         tenant_id: "t1",
         name: "Patio Norte",
@@ -112,9 +131,10 @@ describe("CameraGroups", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
 
     await waitFor(() => expect(writes).toHaveLength(1));
-    expect(writes[0]).toEqual({
+    expect(writes[0]).toMatchObject({
       method: "PUT",
       url: "/api/v1/camera-groups/cg1",
+      ifMatch: "1",
       body: {
         tenant_id: "t1",
         name: "Perímetro",
@@ -138,7 +158,7 @@ describe("CameraGroups", () => {
 
     fireEvent.click(within(confirm).getByRole("button", { name: "Eliminar" }));
     await waitFor(() =>
-      expect(writes).toEqual([{ method: "DELETE", url: "/api/v1/camera-groups/cg2", body: null }]),
+      expect(writes).toEqual([{ method: "DELETE", url: "/api/v1/camera-groups/cg2", body: null, ifMatch: null }]),
     );
     expect(confirmSpy).not.toHaveBeenCalled();
   });
@@ -151,5 +171,127 @@ describe("CameraGroups", () => {
 
     const links = await screen.findAllByRole("link", { name: /Permisos/ });
     expect(links[0]).toHaveAttribute("href", expect.stringContaining("subject=camera_group%3Acg1"));
+  });
+
+  it("shows the dynamic badge and total/hidden member counts", async () => {
+    setup(["cameras.manage"], true);
+    const row = (await screen.findByText("Exteriores")).closest("tr")!;
+    expect(within(row).getByText("Dynamic")).toBeInTheDocument();
+    expect(within(row).getByText("4 cámaras")).toBeInTheDocument();
+    expect(within(row).getByText("3 hidden from you")).toBeInTheDocument();
+    const manualRow = (await screen.findByText("Acceso")).closest("tr")!;
+    expect(within(manualRow).queryByText("Dynamic")).not.toBeInTheDocument();
+    expect(within(manualRow).queryByText(/hidden from you/)).not.toBeInTheDocument();
+  });
+
+  it("creates a dynamic group with a filter and no camera_ids", async () => {
+    const { writes } = setup(["cameras.manage"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Nuevo grupo" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Nuevo grupo de cámaras" });
+    fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Exteriores" } });
+    fireEvent.change(within(dialog).getByLabelText("Group type"), { target: { value: "dynamic" } });
+    expect(within(dialog).queryByLabelText("Entrada")).not.toBeInTheDocument();
+    fireEvent.click(await within(dialog).findByLabelText("Helvecia"));
+    fireEvent.change(within(dialog).getByLabelText("Tags (comma separated)"), { target: { value: " exterior, acceso " } });
+    fireEvent.change(within(dialog).getByLabelText("Name contains"), { target: { value: "norte" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({
+      method: "POST",
+      url: "/api/v1/camera-groups",
+      body: {
+        tenant_id: "t1",
+        name: "Exteriores",
+        description: "",
+        filter: { site_ids: ["s1"], tags: ["exterior", "acceso"], name_contains: "norte" },
+      },
+    });
+    expect(writes[0]!.body).not.toHaveProperty("camera_ids");
+  });
+
+  it("edits a dynamic group with its filter and version, without camera_ids", async () => {
+    const { writes } = setup(["cameras.manage"], true);
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Exteriores" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByLabelText("Group type")).toBeDisabled();
+    expect(within(dialog).getByLabelText("Tags (comma separated)")).toHaveValue("exterior");
+    fireEvent.change(within(dialog).getByLabelText("Name contains"), { target: { value: "sur" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]).toMatchObject({
+      method: "PUT",
+      url: "/api/v1/camera-groups/cg3",
+      ifMatch: "5",
+      body: { tenant_id: "t1", name: "Exteriores", filter: { tags: ["exterior"], name_contains: "sur" } },
+    });
+    expect(writes[0]!.body).not.toHaveProperty("camera_ids");
+  });
+
+  it("blocks saving a dynamic group with an empty filter", async () => {
+    const { writes } = setup(["cameras.manage"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Nuevo grupo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Nuevo grupo de cámaras" });
+    fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Vacio" } });
+    fireEvent.change(within(dialog).getByLabelText("Group type"), { target: { value: "dynamic" } });
+    fireEvent.change(within(dialog).getByLabelText("Tags (comma separated)"), { target: { value: " , " } });
+    fireEvent.change(within(dialog).getByLabelText("Name contains"), { target: { value: "   " } });
+    expect(within(dialog).getByText("Select at least one site, server, tag or name filter.")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Guardar" })).toBeDisabled();
+    expect(writes).toHaveLength(0);
+  });
+
+  it("shows loading and error states for the site and server pickers and blocks saving on error", async () => {
+    setup(["cameras.manage"], false, {
+      routes: { "/api/v1/sites": () => json({ code: "internal", message: "boom" }, 500) },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Nuevo grupo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Nuevo grupo de cámaras" });
+    fireEvent.change(within(dialog).getByLabelText("Group type"), { target: { value: "dynamic" } });
+    expect(within(dialog).getByText("Loading servers…")).toBeInTheDocument();
+    expect(await within(dialog).findByText("Could not load sites.")).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Name contains"), { target: { value: "norte" } });
+    expect(within(dialog).getByRole("button", { name: "Guardar" })).toBeDisabled();
+  });
+
+  it("selects servers in the filter", async () => {
+    const { writes } = setup(["cameras.manage"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Nuevo grupo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Nuevo grupo de cámaras" });
+    fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Por servidor" } });
+    fireEvent.change(within(dialog).getByLabelText("Group type"), { target: { value: "dynamic" } });
+    fireEvent.click(await within(dialog).findByLabelText("frigate-h01"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]!.body).toEqual({ tenant_id: "t1", name: "Por servidor", description: "", filter: { server_ids: ["srv1"] } });
+  });
+
+  it("sends only the active kind when switching between manual and dynamic before saving", async () => {
+    const { writes } = setup(["cameras.manage"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Nuevo grupo" }));
+    const dialog = await screen.findByRole("dialog", { name: "Nuevo grupo de cámaras" });
+    fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Cambio" } });
+    fireEvent.click(await within(dialog).findByLabelText("Entrada"));
+    fireEvent.change(within(dialog).getByLabelText("Group type"), { target: { value: "dynamic" } });
+    fireEvent.change(within(dialog).getByLabelText("Name contains"), { target: { value: "norte" } });
+    fireEvent.change(within(dialog).getByLabelText("Group type"), { target: { value: "manual" } });
+    expect(within(dialog).getByLabelText("Entrada")).toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(writes).toHaveLength(1));
+    expect(writes[0]!.body).toEqual({ tenant_id: "t1", name: "Cambio", description: "", camera_ids: ["c1"] });
+  });
+
+  it("offers a reload when the group version is stale", async () => {
+    const { writes } = setup(["cameras.manage"], true, { putStatus: 409 });
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Exteriores" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    expect(await within(dialog).findByText("This group was changed by someone else since you opened it.")).toBeInTheDocument();
+    expect(writes[0]).toMatchObject({ method: "PUT", ifMatch: "5" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reload latest" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });

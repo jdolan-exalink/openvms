@@ -189,6 +189,8 @@ type CameraGroup struct {
 	UpdatedAt   time.Time
 	DeletedAt   *time.Time
 	DeletedBy   *uuid.UUID
+	Filter      []byte
+	Version     int32
 }
 
 type CameraGroupMember struct {
@@ -633,6 +635,7 @@ type Rule struct {
 	Enabled     bool
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	Version     int32
 }
 
 type RuleFiring struct {
@@ -640,6 +643,15 @@ type RuleFiring struct {
 	ResourceID uuid.UUID
 	TenantID   uuid.UUID
 	FiredAt    time.Time
+}
+
+type RuleVersion struct {
+	RuleID    uuid.UUID
+	TenantID  uuid.UUID
+	Version   int32
+	Snapshot  json.RawMessage
+	ChangedBy *uuid.UUID
+	CreatedAt time.Time
 }
 
 type ServerAgent struct {

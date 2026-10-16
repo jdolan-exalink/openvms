@@ -1560,7 +1560,10 @@ paths:
       tags: [cameras]
       operationId: createCameraGroup
       summary: Create a camera group
-      description: Requires cameras.manage on the tenant and on every member camera.
+      description: |
+        Requires cameras.manage on the tenant and, for a manual group, on every member camera. Set filter to
+        create a dynamic group: camera_ids must then be empty and the members are computed from the filter and
+        kept in sync when cameras are added, retagged, renamed or moved.
       requestBody:
         required: true
         content:
@@ -1595,7 +1598,20 @@ paths:
     put:
       tags: [cameras]
       operationId: replaceCameraGroup
-      summary: Replace name, description and members of a camera group
+      summary: Replace name, description and members (manual) or filter (dynamic) of a camera group
+      description: |
+        A group is manual or dynamic for its whole life. A manual group takes camera_ids; a dynamic group
+        (created with a filter) takes the filter again, must not set camera_ids and has its members recomputed.
+        Sending camera_ids for a dynamic group, omitting the filter for one, or adding a filter to a manual group
+        returns 400. A dynamic group's filter can reach cameras the caller does not manage one by one, so
+        updating it requires cameras.manage on the whole tenant. Optimistic locking is optional: when If-Match
+        carries the group's version (plain or quoted integer) a stale value returns 409.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Current camera group version, e.g. 3 or "3".
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -2806,7 +2822,7 @@ paths:
       tags: [rules]
       operationId: listRules
       summary: List automation rules for the tenant
-      description: Returns all automation rules for the current tenant. Requires notifications.manage or tenant admin.
+      description: Returns all automation rules for the current tenant. Requires rules.read.
       responses:
         "200":
           description: List of rules
@@ -2820,7 +2836,7 @@ paths:
       tags: [rules]
       operationId: createRule
       summary: Create an automation rule
-      description: Creates a new automation rule for the tenant. Requires notifications.manage.
+      description: Creates a new automation rule for the tenant (version 1). Requires rules.manage. Conditions are validated; invalid combinations return 400.
       requestBody:
         required: true
         content:
@@ -2837,6 +2853,60 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/rules/templates:
+    get:
+      tags: [rules]
+      operationId: listRuleTemplates
+      summary: List reusable automation rule templates
+      description: Returns validated starter conditions and actions. Requires rules.read.
+      responses:
+        "200":
+          description: Available templates
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleTemplatesList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/rules/simulate:
+    post:
+      tags: [rules]
+      operationId: simulateRule
+      summary: Preview a rule against recent tenant events
+      description: Evaluates submitted conditions against recent events visible to the current user, estimates per-camera cooldown suppression from historical event timestamps, and never executes actions or consults the live firing ledger. Requires rules.manage and events.search. The limit bounds the newest events evaluated; has_more indicates additional events exist in the window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuleSimulationRequest" }
+      responses:
+        "200":
+          description: Simulation results
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleSimulation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/rules/{ruleId}/versions:
+    parameters:
+      - name: ruleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [rules]
+      operationId: listRuleVersions
+      summary: List rule version snapshots
+      description: Requires rules.read and access to the rule.
+      responses:
+        "200":
+          description: Rule versions, newest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleVersionsList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/rules/{ruleId}:
     parameters:
       - name: ruleId
@@ -2847,6 +2917,7 @@ paths:
       tags: [rules]
       operationId: getRule
       summary: Get rule by ID
+      description: Requires rules.read.
       responses:
         "200":
           description: The rule
@@ -2861,6 +2932,17 @@ paths:
       tags: [rules]
       operationId: updateRule
       summary: Update rule
+      description: >-
+        Requires rules.manage. Optimistic locking is optional: when If-Match carries the rule's current version
+        (plain or quoted integer) a stale value returns 409 and a malformed one returns 400; without it the update
+        proceeds unchecked. A successful update increments the version and records a snapshot.
+        The merged rule is validated and invalid conditions return 400.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Current rule version, e.g. 3 or "3".
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -2878,10 +2960,12 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
     delete:
       tags: [rules]
       operationId: deleteRule
       summary: Delete rule
+      description: Requires rules.manage.
       responses:
         "204":
           description: Rule deleted
@@ -4690,17 +4774,35 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/FrigateConfigRevision" } }
+    CameraGroupFilter:
+      type: object
+      additionalProperties: false
+      description: |
+        Selects the tenant's cameras of a dynamic group. Fields combine with AND, the values of one field
+        with OR. At least one field must be set. Tags match case-insensitively; name_contains is a
+        case-insensitive substring of the camera display name.
+      properties:
+        site_ids: { type: array, items: { type: string, format: uuid }, maxItems: 100 }
+        server_ids: { type: array, items: { type: string, format: uuid }, maxItems: 100 }
+        tags: { type: array, items: { type: string, maxLength: 64 }, maxItems: 100 }
+        name_contains: { type: string, maxLength: 200 }
     CameraGroupInput:
       type: object
-      required: [tenant_id, name, camera_ids]
+      required: [tenant_id, name]
       properties:
         tenant_id: { type: string, format: uuid }
         name: { type: string, minLength: 1, maxLength: 200 }
         description: { type: string, maxLength: 1000 }
-        camera_ids: { type: array, items: { type: string, format: uuid }, maxItems: 5000 }
+        camera_ids:
+          type: array
+          description: Members of a manual group. Must be empty or omitted when filter is set.
+          items: { type: string, format: uuid }
+          maxItems: 5000
+        filter:
+          $ref: "#/components/schemas/CameraGroupFilter"
     CameraGroup:
       type: object
-      required: [id, tenant_id, name, description, camera_ids, created_at, updated_at]
+      required: [id, tenant_id, name, description, camera_ids, member_count_total, member_count_hidden, version, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
@@ -4710,6 +4812,19 @@ components:
           type: array
           description: Members the caller can view.
           items: { type: string, format: uuid }
+        filter:
+          allOf:
+            - $ref: "#/components/schemas/CameraGroupFilter"
+          description: Present for dynamic groups; absent for manual groups.
+        member_count_total:
+          type: integer
+          description: Every member of the group in the tenant, whether or not the caller can view it.
+        member_count_hidden:
+          type: integer
+          description: Members the caller cannot view (member_count_total minus camera_ids).
+        version:
+          type: integer
+          description: Incremented on every update; send it in If-Match for optimistic locking.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     LivenessStatus:
@@ -5549,6 +5664,33 @@ components:
           items: { type: string }
         duration_seconds:
           type: integer
+          minimum: 0
+          description: Offline rules only. Minimum outage duration before the rule fires.
+        camera_group_ids:
+          type: array
+          description: Event rules only. Match cameras that belong to any of these groups.
+          items: { type: string, format: uuid }
+        map_zone_ids:
+          type: array
+          description: Event rules only. Match events from cameras inside or linked to these map zones.
+          items: { type: string, format: uuid }
+        schedule: { $ref: "#/components/schemas/RuleSchedule" }
+        cooldown_seconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+          description: Event rules only. Quiet period per rule and camera after firing; 0 or unset uses the 300 second default.
+    RuleSchedule:
+      type: object
+      description: Event rules only. Evaluated in the camera's site timezone, falling back to timezone and then UTC. start_time later than end_time is an overnight window.
+      properties:
+        days_of_week:
+          type: array
+          description: 0 (Sunday) to 6 (Saturday). Empty means every day.
+          items: { type: integer, minimum: 0, maximum: 6 }
+        start_time: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: HH:MM, set together with end_time }
+        end_time: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: HH:MM, set together with start_time }
+        timezone: { type: string, description: IANA timezone used when the site has none }
     RuleActions:
       type: object
       properties:
@@ -5565,11 +5707,12 @@ components:
           items: { type: string, format: uuid }
     Rule:
       type: object
-      required: [id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at]
+      required: [id, tenant_id, name, trigger_type, conditions, actions, enabled, version, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
         name: { type: string }
+        version: { type: integer, minimum: 1, description: Optimistic-locking version; send it back as If-Match on update. }
         trigger_type: { $ref: "#/components/schemas/RuleTriggerType" }
         conditions: { $ref: "#/components/schemas/RuleConditions" }
         actions: { $ref: "#/components/schemas/RuleActions" }
@@ -5600,6 +5743,72 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Rule" }
+    RuleTemplate:
+      type: object
+      required: [id, name, description, trigger_type, conditions, actions]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        trigger_type: { $ref: "#/components/schemas/RuleTriggerType" }
+        conditions: { $ref: "#/components/schemas/RuleConditions" }
+        actions: { $ref: "#/components/schemas/RuleActions" }
+    RuleTemplatesList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RuleTemplate" }
+    RuleSimulationRequest:
+      type: object
+      required: [trigger_type, conditions]
+      properties:
+        trigger_type: { $ref: "#/components/schemas/RuleTriggerType" }
+        conditions: { $ref: "#/components/schemas/RuleConditions" }
+        hours: { type: integer, minimum: 1, maximum: 168, default: 24 }
+        limit: { type: integer, minimum: 1, maximum: 100, default: 100 }
+    RuleSimulationMatch:
+      type: object
+      required: [event_id, camera_id, camera_name, site_name, severity, labels, start_time]
+      properties:
+        event_id: { type: string, format: uuid }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        site_name: { type: string }
+        severity: { $ref: "#/components/schemas/Severity" }
+        labels: { type: array, items: { type: string } }
+        start_time: { type: string, format: date-time }
+    RuleSimulation:
+      type: object
+      required: [evaluated, condition_matched, matched, cooldown_suppressed, cooldown_seconds, has_more, window_start, window_end, matches]
+      properties:
+        evaluated: { type: integer }
+        condition_matched: { type: integer, description: Events matching conditions before cooldown suppression. }
+        matched: { type: integer, description: Condition matches remaining after the historical per-camera cooldown projection. }
+        cooldown_suppressed: { type: integer, description: Historical condition matches suppressed by an earlier match on the same camera. }
+        cooldown_seconds: { type: integer, minimum: 1, description: Effective cooldown; unset or zero conditions use the 300 second production default. }
+        has_more: { type: boolean }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        matches:
+          type: array
+          items: { $ref: "#/components/schemas/RuleSimulationMatch" }
+    RuleVersion:
+      type: object
+      required: [version, snapshot, created_at]
+      properties:
+        version: { type: integer, minimum: 1 }
+        snapshot: { $ref: "#/components/schemas/Rule" }
+        changed_by: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+    RuleVersionsList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RuleVersion" }
     NotificationSeverity:
       type: string
       enum: [info, warning, critical]

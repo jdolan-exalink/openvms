@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -228,7 +230,7 @@ func toServer(s inventory.ServerView) gen.Server {
 		Id: s.ID, TenantId: s.TenantID, SiteId: s.SiteID, Name: s.Name, BaseUrl: s.BaseUrl, AuthMode: gen.AuthMode(s.AuthMode), Username: s.Username,
 		TlsSkipVerify: s.TlsSkipVerify, FrigateVersion: s.FrigateVersion, Capabilities: toCaps(s),
 		EventAlarmMode: &mode,
-		Status: gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,
+		Status:         gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,
 		LastError: s.LastError, CameraCount: int(s.CameraCount), CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
 	out.AgentLastSeenAt, out.AgentVersion = s.AgentLastSeenAt, s.AgentVersion
@@ -459,7 +461,24 @@ func toGroup(g inventory.CameraGroupView) gen.CameraGroup {
 	if ids == nil {
 		ids = []uuid.UUID{}
 	}
-	return gen.CameraGroup{Id: g.ID, TenantId: g.TenantID, Name: g.Name, Description: g.Description, CameraIds: ids, CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt}
+	out := gen.CameraGroup{
+		Id: g.ID, TenantId: g.TenantID, Name: g.Name, Description: g.Description, CameraIds: ids,
+		MemberCountTotal: g.MemberCountTotal, MemberCountHidden: g.MemberCountHidden, Version: int(g.Version),
+		CreatedAt: g.CreatedAt, UpdatedAt: g.UpdatedAt,
+	}
+	if f := g.DynamicFilter; f != nil {
+		out.Filter = &gen.CameraGroupFilter{NameContains: nilIfEmpty(f.NameContains)}
+		if len(f.SiteIDs) > 0 {
+			out.Filter.SiteIds = &f.SiteIDs
+		}
+		if len(f.ServerIDs) > 0 {
+			out.Filter.ServerIds = &f.ServerIDs
+		}
+		if len(f.Tags) > 0 {
+			out.Filter.Tags = &f.Tags
+		}
+	}
+	return out
 }
 
 func (h *Handlers) ListCameraGroups(ctx context.Context, _ gen.ListCameraGroupsRequestObject) (gen.ListCameraGroupsResponseObject, error) {
@@ -478,8 +497,35 @@ func (h *Handlers) ListCameraGroups(ctx context.Context, _ gen.ListCameraGroupsR
 	return out, nil
 }
 
+func nilIfEmpty(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 func cameraGroupInput(b gen.CameraGroupInput) inventory.CameraGroupInput {
-	return inventory.CameraGroupInput{TenantID: b.TenantId, Name: b.Name, Description: deref(b.Description), CameraIDs: b.CameraIds}
+	in := inventory.CameraGroupInput{TenantID: b.TenantId, Name: b.Name, Description: deref(b.Description), CameraIDs: deref(b.CameraIds)}
+	if f := b.Filter; f != nil {
+		in.Filter = &inventory.CameraGroupFilter{
+			SiteIDs: deref(f.SiteIds), ServerIDs: deref(f.ServerIds), Tags: deref(f.Tags), NameContains: deref(f.NameContains),
+		}
+	}
+	return in
+}
+
+// parseGroupVersion reads the optional camera group version from an If-Match value (plain or quoted integer).
+func parseGroupVersion(ifMatch *string) (*int32, error) {
+	if ifMatch == nil || strings.TrimSpace(*ifMatch) == "" {
+		return nil, nil
+	}
+	raw := strings.Trim(strings.TrimPrefix(strings.TrimSpace(*ifMatch), "W/"), `"`)
+	v, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || v < 1 {
+		return nil, &inventory.ValidationError{Msg: "If-Match must carry the current camera group version (a positive integer)"}
+	}
+	n := int32(v)
+	return &n, nil
 }
 
 func (h *Handlers) CreateCameraGroup(ctx context.Context, r gen.CreateCameraGroupRequestObject) (gen.CreateCameraGroupResponseObject, error) {
@@ -511,7 +557,11 @@ func (h *Handlers) ReplaceCameraGroup(ctx context.Context, r gen.ReplaceCameraGr
 	if err != nil {
 		return nil, err
 	}
-	g, err := h.Inv.ReplaceCameraGroup(ctx, a, r.GroupId, cameraGroupInput(*r.Body))
+	in := cameraGroupInput(*r.Body)
+	if in.ExpectedVersion, err = parseGroupVersion(r.Params.IfMatch); err != nil {
+		return nil, err
+	}
+	g, err := h.Inv.ReplaceCameraGroup(ctx, a, r.GroupId, in)
 	if err != nil {
 		return nil, err
 	}

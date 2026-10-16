@@ -396,5 +396,3 @@ func TestListAlarmsKeysetCursorSortAndListAlarmEvents(t *testing.T) {
 		t.Fatalf("ListEvents = %+v, want 2 events at t0 and t0+5m", evs)
 	}
 }
-
-

@@ -141,17 +141,24 @@ func (q *Queries) CreateCameraFolder(ctx context.Context, arg CreateCameraFolder
 }
 
 const createCameraGroup = `-- name: CreateCameraGroup :one
-INSERT INTO camera_groups (tenant_id, name, description) VALUES ($1, $2, $3) RETURNING id, tenant_id, name, description, created_at, updated_at, deleted_at, deleted_by
+INSERT INTO camera_groups (tenant_id, name, description, filter)
+VALUES ($1, $2, $3, $4::jsonb) RETURNING id, tenant_id, name, description, created_at, updated_at, deleted_at, deleted_by, filter, version
 `
 
 type CreateCameraGroupParams struct {
 	TenantID    uuid.UUID
 	Name        string
 	Description string
+	Filter      []byte
 }
 
 func (q *Queries) CreateCameraGroup(ctx context.Context, arg CreateCameraGroupParams) (CameraGroup, error) {
-	row := q.db.QueryRow(ctx, createCameraGroup, arg.TenantID, arg.Name, arg.Description)
+	row := q.db.QueryRow(ctx, createCameraGroup,
+		arg.TenantID,
+		arg.Name,
+		arg.Description,
+		arg.Filter,
+	)
 	var i CameraGroup
 	err := row.Scan(
 		&i.ID,
@@ -162,6 +169,8 @@ func (q *Queries) CreateCameraGroup(ctx context.Context, arg CreateCameraGroupPa
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletedBy,
+		&i.Filter,
+		&i.Version,
 	)
 	return i, err
 }
@@ -374,7 +383,7 @@ func (q *Queries) GetCameraFolder(ctx context.Context, id uuid.UUID) (GetCameraF
 }
 
 const getCameraGroup = `-- name: GetCameraGroup :one
-SELECT id, tenant_id, name, description, created_at, updated_at, deleted_at, deleted_by FROM camera_groups WHERE id = $1 AND deleted_at IS NULL
+SELECT id, tenant_id, name, description, created_at, updated_at, deleted_at, deleted_by, filter, version FROM camera_groups WHERE id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) GetCameraGroup(ctx context.Context, id uuid.UUID) (CameraGroup, error) {
@@ -389,6 +398,8 @@ func (q *Queries) GetCameraGroup(ctx context.Context, id uuid.UUID) (CameraGroup
 		&i.UpdatedAt,
 		&i.DeletedAt,
 		&i.DeletedBy,
+		&i.Filter,
+		&i.Version,
 	)
 	return i, err
 }
@@ -788,7 +799,7 @@ func (q *Queries) ListCameraGroupMembers(ctx context.Context, groupID uuid.UUID)
 }
 
 const listCameraGroups = `-- name: ListCameraGroups :many
-SELECT id, tenant_id, name, description, created_at, updated_at, deleted_at, deleted_by FROM camera_groups WHERE deleted_at IS NULL
+SELECT id, tenant_id, name, description, created_at, updated_at, deleted_at, deleted_by, filter, version FROM camera_groups WHERE deleted_at IS NULL
   AND ($1::uuid IS NULL OR tenant_id = $1)
 ORDER BY name
 `
@@ -811,6 +822,8 @@ func (q *Queries) ListCameraGroups(ctx context.Context, tenantID *uuid.UUID) ([]
 			&i.UpdatedAt,
 			&i.DeletedAt,
 			&i.DeletedBy,
+			&i.Filter,
+			&i.Version,
 		); err != nil {
 			return nil, err
 		}
@@ -1405,6 +1418,42 @@ func (q *Queries) PurgeServerSyncState(ctx context.Context, serverID uuid.UUID) 
 	return result.RowsAffected(), nil
 }
 
+const rematerializeDynamicGroups = `-- name: RematerializeDynamicGroups :exec
+WITH g AS (
+    SELECT cg.id, cg.tenant_id, cg.filter FROM camera_groups cg
+    WHERE cg.tenant_id = $1 AND cg.filter IS NOT NULL AND cg.deleted_at IS NULL
+      AND ($2::uuid IS NULL OR cg.id = $2)
+), matches AS (
+    SELECT g.id AS group_id, c.id AS camera_id, c.tenant_id
+    FROM g JOIN cameras c ON c.tenant_id = g.tenant_id AND c.deleted_at IS NULL
+    WHERE (NOT g.filter ? 'site_ids' OR c.site_id::text IN (SELECT jsonb_array_elements_text(g.filter->'site_ids')))
+      AND (NOT g.filter ? 'server_ids' OR c.server_id::text IN (SELECT jsonb_array_elements_text(g.filter->'server_ids')))
+      AND (NOT g.filter ? 'tags' OR EXISTS (
+            SELECT 1 FROM unnest(c.tags) ct JOIN jsonb_array_elements_text(g.filter->'tags') ft ON lower(ct) = lower(ft)))
+      AND (NOT g.filter ? 'name_contains' OR strpos(lower(c.display_name), lower(g.filter->>'name_contains')) > 0)
+), del AS (
+    DELETE FROM camera_group_members m USING g
+    WHERE m.group_id = g.id
+      AND NOT EXISTS (SELECT 1 FROM matches x WHERE x.group_id = m.group_id AND x.camera_id = m.camera_id)
+)
+INSERT INTO camera_group_members (group_id, camera_id, tenant_id)
+SELECT x.group_id, x.camera_id, x.tenant_id FROM matches x
+ON CONFLICT DO NOTHING
+`
+
+type RematerializeDynamicGroupsParams struct {
+	TenantID uuid.UUID
+	GroupID  *uuid.UUID
+}
+
+// Recomputes camera_group_members of the tenant's dynamic groups (filter IS NOT NULL) from their filters,
+// optionally for one group. Filter keys (AND across keys, OR within a key): site_ids, server_ids, tags
+// (any tag, case-insensitive) and name_contains (case-insensitive substring of display_name).
+func (q *Queries) RematerializeDynamicGroups(ctx context.Context, arg RematerializeDynamicGroupsParams) error {
+	_, err := q.db.Exec(ctx, rematerializeDynamicGroups, arg.TenantID, arg.GroupID)
+	return err
+}
+
 const renameCameraFolder = `-- name: RenameCameraFolder :exec
 UPDATE camera_folders SET name = $1, updated_at = now() WHERE id = $2
 `
@@ -1605,20 +1654,34 @@ func (q *Queries) UpdateCamera(ctx context.Context, arg UpdateCameraParams) erro
 	return err
 }
 
-const updateCameraGroup = `-- name: UpdateCameraGroup :exec
-UPDATE camera_groups SET name = $1, description = $2, updated_at = now()
-WHERE id = $3 AND deleted_at IS NULL
+const updateCameraGroup = `-- name: UpdateCameraGroup :execrows
+UPDATE camera_groups SET name = $1, description = $2, filter = $3::jsonb,
+    version = version + 1, updated_at = now()
+WHERE id = $4 AND deleted_at IS NULL
+  AND ($5::int IS NULL OR version = $5)
 `
 
 type UpdateCameraGroupParams struct {
-	Name        string
-	Description string
-	ID          uuid.UUID
+	Name            string
+	Description     string
+	Filter          []byte
+	ID              uuid.UUID
+	ExpectedVersion *int32
 }
 
-func (q *Queries) UpdateCameraGroup(ctx context.Context, arg UpdateCameraGroupParams) error {
-	_, err := q.db.Exec(ctx, updateCameraGroup, arg.Name, arg.Description, arg.ID)
-	return err
+// Bumps version; a non-NULL expected_version makes the update a compare-and-swap (0 rows = stale).
+func (q *Queries) UpdateCameraGroup(ctx context.Context, arg UpdateCameraGroupParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateCameraGroup,
+		arg.Name,
+		arg.Description,
+		arg.Filter,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateCameraHealth = `-- name: UpdateCameraHealth :exec

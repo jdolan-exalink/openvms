@@ -209,11 +209,40 @@ ORDER BY name;
 SELECT * FROM camera_groups WHERE id = @id AND deleted_at IS NULL;
 
 -- name: CreateCameraGroup :one
-INSERT INTO camera_groups (tenant_id, name, description) VALUES (@tenant_id, @name, @description) RETURNING *;
+INSERT INTO camera_groups (tenant_id, name, description, filter)
+VALUES (@tenant_id, @name, @description, sqlc.narg('filter')::jsonb) RETURNING *;
 
--- name: UpdateCameraGroup :exec
-UPDATE camera_groups SET name = @name, description = @description, updated_at = now()
-WHERE id = @id AND deleted_at IS NULL;
+-- name: UpdateCameraGroup :execrows
+-- Bumps version; a non-NULL expected_version makes the update a compare-and-swap (0 rows = stale).
+UPDATE camera_groups SET name = @name, description = @description, filter = sqlc.narg('filter')::jsonb,
+    version = version + 1, updated_at = now()
+WHERE id = @id AND deleted_at IS NULL
+  AND (sqlc.narg('expected_version')::int IS NULL OR version = sqlc.narg('expected_version'));
+
+-- name: RematerializeDynamicGroups :exec
+-- Recomputes camera_group_members of the tenant's dynamic groups (filter IS NOT NULL) from their filters,
+-- optionally for one group. Filter keys (AND across keys, OR within a key): site_ids, server_ids, tags
+-- (any tag, case-insensitive) and name_contains (case-insensitive substring of display_name).
+WITH g AS (
+    SELECT cg.id, cg.tenant_id, cg.filter FROM camera_groups cg
+    WHERE cg.tenant_id = @tenant_id AND cg.filter IS NOT NULL AND cg.deleted_at IS NULL
+      AND (sqlc.narg('group_id')::uuid IS NULL OR cg.id = sqlc.narg('group_id'))
+), matches AS (
+    SELECT g.id AS group_id, c.id AS camera_id, c.tenant_id
+    FROM g JOIN cameras c ON c.tenant_id = g.tenant_id AND c.deleted_at IS NULL
+    WHERE (NOT g.filter ? 'site_ids' OR c.site_id::text IN (SELECT jsonb_array_elements_text(g.filter->'site_ids')))
+      AND (NOT g.filter ? 'server_ids' OR c.server_id::text IN (SELECT jsonb_array_elements_text(g.filter->'server_ids')))
+      AND (NOT g.filter ? 'tags' OR EXISTS (
+            SELECT 1 FROM unnest(c.tags) ct JOIN jsonb_array_elements_text(g.filter->'tags') ft ON lower(ct) = lower(ft)))
+      AND (NOT g.filter ? 'name_contains' OR strpos(lower(c.display_name), lower(g.filter->>'name_contains')) > 0)
+), del AS (
+    DELETE FROM camera_group_members m USING g
+    WHERE m.group_id = g.id
+      AND NOT EXISTS (SELECT 1 FROM matches x WHERE x.group_id = m.group_id AND x.camera_id = m.camera_id)
+)
+INSERT INTO camera_group_members (group_id, camera_id, tenant_id)
+SELECT x.group_id, x.camera_id, x.tenant_id FROM matches x
+ON CONFLICT DO NOTHING;
 
 -- name: SoftDeleteCameraGroup :exec
 UPDATE camera_groups SET deleted_at = now(), deleted_by = @deleted_by WHERE id = @id AND deleted_at IS NULL;

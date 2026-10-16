@@ -1267,7 +1267,9 @@ export interface paths {
         put?: never;
         /**
          * Create a camera group
-         * @description Requires cameras.manage on the tenant and on every member camera.
+         * @description Requires cameras.manage on the tenant and, for a manual group, on every member camera. Set filter to
+         *     create a dynamic group: camera_ids must then be empty and the members are computed from the filter and
+         *     kept in sync when cameras are added, retagged, renamed or moved.
          */
         post: operations["createCameraGroup"];
         delete?: never;
@@ -1287,7 +1289,15 @@ export interface paths {
         };
         /** Get a camera group */
         get: operations["getCameraGroup"];
-        /** Replace name, description and members of a camera group */
+        /**
+         * Replace name, description and members (manual) or filter (dynamic) of a camera group
+         * @description A group is manual or dynamic for its whole life. A manual group takes camera_ids; a dynamic group
+         *     (created with a filter) takes the filter again, must not set camera_ids and has its members recomputed.
+         *     Sending camera_ids for a dynamic group, omitting the filter for one, or adding a filter to a manual group
+         *     returns 400. A dynamic group's filter can reach cameras the caller does not manage one by one, so
+         *     updating it requires cameras.manage on the whole tenant. Optimistic locking is optional: when If-Match
+         *     carries the group's version (plain or quoted integer) a stale value returns 409.
+         */
         put: operations["replaceCameraGroup"];
         post?: never;
         /** Delete a camera group */
@@ -2217,15 +2227,77 @@ export interface paths {
         };
         /**
          * List automation rules for the tenant
-         * @description Returns all automation rules for the current tenant. Requires notifications.manage or tenant admin.
+         * @description Returns all automation rules for the current tenant. Requires rules.read.
          */
         get: operations["listRules"];
         put?: never;
         /**
          * Create an automation rule
-         * @description Creates a new automation rule for the tenant. Requires notifications.manage.
+         * @description Creates a new automation rule for the tenant (version 1). Requires rules.manage. Conditions are validated; invalid combinations return 400.
          */
         post: operations["createRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List reusable automation rule templates
+         * @description Returns validated starter conditions and actions. Requires rules.read.
+         */
+        get: operations["listRuleTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/simulate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a rule against recent tenant events
+         * @description Evaluates submitted conditions against recent events visible to the current user, estimates per-camera cooldown suppression from historical event timestamps, and never executes actions or consults the live firing ledger. Requires rules.manage and events.search. The limit bounds the newest events evaluated; has_more indicates additional events exist in the window.
+         */
+        post: operations["simulateRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/{ruleId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List rule version snapshots
+         * @description Requires rules.read and access to the rule.
+         */
+        get: operations["listRuleVersions"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2241,15 +2313,24 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Get rule by ID */
+        /**
+         * Get rule by ID
+         * @description Requires rules.read.
+         */
         get: operations["getRule"];
         put?: never;
         post?: never;
-        /** Delete rule */
+        /**
+         * Delete rule
+         * @description Requires rules.manage.
+         */
         delete: operations["deleteRule"];
         options?: never;
         head?: never;
-        /** Update rule */
+        /**
+         * Update rule
+         * @description Requires rules.manage. Optimistic locking is optional: when If-Match carries the rule's current version (plain or quoted integer) a stale value returns 409 and a malformed one returns 400; without it the update proceeds unchecked. A successful update increments the version and records a snapshot. The merged rule is validated and invalid conditions return 400.
+         */
         patch: operations["updateRule"];
         trace?: never;
     };
@@ -3613,12 +3694,25 @@ export interface components {
         FrigateConfigRevisionList: {
             items: components["schemas"]["FrigateConfigRevision"][];
         };
+        /**
+         * @description Selects the tenant's cameras of a dynamic group. Fields combine with AND, the values of one field
+         *     with OR. At least one field must be set. Tags match case-insensitively; name_contains is a
+         *     case-insensitive substring of the camera display name.
+         */
+        CameraGroupFilter: {
+            site_ids?: string[];
+            server_ids?: string[];
+            tags?: string[];
+            name_contains?: string;
+        };
         CameraGroupInput: {
             /** Format: uuid */
             tenant_id: string;
             name: string;
             description?: string;
-            camera_ids: string[];
+            /** @description Members of a manual group. Must be empty or omitted when filter is set. */
+            camera_ids?: string[];
+            filter?: components["schemas"]["CameraGroupFilter"];
         };
         CameraGroup: {
             /** Format: uuid */
@@ -3629,6 +3723,14 @@ export interface components {
             description: string;
             /** @description Members the caller can view. */
             camera_ids: string[];
+            /** @description Present for dynamic groups; absent for manual groups. */
+            filter?: components["schemas"]["CameraGroupFilter"];
+            /** @description Every member of the group in the tenant, whether or not the caller can view it. */
+            member_count_total: number;
+            /** @description Members the caller cannot view (member_count_total minus camera_ids). */
+            member_count_hidden: number;
+            /** @description Incremented on every update; send it in If-Match for optimistic locking. */
+            version: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -4472,7 +4574,26 @@ export interface components {
             vehicle_types?: string[];
             /** @description Matched after vehicle enrichment. Empty means any color. */
             vehicle_colors?: string[];
+            /** @description Offline rules only. Minimum outage duration before the rule fires. */
             duration_seconds?: number;
+            /** @description Event rules only. Match cameras that belong to any of these groups. */
+            camera_group_ids?: string[];
+            /** @description Event rules only. Match events from cameras inside or linked to these map zones. */
+            map_zone_ids?: string[];
+            schedule?: components["schemas"]["RuleSchedule"];
+            /** @description Event rules only. Quiet period per rule and camera after firing; 0 or unset uses the 300 second default. */
+            cooldown_seconds?: number;
+        };
+        /** @description Event rules only. Evaluated in the camera's site timezone, falling back to timezone and then UTC. start_time later than end_time is an overnight window. */
+        RuleSchedule: {
+            /** @description 0 (Sunday) to 6 (Saturday). Empty means every day. */
+            days_of_week?: number[];
+            /** @description HH:MM */
+            start_time?: string;
+            /** @description HH:MM */
+            end_time?: string;
+            /** @description IANA timezone used when the site has none */
+            timezone?: string;
         };
         RuleActions: {
             create_alarm?: boolean;
@@ -4488,6 +4609,8 @@ export interface components {
             /** Format: uuid */
             tenant_id: string;
             name: string;
+            /** @description Optimistic-locking version; send it back as If-Match on update. */
+            version: number;
             trigger_type: components["schemas"]["RuleTriggerType"];
             conditions: components["schemas"]["RuleConditions"];
             actions: components["schemas"]["RuleActions"];
@@ -4514,6 +4637,65 @@ export interface components {
         };
         RulesList: {
             items: components["schemas"]["Rule"][];
+        };
+        RuleTemplate: {
+            id: string;
+            name: string;
+            description: string;
+            trigger_type: components["schemas"]["RuleTriggerType"];
+            conditions: components["schemas"]["RuleConditions"];
+            actions: components["schemas"]["RuleActions"];
+        };
+        RuleTemplatesList: {
+            items: components["schemas"]["RuleTemplate"][];
+        };
+        RuleSimulationRequest: {
+            trigger_type: components["schemas"]["RuleTriggerType"];
+            conditions: components["schemas"]["RuleConditions"];
+            /** @default 24 */
+            hours: number;
+            /** @default 100 */
+            limit: number;
+        };
+        RuleSimulationMatch: {
+            /** Format: uuid */
+            event_id: string;
+            /** Format: uuid */
+            camera_id: string;
+            camera_name: string;
+            site_name: string;
+            severity: components["schemas"]["Severity"];
+            labels: string[];
+            /** Format: date-time */
+            start_time: string;
+        };
+        RuleSimulation: {
+            evaluated: number;
+            /** @description Events matching conditions before cooldown suppression. */
+            condition_matched: number;
+            /** @description Condition matches remaining after the historical per-camera cooldown projection. */
+            matched: number;
+            /** @description Historical condition matches suppressed by an earlier match on the same camera. */
+            cooldown_suppressed: number;
+            /** @description Effective cooldown; unset or zero conditions use the 300 second production default. */
+            cooldown_seconds: number;
+            has_more: boolean;
+            /** Format: date-time */
+            window_start: string;
+            /** Format: date-time */
+            window_end: string;
+            matches: components["schemas"]["RuleSimulationMatch"][];
+        };
+        RuleVersion: {
+            version: number;
+            snapshot: components["schemas"]["Rule"];
+            /** Format: uuid */
+            changed_by?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        RuleVersionsList: {
+            items: components["schemas"]["RuleVersion"][];
         };
         /** @enum {string} */
         NotificationSeverity: "info" | "warning" | "critical";
@@ -7264,7 +7446,10 @@ export interface operations {
     replaceCameraGroup: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Current camera group version, e.g. 3 or "3". */
+                "If-Match"?: string;
+            };
             path: {
                 groupId: string;
             };
@@ -8991,6 +9176,80 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    listRuleTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Available templates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleTemplatesList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    simulateRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleSimulationRequest"];
+            };
+        };
+        responses: {
+            /** @description Simulation results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleSimulation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listRuleVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rule versions, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleVersionsList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getRule: {
         parameters: {
             query?: never;
@@ -9042,7 +9301,10 @@ export interface operations {
     updateRule: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Current rule version, e.g. 3 or "3". */
+                "If-Match"?: string;
+            };
             path: {
                 ruleId: string;
             };
@@ -9067,6 +9329,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listNotificationChannels: {

@@ -171,4 +171,3 @@ func TestBacklogCleanupMigrationClosesOpenAlarmsOlderThan24h(t *testing.T) {
 		t.Fatal("non-open alarm must remain untouched by backlog cleanup migration")
 	}
 }
-

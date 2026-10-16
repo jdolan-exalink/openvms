@@ -170,4 +170,3 @@ func TestSyncerHonorsServerEventAlarmModeRulesOnly(t *testing.T) {
 		t.Fatalf("rule alarms for zebra in rules_only mode = (%d, %d, %d), want (1, 1, 1)", a, count, linked)
 	}
 }
-

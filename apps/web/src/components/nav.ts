@@ -56,7 +56,7 @@ export const settingsNavGroups: NavGroup[] = [
       { label: "nav.servers", icon: Server, to: "/servers", permission: "servers.view" },
       { label: "nav.cameras", icon: Camera, to: "/cameras", permission: "cameras.view" },
       { label: "nav.cameraGroups", icon: Layers, to: "/camera-groups", permission: "cameras.view" },
-      { label: "nav.rules", icon: GitBranch, to: "/rules", permission: "notifications.manage" },
+      { label: "nav.rules", icon: GitBranch, to: "/rules", permission: "rules.read" },
       { label: "nav.channels", icon: Send, to: "/channels", permission: "notifications.manage" },
       { label: "nav.notifications", icon: BellRing, to: "/notifications" },
     ],

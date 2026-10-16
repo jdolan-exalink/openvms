@@ -490,3 +490,166 @@ func TestEvaluateOfflineEnqueuesDeliveries(t *testing.T) {
 		t.Fatalf("deliveries = %+v, want exactly one for the outage", got)
 	}
 }
+
+func TestEvaluateEventCameraGroupScheduleAndCooldown(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	camNorte := f.env.Cameras["frigate-h01/acceso_norte"]
+	camPlaza := f.env.Cameras["frigate-h01/plaza"]
+
+	// Create a camera group in DB and assign camNorte (not camPlaza) to it.
+	groupID := uuid.New()
+	if err := f.exec(
+		`INSERT INTO camera_groups (id, tenant_id, name, description) VALUES ($1, $2, 'Perimetro Norte', '')`,
+		groupID, f.env.Demo.TenantID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.exec(
+		`INSERT INTO camera_group_members (group_id, camera_id, tenant_id) VALUES ($1, $2, $3)`,
+		groupID, camNorte.ID, f.env.Demo.TenantID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set the site's timezone in DB to America/New_York so schedule evaluation uses real DB site timezone.
+	if err := f.exec(`UPDATE sites SET timezone = 'America/New_York' WHERE id = $1`, camNorte.SiteID); err != nil {
+		t.Fatal(err)
+	}
+
+	cooldownShort := 1
+	cooldownLong := 600
+	ruleShort := f.addRule("Grupo Nocturno Corto", rules.TriggerEvent, rules.Conditions{
+		CameraGroupIDs: []uuid.UUID{groupID},
+		Schedule: &rules.RuleSchedule{
+			DaysOfWeek: []int{5}, // Friday night shift (Fri 22:00 -> Sat 06:00 America/New_York)
+			StartTime:  "22:00",
+			EndTime:    "06:00",
+		},
+		CooldownSeconds: &cooldownShort,
+	}, rules.Actions{NotifyInApp: true}, true)
+
+	ruleLong := f.addRule("Grupo Nocturno Largo", rules.TriggerEvent, rules.Conditions{
+		CameraGroupIDs:  []uuid.UUID{groupID},
+		CooldownSeconds: &cooldownLong,
+	}, rules.Actions{NotifyInApp: true}, true)
+
+	// 1) Event on camPlaza (not in groupID) inside schedule window -> must not match either rule.
+	evNight := f.eventCtx("person")
+	// 2026-10-17T06:30:00Z is Saturday 2026-10-17 02:30 EDT (part of Friday 22:00 -> Saturday 06:00 shift).
+	evNight.Start = time.Date(2026, 10, 17, 6, 30, 0, 0, time.UTC)
+	evPlaza := evNight
+	evPlaza.CameraID, evPlaza.CameraName = camPlaza.ID, camPlaza.DisplayName
+	if err := f.svc.EvaluateEvent(ctx, evPlaza); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(ruleShort); n != 0 {
+		t.Fatalf("camera outside group created %d notifications for ruleShort, want 0", n)
+	}
+
+	// 2) Event on camNorte (in groupID) outside schedule window (Friday 14:00 EDT = 18:00Z) -> ruleShort skipped, ruleLong fires.
+	evDay := evNight
+	evDay.Start = time.Date(2026, 10, 16, 18, 0, 0, 0, time.UTC)
+	if err := f.svc.EvaluateEvent(ctx, evDay); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(ruleShort); n != 0 {
+		t.Fatalf("event outside schedule created %d notifications for ruleShort, want 0", n)
+	}
+	if n := f.notifications(ruleLong); n != 1 {
+		t.Fatalf("matching event created %d notifications for ruleLong, want 1", n)
+	}
+
+	// 3) Event on camNorte inside overnight schedule window -> ruleShort fires (1), ruleLong is debounced (still 1).
+	if err := f.svc.EvaluateEvent(ctx, evNight); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(ruleShort); n != 1 {
+		t.Fatalf("matching overnight event created %d notifications for ruleShort, want 1", n)
+	}
+	if n := f.notifications(ruleLong); n != 1 {
+		t.Fatalf("debounced ruleLong created %d notifications, want 1", n)
+	}
+
+	// Immediate second event within 1s cooldown -> ruleShort is debounced (still 1).
+	if err := f.svc.EvaluateEvent(ctx, evNight); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(ruleShort); n != 1 {
+		t.Fatalf("immediate repeat created %d notifications for ruleShort, want 1", n)
+	}
+
+	// Backdate ruleShort's firing by 2 seconds (> 1s cooldown, < 600s cooldown) -> ruleShort fires again (2), ruleLong stays debounced (1).
+	if err := f.exec(`UPDATE rule_firings SET fired_at = now() - interval '2 seconds' WHERE rule_id = $1`, ruleShort); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.exec(`UPDATE rule_firings SET fired_at = now() - interval '2 seconds' WHERE rule_id = $1`, ruleLong); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.svc.EvaluateEvent(ctx, evNight); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(ruleShort); n != 2 {
+		t.Fatalf("after 1s cooldown expiry ruleShort notifications = %d, want 2", n)
+	}
+	if n := f.notifications(ruleLong); n != 1 {
+		t.Fatalf("inside 600s cooldown ruleLong notifications = %d, want 1", n)
+	}
+}
+
+func TestEvaluateEventMapZoneResolver(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	camInside := f.env.Cameras["frigate-h01/acceso_norte"]
+	camOutside := f.env.Cameras["frigate-h01/plaza"]
+
+	// Create a map zone polygon covering lng [-64.20, -64.15], lat [-31.45, -31.40].
+	zoneID := uuid.New()
+	poly := `{"type":"Polygon","coordinates":[[[-64.20,-31.45],[-64.15,-31.45],[-64.15,-31.40],[-64.20,-31.40],[-64.20,-31.45]]]}`
+	if err := f.exec(`
+INSERT INTO map_zones (id, tenant_id, site_id, name, kind, geometry, min_lat, min_lng, max_lat, max_lng)
+VALUES ($1, $2, $3, 'Zona Restringida Norte', 'security', $4::jsonb, -31.45, -64.20, -31.40, -64.15)`,
+		zoneID, camInside.TenantID, camInside.SiteID, poly,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Place camInside inside the polygon (-31.42, -64.18) and camOutside outside (-31.55, -64.30).
+	if err := f.exec(`
+INSERT INTO map_placements (tenant_id, site_id, entity_type, entity_id, lat, lng)
+VALUES
+  ($1, $2, 'camera', $3, -31.42, -64.18),
+  ($1, $2, 'camera', $4, -31.55, -64.30)
+ON CONFLICT (entity_type, entity_id) WHERE floor_id IS NULL
+DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng`,
+		camInside.TenantID, camInside.SiteID, camInside.ID, camOutside.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	ruleID := f.addRule("Regla Zona Mapa", rules.TriggerEvent, rules.Conditions{
+		MapZoneIDs: []uuid.UUID{zoneID},
+	}, rules.Actions{NotifyInApp: true}, true)
+
+	// Event from camera outside map zone -> must not match.
+	evOut := f.eventCtx("person")
+	evOut.CameraID, evOut.CameraName = camOutside.ID, camOutside.DisplayName
+	if err := f.svc.EvaluateEvent(ctx, evOut); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(ruleID); n != 0 {
+		t.Fatalf("camera outside map zone created %d notifications, want 0", n)
+	}
+
+	// Event from camera inside map zone -> resolved dynamically via StoreZoneResolver and matches.
+	evIn := f.eventCtx("person")
+	evIn.CameraID, evIn.CameraName = camInside.ID, camInside.DisplayName
+	if err := f.svc.EvaluateEvent(ctx, evIn); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(ruleID); n != 1 {
+		t.Fatalf("camera inside map zone created %d notifications, want 1", n)
+	}
+}
