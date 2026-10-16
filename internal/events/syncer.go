@@ -23,6 +23,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
@@ -58,6 +59,9 @@ type Syncer struct {
 	OnNew func(ctx context.Context, e NewEvent)
 	// OnAlarm is called after commit with the alarms opened by one review pull (optional).
 	OnAlarm func(ctx context.Context, alarms []OpenedAlarm)
+	// OnAlarmUpdated is called after commit with the alarms that absorbed further events of an
+	// ongoing situation (one entry per alarm per pull; optional).
+	OnAlarmUpdated func(ctx context.Context, alarms []OpenedAlarm)
 	// Rules is evaluated for each newly inserted event, after commit (optional). Its errors are
 	// logged and never fail the sync.
 	Rules RuleEvaluator
@@ -92,6 +96,9 @@ type OpenedAlarm struct {
 	EventID   uuid.UUID `json:"event_id"`
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
+	// UpdatedAt and EventCount describe the alarm after the event joined it.
+	UpdatedAt  time.Time `json:"updated_at"`
+	EventCount int       `json:"event_count"`
 }
 
 const (
@@ -284,6 +291,7 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	var created []NewEvent
 	cameraNames := map[uuid.UUID]string{}
 	var opened []OpenedAlarm
+	updated := newAlarmUpdates()
 	err := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		for _, r := range all {
 			cam, ok := cams[r.Camera]
@@ -307,12 +315,15 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 			// On every upsert, not only inserts: a detection promoted to alert opens its
 			// alarm later. A downgrade leaves an existing alarm untouched.
 			if ev.Severity == "alert" {
-				alarm, err := openAlarm(ctx, tx, ev)
+				res, err := openAlarm(ctx, tx, ev)
 				if err != nil {
 					return err
 				}
-				if alarm != nil {
-					opened = append(opened, *alarm)
+				if res.opened != nil {
+					opened = append(opened, *res.opened)
+				}
+				for _, u := range res.updated {
+					updated.add(u)
 				}
 			}
 		}
@@ -329,6 +340,9 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	if s.OnAlarm != nil && len(opened) > 0 {
 		s.OnAlarm(ctx, opened)
 	}
+	if s.OnAlarmUpdated != nil && len(updated.list) > 0 {
+		s.OnAlarmUpdated(ctx, updated.list)
+	}
 	if s.Rules != nil {
 		for _, ev := range created {
 			rc := rules.EventContext{
@@ -343,26 +357,68 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	return nil
 }
 
-// openAlarm opens the event's alarm unless one already exists (unique per event and source, so
-// re-reads are idempotent) or the event started before alarms were enabled (alarm_settings:
-// there is no backfill). It returns nil when nothing was opened.
-func openAlarm(ctx context.Context, tx pgx.Tx, ev NewEvent) (*OpenedAlarm, error) {
-	a := OpenedAlarm{TenantID: ev.TenantID, SiteID: ev.SiteID, CameraID: ev.CameraID, EventID: ev.ID}
-	err := tx.QueryRow(ctx, `
-INSERT INTO alarms (tenant_id, site_id, camera_id, event_id, source)
-SELECT $1, $2, $3, $4, 'event'
-WHERE $5::timestamptz >= (SELECT enabled_at FROM alarm_settings)
-ON CONFLICT (event_id, source) DO NOTHING
-RETURNING id, status, created_at`,
-		a.TenantID, a.SiteID, a.CameraID, a.EventID, ev.Start,
-	).Scan(&a.ID, &a.Status, &a.CreatedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil
+// alarmResult is what openAlarm did for one event: opened is the new alarm, updated the existing
+// alarms that changed (the one the event joined, stale ones closed to free the key).
+type alarmResult struct {
+	opened  *OpenedAlarm
+	updated []OpenedAlarm
+}
+
+// alarmUpdates keeps the latest state of each updated alarm of one pull, in first-seen order.
+type alarmUpdates struct {
+	list []OpenedAlarm
+	idx  map[uuid.UUID]int
+}
+
+func newAlarmUpdates() *alarmUpdates { return &alarmUpdates{idx: map[uuid.UUID]int{}} }
+
+func (u *alarmUpdates) add(a OpenedAlarm) {
+	if i, ok := u.idx[a.ID]; ok {
+		u.list[i] = a
+		return
 	}
+	u.idx[a.ID] = len(u.list)
+	u.list = append(u.list, a)
+}
+
+// openAlarm correlates the event into an alarm (see alarms.Correlate): it joins the ongoing alarm
+// of its camera and label or opens a new one. It is idempotent per event, so re-reads change
+// nothing, and does nothing for events that started before alarms were enabled (alarm_settings:
+// there is no backfill).
+func openAlarm(ctx context.Context, tx pgx.Tx, ev NewEvent) (alarmResult, error) {
+	var out alarmResult
+	settings, err := db.New(tx).GetAlarmSettings(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("open alarm for event %s: %w", ev.ID, err)
+		return out, fmt.Errorf("alarm settings: %w", err)
 	}
-	return &a, nil
+	if ev.Start.Before(settings.EnabledAt) {
+		return out, nil
+	}
+	res, err := alarms.Correlate(ctx, tx, alarms.CorrelateInput{
+		TenantID: ev.TenantID, SiteID: ev.SiteID, CameraID: ev.CameraID, EventID: ev.ID,
+		Source: "event", Labels: ev.Labels, At: ev.Start,
+	})
+	if err != nil {
+		return out, fmt.Errorf("correlate alarm for event %s: %w", ev.ID, err)
+	}
+	for _, c := range res.Closed {
+		out.updated = append(out.updated, OpenedAlarm{
+			ID: c.ID, TenantID: c.TenantID, SiteID: c.SiteID, CameraID: c.CameraID, EventID: c.EventID,
+			Status: "closed", UpdatedAt: c.UpdatedAt,
+		})
+	}
+	a := OpenedAlarm{
+		ID: res.AlarmID, TenantID: ev.TenantID, SiteID: ev.SiteID, CameraID: ev.CameraID, EventID: ev.ID,
+		Status: res.Status, CreatedAt: res.CreatedAt, UpdatedAt: res.UpdatedAt, EventCount: res.EventCount,
+	}
+	switch res.Outcome {
+	case alarms.Created:
+		out.opened = &a
+	case alarms.Merged:
+		a.UpdatedAt = res.UpdatedAt
+		out.updated = append(out.updated, a)
+	}
+	return out, nil
 }
 
 func severity(v string) string {

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
+	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -405,16 +406,6 @@ type NotificationCreatedPayload struct {
 	CreatedAt time.Time  `json:"created_at"`
 }
 
-type OpenedAlarmPayload struct {
-	ID        uuid.UUID `json:"id"`
-	TenantID  uuid.UUID `json:"tenant_id"`
-	SiteID    uuid.UUID `json:"site_id"`
-	CameraID  uuid.UUID `json:"camera_id"`
-	EventID   uuid.UUID `json:"event_id"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
 func (s *Service) debounce() time.Duration {
 	if s.Debounce <= 0 {
 		return DefaultDebounce
@@ -430,7 +421,10 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 		}
 	}
 	actor := authz.Actor{TenantID: &ev.TenantID}
-	return s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
+	// Alarm announcements wait for the commit: a rolled-back transaction must not publish.
+	var published []publishedAlarm
+	var closed []alarms.ClosedAlarm
+	err := s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		q := db.New(tx)
 		rulesRows, err := q.ListActiveRulesByTrigger(ctx, db.ListActiveRulesByTriggerParams{
 			TenantID:    ev.TenantID,
@@ -460,33 +454,24 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 			// Matched! Execute actions
 			var alarmID *uuid.UUID
 			if rule.Actions.CreateAlarm {
-				var openedID uuid.UUID
-				var status string
-				var createdAt time.Time
-				err := tx.QueryRow(ctx, `
-					INSERT INTO alarms (tenant_id, site_id, camera_id, event_id, source)
-					VALUES ($1, $2, $3, $4, 'rule')
-					ON CONFLICT (event_id, source) DO NOTHING
-					RETURNING id, status, created_at`,
-					ev.TenantID, ev.SiteID, ev.CameraID, ev.ID,
-				).Scan(&openedID, &status, &createdAt)
-				if err == nil {
-					alarmID = &openedID
-					if s.Pub != nil {
-						payload, _ := json.Marshal(OpenedAlarmPayload{
-							ID:        openedID,
-							TenantID:  ev.TenantID,
-							SiteID:    ev.SiteID,
-							CameraID:  ev.CameraID,
-							EventID:   ev.ID,
-							Status:    status,
-							CreatedAt: createdAt,
-						})
-						_ = s.Pub.Publish(ctx, "alarm.opened."+ev.TenantID.String(), payload)
-					}
-				} else if !errors.Is(err, pgx.ErrNoRows) {
-					s.Log.WarnContext(ctx, "failed to create rule alarm", "error", err, "rule_id", rule.ID)
+				// One alarm per ongoing situation of this rule on this camera and label.
+				res, err := alarms.Correlate(ctx, tx, alarms.CorrelateInput{
+					TenantID: ev.TenantID, SiteID: ev.SiteID, CameraID: ev.CameraID, EventID: ev.ID,
+					Source: "rule", RuleID: &rule.ID, Labels: ev.Labels, At: ev.Start,
+				})
+				if err != nil {
+					return fmt.Errorf("correlate alarm for rule %s: %w", rule.ID, err)
 				}
+				if res.Outcome != alarms.Skipped {
+					id := res.AlarmID
+					alarmID = &id
+					action := "updated"
+					if res.Outcome == alarms.Created {
+						action = "opened"
+					}
+					published = append(published, publishedAlarm{action: action, res: res})
+				}
+				closed = append(closed, res.Closed...)
 			}
 
 			severity := rule.Actions.Severity
@@ -505,6 +490,22 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	for _, p := range published {
+		alarms.PublishAlarm(ctx, s.Pub, s.Log, p.action, p.res.Status, ev.TenantID, ev.SiteID, ev.CameraID, ev.ID, p.res.AlarmID, p.res.UpdatedAt)
+	}
+	for _, c := range closed {
+		alarms.PublishAlarm(ctx, s.Pub, s.Log, "closed", "closed", c.TenantID, c.SiteID, c.CameraID, c.EventID, c.ID, c.UpdatedAt)
+	}
+	return nil
+}
+
+// publishedAlarm is an alarm announcement held back until the transaction commits.
+type publishedAlarm struct {
+	action string
+	res    alarms.CorrelateResult
 }
 
 // Outage describes a camera or server that is currently down. Since is the outage start and

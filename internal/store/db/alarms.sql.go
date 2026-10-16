@@ -18,7 +18,7 @@ SET assigned_to = $1,
     status = CASE WHEN status IN ('open', 'acknowledged') THEN 'assigned' ELSE status END,
     updated_at = now()
 WHERE id = $2
-RETURNING id, tenant_id, site_id, camera_id, event_id, source, status, assigned_to, acknowledged_by, acknowledged_at, resolved_by, resolved_at, created_at, updated_at, closed_by, closed_at
+RETURNING id, tenant_id, site_id, camera_id, event_id, source, status, assigned_to, acknowledged_by, acknowledged_at, resolved_by, resolved_at, created_at, updated_at, closed_by, closed_at, correlation_key, first_event_at, last_event_at, event_count, late, auto_closed
 `
 
 type AssignAlarmParams struct {
@@ -46,6 +46,12 @@ func (q *Queries) AssignAlarm(ctx context.Context, arg AssignAlarmParams) (Alarm
 		&i.UpdatedAt,
 		&i.ClosedBy,
 		&i.ClosedAt,
+		&i.CorrelationKey,
+		&i.FirstEventAt,
+		&i.LastEventAt,
+		&i.EventCount,
+		&i.Late,
+		&i.AutoClosed,
 	)
 	return i, err
 }
@@ -458,7 +464,7 @@ SET status = $1,
     closed_at = CASE WHEN $1 = 'closed' THEN now() ELSE closed_at END,
     updated_at = now()
 WHERE id = $3
-RETURNING id, tenant_id, site_id, camera_id, event_id, source, status, assigned_to, acknowledged_by, acknowledged_at, resolved_by, resolved_at, created_at, updated_at, closed_by, closed_at
+RETURNING id, tenant_id, site_id, camera_id, event_id, source, status, assigned_to, acknowledged_by, acknowledged_at, resolved_by, resolved_at, created_at, updated_at, closed_by, closed_at, correlation_key, first_event_at, last_event_at, event_count, late, auto_closed
 `
 
 type UpdateAlarmStatusParams struct {
@@ -487,6 +493,12 @@ func (q *Queries) UpdateAlarmStatus(ctx context.Context, arg UpdateAlarmStatusPa
 		&i.UpdatedAt,
 		&i.ClosedBy,
 		&i.ClosedAt,
+		&i.CorrelationKey,
+		&i.FirstEventAt,
+		&i.LastEventAt,
+		&i.EventCount,
+		&i.Late,
+		&i.AutoClosed,
 	)
 	return i, err
 }

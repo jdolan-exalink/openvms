@@ -126,11 +126,19 @@ func run() error {
 				log.WarnContext(ctx, "publish new event", "error", err)
 			}
 		},
-		OnAlarm: func(ctx context.Context, alarms []events.OpenedAlarm) {
-			for _, a := range alarms {
+		OnAlarm: func(ctx context.Context, opened []events.OpenedAlarm) {
+			for _, a := range opened {
 				data, _ := json.Marshal(a)
 				if _, err := js.Publish(ctx, "alarm.opened."+a.TenantID.String(), data); err != nil {
 					log.WarnContext(ctx, "publish opened alarm", "error", err, "alarm_id", a.ID)
+				}
+			}
+		},
+		OnAlarmUpdated: func(ctx context.Context, updated []events.OpenedAlarm) {
+			for _, a := range updated {
+				data, _ := json.Marshal(a)
+				if _, err := js.Publish(ctx, "alarm.updated."+a.TenantID.String(), data); err != nil {
+					log.WarnContext(ctx, "publish updated alarm", "error", err, "alarm_id", a.ID)
 				}
 			}
 		},
