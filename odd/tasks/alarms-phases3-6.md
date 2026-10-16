@@ -19,7 +19,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 ## Tasks and acceptance criteria
 - [x] **P3-01 — Finish priority inbox UX.** Existing route exposed status/camera filters and actions but did not request the backend's supported priority ordering or expose its cursor pagination. The inbox now defaults to priority order, allows activity-time sorting, and loads subsequent cursor pages. Acceptance: covered by the focused regression test; no duplicate backend or invented requirements.
 - [x] **P3-02 — Contextual alarm video.** Added a permission-gated action that opens the existing playback route for the alarm camera at its latest correlated event timestamp (falling back to event start). The action clarifies that an event capture does not guarantee retained video. Acceptance: covered by focused tests; no playback backend or retention behavior duplicated or promised.
-- [ ] **P3-03 — Real-time ordering and pagination.** Ensure incoming alarm updates coexist correctly with cursor paging. Acceptance: no duplicate/lost/reordered visible items under tested updates; focused tests.
+- [x] **P3-03 — Real-time ordering and pagination.** Verified the existing app-wide feed invalidates the alarms prefix for `alarm.created`/`alarm.updated` and on reconnect; the priority infinite query refetches pages from a newly-derived cursor while retaining filters/sort. Added regression coverage; no runtime behavior change was needed.
 - [ ] **P3-04 — Optional VisionAI alarm pin.** Implement only if source inspection confirms an actual missing pin behavior. Acceptance: evidence-based gap and tests; otherwise record not needed.
 - [ ] **P4-01 — Alarm rule wizard.** Pending product decision for wizard steps, copy, and form grouping; existing P2-04 group coverage is done. Acceptance after decision: approved flow implemented and tested.
 - [ ] **P5-01 — Persisted camera zones.** Add tenant-safe persistence/API for normalized zones and stable IDs. Acceptance: forward-only migration, RLS, contract/client generation, integration tests.
@@ -29,7 +29,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [ ] **P6-02 — Publish-after-commit and hardening.** Move event/rule notifications behind commit/outbox; add end-to-end and latency coverage. Acceptance: rollback cannot emit events, multi-replica behavior tested, measured latency documented.
 
 ## Route and estimate
-- Route: delegated direct implementation was assigned as one bounded writer; no parallel writers. P3-01 and P3-02 are separate cohesive work units.
+- Route: delegated direct implementation was assigned as one bounded writer; no parallel writers. P3-01 and P3-02 are separate implementation units; P3-03 closes as a test/evidence unit because existing runtime behavior is sufficient.
 - Trigger evidence: this roadmap spans multiple phases/files; parent performed read-only mapping. Each delegated unit stays separately bounded.
 - Forecast: approximately 2,000 authored changed lines across phases 3–6, excluding generated files; sliced by work unit. Revisit actual counts as commits accumulate. No PR strategy/chain selected or PR authorized here.
 
@@ -45,7 +45,12 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [x] P3-02 runtime harness: N/A — browser tests verify the playback link's camera/time target and permission gate; no Frigate recording runtime is provided to assert actual retained video availability.
 - [x] P3-02 rollback boundary: revert `apps/web/src/routes/Alarms.tsx` and `apps/web/src/routes/Alarms.test.tsx`; no API/database changes.
 - [x] P3-02 work-unit commit: `6c15cc5` (`feat(alarms): link alarms to contextual playback`) on `feat/https-agent-ingress`.
+- [x] P3-03 validation: test-first behavior check required no product fix. `cd apps/web && pnpm exec vitest run src/lib/realtime.test.tsx --reporter=dot` — 16/16 passed. `cd apps/web && pnpm exec eslint src/lib/realtime.test.tsx` and `cd apps/web && pnpm typecheck` passed; `git diff --check` passed.
+- [x] P3-03 authored test diff: 78 lines (74 additions, 4 deletions; tracker is separate documentation).
+- [x] P3-03 runtime harness: N/A — controlled WebSocket/query test verifies invalidation and refreshed pages; no external runtime dependency is needed.
+- [x] P3-03 rollback boundary: revert `apps/web/src/lib/realtime.test.tsx` and this tracker entry; no production source changed.
+- [ ] P3-03 evidence commit identity: pending commit.
 - Known blocker: Phase 4 wizard needs a product decision. P3-04 is conditional on confirmed gap.
 
 ## Next step
-Proceed to P3-03 real-time ordering and pagination; Phase 4 remains gated on the wizard product decision.
+Proceed to P3-04 gap assessment; Phase 4 remains gated on the wizard product decision.
