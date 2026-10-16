@@ -200,10 +200,24 @@ func (s *Service) GetServer(ctx context.Context, actor authz.Actor, id uuid.UUID
 }
 
 type CreateServerInput struct {
-	SiteID        uuid.UUID
-	Name          string
-	Conn          ConnInput
-	ImportCameras bool
+	SiteID         uuid.UUID
+	Name           string
+	Conn           ConnInput
+	ImportCameras  bool
+	EventAlarmMode *string
+}
+
+func validateEventAlarmMode(m *string) (*string, error) {
+	if m == nil || strings.TrimSpace(*m) == "" {
+		return nil, nil
+	}
+	v := strings.TrimSpace(*m)
+	switch v {
+	case "all_alerts", "rules_only":
+		return &v, nil
+	default:
+		return nil, invalid("event_alarm_mode must be all_alerts or rules_only")
+	}
 }
 
 // CreateServer registers a Frigate server after proving the credentials work.
@@ -215,10 +229,14 @@ func (s *Service) CreateServer(ctx context.Context, actor authz.Actor, in Create
 	if err := in.Conn.validate(); err != nil {
 		return ServerView{}, err
 	}
+	alarmMode, err := validateEventAlarmMode(in.EventAlarmMode)
+	if err != nil {
+		return ServerView{}, err
+	}
 	// Authorize before contacting Frigate so an unauthorized caller cannot use the
 	// VMS to probe arbitrary hosts.
 	var site db.GetSiteRow
-	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+	err = s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		var err error
 		site, err = requireSite(ctx, q, c, authz.ServersManage, in.SiteID)
 		return err
@@ -247,7 +265,7 @@ func (s *Service) CreateServer(ctx context.Context, actor authz.Actor, in Create
 			ID: id, TenantID: site.TenantID, SiteID: site.ID, Name: in.Name,
 			BaseUrl: strings.TrimRight(info.BaseURL, "/"), AuthMode: string(info.AuthMode), Username: info.Username,
 			PasswordSealed: sealed, TlsSkipVerify: in.Conn.TLSSkipVerify,
-			FrigateVersion: found.Version, Capabilities: caps,
+			FrigateVersion: found.Version, Capabilities: caps, EventAlarmMode: alarmMode,
 		})
 		if err != nil {
 			return store.Classify(err)
@@ -297,18 +315,23 @@ func displayName(remote string) string {
 }
 
 type UpdateServerInput struct {
-	Name          *string
-	SiteID        *uuid.UUID
-	BaseURL       *string
-	AuthMode      *frigate.AuthMode
-	Username      *string
-	Password      *string
-	TLSSkipVerify *bool
+	Name           *string
+	SiteID         *uuid.UUID
+	BaseURL        *string
+	AuthMode       *frigate.AuthMode
+	Username       *string
+	Password       *string
+	TLSSkipVerify  *bool
+	EventAlarmMode *string
 }
 
 func (s *Service) UpdateServer(ctx context.Context, actor authz.Actor, id uuid.UUID, in UpdateServerInput) (ServerView, error) {
+	alarmMode, err := validateEventAlarmMode(in.EventAlarmMode)
+	if err != nil {
+		return ServerView{}, err
+	}
 	var current db.GetServerRow
-	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+	err = s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		var err error
 		current, err = q.GetServer(ctx, id)
 		if err != nil {
@@ -382,6 +405,7 @@ func (s *Service) UpdateServer(ctx context.Context, actor authz.Actor, id uuid.U
 		err := q.UpdateServer(ctx, db.UpdateServerParams{
 			ID: id, Name: name, SiteID: siteID, BaseUrl: strings.TrimRight(info.BaseURL, "/"), AuthMode: string(info.AuthMode),
 			Username: info.Username, PasswordSealed: sealed, TlsSkipVerify: conn.TLSSkipVerify,
+			EventAlarmMode: alarmMode,
 		})
 		if err != nil {
 			return store.Classify(err)

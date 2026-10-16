@@ -2942,11 +2942,17 @@ export interface components {
              */
             tls_skip_verify: boolean;
         };
+        /**
+         * @description Controls whether Frigate alert events open event-source alarms directly (all_alerts) or only through rules (rules_only).
+         * @enum {string}
+         */
+        EventAlarmMode: "all_alerts" | "rules_only";
         ServerCreate: components["schemas"]["ServerProbe"] & {
             /** @example Frigate-H01 */
             name: string;
             /** @default true */
             import_cameras: boolean;
+            event_alarm_mode?: components["schemas"]["EventAlarmMode"];
         };
         ServerUpdate: {
             name?: string;
@@ -2958,6 +2964,7 @@ export interface components {
             /** Format: password */
             password?: string;
             tls_skip_verify?: boolean;
+            event_alarm_mode?: components["schemas"]["EventAlarmMode"];
         };
         Capabilities: {
             review: boolean;
@@ -3005,6 +3012,7 @@ export interface components {
             tls_skip_verify: boolean;
             frigate_version: string;
             capabilities: components["schemas"]["Capabilities"];
+            event_alarm_mode?: components["schemas"]["EventAlarmMode"];
             status: components["schemas"]["HealthStatus"];
             /** Format: date-time */
             last_seen_at?: string | null;

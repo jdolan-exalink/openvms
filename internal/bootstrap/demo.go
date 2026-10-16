@@ -64,7 +64,8 @@ func Demo(ctx context.Context, svc *inventory.Service, admin authz.Actor, server
 		}
 		v, err := svc.CreateServer(ctx, admin, inventory.CreateServerInput{
 			SiteID: siteID, Name: s.Name, ImportCameras: true,
-			Conn: inventory.ConnInput{BaseURL: s.BaseURL, Username: s.Username, Password: s.Password},
+			EventAlarmMode: ptr("all_alerts"),
+			Conn:           inventory.ConnInput{BaseURL: s.BaseURL, Username: s.Username, Password: s.Password},
 		})
 		if err != nil {
 			return res, fmt.Errorf("register server %s: %w", s.Name, err)

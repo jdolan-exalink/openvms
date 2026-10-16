@@ -313,8 +313,9 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 				}
 			}
 			// On every upsert, not only inserts: a detection promoted to alert opens its
-			// alarm later. A downgrade leaves an existing alarm untouched.
-			if ev.Severity == "alert" {
+			// alarm later. A downgrade leaves an existing alarm untouched. Servers in
+			// rules_only mode rely exclusively on rules (source='rule') to open alarms.
+			if ev.Severity == "alert" && srv.EventAlarmMode != "rules_only" {
 				res, err := openAlarm(ctx, tx, ev)
 				if err != nil {
 					return err
