@@ -75,6 +75,12 @@ hay que instalar/confiar el certificado y acceder con un nombre/IP incluido en s
 `OPENVMS_HTTPS_DEFAULT_SNI` debe ser uno de los nombres incluidos en `OPENVMS_HTTPS_SANS`;
 por defecto es `localhost`.
 
+El generador espera hasta 30 segundos si otra instancia está creando el certificado y luego
+falla con un mensaje de recuperación; nunca elimina automáticamente un bloqueo porque podría
+pertenecer a un inicio todavía activo. Si el bloqueo persiste, detené el contenedor web y
+verificá que no haya otro proceso de inicio usando ese volumen antes de quitar
+`.generation-lock` del volumen `openvms-web-tls` y volver a iniciar.
+
 Para conservar un certificado y una clave externos, definí ambos
 `OPENVMS_WEB_TLS_CERT_HOST_FILE` y `OPENVMS_WEB_TLS_KEY_HOST_FILE` con rutas del host. El
 contenedor valida que sean legibles, válidos y que coincidan; no reemplaza esos archivos.

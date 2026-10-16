@@ -2,6 +2,7 @@ package compose
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -702,6 +704,31 @@ func TestAutomaticWebTLSBootstrapReleasesGenerationLockBeforeCaddyExec(t *testin
 	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost", "OPENVMS_WEB_TLS_DIR="+root)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("entrypoint must release startup lock before exec: %v: %s", err, output)
+	}
+}
+
+func TestAutomaticWebTLSBootstrapFailsActionablyOnAbandonedGenerationLock(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "tls")
+	if err := os.MkdirAll(filepath.Join(root, ".generation-lock"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, "sh", script)
+	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost", "OPENVMS_WEB_TLS_DIR="+root, "OPENVMS_TLS_LOCK_WAIT_SECONDS=1")
+	output, err := command.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("TLS bootstrap hung on a pre-existing lock instead of failing within its bound: %v: %s", ctx.Err(), output)
+	}
+	if err == nil {
+		t.Fatalf("TLS bootstrap unexpectedly proceeded through pre-existing lock: %s", output)
+	}
+	if !strings.Contains(string(output), "generation lock") || !strings.Contains(string(output), "stop the web container") {
+		t.Fatalf("lock failure must explain safe recovery, got: %s", output)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".generation-lock")); err != nil {
+		t.Fatalf("bootstrap must not remove or steal a pre-existing lock: %v", err)
 	}
 }
 

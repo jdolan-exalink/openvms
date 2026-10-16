@@ -44,7 +44,6 @@ for san do
     [ "${#san}" -le 253 ] || { echo "DNS HTTPS SAN is too long: $san" >&2; exit 1; }
     case "$san" in *[!a-zA-Z0-9.-]*|[.-]*|*[-.]) echo "Invalid DNS HTTPS SAN: $san" >&2; exit 1;; esac
     printf '%s\n' "$san" | awk -F. '{for (i=1; i<=NF; i++) if (length($i) > 63) exit 1}' || { echo "DNS HTTPS SAN label exceeds 63 characters: $san" >&2; exit 1; }
-    printf '%s\n' "$san" | awk -F. '{for (i=1; i<=NF; i++) if (length($i) > 63) exit 1}' || { echo "DNS HTTPS SAN label exceeds 63 characters: $san" >&2; exit 1; }
     san_ext=${san_ext}${san_ext:+,}DNS:$san
   else
     san_ext=${san_ext}${san_ext:+,}IP:$san
@@ -55,7 +54,18 @@ done
 mkdir -p "$dir"
 chmod 700 "$dir"
 lock=$dir/.generation-lock
-while ! mkdir "$lock" 2>/dev/null; do sleep 1; done
+lock_wait_seconds=${OPENVMS_TLS_LOCK_WAIT_SECONDS:-30}
+case "$lock_wait_seconds" in ''|*[!0-9]*) echo "OPENVMS_TLS_LOCK_WAIT_SECONDS must be an integer from 1 to 300." >&2; exit 1;; esac
+[ "$lock_wait_seconds" -ge 1 ] && [ "$lock_wait_seconds" -le 300 ] || { echo "OPENVMS_TLS_LOCK_WAIT_SECONDS must be an integer from 1 to 300." >&2; exit 1; }
+lock_waited=0
+while ! mkdir "$lock" 2>/dev/null; do
+  if [ "$lock_waited" -ge "$lock_wait_seconds" ]; then
+    echo "Timed out waiting for HTTPS certificate generation lock at $lock. If this persists, stop the web container and verify no startup process is using this TLS volume before removing the stale lock and retrying." >&2
+    exit 1
+  fi
+  sleep 1
+  lock_waited=$((lock_waited + 1))
+done
 trap 'rmdir "$lock" 2>/dev/null || true' EXIT HUP INT TERM
 current=$dir/current
 rotate=true

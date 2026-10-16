@@ -15,6 +15,7 @@ Status: ACTIVE — trusted HTTPS ingress is complete; HTTPS-04 auto-provisioned 
 - [x] HTTPS-02 — Choose fixed operator-configured SAN host list and persisted self-signed leaf cert for appliance-style direct access; retain Caddy and external-cert override. No dynamic Host-header issuance or automatic host-interface discovery.
 - [x] HTTPS-03 — Close with focused/broader verification, isolated runtime evidence, work-unit commit, and tracker/mirror sync.
 - [x] HTTPS-04 — Auto-generate and persist a self-signed HTTPS leaf on first start; renew on startup when SAN set changes or expiry threshold is reached; validate/atomically install pair; preserve explicit external cert mode and actionable invalid config failures. Configure multiple IPv4/IPv6/DNS SANs with localhost fallback, preserve no-SNI IP TLS, HTTP and 8443 behavior. Route: delegated direct; strict TDD true (user/session configuration); delivery ask-on-risk with cached stacked-to-main.
+- [x] HTTPS-05 — Bound TLS generation lock waiting so an abandoned lock cannot hang startup forever; fail with safe, actionable recovery guidance without stealing a live lock. Remove duplicate DNS-label validation and document manual recovery. RED → GREEN → REFACTOR. Parent requested before native candidate freeze.
 
 ## Alarms closeout context
 - P2-05 native review was approved and acknowledged; authority burned for `review-41b36ff5391a45cd`.
@@ -64,6 +65,9 @@ cases), instead of fixing a single scenario. The SSH password must never be stor
 - No-SNI proof depends on the generated multi-SAN certificate plus Caddy `default_sni`; the test intentionally connects without SNI to the IP literal.
 - Rollback boundary: revert the HTTPS-04 work-unit commit to remove auto-generation/volume/SAN configuration, entrypoint, docs, and focused tests; HTTPS-01 proxy trust implementation and API behavior remain unchanged.
 - HTTPS-04 work-unit commit: `5f67a90` (`feat(https): provision persistent self-signed certificates`); 431 additions / 38 deletions, 469 changed lines. No PR, push, or deployment.
+- HTTPS-05 RED: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./deploy/agent/compose -run '^TestAutomaticWebTLSBootstrapFailsActionablyOnAbandonedGenerationLock$' -v` failed because the pre-existing lock caused the script to outlive the test's 3-second context deadline.
+- HTTPS-05 GREEN: `GOCACHE=/tmp/openvms-go-build-cache go test -race -count=1 ./deploy/agent/compose -run '^TestAutomaticWebTLSBootstrap' -v` passed all 11 auto-TLS tests, including abandoned-lock failure, concurrent startup, and normal lock release. `sh -n deploy/docker/prepare-web-tls.sh` and `git diff --check` passed.
+- HTTPS-05 uses a 30-second default lock bound (configurable from 1 to 300 seconds for operators/tests), and never steals/removes an existing lock. Timeout reports the lock path and directs operators to stop the web container and verify no startup process is using the volume before manual removal. README documents the same safe recovery. Removed the duplicate DNS-label validation command.
 
 ## Next step
-Parent-owned risk assessment/native review for commit `5f67a90`, then decide ordinary delivery. No deployment, restart of current project services, remote operation, PR, or push was performed.
+Parent-owned risk assessment/native review for the normalized work-unit commit. No deployment, restart of current project services, remote operation, PR, or push was performed.
