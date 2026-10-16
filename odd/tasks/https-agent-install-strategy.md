@@ -73,3 +73,8 @@ cases), instead of fixing a single scenario. The SSH password must never be stor
 
 ## Next step
 Parent-owned risk assessment/native review for the normalized work-unit commit. No deployment, restart of current project services, remote operation, PR, or push was performed.
+
+## Delivery review (2026-10-16)
+- PR #69 slice (`8809c41..47b458e`): RDD assessed `high` (`process_boundary`/`shell_source` in `prepare-web-tls.sh`), consent granted, 4-lens review `review-a5cdebd1df523472`.
+- Blocking finding R1..R4-001 (CRITICAL, introduced): legacy `OPENVMS_HTTPS_SITE_IPV4`-only deployments crashed the web container because the default SNI stayed `localhost`. Corrected in `47b458e` (default SNI falls back to the site IPv4; regression test, RED then GREEN); targeted validation approved and acknowledged.
+- Advisory follow-ups (non-blocking): R1-002/R3-002 compose 198-199, R1-003/R2-003/R3-003 compose 214, R4-004 compose 210-220, R2-002 Caddyfile 32-34, R2-004/R2-005/R3-004..006/R4-002/R4-003/R4-005 `prepare-web-tls.sh` (lock/staging/rotation edge cases).
