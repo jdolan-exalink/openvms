@@ -122,8 +122,9 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
 - Deferred to the end (user decision): HTTPS / agent SSH install strategy — see
   `odd/tasks/https-agent-install-strategy.md`.
 
-- P2-05 completed in the work-unit commit recorded below. OpenAPI-first endpoints/templates, bounded real
-  recent-event simulation (hours 1..168, event page 1..100; `has_more` signals additional events), versions,
+- P2-05 completed in work-unit commit `26c505b348c422b704677a641f0a2f970c3d7ba1`. OpenAPI-first
+  endpoints/templates, bounded real recent-event simulation (hours 1..168, event page 1..100; `has_more`
+  signals additional events), versions,
   group/schedule/timezone/cooldown UI, field preservation and explicit 409 reload are implemented. Simulation
   uses the canonical condition matcher and the existing event-search visibility path; its cooldown result is
   explicitly a chronological historical projection, not a claim about live firing history/actions.
@@ -141,5 +142,5 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
   database-backed API integration and browser component tests).
 
 ## Next step
-Record the final work-unit commit identity below; native review is parent-owned/pending. Then proceed to the
-deferred HTTPS / agent SSH install strategy only when separately authorized/instructed.
+Native review is parent-owned/pending. Then proceed to the deferred HTTPS / agent SSH install strategy only
+when separately authorized/instructed.
