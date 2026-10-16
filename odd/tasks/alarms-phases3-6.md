@@ -51,6 +51,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [x] P3-03 rollback boundary: revert `apps/web/src/lib/realtime.test.tsx` and this tracker entry; no production source changed.
 - [x] P3-03 evidence commit: `1d326c5` (`test(realtime): verify alarm cursor refresh`) on `feat/https-agent-ingress`.
 - [x] P3-04 evidence: `apps/web/src/routes/VisionAI.tsx` already maps the `alarmas` source and exposes slot pin/unpin controls; `apps/web/src/routes/VisionAI.test.tsx` covers alarm source selection and pin/unpin behavior. `cd apps/web && pnpm exec vitest run src/routes/VisionAI.test.tsx --reporter=dot` — 32/32 passed (4 non-fatal React `act(...)` warnings). No production change was needed.
+- [x] P3-04 tracker work-unit commit: `7d4d355` (`docs(alarms): close phase 3 pin gap`) on `feat/https-agent-ingress`.
 - Known blocker: Phase 4 wizard step sequence, copy, and form grouping still need a product decision; the activation toggle defaulting on is already specified.
 
 ## Next step
