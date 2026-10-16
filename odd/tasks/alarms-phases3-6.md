@@ -49,7 +49,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [x] P3-03 authored test diff: 78 lines (74 additions, 4 deletions; tracker is separate documentation).
 - [x] P3-03 runtime harness: N/A — controlled WebSocket/query test verifies invalidation and refreshed pages; no external runtime dependency is needed.
 - [x] P3-03 rollback boundary: revert `apps/web/src/lib/realtime.test.tsx` and this tracker entry; no production source changed.
-- [ ] P3-03 evidence commit identity: pending commit.
+- [x] P3-03 evidence commit: `1d326c5` (`test(realtime): verify alarm cursor refresh`) on `feat/https-agent-ingress`.
 - Known blocker: Phase 4 wizard needs a product decision. P3-04 is conditional on confirmed gap.
 
 ## Next step
