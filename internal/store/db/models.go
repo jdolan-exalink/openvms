@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type AgentCa struct {
@@ -68,11 +69,26 @@ type Alarm struct {
 	UpdatedAt      time.Time
 	ClosedBy       *uuid.UUID
 	ClosedAt       *time.Time
+	CorrelationKey *string
+	FirstEventAt   time.Time
+	LastEventAt    time.Time
+	EventCount     int32
+	Late           bool
+	AutoClosed     bool
+}
+
+type AlarmEvent struct {
+	AlarmID  uuid.UUID
+	EventID  uuid.UUID
+	TenantID uuid.UUID
+	Source   string
+	LinkedAt time.Time
 }
 
 type AlarmSetting struct {
-	Singleton bool
-	EnabledAt time.Time
+	Singleton      bool
+	EnabledAt      time.Time
+	AutoCloseAfter pgtype.Interval
 }
 
 type AlarmTransition struct {

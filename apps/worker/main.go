@@ -34,6 +34,7 @@ import (
 	// of another package's dependency tree.
 	_ "time/tzdata"
 
+	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
@@ -126,16 +127,28 @@ func run() error {
 				log.WarnContext(ctx, "publish new event", "error", err)
 			}
 		},
-		OnAlarm: func(ctx context.Context, alarms []events.OpenedAlarm) {
-			for _, a := range alarms {
+		OnAlarm: func(ctx context.Context, opened []events.OpenedAlarm) {
+			for _, a := range opened {
 				data, _ := json.Marshal(a)
 				if _, err := js.Publish(ctx, "alarm.opened."+a.TenantID.String(), data); err != nil {
 					log.WarnContext(ctx, "publish opened alarm", "error", err, "alarm_id", a.ID)
 				}
 			}
 		},
+		OnAlarmUpdated: func(ctx context.Context, updated []events.OpenedAlarm) {
+			for _, a := range updated {
+				data, _ := json.Marshal(a)
+				if _, err := js.Publish(ctx, "alarm.updated."+a.TenantID.String(), data); err != nil {
+					log.WarnContext(ctx, "publish updated alarm", "error", err, "alarm_id", a.ID)
+				}
+			}
+		},
 	}
 	go syncer.Run(ctx)
+
+	// Closes open/acknowledged alarms that saw no new event for alarm_settings.auto_close_after.
+	autoCloser := &alarms.AutoCloser{Store: st, Pub: &jetstreamPublisher{js: js}, Log: log}
+	go autoCloser.Run(ctx)
 
 	// Delivers the outbox rows that rule firings enqueue for external channels.
 	deliveries := &notify.Worker{
