@@ -37,7 +37,7 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
 - [x] P2-03 — Migration + backend: `rules.version` (optimistic locking), `rule_versions` (RLS, version snapshot
       history), dedicated `rules.read` / `rules.manage` permissions (seeded onto existing roles), and rule
       condition validation; unit + integration tests. Route: same writer.
-- [ ] P2-04 — Dynamic camera groups (`camera_groups.filter jsonb` materialized into `camera_group_members` +
+- [x] P2-04 — Dynamic camera groups (`camera_groups.filter jsonb` materialized into `camera_group_members` +
       `version`) and group coverage counts (`member_count_total`, `member_count_hidden`) in API and
       `CameraGroups.tsx`; integration + web tests. Route: same writer.
 - [ ] P2-05 — Rule templates (`listRuleTemplates`), dry-run simulation (`simulateRule` against recent tenant
@@ -92,6 +92,27 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
   (no grace period); UI does not refetch on 409; per-user camera visibility not enforced on rule references;
   web edit form can drop API-only condition fields (to fix in P2-05).
 
+- P2-04 done in `21fbd7a` (backend: migration 00052 `camera_groups.filter`/`version`, filter model
+  `site_ids`/`server_ids`/`tags`/`name_contains`, materialization in group + camera mutation/sync paths,
+  `member_count_total`/`member_count_hidden` via `visibleCameraSet`, optional If-Match → 409) and `73ff871`
+  (web `CameraGroups.tsx`). RED observed (compile + web "Unable to find" failures). Mid-task review
+  `review-3dc70712d37c2b2c` (reliability, approved + acked) advisories addressed: empty-filter guard, picker
+  loading/error states, If-Match always sent + 409 reload, hidden members preserved
+  (`TestManualGroupUpdateKeepsHiddenMembers`), extra web coverage.
+- `internal/events` alarm test flake: diagnosed as pre-existing on main (main 3/20 vs HEAD 1/20 failures with
+  `-count=20`): fixture event merged into a seeded demo `person` alarm via correlation. Fixed in test
+  `0d36fc8` (fixture label `drone` + seed guard); 80/80 passes after. Reviews of the diagnostic edits:
+  `review-02d3372153b2c2d7`, `review-0558ccf71bdb06d4` (approved + acked).
+- `75ea692` (cherry-picked from isolated worktree): `If-Match` optional on `PATCH /rules/{id}` (missing →
+  no version check; stale → 409; malformed → 400), consistent with camera groups. RED observed.
+- Full verification on `75ea692` (2026-10-16): `go vet ./...` + `-tags integration` ok; `go test -race ./...`
+  ok; integration events/rules/inventory/authz/store ok; `internal/api` ok when run alone (357s; the parallel
+  run hit Go's default 10m timeout); web typecheck ok; vitest 177 files / 1532 tests ok.
+- Accumulated-branch review attempts (main..HEAD) keep failing with `lens_context_budget_exceeded`; review
+  per slice only.
+- Deferred to the end (user decision): HTTPS / agent SSH install strategy — see
+  `odd/tasks/https-agent-install-strategy.md`.
+
 ## Next step
-P2-04 (route: delegated writer). Slice `2161587..1ba9bd0` assessed medium / `under_budget` (318 lines):
-review pending in the slice until the next commit reaches the budget; reviewed boundary stays `2161587`.
+Review slice `2161587..HEAD`, then P2-05 (route: delegated writer), including: web form must not drop
+API-only condition fields; Rules UI refetch/reload on 409; Spanish UI copy consistent with existing screens.
