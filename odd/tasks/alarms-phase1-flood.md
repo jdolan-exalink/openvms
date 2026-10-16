@@ -42,7 +42,7 @@ event, rules add a second one per event (`UNIQUE(event_id, source)`), nothing au
 - [x] P1-06 — Single-alarm authz with server/group scopes + integration test (grant at server/group scope
       can operate on the alarm). Route: same writer. (`31fc6b4`)
 - [x] P1-07 — API: `listAlarms` keyset cursor + `event_count`, `last_event_at`, `late`; `listAlarmEvents`;
-      Alarms page shows count/last event/late badge. Route: same writer.
+      Alarms page shows count/last event/late badge. Route: same writer. (`64c6ebe`)
 
 ## Acceptance criteria and checks
 - A person staying 10 minutes in front of a camera with several Frigate reviews → 1 alarm with event_count>1.
@@ -62,7 +62,7 @@ event, rules add a second one per event (`UNIQUE(event_id, source)`), nothing au
 - P1-04 (`b17dbc9`): migration `00049_alarms_backlog_cleanup.sql` + integration test in `internal/alarms/autoclose_integration_test.go`.
 - P1-05 (`329a5b7`): `late` flag on backfill alarms older than `auto_close_after` + `Tardía` UI badge.
 - P1-06 (`31fc6b4`): single-alarm authorization includes camera's `server_id` and `camera_group_ids` + `internal/alarms/authz_integration_test.go`.
-- P1-07: keyset cursor + `sort` (`last_event_at` | `priority`) + correlation fields on `listAlarms`, `listAlarmEvents` (`GET /api/v1/alarms/{alarmId}/events`), and `Alarms.tsx` correlated events modal & badges.
+- P1-07 (`64c6ebe`): keyset cursor + `sort` (`last_event_at` | `priority`) + correlation fields on `listAlarms`, `listAlarmEvents` (`GET /api/v1/alarms/{alarmId}/events`), and `Alarms.tsx` correlated events modal & badges.
 
 ## Next step
 Verification and stacked PR delivery.
