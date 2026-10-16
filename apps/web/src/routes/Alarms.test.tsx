@@ -28,6 +28,37 @@ function makeAlarm(id: string, overrides: Partial<Schemas["Alarm"]> = {}): Schem
 }
 
 describe("Alarms Route", () => {
+  it("loads the priority inbox in cursor pages", async () => {
+    const first = makeAlarm("a-priority-first");
+    const second = makeAlarm("a-priority-second", { camera_name: "Cámara página 2" });
+    const alarmRequests: URL[] = [];
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        const url = new URL(req.url);
+        if (url.pathname === "/api/v1/alarms") {
+          alarmRequests.push(url);
+          return url.searchParams.has("cursor")
+            ? json({ items: [second] })
+            : json({ items: [first], next_cursor: "opaque-next-page" });
+        }
+        if (url.pathname === "/api/v1/cameras") return json({ items: [] });
+        return json({}, 404);
+      }),
+    );
+
+    renderPage(() => <Alarms />);
+
+    expect(await screen.findByText("Cámara Acceso")).toBeInTheDocument();
+    expect(alarmRequests[0]?.searchParams.get("sort")).toBe("priority");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cargar más alarmas" }));
+
+    expect(await screen.findByText("Cámara página 2")).toBeInTheDocument();
+    expect(alarmRequests[1]?.searchParams.get("cursor")).toBe("opaque-next-page");
+  });
+
   it("renders empty state when there are no alarms", async () => {
     vi.stubGlobal(
       "fetch",
@@ -162,7 +193,7 @@ describe("Alarms Route", () => {
     expect(await screen.findByText(/Asignar alarma en Cámara Acceso/i)).toBeInTheDocument();
     expect(await screen.findByText("Juan Operador (operador)")).toBeInTheDocument();
 
-    const select = screen.getByRole("combobox");
+    const select = screen.getByRole("combobox", { name: "Operador asignado" });
     fireEvent.change(select, { target: { value: "u1" } });
 
     const saveBtn = screen.getByRole("button", { name: "Guardar asignación" });
