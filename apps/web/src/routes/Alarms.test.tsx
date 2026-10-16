@@ -28,6 +28,61 @@ function makeAlarm(id: string, overrides: Partial<Schemas["Alarm"]> = {}): Schem
 }
 
 describe("Alarms Route", () => {
+  it("opens the alarm camera recording at its latest event time for recording viewers", async () => {
+    const alarm = makeAlarm("a-video", {
+      last_event_at: "2026-09-29T10:12:00Z",
+      event_start_time: "2026-09-29T10:00:00Z",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        const url = new URL(req.url);
+        if (url.pathname === "/api/v1/alarms") return json({ items: [alarm] });
+        if (url.pathname === "/api/v1/cameras") return json({ items: [] });
+        if (url.pathname === "/api/v1/me") {
+          return json({
+            id: "u1", username: "u1", display_name: "Operator", mfa_enabled: false,
+            must_change_password: false, auth_method: "session", tenant_id: "t1",
+            grants: [{ permission: "recordings.view", effect: "allow", scope_type: "platform" }],
+          });
+        }
+        return json({}, 404);
+      }),
+    );
+
+    renderPage(() => <Alarms />);
+
+    const link = await screen.findByRole("link", { name: /Ver grabación/i });
+    const search = new URL(link.getAttribute("href")!, "http://localhost").searchParams;
+    expect(search.get("camera")).toBe("c1");
+    expect(search.get("t")).toBe(String(Math.floor(new Date(alarm.last_event_at!).getTime() / 1000) - 5));
+    expect(link).toHaveAttribute("title", expect.stringMatching(/no garantiza.*video grabado/i));
+  });
+
+  it("hides camera playback without recordings.view", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        const url = new URL(req.url);
+        if (url.pathname === "/api/v1/alarms") return json({ items: [makeAlarm("a-no-recording-access")] });
+        if (url.pathname === "/api/v1/cameras") return json({ items: [] });
+        if (url.pathname === "/api/v1/me") {
+          return json({
+            id: "u1", username: "u1", display_name: "Operator", mfa_enabled: false,
+            must_change_password: false, auth_method: "session", tenant_id: "t1", grants: [],
+          });
+        }
+        return json({}, 404);
+      }),
+    );
+
+    renderPage(() => <Alarms />);
+
+    await screen.findByText("Cámara Acceso");
+    expect(screen.queryByRole("link", { name: /Ver grabación/i })).not.toBeInTheDocument();
+  });
+
   it("loads the priority inbox in cursor pages", async () => {
     const first = makeAlarm("a-priority-first");
     const second = makeAlarm("a-priority-second", { camera_name: "Cámara página 2" });

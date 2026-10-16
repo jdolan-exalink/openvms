@@ -3,12 +3,13 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tansta
 import { Check, CheckCheck, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
 import { api, unwrap, type Schemas } from "@/api/client";
-import { alarmAssigneesQuery, alarmEventsQuery, alarmsInfiniteQuery, camerasQuery, type AlarmFilter } from "@/api/queries";
+import { alarmAssigneesQuery, alarmEventsQuery, alarmsInfiniteQuery, camerasQuery, meQuery, type AlarmFilter } from "@/api/queries";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
-import { Button, Chip, Empty, ErrorNote, Field, PageHeader, Pill, type PillTone, Select, Table, Th } from "@/components/ui";
+import { Button, Chip, Empty, ErrorNote, Field, LinkButton, PageHeader, Pill, type PillTone, Select, Table, Th } from "@/components/ui";
 import { VehicleFacts } from "@/components/VehicleMark";
 import { fmtDateTime } from "@/lib/format";
+import { can } from "@/lib/perm";
 
 type Alarm = Schemas["Alarm"];
 type AlarmStatus = Schemas["AlarmStatus"];
@@ -44,6 +45,7 @@ export function Alarms() {
 
   const alarms = useInfiniteQuery(alarmsInfiniteQuery(filter));
   const cameras = useQuery(camerasQuery());
+  const me = useQuery(meQuery);
 
   const assignees = useQuery(alarmAssigneesQuery(assignAlarm?.id));
   const alarmEvents = useQuery(alarmEventsQuery(eventsAlarm?.id));
@@ -331,6 +333,19 @@ export function Alarms() {
                   </td>
                   <td className="text-right whitespace-nowrap">
                     <div className="inline-flex items-center justify-end gap-1.5">
+                      {can(me.data, "recordings.view") && (
+                        <LinkButton
+                          variant="tonal"
+                          to="/playback"
+                          search={{
+                            camera: a.camera_id,
+                            t: Math.floor(new Date(a.last_event_at ?? a.event_start_time).getTime() / 1000) - 5,
+                          }}
+                          title="La captura del evento no garantiza que exista video grabado para ese momento."
+                        >
+                          Ver grabación
+                        </LinkButton>
+                      )}
                       {a.status === "open" && (
                         <Button
                           size="sm"

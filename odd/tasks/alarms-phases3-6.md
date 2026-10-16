@@ -18,7 +18,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 
 ## Tasks and acceptance criteria
 - [x] **P3-01 — Finish priority inbox UX.** Existing route exposed status/camera filters and actions but did not request the backend's supported priority ordering or expose its cursor pagination. The inbox now defaults to priority order, allows activity-time sorting, and loads subsequent cursor pages. Acceptance: covered by the focused regression test; no duplicate backend or invented requirements.
-- [ ] **P3-02 — Contextual alarm video.** Connect alarm context/time to existing camera playback without duplicating snapshot/playback foundations. Acceptance: selected alarm opens the relevant camera/time context; focused web tests.
+- [x] **P3-02 — Contextual alarm video.** Added a permission-gated action that opens the existing playback route for the alarm camera at its latest correlated event timestamp (falling back to event start). The action clarifies that an event capture does not guarantee retained video. Acceptance: covered by focused tests; no playback backend or retention behavior duplicated or promised.
 - [ ] **P3-03 — Real-time ordering and pagination.** Ensure incoming alarm updates coexist correctly with cursor paging. Acceptance: no duplicate/lost/reordered visible items under tested updates; focused tests.
 - [ ] **P3-04 — Optional VisionAI alarm pin.** Implement only if source inspection confirms an actual missing pin behavior. Acceptance: evidence-based gap and tests; otherwise record not needed.
 - [ ] **P4-01 — Alarm rule wizard.** Pending product decision for wizard steps, copy, and form grouping; existing P2-04 group coverage is done. Acceptance after decision: approved flow implemented and tested.
@@ -29,8 +29,8 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [ ] **P6-02 — Publish-after-commit and hardening.** Move event/rule notifications behind commit/outbox; add end-to-end and latency coverage. Acceptance: rollback cannot emit events, multi-replica behavior tested, measured latency documented.
 
 ## Route and estimate
-- Route: delegated direct implementation was assigned as one bounded writer; no parallel writers. P3-01 stays one cohesive work unit.
-- Trigger evidence: this roadmap spans multiple phases/files; parent performed read-only mapping. This agent has a single delegated P3-01 scope.
+- Route: delegated direct implementation was assigned as one bounded writer; no parallel writers. P3-01 and P3-02 are separate cohesive work units.
+- Trigger evidence: this roadmap spans multiple phases/files; parent performed read-only mapping. Each delegated unit stays separately bounded.
 - Forecast: approximately 2,000 authored changed lines across phases 3–6, excluding generated files; sliced by work unit. Revisit actual counts as commits accumulate. No PR strategy/chain selected or PR authorized here.
 
 ## Progress and evidence
@@ -40,7 +40,12 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [x] Work-unit runtime scenario: N/A (browser UI-only behavior; no runtime/hardware boundary exercised).
 - [x] Rollback boundary: revert `apps/web/src/api/queries.ts`, `apps/web/src/routes/Alarms.tsx`, and `apps/web/src/routes/Alarms.test.tsx` to remove this behavior; no API/database changes.
 - [x] Work-unit commit: `fb4b75e` (`feat(alarms): add priority inbox pagination`) on `feat/https-agent-ingress`.
+- [x] P3-02 strict TDD: RED observed (recording-viewer test could not find the playback link); GREEN after implementation. Focused test: `cd apps/web && pnpm exec vitest run src/routes/Alarms.test.tsx --reporter=dot` — 11/11 passed. Typecheck: `cd apps/web && pnpm typecheck` — passed. `git diff --check` — passed.
+- [x] P3-02 authored source diff: 74 lines (72 additions, 2 deletions; tracker is separate documentation).
+- [x] P3-02 runtime harness: N/A — browser tests verify the playback link's camera/time target and permission gate; no Frigate recording runtime is provided to assert actual retained video availability.
+- [x] P3-02 rollback boundary: revert `apps/web/src/routes/Alarms.tsx` and `apps/web/src/routes/Alarms.test.tsx`; no API/database changes.
+- [ ] P3-02 work-unit commit identity: pending commit.
 - Known blocker: Phase 4 wizard needs a product decision. P3-04 is conditional on confirmed gap.
 
 ## Next step
-Proceed to P3-02 contextual alarm video; the remaining Phase 3 tasks and Phase 4 product-decision gate are unchanged.
+Proceed to P3-03 real-time ordering and pagination; Phase 4 remains gated on the wizard product decision.
