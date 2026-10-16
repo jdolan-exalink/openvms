@@ -2217,13 +2217,13 @@ export interface paths {
         };
         /**
          * List automation rules for the tenant
-         * @description Returns all automation rules for the current tenant. Requires notifications.manage or tenant admin.
+         * @description Returns all automation rules for the current tenant. Requires rules.read.
          */
         get: operations["listRules"];
         put?: never;
         /**
          * Create an automation rule
-         * @description Creates a new automation rule for the tenant. Requires notifications.manage.
+         * @description Creates a new automation rule for the tenant (version 1). Requires rules.manage. Conditions are validated; invalid combinations return 400.
          */
         post: operations["createRule"];
         delete?: never;
@@ -2241,15 +2241,24 @@ export interface paths {
             };
             cookie?: never;
         };
-        /** Get rule by ID */
+        /**
+         * Get rule by ID
+         * @description Requires rules.read.
+         */
         get: operations["getRule"];
         put?: never;
         post?: never;
-        /** Delete rule */
+        /**
+         * Delete rule
+         * @description Requires rules.manage.
+         */
         delete: operations["deleteRule"];
         options?: never;
         head?: never;
-        /** Update rule */
+        /**
+         * Update rule
+         * @description Requires rules.manage. Optimistic locking: If-Match must carry the rule's current version (plain or quoted integer). A stale version returns 409; a successful update increments the version and records a snapshot. The merged rule is validated and invalid conditions return 400.
+         */
         patch: operations["updateRule"];
         trace?: never;
     };
@@ -4472,7 +4481,26 @@ export interface components {
             vehicle_types?: string[];
             /** @description Matched after vehicle enrichment. Empty means any color. */
             vehicle_colors?: string[];
+            /** @description Offline rules only. Minimum outage duration before the rule fires. */
             duration_seconds?: number;
+            /** @description Event rules only. Match cameras that belong to any of these groups. */
+            camera_group_ids?: string[];
+            /** @description Event rules only. Match events from cameras inside or linked to these map zones. */
+            map_zone_ids?: string[];
+            schedule?: components["schemas"]["RuleSchedule"];
+            /** @description Event rules only. Quiet period per rule and camera after firing; 0 or unset uses the 300 second default. */
+            cooldown_seconds?: number;
+        };
+        /** @description Event rules only. Evaluated in the camera's site timezone, falling back to timezone and then UTC. start_time later than end_time is an overnight window. */
+        RuleSchedule: {
+            /** @description 0 (Sunday) to 6 (Saturday). Empty means every day. */
+            days_of_week?: number[];
+            /** @description HH:MM */
+            start_time?: string;
+            /** @description HH:MM */
+            end_time?: string;
+            /** @description IANA timezone used when the site has none */
+            timezone?: string;
         };
         RuleActions: {
             create_alarm?: boolean;
@@ -4488,6 +4516,8 @@ export interface components {
             /** Format: uuid */
             tenant_id: string;
             name: string;
+            /** @description Optimistic-locking version; send it back as If-Match on update. */
+            version: number;
             trigger_type: components["schemas"]["RuleTriggerType"];
             conditions: components["schemas"]["RuleConditions"];
             actions: components["schemas"]["RuleActions"];
@@ -9042,7 +9072,10 @@ export interface operations {
     updateRule: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                /** @description Current rule version, e.g. 3 or "3". */
+                "If-Match": string;
+            };
             path: {
                 ruleId: string;
             };
@@ -9067,6 +9100,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listNotificationChannels: {

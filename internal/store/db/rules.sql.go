@@ -12,10 +12,95 @@ import (
 	"github.com/google/uuid"
 )
 
+const countCameraGroupsByIDs = `-- name: CountCameraGroupsByIDs :one
+SELECT count(*) FROM camera_groups
+WHERE tenant_id = $1 AND deleted_at IS NULL AND id = ANY($2::uuid[])
+`
+
+type CountCameraGroupsByIDsParams struct {
+	TenantID uuid.UUID
+	Ids      []uuid.UUID
+}
+
+func (q *Queries) CountCameraGroupsByIDs(ctx context.Context, arg CountCameraGroupsByIDsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCameraGroupsByIDs, arg.TenantID, arg.Ids)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countCamerasByIDs = `-- name: CountCamerasByIDs :one
+SELECT count(*) FROM cameras
+WHERE tenant_id = $1 AND deleted_at IS NULL AND id = ANY($2::uuid[])
+`
+
+type CountCamerasByIDsParams struct {
+	TenantID uuid.UUID
+	Ids      []uuid.UUID
+}
+
+func (q *Queries) CountCamerasByIDs(ctx context.Context, arg CountCamerasByIDsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCamerasByIDs, arg.TenantID, arg.Ids)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countMapZonesByIDs = `-- name: CountMapZonesByIDs :one
+SELECT count(*) FROM map_zones
+WHERE tenant_id = $1 AND deleted_at IS NULL AND id = ANY($2::uuid[])
+`
+
+type CountMapZonesByIDsParams struct {
+	TenantID uuid.UUID
+	Ids      []uuid.UUID
+}
+
+func (q *Queries) CountMapZonesByIDs(ctx context.Context, arg CountMapZonesByIDsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMapZonesByIDs, arg.TenantID, arg.Ids)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countServersByIDs = `-- name: CountServersByIDs :one
+SELECT count(*) FROM frigate_servers
+WHERE tenant_id = $1 AND deleted_at IS NULL AND id = ANY($2::uuid[])
+`
+
+type CountServersByIDsParams struct {
+	TenantID uuid.UUID
+	Ids      []uuid.UUID
+}
+
+func (q *Queries) CountServersByIDs(ctx context.Context, arg CountServersByIDsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countServersByIDs, arg.TenantID, arg.Ids)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countSitesByIDs = `-- name: CountSitesByIDs :one
+SELECT count(*) FROM sites
+WHERE tenant_id = $1 AND deleted_at IS NULL AND id = ANY($2::uuid[])
+`
+
+type CountSitesByIDsParams struct {
+	TenantID uuid.UUID
+	Ids      []uuid.UUID
+}
+
+func (q *Queries) CountSitesByIDs(ctx context.Context, arg CountSitesByIDsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSitesByIDs, arg.TenantID, arg.Ids)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createRule = `-- name: CreateRule :one
 INSERT INTO rules (tenant_id, name, trigger_type, conditions, actions, enabled)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at
+RETURNING id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at, version
 `
 
 type CreateRuleParams struct {
@@ -47,6 +132,7 @@ func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (Rule, e
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Version,
 	)
 	return i, err
 }
@@ -67,7 +153,7 @@ func (q *Queries) DeleteRule(ctx context.Context, arg DeleteRuleParams) error {
 }
 
 const getRule = `-- name: GetRule :one
-SELECT id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at
+SELECT id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at, version
 FROM rules
 WHERE id = $1 AND tenant_id = $2
 `
@@ -90,12 +176,37 @@ func (q *Queries) GetRule(ctx context.Context, arg GetRuleParams) (Rule, error) 
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Version,
 	)
 	return i, err
 }
 
+const insertRuleVersion = `-- name: InsertRuleVersion :exec
+INSERT INTO rule_versions (rule_id, tenant_id, version, snapshot, changed_by)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertRuleVersionParams struct {
+	RuleID    uuid.UUID
+	TenantID  uuid.UUID
+	Version   int32
+	Snapshot  json.RawMessage
+	ChangedBy *uuid.UUID
+}
+
+func (q *Queries) InsertRuleVersion(ctx context.Context, arg InsertRuleVersionParams) error {
+	_, err := q.db.Exec(ctx, insertRuleVersion,
+		arg.RuleID,
+		arg.TenantID,
+		arg.Version,
+		arg.Snapshot,
+		arg.ChangedBy,
+	)
+	return err
+}
+
 const listActiveRulesByTrigger = `-- name: ListActiveRulesByTrigger :many
-SELECT id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at
+SELECT id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at, version
 FROM rules
 WHERE tenant_id = $1 AND trigger_type = $2 AND enabled = true
 ORDER BY created_at ASC
@@ -125,6 +236,7 @@ func (q *Queries) ListActiveRulesByTrigger(ctx context.Context, arg ListActiveRu
 			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Version,
 		); err != nil {
 			return nil, err
 		}
@@ -137,7 +249,7 @@ func (q *Queries) ListActiveRulesByTrigger(ctx context.Context, arg ListActiveRu
 }
 
 const listRules = `-- name: ListRules :many
-SELECT id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at
+SELECT id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at, version
 FROM rules
 WHERE tenant_id = $1
 ORDER BY name ASC, created_at DESC
@@ -162,6 +274,7 @@ func (q *Queries) ListRules(ctx context.Context, tenantID uuid.UUID) ([]Rule, er
 			&i.Enabled,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Version,
 		); err != nil {
 			return nil, err
 		}
@@ -181,19 +294,21 @@ SET
   conditions = coalesce($3, conditions),
   actions = coalesce($4, actions),
   enabled = coalesce($5, enabled),
+  version = version + 1,
   updated_at = now()
-WHERE id = $6 AND tenant_id = $7
-RETURNING id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at
+WHERE id = $6 AND tenant_id = $7 AND version = $8
+RETURNING id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at, version
 `
 
 type UpdateRuleParams struct {
-	Name        *string
-	TriggerType *string
-	Conditions  []byte
-	Actions     []byte
-	Enabled     *bool
-	ID          uuid.UUID
-	TenantID    uuid.UUID
+	Name            *string
+	TriggerType     *string
+	Conditions      []byte
+	Actions         []byte
+	Enabled         *bool
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	ExpectedVersion int32
 }
 
 func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (Rule, error) {
@@ -205,6 +320,7 @@ func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (Rule, e
 		arg.Enabled,
 		arg.ID,
 		arg.TenantID,
+		arg.ExpectedVersion,
 	)
 	var i Rule
 	err := row.Scan(
@@ -217,6 +333,7 @@ func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (Rule, e
 		&i.Enabled,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Version,
 	)
 	return i, err
 }

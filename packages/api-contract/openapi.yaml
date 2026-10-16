@@ -2806,7 +2806,7 @@ paths:
       tags: [rules]
       operationId: listRules
       summary: List automation rules for the tenant
-      description: Returns all automation rules for the current tenant. Requires notifications.manage or tenant admin.
+      description: Returns all automation rules for the current tenant. Requires rules.read.
       responses:
         "200":
           description: List of rules
@@ -2820,7 +2820,7 @@ paths:
       tags: [rules]
       operationId: createRule
       summary: Create an automation rule
-      description: Creates a new automation rule for the tenant. Requires notifications.manage.
+      description: Creates a new automation rule for the tenant (version 1). Requires rules.manage. Conditions are validated; invalid combinations return 400.
       requestBody:
         required: true
         content:
@@ -2847,6 +2847,7 @@ paths:
       tags: [rules]
       operationId: getRule
       summary: Get rule by ID
+      description: Requires rules.read.
       responses:
         "200":
           description: The rule
@@ -2861,6 +2862,16 @@ paths:
       tags: [rules]
       operationId: updateRule
       summary: Update rule
+      description: >-
+        Requires rules.manage. Optimistic locking: If-Match must carry the rule's current version (plain or quoted
+        integer). A stale version returns 409; a successful update increments the version and records a snapshot.
+        The merged rule is validated and invalid conditions return 400.
+      parameters:
+        - name: If-Match
+          in: header
+          required: true
+          description: Current rule version, e.g. 3 or "3".
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -2878,10 +2889,12 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
     delete:
       tags: [rules]
       operationId: deleteRule
       summary: Delete rule
+      description: Requires rules.manage.
       responses:
         "204":
           description: Rule deleted
@@ -5549,6 +5562,33 @@ components:
           items: { type: string }
         duration_seconds:
           type: integer
+          minimum: 0
+          description: Offline rules only. Minimum outage duration before the rule fires.
+        camera_group_ids:
+          type: array
+          description: Event rules only. Match cameras that belong to any of these groups.
+          items: { type: string, format: uuid }
+        map_zone_ids:
+          type: array
+          description: Event rules only. Match events from cameras inside or linked to these map zones.
+          items: { type: string, format: uuid }
+        schedule: { $ref: "#/components/schemas/RuleSchedule" }
+        cooldown_seconds:
+          type: integer
+          minimum: 0
+          maximum: 86400
+          description: Event rules only. Quiet period per rule and camera after firing; 0 or unset uses the 300 second default.
+    RuleSchedule:
+      type: object
+      description: Event rules only. Evaluated in the camera's site timezone, falling back to timezone and then UTC. start_time later than end_time is an overnight window.
+      properties:
+        days_of_week:
+          type: array
+          description: 0 (Sunday) to 6 (Saturday). Empty means every day.
+          items: { type: integer, minimum: 0, maximum: 6 }
+        start_time: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: HH:MM, set together with end_time }
+        end_time: { type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$', description: HH:MM, set together with start_time }
+        timezone: { type: string, description: IANA timezone used when the site has none }
     RuleActions:
       type: object
       properties:
@@ -5565,11 +5605,12 @@ components:
           items: { type: string, format: uuid }
     Rule:
       type: object
-      required: [id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at]
+      required: [id, tenant_id, name, trigger_type, conditions, actions, enabled, version, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
         name: { type: string }
+        version: { type: integer, minimum: 1, description: Optimistic-locking version; send it back as If-Match on update. }
         trigger_type: { $ref: "#/components/schemas/RuleTriggerType" }
         conditions: { $ref: "#/components/schemas/RuleConditions" }
         actions: { $ref: "#/components/schemas/RuleActions" }

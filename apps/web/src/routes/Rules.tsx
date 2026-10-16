@@ -26,7 +26,7 @@ const eventSeverities = [
 ];
 const defaultMinutes = 5;
 
-/** Rules: guided form for automation rules (no JSON). Requires notifications.manage. */
+/** Rules: guided form for automation rules (no JSON). Requires rules.read (rules.manage to change). */
 export function Rules() {
   const t = useT();
   const qc = useQueryClient();
@@ -36,7 +36,7 @@ export function Rules() {
 
   const toggle = useMutation({
     mutationFn: async (r: Rule) =>
-      unwrap(await api.PATCH("/api/v1/rules/{ruleId}", { params: { path: { ruleId: r.id } }, body: { enabled: !r.enabled } })),
+      unwrap(await api.PATCH("/api/v1/rules/{ruleId}", { params: { path: { ruleId: r.id }, header: { "If-Match": String(r.version) } }, body: { enabled: !r.enabled } })),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["rules"] }),
   });
   const remove = useMutation({
@@ -194,7 +194,7 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
           ...(f.channel_ids.length ? { channel_ids: f.channel_ids } : {}),
         },
       };
-      if (rule) return unwrap(await api.PATCH("/api/v1/rules/{ruleId}", { params: { path: { ruleId: rule.id } }, body }));
+      if (rule) return unwrap(await api.PATCH("/api/v1/rules/{ruleId}", { params: { path: { ruleId: rule.id }, header: { "If-Match": String(rule.version) } }, body }));
       return unwrap(await api.POST("/api/v1/rules", { body: { ...body, enabled: true } }));
     },
     onSuccess: onDone,

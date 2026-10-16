@@ -9,7 +9,11 @@ afterEach(() => vi.unstubAllGlobals());
 const manager = {
   id: "u1", username: "admin", display_name: "Admin", tenant_id: "t1", mfa_enabled: false,
   must_change_password: false, auth_method: "session",
-  grants: [{ permission: "notifications.manage", effect: "allow", scope_type: "tenant" }],
+  grants: [
+    { permission: "rules.read", effect: "allow", scope_type: "tenant" },
+    { permission: "rules.manage", effect: "allow", scope_type: "tenant" },
+    { permission: "notifications.manage", effect: "allow", scope_type: "tenant" },
+  ],
 };
 
 function makeRule(overrides: Partial<Schemas["Rule"]> = {}): Schemas["Rule"] {
@@ -17,7 +21,7 @@ function makeRule(overrides: Partial<Schemas["Rule"]> = {}): Schemas["Rule"] {
     id: "r1", tenant_id: "t1", name: "Alertas de acceso", trigger_type: "event",
     conditions: { camera_ids: ["c1"], labels: ["person"] },
     actions: { create_alarm: true, notify_in_app: true, severity: "warning" },
-    enabled: true, created_at: "2026-09-29T10:00:00Z", updated_at: "2026-09-29T10:00:00Z", ...overrides,
+    enabled: true, version: 3, created_at: "2026-09-29T10:00:00Z", updated_at: "2026-09-29T10:00:00Z", ...overrides,
   };
 }
 
@@ -63,6 +67,17 @@ describe("Rules route", () => {
     renderPage(() => <Rules />);
     fireEvent.click(await screen.findByRole("switch", { name: /Alertas de acceso/ }));
     await waitFor(() => expect(calls).toContainEqual({ method: "PATCH", path: "/api/v1/rules/r1", body: { enabled: false } }));
+  });
+
+  it("sends the rule version as If-Match on update", async () => {
+    const ifMatch: string[] = [];
+    stub([makeRule()], (req) => {
+      if (req.method === "PATCH") ifMatch.push(req.headers.get("If-Match") ?? "");
+      return undefined;
+    });
+    renderPage(() => <Rules />);
+    fireEvent.click(await screen.findByRole("switch", { name: /Alertas de acceso/ }));
+    await waitFor(() => expect(ifMatch).toEqual(["3"]));
   });
 
   it("shows a clear message when the user cannot manage rules", async () => {

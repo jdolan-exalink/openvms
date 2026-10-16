@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"strconv"
+	"strings"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/rules"
@@ -37,6 +39,32 @@ func toRule(r rules.Rule) gen.Rule {
 	if c.DurationSeconds > 0 {
 		cond.DurationSeconds = &c.DurationSeconds
 	}
+	if len(c.CameraGroupIDs) > 0 {
+		cond.CameraGroupIds = &c.CameraGroupIDs
+	}
+	if len(c.MapZoneIDs) > 0 {
+		cond.MapZoneIds = &c.MapZoneIDs
+	}
+	if c.CooldownSeconds != nil {
+		v := *c.CooldownSeconds
+		cond.CooldownSeconds = &v
+	}
+	if c.Schedule != nil {
+		sc := gen.RuleSchedule{}
+		if len(c.Schedule.DaysOfWeek) > 0 {
+			sc.DaysOfWeek = &c.Schedule.DaysOfWeek
+		}
+		if c.Schedule.StartTime != "" {
+			sc.StartTime = &c.Schedule.StartTime
+		}
+		if c.Schedule.EndTime != "" {
+			sc.EndTime = &c.Schedule.EndTime
+		}
+		if c.Schedule.Timezone != "" {
+			sc.Timezone = &c.Schedule.Timezone
+		}
+		cond.Schedule = &sc
+	}
 	createAlarm, notify := r.Actions.CreateAlarm, r.Actions.NotifyInApp
 	act := gen.RuleActions{CreateAlarm: &createAlarm, NotifyInApp: &notify}
 	if len(r.Actions.ChannelIDs) > 0 {
@@ -54,6 +82,7 @@ func toRule(r rules.Rule) gen.Rule {
 		Conditions:  cond,
 		Actions:     act,
 		Enabled:     r.Enabled,
+		Version:     r.Version,
 		CreatedAt:   r.CreatedAt,
 		UpdatedAt:   r.UpdatedAt,
 	}
@@ -90,6 +119,32 @@ func fromRuleConditions(c *gen.RuleConditions) rules.Conditions {
 	}
 	if c.DurationSeconds != nil {
 		out.DurationSeconds = *c.DurationSeconds
+	}
+	if c.CameraGroupIds != nil {
+		out.CameraGroupIDs = *c.CameraGroupIds
+	}
+	if c.MapZoneIds != nil {
+		out.MapZoneIDs = *c.MapZoneIds
+	}
+	if c.CooldownSeconds != nil {
+		v := *c.CooldownSeconds
+		out.CooldownSeconds = &v
+	}
+	if c.Schedule != nil {
+		sc := &rules.RuleSchedule{}
+		if c.Schedule.DaysOfWeek != nil {
+			sc.DaysOfWeek = *c.Schedule.DaysOfWeek
+		}
+		if c.Schedule.StartTime != nil {
+			sc.StartTime = *c.Schedule.StartTime
+		}
+		if c.Schedule.EndTime != nil {
+			sc.EndTime = *c.Schedule.EndTime
+		}
+		if c.Schedule.Timezone != nil {
+			sc.Timezone = *c.Schedule.Timezone
+		}
+		out.Schedule = sc
 	}
 	return out
 }
@@ -190,7 +245,11 @@ func (h *Handlers) UpdateRule(ctx context.Context, r gen.UpdateRuleRequestObject
 	if r.Body == nil {
 		return nil, &rules.ValidationError{Msg: "missing request body"}
 	}
-	req := rules.UpdateRuleRequest{Name: r.Body.Name, Enabled: r.Body.Enabled}
+	version, err := parseRuleVersion(r.Params.IfMatch)
+	if err != nil {
+		return nil, err
+	}
+	req := rules.UpdateRuleRequest{ExpectedVersion: version, Name: r.Body.Name, Enabled: r.Body.Enabled}
 	if r.Body.TriggerType != nil {
 		t := rules.TriggerType(*r.Body.TriggerType)
 		req.TriggerType = &t
@@ -264,4 +323,15 @@ func (h *Handlers) MarkAllNotificationsRead(ctx context.Context, _ gen.MarkAllNo
 		return nil, err
 	}
 	return gen.MarkAllNotificationsRead200JSONResponse{Count: int(n)}, nil
+}
+
+// parseRuleVersion reads the rule version from an If-Match value: a plain or quoted integer.
+func parseRuleVersion(ifMatch string) (int, error) {
+	raw := strings.TrimPrefix(strings.TrimSpace(ifMatch), "W/")
+	raw = strings.Trim(raw, `"`)
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 1 {
+		return 0, &rules.ValidationError{Msg: "If-Match must carry the current rule version (a positive integer)"}
+	}
+	return v, nil
 }

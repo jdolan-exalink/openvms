@@ -27,6 +27,9 @@ type ValidationError struct {
 
 func (e *ValidationError) Error() string { return e.Msg }
 
+// ErrVersionConflict is returned when an update carries a stale rule version.
+var ErrVersionConflict = errors.New("rule was modified by someone else; reload and retry with the current version")
+
 func validTrigger(t TriggerType) bool {
 	return t == TriggerEvent || t == TriggerCameraOffline || t == TriggerServerOffline
 }
@@ -95,16 +98,19 @@ type CreateRuleRequest struct {
 }
 
 type UpdateRuleRequest struct {
-	Name        *string      `json:"name,omitempty"`
-	TriggerType *TriggerType `json:"trigger_type,omitempty"`
-	Conditions  *Conditions  `json:"conditions,omitempty"`
-	Actions     *Actions     `json:"actions,omitempty"`
-	Enabled     *bool        `json:"enabled,omitempty"`
+	// ExpectedVersion is the rule version the caller based the change on (optimistic locking).
+	// It is required; a stale value yields ErrVersionConflict.
+	ExpectedVersion int          `json:"version"`
+	Name            *string      `json:"name,omitempty"`
+	TriggerType     *TriggerType `json:"trigger_type,omitempty"`
+	Conditions      *Conditions  `json:"conditions,omitempty"`
+	Actions         *Actions     `json:"actions,omitempty"`
+	Enabled         *bool        `json:"enabled,omitempty"`
 }
 
 func (s *Service) ListRules(ctx context.Context, actor authz.Actor) ([]Rule, error) {
 	if actor.TenantID == nil {
-		return nil, &access.ForbiddenError{Permission: authz.NotificationsManage}
+		return nil, &access.ForbiddenError{Permission: authz.RulesRead}
 	}
 	var out []Rule
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
@@ -112,7 +118,7 @@ func (s *Service) ListRules(ctx context.Context, actor authz.Actor) ([]Rule, err
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.NotificationsManage, access.Tenant(*actor.TenantID)); err != nil {
+		if err := chk.Require(authz.RulesRead, access.Tenant(*actor.TenantID)); err != nil {
 			return err
 		}
 		rows, err := q.ListRules(ctx, *actor.TenantID)
@@ -134,7 +140,7 @@ func (s *Service) ListRules(ctx context.Context, actor authz.Actor) ([]Rule, err
 
 func (s *Service) GetRule(ctx context.Context, actor authz.Actor, id uuid.UUID) (Rule, error) {
 	if actor.TenantID == nil {
-		return Rule{}, &access.ForbiddenError{Permission: authz.NotificationsManage}
+		return Rule{}, &access.ForbiddenError{Permission: authz.RulesRead}
 	}
 	var out Rule
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
@@ -142,7 +148,7 @@ func (s *Service) GetRule(ctx context.Context, actor authz.Actor, id uuid.UUID) 
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.NotificationsManage, access.Tenant(*actor.TenantID)); err != nil {
+		if err := chk.Require(authz.RulesRead, access.Tenant(*actor.TenantID)); err != nil {
 			return err
 		}
 		row, err := q.GetRule(ctx, db.GetRuleParams{ID: id, TenantID: *actor.TenantID})
@@ -157,13 +163,16 @@ func (s *Service) GetRule(ctx context.Context, actor authz.Actor, id uuid.UUID) 
 
 func (s *Service) CreateRule(ctx context.Context, actor authz.Actor, req CreateRuleRequest) (Rule, error) {
 	if actor.TenantID == nil {
-		return Rule{}, &access.ForbiddenError{Permission: authz.NotificationsManage}
+		return Rule{}, &access.ForbiddenError{Permission: authz.RulesManage}
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		return Rule{}, &ValidationError{Msg: "name is required"}
 	}
 	if !validTrigger(req.TriggerType) {
 		return Rule{}, &ValidationError{Msg: "invalid trigger_type " + string(req.TriggerType)}
+	}
+	if err := ValidateConditions(req.TriggerType, req.Conditions); err != nil {
+		return Rule{}, err
 	}
 
 	condBytes, err := json.Marshal(req.Conditions)
@@ -181,10 +190,13 @@ func (s *Service) CreateRule(ctx context.Context, actor authz.Actor, req CreateR
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.NotificationsManage, access.Tenant(*actor.TenantID)); err != nil {
+		if err := chk.Require(authz.RulesManage, access.Tenant(*actor.TenantID)); err != nil {
 			return err
 		}
 		if err := checkChannels(ctx, q, *actor.TenantID, req.Actions.ChannelIDs); err != nil {
+			return err
+		}
+		if err := checkConditionRefs(ctx, q, *actor.TenantID, req.Conditions); err != nil {
 			return err
 		}
 
@@ -204,6 +216,9 @@ func (s *Service) CreateRule(ctx context.Context, actor authz.Actor, req CreateR
 		if err != nil {
 			return err
 		}
+		if err := recordVersion(ctx, q, actor, out); err != nil {
+			return err
+		}
 
 		return audit(ctx, q, actor, actor.TenantID, ActionRuleCreated, out.ID, map[string]any{
 			"name":         out.Name,
@@ -215,9 +230,12 @@ func (s *Service) CreateRule(ctx context.Context, actor authz.Actor, req CreateR
 
 func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUID, req UpdateRuleRequest) (Rule, error) {
 	if actor.TenantID == nil {
-		return Rule{}, &access.ForbiddenError{Permission: authz.NotificationsManage}
+		return Rule{}, &access.ForbiddenError{Permission: authz.RulesManage}
 	}
 
+	if req.ExpectedVersion < 1 {
+		return Rule{}, &ValidationError{Msg: "the current rule version is required (If-Match header)"}
+	}
 	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
 		return Rule{}, &ValidationError{Msg: "name is required"}
 	}
@@ -255,7 +273,7 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.NotificationsManage, access.Tenant(*actor.TenantID)); err != nil {
+		if err := chk.Require(authz.RulesManage, access.Tenant(*actor.TenantID)); err != nil {
 			return err
 		}
 		if req.Actions != nil {
@@ -264,21 +282,55 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 			}
 		}
 
+		current, err := q.GetRule(ctx, db.GetRuleParams{ID: id, TenantID: *actor.TenantID})
+		if err != nil {
+			return store.Classify(err)
+		}
+		if int(current.Version) != req.ExpectedVersion {
+			return ErrVersionConflict
+		}
+		// Validate the rule as it will look after the change, not just the patch.
+		effTrigger := TriggerType(current.TriggerType)
+		if req.TriggerType != nil {
+			effTrigger = *req.TriggerType
+		}
+		effCond := Conditions{}
+		if req.Conditions != nil {
+			effCond = *req.Conditions
+		} else if len(current.Conditions) > 0 {
+			_ = json.Unmarshal(current.Conditions, &effCond)
+		}
+		if err := ValidateConditions(effTrigger, effCond); err != nil {
+			return err
+		}
+		if req.Conditions != nil {
+			if err := checkConditionRefs(ctx, q, *actor.TenantID, effCond); err != nil {
+				return err
+			}
+		}
+
 		row, err := q.UpdateRule(ctx, db.UpdateRuleParams{
-			ID:          id,
-			TenantID:    *actor.TenantID,
-			Name:        req.Name,
-			TriggerType: trType,
-			Conditions:  condBytes,
-			Actions:     actBytes,
-			Enabled:     req.Enabled,
+			ID:              id,
+			TenantID:        *actor.TenantID,
+			ExpectedVersion: current.Version,
+			Name:            req.Name,
+			TriggerType:     trType,
+			Conditions:      condBytes,
+			Actions:         actBytes,
+			Enabled:         req.Enabled,
 		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrVersionConflict // changed between the read and the guarded update
+		}
 		if err != nil {
 			return store.Classify(err)
 		}
 
 		out, err = ruleFromRow(row)
 		if err != nil {
+			return err
+		}
+		if err := recordVersion(ctx, q, actor, out); err != nil {
 			return err
 		}
 
@@ -293,14 +345,14 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 
 func (s *Service) DeleteRule(ctx context.Context, actor authz.Actor, id uuid.UUID) error {
 	if actor.TenantID == nil {
-		return &access.ForbiddenError{Permission: authz.NotificationsManage}
+		return &access.ForbiddenError{Permission: authz.RulesManage}
 	}
 	return s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		chk, err := access.Load(ctx, q, actor)
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.NotificationsManage, access.Tenant(*actor.TenantID)); err != nil {
+		if err := chk.Require(authz.RulesManage, access.Tenant(*actor.TenantID)); err != nil {
 			return err
 		}
 
@@ -730,6 +782,7 @@ func ruleFromRow(row db.Rule) (Rule, error) {
 		Conditions:  c,
 		Actions:     a,
 		Enabled:     row.Enabled,
+		Version:     int(row.Version),
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
 	}, nil
@@ -767,4 +820,76 @@ func audit(ctx context.Context, q *db.Queries, actor authz.Actor, tenantID *uuid
 		TargetID:   &targetID,
 		Details:    b,
 	})
+}
+
+// recordVersion stores a snapshot of the rule as of its current version, in the caller's transaction.
+func recordVersion(ctx context.Context, q *db.Queries, actor authz.Actor, r Rule) error {
+	snap, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	changedBy := actor.UserID
+	var by *uuid.UUID
+	if changedBy != uuid.Nil {
+		by = &changedBy
+	}
+	return store.Classify(q.InsertRuleVersion(ctx, db.InsertRuleVersionParams{
+		RuleID:    r.ID,
+		TenantID:  r.TenantID,
+		Version:   int32(r.Version), //nolint:gosec // small counter
+		Snapshot:  snap,
+		ChangedBy: by,
+	}))
+}
+
+func uniqueIDs(ids []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{}, len(ids))
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; !ok {
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// checkConditionRefs rejects ids in the conditions that do not exist in the caller's tenant
+// (row-level security and the tenant filter hide other tenants' rows from the count).
+func checkConditionRefs(ctx context.Context, q *db.Queries, tenantID uuid.UUID, c Conditions) error {
+	checks := []struct {
+		field string
+		ids   []uuid.UUID
+		count func(ids []uuid.UUID) (int64, error)
+	}{
+		{"camera_ids", c.CameraIDs, func(ids []uuid.UUID) (int64, error) {
+			return q.CountCamerasByIDs(ctx, db.CountCamerasByIDsParams{TenantID: tenantID, Ids: ids})
+		}},
+		{"camera_group_ids", c.CameraGroupIDs, func(ids []uuid.UUID) (int64, error) {
+			return q.CountCameraGroupsByIDs(ctx, db.CountCameraGroupsByIDsParams{TenantID: tenantID, Ids: ids})
+		}},
+		{"server_ids", c.ServerIDs, func(ids []uuid.UUID) (int64, error) {
+			return q.CountServersByIDs(ctx, db.CountServersByIDsParams{TenantID: tenantID, Ids: ids})
+		}},
+		{"site_ids", c.SiteIDs, func(ids []uuid.UUID) (int64, error) {
+			return q.CountSitesByIDs(ctx, db.CountSitesByIDsParams{TenantID: tenantID, Ids: ids})
+		}},
+		{"map_zone_ids", c.MapZoneIDs, func(ids []uuid.UUID) (int64, error) {
+			return q.CountMapZonesByIDs(ctx, db.CountMapZonesByIDsParams{TenantID: tenantID, Ids: ids})
+		}},
+	}
+	for _, ch := range checks {
+		if len(ch.ids) == 0 {
+			continue
+		}
+		ids := uniqueIDs(ch.ids)
+		n, err := ch.count(ids)
+		if err != nil {
+			return store.Classify(err)
+		}
+		if int(n) != len(ids) {
+			return &ValidationError{Msg: "unknown or inaccessible id in conditions." + ch.field}
+		}
+	}
+	return nil
 }

@@ -65,6 +65,9 @@ const (
 
 	NotificationsManage Permission = "notifications.manage"
 
+	RulesRead   Permission = "rules.read"
+	RulesManage Permission = "rules.manage"
+
 	MapsView       Permission = "maps.view"
 	MapsEdit       Permission = "maps.edit"
 	MapsCreateZone Permission = "maps.create_zone"
@@ -125,6 +128,8 @@ var Catalog = []Definition{
 	{AuditView, "Ver auditoría", ScopeTenant},
 	{HealthView, "Ver estado de salud", ScopeCamera},
 	{NotificationsManage, "Administrar notificaciones", ScopeTenant},
+	{RulesRead, "Ver reglas de automatización", ScopeTenant},
+	{RulesManage, "Crear, editar y eliminar reglas de automatización", ScopeTenant},
 	{MapsView, "Ver mapas", ScopeSite},
 	{MapsEdit, "Administrar estructura del mapa (sitios, edificios, pisos)", ScopeSite},
 	{MapsCreateZone, "Crear y editar zonas en mapas", ScopeSite},
