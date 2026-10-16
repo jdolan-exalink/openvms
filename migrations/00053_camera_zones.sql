@@ -17,8 +17,8 @@ BEGIN
     END IF;
     FOR point IN SELECT value FROM jsonb_array_elements(points) LOOP
         IF jsonb_typeof(point) <> 'object'
-            OR jsonb_typeof(point->'x') <> 'number'
-            OR jsonb_typeof(point->'y') <> 'number' THEN
+            OR jsonb_typeof(point->'x') IS DISTINCT FROM 'number'
+            OR jsonb_typeof(point->'y') IS DISTINCT FROM 'number' THEN
             RETURN false;
         END IF;
         IF (point->>'x')::numeric < 0 OR (point->>'x')::numeric > 1

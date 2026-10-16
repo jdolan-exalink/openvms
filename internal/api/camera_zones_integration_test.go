@@ -54,6 +54,24 @@ VALUES ($1, $2, 'outside_frame', '[{"x":-0.1,"y":0.1},{"x":0.9,"y":0.1},{"x":0.5
 	if err == nil {
 		t.Fatal("database accepted points outside the normalized frame")
 	}
+	for _, test := range []struct {
+		name   string
+		points string
+	}{
+		{name: "missing_x", points: `[{"y":0.1},{"x":0.9,"y":0.1},{"x":0.5,"y":0.9}]`},
+		{name: "missing_y", points: `[{"x":0.1},{"x":0.9,"y":0.1},{"x":0.5,"y":0.9}]`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := te.Store.TxRaw(ctx, store.TenantScope{TenantID: cam.TenantID}, func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `INSERT INTO camera_zones (tenant_id, camera_id, name, points)
+VALUES ($1, $2, $3, $4::jsonb)`, cam.TenantID, cam.ID, "missing_coordinate_"+test.name, test.points)
+				return err
+			})
+			if err == nil {
+				t.Fatalf("database accepted points with %s", test.name)
+			}
+		})
+	}
 	if status, _, body := te.request(http.MethodPost, path, te.AdminToken, nil, input); status != http.StatusConflict {
 		t.Fatalf("duplicate zone name status = %d, want %d: %s", status, http.StatusConflict, body)
 	}
