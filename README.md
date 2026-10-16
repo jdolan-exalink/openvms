@@ -73,7 +73,8 @@ de validez, el próximo inicio genera un nuevo certificado. El valor predetermin
 cambia. El certificado autofirmado no hace que el navegador confíe automáticamente en él:
 hay que instalar/confiar el certificado y acceder con un nombre/IP incluido en sus SAN.
 `OPENVMS_HTTPS_DEFAULT_SNI` debe ser uno de los nombres incluidos en `OPENVMS_HTTPS_SANS`;
-por defecto es `localhost`.
+por defecto es `OPENVMS_HTTPS_SITE_IPV4` si está definida (que también es el SAN de respaldo)
+o `localhost` en caso contrario.
 
 El generador espera hasta 30 segundos si otra instancia está creando el certificado y luego
 falla con un mensaje de recuperación; nunca elimina automáticamente un bloqueo porque podría

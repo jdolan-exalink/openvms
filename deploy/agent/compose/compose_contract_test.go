@@ -524,6 +524,32 @@ func TestComposeWebTLSUsesPersistentGeneratedCertificateVolumeAndConfiguredSANs(
 	}
 }
 
+func TestComposeWebTLSLegacySiteIPv4KeepsDefaultSNIInSANSet(t *testing.T) {
+	compose, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Deployments that only set OPENVMS_HTTPS_SITE_IPV4 get it as the sole fallback SAN,
+	// so the default SNI must fall back to it too or the web container fails to start.
+	for _, required := range []string{
+		"OPENVMS_HTTPS_SANS: ${OPENVMS_HTTPS_SANS:-${OPENVMS_HTTPS_SITE_IPV4:-localhost,127.0.0.1,::1}}",
+		"OPENVMS_HTTPS_DEFAULT_SNI: ${OPENVMS_HTTPS_DEFAULT_SNI:-${OPENVMS_HTTPS_SITE_IPV4:-localhost}}",
+	} {
+		if !strings.Contains(string(compose), required) {
+			t.Errorf("compose must keep legacy OPENVMS_HTTPS_SITE_IPV4 deployments starting, missing %q", required)
+		}
+	}
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("OpenSSL is required for TLS generation integration test")
+	}
+	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
+	command := exec.Command("sh", script) //nolint:gosec // fixed repo script path
+	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=10.1.1.24", "OPENVMS_HTTPS_DEFAULT_SNI=10.1.1.24", "OPENVMS_WEB_TLS_DIR="+t.TempDir())
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("legacy site IPv4 fallback must start TLS bootstrap: %v: %s", err, output)
+	}
+}
+
 func TestAutomaticWebTLSBootstrapGeneratesAndReusesSANCertificate(t *testing.T) {
 	if _, err := exec.LookPath("openssl"); err != nil {
 		t.Skip("OpenSSL is required for TLS generation integration test")
