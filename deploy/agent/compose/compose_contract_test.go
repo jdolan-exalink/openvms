@@ -532,7 +532,7 @@ func TestAutomaticWebTLSBootstrapGeneratesAndReusesSANCertificate(t *testing.T) 
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
 	run := func(sans string) {
 		t.Helper()
-		cmd := exec.Command("sh", script)
+		cmd := exec.Command("sh", script) //nolint:gosec // fixed repo script path
 		cmd.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS="+sans, "OPENVMS_WEB_TLS_DIR="+root)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("prepare TLS failed: %v: %s", err, out)
@@ -546,7 +546,7 @@ func TestAutomaticWebTLSBootstrapGeneratesAndReusesSANCertificate(t *testing.T) 
 			t.Fatalf("%s permissions: %v %v", name, info, err)
 		}
 	}
-	first, err := os.ReadFile(certPath)
+	first, err := os.ReadFile(certPath) //nolint:gosec // certPath is under this test's t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +570,7 @@ func TestAutomaticWebTLSBootstrapGeneratesAndReusesSANCertificate(t *testing.T) 
 		t.Fatalf("generated self-signed leaf must be usable when explicitly trusted by the client: %v", err)
 	}
 	run("localhost,127.0.0.1,::1,openvms.test")
-	second, err := os.ReadFile(certPath)
+	second, err := os.ReadFile(certPath) //nolint:gosec // certPath is under this test's t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -578,13 +578,13 @@ func TestAutomaticWebTLSBootstrapGeneratesAndReusesSANCertificate(t *testing.T) 
 		t.Fatal("matching persisted certificate must be reused")
 	}
 	for _, name := range []string{"localhost", "openvms.test"} {
-		cmd := exec.Command("openssl", "x509", "-in", certPath, "-noout", "-checkhost", name)
+		cmd := exec.Command("openssl", "x509", "-in", certPath, "-noout", "-checkhost", name) //nolint:gosec // certPath is under this test's t.TempDir()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Errorf("certificate missing SAN %s: %v %s", name, err, out)
 		}
 	}
 	for _, ip := range []string{"127.0.0.1", "::1"} {
-		cmd := exec.Command("openssl", "x509", "-in", certPath, "-noout", "-checkip", ip)
+		cmd := exec.Command("openssl", "x509", "-in", certPath, "-noout", "-checkip", ip) //nolint:gosec // certPath is under this test's t.TempDir()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Errorf("certificate missing IP SAN %s: %v %s", ip, err, out)
 		}
@@ -593,7 +593,7 @@ func TestAutomaticWebTLSBootstrapGeneratesAndReusesSANCertificate(t *testing.T) 
 		t.Fatal(err)
 	}
 	run("localhost,127.0.0.1,::1,new.example")
-	third, err := os.ReadFile(certPath)
+	third, err := os.ReadFile(certPath) //nolint:gosec // certPath is under this test's t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -605,7 +605,7 @@ func TestAutomaticWebTLSBootstrapGeneratesAndReusesSANCertificate(t *testing.T) 
 func TestAutomaticWebTLSBootstrapRejectsMalformedSANWithoutReplacingCertificate(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "tls")
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
-	cmd := exec.Command("sh", script)
+	cmd := exec.Command("sh", script) //nolint:gosec // fixed repo script path
 	cmd.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost,not a host", "OPENVMS_WEB_TLS_DIR="+root)
 	if out, err := cmd.CombinedOutput(); err == nil {
 		t.Fatalf("invalid SAN accepted: %s", out)
@@ -618,7 +618,7 @@ func TestAutomaticWebTLSBootstrapRejectsMalformedSANWithoutReplacingCertificate(
 func TestAutomaticWebTLSBootstrapRejectsMalformedIPv6BeforeCreatingOutput(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "tls")
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
-	command := exec.Command("sh", script)
+	command := exec.Command("sh", script) //nolint:gosec // fixed repo script path
 	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=2001:::db8", "OPENVMS_WEB_TLS_DIR="+root)
 	if output, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("invalid IPv6 SAN accepted: %s", output)
@@ -631,7 +631,7 @@ func TestAutomaticWebTLSBootstrapRejectsMalformedIPv6BeforeCreatingOutput(t *tes
 func TestAutomaticWebTLSBootstrapRejectsInvalidIPv4BeforeCreatingOutput(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "tls")
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
-	command := exec.Command("sh", script)
+	command := exec.Command("sh", script) //nolint:gosec // fixed repo script path
 	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost,192.0.2.999", "OPENVMS_WEB_TLS_DIR="+root)
 	if output, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("invalid IPv4 SAN accepted: %s", output)
@@ -645,7 +645,7 @@ func TestAutomaticWebTLSBootstrapRejectsOversizedDNSLabelBeforeCreatingOutput(t 
 	root := filepath.Join(t.TempDir(), "tls")
 	longLabel := strings.Repeat("a", 64)
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
-	command := exec.Command("sh", script)
+	command := exec.Command("sh", script) //nolint:gosec // fixed repo script path
 	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost,"+longLabel+".example", "OPENVMS_WEB_TLS_DIR="+root)
 	if output, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("oversized DNS label accepted: %s", output)
@@ -658,7 +658,7 @@ func TestAutomaticWebTLSBootstrapRejectsOversizedDNSLabelBeforeCreatingOutput(t 
 func TestAutomaticWebTLSBootstrapRequiresDefaultSNIInSANSet(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "tls")
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
-	command := exec.Command("sh", script)
+	command := exec.Command("sh", script) //nolint:gosec // fixed repo script path
 	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=192.0.2.25,appliance.example", "OPENVMS_HTTPS_DEFAULT_SNI=localhost", "OPENVMS_WEB_TLS_DIR="+root)
 	if output, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("default SNI absent from SAN set was accepted: %s", output)
@@ -674,12 +674,12 @@ func TestAutomaticWebTLSBootstrapValidatesExternalCertificatePair(t *testing.T) 
 	}
 	root := t.TempDir()
 	cert, key := filepath.Join(root, "custom.crt"), filepath.Join(root, "custom.key")
-	command := exec.Command("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=custom.test", "-addext", "subjectAltName=DNS:custom.test", "-keyout", key, "-out", cert)
+	command := exec.Command("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=custom.test", "-addext", "subjectAltName=DNS:custom.test", "-keyout", key, "-out", cert) //nolint:gosec // paths are under this test's t.TempDir()
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("create fixture certificate: %v: %s", err, output)
 	}
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
-	command = exec.Command("sh", script)
+	command = exec.Command("sh", script) //nolint:gosec // fixed repo script path
 	command.Env = append(os.Environ(), "OPENVMS_WEB_TLS_CERT_FILE="+cert, "OPENVMS_WEB_TLS_KEY_FILE="+key, "OPENVMS_WEB_TLS_DIR="+filepath.Join(root, "generated"))
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("valid external pair rejected: %v: %s", err, output)
@@ -690,7 +690,7 @@ func TestAutomaticWebTLSBootstrapValidatesExternalCertificatePair(t *testing.T) 
 	if err := os.WriteFile(key, []byte("not a key"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	command = exec.Command("sh", script)
+	command = exec.Command("sh", script) //nolint:gosec // fixed repo script path
 	command.Env = append(os.Environ(), "OPENVMS_WEB_TLS_CERT_FILE="+cert, "OPENVMS_WEB_TLS_KEY_FILE="+key, "OPENVMS_WEB_TLS_DIR="+filepath.Join(root, "generated"))
 	if output, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("invalid custom pair accepted: %s", output)
@@ -700,7 +700,7 @@ func TestAutomaticWebTLSBootstrapValidatesExternalCertificatePair(t *testing.T) 
 func TestAutomaticWebTLSBootstrapReleasesGenerationLockBeforeCaddyExec(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "tls")
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
-	command := exec.Command("sh", "-c", `. "$1"; test ! -d "$OPENVMS_WEB_TLS_DIR/.generation-lock"`, "test", script)
+	command := exec.Command("sh", "-c", `. "$1"; test ! -d "$OPENVMS_WEB_TLS_DIR/.generation-lock"`, "test", script) //nolint:gosec // fixed repo script path
 	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost", "OPENVMS_WEB_TLS_DIR="+root)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("entrypoint must release startup lock before exec: %v: %s", err, output)
@@ -715,7 +715,7 @@ func TestAutomaticWebTLSBootstrapFailsActionablyOnAbandonedGenerationLock(t *tes
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	command := exec.CommandContext(ctx, "sh", script)
+	command := exec.CommandContext(ctx, "sh", script) //nolint:gosec // fixed repo script path
 	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost", "OPENVMS_WEB_TLS_DIR="+root, "OPENVMS_TLS_LOCK_WAIT_SECONDS=1")
 	output, err := command.CombinedOutput()
 	if ctx.Err() != nil {
@@ -739,7 +739,7 @@ func TestAutomaticWebTLSBootstrapRecoversFromAbandonedGenerationDirectory(t *tes
 		t.Fatal(err)
 	}
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
-	command := exec.Command("sh", "-c", `printf '%s' "$$" > "$PID_MARKER"; mkdir -m 700 "$OPENVMS_WEB_TLS_DIR/.generation-$$"; exec sh "$1"`, "test", script)
+	command := exec.Command("sh", "-c", `printf '%s' "$$" > "$PID_MARKER"; mkdir -m 700 "$OPENVMS_WEB_TLS_DIR/.generation-$$"; exec sh "$1"`, "test", script) //nolint:gosec // fixed repo script path
 	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost", "OPENVMS_WEB_TLS_DIR="+root, "PID_MARKER="+pidFile)
 	output, err := command.CombinedOutput()
 	if err != nil {
@@ -748,11 +748,11 @@ func TestAutomaticWebTLSBootstrapRecoversFromAbandonedGenerationDirectory(t *tes
 	if _, err := os.Stat(filepath.Join(root, "current", "tls.crt")); err != nil {
 		t.Fatalf("TLS bootstrap did not install a certificate after staging recovery: %v", err)
 	}
-	pid, err := os.ReadFile(pidFile)
+	pid, err := os.ReadFile(pidFile) //nolint:gosec // pidFile is under this test's t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(root, ".generation-"+string(pid))); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, ".generation-"+string(pid))); !os.IsNotExist(err) { //nolint:gosec // root is t.TempDir() and pid is written by this test's own script
 		t.Fatalf("abandoned same-PID staging directory was not removed: %v", err)
 	}
 }
@@ -765,7 +765,7 @@ func TestAutomaticWebTLSBootstrapRotatesNearExpiryCertificate(t *testing.T) {
 	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
 	run := func() {
 		t.Helper()
-		command := exec.Command("sh", script)
+		command := exec.Command("sh", script) //nolint:gosec // fixed repo script path
 		command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost", "OPENVMS_WEB_TLS_DIR="+root)
 		if output, err := command.CombinedOutput(); err != nil {
 			t.Fatalf("prepare TLS: %v: %s", err, output)
@@ -773,23 +773,23 @@ func TestAutomaticWebTLSBootstrapRotatesNearExpiryCertificate(t *testing.T) {
 	}
 	run()
 	certPath, keyPath := filepath.Join(root, "current", "tls.crt"), filepath.Join(root, "current", "tls.key")
-	command := exec.Command("openssl", "req", "-x509", "-new", "-key", keyPath, "-sha256", "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost", "-addext", "basicConstraints=critical,CA:FALSE", "-addext", "extendedKeyUsage=serverAuth", "-addext", "keyUsage=digitalSignature,keyEncipherment", "-out", certPath)
+	command := exec.Command("openssl", "req", "-x509", "-new", "-key", keyPath, "-sha256", "-days", "1", "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost", "-addext", "basicConstraints=critical,CA:FALSE", "-addext", "extendedKeyUsage=serverAuth", "-addext", "keyUsage=digitalSignature,keyEncipherment", "-out", certPath) //nolint:gosec // paths are under this test's t.TempDir()
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("create near-expiry fixture: %v: %s", err, output)
 	}
-	nearExpiry, err := os.ReadFile(certPath)
+	nearExpiry, err := os.ReadFile(certPath) //nolint:gosec // certPath is under this test's t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
 	run()
-	rotated, err := os.ReadFile(certPath)
+	rotated, err := os.ReadFile(certPath) //nolint:gosec // certPath is under this test's t.TempDir()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Equal(nearExpiry, rotated) {
 		t.Fatal("near-expiry certificate was not rotated")
 	}
-	if output, err := exec.Command("openssl", "x509", "-in", certPath, "-noout", "-checkend", "2592000").CombinedOutput(); err != nil {
+	if output, err := exec.Command("openssl", "x509", "-in", certPath, "-noout", "-checkend", "2592000").CombinedOutput(); err != nil { //nolint:gosec // paths are under this test's t.TempDir()
 		t.Fatalf("replacement certificate must exceed 30-day threshold: %v %s", err, output)
 	}
 }
@@ -806,7 +806,7 @@ func TestAutomaticWebTLSBootstrapSerializesConcurrentStartup(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			command := exec.Command("sh", script)
+			command := exec.Command("sh", script) //nolint:gosec // fixed repo script path
 			command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost,127.0.0.1", "OPENVMS_WEB_TLS_DIR="+root)
 			if output, err := command.CombinedOutput(); err != nil {
 				errCh <- fmt.Errorf("concurrent TLS prepare: %w: %s", err, output)
