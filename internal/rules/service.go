@@ -413,6 +413,47 @@ func (s *Service) debounce() time.Duration {
 	return s.Debounce
 }
 
+func (s *Service) debounceFor(r Rule) time.Duration {
+	if r.Conditions.CooldownSeconds != nil && *r.Conditions.CooldownSeconds > 0 {
+		return time.Duration(*r.Conditions.CooldownSeconds) * time.Second
+	}
+	return s.debounce()
+}
+
+func loadCameraGroupIDs(ctx context.Context, tx pgx.Tx, tenantID, cameraID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := tx.Query(ctx, `SELECT group_id FROM camera_group_members WHERE tenant_id = $1 AND camera_id = $2`, tenantID, cameraID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func loadSiteTimezone(ctx context.Context, tx pgx.Tx, tenantID, siteID, cameraID uuid.UUID) string {
+	var tz string
+	if siteID != uuid.Nil {
+		_ = tx.QueryRow(ctx, `SELECT timezone FROM sites WHERE id = $1 AND tenant_id = $2`, siteID, tenantID).Scan(&tz)
+		if tz != "" {
+			return tz
+		}
+	}
+	if cameraID != uuid.Nil {
+		_ = tx.QueryRow(ctx, `
+SELECT s.timezone FROM cameras c
+JOIN sites s ON s.id = c.site_id AND s.tenant_id = c.tenant_id
+WHERE c.id = $1 AND c.tenant_id = $2`, cameraID, tenantID).Scan(&tz)
+	}
+	return tz
+}
+
 // EvaluateEvent runs every enabled event rule of the tenant against a newly indexed event.
 func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 	if s.ZoneResolver != nil && len(ev.MapZoneIDs) == 0 {
@@ -433,6 +474,19 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 		if err != nil {
 			return store.Classify(err)
 		}
+		if len(rulesRows) == 0 {
+			return nil
+		}
+		if len(ev.CameraGroupIDs) == 0 && ev.CameraID != uuid.Nil {
+			groupIDs, err := loadCameraGroupIDs(ctx, tx, ev.TenantID, ev.CameraID)
+			if err != nil {
+				return store.Classify(err)
+			}
+			ev.CameraGroupIDs = groupIDs
+		}
+		if ev.SiteTimezone == "" {
+			ev.SiteTimezone = loadSiteTimezone(ctx, tx, ev.TenantID, ev.SiteID, ev.CameraID)
+		}
 
 		for _, rRow := range rulesRows {
 			rule, err := ruleFromRow(rRow)
@@ -443,7 +497,7 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 				continue
 			}
 
-			ok, err := claim(ctx, tx, ev.TenantID, rule.ID, ev.CameraID, time.Now().Add(-s.debounce()))
+			ok, err := claim(ctx, tx, ev.TenantID, rule.ID, ev.CameraID, time.Now().Add(-s.debounceFor(rule)))
 			if err != nil {
 				return store.Classify(err)
 			}
