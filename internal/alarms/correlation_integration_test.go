@@ -329,3 +329,72 @@ func TestCorrelateMarksAlarmLateWhenEventOlderThanAutoCloseWindow(t *testing.T) 
 	}
 }
 
+func TestListAlarmsKeysetCursorSortAndListAlarmEvents(t *testing.T) {
+	c := newCorrEnv(t)
+	ctx := context.Background()
+	svc := &alarms.Service{Store: c.env.Store}
+
+	// Alarm 1: 2 correlated events ("person") at t0 and t0+5m -> last_event_at = t0+5m, status = acknowledged
+	a1 := c.correlate(c.cam, "event", nil, t0, "person")
+	c.correlate(c.cam, "event", nil, t0.Add(5*time.Minute), "person")
+	c.setStatus(a1.AlarmID, "acknowledged")
+
+	// Alarm 2: 1 event ("car") at t0+10m -> last_event_at = t0+10m, status = closed
+	a2 := c.correlate(c.cam, "event", nil, t0.Add(10*time.Minute), "car")
+	c.setStatus(a2.AlarmID, "closed")
+
+	// Alarm 3: 1 event ("dog") at t0+2m -> last_event_at = t0+2m, status = open
+	a3 := c.correlate(c.cam, "event", nil, t0.Add(2*time.Minute), "dog")
+
+	// 1. Sort by last_event_at (default): expected order a2 (t0+10m), a1 (t0+5m), a3 (t0+2m)
+	camID := c.cam.ID
+	p1, err := svc.ListPage(ctx, c.env.Admin, alarms.Filter{CameraID: &camID, Limit: 2})
+	if err != nil {
+		t.Fatalf("ListPage page 1: %v", err)
+	}
+	if len(p1.Items) != 2 || p1.Items[0].ID != a2.AlarmID || p1.Items[1].ID != a1.AlarmID {
+		t.Fatalf("page 1 items = %+v, want [a2, a1]", p1.Items)
+	}
+	if p1.Items[1].EventCount != 2 || !p1.Items[1].FirstEventAt.Equal(t0) || !p1.Items[1].LastEventAt.Equal(t0.Add(5*time.Minute)) {
+		t.Fatalf("a1 correlation fields = count:%d first:%v last:%v, want 2, %v, %v",
+			p1.Items[1].EventCount, p1.Items[1].FirstEventAt, p1.Items[1].LastEventAt, t0, t0.Add(5*time.Minute))
+	}
+	if p1.NextCursor == "" {
+		t.Fatal("expected NextCursor on page 1")
+	}
+
+	p2, err := svc.ListPage(ctx, c.env.Admin, alarms.Filter{CameraID: &camID, Limit: 2, Cursor: p1.NextCursor})
+	if err != nil {
+		t.Fatalf("ListPage page 2: %v", err)
+	}
+	if len(p2.Items) != 1 || p2.Items[0].ID != a3.AlarmID || p2.NextCursor != "" {
+		t.Fatalf("page 2 = %+v (next=%q), want [a3] and empty cursor", p2.Items, p2.NextCursor)
+	}
+
+	// 2. Sort by priority: open (a3) -> acknowledged (a1) -> closed (a2)
+	prio1, err := svc.ListPage(ctx, c.env.Admin, alarms.Filter{CameraID: &camID, Sort: "priority", Limit: 2})
+	if err != nil {
+		t.Fatalf("ListPage priority page 1: %v", err)
+	}
+	if len(prio1.Items) != 2 || prio1.Items[0].ID != a3.AlarmID || prio1.Items[1].ID != a1.AlarmID {
+		t.Fatalf("priority page 1 = %+v, want [a3, a1]", prio1.Items)
+	}
+	prio2, err := svc.ListPage(ctx, c.env.Admin, alarms.Filter{CameraID: &camID, Sort: "priority", Limit: 2, Cursor: prio1.NextCursor})
+	if err != nil {
+		t.Fatalf("ListPage priority page 2: %v", err)
+	}
+	if len(prio2.Items) != 1 || prio2.Items[0].ID != a2.AlarmID {
+		t.Fatalf("priority page 2 = %+v, want [a2]", prio2.Items)
+	}
+
+	// 3. ListEvents returns correlated events in chronological order
+	evs, err := svc.ListEvents(ctx, c.env.Admin, a1.AlarmID)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(evs) != 2 || !evs[0].StartTime.Equal(t0) || !evs[1].StartTime.Equal(t0.Add(5*time.Minute)) {
+		t.Fatalf("ListEvents = %+v, want 2 events at t0 and t0+5m", evs)
+	}
+}
+
+

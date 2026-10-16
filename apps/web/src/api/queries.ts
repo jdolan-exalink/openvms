@@ -335,6 +335,8 @@ export type AlarmFilter = {
   site_id?: string;
   camera_id?: string;
   assigned_to?: string;
+  sort?: "last_event_at" | "priority";
+  cursor?: string;
   limit?: number;
 };
 
@@ -351,6 +353,16 @@ export const alarmAssigneesQuery = (alarmId?: string) =>
     queryFn: async () => {
       if (!alarmId) return [];
       return unwrap(await api.GET("/api/v1/alarms/{alarmId}/assignees", { params: { path: { alarmId } } })).items;
+    },
+    enabled: !!alarmId,
+  });
+
+export const alarmEventsQuery = (alarmId?: string) =>
+  queryOptions({
+    queryKey: ["alarms", alarmId, "events"],
+    queryFn: async () => {
+      if (!alarmId) return [];
+      return unwrap(await api.GET("/api/v1/alarms/{alarmId}/events", { params: { path: { alarmId } } })).items;
     },
     enabled: !!alarmId,
   });

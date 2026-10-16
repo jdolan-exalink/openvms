@@ -239,5 +239,65 @@ describe("Alarms Route", () => {
     expect(await screen.findByText("Cámara Backfill")).toBeInTheDocument();
     expect(screen.getAllByText("Tardía")).toHaveLength(1);
   });
+
+  it("renders event_count badge and opens correlated events modal", async () => {
+    const corrAlarm = makeAlarm("a-corr", {
+      camera_name: "Cámara Correlación",
+      event_count: 3,
+      first_event_at: "2026-09-29T10:00:00Z",
+      last_event_at: "2026-09-29T10:12:00Z",
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        const url = new URL(req.url);
+        if (url.pathname === "/api/v1/alarms") return json({ items: [corrAlarm] });
+        if (url.pathname === "/api/v1/alarms/a-corr/events") {
+          return json({
+            items: [
+              {
+                id: "ev-1",
+                remote_id: "fr-101",
+                severity: "alert",
+                labels: ["person"],
+                sub_labels: [],
+                zones: ["entrada"],
+                start_time: "2026-09-29T10:00:00Z",
+                has_thumbnail: false,
+                linked_at: "2026-09-29T10:00:01Z",
+              },
+              {
+                id: "ev-2",
+                remote_id: "fr-102",
+                severity: "alert",
+                labels: ["person"],
+                sub_labels: [],
+                zones: ["patio"],
+                start_time: "2026-09-29T10:12:00Z",
+                has_thumbnail: false,
+                linked_at: "2026-09-29T10:12:01Z",
+              },
+            ],
+          });
+        }
+        if (url.pathname === "/api/v1/cameras") return json({ items: [] });
+        return json({}, 404);
+      }),
+    );
+
+    renderPage(() => <Alarms />);
+
+    expect(await screen.findByText("Cámara Correlación")).toBeInTheDocument();
+    const countBtn = screen.getByRole("button", { name: /3 eventos/i });
+    expect(countBtn).toBeInTheDocument();
+
+    fireEvent.click(countBtn);
+
+    expect(await screen.findByText(/Eventos correlacionados/i)).toBeInTheDocument();
+    expect(await screen.findByText(/entrada/i)).toBeInTheDocument();
+    expect(screen.getByText(/patio/i)).toBeInTheDocument();
+  });
 });
+
 

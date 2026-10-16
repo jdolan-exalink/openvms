@@ -35,7 +35,11 @@ func toAlarm(a alarms.Alarm) gen.Alarm {
 		ClosedBy:           a.ClosedBy,
 		ClosedByName:       a.ClosedByName,
 		ClosedAt:           a.ClosedAt,
+		EventCount:         &a.EventCount,
+		FirstEventAt:       &a.FirstEventAt,
+		LastEventAt:        &a.LastEventAt,
 		Late:               &a.Late,
+		AutoClosed:         &a.AutoClosed,
 		CreatedAt:          a.CreatedAt,
 		UpdatedAt:          a.UpdatedAt,
 	}
@@ -99,19 +103,28 @@ func (h *Handlers) ListAlarms(ctx context.Context, r gen.ListAlarmsRequestObject
 		CameraID:    p.CameraId,
 		AssignedTo:  p.AssignedTo,
 	}
+	if p.Sort != nil {
+		f.Sort = string(*p.Sort)
+	}
+	if p.Cursor != nil {
+		f.Cursor = *p.Cursor
+	}
 	if p.Limit != nil {
 		f.Limit = *p.Limit
 	}
 
-	items, err := h.Alarms.List(ctx, a, f)
+	page, err := h.Alarms.ListPage(ctx, a, f)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]gen.Alarm, len(items))
-	for i, item := range items {
+	out := make([]gen.Alarm, len(page.Items))
+	for i, item := range page.Items {
 		out[i] = toAlarm(item)
 	}
-	return gen.ListAlarms200JSONResponse{Items: out}, nil
+	return gen.ListAlarms200JSONResponse{
+		Items:      out,
+		NextCursor: nextCursor(page.NextCursor),
+	}, nil
 }
 
 func (h *Handlers) GetAlarm(ctx context.Context, r gen.GetAlarmRequestObject) (gen.GetAlarmResponseObject, error) {
@@ -261,4 +274,31 @@ func (h *Handlers) ListAlarmAssignees(ctx context.Context, r gen.ListAlarmAssign
 		}
 	}
 	return gen.ListAlarmAssignees200JSONResponse{Items: items}, nil
+}
+
+func (h *Handlers) ListAlarmEvents(ctx context.Context, r gen.ListAlarmEventsRequestObject) (gen.ListAlarmEventsResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	evs, err := h.Alarms.ListEvents(ctx, a, r.AlarmId)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]gen.AlarmEvent, len(evs))
+	for i, ev := range evs {
+		items[i] = gen.AlarmEvent{
+			Id:           ev.ID,
+			RemoteId:     ev.RemoteID,
+			Severity:     ev.Severity,
+			Labels:       ev.Labels,
+			SubLabels:    ev.SubLabels,
+			Zones:        ev.Zones,
+			StartTime:    ev.StartTime,
+			EndTime:      ev.EndTime,
+			HasThumbnail: ev.HasThumbnail,
+			LinkedAt:     ev.LinkedAt,
+		}
+	}
+	return gen.ListAlarmEvents200JSONResponse{Items: items}, nil
 }

@@ -2506,13 +2506,15 @@ paths:
       operationId: listAlarms
       summary: List alarms
       description: |
-        Alarms for alert-severity events the caller can view via alarms.view, newest first.
+        Alarms for alert-severity events the caller can view via alarms.view, newest activity first.
       parameters:
         - { name: status, in: query, schema: { $ref: "#/components/schemas/AlarmStatus" } }
         - { name: status_group, in: query, schema: { type: string, enum: [active] }, description: "Filter by status group (active = open, acknowledged, assigned, investigating)" }
         - { name: site_id, in: query, schema: { type: string, format: uuid } }
         - { name: camera_id, in: query, schema: { type: string, format: uuid } }
         - { name: assigned_to, in: query, schema: { type: string, format: uuid } }
+        - { name: sort, in: query, schema: { type: string, enum: [last_event_at, priority], default: last_event_at }, description: "Sort by newest activity (last_event_at) or operational priority (open > acknowledged > assigned > investigating > resolved > closed, then last_event_at)." }
+        - { name: cursor, in: query, schema: { type: string }, description: "Opaque keyset pagination cursor returned as next_cursor." }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
       responses:
         "200":
@@ -2526,6 +2528,9 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/Alarm" }
+                  next_cursor:
+                    type: string
+                    description: Opaque cursor for the next page; omitted when there are no more items.
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
   /api/v1/alarms/bulk:
@@ -2742,6 +2747,29 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/AlarmAssignee" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/alarms/{alarmId}/events:
+    parameters:
+      - { name: alarmId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [alarms]
+      operationId: listAlarmEvents
+      summary: List events correlated into an alarm
+      description: Returns the events linked in alarm_events for this alarm in chronological order. Requires alarms.view on the alarm's camera.
+      responses:
+        "200":
+          description: Correlated events for the alarm
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AlarmEvent" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -5346,11 +5374,39 @@ components:
         closed_by: { type: string, format: uuid, nullable: true }
         closed_by_name: { type: string, nullable: true }
         closed_at: { type: string, format: date-time, nullable: true }
+        event_count:
+          type: integer
+          description: Number of correlated events folded into this alarm.
+        first_event_at:
+          type: string
+          format: date-time
+          description: Start time of the first event correlated into this alarm.
+        last_event_at:
+          type: string
+          format: date-time
+          description: Start time of the most recent event correlated into this alarm.
         late:
           type: boolean
           description: True when the alarm was opened from an event older than the auto-close window at ingestion time.
+        auto_closed:
+          type: boolean
+          description: True when the alarm was closed automatically by the inactivity sweeper or backlog cleanup.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AlarmEvent:
+      type: object
+      required: [id, remote_id, severity, labels, sub_labels, zones, start_time, has_thumbnail, linked_at]
+      properties:
+        id: { type: string, format: uuid }
+        remote_id: { type: string }
+        severity: { type: string }
+        labels: { type: array, items: { type: string } }
+        sub_labels: { type: array, items: { type: string } }
+        zones: { type: array, items: { type: string } }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time, nullable: true }
+        has_thumbnail: { type: boolean }
+        linked_at: { type: string, format: date-time }
     AlarmTransition:
       type: object
       required: [id, tenant_id, alarm_id, comment, at]

@@ -98,7 +98,7 @@ const getAlarm = `-- name: GetAlarm :one
 SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status,
        a.assigned_to, a.acknowledged_by, a.acknowledged_at, a.resolved_by, a.resolved_at,
        a.closed_by, a.closed_at,
-       a.late,
+       a.first_event_at, a.last_event_at, a.event_count, a.late, a.auto_closed,
        a.created_at, a.updated_at,
        s.name AS site_name,
        c.display_name AS camera_name,
@@ -157,7 +157,11 @@ type GetAlarmRow struct {
 	ResolvedAt             *time.Time
 	ClosedBy               *uuid.UUID
 	ClosedAt               *time.Time
+	FirstEventAt           time.Time
+	LastEventAt            time.Time
+	EventCount             int32
 	Late                   bool
+	AutoClosed             bool
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	SiteName               string
@@ -206,7 +210,11 @@ func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, erro
 		&i.ResolvedAt,
 		&i.ClosedBy,
 		&i.ClosedAt,
+		&i.FirstEventAt,
+		&i.LastEventAt,
+		&i.EventCount,
 		&i.Late,
+		&i.AutoClosed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SiteName,
@@ -237,6 +245,61 @@ func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, erro
 		&i.ClosedByName,
 	)
 	return i, err
+}
+
+const listAlarmEvents = `-- name: ListAlarmEvents :many
+SELECT e.id, e.remote_id, e.severity, e.labels, e.sub_labels, e.zones,
+       e.start_time, e.end_time,
+       (e.thumb_key <> '')::bool AS has_thumbnail,
+       ae.linked_at
+FROM alarm_events ae
+JOIN events e ON e.id = ae.event_id
+WHERE ae.alarm_id = $1
+ORDER BY e.start_time ASC, e.id ASC
+`
+
+type ListAlarmEventsRow struct {
+	ID           uuid.UUID
+	RemoteID     string
+	Severity     string
+	Labels       []string
+	SubLabels    []string
+	Zones        []string
+	StartTime    time.Time
+	EndTime      *time.Time
+	HasThumbnail bool
+	LinkedAt     time.Time
+}
+
+func (q *Queries) ListAlarmEvents(ctx context.Context, alarmID uuid.UUID) ([]ListAlarmEventsRow, error) {
+	rows, err := q.db.Query(ctx, listAlarmEvents, alarmID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAlarmEventsRow{}
+	for rows.Next() {
+		var i ListAlarmEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RemoteID,
+			&i.Severity,
+			&i.Labels,
+			&i.SubLabels,
+			&i.Zones,
+			&i.StartTime,
+			&i.EndTime,
+			&i.HasThumbnail,
+			&i.LinkedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAlarmTransitions = `-- name: ListAlarmTransitions :many
@@ -294,7 +357,7 @@ const listAlarms = `-- name: ListAlarms :many
 SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status,
        a.assigned_to, a.acknowledged_by, a.acknowledged_at, a.resolved_by, a.resolved_at,
        a.closed_by, a.closed_at,
-       a.late,
+       a.first_event_at, a.last_event_at, a.event_count, a.late, a.auto_closed,
        a.created_at, a.updated_at,
        s.name AS site_name,
        c.display_name AS camera_name,
@@ -339,8 +402,28 @@ WHERE a.camera_id = ANY($1::uuid[])
   AND ($4::uuid IS NULL OR a.site_id = $4)
   AND ($5::uuid IS NULL OR a.camera_id = $5)
   AND ($6::uuid IS NULL OR a.assigned_to = $6)
-ORDER BY a.created_at DESC
-LIMIT $7
+  AND (
+      $7::timestamptz IS NULL
+      OR (
+          CASE WHEN $8::text = 'priority' THEN
+              (CASE a.status WHEN 'open' THEN 1 WHEN 'acknowledged' THEN 2 WHEN 'assigned' THEN 3 WHEN 'investigating' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END) > $9::int
+              OR (
+                  (CASE a.status WHEN 'open' THEN 1 WHEN 'acknowledged' THEN 2 WHEN 'assigned' THEN 3 WHEN 'investigating' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END) = $9::int
+                  AND (a.last_event_at < $7::timestamptz OR (a.last_event_at = $7::timestamptz AND a.id < $10::uuid))
+              )
+          ELSE
+              a.last_event_at < $7::timestamptz
+              OR (a.last_event_at = $7::timestamptz AND a.id < $10::uuid)
+          END
+      )
+  )
+ORDER BY
+    CASE WHEN $8::text = 'priority' THEN
+        (CASE a.status WHEN 'open' THEN 1 WHEN 'acknowledged' THEN 2 WHEN 'assigned' THEN 3 WHEN 'investigating' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END)
+    ELSE 0 END ASC,
+    a.last_event_at DESC,
+    a.id DESC
+LIMIT $11
 `
 
 type ListAlarmsParams struct {
@@ -350,6 +433,10 @@ type ListAlarmsParams struct {
 	SiteID      *uuid.UUID
 	CameraID    *uuid.UUID
 	AssignedTo  *uuid.UUID
+	CursorAt    *time.Time
+	Sort        string
+	CursorRank  *int32
+	CursorID    *uuid.UUID
 	LimitCount  int32
 }
 
@@ -368,7 +455,11 @@ type ListAlarmsRow struct {
 	ResolvedAt             *time.Time
 	ClosedBy               *uuid.UUID
 	ClosedAt               *time.Time
+	FirstEventAt           time.Time
+	LastEventAt            time.Time
+	EventCount             int32
 	Late                   bool
+	AutoClosed             bool
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	SiteName               string
@@ -405,6 +496,10 @@ func (q *Queries) ListAlarms(ctx context.Context, arg ListAlarmsParams) ([]ListA
 		arg.SiteID,
 		arg.CameraID,
 		arg.AssignedTo,
+		arg.CursorAt,
+		arg.Sort,
+		arg.CursorRank,
+		arg.CursorID,
 		arg.LimitCount,
 	)
 	if err != nil {
@@ -429,7 +524,11 @@ func (q *Queries) ListAlarms(ctx context.Context, arg ListAlarmsParams) ([]ListA
 			&i.ResolvedAt,
 			&i.ClosedBy,
 			&i.ClosedAt,
+			&i.FirstEventAt,
+			&i.LastEventAt,
+			&i.EventCount,
 			&i.Late,
+			&i.AutoClosed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SiteName,

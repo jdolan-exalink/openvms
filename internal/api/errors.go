@@ -88,7 +88,7 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", err.Error()
 	case errors.Is(err, alarms.ErrInvalidTransition):
 		return http.StatusConflict, "invalid_transition", err.Error()
-	case errors.Is(err, events.ErrInvalidCursor):
+	case errors.Is(err, events.ErrInvalidCursor), errors.Is(err, alarms.ErrInvalidCursor):
 		return http.StatusBadRequest, "invalid_cursor", "the pagination cursor is not valid"
 	case errors.Is(err, agentenroll.ErrInvalidToken):
 		// One answer for unknown, used and expired tokens, so tokens cannot be probed.

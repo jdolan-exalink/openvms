@@ -35,13 +35,13 @@ event, rules add a second one per event (`UNIQUE(event_id, source)`), nothing au
       separate, closed alarm → new one). Route: delegated writer. (`9c788ff`)
 - [x] P1-02 — Auto-close sweeper in worker + `alarm_settings.auto_close_after` (default 30m) + transition with
       system actor; tests with fake clock. Route: same writer. (`7a1b829`)
-- [ ] P1-03 — `frigate_servers.event_alarm_mode` (existing → all_alerts, new → rules_only) honored by syncer;
-      API/OpenAPI field on server; settings UI toggle on the server page. Route: same writer.
-- [ ] P1-04 — Backlog cleanup migration (24h cutoff, auto_closed, counts). Route: same writer.
-- [ ] P1-05 — `late` flag for alarms created from old events; exposed in API/UI. Route: same writer.
-- [ ] P1-06 — Single-alarm authz with server/group scopes + integration test (grant at server/group scope
-      can operate on the alarm). Route: same writer.
-- [ ] P1-07 — API: `listAlarms` keyset cursor + `event_count`, `last_event_at`, `late`; `listAlarmEvents`;
+- [x] P1-03 — `frigate_servers.event_alarm_mode` (existing → all_alerts, new → rules_only) honored by syncer;
+      API/OpenAPI field on server; settings UI toggle on the server page. Route: same writer. (`43139f1`)
+- [x] P1-04 — Backlog cleanup migration (24h cutoff, auto_closed, counts). Route: same writer. (`b17dbc9`)
+- [x] P1-05 — `late` flag for alarms created from old events; exposed in API/UI. Route: same writer. (`329a5b7`)
+- [x] P1-06 — Single-alarm authz with server/group scopes + integration test (grant at server/group scope
+      can operate on the alarm). Route: same writer. (`31fc6b4`)
+- [x] P1-07 — API: `listAlarms` keyset cursor + `event_count`, `last_event_at`, `late`; `listAlarmEvents`;
       Alarms page shows count/last event/late badge. Route: same writer.
 
 ## Acceptance criteria and checks
@@ -58,6 +58,11 @@ event, rules add a second one per event (`UNIQUE(event_id, source)`), nothing au
 - Branch `feat/alarms-phase1-flood` from main (`d72521c`).
 - P1-01 (`9c788ff`): migration `00047_alarm_correlation.sql`, `internal/alarms/correlation.go`, `internal/events/syncer.go`, `internal/rules/service.go`, unit + integration tests (`go test -race ./internal/alarms/... ./internal/events/... ./internal/rules/...` PASS).
 - P1-02 (`7a1b829`): auto-close sweeper in `internal/alarms/autoclose.go`, wired in `apps/worker/main.go`, integration tests in `internal/alarms/autoclose_integration_test.go` (PASS).
+- P1-03 (`43139f1`): migration `00048_frigate_server_event_alarm_mode.sql`, `internal/events/syncer.go`, server API & UI toggle (`apps/web/src/routes/Servers.tsx`).
+- P1-04 (`b17dbc9`): migration `00049_alarms_backlog_cleanup.sql` + integration test in `internal/alarms/autoclose_integration_test.go`.
+- P1-05 (`329a5b7`): `late` flag on backfill alarms older than `auto_close_after` + `Tardía` UI badge.
+- P1-06 (`31fc6b4`): single-alarm authorization includes camera's `server_id` and `camera_group_ids` + `internal/alarms/authz_integration_test.go`.
+- P1-07: keyset cursor + `sort` (`last_event_at` | `priority`) + correlation fields on `listAlarms`, `listAlarmEvents` (`GET /api/v1/alarms/{alarmId}/events`), and `Alarms.tsx` correlated events modal & badges.
 
 ## Next step
-P1-03 (`frigate_servers.event_alarm_mode`).
+Verification and stacked PR delivery.

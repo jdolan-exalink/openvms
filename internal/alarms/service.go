@@ -2,10 +2,13 @@ package alarms
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,6 +23,7 @@ import (
 
 var (
 	ErrInvalidTransition = errors.New("invalid alarm status transition")
+	ErrInvalidCursor     = errors.New("invalid cursor")
 )
 
 type ValidationError struct {
@@ -123,9 +127,26 @@ type Alarm struct {
 	ClosedBy               *uuid.UUID `json:"closed_by,omitempty"`
 	ClosedByName           *string    `json:"closed_by_name,omitempty"`
 	ClosedAt               *time.Time `json:"closed_at,omitempty"`
+	EventCount             int        `json:"event_count"`
+	FirstEventAt           time.Time  `json:"first_event_at"`
+	LastEventAt            time.Time  `json:"last_event_at"`
 	Late                   bool       `json:"late"`
+	AutoClosed             bool       `json:"auto_closed"`
 	CreatedAt              time.Time  `json:"created_at"`
 	UpdatedAt              time.Time  `json:"updated_at"`
+}
+
+type AlarmEvent struct {
+	ID           uuid.UUID  `json:"id"`
+	RemoteID     string     `json:"remote_id"`
+	Severity     string     `json:"severity"`
+	Labels       []string   `json:"labels"`
+	SubLabels    []string   `json:"sub_labels"`
+	Zones        []string   `json:"zones"`
+	StartTime    time.Time  `json:"start_time"`
+	EndTime      *time.Time `json:"end_time,omitempty"`
+	HasThumbnail bool       `json:"has_thumbnail"`
+	LinkedAt     time.Time  `json:"linked_at"`
 }
 
 type Transition struct {
@@ -152,20 +173,101 @@ type Filter struct {
 	SiteID      *uuid.UUID
 	CameraID    *uuid.UUID
 	AssignedTo  *uuid.UUID
+	Sort        string
+	Cursor      string
 	Limit       int
+}
+
+type Page struct {
+	Items      []Alarm
+	NextCursor string
 }
 
 type BulkResult struct {
 	Updated int
 }
 
+func statusPriorityRank(status string) int32 {
+	switch status {
+	case "open":
+		return 1
+	case "acknowledged":
+		return 2
+	case "assigned":
+		return 3
+	case "investigating":
+		return 4
+	case "resolved":
+		return 5
+	default:
+		return 6
+	}
+}
+
+func encodeAlarmCursor(sortMode string, a Alarm) string {
+	raw := fmt.Sprintf("%s|%d|%d|%s", sortMode, statusPriorityRank(a.Status), a.LastEventAt.UnixMicro(), a.ID.String())
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeAlarmCursor(c string) (string, int32, time.Time, uuid.UUID, error) {
+	raw, err := base64.RawURLEncoding.DecodeString(c)
+	if err != nil {
+		return "", 0, time.Time{}, uuid.Nil, ErrInvalidCursor
+	}
+	parts := strings.Split(string(raw), "|")
+	if len(parts) != 4 {
+		return "", 0, time.Time{}, uuid.Nil, ErrInvalidCursor
+	}
+	rank64, err := strconv.ParseInt(parts[1], 10, 32)
+	if err != nil {
+		return "", 0, time.Time{}, uuid.Nil, ErrInvalidCursor
+	}
+	micros, err := strconv.ParseInt(parts[2], 10, 64)
+	if err != nil {
+		return "", 0, time.Time{}, uuid.Nil, ErrInvalidCursor
+	}
+	id, err := uuid.Parse(parts[3])
+	if err != nil {
+		return "", 0, time.Time{}, uuid.Nil, ErrInvalidCursor
+	}
+	return parts[0], int32(rank64), time.UnixMicro(micros).UTC(), id, nil
+}
+
 func (s *Service) List(ctx context.Context, actor authz.Actor, f Filter) ([]Alarm, error) {
+	page, err := s.ListPage(ctx, actor, f)
+	if err != nil {
+		return nil, err
+	}
+	return page.Items, nil
+}
+
+func (s *Service) ListPage(ctx context.Context, actor authz.Actor, f Filter) (Page, error) {
 	limit := f.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 50
 	}
+	sortMode := f.Sort
+	if sortMode == "" {
+		sortMode = "last_event_at"
+	}
+	if sortMode != "last_event_at" && sortMode != "priority" {
+		return Page{}, &ValidationError{Msg: "sort must be last_event_at or priority"}
+	}
 
-	var items []Alarm
+	var cursorAt *time.Time
+	var cursorID *uuid.UUID
+	var cursorRank *int32
+	if f.Cursor != "" {
+		cSort, cRank, cAt, cID, err := decodeAlarmCursor(f.Cursor)
+		if err != nil || cSort != sortMode {
+			return Page{}, ErrInvalidCursor
+		}
+		cursorAt = &cAt
+		cursorID = &cID
+		cursorRank = &cRank
+	}
+
+	var out Page
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		chk, err := access.Load(ctx, q, actor)
 		if err != nil {
@@ -176,7 +278,7 @@ func (s *Service) List(ctx context.Context, actor authz.Actor, f Filter) ([]Alar
 			return err
 		}
 		if len(cameraIDs) == 0 {
-			items = []Alarm{}
+			out.Items = []Alarm{}
 			return nil
 		}
 
@@ -189,7 +291,7 @@ func (s *Service) List(ctx context.Context, actor authz.Actor, f Filter) ([]Alar
 				}
 			}
 			if !has {
-				items = []Alarm{}
+				out.Items = []Alarm{}
 				return nil
 			}
 			cameraIDs = []uuid.UUID{*f.CameraID}
@@ -202,15 +304,77 @@ func (s *Service) List(ctx context.Context, actor authz.Actor, f Filter) ([]Alar
 			SiteID:      f.SiteID,
 			CameraID:    f.CameraID,
 			AssignedTo:  f.AssignedTo,
-			LimitCount:  int32(limit), //nolint:gosec // bounded to 1000
+			CursorAt:    cursorAt,
+			Sort:        sortMode,
+			CursorRank:  cursorRank,
+			CursorID:    cursorID,
+			LimitCount:  int32(limit + 1), //nolint:gosec // bounded to 501
 		})
 		if err != nil {
 			return store.Classify(err)
 		}
 
-		items = make([]Alarm, len(rows))
+		hasMore := len(rows) > limit
+		if hasMore {
+			rows = rows[:limit]
+		}
+		out.Items = make([]Alarm, len(rows))
 		for i, r := range rows {
-			items[i] = mapListAlarmRow(r)
+			out.Items[i] = mapListAlarmRow(r)
+		}
+		if hasMore && len(out.Items) > 0 {
+			out.NextCursor = encodeAlarmCursor(sortMode, out.Items[len(out.Items)-1])
+		}
+		return nil
+	})
+	return out, err
+}
+
+func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, alarmID uuid.UUID) ([]AlarmEvent, error) {
+	var items []AlarmEvent
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		row, err := q.GetAlarm(ctx, alarmID)
+		if err != nil {
+			return notFoundOr(err)
+		}
+		chk, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		if err := chk.Require(authz.AlarmsView, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
+			return err
+		}
+
+		rows, err := q.ListAlarmEvents(ctx, alarmID)
+		if err != nil {
+			return store.Classify(err)
+		}
+		items = make([]AlarmEvent, len(rows))
+		for i, r := range rows {
+			labels := r.Labels
+			if labels == nil {
+				labels = []string{}
+			}
+			subLabels := r.SubLabels
+			if subLabels == nil {
+				subLabels = []string{}
+			}
+			zones := r.Zones
+			if zones == nil {
+				zones = []string{}
+			}
+			items[i] = AlarmEvent{
+				ID:           r.ID,
+				RemoteID:     r.RemoteID,
+				Severity:     r.Severity,
+				Labels:       labels,
+				SubLabels:    subLabels,
+				Zones:        zones,
+				StartTime:    r.StartTime,
+				EndTime:      r.EndTime,
+				HasThumbnail: r.HasThumbnail,
+				LinkedAt:     r.LinkedAt,
+			}
 		}
 		return nil
 	})
@@ -962,7 +1126,11 @@ func mapGetAlarmRow(r db.GetAlarmRow) Alarm {
 		ClosedBy:               r.ClosedBy,
 		ClosedByName:           closedByName,
 		ClosedAt:               r.ClosedAt,
+		EventCount:             int(r.EventCount),
+		FirstEventAt:           r.FirstEventAt,
+		LastEventAt:            r.LastEventAt,
 		Late:                   r.Late,
+		AutoClosed:             r.AutoClosed,
 		CreatedAt:              r.CreatedAt,
 		UpdatedAt:              r.UpdatedAt,
 	}
@@ -1024,7 +1192,11 @@ func mapListAlarmRow(r db.ListAlarmsRow) Alarm {
 		ClosedBy:               r.ClosedBy,
 		ClosedByName:           closedByName,
 		ClosedAt:               r.ClosedAt,
+		EventCount:             int(r.EventCount),
+		FirstEventAt:           r.FirstEventAt,
+		LastEventAt:            r.LastEventAt,
 		Late:                   r.Late,
+		AutoClosed:             r.AutoClosed,
 		CreatedAt:              r.CreatedAt,
 		UpdatedAt:              r.UpdatedAt,
 	}
