@@ -102,6 +102,10 @@ SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status
        a.created_at, a.updated_at,
        s.name AS site_name,
        c.display_name AS camera_name,
+       c.server_id,
+       coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
+                 JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
+                 WHERE m.camera_id = c.id), '{}')::uuid[] AS camera_group_ids,
        e.severity AS event_severity,
        e.start_time AS event_start_time,
        e.end_time AS event_end_time,
@@ -158,6 +162,8 @@ type GetAlarmRow struct {
 	UpdatedAt              time.Time
 	SiteName               string
 	CameraName             string
+	ServerID               uuid.UUID
+	CameraGroupIds         []uuid.UUID
 	EventSeverity          string
 	EventStartTime         time.Time
 	EventEndTime           *time.Time
@@ -205,6 +211,8 @@ func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, erro
 		&i.UpdatedAt,
 		&i.SiteName,
 		&i.CameraName,
+		&i.ServerID,
+		&i.CameraGroupIds,
 		&i.EventSeverity,
 		&i.EventStartTime,
 		&i.EventEndTime,

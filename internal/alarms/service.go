@@ -229,7 +229,7 @@ func (s *Service) Get(ctx context.Context, actor authz.Actor, id uuid.UUID) (Ala
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.AlarmsView, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+		if err := chk.Require(authz.AlarmsView, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 			return err
 		}
 
@@ -256,7 +256,7 @@ func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UU
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 			return err
 		}
 
@@ -323,7 +323,7 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 			return err
 		}
 
@@ -414,7 +414,7 @@ func (s *Service) Investigate(ctx context.Context, actor authz.Actor, id uuid.UU
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 			return err
 		}
 
@@ -485,7 +485,7 @@ func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID, 
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 			return err
 		}
 
@@ -556,7 +556,7 @@ func (s *Service) Close(ctx context.Context, actor authz.Actor, id uuid.UUID, co
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 			return err
 		}
 
@@ -625,7 +625,7 @@ func (s *Service) AddComment(ctx context.Context, actor authz.Actor, id uuid.UUI
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+		if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 			return err
 		}
 
@@ -676,7 +676,7 @@ func (s *Service) ListTransitions(ctx context.Context, actor authz.Actor, id uui
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.AlarmsView, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+		if err := chk.Require(authz.AlarmsView, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 			return err
 		}
 
@@ -727,7 +727,7 @@ func (s *Service) Bulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, 
 			if err != nil {
 				return notFoundOr(err)
 			}
-			if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+			if err := chk.Require(authz.AlarmsManage, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 				return err
 			}
 
@@ -825,7 +825,7 @@ func (s *Service) AssignableUsers(ctx context.Context, actor authz.Actor, alarmI
 		if err != nil {
 			return err
 		}
-		if err := chk.Require(authz.AlarmsView, access.Camera(row.TenantID, row.SiteID, uuid.Nil, row.CameraID, nil)); err != nil {
+		if err := chk.Require(authz.AlarmsView, access.Camera(row.TenantID, row.SiteID, row.ServerID, row.CameraID, row.CameraGroupIds)); err != nil {
 			return err
 		}
 
