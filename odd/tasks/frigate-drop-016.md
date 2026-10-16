@@ -20,7 +20,7 @@ Make Frigate 0.17 the minimum supported version across the product and delete th
 - Delivery: `ask-on-risk` with cached `stacked-to-main`; one PR.
 
 ## Tasks
-- [ ] FR16-01 — Backend gate and dead-path removal (adapter, config_edit, inventory/api callers, mock, Go tests). Route: delegated direct (writer trigger: 2+ non-trivial files).
+- [x] FR16-01 — Backend gate and dead-path removal (adapter, config_edit, inventory/api callers, mock, Go tests). Route: delegated direct (writer trigger: 2+ non-trivial files).
 - [ ] FR16-02 — Web UI and contract/docs cleanup (frigateSchema, FrigateCameraConfig, CuratedPanels, OpenAPI text, generated types, docs, web tests). Route: delegated direct.
 - [ ] FR16-03 — PR, CI green, merge.
 
@@ -32,5 +32,11 @@ Make Frigate 0.17 the minimum supported version across the product and delete th
 ## Progress
 - 2026-10-16: document created; branch `feat/frigate-min-017` from `origin/main` (`377f427`).
 
+- 2026-10-16: FR16-01 done (commit `37e006c`, delegated direct writer). Evidence:
+  - RED: `go test -run TestConnect ./internal/frigate/` failed (0.14-0.16 accepted, 0.13 error lacked ErrUnsupportedVersion/0.17).
+  - GREEN: `go build ./...`, `go vet ./...`, `golangci-lint run ./...` (0 issues), `go test -race -count=1 ./...` all pass; `go test -tags integration ./internal/frigate/... ./internal/api/... ./internal/inventory/...` pass.
+  - Removed: `ConfigEditable`, `ErrConfigEditUnsupported` (and its `config_edit_unsupported` API mapping), `supportsConfigData`, `setViaQuery`, `flattenQuery`, legacy query-param `UpdateCameraConfig` fallback, mock query-param simulation. Unreachable-gate errors now surface as 502 `frigate_unreachable` naming the version.
+  - Rollback boundary: revert `37e006c`.
+
 ## Next step
-FR16-01.
+FR16-02 (web `isLiveSection`/`versionOk`/"requiere 0.16", OpenAPI text, docs; check `config_edit_unsupported` use in web).
