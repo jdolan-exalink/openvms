@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -76,9 +77,30 @@ func TestConnectPicksAdapterByVersion(t *testing.T) {
 	if a.Name() != "v018" {
 		t.Errorf("want v018, got %s", a.Name())
 	}
-	old := startMock(t, "0.13.2")
-	if _, err := Connect(context.Background(), ConnInfo{BaseURL: old.URL, Username: "vms", Password: "pw"}); err == nil {
-		t.Error("0.13 must be rejected")
+	ok := startMock(t, "0.17.0")
+	a, err = Connect(context.Background(), ConnInfo{BaseURL: ok.URL, Username: "vms", Password: "pw"})
+	if err != nil || a.Name() != "v017" {
+		t.Errorf("0.17 must connect as v017: %v", err)
+	}
+}
+
+func TestConnectRejectsVersionsBelow017(t *testing.T) {
+	for _, version := range []string{"0.13.2", "0.14.1", "0.15.1", "0.16.0", "0.16.3-abc123"} {
+		ts := startMock(t, version)
+		a, err := Connect(context.Background(), ConnInfo{BaseURL: ts.URL, Username: "vms", Password: "pw"})
+		if err == nil {
+			t.Errorf("%s must be rejected", version)
+			continue
+		}
+		if a != nil {
+			t.Errorf("%s: no adapter may be returned", version)
+		}
+		if !errors.Is(err, ErrUnsupportedVersion) {
+			t.Errorf("%s: want ErrUnsupportedVersion, got %v", version, err)
+		}
+		if msg := err.Error(); !strings.Contains(msg, version) || !strings.Contains(msg, "0.17") {
+			t.Errorf("%s: error must name the detected version and the 0.17 minimum: %q", version, msg)
+		}
 	}
 }
 

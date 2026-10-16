@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -39,8 +40,6 @@ type Adapter interface {
 	// Media opens raw media resources for the media gateway.
 	Media() Media
 
-	// ConfigEditable reports whether this server's config may be edited (Frigate >= 0.16).
-	ConfigEditable() bool
 	// ConfigSchema returns Frigate's JSON schema of its configuration (cached).
 	ConfigSchema(ctx context.Context) (json.RawMessage, error)
 	// RawConfig returns config.yml with secrets (Frigate admin only).
@@ -213,6 +212,9 @@ func MediaURLPath(p string) (string, error) {
 	return "/" + rest, nil
 }
 
+// ErrUnsupportedVersion means the server runs a Frigate older than the minimum OpenVMS supports.
+var ErrUnsupportedVersion = errors.New("unsupported Frigate version")
+
 // Connect logs in, reads the version and returns the adapter for it.
 func Connect(ctx context.Context, info ConnInfo) (Adapter, error) {
 	c, err := newClient(info)
@@ -228,8 +230,8 @@ func Connect(ctx context.Context, info ConnInfo) (Adapter, error) {
 	switch {
 	case !ok:
 		return nil, fmt.Errorf("unrecognised Frigate version %q", version)
-	case major == 0 && minor < 14:
-		return nil, fmt.Errorf("frigate %s is not supported: review items require 0.14 or later", version)
+	case major == 0 && minor < 17:
+		return nil, fmt.Errorf("%w: Frigate %s is not supported, OpenVMS requires Frigate 0.17 or later", ErrUnsupportedVersion, version)
 	case major == 0 && minor >= 18, major > 0:
 		return &v018{v017{c: c, version: version}}, nil
 	default:
