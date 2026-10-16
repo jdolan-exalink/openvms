@@ -142,5 +142,10 @@ Each phase keeps its own `odd/tasks/<phase>.md`, TDD, native review and ~400-lin
 - Audit by three read-only explorers (pipeline; Frigate/zones/identity; groups/authz/web/API), synthesized
   here. No tests were run in this phase.
 
+## Checkpoint decision (2026-10-16)
+Approved by the user ("vamos así con todo"). Decision 2 refined: new installs AND newly registered Frigate
+servers default to no event-source alarms (rules only); already registered servers keep `all_alerts` until
+changed. Decisions 1, 3, 4 and the phase order approved as proposed.
+
 ## Next step
-**Checkpoint:** user reviews §1-§7 and answers the decisions in §6. No product code before approval.
+Phase 1 — `odd/tasks/alarms-phase1-flood.md`.
