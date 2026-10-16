@@ -80,6 +80,8 @@ falla con un mensaje de recuperación; nunca elimina automáticamente un bloqueo
 pertenecer a un inicio todavía activo. Si el bloqueo persiste, detené el contenedor web y
 verificá que no haya otro proceso de inicio usando ese volumen antes de quitar
 `.generation-lock` del volumen `openvms-web-tls` y volver a iniciar.
+Con el bloqueo adquirido, el siguiente inicio también limpia directorios temporales de
+generaciones interrumpidas y conserva intacta la generación activa.
 
 Para conservar un certificado y una clave externos, definí ambos
 `OPENVMS_WEB_TLS_CERT_HOST_FILE` y `OPENVMS_WEB_TLS_KEY_HOST_FILE` con rutas del host. El

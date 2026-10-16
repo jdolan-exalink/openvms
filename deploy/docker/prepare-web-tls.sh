@@ -68,13 +68,20 @@ while ! mkdir "$lock" 2>/dev/null; do
 done
 trap 'rmdir "$lock" 2>/dev/null || true' EXIT HUP INT TERM
 current=$dir/current
+current_generation=$(readlink "$current" 2>/dev/null || true)
+for abandoned in "$dir"/.generation-*; do
+  [ "$abandoned" = "$lock" ] && continue
+  [ -d "$abandoned" ] || continue
+  [ ! -L "$abandoned" ] || continue
+  [ "${abandoned##*/}" = "$current_generation" ] && continue
+  rm -rf "$abandoned"
+done
 rotate=true
 if [ -L "$current" ] && [ -s "$current/tls.crt" ] && [ -s "$current/tls.key" ] && [ -s "$current/sans" ]; then
   if [ "$(cat "$current/sans")" = "$san_ext" ] && openssl x509 -in "$current/tls.crt" -noout -checkend 2592000 >/dev/null 2>&1; then rotate=false; fi
 fi
 if [ "$rotate" = true ]; then
-  generation=$dir/.generation-$$
-  mkdir -m 700 "$generation"
+  generation=$(mktemp -d "$dir/.generation-XXXXXXXXXX")
   trap 'rm -rf "$generation"; rmdir "$lock" 2>/dev/null || true' EXIT HUP INT TERM
   openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 365 \
     -subj "/CN=${1:-localhost}" -addext "subjectAltName=$san_ext" \

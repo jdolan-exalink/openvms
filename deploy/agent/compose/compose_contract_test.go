@@ -732,6 +732,31 @@ func TestAutomaticWebTLSBootstrapFailsActionablyOnAbandonedGenerationLock(t *tes
 	}
 }
 
+func TestAutomaticWebTLSBootstrapRecoversFromAbandonedGenerationDirectory(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "tls")
+	pidFile := filepath.Join(t.TempDir(), "startup-pid")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join("..", "..", "..", "deploy", "docker", "prepare-web-tls.sh")
+	command := exec.Command("sh", "-c", `printf '%s' "$$" > "$PID_MARKER"; mkdir -m 700 "$OPENVMS_WEB_TLS_DIR/.generation-$$"; exec sh "$1"`, "test", script)
+	command.Env = append(os.Environ(), "OPENVMS_HTTPS_SANS=localhost", "OPENVMS_WEB_TLS_DIR="+root, "PID_MARKER="+pidFile)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("TLS bootstrap must recover from its own PID's abandoned staging directory: %v: %s", err, output)
+	}
+	if _, err := os.Stat(filepath.Join(root, "current", "tls.crt")); err != nil {
+		t.Fatalf("TLS bootstrap did not install a certificate after staging recovery: %v", err)
+	}
+	pid, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".generation-"+string(pid))); !os.IsNotExist(err) {
+		t.Fatalf("abandoned same-PID staging directory was not removed: %v", err)
+	}
+}
+
 func TestAutomaticWebTLSBootstrapRotatesNearExpiryCertificate(t *testing.T) {
 	if _, err := exec.LookPath("openssl"); err != nil {
 		t.Skip("OpenSSL is required for TLS generation integration test")
