@@ -192,7 +192,11 @@ services:
     build: { context: ., dockerfile: deploy/docker/web.Dockerfile }
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
-      HTTPS_SITE_ADDRESS: ${OPENVMS_HTTPS_SITE_IPV4:-10.1.1.24}
+      HTTPS_SITE_ADDRESS: ${OPENVMS_HTTPS_SITE_IPV4:-:443}
+      OPENVMS_HTTPS_SANS: ${OPENVMS_HTTPS_SANS:-${OPENVMS_HTTPS_SITE_IPV4:-localhost,127.0.0.1,::1}}
+      OPENVMS_HTTPS_DEFAULT_SNI: ${OPENVMS_HTTPS_DEFAULT_SNI:-localhost}
+      OPENVMS_WEB_TLS_CERT_FILE: ${OPENVMS_WEB_TLS_CERT_HOST_FILE:+/etc/caddy/tls.crt}
+      OPENVMS_WEB_TLS_KEY_FILE: ${OPENVMS_WEB_TLS_KEY_HOST_FILE:+/etc/caddy/tls.key}
       OPENVMS_WEB_HTTPS_PORT: ${WEB_HTTPS_PORT:-8443}
       API_UPSTREAM: ${OPENVMS_AGENT_API_IPV4:-172.29.240.2}:8080
       # An empty static proxy list denies all forwarded-header trust by default.
@@ -201,18 +205,19 @@ services:
     depends_on: [api]
     volumes:
       - caddy:/data
+      - openvms-web-tls:/var/lib/openvms/tls
       - type: bind
         source: ${OPENVMS_WEB_TLS_CERT_HOST_FILE:-./deploy/docker/local-tls/tls.crt}
         target: /etc/caddy/tls.crt
         read_only: true
         bind:
-          create_host_path: false
+          create_host_path: true
       - type: bind
         source: ${OPENVMS_WEB_TLS_KEY_HOST_FILE:-./deploy/docker/local-tls/tls.key}
         target: /etc/caddy/tls.key
         read_only: true
         bind:
-          create_host_path: false
+          create_host_path: true
     networks:
       default: {}
       onvif-agent:
@@ -244,5 +249,6 @@ volumes:
   nats:
   seaweedfs:
   caddy:
+  openvms-web-tls:
   waha:
   exports:

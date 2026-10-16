@@ -1,20 +1,20 @@
 # HTTPS and agent SSH install strategy
 
-Status: ACTIVE — scoped HTTPS trusted-ingress fix only. The broader LAN certificate/install strategy remains
-unsettled and is intentionally deferred to a later product decision.
+Status: ACTIVE — trusted HTTPS ingress is complete; HTTPS-04 auto-provisioned appliance certificate work is authorized.
 
 ## Tracking
 - Branch: `feat/https-agent-ingress`, based on `feat/alarms-phase2-rules` at `8809c418746720c097e6f177fe20092b55133ab6`.
 - Route: delegated direct; strict TDD enabled by user/session configuration.
-- Runners: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/api ./internal/platform/config ./deploy/agent/compose`; `GOCACHE=/tmp/openvms-go-build-cache go vet ./internal/api ./internal/platform/config ./deploy/agent/compose`; `docker compose config --quiet`; isolated Caddy runtime harness if the pinned image is locally available; `git diff --check`.
-- Authored forecast: approximately 200 lines, excluding generated files; advisory 400-line work-unit heuristic.
+- Runners: `GOCACHE=/tmp/openvms-go-build-cache go test -race -count=1 ./deploy/agent/compose ./internal/platform/config ./internal/api`; `GOCACHE=/tmp/openvms-go-build-cache go vet ./deploy/agent/compose ./internal/platform/config ./internal/api`; `docker compose config --quiet`; isolated full Caddy runtime harness; `git diff --check`.
+- Authored change: approximately 469 lines (additions plus deletions, no generated files); this is one cohesive deployable behavior with tests/docs, so it was not artificially sliced or code-golfed. The 400-line heuristic is advisory. Delivery remains ask-on-risk with the cached stacked-to-main strategy; no PR has been created.
 - Delivery: `ask-on-risk` (default); if slicing is needed, use previously user-selected `stacked-to-main`. No PR creation authorized.
-- Constraints: no remote operations, deployment/restart, SSH/tunnel changes, actual `.env` edits, broad private-range trust, mTLS changes, or LAN certificate policy changes.
+- Constraints: no remote operations, deployment/restart, SSH/tunnel changes, actual `.env` edits, broad private-range trust, or mTLS changes. Explicit user authorization supersedes prior “LAN certificate strategy unsettled/no LAN certificate changes authorized” constraints only for HTTPS-04 auto-provisioning. No arbitrary Host-header issuance, token installer, or alarms work.
 
 ## Tasks
 - [x] HTTPS-01 — Configure explicit operator-controlled Caddy ingress proxy CIDRs (empty/default deny); preserve HTTPS forwarding only for a trusted immediate peer and enforce a single exact `https` protocol value. Add regression tests for trusted, untrusted/spoofed, duplicate/multi-hop, and ordinary HTTP inputs. Route: delegated direct; strict TDD.
-- [ ] HTTPS-02 — Decide LAN endpoint/certificate strategy (pending product choice; no implementation in this task).
+- [x] HTTPS-02 — Choose fixed operator-configured SAN host list and persisted self-signed leaf cert for appliance-style direct access; retain Caddy and external-cert override. No dynamic Host-header issuance or automatic host-interface discovery.
 - [x] HTTPS-03 — Close with focused/broader verification, isolated runtime evidence, work-unit commit, and tracker/mirror sync.
+- [x] HTTPS-04 — Auto-generate and persist a self-signed HTTPS leaf on first start; renew on startup when SAN set changes or expiry threshold is reached; validate/atomically install pair; preserve explicit external cert mode and actionable invalid config failures. Configure multiple IPv4/IPv6/DNS SANs with localhost fallback, preserve no-SNI IP TLS, HTTP and 8443 behavior. Route: delegated direct; strict TDD true (user/session configuration); delivery ask-on-risk with cached stacked-to-main.
 
 ## Alarms closeout context
 - P2-05 native review was approved and acknowledged; authority burned for `review-41b36ff5391a45cd`.
@@ -34,7 +34,7 @@ A deployment and agent-install strategy that works for most environments (LAN by
 behind any TLS reverse proxy such as Cloudflare Zero Trust / nginx / Traefik, and no-browser
 cases), instead of fixing a single scenario. The SSH password must never be stored anywhere.
 
-## Verified findings (2026-10-16)
+## Baseline findings before HTTPS-01 (2026-10-16)
 - SSH itself is not installed "via HTTPS": the OpenVMS server dials SSH. HTTPS protects the root
   SSH password on its way from the browser to the API. The web dialog blocks submit unless
   `location.protocol === "https:"` (`apps/web/src/routes/Servers.tsx:835`), and the API rejects
@@ -52,21 +52,17 @@ cases), instead of fixing a single scenario. The SSH password must never be stor
   3. One certificate covers a single IP literal; multiple IPs, DHCP changes or hostnames break it,
      and every browser must trust it manually.
 
-## Proposed strategy (to validate)
-1. Any TLS reverse proxy: Caddy honors `X-Forwarded-Proto` only from operator-configured proxy
-   CIDRs (env, empty by default); the API keeps its own peer allowlist.
-2. Direct LAN access: replace the manual per-IP certificate with Caddy's internal CA generated on
-   first start and persisted in a volume, issuing certificates for whatever IP/hostname is used
-   (restricted to private ranges, e.g. on-demand with an `ask` endpoint). Operator trusts the root
-   CA once (download from `http://<host>:8000/ca.crt`). No bind mount, so deploy never blocks.
-3. Always-works fallback: one-time install command with a short-lived token
-   (`curl .../install/<token> | sudo bash`), no SSH password in the browser at all.
-- Keep agent <-> server mTLS (machine-to-machine, no operator friction).
-
-## Open questions / research spike first
-- Can Caddy issue on-demand internal-CA certificates for IP-literal clients that send no SNI?
-  (Otherwise: detect host IPs at install time and pre-issue for them.)
-- Whether to remove the 8443 listener and self-signed bootstrap entirely after the above lands.
+## HTTPS-04 implementation decisions and evidence
+- Keep Caddy and issue one persisted self-signed leaf from the explicit `OPENVMS_HTTPS_SANS` comma-separated DNS/IPv4/IPv6 list. Default SANs are `localhost,127.0.0.1,::1`; legacy `OPENVMS_HTTPS_SITE_IPV4` remains a listener override and fallback SAN input.
+- Require `OPENVMS_HTTPS_DEFAULT_SNI` (default `localhost`) to be present in that SAN set so no-SNI TLS has a matching default certificate identity.
+- Do not discover host addresses from inside Docker and do not issue for request Host headers. Operators must list addresses/names in advance and still establish browser trust/name validation themselves.
+- The generator uses OpenSSL installed in the web image, a private named volume, a generation lock, staged cert/key files, and atomic `current` symlink replacement. It reuses matching certs with more than 30 days remaining; SAN changes or expiry threshold rotate at next container start, not continuously while Caddy runs. Tests cover concurrent starts, near-expiry rotation, DNS label bounds, invalid IPv4/IPv6, and default-SNI membership.
+- Generated material is an RSA-3072 self-signed server leaf (`CA:FALSE`, serverAuth only); key mode 0600, cert mode 0644. External cert/key host file overrides remain supported and must both be supplied, parse, and match or startup fails.
+- Keep HTTP port 8000, HTTPS 8443, `default_sni`, ingress proxy trust/anti-spoof guard, API TLS gate, and mTLS behavior unchanged.
+- Strict-TDD RED included missing configured SAN/volume/script support, malformed SAN rejection, and sourced-entrypoint lock leakage; an additional RED caught OpenSSL's default `CA:TRUE` on `req -x509`. GREEN: `GOCACHE=/tmp/openvms-go-build-cache go test -race -count=1 ./deploy/agent/compose ./internal/platform/config ./internal/api`; `GOCACHE=/tmp/openvms-go-build-cache go vet ./deploy/agent/compose ./internal/platform/config ./internal/api`; `docker compose config --quiet`; `git diff --check`.
+- Isolated full runtime harness used actual changed Caddyfile and entrypoint in `caddy:2-alpine` with only owned loopback ports 18443/18080 and a temporary TLS directory. HTTPS and HTTP `/.well-known/openvms-https-port` returned 200/`18443`; `openssl s_client -connect 127.0.0.1:18443 -noservername` returned a cert validating IP SAN 127.0.0.1; DNS SAN `web.test` validated; SHA-256 fingerprint was identical after container restart. Container and temporary TLS directory were removed.
+- No-SNI proof depends on the generated multi-SAN certificate plus Caddy `default_sni`; the test intentionally connects without SNI to the IP literal.
+- Rollback boundary: revert the HTTPS-04 work-unit commit to remove auto-generation/volume/SAN configuration, entrypoint, docs, and focused tests; HTTPS-01 proxy trust implementation and API behavior remain unchanged.
 
 ## Next step
-Resolve the pending LAN endpoint/certificate product choice (HTTPS-02) before changing direct-LAN TLS behavior. The trusted ingress proxy fix is complete; agent mTLS and existing certificate bind/bootstrap behavior are unchanged.
+Parent-owned risk assessment/native review for the normalized HTTPS-04 work-unit commit, then decide ordinary delivery. No deployment, restart of current project services, remote operation, PR, or push was performed.

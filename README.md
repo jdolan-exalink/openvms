@@ -56,6 +56,29 @@ Levanta Postgres, Valkey, NATS, SeaweedFS, Mosquitto y los Frigate simulados en 
 
 `make help` lista el resto: `test`, `test-integration`, `lint`, `generate`, `build`.
 
+### HTTPS directo en la LAN
+
+`docker compose up` genera en el primer inicio un certificado TLS autofirmado y lo conserva
+en el volumen Docker `openvms-web-tls`. Configurá explícitamente todas las direcciones que
+usarás en el navegador; el contenedor no puede descubrir de forma fiable las IP de la interfaz
+del host:
+
+```dotenv
+OPENVMS_HTTPS_SANS=localhost,192.168.1.20,openvms.lan,fd00::20
+```
+
+Separá los SAN por comas, sin espacios. Al cambiar la lista o cuando queden menos de 30 días
+de validez, el próximo inicio genera un nuevo certificado. El valor predeterminado solo cubre
+`localhost`, `127.0.0.1` y `::1`. HTTPS sigue disponible en el puerto 8443; HTTP en 8000 no
+cambia. El certificado autofirmado no hace que el navegador confíe automáticamente en él:
+hay que instalar/confiar el certificado y acceder con un nombre/IP incluido en sus SAN.
+`OPENVMS_HTTPS_DEFAULT_SNI` debe ser uno de los nombres incluidos en `OPENVMS_HTTPS_SANS`;
+por defecto es `localhost`.
+
+Para conservar un certificado y una clave externos, definí ambos
+`OPENVMS_WEB_TLS_CERT_HOST_FILE` y `OPENVMS_WEB_TLS_KEY_HOST_FILE` con rutas del host. El
+contenedor valida que sean legibles, válidos y que coincidan; no reemplaza esos archivos.
+
 ## Estructura
 
 ```text
