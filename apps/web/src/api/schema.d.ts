@@ -960,8 +960,8 @@ export interface paths {
          * Get the full effective Frigate configuration of a camera
          * @description Requires cameras.view on the camera. Credentials (ffmpeg input URLs, ONVIF user and
          *     password) stay masked unless the caller holds servers.config.secrets, in which case
-         *     secrets_visible is true. editable is false for Frigate older than 0.16 and for callers
-         *     without servers.config.
+         *     secrets_visible is true. editable is false for callers without servers.config. OpenVMS
+         *     requires Frigate 0.17 or later; older servers are rejected on registration and connect.
          */
         get: operations["getCameraFrigateConfigFull"];
         put?: never;
@@ -975,7 +975,7 @@ export interface paths {
          *     user/password also needs servers.config.secrets. Sections Frigate can hot-reload are
          *     applied live; the rest are saved and flagged, and restart_required tells the caller to
          *     offer a restart. Redacted values are rejected. Every change stores a revision.
-         *     Answers 409 for Frigate older than 0.16.
+         *     Requires Frigate 0.17 or later.
          */
         patch: operations["patchCameraFrigateConfig"];
         trace?: never;
@@ -1130,7 +1130,7 @@ export interface paths {
          * Validate and write Frigate's config.yml
          * @description Requires servers.config and servers.config.secrets. Frigate validates the file (400
          *     with its message on failure); a revision is stored. Without restart=true the change
-         *     only takes effect on the next Frigate restart. Answers 409 for Frigate older than 0.16.
+         *     only takes effect on the next Frigate restart.
          */
         put: operations["putServerFrigateConfigRaw"];
         post?: never;
@@ -6908,7 +6908,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };
@@ -7151,7 +7150,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            409: components["responses"]["Conflict"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };

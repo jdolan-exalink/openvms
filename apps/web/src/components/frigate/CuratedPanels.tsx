@@ -342,7 +342,7 @@ function Zones({ onEditZones, readOnly }: { onEditZones?: () => void; readOnly: 
   return (
     <Group title="Zonas y máscaras">
       <div>
-        <Button disabled={!onEditZones || readOnly} title={readOnly ? "Solo lectura: requiere el permiso servers.config y Frigate 0.16 o superior" : undefined} onClick={onEditZones}>
+        <Button disabled={!onEditZones || readOnly} title={readOnly ? "Solo lectura: requiere el permiso servers.config" : undefined} onClick={onEditZones}>
           Editar zonas
         </Button>
       </div>

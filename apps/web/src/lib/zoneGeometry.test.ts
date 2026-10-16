@@ -72,7 +72,7 @@ describe("mask formats", () => {
   });
   it("picks the native format when the field is missing", () => {
     expect(usesDictMasks("0.18.0-abc")).toBe(true);
-    expect(parseMasks(undefined, undefined, "0.16.1").format).toBe("list");
+    expect(parseMasks(undefined, undefined, "0.17.1").format).toBe("list");
     expect(parseMasks(undefined, undefined, "0.18.0").format).toBe("dict-map");
   });
 });

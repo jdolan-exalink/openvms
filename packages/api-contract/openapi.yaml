@@ -1141,8 +1141,8 @@ paths:
       description: |
         Requires cameras.view on the camera. Credentials (ffmpeg input URLs, ONVIF user and
         password) stay masked unless the caller holds servers.config.secrets, in which case
-        secrets_visible is true. editable is false for Frigate older than 0.16 and for callers
-        without servers.config.
+        secrets_visible is true. editable is false for callers without servers.config. OpenVMS
+        requires Frigate 0.17 or later; older servers are rejected on registration and connect.
       responses:
         "200":
           description: Camera configuration
@@ -1162,7 +1162,7 @@ paths:
         user/password also needs servers.config.secrets. Sections Frigate can hot-reload are
         applied live; the rest are saved and flagged, and restart_required tells the caller to
         offer a restart. Redacted values are rejected. Every change stores a revision.
-        Answers 409 for Frigate older than 0.16.
+        Requires Frigate 0.17 or later.
       requestBody:
         required: true
         content:
@@ -1178,7 +1178,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/onvif/check:
     parameters:
@@ -1343,7 +1342,7 @@ paths:
       description: |
         Requires servers.config and servers.config.secrets. Frigate validates the file (400
         with its message on failure); a revision is stored. Without restart=true the change
-        only takes effect on the next Frigate restart. Answers 409 for Frigate older than 0.16.
+        only takes effect on the next Frigate restart.
       parameters:
         - { name: restart, in: query, required: false, schema: { type: boolean, default: false } }
       requestBody:
@@ -1361,7 +1360,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-        "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/servers/{serverId}/frigate-config/revisions:
     parameters:
