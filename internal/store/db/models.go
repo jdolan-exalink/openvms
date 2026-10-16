@@ -205,6 +205,17 @@ type CameraOutage struct {
 	Since    time.Time
 }
 
+type CameraZone struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	CameraID  uuid.UUID
+	Name      string
+	Points    json.RawMessage
+	Settings  json.RawMessage
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type ClipWatermarkJob struct {
 	ID            uuid.UUID
 	TenantID      uuid.UUID

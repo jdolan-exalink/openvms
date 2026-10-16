@@ -1090,6 +1090,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/zones": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List persisted zones for a camera
+         * @description Requires cameras.view. Points use normalized 0..1 camera-frame coordinates.
+         */
+        get: operations["listCameraZones"];
+        put?: never;
+        /**
+         * Persist a camera zone and assign its stable ID
+         * @description Requires cameras.manage. Zone names are Frigate-compatible lowercase identifiers.
+         */
+        post: operations["createCameraZone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/cameras/{cameraId}/zones/{zoneId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                zoneId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update a persisted camera zone without changing its stable ID
+         * @description Requires cameras.manage. Points use normalized 0..1 camera-frame coordinates.
+         */
+        put: operations["updateCameraZone"];
+        post?: never;
+        /**
+         * Delete a persisted camera zone
+         * @description Requires cameras.manage. Deletes only a zone belonging to the path camera.
+         */
+        delete: operations["deleteCameraZone"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/frigate-config/schema": {
         parameters: {
             query?: never;
@@ -3612,6 +3665,35 @@ export interface components {
             onvif_endpoint?: string | null;
             onvif_profile?: string | null;
             onvif_version?: string | null;
+        };
+        /** @description Normalized coordinate within the camera frame; persisted to three decimal places. */
+        CameraZonePoint: {
+            x: number;
+            y: number;
+        };
+        CameraZoneInput: {
+            name: string;
+            points: components["schemas"]["CameraZonePoint"][];
+            /** @description Frigate zone options other than name and coordinates, preserved for synchronization. */
+            settings?: {
+                [key: string]: unknown;
+            };
+        };
+        CameraZone: components["schemas"]["CameraZoneInput"] & {
+            /** Format: uuid */
+            readonly id: string;
+            /** Format: uuid */
+            readonly camera_id: string;
+            settings: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            readonly created_at: string;
+            /** Format: date-time */
+            readonly updated_at: string;
+        };
+        CameraZoneList: {
+            zones: components["schemas"]["CameraZone"][];
         };
         CameraFrigateConfig: {
             /** Format: uuid */
@@ -7065,6 +7147,118 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    listCameraZones: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Persisted camera zones */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraZoneList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createCameraZone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraZoneInput"];
+            };
+        };
+        responses: {
+            /** @description Created camera zone */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraZone"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateCameraZone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                zoneId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraZoneInput"];
+            };
+        };
+        responses: {
+            /** @description Updated camera zone */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraZone"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    deleteCameraZone: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                zoneId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Zone deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getServerFrigateConfigSchema: {
