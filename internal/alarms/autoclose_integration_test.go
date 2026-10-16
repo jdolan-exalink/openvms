@@ -15,6 +15,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
+	"github.com/jdolan-exalink/openvms/migrations"
 )
 
 type recordingPub struct {
@@ -123,3 +124,51 @@ func TestAutoCloseRespectsBatchLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestBacklogCleanupMigrationClosesOpenAlarmsOlderThan24h(t *testing.T) {
+	c := newCorrEnv(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	other := c.env.Cameras["frigate-h01/acceso_norte"]
+
+	staleOpen1 := c.correlate(c.cam, "event", nil, now.Add(-48*time.Hour), "person")
+	staleOpen2 := c.correlate(c.cam, "event", nil, now.Add(-25*time.Hour), "car")
+	recentOpen := c.correlate(c.cam, "event", nil, now.Add(-23*time.Hour), "dog")
+	staleAck := c.correlate(other, "event", nil, now.Add(-36*time.Hour), "person")
+	c.setStatus(staleAck.AlarmID, "acknowledged")
+
+	raw, err := migrations.FS.ReadFile("00049_alarms_backlog_cleanup.sql")
+	if err != nil {
+		t.Fatalf("read migration 00049_alarms_backlog_cleanup.sql: %v", err)
+	}
+	upSQL := string(raw)
+	if idx := strings.Index(upSQL, "-- +goose Down"); idx >= 0 {
+		upSQL = upSQL[:idx]
+	}
+
+	if err := c.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, upSQL)
+		return err
+	}); err != nil {
+		t.Fatalf("execute backlog cleanup migration: %v", err)
+	}
+
+	for _, id := range []uuid.UUID{staleOpen1.AlarmID, staleOpen2.AlarmID} {
+		if got := c.count(`SELECT count(*) FROM alarms WHERE id = $1 AND status = 'closed' AND auto_closed AND closed_at IS NOT NULL`, id); got != 1 {
+			t.Fatalf("stale open alarm %s was not auto-closed by migration", id)
+		}
+		if got := c.count(`SELECT count(*) FROM alarm_transitions WHERE alarm_id = $1 AND from_status = 'open' AND to_status = 'closed' AND actor_id IS NULL AND comment = 'Auto-closed by 24h backlog cleanup migration'`, id); got != 1 {
+			t.Fatalf("stale open alarm %s missing system transition row", id)
+		}
+		if got := c.count(`SELECT count(*) FROM audit_log WHERE action = 'ALARM_CLOSED' AND target_id = $1 AND actor_name = 'system'`, id); got != 1 {
+			t.Fatalf("stale open alarm %s missing system audit entry", id)
+		}
+	}
+	if got := c.count(`SELECT count(*) FROM alarms WHERE id = $1 AND status = 'open' AND NOT auto_closed`, recentOpen.AlarmID); got != 1 {
+		t.Fatal("recent open alarm (<24h) must remain open")
+	}
+	if got := c.count(`SELECT count(*) FROM alarms WHERE id = $1 AND status = 'acknowledged' AND NOT auto_closed`, staleAck.AlarmID); got != 1 {
+		t.Fatal("non-open alarm must remain untouched by backlog cleanup migration")
+	}
+}
+
