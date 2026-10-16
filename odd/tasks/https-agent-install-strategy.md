@@ -63,6 +63,7 @@ cases), instead of fixing a single scenario. The SSH password must never be stor
 - Isolated full runtime harness used actual changed Caddyfile and entrypoint in `caddy:2-alpine` with only owned loopback ports 18443/18080 and a temporary TLS directory. HTTPS and HTTP `/.well-known/openvms-https-port` returned 200/`18443`; `openssl s_client -connect 127.0.0.1:18443 -noservername` returned a cert validating IP SAN 127.0.0.1; DNS SAN `web.test` validated; SHA-256 fingerprint was identical after container restart. Container and temporary TLS directory were removed.
 - No-SNI proof depends on the generated multi-SAN certificate plus Caddy `default_sni`; the test intentionally connects without SNI to the IP literal.
 - Rollback boundary: revert the HTTPS-04 work-unit commit to remove auto-generation/volume/SAN configuration, entrypoint, docs, and focused tests; HTTPS-01 proxy trust implementation and API behavior remain unchanged.
+- HTTPS-04 work-unit commit: `5f67a90` (`feat(https): provision persistent self-signed certificates`); 431 additions / 38 deletions, 469 changed lines. No PR, push, or deployment.
 
 ## Next step
-Parent-owned risk assessment/native review for the normalized HTTPS-04 work-unit commit, then decide ordinary delivery. No deployment, restart of current project services, remote operation, PR, or push was performed.
+Parent-owned risk assessment/native review for commit `5f67a90`, then decide ordinary delivery. No deployment, restart of current project services, remote operation, PR, or push was performed.
