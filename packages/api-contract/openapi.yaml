@@ -1373,6 +1373,21 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/zones/{zoneId}/sync:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: zoneId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: retryCameraZoneSync
+      summary: Manually retry a terminal camera-zone synchronization
+      description: Requires cameras.manage. Requeues only failed, unsupported, or conflicted persisted zones.
+      responses:
+        "202": { description: Camera-zone synchronization queued }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/v1/servers/{serverId}/frigate-config/schema:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }

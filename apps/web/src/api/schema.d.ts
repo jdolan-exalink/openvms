@@ -1143,6 +1143,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/zones/{zoneId}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                zoneId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Manually retry a terminal camera-zone synchronization
+         * @description Requires cameras.manage. Requeues only failed, unsupported, or conflicted persisted zones.
+         */
+        post: operations["retryCameraZoneSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/frigate-config/schema": {
         parameters: {
             query?: never;
@@ -7259,6 +7282,31 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    retryCameraZoneSync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+                zoneId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Camera-zone synchronization queued */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getServerFrigateConfigSchema: {

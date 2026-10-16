@@ -79,6 +79,17 @@ func (h *Handlers) DeleteCameraZone(ctx context.Context, r gen.DeleteCameraZoneR
 	return gen.DeleteCameraZone204Response{}, nil
 }
 
+func (h *Handlers) RetryCameraZoneSync(ctx context.Context, r gen.RetryCameraZoneSyncRequestObject) (gen.RetryCameraZoneSyncResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.Inv.RetryCameraZoneSync(ctx, a, r.CameraId, r.ZoneId); err != nil {
+		return nil, err
+	}
+	return gen.RetryCameraZoneSync202Response{}, nil
+}
+
 func cameraZoneInput(input gen.CameraZoneInput) inventory.CameraZoneInput {
 	points := make([]inventory.CameraZonePoint, 0, len(input.Points))
 	for _, p := range input.Points {
