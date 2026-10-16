@@ -56,7 +56,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [x] P4-01 authored work-unit diff: 145 lines (138 additions, 7 deletions across source and tests; tracker evidence is separate).
 - [x] P4-01 runtime harness: N/A — browser/UI behavior is covered by focused component tests; no rule-processing runtime/device boundary was exercised.
 - [x] P4-01 rollback boundary: revert `apps/web/src/routes/Rules.tsx` and `apps/web/src/routes/Rules.test.tsx` to remove the wizard without affecting API or database behavior.
-- [x] P4-01 work-unit commit: `5518a95` (`feat(alarms): add guided rule activation steps`) on `feat/https-agent-ingress`.
-- [x] P4-01 post-commit assessment before tracker finalization: risk `medium`, 432 changed lines against `00eeb45`, `review_due=true` (`slice_budget_reached`). Assessment is being rerun after this tracker update; parent owns any required native review lifecycle.
+- [x] P4-01 work-unit commit: `a037cd2` (`feat(alarms): add guided rule activation steps`) on `feat/https-agent-ingress`.
+- [x] P4-01 post-commit assessment: risk `medium`, `review_due=true` (`slice_budget_reached`) against `00eeb45`; parent owns any required native review lifecycle.
 ## Next step
 Implement P5-01 through P5-03 in bounded work units.
