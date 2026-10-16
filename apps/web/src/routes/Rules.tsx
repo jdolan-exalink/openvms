@@ -191,6 +191,13 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
       setStepError("Completá ambos horarios para definir un rango.");
       return;
     }
+    if (step === 1 && f.trigger === "event" && f.cooldown_seconds.trim()) {
+      const cooldown = Number(f.cooldown_seconds);
+      if (!Number.isInteger(cooldown) || cooldown < 0 || cooldown > 86400) {
+        setStepError("El cooldown debe estar entre 0 y 86400 segundos.");
+        return;
+      }
+    }
     if (step === 1 && f.trigger !== "event" && (!Number.isFinite(Number(f.minutes)) || Number(f.minutes) < 1)) {
       setStepError("Ingresá una duración de al menos un minuto.");
       return;

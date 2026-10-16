@@ -259,6 +259,18 @@ describe("Rules route", () => {
     expect(within(dialog).getByText("Paso 2 de 4: Condiciones")).toBeInTheDocument();
   });
 
+  it.each(["-1", "86401"])("keeps invalid cooldown %s in the conditions step with a correction message", async (cooldown) => {
+    stub([]);
+    renderPage(() => <Rules />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
+    const dialog = await screen.findByRole("dialog");
+    advanceWizard(dialog, 1);
+    fireEvent.change(within(dialog).getByLabelText(/Cooldown \(segundos\)/), { target: { value: cooldown } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Siguiente" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("El cooldown debe estar entre 0 y 86400 segundos.");
+    expect(within(dialog).getByText("Paso 2 de 4: Condiciones")).toBeInTheDocument();
+  });
+
   it("preserves a disabled rule state when editing without activation changes", async () => {
     const calls = stub([makeRule({ enabled: false })]);
     renderPage(() => <Rules />);
