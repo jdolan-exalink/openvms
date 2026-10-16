@@ -11,7 +11,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - Branch: `feat/https-agent-ingress`, starting at `00eeb45`; do not change branches.
 - Strict TDD: enabled by user global config; web runner `cd apps/web && pnpm exec vitest run <file> --reporter=dot`; API runner as applicable `GOCACHE=/tmp/openvms-go-build-cache go test ...`.
 - Reuse existing alarm priority/cursor/actions, correlated events, basic realtime, maps alarm panel, and camera snapshot/playback. Do not duplicate these foundations.
-- Phase 4 wizard: user already requested an activate/deactivate checkbox, enabled by default. Step sequence, copy, and form grouping remain unresolved; ask for that flow when phase 4 begins. Existing Phase 2 group coverage is complete; do not invent wizard flow.
+- Phase 4 wizard: user approved the four-step flow: scope (cameras/groups) → conditions → actions → review/activation. Include an activate/deactivate checkbox, enabled by default. Preserve existing Phase 2 group coverage; do not duplicate it.
 - Zone writes must preserve foreign Frigate zones, use `ovms_` ownership, patch and verify, tolerate drift/offline retry, and rebind only within tenant with audit.
 - Durable rule evaluation must survive crashes and replicas; event publication must be after commit/outbox-backed.
 - HTTPS variable migration and prior Alarms aggregate review are unrelated and out of scope.
@@ -21,7 +21,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [x] **P3-02 — Contextual alarm video.** Added a permission-gated action that opens the existing playback route for the alarm camera at its latest correlated event timestamp (falling back to event start). The action clarifies that an event capture does not guarantee retained video. Acceptance: covered by focused tests; no playback backend or retention behavior duplicated or promised.
 - [x] **P3-03 — Real-time ordering and pagination.** Verified the existing app-wide feed invalidates the alarms prefix for `alarm.created`/`alarm.updated` and on reconnect; the priority infinite query refetches pages from a newly-derived cursor while retaining filters/sort. Added regression coverage; no runtime behavior change was needed.
 - [x] **P3-04 — Optional VisionAI alarm pin.** No change needed: VisionAI already supports the `alarmas` source and slot pin/unpin controls scoped to source/layout. The focused regression suite confirms those behaviors; avoid duplicating them.
-- [ ] **P4-01 — Alarm rule wizard.** User-approved requirement: include an activate/deactivate checkbox, enabled by default. Still pending product decision for wizard steps, copy, and form grouping; existing P2-04 group coverage is done. Acceptance after decision: approved flow implemented and tested.
+- [x] **P4-01 — Alarm rule wizard.** Implemented the approved four steps: scope (cameras/groups), conditions, actions, and review/activation. Includes an activate/deactivate checkbox enabled by default. Reuses existing CRUD, templates, simulation, validation, and group coverage; no duplicate coverage UI. Acceptance: step navigation, step-level validation, persistence, default activation, and edit-safe behavior covered by focused tests.
 - [ ] **P5-01 — Persisted camera zones.** Add tenant-safe persistence/API for normalized zones and stable IDs. Acceptance: forward-only migration, RLS, contract/client generation, integration tests.
 - [ ] **P5-02 — Safe zone sync.** Implement `ovms_` ownership, per-zone patch/verify, preserve foreign zones, drift detection and offline retry queue. Acceptance: tests cover preservation, partial failures, and convergence; no full-section replacement.
 - [ ] **P5-03 — Audited camera rebind.** Support same-tenant camera rebind with an audit record. Acceptance: tenant boundary enforced and history preserved; integration tests.
@@ -52,7 +52,11 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [x] P3-03 evidence commit: `1d326c5` (`test(realtime): verify alarm cursor refresh`) on `feat/https-agent-ingress`.
 - [x] P3-04 evidence: `apps/web/src/routes/VisionAI.tsx` already maps the `alarmas` source and exposes slot pin/unpin controls; `apps/web/src/routes/VisionAI.test.tsx` covers alarm source selection and pin/unpin behavior. `cd apps/web && pnpm exec vitest run src/routes/VisionAI.test.tsx --reporter=dot` — 32/32 passed (4 non-fatal React `act(...)` warnings). No production change was needed.
 - [x] P3-04 tracker work-unit commit: `7d4d355` (`docs(alarms): close phase 3 pin gap`) on `feat/https-agent-ingress`.
-- Known blocker: Phase 4 wizard step sequence, copy, and form grouping still need a product decision; the activation toggle defaulting on is already specified.
-
+- [x] P4-01 strict TDD: RED observed for the first wizard navigation test (expected step 1 label was absent); RED observed for paired schedule validation (expected blocking alert was absent); RED observed for review summary (expected summary was absent). GREEN after implementation. Focused test: `cd apps/web && pnpm exec vitest run src/routes/Rules.test.tsx --reporter=dot` — 19/19 passed. Typecheck: `cd apps/web && pnpm typecheck` — passed. ESLint: `cd apps/web && pnpm exec eslint src/routes/Rules.tsx src/routes/Rules.test.tsx` — passed. `git diff --check` — passed.
+- [x] P4-01 authored work-unit diff: 145 lines (138 additions, 7 deletions across source and tests; tracker evidence is separate).
+- [x] P4-01 runtime harness: N/A — browser/UI behavior is covered by focused component tests; no rule-processing runtime/device boundary was exercised.
+- [x] P4-01 rollback boundary: revert `apps/web/src/routes/Rules.tsx` and `apps/web/src/routes/Rules.test.tsx` to remove the wizard without affecting API or database behavior.
+- [x] P4-01 work-unit commit: `5518a95` (`feat(alarms): add guided rule activation steps`) on `feat/https-agent-ingress`.
+- [x] P4-01 post-commit assessment before tracker finalization: risk `medium`, 432 changed lines against `00eeb45`, `review_due=true` (`slice_budget_reached`). Assessment is being rerun after this tracker update; parent owns any required native review lifecycle.
 ## Next step
-Phase 3 is complete; proceed to Phase 4 after clarifying the remaining wizard flow.
+Implement P5-01 through P5-03 in bounded work units.

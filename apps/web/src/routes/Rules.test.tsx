@@ -57,6 +57,12 @@ function stub(rules: Schemas["Rule"][], extra?: Handler) {
   return calls;
 }
 
+function advanceWizard(dialog: HTMLElement, count: number) {
+  const name = within(dialog).getByLabelText("Nombre");
+  if (!(name as HTMLInputElement).value.trim()) fireEvent.change(name, { target: { value: "Regla de prueba" } });
+  for (let step = 0; step < count; step += 1) fireEvent.click(within(dialog).getByRole("button", { name: "Siguiente" }));
+}
+
 describe("Rules route", () => {
   it("lists rules with trigger and enable state", async () => {
     stub([makeRule()]);
@@ -95,6 +101,7 @@ describe("Rules route", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Editar Alertas de acceso" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Regla editada" } });
+    advanceWizard(dialog, 3);
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]?.body).toMatchObject({ conditions: {
@@ -113,11 +120,13 @@ describe("Rules route", () => {
     fireEvent.change(within(dialog).getByLabelText("Plantilla"), { target: { value: "person-detection" } });
     expect(await within(dialog).findByRole("checkbox", { name: "Perímetro" })).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Perímetro" }));
+    advanceWizard(dialog, 1);
     fireEvent.change(within(dialog).getByLabelText(/Cooldown \(segundos\)/), { target: { value: "45" } });
     fireEvent.change(within(dialog).getByLabelText(/Zona horaria IANA/), { target: { value: "America/Argentina/Buenos_Aires" } });
     fireEvent.change(within(dialog).getByLabelText("Desde (HH:MM)"), { target: { value: "21:00" } });
     fireEvent.change(within(dialog).getByLabelText("Hasta (HH:MM)"), { target: { value: "06:00" } });
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Lunes" }));
+    advanceWizard(dialog, 2);
     fireEvent.click(within(dialog).getByRole("button", { name: "Vista previa con eventos recientes" }));
     await waitFor(() => expect(calls).toContainEqual(expect.objectContaining({ method: "POST", path: "/api/v1/rules/simulate" })));
     expect(await within(dialog).findByText(/1 coinciden/)).toBeInTheDocument();
@@ -143,6 +152,7 @@ describe("Rules route", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Editar Alertas de acceso" }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Mi edición" } });
+    advanceWizard(dialog, 3);
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
     expect(await within(dialog).findByText(/Tus cambios no se guardaron/)).toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole("button", { name: "Cargar versión actual" }));
@@ -165,15 +175,16 @@ describe("Rules route", () => {
     renderPage(() => <Rules />);
     fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
     const dialog = await screen.findByRole("dialog");
+    advanceWizard(dialog, 1);
     expect(within(dialog).getByLabelText(/Etiquetas/)).toBeInTheDocument();
     expect(within(dialog).getByLabelText(/Zonas/)).toBeInTheDocument();
     expect(within(dialog).getByRole("checkbox", { name: "Alerta" })).toBeInTheDocument();
     expect(within(dialog).queryByLabelText(/Minutos/)).not.toBeInTheDocument();
 
+    fireEvent.click(within(dialog).getByRole("button", { name: "Anterior" }));
     fireEvent.change(within(dialog).getByLabelText("Disparador"), { target: { value: "camera_offline" } });
     expect(within(dialog).getByLabelText(/Minutos sin conexión/)).toBeInTheDocument();
     expect(within(dialog).getByRole("checkbox", { name: "Cámara Patio" })).toBeInTheDocument();
-    expect(within(dialog).queryByLabelText(/Etiquetas/)).not.toBeInTheDocument();
 
     fireEvent.change(within(dialog).getByLabelText("Disparador"), { target: { value: "server_offline" } });
     expect(within(dialog).getByRole("checkbox", { name: "Servidor Norte" })).toBeInTheDocument();
@@ -187,9 +198,12 @@ describe("Rules route", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Personas de noche" } });
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: "Cámara Acceso" }));
+    advanceWizard(dialog, 1);
     fireEvent.change(within(dialog).getByLabelText(/Etiquetas/), { target: { value: "person, car" } });
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Alerta" }));
+    advanceWizard(dialog, 1);
     fireEvent.change(within(dialog).getByLabelText("Severidad de la notificación"), { target: { value: "critical" } });
+    advanceWizard(dialog, 1);
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]).toEqual({
@@ -205,6 +219,58 @@ describe("Rules route", () => {
     });
   });
 
+  it("guides creation through scope, conditions, actions, and review with activation enabled by default", async () => {
+    const calls = stub([]);
+    renderPage(() => <Rules />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText("Paso 1 de 4: Alcance")).toBeInTheDocument();
+    expect(within(dialog).getByRole("checkbox", { name: "Cámara Acceso" })).toBeInTheDocument();
+    expect(within(dialog).queryByRole("textbox", { name: "Etiquetas" })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Siguiente" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Ingresá un nombre");
+    expect(within(dialog).getByText("Paso 1 de 4: Alcance")).toBeInTheDocument();
+    fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Personas" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Siguiente" }));
+    expect(await within(dialog).findByText("Paso 2 de 4: Condiciones")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("checkbox", { name: "Cámara Acceso" })).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText("Etiquetas")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Siguiente" }));
+    expect(await within(dialog).findByText("Paso 3 de 4: Acciones")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Siguiente" }));
+    expect(await within(dialog).findByText("Paso 4 de 4: Revisión y activación")).toBeInTheDocument();
+    expect(within(dialog).getByText("Resumen de la regla")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Personas · Evento nuevo/)).toBeInTheDocument();
+    expect(within(dialog).getByRole("checkbox", { name: "Activar regla al guardar" })).toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]?.body).toMatchObject({ enabled: true });
+  });
+
+  it("validates paired schedule times before leaving the conditions step", async () => {
+    stub([]);
+    renderPage(() => <Rules />);
+    fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
+    const dialog = await screen.findByRole("dialog");
+    advanceWizard(dialog, 1);
+    fireEvent.change(within(dialog).getByLabelText("Desde (HH:MM)"), { target: { value: "21:00" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Siguiente" }));
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Completá ambos horarios");
+    expect(within(dialog).getByText("Paso 2 de 4: Condiciones")).toBeInTheDocument();
+  });
+
+  it("preserves a disabled rule state when editing without activation changes", async () => {
+    const calls = stub([makeRule({ enabled: false })]);
+    renderPage(() => <Rules />);
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Alertas de acceso" }));
+    const dialog = await screen.findByRole("dialog");
+    advanceWizard(dialog, 3);
+    expect(within(dialog).getByRole("checkbox", { name: "Activar regla al guardar" })).not.toBeChecked();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]?.body).toMatchObject({ enabled: false });
+  });
+
   it("creates a camera offline rule converting minutes to seconds", async () => {
     const calls = stub([]);
     renderPage(() => <Rules />);
@@ -212,7 +278,9 @@ describe("Rules route", () => {
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Cámara caída" } });
     fireEvent.change(within(dialog).getByLabelText("Disparador"), { target: { value: "camera_offline" } });
+    advanceWizard(dialog, 1);
     fireEvent.change(within(dialog).getByLabelText(/Minutos sin conexión/), { target: { value: "10" } });
+    advanceWizard(dialog, 2);
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]?.body).toMatchObject({ trigger_type: "camera_offline", conditions: { duration_seconds: 600 } });
@@ -227,6 +295,7 @@ describe("Rules route", () => {
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: "Sucursal Central" }));
     fireEvent.change(within(dialog).getByLabelText("Disparador"), { target: { value: "server_offline" } });
     expect(within(dialog).getByRole("checkbox", { name: "Sucursal Central" })).toBeChecked();
+    advanceWizard(dialog, 3);
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]?.body).toMatchObject({ trigger_type: "server_offline", conditions: { site_ids: ["site1"] } });
@@ -244,6 +313,7 @@ describe("Rules route", () => {
     expect(options(/Etiquetas/)).toEqual(expect.arrayContaining(["person", "car", "dog"]));
     await waitFor(() => expect(options(/Zonas/)).toEqual(["entrada", "patio"]));
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Cámara Acceso" }));
+    advanceWizard(dialog, 1);
     expect(options(/Zonas/)).toEqual(["entrada"]);
 
     fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Zonas" } });
@@ -253,6 +323,7 @@ describe("Rules route", () => {
     const zones = within(dialog).getByLabelText(/Zonas/);
     fireEvent.change(zones, { target: { value: "entrada" } });
     fireEvent.keyDown(zones, { key: "Enter" });
+    advanceWizard(dialog, 2);
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]?.body).toMatchObject({ conditions: { camera_ids: ["c1"], labels: ["forklift"], zones: ["entrada"] } });
@@ -277,7 +348,9 @@ describe("Rules route", () => {
     fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
     const dialog = await screen.findByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Con canales" } });
+    advanceWizard(dialog, 2);
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: /Telegram guardia/ }));
+    advanceWizard(dialog, 1);
     fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]?.body).toMatchObject({ actions: { create_alarm: true, notify_in_app: true, severity: "warning", channel_ids: ["ch1"] } });
@@ -289,6 +362,7 @@ describe("Rules route", () => {
     expect(await screen.findByText(/1 canal externo/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Editar Alertas de acceso" }));
     const dialog = await screen.findByRole("dialog");
+    advanceWizard(dialog, 2);
     expect(await within(dialog).findByRole("checkbox", { name: /Correo operaciones/ })).toBeChecked();
     expect(within(dialog).getByRole("checkbox", { name: /Telegram guardia/ })).not.toBeChecked();
   });
