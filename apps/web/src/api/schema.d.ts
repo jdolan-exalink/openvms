@@ -4309,6 +4309,8 @@ export interface components {
             closed_by_name?: string | null;
             /** Format: date-time */
             closed_at?: string | null;
+            /** @description True when the alarm was opened from an event older than the auto-close window at ingestion time. */
+            late?: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */

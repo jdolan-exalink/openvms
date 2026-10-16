@@ -5346,6 +5346,9 @@ components:
         closed_by: { type: string, format: uuid, nullable: true }
         closed_by_name: { type: string, nullable: true }
         closed_at: { type: string, format: date-time, nullable: true }
+        late:
+          type: boolean
+          description: True when the alarm was opened from an event older than the auto-close window at ingestion time.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AlarmTransition:

@@ -41,6 +41,9 @@ type CorrelateInput struct {
 	// At is the event's start time. The activity window is measured on event time, not wall
 	// clock, so catch-up after downtime correlates the same way as live ingestion.
 	At time.Time
+	// Now is the ingestion wall-clock time used to flag backfill events older than
+	// auto_close_after as late. Defaults to time.Now() when zero.
+	Now time.Time
 }
 
 // CorrelateResult is the alarm the event ended up in.
@@ -51,6 +54,7 @@ type CorrelateResult struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	EventCount int
+	Late       bool
 	// Closed lists stale alarms of the same key that were auto-closed to free it.
 	Closed []ClosedAlarm
 }
@@ -97,6 +101,11 @@ func Correlate(ctx context.Context, tx pgx.Tx, in CorrelateInput) (CorrelateResu
 		return CorrelateResult{}, store.Classify(err)
 	}
 	window := time.Duration(settings.AutoCloseSeconds * float64(time.Second))
+	now := in.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	late := now.Sub(in.At) > window
 	key := CorrelationKey(in.Source, in.RuleID, in.CameraID, in.Labels)
 
 	var res CorrelateResult
@@ -126,7 +135,7 @@ func Correlate(ctx context.Context, tx pgx.Tx, in CorrelateInput) (CorrelateResu
 			return CorrelateResult{}, store.Classify(err)
 		}
 		for _, id := range stale {
-			c, ok, err := autoClose(ctx, q, id, time.Now(), window)
+			c, ok, err := autoClose(ctx, q, id, now, window)
 			if err != nil {
 				return CorrelateResult{}, err
 			}
@@ -137,7 +146,7 @@ func Correlate(ctx context.Context, tx pgx.Tx, in CorrelateInput) (CorrelateResu
 
 		row, err := q.InsertCorrelatedAlarm(ctx, db.InsertCorrelatedAlarmParams{
 			TenantID: in.TenantID, SiteID: in.SiteID, CameraID: in.CameraID, EventID: in.EventID,
-			Source: in.Source, CorrelationKey: &key, At: in.At,
+			Source: in.Source, CorrelationKey: &key, At: in.At, Late: late,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue // lost a race for the key: merge into the winner on the next attempt
@@ -148,7 +157,7 @@ func Correlate(ctx context.Context, tx pgx.Tx, in CorrelateInput) (CorrelateResu
 		if err := q.LinkAlarmEvent(ctx, db.LinkAlarmEventParams{AlarmID: row.ID, EventID: in.EventID, TenantID: in.TenantID, Source: in.Source}); err != nil {
 			return CorrelateResult{}, store.Classify(err)
 		}
-		res.Outcome, res.AlarmID, res.Status, res.CreatedAt, res.UpdatedAt, res.EventCount = Created, row.ID, row.Status, row.CreatedAt, row.CreatedAt, 1
+		res.Outcome, res.AlarmID, res.Status, res.CreatedAt, res.UpdatedAt, res.EventCount, res.Late = Created, row.ID, row.Status, row.CreatedAt, row.CreatedAt, 1, row.Late
 		return res, nil
 	}
 	return CorrelateResult{}, fmt.Errorf("correlate event %s: key %q still contended after %d attempts", in.EventID, key, maxCorrelateAttempts)

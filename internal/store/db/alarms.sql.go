@@ -98,6 +98,7 @@ const getAlarm = `-- name: GetAlarm :one
 SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status,
        a.assigned_to, a.acknowledged_by, a.acknowledged_at, a.resolved_by, a.resolved_at,
        a.closed_by, a.closed_at,
+       a.late,
        a.created_at, a.updated_at,
        s.name AS site_name,
        c.display_name AS camera_name,
@@ -152,6 +153,7 @@ type GetAlarmRow struct {
 	ResolvedAt             *time.Time
 	ClosedBy               *uuid.UUID
 	ClosedAt               *time.Time
+	Late                   bool
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	SiteName               string
@@ -198,6 +200,7 @@ func (q *Queries) GetAlarm(ctx context.Context, id uuid.UUID) (GetAlarmRow, erro
 		&i.ResolvedAt,
 		&i.ClosedBy,
 		&i.ClosedAt,
+		&i.Late,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.SiteName,
@@ -283,6 +286,7 @@ const listAlarms = `-- name: ListAlarms :many
 SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status,
        a.assigned_to, a.acknowledged_by, a.acknowledged_at, a.resolved_by, a.resolved_at,
        a.closed_by, a.closed_at,
+       a.late,
        a.created_at, a.updated_at,
        s.name AS site_name,
        c.display_name AS camera_name,
@@ -356,6 +360,7 @@ type ListAlarmsRow struct {
 	ResolvedAt             *time.Time
 	ClosedBy               *uuid.UUID
 	ClosedAt               *time.Time
+	Late                   bool
 	CreatedAt              time.Time
 	UpdatedAt              time.Time
 	SiteName               string
@@ -416,6 +421,7 @@ func (q *Queries) ListAlarms(ctx context.Context, arg ListAlarmsParams) ([]ListA
 			&i.ResolvedAt,
 			&i.ClosedBy,
 			&i.ClosedAt,
+			&i.Late,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.SiteName,

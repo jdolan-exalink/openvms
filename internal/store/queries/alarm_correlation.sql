@@ -44,12 +44,12 @@ RETURNING id, tenant_id, site_id, camera_id, event_id, status, event_count, upda
 
 -- name: InsertCorrelatedAlarm :one
 INSERT INTO alarms (tenant_id, site_id, camera_id, event_id, source, correlation_key,
-                    first_event_at, last_event_at)
-VALUES (@tenant_id, @site_id, @camera_id, @event_id, @source, @correlation_key, @at, @at)
+                    first_event_at, last_event_at, late)
+VALUES (@tenant_id, @site_id, @camera_id, @event_id, @source, @correlation_key, @at, @at, @late)
 ON CONFLICT (tenant_id, correlation_key)
     WHERE status NOT IN ('resolved', 'closed') AND correlation_key IS NOT NULL
 DO NOTHING
-RETURNING id, status, created_at;
+RETURNING id, status, created_at, late;
 
 -- name: AutoCloseAlarm :one
 WITH cur AS (

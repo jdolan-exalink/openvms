@@ -272,3 +272,60 @@ func TestAlarmEventsAreTenantIsolated(t *testing.T) {
 		t.Fatal("tenant B inserted an alarm_events row for another tenant")
 	}
 }
+
+func TestCorrelateMarksAlarmLateWhenEventOlderThanAutoCloseWindow(t *testing.T) {
+	c := newCorrEnv(t)
+	ctx := context.Background()
+	now := t0.Add(2 * time.Hour)
+
+	// Fresh event within the 30m auto-close window: late = false.
+	freshEv := c.seedEvent(c.cam, now.Add(-5*time.Minute), "person")
+	var freshRes alarms.CorrelateResult
+	if err := c.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		var err error
+		freshRes, err = alarms.Correlate(ctx, tx, alarms.CorrelateInput{
+			TenantID: c.cam.TenantID, SiteID: c.cam.SiteID, CameraID: c.cam.ID, EventID: freshEv,
+			Source: "event", Labels: []string{"person"}, At: now.Add(-5 * time.Minute), Now: now,
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if freshRes.Late {
+		t.Fatalf("fresh alarm Late = true, want false")
+	}
+
+	// Old event past the 30m auto-close window at ingestion: late = true.
+	lateEv := c.seedEvent(c.cam, now.Add(-45*time.Minute), "car")
+	var lateRes alarms.CorrelateResult
+	if err := c.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		var err error
+		lateRes, err = alarms.Correlate(ctx, tx, alarms.CorrelateInput{
+			TenantID: c.cam.TenantID, SiteID: c.cam.SiteID, CameraID: c.cam.ID, EventID: lateEv,
+			Source: "event", Labels: []string{"car"}, At: now.Add(-45 * time.Minute), Now: now,
+		})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !lateRes.Late {
+		t.Fatalf("late alarm Late = false, want true")
+	}
+
+	alarmSvc := &alarms.Service{Store: c.env.Store}
+	gotFresh, err := alarmSvc.Get(ctx, c.env.Admin, freshRes.AlarmID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotFresh.Late {
+		t.Fatalf("Get(fresh).Late = true, want false")
+	}
+	gotLate, err := alarmSvc.Get(ctx, c.env.Admin, lateRes.AlarmID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gotLate.Late {
+		t.Fatalf("Get(late).Late = false, want true")
+	}
+}
+

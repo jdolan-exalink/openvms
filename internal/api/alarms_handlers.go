@@ -35,6 +35,7 @@ func toAlarm(a alarms.Alarm) gen.Alarm {
 		ClosedBy:           a.ClosedBy,
 		ClosedByName:       a.ClosedByName,
 		ClosedAt:           a.ClosedAt,
+		Late:               &a.Late,
 		CreatedAt:          a.CreatedAt,
 		UpdatedAt:          a.UpdatedAt,
 	}

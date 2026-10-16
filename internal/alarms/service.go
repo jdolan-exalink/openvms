@@ -123,6 +123,7 @@ type Alarm struct {
 	ClosedBy               *uuid.UUID `json:"closed_by,omitempty"`
 	ClosedByName           *string    `json:"closed_by_name,omitempty"`
 	ClosedAt               *time.Time `json:"closed_at,omitempty"`
+	Late                   bool       `json:"late"`
 	CreatedAt              time.Time  `json:"created_at"`
 	UpdatedAt              time.Time  `json:"updated_at"`
 }
@@ -961,6 +962,7 @@ func mapGetAlarmRow(r db.GetAlarmRow) Alarm {
 		ClosedBy:               r.ClosedBy,
 		ClosedByName:           closedByName,
 		ClosedAt:               r.ClosedAt,
+		Late:                   r.Late,
 		CreatedAt:              r.CreatedAt,
 		UpdatedAt:              r.UpdatedAt,
 	}
@@ -1022,6 +1024,7 @@ func mapListAlarmRow(r db.ListAlarmsRow) Alarm {
 		ClosedBy:               r.ClosedBy,
 		ClosedByName:           closedByName,
 		ClosedAt:               r.ClosedAt,
+		Late:                   r.Late,
 		CreatedAt:              r.CreatedAt,
 		UpdatedAt:              r.UpdatedAt,
 	}

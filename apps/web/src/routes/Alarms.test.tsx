@@ -213,4 +213,31 @@ describe("Alarms Route", () => {
       });
     });
   });
+
+  it("renders Tardía badge when alarm is marked late", async () => {
+    const lateAlarm = makeAlarm("a-late", {
+      camera_name: "Cámara Backfill",
+      late: true,
+    });
+    const freshAlarm = makeAlarm("a-fresh", {
+      camera_name: "Cámara En Vivo",
+      late: false,
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (req: Request) => {
+        const url = new URL(req.url);
+        if (url.pathname === "/api/v1/alarms") return json({ items: [lateAlarm, freshAlarm] });
+        if (url.pathname === "/api/v1/cameras") return json({ items: [] });
+        return json({}, 404);
+      }),
+    );
+
+    renderPage(() => <Alarms />);
+
+    expect(await screen.findByText("Cámara Backfill")).toBeInTheDocument();
+    expect(screen.getAllByText("Tardía")).toHaveLength(1);
+  });
 });
+
