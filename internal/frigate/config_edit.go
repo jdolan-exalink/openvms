@@ -470,6 +470,39 @@ func (a *v017) UpsertManagedCameraZone(ctx context.Context, camera, zoneName str
 	return nil
 }
 
+// DeleteManagedCameraZone removes one explicitly OpenVMS-owned zone and verifies absence.
+// Callers must only invoke this for a persisted zone with a last-applied snapshot.
+func (a *v017) DeleteManagedCameraZone(ctx context.Context, camera, zoneName string, hasConfigPermission bool) error {
+	if !hasConfigPermission {
+		return ErrConfigPermissionRequired
+	}
+	if !supportsConfigData(a.version) {
+		return ErrManagedZoneSyncUnsupported
+	}
+	if !safeName.MatchString(camera) || !safeName.MatchString(zoneName) {
+		return &ConfigValidationError{Message: "invalid camera or zone name"}
+	}
+	if !strings.HasPrefix(zoneName, "ovms_") {
+		zoneName = "ovms_" + zoneName
+	}
+	results, err := a.ApplyCameraPatch(ctx, camera, map[string]any{"zones": map[string]any{zoneName: ""}})
+	if err != nil {
+		return err
+	}
+	if len(results) != 1 || results[0].Section != "zones" || !results[0].AppliedLive || results[0].RequiresRestart {
+		return fmt.Errorf("managed camera-zone deletion did not apply live")
+	}
+	cfg, err := a.CameraConfig(ctx, camera, false)
+	if err != nil {
+		return err
+	}
+	zones, _ := cfg["zones"].(map[string]any)
+	if _, exists := zones[zoneName]; exists {
+		return ErrConfigReadBackMismatch
+	}
+	return nil
+}
+
 func (a *v017) setViaBody(ctx context.Context, camera, section string, value any, live bool) error {
 	body := map[string]any{
 		"config_data":      map[string]any{"cameras": map[string]any{camera: map[string]any{section: value}}},

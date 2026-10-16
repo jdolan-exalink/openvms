@@ -115,6 +115,7 @@ func run() error {
 	st := &store.Store{Pool: pool}
 	inv := inventory.New(st, sealer, log)
 	adapters := inventory.NewAdapters(inv)
+	go runCameraZoneSync(ctx, inv, log)
 
 	rulesSvc := rules.NewService(st, &jetstreamPublisher{js: js}, log)
 	rulesSvc.ZoneResolver = rules.NewStoreZoneResolver(st)
@@ -275,6 +276,21 @@ func run() error {
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	return srv.Shutdown(sctx)
+}
+
+func runCameraZoneSync(ctx context.Context, svc *inventory.Service, log *slog.Logger) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := svc.ProcessCameraZoneSyncJobs(ctx, 25); err != nil && ctx.Err() == nil {
+				log.WarnContext(ctx, "process camera-zone sync jobs", "error", err)
+			}
+		}
+	}
 }
 
 type bodyReport struct {

@@ -127,6 +127,9 @@ func (s *Service) CreateCameraZone(ctx context.Context, actor authz.Actor, camer
 		if err != nil {
 			return store.Classify(err)
 		}
+		if err := enqueueCameraZone(ctx, q, actor, row.ID, cam.TenantID, cam.ID, zone.Name, zone.Points, settings, 1, nil, nil, "upsert"); err != nil {
+			return err
+		}
 		out, err = cameraZoneFromRow(row.ID, row.CameraID, row.Name, row.Points, row.Settings, row.CreatedAt, row.UpdatedAt)
 		return err
 	})
@@ -151,14 +154,59 @@ func (s *Service) UpdateCameraZone(ctx context.Context, actor authz.Actor, camer
 		if err := checker.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
 			return err
 		}
+		if err := q.LockCameraZoneSync(ctx, zoneID.String()); err != nil {
+			return err
+		}
+		oldName, err := q.GetCameraZoneName(ctx, db.GetCameraZoneNameParams{TenantID: cam.TenantID, ZoneID: zoneID})
+		if err != nil {
+			return notFoundOr(err)
+		}
 		row, err := q.UpdateCameraZone(ctx, db.UpdateCameraZoneParams{TenantID: cam.TenantID, CameraID: cam.ID, ID: zoneID, Name: zone.Name, Points: mustJSON(zone.Points), Settings: settings})
 		if err != nil {
 			return notFoundOr(err)
+		}
+		if err := q.SetCameraZoneDesiredSync(ctx, db.SetCameraZoneDesiredSyncParams{ZoneID: zoneID, TenantID: cam.TenantID}); err != nil {
+			return err
+		}
+		revision, err := q.GetCameraZoneSyncRevision(ctx, db.GetCameraZoneSyncRevisionParams{ZoneID: zoneID, TenantID: cam.TenantID})
+		if err != nil {
+			return err
+		}
+		var previousName *string
+		if oldName != zone.Name {
+			previousName = &oldName
+		}
+		if err := enqueueCameraZone(ctx, q, actor, row.ID, cam.TenantID, cam.ID, zone.Name, zone.Points, settings, revision, nil, previousName, "upsert"); err != nil {
+			return err
 		}
 		out, err = cameraZoneFromRow(row.ID, row.CameraID, row.Name, row.Points, row.Settings, row.CreatedAt, row.UpdatedAt)
 		return err
 	})
 	return out, err
+}
+
+func enqueueCameraZone(ctx context.Context, q *db.Queries, actor authz.Actor, id, tenantID, cameraID uuid.UUID, name string, points []CameraZonePoint, settings json.RawMessage, revision int64, lastApplied []byte, previousName *string, operation string) error {
+	if lastApplied == nil {
+		stored, err := q.GetCameraZoneLastApplied(ctx, db.GetCameraZoneLastAppliedParams{ZoneID: id, TenantID: tenantID})
+		if err != nil {
+			return err
+		}
+		lastApplied = stored
+	}
+	var config map[string]any
+	if err := json.Unmarshal(settings, &config); err != nil {
+		return err
+	}
+	// Coordinates are converted to Frigate's conventional pixel string by the worker after
+	// reading the camera's detect dimensions; the durable desired snapshot stores normalized points.
+	config["_ovms_points"] = points
+	config["_ovms_name"] = name
+	data, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	_, err = q.EnqueueCameraZoneSync(ctx, db.EnqueueCameraZoneSyncParams{ZoneID: id, TenantID: tenantID, CameraID: cameraID, ActorUserID: &actor.UserID, Operation: operation, DesiredRevision: revision, DesiredConfig: data, LastApplied: lastApplied, PreviousRemoteName: previousName})
+	return err
 }
 
 func (s *Service) DeleteCameraZone(ctx context.Context, actor authz.Actor, cameraID, zoneID uuid.UUID) error {
@@ -170,12 +218,19 @@ func (s *Service) DeleteCameraZone(ctx context.Context, actor authz.Actor, camer
 		if err := checker.Require(authz.CamerasManage, cameraResource(cam)); err != nil {
 			return err
 		}
-		deleted, err := q.DeleteCameraZone(ctx, db.DeleteCameraZoneParams{TenantID: cam.TenantID, CameraID: cam.ID, ID: zoneID})
-		if err != nil {
+		if err := q.LockCameraZoneSync(ctx, zoneID.String()); err != nil {
 			return err
 		}
-		if deleted == 0 {
-			return store.ErrNotFound
+		zone, err := q.DeleteCameraZoneForSync(ctx, db.DeleteCameraZoneForSyncParams{ID: zoneID, TenantID: cam.TenantID, CameraID: cam.ID})
+		if err != nil {
+			return notFoundOr(err)
+		}
+		var last []byte
+		if len(zone.LastApplied) > 0 {
+			last = zone.LastApplied
+		}
+		if err := enqueueCameraZone(ctx, q, actor, zone.ID, zone.TenantID, zone.CameraID, zone.Name, nil, zone.Settings, zone.SyncRevision, last, nil, "delete"); err != nil {
+			return err
 		}
 		return nil
 	})
