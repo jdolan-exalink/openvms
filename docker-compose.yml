@@ -195,6 +195,8 @@ services:
       HTTPS_SITE_ADDRESS: ${OPENVMS_HTTPS_SITE_IPV4:-10.1.1.24}
       OPENVMS_WEB_HTTPS_PORT: ${WEB_HTTPS_PORT:-8443}
       API_UPSTREAM: ${OPENVMS_AGENT_API_IPV4:-172.29.240.2}:8080
+      # An empty static proxy list denies all forwarded-header trust by default.
+      HTTPS_INGRESS_PROXY_CIDRS: ${HTTPS_INGRESS_PROXY_CIDRS:-}
     ports: ["${WEB_PORT:-8000}:80", "${WEB_HTTPS_PORT:-8443}:443"]
     depends_on: [api]
     volumes:

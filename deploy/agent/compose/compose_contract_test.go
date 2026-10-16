@@ -100,6 +100,9 @@ func TestAPIIsInternalOnlyAndUsesNoHostPortPublication(t *testing.T) {
 	}
 	web := asMap(t, services["web"])
 	webEnv := asMap(t, web["environment"])
+	if webEnv["HTTPS_INGRESS_PROXY_CIDRS"] != "${HTTPS_INGRESS_PROXY_CIDRS:-}" {
+		t.Fatalf("Caddy ingress proxy trust must default to empty/deny-all, got %#v", webEnv["HTTPS_INGRESS_PROXY_CIDRS"])
+	}
 	if webEnv["API_UPSTREAM"] != "${OPENVMS_AGENT_API_IPV4:-172.29.240.2}:8080" {
 		t.Fatalf("web API upstream must remain on the fixed internal API address, got %#v", webEnv["API_UPSTREAM"])
 	}
@@ -367,10 +370,15 @@ func TestWebComposeAddsPinnedHTTPSIngressWithoutBreakingHTTPOrProxyTrust(t *test
 	if portHintPosition < 0 || spaFallbackPosition < 0 || portHintPosition > spaFallbackPosition {
 		t.Fatal("Caddy HTTPS port hint must be handled before the SPA catch-all")
 	}
-	for _, required := range []string{"auto_https disable_redirects", "default_sni {$HTTPS_SITE_ADDRESS:10.1.1.24}", "{$SITE_ADDRESS::80} {", "{$HTTPS_SITE_ADDRESS:10.1.1.24}:443 {", "tls /etc/caddy/tls.crt /etc/caddy/tls.key", "protocols tls1.2 tls1.3", "import openvms_site_routes"} {
+	for _, required := range []string{"auto_https disable_redirects", "default_sni {$HTTPS_SITE_ADDRESS:10.1.1.24}", "trusted_proxies static {$HTTPS_INGRESS_PROXY_CIDRS}", "expression `{http.request.header.X-Forwarded-Proto}.contains(\",\")`", "{$SITE_ADDRESS::80} {", "{$HTTPS_SITE_ADDRESS:10.1.1.24}:443 {", "tls /etc/caddy/tls.crt /etc/caddy/tls.key", "protocols tls1.2 tls1.3", "import openvms_site_routes"} {
 		if !strings.Contains(configuration, required) {
 			t.Errorf("Caddy configuration must include %q", required)
 		}
+	}
+	chainGuardPosition := strings.Index(configuration, "@api_forwarded_proto_chain")
+	apiHandlerPosition := strings.Index(configuration, "@api path /api/*")
+	if chainGuardPosition < 0 || apiHandlerPosition < 0 || chainGuardPosition > apiHandlerPosition {
+		t.Fatal("Caddy must reject comma-joined forwarded-proto values before proxying API requests")
 	}
 	if strings.Contains(configuration, "redir ") {
 		t.Fatal("adding HTTPS must not redirect or otherwise change existing HTTP behavior")

@@ -137,10 +137,12 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
   `GOCACHE=/tmp/openvms-go-build-cache go test -race -timeout 30m -tags integration ./internal/rules ./internal/authz ./internal/inventory ./internal/store/... ./internal/events`,
   `GOCACHE=/tmp/openvms-go-build-cache go test -race -timeout 30m -tags integration ./internal/api` (run
   separately; 386.003s), `cd apps/web && pnpm typecheck`, focused Rules vitest, and full `cd apps/web &&
-  pnpm exec vitest run` (177 files / 1536 tests) passed. `git diff --check` passed. Native review remains
-  pending; do not claim approval. Runtime harness: N/A (no hardware/agent runtime boundary is exercised by
+  pnpm exec vitest run` (177 files / 1536 tests) passed. `git diff --check` passed. Native review
+  `review-41b36ff5391a45cd` was approved and acknowledged; its authority is burned. R3-001 stale preview is
+  a nonblocking separate follow-up. An older accumulated-range review was unavailable due to budget; this
+  does not invalidate the approved P2-05 slice. Runtime harness: N/A (no hardware/agent runtime boundary is exercised by
   database-backed API integration and browser component tests).
 
 ## Next step
-Native review is parent-owned/pending. Then proceed to the deferred HTTPS / agent SSH install strategy only
-when separately authorized/instructed.
+HTTPS ingress fix is separately authorized and active on `feat/https-agent-ingress`; see
+`odd/tasks/https-agent-install-strategy.md`. Alarms phases 3–6 remain incomplete.

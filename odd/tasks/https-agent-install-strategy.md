@@ -1,6 +1,32 @@
-# HTTPS and agent SSH install strategy (backlog — deferred until after alarms phase 2)
+# HTTPS and agent SSH install strategy
 
-Status: NOT STARTED. User decision (2026-10-16): close alarms phase 2 first; pick this up at the end.
+Status: ACTIVE — scoped HTTPS trusted-ingress fix only. The broader LAN certificate/install strategy remains
+unsettled and is intentionally deferred to a later product decision.
+
+## Tracking
+- Branch: `feat/https-agent-ingress`, based on `feat/alarms-phase2-rules` at `8809c418746720c097e6f177fe20092b55133ab6`.
+- Route: delegated direct; strict TDD enabled by user/session configuration.
+- Runners: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/api ./internal/platform/config ./deploy/agent/compose`; `GOCACHE=/tmp/openvms-go-build-cache go vet ./internal/api ./internal/platform/config ./deploy/agent/compose`; `docker compose config --quiet`; isolated Caddy runtime harness if the pinned image is locally available; `git diff --check`.
+- Authored forecast: approximately 200 lines, excluding generated files; advisory 400-line work-unit heuristic.
+- Delivery: `ask-on-risk` (default); if slicing is needed, use previously user-selected `stacked-to-main`. No PR creation authorized.
+- Constraints: no remote operations, deployment/restart, SSH/tunnel changes, actual `.env` edits, broad private-range trust, mTLS changes, or LAN certificate policy changes.
+
+## Tasks
+- [x] HTTPS-01 — Configure explicit operator-controlled Caddy ingress proxy CIDRs (empty/default deny); preserve HTTPS forwarding only for a trusted immediate peer and enforce a single exact `https` protocol value. Add regression tests for trusted, untrusted/spoofed, duplicate/multi-hop, and ordinary HTTP inputs. Route: delegated direct; strict TDD.
+- [ ] HTTPS-02 — Decide LAN endpoint/certificate strategy (pending product choice; no implementation in this task).
+- [ ] HTTPS-03 — Close with focused/broader verification, isolated runtime evidence where available, work-unit commit, and tracker/mirror sync.
+
+## Alarms closeout context
+- P2-05 native review was approved and acknowledged; authority burned for `review-41b36ff5391a45cd`.
+- R3-001 stale preview is a nonblocking separate follow-up; older accumulated-range review was unavailable due to budget.
+- User authorized proceeding with this HTTPS fix; Alarms phases 3–6 remain incomplete and are not marked done here.
+
+## Progress and evidence
+- RED: the focused compose contract failed before Caddy changes because the explicit ingress trust and comma-value guard were missing. An initial isolated Caddy v2.11.7 harness also exposed that `reverse_proxy` normalized duplicate `X-Forwarded-Proto` fields to one value, which would otherwise let the API accept a duplicate. The guard now rejects comma-joined values before proxying.
+- GREEN: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/api ./internal/platform/config ./deploy/agent/compose` passed; `GOCACHE=/tmp/openvms-go-build-cache go vet ./internal/api ./internal/platform/config ./deploy/agent/compose` passed; `docker compose config --quiet` and `git diff --check` passed. Caddy v2.11.7 `adapt --validate` passed with a single and multi-CIDR setting.
+- Isolated local Caddy v2.11.7 harness (actual Caddyfile HTTP portion, temporary mock API, host loopback only): untrusted spoof → 403 with upstream `http`; ordinary HTTP → 403/`http`; trusted single `https` → 204/`https`; duplicate and comma-chain → 400 before upstream. Harness container/process/temp files were removed. No running services, volumes, certificates, or `.env` were changed.
+- Caddy global trust is set by `HTTPS_INGRESS_PROXY_CIDRS`; the empty Compose default is a deny-all proxy list. Operators must set whitespace-separated CIDRs only for actual ingress proxies; API `CREDENTIAL_TRUSTED_PROXY_CIDRS` remains unchanged.
+- Rollback boundary: revert the HTTPS-01 work-unit commit to remove only Caddy ingress trust/guard, its compose environment, contract assertions, and this tracker update. Direct TLS behavior, API credential allowlist, mTLS, LAN certificate/bootstrap behavior remain unchanged.
 
 ## Objective
 A deployment and agent-install strategy that works for most environments (LAN by IP or hostname,

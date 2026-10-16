@@ -3,6 +3,11 @@
 # uses the operator-bootstrapped certificate for HTTPS_SITE_ADDRESS.
 {
 	auto_https disable_redirects
+	servers {
+		# Only operator-configured ingress proxy peers may assert forwarded HTTPS.
+		# The empty Compose default means no proxy peers are trusted.
+		trusted_proxies static {$HTTPS_INGRESS_PROXY_CIDRS}
+	}
 	# IP-literal HTTPS clients omit SNI. Select the configured IP-SAN certificate
 	# for those handshakes without weakening certificate verification.
 	default_sni {$HTTPS_SITE_ADDRESS:10.1.1.24}
@@ -20,6 +25,16 @@
 		# host, so OSM raster fallback keeps both spellings).
 		Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://tiles.openfreemap.org; connect-src 'self' ws: wss: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://tiles.openfreemap.org; media-src 'self' blob:; frame-src 'self' blob:; manifest-src 'self'; worker-src 'self'; frame-ancestors 'self'"
 		-Server
+	}
+
+	# Caddy's reverse_proxy normalizes forwarded headers. Reject comma-joined XFP
+	# values first, before duplicate fields can be collapsed to a single value.
+	@api_forwarded_proto_chain {
+		path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs
+		expression `{http.request.header.X-Forwarded-Proto}.contains(",")`
+	}
+	handle @api_forwarded_proto_chain {
+		respond "invalid forwarded protocol" 400
 	}
 
 	@api path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs
