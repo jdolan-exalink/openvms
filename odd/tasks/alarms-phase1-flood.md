@@ -30,11 +30,11 @@ event, rules add a second one per event (`UNIQUE(event_id, source)`), nothing au
   `go test -race -tags integration ./internal/...`; web `cd apps/web && pnpm vitest run <file>`.
 
 ## Tasks
-- [ ] P1-01 — Migration: alarms correlation columns + `alarm_events` (RLS) + indexes; correlation in syncer
+- [x] P1-01 — Migration: alarms correlation columns + `alarm_events` (RLS) + indexes; correlation in syncer
       (`openAlarm`) and rules path; integration tests (N events same key → 1 alarm, different label/camera →
-      separate, closed alarm → new one). Route: delegated writer.
-- [ ] P1-02 — Auto-close sweeper in worker + `alarm_settings.auto_close_after` (default 30m) + transition with
-      system actor; tests with fake clock. Route: same writer.
+      separate, closed alarm → new one). Route: delegated writer. (`9c788ff`)
+- [x] P1-02 — Auto-close sweeper in worker + `alarm_settings.auto_close_after` (default 30m) + transition with
+      system actor; tests with fake clock. Route: same writer. (`7a1b829`)
 - [ ] P1-03 — `frigate_servers.event_alarm_mode` (existing → all_alerts, new → rules_only) honored by syncer;
       API/OpenAPI field on server; settings UI toggle on the server page. Route: same writer.
 - [ ] P1-04 — Backlog cleanup migration (24h cutoff, auto_closed, counts). Route: same writer.
@@ -55,7 +55,9 @@ event, rules add a second one per event (`UNIQUE(event_id, source)`), nothing au
   PR-A P1-01..P1-02, PR-B P1-03..P1-05, PR-C P1-06..P1-07. RDD on (global).
 
 ## Progress and evidence
-- Branch `feat/alarms-phase1-flood` from main.
+- Branch `feat/alarms-phase1-flood` from main (`d72521c`).
+- P1-01 (`9c788ff`): migration `00047_alarm_correlation.sql`, `internal/alarms/correlation.go`, `internal/events/syncer.go`, `internal/rules/service.go`, unit + integration tests (`go test -race ./internal/alarms/... ./internal/events/... ./internal/rules/...` PASS).
+- P1-02 (`7a1b829`): auto-close sweeper in `internal/alarms/autoclose.go`, wired in `apps/worker/main.go`, integration tests in `internal/alarms/autoclose_integration_test.go` (PASS).
 
 ## Next step
-P1-01.
+P1-03 (`frigate_servers.event_alarm_mode`).
