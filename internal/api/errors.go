@@ -78,6 +78,8 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, provision.ErrNotFound):
 		return http.StatusNotFound, "not_found", "not found"
+	case errors.Is(err, inventory.ErrCameraGroupVersionConflict):
+		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, rules.ErrVersionConflict):
 		return http.StatusConflict, "conflict", err.Error()
 	case errors.Is(err, maps.ErrOptimisticLockConflict):

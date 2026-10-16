@@ -158,6 +158,9 @@ func (s *Service) UpdateCamera(ctx context.Context, actor authz.Actor, id uuid.U
 		if err := q.UpdateCamera(ctx, params); err != nil {
 			return err
 		}
+		if err := q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: cam.TenantID}); err != nil {
+			return err
+		}
 		return audit(ctx, q, actor, &cam.TenantID, ActionCameraUpdated, "camera", id, map[string]any{
 			"display_name": in.DisplayName, "enabled": in.Enabled,
 			"default_live_quality": in.DefaultLiveQuality, "description": in.Description,
@@ -230,6 +233,16 @@ func (s *Service) ListServerCameras(ctx context.Context, actor authz.Actor, serv
 type CameraGroupView struct {
 	db.CameraGroup
 	CameraIDs []uuid.UUID
+	// DynamicFilter is nil for manual groups.
+	DynamicFilter *CameraGroupFilter
+	// MemberCountTotal counts every member in the tenant; MemberCountHidden those the caller cannot view.
+	MemberCountTotal  int
+	MemberCountHidden int
+}
+
+func groupView(g db.CameraGroup, seen, hidden []uuid.UUID) CameraGroupView {
+	return CameraGroupView{CameraGroup: g, CameraIDs: seen, DynamicFilter: parseGroupFilter(g.Filter),
+		MemberCountTotal: len(seen) + len(hidden), MemberCountHidden: len(hidden)}
 }
 
 func visibleMembers(ctx context.Context, q *db.Queries, groupID uuid.UUID, visible map[uuid.UUID]bool) ([]uuid.UUID, []uuid.UUID, error) {
@@ -272,12 +285,12 @@ func (s *Service) ListCameraGroups(ctx context.Context, actor authz.Actor) ([]Ca
 			return err
 		}
 		for _, g := range groups {
-			members, _, err := visibleMembers(ctx, q, g.ID, visible)
+			members, hidden, err := visibleMembers(ctx, q, g.ID, visible)
 			if err != nil {
 				return err
 			}
 			if len(members) > 0 || c.Can(authz.CamerasView, access.CameraGroup(g.TenantID, g.ID)) {
-				out = append(out, CameraGroupView{CameraGroup: g, CameraIDs: members})
+				out = append(out, groupView(g, members, hidden))
 			}
 		}
 		return nil
@@ -296,14 +309,14 @@ func (s *Service) GetCameraGroup(ctx context.Context, actor authz.Actor, id uuid
 		if err != nil {
 			return err
 		}
-		members, _, err := visibleMembers(ctx, q, id, visible)
+		members, hidden, err := visibleMembers(ctx, q, id, visible)
 		if err != nil {
 			return err
 		}
 		if len(members) == 0 && !c.Can(authz.CamerasView, access.CameraGroup(g.TenantID, g.ID)) {
 			return access.ErrForbidden
 		}
-		out = CameraGroupView{CameraGroup: g, CameraIDs: members}
+		out = groupView(g, members, hidden)
 		return nil
 	})
 	return out, err
@@ -314,6 +327,26 @@ type CameraGroupInput struct {
 	Name        string
 	Description string
 	CameraIDs   []uuid.UUID
+	// Filter makes the group dynamic: members are computed from it and CameraIDs must be empty.
+	Filter *CameraGroupFilter
+	// ExpectedVersion, when set, makes ReplaceCameraGroup fail with ErrCameraGroupVersionConflict if stale.
+	ExpectedVersion *int32
+}
+
+// prepareGroupFilter validates the dynamic/manual shape of the input and returns the encoded filter.
+func prepareGroupFilter(in *CameraGroupInput) ([]byte, error) {
+	if in.Filter == nil {
+		return nil, nil
+	}
+	if len(in.CameraIDs) > 0 {
+		return nil, invalid("camera_ids cannot be set on a dynamic group; its members come from the filter")
+	}
+	f, err := normalizeCameraGroupFilter(*in.Filter)
+	if err != nil {
+		return nil, err
+	}
+	in.Filter = &f
+	return f.marshal()
 }
 
 // requireManageCameras checks cameras.manage on each camera and that all belong to tenantID.
@@ -353,8 +386,12 @@ func (s *Service) CreateCameraGroup(ctx context.Context, actor authz.Actor, in C
 		return CameraGroupView{}, invalid("name is required")
 	}
 	in.CameraIDs = dedupe(in.CameraIDs)
+	filter, err := prepareGroupFilter(&in)
+	if err != nil {
+		return CameraGroupView{}, err
+	}
 	var id uuid.UUID
-	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+	err = s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		if !actor.IsPlatform() && *actor.TenantID != in.TenantID {
 			return store.ErrNotFound
 		}
@@ -364,11 +401,17 @@ func (s *Service) CreateCameraGroup(ctx context.Context, actor authz.Actor, in C
 		if err := requireManageCameras(ctx, q, c, in.TenantID, in.CameraIDs); err != nil {
 			return err
 		}
-		g, err := q.CreateCameraGroup(ctx, db.CreateCameraGroupParams{TenantID: in.TenantID, Name: in.Name, Description: in.Description})
+		g, err := q.CreateCameraGroup(ctx, db.CreateCameraGroupParams{TenantID: in.TenantID, Name: in.Name, Description: in.Description, Filter: filter})
 		if err != nil {
 			return store.Classify(err)
 		}
 		id = g.ID
+		if filter != nil {
+			if err := q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: in.TenantID, GroupID: &id}); err != nil {
+				return err
+			}
+			return audit(ctx, q, actor, &in.TenantID, ActionCameraGroupChanged, "camera_group", id, map[string]any{"created": true, "dynamic": true})
+		}
 		if err := q.AddCameraGroupMembers(ctx, db.AddCameraGroupMembersParams{GroupID: id, CameraIds: in.CameraIDs, TenantID: in.TenantID}); err != nil {
 			return err
 		}
@@ -387,7 +430,11 @@ func (s *Service) ReplaceCameraGroup(ctx context.Context, actor authz.Actor, id 
 		return CameraGroupView{}, invalid("name is required")
 	}
 	in.CameraIDs = dedupe(in.CameraIDs)
-	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+	filter, err := prepareGroupFilter(&in)
+	if err != nil {
+		return CameraGroupView{}, err
+	}
+	err = s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
 		g, err := q.GetCameraGroup(ctx, id)
 		if err != nil {
 			return notFoundOr(err)
@@ -397,6 +444,30 @@ func (s *Service) ReplaceCameraGroup(ctx context.Context, actor authz.Actor, id 
 		}
 		if err := c.Require(authz.CamerasManage, access.CameraGroup(g.TenantID, g.ID)); err != nil {
 			return err
+		}
+		// A group is manual or dynamic for its whole life.
+		if (g.Filter != nil) != (filter != nil) {
+			if g.Filter != nil {
+				return invalid("a dynamic group requires a filter; its members cannot be edited by hand")
+			}
+			return invalid("a manual group cannot become dynamic; create a new group with a filter")
+		}
+		if filter != nil {
+			// The filter can pull in cameras the caller does not manage one by one: require tenant-wide manage.
+			if err := c.Require(authz.CamerasManage, access.Tenant(g.TenantID)); err != nil {
+				return err
+			}
+			n, err := q.UpdateCameraGroup(ctx, db.UpdateCameraGroupParams{ID: id, Name: in.Name, Description: in.Description, Filter: filter, ExpectedVersion: in.ExpectedVersion})
+			if err != nil {
+				return store.Classify(err)
+			}
+			if n == 0 {
+				return ErrCameraGroupVersionConflict
+			}
+			if err := q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: g.TenantID, GroupID: &id}); err != nil {
+				return err
+			}
+			return audit(ctx, q, actor, &g.TenantID, ActionCameraGroupChanged, "camera_group", id, map[string]any{"dynamic": true})
 		}
 		visible, err := s.visibleCameraSet(ctx, c)
 		if err != nil {
@@ -425,8 +496,12 @@ func (s *Service) ReplaceCameraGroup(ctx context.Context, actor authz.Actor, id 
 		if err := requireManageCameras(ctx, q, c, g.TenantID, changed); err != nil {
 			return err
 		}
-		if err := q.UpdateCameraGroup(ctx, db.UpdateCameraGroupParams{ID: id, Name: in.Name, Description: in.Description}); err != nil {
+		n, err := q.UpdateCameraGroup(ctx, db.UpdateCameraGroupParams{ID: id, Name: in.Name, Description: in.Description, ExpectedVersion: in.ExpectedVersion})
+		if err != nil {
 			return store.Classify(err)
+		}
+		if n == 0 {
+			return ErrCameraGroupVersionConflict
 		}
 		if err := q.ClearCameraGroupMembers(ctx, id); err != nil {
 			return err

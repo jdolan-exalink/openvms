@@ -294,11 +294,16 @@ func upsertCamera(ctx context.Context, q *db.Queries, tenantID, siteID, serverID
 		// The synthesized birdseye camera has no zones; cameras.zones is NOT NULL.
 		cam.Zones = []string{}
 	}
-	return q.UpsertCamera(ctx, db.UpsertCameraParams{
+	inserted, err := q.UpsertCamera(ctx, db.UpsertCameraParams{
 		TenantID: tenantID, SiteID: siteID, ServerID: serverID,
 		RemoteName: cam.Name, DisplayName: displayName(cam.Name), Enabled: cam.Enabled,
 		Zones: cam.Zones, Lpr: cam.LPR, LiveStream: cam.LiveStream, HqStream: cam.HQStream,
 	})
+	if err != nil || !inserted {
+		return inserted, err
+	}
+	// A new camera may match dynamic camera groups.
+	return true, q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: tenantID})
 }
 
 // displayName turns "acceso_norte" into "Acceso norte" as a starting label,
@@ -412,6 +417,9 @@ func (s *Service) UpdateServer(ctx context.Context, actor authz.Actor, id uuid.U
 		}
 		if siteID != current.SiteID {
 			if err := q.MoveServerCameras(ctx, db.MoveServerCamerasParams{ServerID: id, SiteID: siteID}); err != nil {
+				return err
+			}
+			if err := q.RematerializeDynamicGroups(ctx, db.RematerializeDynamicGroupsParams{TenantID: current.TenantID}); err != nil {
 				return err
 			}
 		}

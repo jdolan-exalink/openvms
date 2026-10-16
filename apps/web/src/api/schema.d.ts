@@ -1267,7 +1267,9 @@ export interface paths {
         put?: never;
         /**
          * Create a camera group
-         * @description Requires cameras.manage on the tenant and on every member camera.
+         * @description Requires cameras.manage on the tenant and, for a manual group, on every member camera. Set filter to
+         *     create a dynamic group: camera_ids must then be empty and the members are computed from the filter and
+         *     kept in sync when cameras are added, retagged, renamed or moved.
          */
         post: operations["createCameraGroup"];
         delete?: never;
@@ -1287,7 +1289,15 @@ export interface paths {
         };
         /** Get a camera group */
         get: operations["getCameraGroup"];
-        /** Replace name, description and members of a camera group */
+        /**
+         * Replace name, description and members (manual) or filter (dynamic) of a camera group
+         * @description A group is manual or dynamic for its whole life. A manual group takes camera_ids; a dynamic group
+         *     (created with a filter) takes the filter again, must not set camera_ids and has its members recomputed.
+         *     Sending camera_ids for a dynamic group, omitting the filter for one, or adding a filter to a manual group
+         *     returns 400. A dynamic group's filter can reach cameras the caller does not manage one by one, so
+         *     updating it requires cameras.manage on the whole tenant. Optimistic locking is optional: when If-Match
+         *     carries the group's version (plain or quoted integer) a stale value returns 409.
+         */
         put: operations["replaceCameraGroup"];
         post?: never;
         /** Delete a camera group */
@@ -3622,12 +3632,25 @@ export interface components {
         FrigateConfigRevisionList: {
             items: components["schemas"]["FrigateConfigRevision"][];
         };
+        /**
+         * @description Selects the tenant's cameras of a dynamic group. Fields combine with AND, the values of one field
+         *     with OR. At least one field must be set. Tags match case-insensitively; name_contains is a
+         *     case-insensitive substring of the camera display name.
+         */
+        CameraGroupFilter: {
+            site_ids?: string[];
+            server_ids?: string[];
+            tags?: string[];
+            name_contains?: string;
+        };
         CameraGroupInput: {
             /** Format: uuid */
             tenant_id: string;
             name: string;
             description?: string;
-            camera_ids: string[];
+            /** @description Members of a manual group. Must be empty or omitted when filter is set. */
+            camera_ids?: string[];
+            filter?: components["schemas"]["CameraGroupFilter"];
         };
         CameraGroup: {
             /** Format: uuid */
@@ -3638,6 +3661,14 @@ export interface components {
             description: string;
             /** @description Members the caller can view. */
             camera_ids: string[];
+            /** @description Present for dynamic groups; absent for manual groups. */
+            filter?: components["schemas"]["CameraGroupFilter"];
+            /** @description Every member of the group in the tenant, whether or not the caller can view it. */
+            member_count_total: number;
+            /** @description Members the caller cannot view (member_count_total minus camera_ids). */
+            member_count_hidden: number;
+            /** @description Incremented on every update; send it in If-Match for optimistic locking. */
+            version: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -7294,7 +7325,10 @@ export interface operations {
     replaceCameraGroup: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                /** @description Current camera group version, e.g. 3 or "3". */
+                "If-Match"?: string;
+            };
             path: {
                 groupId: string;
             };

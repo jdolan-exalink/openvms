@@ -189,6 +189,8 @@ type CameraGroup struct {
 	UpdatedAt   time.Time
 	DeletedAt   *time.Time
 	DeletedBy   *uuid.UUID
+	Filter      []byte
+	Version     int32
 }
 
 type CameraGroupMember struct {

@@ -1560,7 +1560,10 @@ paths:
       tags: [cameras]
       operationId: createCameraGroup
       summary: Create a camera group
-      description: Requires cameras.manage on the tenant and on every member camera.
+      description: |
+        Requires cameras.manage on the tenant and, for a manual group, on every member camera. Set filter to
+        create a dynamic group: camera_ids must then be empty and the members are computed from the filter and
+        kept in sync when cameras are added, retagged, renamed or moved.
       requestBody:
         required: true
         content:
@@ -1595,7 +1598,20 @@ paths:
     put:
       tags: [cameras]
       operationId: replaceCameraGroup
-      summary: Replace name, description and members of a camera group
+      summary: Replace name, description and members (manual) or filter (dynamic) of a camera group
+      description: |
+        A group is manual or dynamic for its whole life. A manual group takes camera_ids; a dynamic group
+        (created with a filter) takes the filter again, must not set camera_ids and has its members recomputed.
+        Sending camera_ids for a dynamic group, omitting the filter for one, or adding a filter to a manual group
+        returns 400. A dynamic group's filter can reach cameras the caller does not manage one by one, so
+        updating it requires cameras.manage on the whole tenant. Optimistic locking is optional: when If-Match
+        carries the group's version (plain or quoted integer) a stale value returns 409.
+      parameters:
+        - name: If-Match
+          in: header
+          required: false
+          description: Current camera group version, e.g. 3 or "3".
+          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -4703,17 +4719,35 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/FrigateConfigRevision" } }
+    CameraGroupFilter:
+      type: object
+      additionalProperties: false
+      description: |
+        Selects the tenant's cameras of a dynamic group. Fields combine with AND, the values of one field
+        with OR. At least one field must be set. Tags match case-insensitively; name_contains is a
+        case-insensitive substring of the camera display name.
+      properties:
+        site_ids: { type: array, items: { type: string, format: uuid }, maxItems: 100 }
+        server_ids: { type: array, items: { type: string, format: uuid }, maxItems: 100 }
+        tags: { type: array, items: { type: string, maxLength: 64 }, maxItems: 100 }
+        name_contains: { type: string, maxLength: 200 }
     CameraGroupInput:
       type: object
-      required: [tenant_id, name, camera_ids]
+      required: [tenant_id, name]
       properties:
         tenant_id: { type: string, format: uuid }
         name: { type: string, minLength: 1, maxLength: 200 }
         description: { type: string, maxLength: 1000 }
-        camera_ids: { type: array, items: { type: string, format: uuid }, maxItems: 5000 }
+        camera_ids:
+          type: array
+          description: Members of a manual group. Must be empty or omitted when filter is set.
+          items: { type: string, format: uuid }
+          maxItems: 5000
+        filter:
+          $ref: "#/components/schemas/CameraGroupFilter"
     CameraGroup:
       type: object
-      required: [id, tenant_id, name, description, camera_ids, created_at, updated_at]
+      required: [id, tenant_id, name, description, camera_ids, member_count_total, member_count_hidden, version, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         tenant_id: { type: string, format: uuid }
@@ -4723,6 +4757,19 @@ components:
           type: array
           description: Members the caller can view.
           items: { type: string, format: uuid }
+        filter:
+          allOf:
+            - $ref: "#/components/schemas/CameraGroupFilter"
+          description: Present for dynamic groups; absent for manual groups.
+        member_count_total:
+          type: integer
+          description: Every member of the group in the tenant, whether or not the caller can view it.
+        member_count_hidden:
+          type: integer
+          description: Members the caller cannot view (member_count_total minus camera_ids).
+        version:
+          type: integer
+          description: Incremented on every update; send it in If-Match for optimistic locking.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     LivenessStatus:
