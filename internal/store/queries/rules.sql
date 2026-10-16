@@ -41,6 +41,17 @@ ORDER BY created_at ASC;
 INSERT INTO rule_versions (rule_id, tenant_id, version, snapshot, changed_by)
 VALUES (@rule_id, @tenant_id, @version, @snapshot, @changed_by);
 
+-- name: ListRuleVersions :many
+SELECT version, snapshot, changed_by, created_at
+FROM rule_versions
+WHERE tenant_id = @tenant_id AND rule_id = @rule_id
+ORDER BY version DESC;
+
+-- name: ListCameraGroupsForCamera :many
+SELECT group_id FROM camera_group_members
+WHERE tenant_id = @tenant_id AND camera_id = @camera_id
+ORDER BY group_id;
+
 -- name: CountCamerasByIDs :one
 SELECT count(*) FROM cameras
 WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND id = ANY(@ids::uuid[]);

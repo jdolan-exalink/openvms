@@ -2853,6 +2853,60 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/rules/templates:
+    get:
+      tags: [rules]
+      operationId: listRuleTemplates
+      summary: List reusable automation rule templates
+      description: Returns validated starter conditions and actions. Requires rules.read.
+      responses:
+        "200":
+          description: Available templates
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleTemplatesList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/rules/simulate:
+    post:
+      tags: [rules]
+      operationId: simulateRule
+      summary: Preview a rule against recent tenant events
+      description: Evaluates submitted conditions against recent events visible to the current user, estimates per-camera cooldown suppression from historical event timestamps, and never executes actions or consults the live firing ledger. Requires rules.manage and events.search. The limit bounds the newest events evaluated; has_more indicates additional events exist in the window.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RuleSimulationRequest" }
+      responses:
+        "200":
+          description: Simulation results
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleSimulation" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+  /api/v1/rules/{ruleId}/versions:
+    parameters:
+      - name: ruleId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [rules]
+      operationId: listRuleVersions
+      summary: List rule version snapshots
+      description: Requires rules.read and access to the rule.
+      responses:
+        "200":
+          description: Rule versions, newest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RuleVersionsList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/rules/{ruleId}:
     parameters:
       - name: ruleId
@@ -5689,6 +5743,72 @@ components:
         items:
           type: array
           items: { $ref: "#/components/schemas/Rule" }
+    RuleTemplate:
+      type: object
+      required: [id, name, description, trigger_type, conditions, actions]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        description: { type: string }
+        trigger_type: { $ref: "#/components/schemas/RuleTriggerType" }
+        conditions: { $ref: "#/components/schemas/RuleConditions" }
+        actions: { $ref: "#/components/schemas/RuleActions" }
+    RuleTemplatesList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RuleTemplate" }
+    RuleSimulationRequest:
+      type: object
+      required: [trigger_type, conditions]
+      properties:
+        trigger_type: { $ref: "#/components/schemas/RuleTriggerType" }
+        conditions: { $ref: "#/components/schemas/RuleConditions" }
+        hours: { type: integer, minimum: 1, maximum: 168, default: 24 }
+        limit: { type: integer, minimum: 1, maximum: 100, default: 100 }
+    RuleSimulationMatch:
+      type: object
+      required: [event_id, camera_id, camera_name, site_name, severity, labels, start_time]
+      properties:
+        event_id: { type: string, format: uuid }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        site_name: { type: string }
+        severity: { $ref: "#/components/schemas/Severity" }
+        labels: { type: array, items: { type: string } }
+        start_time: { type: string, format: date-time }
+    RuleSimulation:
+      type: object
+      required: [evaluated, condition_matched, matched, cooldown_suppressed, cooldown_seconds, has_more, window_start, window_end, matches]
+      properties:
+        evaluated: { type: integer }
+        condition_matched: { type: integer, description: Events matching conditions before cooldown suppression. }
+        matched: { type: integer, description: Condition matches remaining after the historical per-camera cooldown projection. }
+        cooldown_suppressed: { type: integer, description: Historical condition matches suppressed by an earlier match on the same camera. }
+        cooldown_seconds: { type: integer, minimum: 1, description: Effective cooldown; unset or zero conditions use the 300 second production default. }
+        has_more: { type: boolean }
+        window_start: { type: string, format: date-time }
+        window_end: { type: string, format: date-time }
+        matches:
+          type: array
+          items: { $ref: "#/components/schemas/RuleSimulationMatch" }
+    RuleVersion:
+      type: object
+      required: [version, snapshot, created_at]
+      properties:
+        version: { type: integer, minimum: 1 }
+        snapshot: { $ref: "#/components/schemas/Rule" }
+        changed_by: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+    RuleVersionsList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/RuleVersion" }
     NotificationSeverity:
       type: string
       enum: [info, warning, critical]

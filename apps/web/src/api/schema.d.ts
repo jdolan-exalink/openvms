@@ -2242,6 +2242,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/rules/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List reusable automation rule templates
+         * @description Returns validated starter conditions and actions. Requires rules.read.
+         */
+        get: operations["listRuleTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/simulate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a rule against recent tenant events
+         * @description Evaluates submitted conditions against recent events visible to the current user, estimates per-camera cooldown suppression from historical event timestamps, and never executes actions or consults the live firing ledger. Requires rules.manage and events.search. The limit bounds the newest events evaluated; has_more indicates additional events exist in the window.
+         */
+        post: operations["simulateRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/{ruleId}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List rule version snapshots
+         * @description Requires rules.read and access to the rule.
+         */
+        get: operations["listRuleVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/rules/{ruleId}": {
         parameters: {
             query?: never;
@@ -4575,6 +4637,65 @@ export interface components {
         };
         RulesList: {
             items: components["schemas"]["Rule"][];
+        };
+        RuleTemplate: {
+            id: string;
+            name: string;
+            description: string;
+            trigger_type: components["schemas"]["RuleTriggerType"];
+            conditions: components["schemas"]["RuleConditions"];
+            actions: components["schemas"]["RuleActions"];
+        };
+        RuleTemplatesList: {
+            items: components["schemas"]["RuleTemplate"][];
+        };
+        RuleSimulationRequest: {
+            trigger_type: components["schemas"]["RuleTriggerType"];
+            conditions: components["schemas"]["RuleConditions"];
+            /** @default 24 */
+            hours: number;
+            /** @default 100 */
+            limit: number;
+        };
+        RuleSimulationMatch: {
+            /** Format: uuid */
+            event_id: string;
+            /** Format: uuid */
+            camera_id: string;
+            camera_name: string;
+            site_name: string;
+            severity: components["schemas"]["Severity"];
+            labels: string[];
+            /** Format: date-time */
+            start_time: string;
+        };
+        RuleSimulation: {
+            evaluated: number;
+            /** @description Events matching conditions before cooldown suppression. */
+            condition_matched: number;
+            /** @description Condition matches remaining after the historical per-camera cooldown projection. */
+            matched: number;
+            /** @description Historical condition matches suppressed by an earlier match on the same camera. */
+            cooldown_suppressed: number;
+            /** @description Effective cooldown; unset or zero conditions use the 300 second production default. */
+            cooldown_seconds: number;
+            has_more: boolean;
+            /** Format: date-time */
+            window_start: string;
+            /** Format: date-time */
+            window_end: string;
+            matches: components["schemas"]["RuleSimulationMatch"][];
+        };
+        RuleVersion: {
+            version: number;
+            snapshot: components["schemas"]["Rule"];
+            /** Format: uuid */
+            changed_by?: string | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        RuleVersionsList: {
+            items: components["schemas"]["RuleVersion"][];
         };
         /** @enum {string} */
         NotificationSeverity: "info" | "warning" | "critical";
@@ -9053,6 +9174,80 @@ export interface operations {
             400: components["responses"]["BadRequest"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    listRuleTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Available templates */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleTemplatesList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    simulateRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuleSimulationRequest"];
+            };
+        };
+        responses: {
+            /** @description Simulation results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleSimulation"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+        };
+    };
+    listRuleVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rule versions, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuleVersionsList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getRule: {

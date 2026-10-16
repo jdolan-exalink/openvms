@@ -40,9 +40,18 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
 - [x] P2-04 — Dynamic camera groups (`camera_groups.filter jsonb` materialized into `camera_group_members` +
       `version`) and group coverage counts (`member_count_total`, `member_count_hidden`) in API and
       `CameraGroups.tsx`; integration + web tests. Route: same writer.
-- [ ] P2-05 — Rule templates (`listRuleTemplates`), dry-run simulation (`simulateRule` against recent tenant
+- [x] P2-05 — Rule templates (`listRuleTemplates`), dry-run simulation (`simulateRule` against recent tenant
       events), version history endpoint (`listRuleVersions`), and `Rules.tsx` UI (schedule, groups, cooldown,
       templates, dry-run preview); integration + web tests. Route: same writer.
+  - [x] P2-05a — OpenAPI-first contracts/generated clients and tenant-authorized templates, recent-event
+        simulation, and version-history API handlers; enforce referenced camera/group/zone visibility.
+  - [x] P2-05b — Rules UI editing for schedule, timezone, groups, cooldown and templates; retain unknown/API-only
+        condition fields and reload current server state after 409 rather than overwriting.
+  - [x] P2-05c — Real-event simulation preview, version history UI, and focused API/web regression coverage.
+  - Route: delegated direct (bounded writer); strict TDD configured. TDD gap: focused Rules UI test showed RED
+    before UI edits; API simulation/API contract implementation did not have a recorded pre-implementation RED.
+    No native review in this task agent. Authored changed lines: 766 (+ generated clients); retained delivery
+    plan PR-2C, stacked-to-main (no PR authorized).
 
 ## Acceptance criteria and checks
 - Event rule with `camera_group_ids`, `schedule` (site TZ, overnight), and custom `cooldown_seconds` matches
@@ -113,6 +122,24 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
 - Deferred to the end (user decision): HTTPS / agent SSH install strategy — see
   `odd/tasks/https-agent-install-strategy.md`.
 
+- P2-05 completed in the work-unit commit recorded below. OpenAPI-first endpoints/templates, bounded real
+  recent-event simulation (hours 1..168, event page 1..100; `has_more` signals additional events), versions,
+  group/schedule/timezone/cooldown UI, field preservation and explicit 409 reload are implemented. Simulation
+  uses the canonical condition matcher and the existing event-search visibility path; its cooldown result is
+  explicitly a chronological historical projection, not a claim about live firing history/actions.
+- P2-05 focused RED/GREEN: `cd apps/web && pnpm exec vitest run src/routes/Rules.test.tsx --reporter=dot`
+  initially failed the API-only-fields preservation test (12 passed, 1 failed); after the edit it passed 16/16.
+  API RED was not captured before implementation (strict-TDD process gap). Focused API integration then passed:
+  `GOCACHE=/tmp/openvms-go-build-cache go test -race -timeout 30m -count=1 -tags integration ./internal/api -run '^TestRule(TemplatesVersionsAndRealEventSimulation|CameraReferencesRequirePerUserVisibility)$' -v`.
+- P2-05 verification (2026-10-16): `make generate`, `GOCACHE=/tmp/openvms-go-build-cache go vet ./...`,
+  `GOCACHE=/tmp/openvms-go-build-cache go test -race ./...`,
+  `GOCACHE=/tmp/openvms-go-build-cache go test -race -timeout 30m -tags integration ./internal/rules ./internal/authz ./internal/inventory ./internal/store/... ./internal/events`,
+  `GOCACHE=/tmp/openvms-go-build-cache go test -race -timeout 30m -tags integration ./internal/api` (run
+  separately; 386.003s), `cd apps/web && pnpm typecheck`, focused Rules vitest, and full `cd apps/web &&
+  pnpm exec vitest run` (177 files / 1536 tests) passed. `git diff --check` passed. Native review remains
+  pending; do not claim approval. Runtime harness: N/A (no hardware/agent runtime boundary is exercised by
+  database-backed API integration and browser component tests).
+
 ## Next step
-Review slice `2161587..HEAD`, then P2-05 (route: delegated writer), including: web form must not drop
-API-only condition fields; Rules UI refetch/reload on 409; Spanish UI copy consistent with existing screens.
+Record the final work-unit commit identity below; native review is parent-owned/pending. Then proceed to the
+deferred HTTPS / agent SSH install strategy only when separately authorized/instructed.

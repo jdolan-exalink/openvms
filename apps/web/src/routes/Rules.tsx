@@ -4,7 +4,7 @@ import { Plus } from "lucide-react";
 import { Icon } from "@/components/Icon";
 import { type FormEvent, useState } from "react";
 import { ApiError, api, type Schemas, unwrap } from "@/api/client";
-import { camerasQuery, channelsQuery, rulesQuery, serversQuery, sitesQuery } from "@/api/queries";
+import { cameraGroupsQuery, camerasQuery, channelsQuery, rulesQuery, serversQuery, sitesQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { TagInput } from "@/components/TagInput";
@@ -33,11 +33,15 @@ export function Rules() {
   const rules = useQuery(rulesQuery);
   const [editing, setEditing] = useState<Rule | "new" | null>(null);
   const [deleting, setDeleting] = useState<Rule | null>(null);
+  const [historyRule, setHistoryRule] = useState<Rule | null>(null);
 
   const toggle = useMutation({
     mutationFn: async (r: Rule) =>
       unwrap(await api.PATCH("/api/v1/rules/{ruleId}", { params: { path: { ruleId: r.id }, header: { "If-Match": String(r.version) } }, body: { enabled: !r.enabled } })),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["rules"] }),
+    onError: async (error) => {
+      if (error instanceof ApiError && error.status === 409) await qc.invalidateQueries({ queryKey: ["rules"] });
+    },
   });
   const remove = useMutation({
     mutationFn: async (r: Rule) => unwrap(await api.DELETE("/api/v1/rules/{ruleId}", { params: { path: { ruleId: r.id } } })),
@@ -91,7 +95,8 @@ export function Rules() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="tonal" aria-label={`Editar ${r.name}`} onClick={() => setEditing(r)}>
+          <Button size="sm" variant="text" onClick={() => setHistoryRule(r)}>Historial</Button>
+          <Button size="sm" variant="tonal" aria-label={`Editar ${r.name}`} onClick={() => setEditing(r)}>
                     Editar
                   </Button>
                   <Button size="sm" variant="outlined" className="border-bad/60 text-bad" aria-label={`Eliminar ${r.name}`} onClick={() => setDeleting(r)}>
@@ -105,7 +110,9 @@ export function Rules() {
       )}
       {editing && (
         <RuleForm
+          key={editing === "new" ? "new" : `${editing.id}:${editing.version}`}
           rule={editing === "new" ? undefined : editing}
+          onReloadRule={(latest) => setEditing(latest)}
           onDone={() => {
             setEditing(null);
             void qc.invalidateQueries({ queryKey: ["rules"] });
@@ -113,6 +120,7 @@ export function Rules() {
           onCancel={() => setEditing(null)}
         />
       )}
+      {historyRule && <RuleHistory rule={historyRule} onClose={() => setHistoryRule(null)} />}
       {deleting && (
         <ConfirmDialog
           title="Eliminar regla"
@@ -138,11 +146,13 @@ function describeActions(a: Schemas["RuleActions"]) {
   return parts.length ? parts.join(" + ") : "Sin acciones";
 }
 
-function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void; onCancel: () => void }) {
+function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDone: () => void; onCancel: () => void; onReloadRule: (rule: Rule) => void }) {
   const cameras = useQuery(camerasQuery({}));
+  const cameraGroups = useQuery(cameraGroupsQuery);
   const servers = useQuery(serversQuery);
   const sites = useQuery(sitesQuery);
   const channels = useQuery(channelsQuery);
+  const templates = useQuery({ queryKey: ["rule-templates"], queryFn: async () => unwrap(await api.GET("/api/v1/rules/templates")).items });
   const c = rule?.conditions ?? {};
   const [f, setF] = useState({
     name: rule?.name ?? "",
@@ -155,29 +165,61 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
     severities: c.severities ?? ([] as string[]),
     vehicle_types: c.vehicle_types ?? ([] as string[]),
     vehicle_colors: c.vehicle_colors ?? ([] as string[]),
+    camera_group_ids: c.camera_group_ids ?? ([] as string[]),
+    map_zone_ids: c.map_zone_ids ?? ([] as string[]),
+    cooldown_seconds: c.cooldown_seconds === undefined ? "" : String(c.cooldown_seconds),
+    schedule_days: c.schedule?.days_of_week ?? ([] as number[]),
+    schedule_start: c.schedule?.start_time ?? "",
+    schedule_end: c.schedule?.end_time ?? "",
+    schedule_timezone: c.schedule?.timezone ?? "",
     minutes: String(c.duration_seconds ? Math.round(c.duration_seconds / 60) : defaultMinutes),
     create_alarm: rule?.actions.create_alarm ?? true,
     notify_in_app: rule?.actions.notify_in_app ?? true,
     severity: (rule?.actions.severity ?? "warning") as NotifSeverity,
     channel_ids: rule?.actions.channel_ids ?? ([] as string[]),
   });
+  const [simulation, setSimulation] = useState<Schemas["RuleSimulation"] | null>(null);
+  const [conflictRule, setConflictRule] = useState<Rule | null>(null);
 
   const buildConditions = (): Schemas["RuleConditions"] => {
+    const out: Schemas["RuleConditions"] = { ...c };
     if (f.trigger === "event") {
-      const out: Schemas["RuleConditions"] = {};
-      if (f.site_ids.length) out.site_ids = f.site_ids;
-      if (f.camera_ids.length) out.camera_ids = f.camera_ids;
-      if (f.labels.length) out.labels = f.labels;
-      if (f.zones.length) out.zones = f.zones;
-      if (f.severities.length) out.severities = f.severities;
-      if (f.vehicle_types.length) out.vehicle_types = f.vehicle_types;
-      if (f.vehicle_colors.length) out.vehicle_colors = f.vehicle_colors;
+      delete out.duration_seconds;
+      delete out.server_ids;
+      if (f.camera_group_ids.length) out.camera_group_ids = f.camera_group_ids; else delete out.camera_group_ids;
+      if (f.map_zone_ids.length) out.map_zone_ids = f.map_zone_ids; else delete out.map_zone_ids;
+      const cooldown = Number(f.cooldown_seconds);
+      if (f.cooldown_seconds.trim() && Number.isFinite(cooldown)) out.cooldown_seconds = cooldown; else delete out.cooldown_seconds;
+      if (f.schedule_start || f.schedule_end || f.schedule_days.length || f.schedule_timezone.trim()) {
+        out.schedule = {
+          ...(f.schedule_days.length ? { days_of_week: f.schedule_days } : {}),
+          ...(f.schedule_start ? { start_time: f.schedule_start } : {}),
+          ...(f.schedule_end ? { end_time: f.schedule_end } : {}),
+          ...(f.schedule_timezone.trim() ? { timezone: f.schedule_timezone.trim() } : {}),
+        };
+      } else delete out.schedule;
+      if (f.site_ids.length) out.site_ids = f.site_ids; else delete out.site_ids;
+      if (f.camera_ids.length) out.camera_ids = f.camera_ids; else delete out.camera_ids;
+      if (f.labels.length) out.labels = f.labels; else delete out.labels;
+      if (f.zones.length) out.zones = f.zones; else delete out.zones;
+      if (f.severities.length) out.severities = f.severities; else delete out.severities;
+      if (f.vehicle_types.length) out.vehicle_types = f.vehicle_types; else delete out.vehicle_types;
+      if (f.vehicle_colors.length) out.vehicle_colors = f.vehicle_colors; else delete out.vehicle_colors;
       return out;
     }
-    const out: Schemas["RuleConditions"] = { duration_seconds: Math.max(1, Number(f.minutes) || defaultMinutes) * 60 };
-    if (f.site_ids.length) out.site_ids = f.site_ids;
-    if (f.trigger === "camera_offline" && f.camera_ids.length) out.camera_ids = f.camera_ids;
-    if (f.trigger === "server_offline" && f.server_ids.length) out.server_ids = f.server_ids;
+    delete out.labels;
+    delete out.zones;
+    delete out.severities;
+    delete out.vehicle_types;
+    delete out.vehicle_colors;
+    delete out.camera_group_ids;
+    delete out.map_zone_ids;
+    delete out.schedule;
+    delete out.cooldown_seconds;
+    out.duration_seconds = Math.max(1, Number(f.minutes) || defaultMinutes) * 60;
+    if (f.site_ids.length) out.site_ids = f.site_ids; else delete out.site_ids;
+    if (f.trigger === "camera_offline" && f.camera_ids.length) out.camera_ids = f.camera_ids; else delete out.camera_ids;
+    if (f.trigger === "server_offline" && f.server_ids.length) out.server_ids = f.server_ids; else delete out.server_ids;
     return out;
   };
 
@@ -198,6 +240,15 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
       return unwrap(await api.POST("/api/v1/rules", { body: { ...body, enabled: true } }));
     },
     onSuccess: onDone,
+    onError: async (error) => {
+      if (!(error instanceof ApiError) || error.status !== 409 || !rule) return;
+      try { setConflictRule(unwrap(await api.GET("/api/v1/rules/{ruleId}", { params: { path: { ruleId: rule.id } } }))); }
+      catch { setConflictRule(null); }
+    },
+  });
+  const simulate = useMutation({
+    mutationFn: async () => unwrap(await api.POST("/api/v1/rules/simulate", { body: { trigger_type: f.trigger, conditions: buildConditions(), hours: 24, limit: 100 } })),
+    onSuccess: setSimulation,
   });
 
   // Zones come from the cameras the rule watches (all of them when none is selected).
@@ -231,6 +282,17 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
           </Field>
         </div>
 
+        <Field label="Plantilla">
+          <Select value="" onChange={(e) => {
+            const item = templates.data?.find((template) => template.id === e.target.value);
+            if (!item) return;
+            setF((current) => ({ ...current, trigger: item.trigger_type, camera_ids: [], server_ids: [], site_ids: [], labels: item.conditions.labels ?? [], zones: item.conditions.zones ?? [], severities: item.conditions.severities ?? [], vehicle_types: item.conditions.vehicle_types ?? [], vehicle_colors: item.conditions.vehicle_colors ?? [], camera_group_ids: item.conditions.camera_group_ids ?? [], map_zone_ids: item.conditions.map_zone_ids ?? [], cooldown_seconds: item.conditions.cooldown_seconds === undefined ? "" : String(item.conditions.cooldown_seconds), schedule_days: item.conditions.schedule?.days_of_week ?? [], schedule_start: item.conditions.schedule?.start_time ?? "", schedule_end: item.conditions.schedule?.end_time ?? "", schedule_timezone: item.conditions.schedule?.timezone ?? "", minutes: String(item.conditions.duration_seconds ? Math.round(item.conditions.duration_seconds / 60) : defaultMinutes), create_alarm: item.actions.create_alarm ?? true, notify_in_app: item.actions.notify_in_app ?? true, severity: item.actions.severity ?? "warning", channel_ids: item.actions.channel_ids ?? [] }));
+          }}>
+            <option value="">Elegir plantilla…</option>
+            {(templates.data ?? []).map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}
+          </Select>
+        </Field>
+
         <CheckGroup
           legend="Sitios (vacío = todos)"
           options={(sites.data ?? []).map((site) => ({ value: site.id, label: site.name }))}
@@ -258,6 +320,30 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
         )}
         {f.trigger === "event" && (
           <>
+            <CheckGroup
+              legend="Grupos de cámaras (vacío = todos)"
+              options={(cameraGroups.data ?? []).map((group) => ({ value: group.id, label: group.name }))}
+              selected={f.camera_group_ids}
+              onToggle={(id) => setF({ ...f, camera_group_ids: flip(f.camera_group_ids, id) })}
+              empty="No hay grupos disponibles."
+            />
+            <ErrorNote error={cameraGroups.error} />
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Cooldown (segundos)" hint="Vacío usa el valor predeterminado de 300 segundos.">
+                <TextInput type="number" min={0} max={86400} value={f.cooldown_seconds} onChange={(e) => setF({ ...f, cooldown_seconds: e.target.value })} />
+              </Field>
+              <Field label="Zona horaria IANA" hint="Se prioriza la zona horaria del sitio; si no está configurada, se usa esta. Vacío usa UTC.">
+                <TextInput placeholder="America/Argentina/Buenos_Aires" value={f.schedule_timezone} onChange={(e) => setF({ ...f, schedule_timezone: e.target.value })} />
+              </Field>
+              <Field label="Desde (HH:MM)"><TextInput type="time" required={!!f.schedule_end} value={f.schedule_start} onChange={(e) => setF({ ...f, schedule_start: e.target.value })} /></Field>
+              <Field label="Hasta (HH:MM)"><TextInput type="time" required={!!f.schedule_start} value={f.schedule_end} onChange={(e) => setF({ ...f, schedule_end: e.target.value })} /></Field>
+            </div>
+            <CheckGroup
+              legend="Días de la semana (vacío = todos)"
+              options={["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"].map((label, value) => ({ value: String(value), label }))}
+              selected={f.schedule_days.map(String)}
+              onToggle={(day) => setF({ ...f, schedule_days: flip(f.schedule_days.map(String), day).map(Number) })}
+            />
             <div className="grid gap-4 sm:grid-cols-2">
               <TagInput
                 label="Etiquetas"
@@ -329,6 +415,12 @@ function RuleForm({ rule, onDone, onCancel }: { rule?: Rule; onDone: () => void;
         />
 
         <ErrorNote error={save.error} />
+        {conflictRule && <div role="alert" className="rounded-m3-md bg-warning/10 p-3 text-sm">La regla cambió en el servidor. Tus cambios no se guardaron. <Button type="button" variant="tonal" onClick={() => onReloadRule(conflictRule)}>Cargar versión actual</Button></div>}
+        <div className="flex flex-col gap-2 rounded-m3-md border border-outline-variant p-3">
+          <Button type="button" variant="tonal" disabled={simulate.isPending || f.trigger !== "event"} onClick={() => simulate.mutate()}>{simulate.isPending ? "Simulando…" : "Vista previa con eventos recientes"}</Button>
+          <ErrorNote error={simulate.error} />
+          {simulation && <div role="status" className="text-sm">Se evaluaron {simulation.evaluated} eventos recientes; {simulation.condition_matched} coinciden con las condiciones y {simulation.matched} quedan en la proyección de cooldown por cámara de {simulation.cooldown_seconds} s ({simulation.cooldown_suppressed} suprimidos). Es una estimación basada en los timestamps históricos; no consulta ejecuciones previas ni ejecuta acciones.{simulation.has_more && " Hay más eventos en la ventana; la vista previa usa los más recientes dentro del límite."}{simulation.matches.slice(0, 5).map((match) => <div key={match.event_id}>{match.camera_name} · {match.labels.join(", ")} · {new Date(match.start_time).toLocaleString()}</div>)}</div>}
+        </div>
         <div className="flex items-center gap-2 pt-2">
           <Button type="submit" variant="filled" disabled={save.isPending}>
             {save.isPending ? "Guardando…" : "Guardar"}
@@ -359,5 +451,22 @@ function CheckGroup({
         ))}
       </div>
     </fieldset>
+  );
+}
+
+function RuleHistory({ rule, onClose }: { rule: Rule; onClose: () => void }) {
+  const versions = useQuery({
+    queryKey: ["rule-versions", rule.id],
+    queryFn: async () => unwrap(await api.GET("/api/v1/rules/{ruleId}/versions", { params: { path: { ruleId: rule.id } } })).items,
+  });
+  return (
+    <Modal title={`Historial de ${rule.name}`} onClose={onClose}>
+      <ErrorNote error={versions.error} />
+      {versions.data?.map((item) => <article key={item.version} className="border-b border-outline-variant py-3">
+        <h3 className="font-semibold">Versión {item.version} · {new Date(item.created_at).toLocaleString()}</h3>
+        <p>{item.snapshot.name} · {triggerLabel[item.snapshot.trigger_type]} · {item.snapshot.enabled ? "Activa" : "Desactivada"}</p>
+      </article>)}
+      {versions.data?.length === 0 && <Empty>No hay versiones disponibles.</Empty>}
+    </Modal>
   );
 }

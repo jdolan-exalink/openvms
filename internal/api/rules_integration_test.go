@@ -11,14 +11,17 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/bootstrap"
+	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/notify"
 	"github.com/jdolan-exalink/openvms/internal/rules"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
 	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
@@ -37,6 +40,7 @@ func setupRulesTestWith(t *testing.T, deps notify.Deps) (*testAlarmsEnv, string)
 	pub := &testPublisher{}
 	handlers := &api.Handlers{
 		Inv:    env.Svc,
+		Events: &events.Service{Store: env.Store, Log: pgtest.Discard()},
 		Rules:  rules.NewService(env.Store, pub, pgtest.Discard()),
 		Notify: notify.NewService(env.Store, env.Sealer, deps, pgtest.Discard()),
 		Log:    pgtest.Discard(),
@@ -54,7 +58,7 @@ func setupRulesTestWith(t *testing.T, deps notify.Deps) (*testAlarmsEnv, string)
 		t.Fatal(err)
 	}
 	tenantID := env.Demo.TenantID
-	for _, p := range []authz.Permission{authz.NotificationsManage, authz.RulesManage, authz.RulesRead} {
+	for _, p := range []authz.Permission{authz.NotificationsManage, authz.RulesManage, authz.RulesRead, authz.EventsSearch, authz.CamerasView} {
 		if _, err := env.Svc.CreateGrant(ctx, env.Admin, inventory.GrantInput{
 			SubjectType: "user", SubjectID: manager.UserID, Permission: p,
 			Effect: authz.Allow, ScopeType: authz.ScopeTenant, ScopeID: &tenantID,
@@ -63,6 +67,118 @@ func setupRulesTestWith(t *testing.T, deps notify.Deps) (*testAlarmsEnv, string)
 		}
 	}
 	return &testAlarmsEnv{Env: env, server: ts, pub: pub}, token
+}
+
+func TestRuleTemplatesVersionsAndRealEventSimulation(t *testing.T) {
+	te, token := setupRulesTest(t)
+	cam := te.Cameras["frigate-h01/acceso_norte"]
+	if code, body := te.request("GET", "/api/v1/rules/templates", token, nil); code != 200 {
+		t.Fatalf("list templates code = %d: %s", code, body)
+	} else {
+		var templates gen.RuleTemplatesList
+		if err := json.Unmarshal(body, &templates); err != nil {
+			t.Fatal(err)
+		}
+		if len(templates.Items) < 2 {
+			t.Fatalf("templates = %d, want reusable templates", len(templates.Items))
+		}
+	}
+	code, body := te.request("POST", "/api/v1/rules", token, map[string]any{
+		"name": "Personas recientes", "trigger_type": "event",
+		"conditions": map[string]any{"camera_ids": []string{cam.ID.String()}, "labels": []string{"person"}},
+	})
+	if code != 201 {
+		t.Fatalf("create rule code = %d: %s", code, body)
+	}
+	var created gen.Rule
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatal(err)
+	}
+	if code, body := te.request("PATCH", "/api/v1/rules/"+created.Id.String(), token, map[string]any{"name": "Personas actuales"}); code != 200 {
+		t.Fatalf("update rule code = %d: %s", code, body)
+	}
+	code, body = te.request("GET", "/api/v1/rules/"+created.Id.String()+"/versions", token, nil)
+	if code != 200 {
+		t.Fatalf("list versions code = %d: %s", code, body)
+	}
+	var versions gen.RuleVersionsList
+	if err := json.Unmarshal(body, &versions); err != nil {
+		t.Fatal(err)
+	}
+	if len(versions.Items) != 2 || versions.Items[0].Version != 2 || versions.Items[1].Version != 1 {
+		t.Fatalf("versions = %+v, want newest-first version 2 and version 1", versions.Items)
+	}
+
+	olderEventID, newerEventID := uuid.New(), uuid.New()
+	err := te.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		for _, seed := range []struct {
+			id  uuid.UUID
+			age string
+		}{{olderEventID, "60 seconds"}, {newerEventID, "30 seconds"}} {
+			if _, err := tx.Exec(context.Background(), `INSERT INTO events (id, tenant_id, site_id, server_id, camera_id, remote_id, severity, start_time, labels) VALUES ($1,$2,$3,$4,$5,$6,'alert',now() - $7::interval,ARRAY['rule-sim-p205']::text[])`, seed.id, cam.TenantID, cam.SiteID, cam.ServerID, cam.ID, "rule-simulation-"+seed.id.String(), seed.age); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, body = te.request("POST", "/api/v1/rules/simulate", token, map[string]any{
+		"trigger_type": "event", "conditions": map[string]any{"camera_ids": []string{cam.ID.String()}, "labels": []string{"rule-sim-p205"}, "cooldown_seconds": 45},
+		"hours": 24, "limit": 100,
+	})
+	if code != 200 {
+		t.Fatalf("simulate code = %d: %s", code, body)
+	}
+	var simulation gen.RuleSimulation
+	if err := json.Unmarshal(body, &simulation); err != nil {
+		t.Fatal(err)
+	}
+	if simulation.Evaluated < 1 {
+		t.Fatalf("evaluated = %d, want recent tenant events", simulation.Evaluated)
+	}
+	if simulation.CooldownSeconds != 45 || simulation.ConditionMatched != 2 || simulation.Matched != 1 || simulation.CooldownSuppressed != 1 {
+		t.Fatalf("simulation = evaluated %d, conditions %d, matched %d, suppressed %d, cooldown %d; want 2, 2, 1, 1, 45", simulation.Evaluated, simulation.ConditionMatched, simulation.Matched, simulation.CooldownSuppressed, simulation.CooldownSeconds)
+	}
+	if len(simulation.Matches) != 1 || simulation.Matches[0].EventId != olderEventID {
+		t.Fatalf("cooldown projection matches = %+v, want only the earlier real event %s", simulation.Matches, olderEventID)
+	}
+	code, body = te.request("POST", "/api/v1/rules/simulate", token, map[string]any{
+		"trigger_type": "event", "conditions": map[string]any{"camera_ids": []string{cam.ID.String()}, "labels": []string{"rule-sim-p205"}},
+		"hours": 24, "limit": 1,
+	})
+	if code != 200 {
+		t.Fatalf("bounded simulation code = %d: %s", code, body)
+	}
+	var bounded gen.RuleSimulation
+	if err := json.Unmarshal(body, &bounded); err != nil {
+		t.Fatal(err)
+	}
+	if bounded.Evaluated != 1 || !bounded.HasMore {
+		t.Fatalf("bounded simulation evaluated=%d has_more=%v; want 1 and true", bounded.Evaluated, bounded.HasMore)
+	}
+}
+
+func TestRuleCameraReferencesRequirePerUserVisibility(t *testing.T) {
+	te, _ := setupRulesTest(t)
+	ctx := context.Background()
+	actor, token, err := bootstrap.TenantUser(ctx, te.Store, te.Demo.TenantID, "rules-manager-no-camera-view")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, permission := range []authz.Permission{authz.RulesManage, authz.RulesRead} {
+		if _, err := te.Svc.CreateGrant(ctx, te.Admin, inventory.GrantInput{SubjectType: "user", SubjectID: actor.UserID, Permission: permission, Effect: authz.Allow, ScopeType: authz.ScopeTenant, ScopeID: &te.Demo.TenantID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cam := te.Cameras["frigate-h01/acceso_norte"]
+	code, body := te.request("POST", "/api/v1/rules", token, map[string]any{
+		"name": "Hidden camera", "trigger_type": "event", "conditions": map[string]any{"camera_ids": []string{cam.ID.String()}},
+	})
+	if code != 400 {
+		t.Fatalf("inaccessible camera reference code = %d, want 400: %s", code, body)
+	}
 }
 
 func TestRulesCRUDAndRBAC(t *testing.T) {

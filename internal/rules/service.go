@@ -63,6 +63,106 @@ type Service struct {
 	ZoneResolver ZoneResolver
 }
 
+// RuleVersionSnapshot is an immutable rule version exposed to authorized tenant users.
+type RuleVersionSnapshot struct {
+	Version   int             `json:"version"`
+	Snapshot  json.RawMessage `json:"snapshot"`
+	ChangedBy *uuid.UUID      `json:"changed_by,omitempty"`
+	CreatedAt time.Time       `json:"created_at"`
+}
+
+// AuthorizeSimulation requires rule-management permission without changing rule state.
+func (s *Service) AuthorizeSimulation(ctx context.Context, actor authz.Actor) error {
+	if actor.TenantID == nil {
+		return &access.ForbiddenError{Permission: authz.RulesManage}
+	}
+	return s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		chk, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		return chk.Require(authz.RulesManage, access.Tenant(*actor.TenantID))
+	})
+}
+
+// SimulationEventMetadata resolves the same site timezone, group membership, and map-zone
+// relationships used by production evaluation for a camera visible to the caller.
+func (s *Service) SimulationEventMetadata(ctx context.Context, actor authz.Actor, cameraID, siteID uuid.UUID, zones []string) (string, []uuid.UUID, []uuid.UUID, error) {
+	if actor.TenantID == nil {
+		return "", nil, nil, &access.ForbiddenError{Permission: authz.RulesManage}
+	}
+	var timezone string
+	var groups, mapZones []uuid.UUID
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		chk, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		if err := chk.Require(authz.RulesManage, access.Tenant(*actor.TenantID)); err != nil {
+			return err
+		}
+		cam, err := q.GetCamera(ctx, cameraID)
+		if err != nil {
+			return store.Classify(err)
+		}
+		if cam.TenantID != *actor.TenantID || cam.SiteID != siteID {
+			return store.ErrNotFound
+		}
+		site, err := q.GetSite(ctx, siteID)
+		if err != nil {
+			return store.Classify(err)
+		}
+		timezone = site.Timezone
+		groups, err = q.ListCameraGroupsForCamera(ctx, db.ListCameraGroupsForCameraParams{TenantID: *actor.TenantID, CameraID: cameraID})
+		return err
+	})
+	if err != nil {
+		return "", nil, nil, err
+	}
+	if s.ZoneResolver != nil {
+		mapZones, err = s.ZoneResolver.ZonesForEvent(ctx, cameraID, zones)
+		if err != nil {
+			return "", nil, nil, err
+		}
+	}
+	return timezone, groups, mapZones, nil
+}
+
+// ListRuleVersions returns snapshots only when the rule belongs to the actor's tenant.
+func (s *Service) ListRuleVersions(ctx context.Context, actor authz.Actor, id uuid.UUID) ([]RuleVersionSnapshot, error) {
+	if actor.TenantID == nil {
+		return nil, &access.ForbiddenError{Permission: authz.RulesRead}
+	}
+	var out []RuleVersionSnapshot
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		chk, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		if err := chk.Require(authz.RulesRead, access.Tenant(*actor.TenantID)); err != nil {
+			return err
+		}
+		if _, err := q.GetRule(ctx, db.GetRuleParams{ID: id, TenantID: *actor.TenantID}); err != nil {
+			return store.Classify(err)
+		}
+		rows, err := q.ListRuleVersions(ctx, db.ListRuleVersionsParams{TenantID: *actor.TenantID, RuleID: id})
+		if err != nil {
+			return err
+		}
+		out = make([]RuleVersionSnapshot, 0)
+		for _, row := range rows {
+			var item RuleVersionSnapshot
+			item.Version = int(row.Version)
+			item.Snapshot = row.Snapshot
+			item.ChangedBy = row.ChangedBy
+			item.CreatedAt = row.CreatedAt
+			out = append(out, item)
+		}
+		return nil
+	})
+	return out, err
+}
+
 func NewService(st *store.Store, pub Publisher, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
@@ -196,7 +296,7 @@ func (s *Service) CreateRule(ctx context.Context, actor authz.Actor, req CreateR
 		if err := checkChannels(ctx, q, *actor.TenantID, req.Actions.ChannelIDs); err != nil {
 			return err
 		}
-		if err := checkConditionRefs(ctx, q, *actor.TenantID, req.Conditions); err != nil {
+		if err := checkConditionRefs(ctx, q, chk, *actor.TenantID, req.Conditions); err != nil {
 			return err
 		}
 
@@ -308,7 +408,7 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 				return err
 			}
 			if req.Conditions != nil {
-				if err := checkConditionRefs(ctx, q, *actor.TenantID, effCond); err != nil {
+				if err := checkConditionRefs(ctx, q, chk, *actor.TenantID, effCond); err != nil {
 					return err
 				}
 			}
@@ -861,7 +961,7 @@ func uniqueIDs(ids []uuid.UUID) []uuid.UUID {
 
 // checkConditionRefs rejects ids in the conditions that do not exist in the caller's tenant
 // (row-level security and the tenant filter hide other tenants' rows from the count).
-func checkConditionRefs(ctx context.Context, q *db.Queries, tenantID uuid.UUID, c Conditions) error {
+func checkConditionRefs(ctx context.Context, q *db.Queries, chk *access.Checker, tenantID uuid.UUID, c Conditions) error {
 	checks := []struct {
 		field string
 		ids   []uuid.UUID
@@ -894,6 +994,29 @@ func checkConditionRefs(ctx context.Context, q *db.Queries, tenantID uuid.UUID, 
 		}
 		if int(n) != len(ids) {
 			return &ValidationError{Msg: "unknown or inaccessible id in conditions." + ch.field}
+		}
+	}
+	for _, id := range uniqueIDs(c.CameraIDs) {
+		cam, err := q.GetCamera(ctx, id)
+		if err != nil {
+			return store.Classify(err)
+		}
+		if cam.TenantID != tenantID || !chk.Can(authz.CamerasView, access.Camera(tenantID, cam.SiteID, cam.ServerID, cam.ID, cam.GroupIds)) {
+			return &ValidationError{Msg: "unknown or inaccessible id in conditions.camera_ids"}
+		}
+	}
+	for _, id := range uniqueIDs(c.CameraGroupIDs) {
+		if !chk.Can(authz.CamerasView, access.CameraGroup(tenantID, id)) {
+			return &ValidationError{Msg: "unknown or inaccessible id in conditions.camera_group_ids"}
+		}
+	}
+	for _, id := range uniqueIDs(c.MapZoneIDs) {
+		zone, err := q.GetMapZone(ctx, db.GetMapZoneParams{ID: id, TenantID: &tenantID})
+		if err != nil {
+			return store.Classify(err)
+		}
+		if !chk.Can(authz.MapsView, access.Site(tenantID, zone.SiteID)) {
+			return &ValidationError{Msg: "unknown or inaccessible id in conditions.map_zone_ids"}
 		}
 	}
 	return nil

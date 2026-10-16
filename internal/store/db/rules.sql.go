@@ -8,6 +8,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -237,6 +238,81 @@ func (q *Queries) ListActiveRulesByTrigger(ctx context.Context, arg ListActiveRu
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCameraGroupsForCamera = `-- name: ListCameraGroupsForCamera :many
+SELECT group_id FROM camera_group_members
+WHERE tenant_id = $1 AND camera_id = $2
+ORDER BY group_id
+`
+
+type ListCameraGroupsForCameraParams struct {
+	TenantID uuid.UUID
+	CameraID uuid.UUID
+}
+
+func (q *Queries) ListCameraGroupsForCamera(ctx context.Context, arg ListCameraGroupsForCameraParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listCameraGroupsForCamera, arg.TenantID, arg.CameraID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var group_id uuid.UUID
+		if err := rows.Scan(&group_id); err != nil {
+			return nil, err
+		}
+		items = append(items, group_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRuleVersions = `-- name: ListRuleVersions :many
+SELECT version, snapshot, changed_by, created_at
+FROM rule_versions
+WHERE tenant_id = $1 AND rule_id = $2
+ORDER BY version DESC
+`
+
+type ListRuleVersionsParams struct {
+	TenantID uuid.UUID
+	RuleID   uuid.UUID
+}
+
+type ListRuleVersionsRow struct {
+	Version   int32
+	Snapshot  json.RawMessage
+	ChangedBy *uuid.UUID
+	CreatedAt time.Time
+}
+
+func (q *Queries) ListRuleVersions(ctx context.Context, arg ListRuleVersionsParams) ([]ListRuleVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listRuleVersions, arg.TenantID, arg.RuleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRuleVersionsRow{}
+	for rows.Next() {
+		var i ListRuleVersionsRow
+		if err := rows.Scan(
+			&i.Version,
+			&i.Snapshot,
+			&i.ChangedBy,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
