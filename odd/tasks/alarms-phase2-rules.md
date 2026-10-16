@@ -93,4 +93,5 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
   web edit form can drop API-only condition fields (to fix in P2-05).
 
 ## Next step
-Review slice `2161587..HEAD` (correction + deny mirror + doc), then P2-04 (route: delegated writer).
+P2-04 (route: delegated writer). Slice `2161587..1ba9bd0` assessed medium / `under_budget` (318 lines):
+review pending in the slice until the next commit reaches the budget; reviewed boundary stays `2161587`.
