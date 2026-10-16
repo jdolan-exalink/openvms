@@ -37,6 +37,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/api"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/bootstrap"
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/control"
@@ -141,6 +142,14 @@ func run() error {
 	}
 
 	st := &dbstore.Store{Pool: pool}
+	// First-start seeding is best effort: retried briefly, then logged; it never stops the API.
+	retry := bootstrap.DefaultRetrier()
+	_ = retry.Do(ctx, log, "initial admin", func() error {
+		return bootstrap.EnsureInitialAdmin(ctx, st, cfg.AdminUsername, cfg.AdminPassword, log)
+	})
+	_ = retry.Do(ctx, log, "default tenant", func() error {
+		return bootstrap.EnsureDefaultTenant(ctx, st, cfg.DefaultTenant, cfg.DefaultSite, cfg.DefaultSiteTZ, log)
+	})
 	inv := inventory.New(st, sealer, log)
 	inv.Blobs = store
 	adapters := inventory.NewAdapters(inv)

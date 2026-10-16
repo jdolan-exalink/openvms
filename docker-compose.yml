@@ -21,6 +21,13 @@ x-go-env: &go-env
   # Feature flags (comma-separated, docs/live-view-architecture.md). The code defaults every
   # flag to off; the local stack enables the Live View P0 flags for testing.
   OPENVMS_FEATURES: ${OPENVMS_FEATURES:-persistentPlayers,videoSurfaceLayer}
+  # First platform admin on a fresh install (never resets an existing one). Change the default.
+  OPENVMS_ADMIN_USERNAME: ${OPENVMS_ADMIN_USERNAME:-admin}
+  OPENVMS_ADMIN_PASSWORD: ${OPENVMS_ADMIN_PASSWORD:-}
+  # Tenant and site created on first start only when the install has no tenant at all.
+  OPENVMS_DEFAULT_TENANT: ${OPENVMS_DEFAULT_TENANT:-openvms}
+  OPENVMS_DEFAULT_SITE: ${OPENVMS_DEFAULT_SITE:-Sitio principal}
+  OPENVMS_DEFAULT_SITE_TZ: ${OPENVMS_DEFAULT_SITE_TZ:-America/Argentina/Cordoba}
   SESSION_TTL: ${SESSION_TTL:-12h}
   SESSION_IDLE: ${SESSION_IDLE:-2h}
 

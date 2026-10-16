@@ -136,3 +136,8 @@ DELETE FROM user_group_members WHERE group_id = @group_id;
 
 -- name: RemoveUserFromGroups :exec
 DELETE FROM user_group_members WHERE user_id = @user_id;
+
+-- name: CountAllPlatformUsers :one
+-- Platform users in any state, soft-deleted included: the first-start bootstrap must not
+-- recreate an admin an operator removed.
+SELECT count(*) FROM users WHERE tenant_id IS NULL;

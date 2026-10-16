@@ -8,6 +8,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,20 +54,8 @@ func PlatformAdmin(ctx context.Context, st *store.Store, username string) (authz
 	var actor authz.Actor
 	var token string
 	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
-		u, err := q.GetUserByUsername(ctx, username)
+		u, err := ensurePlatformAdmin(ctx, q, username)
 		if err != nil {
-			if !errors.Is(store.Classify(err), store.ErrNotFound) {
-				return err
-			}
-			u, err = q.CreateUser(ctx, db.CreateUserParams{Username: username, DisplayName: username})
-			if err != nil {
-				return fmt.Errorf("create user: %w", err)
-			}
-		}
-		if u.TenantID != nil {
-			return fmt.Errorf("user %q belongs to a tenant; pick another name", username)
-		}
-		if _, err := reconcileCatalogGrants(ctx, q, u.ID); err != nil {
 			return err
 		}
 		token, err = IssueToken(ctx, q, u.ID, "bootstrap", 0)
@@ -72,6 +63,166 @@ func PlatformAdmin(ctx context.Context, st *store.Store, username string) (authz
 		return err
 	})
 	return actor, token, err
+}
+
+// ensurePlatformAdmin creates (or reuses) a platform user and reconciles every
+// platform catalog grant. It issues no token.
+func ensurePlatformAdmin(ctx context.Context, q *db.Queries, username string) (db.User, error) {
+	u, err := q.GetUserByUsername(ctx, username)
+	if err != nil {
+		if !errors.Is(store.Classify(err), store.ErrNotFound) {
+			return db.User{}, err
+		}
+		u, err = q.CreateUser(ctx, db.CreateUserParams{Username: username, DisplayName: username})
+		if err != nil {
+			return db.User{}, fmt.Errorf("create user: %w", err)
+		}
+	}
+	if u.TenantID != nil {
+		return db.User{}, fmt.Errorf("user %q belongs to a tenant; pick another name", username)
+	}
+	if _, err := reconcileCatalogGrants(ctx, q, u.ID); err != nil {
+		return db.User{}, err
+	}
+	return u, nil
+}
+
+// generatedPasswordLen is the length of the random initial admin password.
+const generatedPasswordLen = 20
+
+// GeneratePassword returns a random alphanumeric password with lower, upper and digit
+// characters, so it satisfies identity.CheckPolicy.
+func GeneratePassword() (string, error) {
+	const lower, upper, digits = "abcdefghjkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789"
+	all := lower + upper + digits
+	for {
+		b := make([]byte, generatedPasswordLen)
+		if _, err := rand.Read(b); err != nil {
+			return "", err
+		}
+		for i := range b {
+			b[i] = all[int(b[i])%len(all)]
+		}
+		pw := string(b)
+		if strings.ContainsAny(pw, lower) && strings.ContainsAny(pw, upper) && strings.ContainsAny(pw, digits) {
+			return pw, nil
+		}
+	}
+}
+
+// EnsureInitialAdmin creates the platform admin on a fresh install so the first login needs
+// no vmsctl step. It creates or modifies nothing when a user with that name exists or any
+// platform user already has a password, so an existing install is never reset. With an empty
+// password it generates a random one, forces a change at first login and logs it once at WARN
+// (the only disclosure); a configured password is used as is. A configured password failing
+// the policy is logged and skipped.
+func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password string, log *slog.Logger) error {
+	generated := password == ""
+	created := false
+	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		// Existence first: on an existing install the configured password is irrelevant.
+		n, err := q.CountAllPlatformUsers(ctx)
+		if err != nil || n > 0 {
+			return err
+		}
+		if _, err := q.GetUserByUsername(ctx, username); err == nil {
+			log.Warn("no platform admin was created: the username belongs to a tenant user; "+
+				"set OPENVMS_ADMIN_USERNAME to another name or run `vmsctl bootstrap`", "username", username)
+			return nil
+		} else if !errors.Is(store.Classify(err), store.ErrNotFound) {
+			return err
+		}
+		if generated {
+			// The password is logged only after the transaction commits.
+			if password, err = GeneratePassword(); err != nil {
+				return err
+			}
+		} else if err := identity.CheckPolicy(password, username); err != nil {
+			log.Error("initial admin not created: OPENVMS_ADMIN_PASSWORD rejected", "username", username, "error", err)
+			return nil
+		}
+		u, err := ensurePlatformAdmin(ctx, q, username)
+		if err != nil {
+			return err
+		}
+		hash, err := identity.HashPassword(password)
+		if err != nil {
+			return err
+		}
+		if err := q.SetPassword(ctx, db.SetPasswordParams{ID: u.ID, PasswordHash: hash, MustChangePassword: generated}); err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
+	if errors.Is(store.Classify(err), store.ErrConflict) {
+		log.Info("initial admin already created by a concurrent start", "username", username)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	switch {
+	case created && generated:
+		log.Warn("initial admin created: log in with this one-time password and change it after first login", "username", username, "password", password)
+	case created:
+		log.Info("initial admin created", "username", username)
+	}
+	return nil
+}
+
+var (
+	nonSlugRe     = regexp.MustCompile(`[^a-z0-9]+`)
+	tenantSlugRe  = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{1,62}$`)
+	defaultSiteTZ = "America/Argentina/Cordoba"
+)
+
+// EnsureDefaultTenant creates one tenant and one site inside it on an install that has no
+// tenant at all, so the first admin has somewhere to register servers. Any existing tenant
+// makes it a no-op: nothing is renamed, recreated or added, so renames made from the web
+// survive restarts. Names that are empty or yield no valid slug are logged and skipped.
+// Startup creation has no acting user, so it writes no audit entry.
+func EnsureDefaultTenant(ctx context.Context, st *store.Store, tenantName, siteName, timezone string, log *slog.Logger) error {
+	tenantName, siteName = strings.TrimSpace(tenantName), strings.TrimSpace(siteName)
+	slug := strings.Trim(nonSlugRe.ReplaceAllString(strings.ToLower(tenantName), "-"), "-")
+	if siteName == "" || !tenantSlugRe.MatchString(slug) {
+		log.Error("default tenant not created: OPENVMS_DEFAULT_TENANT and OPENVMS_DEFAULT_SITE need a usable name",
+			"tenant", tenantName, "site", siteName)
+		return nil
+	}
+	if _, err := time.LoadLocation(timezone); err != nil || timezone == "" {
+		if timezone != "" {
+			log.Error("invalid OPENVMS_DEFAULT_SITE_TZ; using the default", "timezone", timezone, "default", defaultSiteTZ)
+		}
+		timezone = defaultSiteTZ
+	}
+	created := false
+	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		n, err := q.CountAllTenants(ctx)
+		if err != nil || n > 0 {
+			return err
+		}
+		t, err := q.CreateTenant(ctx, db.CreateTenantParams{Slug: slug, Name: tenantName})
+		if err != nil {
+			return err
+		}
+		if _, err := q.CreateSite(ctx, db.CreateSiteParams{TenantID: t.ID, Name: siteName, Timezone: timezone}); err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
+	if errors.Is(store.Classify(err), store.ErrConflict) {
+		log.Info("default tenant already created by a concurrent start", "tenant", tenantName)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if created {
+		log.Info("default tenant created", "tenant", tenantName, "site", siteName)
+	}
+	return nil
 }
 
 // SyncPlatformAdmin adds missing platform-scope catalog ALLOW grants to an

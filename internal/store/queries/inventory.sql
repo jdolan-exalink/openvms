@@ -370,3 +370,8 @@ UPDATE camera_folders SET sort_order = @sort_order, updated_at = now() WHERE id 
 -- name: SetCameraPlacement :exec
 UPDATE cameras SET folder_id = @folder_id, sort_order = @sort_order, updated_at = now()
 WHERE id = @id AND deleted_at IS NULL;
+
+-- name: CountAllTenants :one
+-- Tenants in any state, soft-deleted included: the first-start bootstrap must not
+-- resurrect a tenant an operator removed.
+SELECT count(*) FROM tenants;

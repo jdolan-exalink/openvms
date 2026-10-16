@@ -77,6 +77,17 @@ type Config struct {
 	ExportGlobalBandwidthMbps int
 	ExportServerBandwidthMbps int
 
+	// AdminUsername and AdminPassword (OPENVMS_ADMIN_USERNAME / OPENVMS_ADMIN_PASSWORD) seed the
+	// first platform admin on a fresh install. An empty password makes the API generate and log a random one.
+	AdminUsername string
+	AdminPassword string
+	// DefaultTenant and DefaultSite (OPENVMS_DEFAULT_TENANT / OPENVMS_DEFAULT_SITE) name the
+	// tenant and site created when the install has no tenant at all.
+	DefaultTenant string
+	DefaultSite   string
+	// DefaultSiteTZ (OPENVMS_DEFAULT_SITE_TZ) is the IANA timezone of that site.
+	DefaultSiteTZ string
+
 	// WorkerURL is the worker probe address. The API reads ONNX throughput from it.
 	WorkerURL string
 }
@@ -138,6 +149,11 @@ func Load(service string) (Config, error) {
 		NATSURL:                     str("NATS_URL", "nats://localhost:4222"),
 		ShutdownTimeout:             duration("SHUTDOWN_TIMEOUT", 15*time.Second),
 		WorkerURL:                   str("WORKER_URL", "http://worker:8081"),
+		AdminUsername:               str("OPENVMS_ADMIN_USERNAME", "admin"),
+		AdminPassword:               str("OPENVMS_ADMIN_PASSWORD", ""),
+		DefaultTenant:               str("OPENVMS_DEFAULT_TENANT", "openvms"),
+		DefaultSite:                 str("OPENVMS_DEFAULT_SITE", "Sitio principal"),
+		DefaultSiteTZ:               str("OPENVMS_DEFAULT_SITE_TZ", "America/Argentina/Cordoba"),
 		TrustForwardedFor:           boolean("TRUST_FORWARDED_FOR", false),
 		HealthInterval:              duration("HEALTH_INTERVAL", 30*time.Second),
 		EventSyncInterval:           duration("EVENT_SYNC_INTERVAL", 5*time.Second),
