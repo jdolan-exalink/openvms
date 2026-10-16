@@ -14,7 +14,7 @@ unsettled and is intentionally deferred to a later product decision.
 ## Tasks
 - [x] HTTPS-01 — Configure explicit operator-controlled Caddy ingress proxy CIDRs (empty/default deny); preserve HTTPS forwarding only for a trusted immediate peer and enforce a single exact `https` protocol value. Add regression tests for trusted, untrusted/spoofed, duplicate/multi-hop, and ordinary HTTP inputs. Route: delegated direct; strict TDD.
 - [ ] HTTPS-02 — Decide LAN endpoint/certificate strategy (pending product choice; no implementation in this task).
-- [ ] HTTPS-03 — Close with focused/broader verification, isolated runtime evidence where available, work-unit commit, and tracker/mirror sync.
+- [x] HTTPS-03 — Close with focused/broader verification, isolated runtime evidence, work-unit commit, and tracker/mirror sync.
 
 ## Alarms closeout context
 - P2-05 native review was approved and acknowledged; authority burned for `review-41b36ff5391a45cd`.
@@ -27,6 +27,7 @@ unsettled and is intentionally deferred to a later product decision.
 - Isolated local Caddy v2.11.7 harness (actual Caddyfile HTTP portion, temporary mock API, host loopback only): untrusted spoof → 403 with upstream `http`; ordinary HTTP → 403/`http`; trusted single `https` → 204/`https`; duplicate and comma-chain → 400 before upstream. Harness container/process/temp files were removed. No running services, volumes, certificates, or `.env` were changed.
 - Caddy global trust is set by `HTTPS_INGRESS_PROXY_CIDRS`; the empty Compose default is a deny-all proxy list. Operators must set whitespace-separated CIDRs only for actual ingress proxies; API `CREDENTIAL_TRUSTED_PROXY_CIDRS` remains unchanged.
 - Rollback boundary: revert the HTTPS-01 work-unit commit to remove only Caddy ingress trust/guard, its compose environment, contract assertions, and this tracker update. Direct TLS behavior, API credential allowlist, mTLS, LAN certificate/bootstrap behavior remain unchanged.
+- Work-unit commit: `98fd010c99674481e7c6ee28efa407fda065e2a7` (`fix(proxy): trust configured HTTPS ingress peers`). Parent-owned native review remains outside this worker's scope.
 
 ## Objective
 A deployment and agent-install strategy that works for most environments (LAN by IP or hostname,
@@ -68,4 +69,4 @@ cases), instead of fixing a single scenario. The SSH password must never be stor
 - Whether to remove the 8443 listener and self-signed bootstrap entirely after the above lands.
 
 ## Next step
-Research spike on Caddy internal CA + IP/no-SNI, then a concrete plan and task list.
+Resolve the pending LAN endpoint/certificate product choice (HTTPS-02) before changing direct-LAN TLS behavior. The trusted ingress proxy fix is complete; agent mTLS and existing certificate bind/bootstrap behavior are unchanged.
