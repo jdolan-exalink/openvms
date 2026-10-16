@@ -56,6 +56,38 @@ Levanta Postgres, Valkey, NATS, SeaweedFS, Mosquitto y los Frigate simulados en 
 
 `make help` lista el resto: `test`, `test-integration`, `lint`, `generate`, `build`.
 
+### HTTPS directo en la LAN
+
+`docker compose up` genera en el primer inicio un certificado TLS autofirmado y lo conserva
+en el volumen Docker `openvms-web-tls`. Configurá explícitamente todas las direcciones que
+usarás en el navegador; el contenedor no puede descubrir de forma fiable las IP de la interfaz
+del host:
+
+```dotenv
+OPENVMS_HTTPS_SANS=localhost,192.168.1.20,openvms.lan,fd00::20
+```
+
+Separá los SAN por comas, sin espacios. Al cambiar la lista o cuando queden menos de 30 días
+de validez, el próximo inicio genera un nuevo certificado. El valor predeterminado solo cubre
+`localhost`, `127.0.0.1` y `::1`. HTTPS sigue disponible en el puerto 8443; HTTP en 8000 no
+cambia. El certificado autofirmado no hace que el navegador confíe automáticamente en él:
+hay que instalar/confiar el certificado y acceder con un nombre/IP incluido en sus SAN.
+`OPENVMS_HTTPS_DEFAULT_SNI` debe ser uno de los nombres incluidos en `OPENVMS_HTTPS_SANS`;
+por defecto es `OPENVMS_HTTPS_SITE_IPV4` si está definida (que también es el SAN de respaldo)
+o `localhost` en caso contrario.
+
+El generador espera hasta 30 segundos si otra instancia está creando el certificado y luego
+falla con un mensaje de recuperación; nunca elimina automáticamente un bloqueo porque podría
+pertenecer a un inicio todavía activo. Si el bloqueo persiste, detené el contenedor web y
+verificá que no haya otro proceso de inicio usando ese volumen antes de quitar
+`.generation-lock` del volumen `openvms-web-tls` y volver a iniciar.
+Con el bloqueo adquirido, el siguiente inicio también limpia directorios temporales de
+generaciones interrumpidas y conserva intacta la generación activa.
+
+Para conservar un certificado y una clave externos, definí ambos
+`OPENVMS_WEB_TLS_CERT_HOST_FILE` y `OPENVMS_WEB_TLS_KEY_HOST_FILE` con rutas del host. El
+contenedor valida que sean legibles, válidos y que coincidan; no reemplaza esos archivos.
+
 ## Estructura
 
 ```text

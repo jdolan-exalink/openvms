@@ -1,11 +1,16 @@
 # SITE_ADDRESS=:80 keeps the existing local HTTP listener.
 # The separately configured HTTPS listener is available on host port 8443 and
-# uses the operator-bootstrapped certificate for HTTPS_SITE_ADDRESS.
+# uses a persisted self-signed certificate for the configured HTTPS SAN set.
 {
 	auto_https disable_redirects
+	servers {
+		# Only operator-configured ingress proxy peers may assert forwarded HTTPS.
+		# The empty Compose default means no proxy peers are trusted.
+		trusted_proxies static {$HTTPS_INGRESS_PROXY_CIDRS}
+	}
 	# IP-literal HTTPS clients omit SNI. Select the configured IP-SAN certificate
 	# for those handshakes without weakening certificate verification.
-	default_sni {$HTTPS_SITE_ADDRESS:10.1.1.24}
+	default_sni {$OPENVMS_HTTPS_DEFAULT_SNI:localhost}
 }
 
 (openvms_site_routes) {
@@ -20,6 +25,16 @@
 		# host, so OSM raster fallback keeps both spellings).
 		Content-Security-Policy "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' data: https://cdn.jsdelivr.net; img-src 'self' data: blob: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://tiles.openfreemap.org; connect-src 'self' ws: wss: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://tiles.openfreemap.org; media-src 'self' blob:; frame-src 'self' blob:; manifest-src 'self'; worker-src 'self'; frame-ancestors 'self'"
 		-Server
+	}
+
+	# Caddy's reverse_proxy normalizes forwarded headers. Reject comma-joined XFP
+	# values first, before duplicate fields can be collapsed to a single value.
+	@api_forwarded_proto_chain {
+		path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs
+		expression `{http.request.header.X-Forwarded-Proto}.contains(",")`
+	}
+	handle @api_forwarded_proto_chain {
+		respond "invalid forwarded protocol" 400
 	}
 
 	@api path /api/* /media/* /ws /ws/* /health/* /openapi.json /docs
@@ -60,11 +75,10 @@
 	import openvms_site_routes
 }
 
-# Manual TLS prevents Caddy from creating certificates or redirecting the HTTP site.
-# The explicit self-signed/IP-SAN cert must be provisioned out of band and trusted by
-# the operator's browser. TLS is restricted to modern protocol versions.
-{$HTTPS_SITE_ADDRESS:10.1.1.24}:443 {
-	tls /etc/caddy/tls.crt /etc/caddy/tls.key {
+# TLS is restricted to modern protocol versions. The entrypoint provisions a leaf
+# certificate for explicit configured SANs or validates an operator-supplied pair.
+{$HTTPS_SITE_ADDRESS::443} {
+	tls {$CADDY_TLS_CERT_FILE:/var/lib/openvms/tls/current/tls.crt} {$CADDY_TLS_KEY_FILE:/var/lib/openvms/tls/current/tls.key} {
 		protocols tls1.2 tls1.3
 	}
 	import openvms_site_routes

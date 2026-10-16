@@ -10,5 +10,10 @@ COPY apps/web ./apps/web
 RUN NODE_OPTIONS=--max-old-space-size=1024 pnpm --filter @openvms/web build
 
 FROM caddy:2-alpine
+RUN apk add --no-cache coreutils openssl
 COPY deploy/docker/Caddyfile /etc/caddy/Caddyfile
+COPY deploy/docker/prepare-web-tls.sh /usr/local/bin/prepare-web-tls.sh
+COPY deploy/docker/web-entrypoint.sh /usr/local/bin/web-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/prepare-web-tls.sh /usr/local/bin/web-entrypoint.sh
 COPY --from=build /src/apps/web/dist /srv
+ENTRYPOINT ["/usr/local/bin/web-entrypoint.sh"]
