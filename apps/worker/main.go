@@ -34,6 +34,7 @@ import (
 	// of another package's dependency tree.
 	_ "time/tzdata"
 
+	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
@@ -144,6 +145,10 @@ func run() error {
 		},
 	}
 	go syncer.Run(ctx)
+
+	// Closes open/acknowledged alarms that saw no new event for alarm_settings.auto_close_after.
+	autoCloser := &alarms.AutoCloser{Store: st, Pub: &jetstreamPublisher{js: js}, Log: log}
+	go autoCloser.Run(ctx)
 
 	// Delivers the outbox rows that rule firings enqueue for external channels.
 	deliveries := &notify.Worker{
