@@ -1935,7 +1935,7 @@ export interface paths {
         };
         /**
          * List alarms
-         * @description Alarms for alert-severity events the caller can view via alarms.view, newest first.
+         * @description Alarms for alert-severity events the caller can view via alarms.view, newest activity first.
          */
         get: operations["listAlarms"];
         put?: never;
@@ -2156,6 +2156,28 @@ export interface paths {
          * @description Returns users in the tenant holding alarms.manage on the alarm's camera.
          */
         get: operations["listAlarmAssignees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/alarms/{alarmId}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * List events correlated into an alarm
+         * @description Returns the events linked in alarm_events for this alarm in chronological order. Requires alarms.view on the alarm's camera.
+         */
+        get: operations["listAlarmEvents"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4309,12 +4331,42 @@ export interface components {
             closed_by_name?: string | null;
             /** Format: date-time */
             closed_at?: string | null;
+            /** @description Number of correlated events folded into this alarm. */
+            event_count?: number;
+            /**
+             * Format: date-time
+             * @description Start time of the first event correlated into this alarm.
+             */
+            first_event_at?: string;
+            /**
+             * Format: date-time
+             * @description Start time of the most recent event correlated into this alarm.
+             */
+            last_event_at?: string;
             /** @description True when the alarm was opened from an event older than the auto-close window at ingestion time. */
             late?: boolean;
+            /** @description True when the alarm was closed automatically by the inactivity sweeper or backlog cleanup. */
+            auto_closed?: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        AlarmEvent: {
+            /** Format: uuid */
+            id: string;
+            remote_id: string;
+            severity: string;
+            labels: string[];
+            sub_labels: string[];
+            zones: string[];
+            /** Format: date-time */
+            start_time: string;
+            /** Format: date-time */
+            end_time?: string | null;
+            has_thumbnail: boolean;
+            /** Format: date-time */
+            linked_at: string;
         };
         AlarmTransition: {
             /** Format: int64 */
@@ -8528,6 +8580,10 @@ export interface operations {
                 site_id?: string;
                 camera_id?: string;
                 assigned_to?: string;
+                /** @description Sort by newest activity (last_event_at) or operational priority (open > acknowledged > assigned > investigating > resolved > closed, then last_event_at). */
+                sort?: "last_event_at" | "priority";
+                /** @description Opaque keyset pagination cursor returned as next_cursor. */
+                cursor?: string;
                 limit?: number;
             };
             header?: never;
@@ -8544,6 +8600,8 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["Alarm"][];
+                        /** @description Opaque cursor for the next page; omitted when there are no more items. */
+                        next_cursor?: string;
                     };
                 };
             };
@@ -8825,6 +8883,33 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["AlarmAssignee"][];
+                    };
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listAlarmEvents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                alarmId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Correlated events for the alarm */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["AlarmEvent"][];
                     };
                 };
             };

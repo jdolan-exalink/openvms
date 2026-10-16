@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCheck, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
 import { api, unwrap, type Schemas } from "@/api/client";
-import { alarmAssigneesQuery, alarmsQuery, camerasQuery, type AlarmFilter } from "@/api/queries";
+import { alarmAssigneesQuery, alarmEventsQuery, alarmsQuery, camerasQuery, type AlarmFilter } from "@/api/queries";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { Button, Chip, Empty, ErrorNote, Field, PageHeader, Pill, type PillTone, Select, Table, Th } from "@/components/ui";
@@ -29,6 +29,7 @@ export function Alarms() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [assignAlarm, setAssignAlarm] = useState<Alarm | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
+  const [eventsAlarm, setEventsAlarm] = useState<Alarm | null>(null);
 
   const filterTabs: { key: string; label: string; filter: AlarmFilter }[] = [
     { key: "active", label: "Activas", filter: { status_group: "active" } },
@@ -45,6 +46,7 @@ export function Alarms() {
   const cameras = useQuery(camerasQuery());
 
   const assignees = useQuery(alarmAssigneesQuery(assignAlarm?.id));
+  const alarmEvents = useQuery(alarmEventsQuery(eventsAlarm?.id));
 
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["alarms"] });
@@ -259,10 +261,19 @@ export function Alarms() {
                     />
                   </td>
                   <td>
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex h-6 items-center rounded-full bg-bad px-2.5 text-[11px] font-bold uppercase tracking-wider text-surface-dim light:text-white">
                         {a.event_severity}
                       </span>
+                      {(a.event_count ?? 1) > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setEventsAlarm(a)}
+                          className="inline-flex h-6 items-center rounded-full bg-primary-container px-2.5 text-[11px] font-bold text-on-primary-container hover:opacity-90"
+                        >
+                          {a.event_count} eventos
+                        </button>
+                      )}
                       <VehicleFacts labels={a.event_labels ?? []} vehicle={a.vehicle} person={a.person} serverName={a.server_name} />
                     </div>
                   </td>
@@ -271,7 +282,12 @@ export function Alarms() {
                     <div className="text-xs text-muted">{a.site_name}{a.server_name ? ` · ${a.server_name}` : ""}</div>
                   </td>
                   <td className="font-mono text-xs whitespace-nowrap">
-                    {fmtDateTime(a.event_start_time)}
+                    <div>{fmtDateTime(a.last_event_at ?? a.event_start_time)}</div>
+                    {(a.event_count ?? 1) > 1 && a.first_event_at && (
+                      <div className="text-[11px] text-muted">
+                        Inicio: {fmtDateTime(a.first_event_at)}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <div className="flex flex-wrap items-center gap-1.5">
@@ -346,6 +362,45 @@ export function Alarms() {
             })}
           </tbody>
         </Table>
+      )}
+
+      {/* Correlated Events Modal */}
+      {eventsAlarm && (
+        <Modal
+          title={`Eventos correlacionados — ${eventsAlarm.camera_name}`}
+          onClose={() => setEventsAlarm(null)}
+        >
+          <div className="flex flex-col gap-3">
+            <ErrorNote error={alarmEvents.error} />
+            {alarmEvents.isLoading && (
+              <p className="text-sm text-muted">Cargando eventos...</p>
+            )}
+            {alarmEvents.data && alarmEvents.data.length === 0 && (
+              <p className="text-sm text-muted">No hay eventos registrados para esta alarma.</p>
+            )}
+            {alarmEvents.data && alarmEvents.data.length > 0 && (
+              <ul className="divide-y divide-outline-variant rounded-m3-md border border-outline-variant text-sm">
+                {alarmEvents.data.map((ev) => (
+                  <li key={ev.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="font-mono text-xs">{fmtDateTime(ev.start_time)}</span>
+                      <span className="text-xs text-muted">
+                        {ev.labels.join(", ") || ev.severity}
+                        {ev.zones.length > 0 ? ` · ${ev.zones.join(", ")}` : ""}
+                      </span>
+                    </div>
+                    <Pill tone="neutral">{ev.severity}</Pill>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex justify-end pt-2">
+              <Button variant="text" onClick={() => setEventsAlarm(null)}>
+                Cerrar
+              </Button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* Assign Modal */}

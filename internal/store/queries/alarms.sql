@@ -2,10 +2,14 @@
 SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status,
        a.assigned_to, a.acknowledged_by, a.acknowledged_at, a.resolved_by, a.resolved_at,
        a.closed_by, a.closed_at,
-       a.late,
+       a.first_event_at, a.last_event_at, a.event_count, a.late, a.auto_closed,
        a.created_at, a.updated_at,
        s.name AS site_name,
        c.display_name AS camera_name,
+       c.server_id,
+       coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
+                 JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
+                 WHERE m.camera_id = c.id), '{}')::uuid[] AS camera_group_ids,
        e.severity AS event_severity,
        e.start_time AS event_start_time,
        e.end_time AS event_end_time,
@@ -45,7 +49,7 @@ WHERE a.id = @id;
 SELECT a.id, a.tenant_id, a.site_id, a.camera_id, a.event_id, a.source, a.status,
        a.assigned_to, a.acknowledged_by, a.acknowledged_at, a.resolved_by, a.resolved_at,
        a.closed_by, a.closed_at,
-       a.late,
+       a.first_event_at, a.last_event_at, a.event_count, a.late, a.auto_closed,
        a.created_at, a.updated_at,
        s.name AS site_name,
        c.display_name AS camera_name,
@@ -90,8 +94,38 @@ WHERE a.camera_id = ANY(@camera_ids::uuid[])
   AND (sqlc.narg('site_id')::uuid IS NULL OR a.site_id = sqlc.narg('site_id'))
   AND (sqlc.narg('camera_id')::uuid IS NULL OR a.camera_id = sqlc.narg('camera_id'))
   AND (sqlc.narg('assigned_to')::uuid IS NULL OR a.assigned_to = sqlc.narg('assigned_to'))
-ORDER BY a.created_at DESC
+  AND (
+      sqlc.narg('cursor_at')::timestamptz IS NULL
+      OR (
+          CASE WHEN @sort::text = 'priority' THEN
+              (CASE a.status WHEN 'open' THEN 1 WHEN 'acknowledged' THEN 2 WHEN 'assigned' THEN 3 WHEN 'investigating' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END) > sqlc.narg('cursor_rank')::int
+              OR (
+                  (CASE a.status WHEN 'open' THEN 1 WHEN 'acknowledged' THEN 2 WHEN 'assigned' THEN 3 WHEN 'investigating' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END) = sqlc.narg('cursor_rank')::int
+                  AND (a.last_event_at < sqlc.narg('cursor_at')::timestamptz OR (a.last_event_at = sqlc.narg('cursor_at')::timestamptz AND a.id < sqlc.narg('cursor_id')::uuid))
+              )
+          ELSE
+              a.last_event_at < sqlc.narg('cursor_at')::timestamptz
+              OR (a.last_event_at = sqlc.narg('cursor_at')::timestamptz AND a.id < sqlc.narg('cursor_id')::uuid)
+          END
+      )
+  )
+ORDER BY
+    CASE WHEN @sort::text = 'priority' THEN
+        (CASE a.status WHEN 'open' THEN 1 WHEN 'acknowledged' THEN 2 WHEN 'assigned' THEN 3 WHEN 'investigating' THEN 4 WHEN 'resolved' THEN 5 ELSE 6 END)
+    ELSE 0 END ASC,
+    a.last_event_at DESC,
+    a.id DESC
 LIMIT @limit_count;
+
+-- name: ListAlarmEvents :many
+SELECT e.id, e.remote_id, e.severity, e.labels, e.sub_labels, e.zones,
+       e.start_time, e.end_time,
+       (e.thumb_key <> '')::bool AS has_thumbnail,
+       ae.linked_at
+FROM alarm_events ae
+JOIN events e ON e.id = ae.event_id
+WHERE ae.alarm_id = @alarm_id
+ORDER BY e.start_time ASC, e.id ASC;
 
 -- name: UpdateAlarmStatus :one
 UPDATE alarms
