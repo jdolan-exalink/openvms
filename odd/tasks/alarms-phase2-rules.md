@@ -34,7 +34,7 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
       `cooldown_seconds` in `internal/rules`; unit + integration tests. Route: delegated writer.
 - [x] P2-02 — Wire `rules.ZoneResolver` in `apps/worker` + store/maps lookup so `map_zone_ids` conditions
       match in production; integration test. Route: same writer.
-- [ ] P2-03 — Migration + backend: `rules.version` (optimistic locking), `rule_versions` (RLS, version snapshot
+- [x] P2-03 — Migration + backend: `rules.version` (optimistic locking), `rule_versions` (RLS, version snapshot
       history), dedicated `rules.read` / `rules.manage` permissions (seeded onto existing roles), and rule
       condition validation; unit + integration tests. Route: same writer.
 - [ ] P2-04 — Dynamic camera groups (`camera_groups.filter jsonb` materialized into `camera_group_members` +
@@ -70,5 +70,27 @@ See `odd/tasks/alarms-phase0-audit.md` §1 (items 5, 7) and §3-§5:
   cross-camera match (`zones.go:123-125`); potentially flaky 1s cooldown integration test; day-of-week `7`
   alias undocumented; unbounded `cooldown_seconds` (to be covered by P2-03 validation).
 
+- P2-03 implemented in `2161587` (delegated writer): `rules.version` + required `If-Match` (stale → 409),
+  `rule_versions` (RLS, snapshot per create/update), `rules.read`/`rules.manage` (handlers switched off
+  `notifications.manage`), `ValidateConditions` (cooldown 0..86400, schedule days 0..6, trigger/field combos).
+  Checks: `make generate` ok, `go vet ./...` ok, `go test -race ./...` ok, integration rules/api/authz/store ok,
+  web typecheck + vitest (1524) ok; parent spot check `go test -race -count=1 -tags integration ./internal/rules/
+  ./internal/authz/` ok. RDD: high (`rules.sql.go` signal), consent granted, 4-lens review
+  `review-2fe9adbb8eb32697` approved + acknowledged; boundary → `2161587`.
+- Accumulated-branch review attempt (main..2161587) stopped with `lens_context_budget_exceeded`; no authority
+  created; slices already reviewed separately.
+- Review correction (scoped, in P2-03 scope) `a9e4c3b`: non-condition PATCH (e.g. `enabled=false`) no longer
+  re-validates legacy-invalid stored conditions; stored-conditions decode error surfaced. RED observed
+  (`TestRuleUpdateNonConditionPatchOnLegacyInvalidRule`, `TestRuleUpdateCorruptStoredConditionsSurfacesError`);
+  vet, unit, integration rules + api `-run Rule` ok.
+- Decision (user, 2026-10-16): keep broadened seeding (`alarms.manage` → `rules.manage`+`rules.read`,
+  `alarms.view` → `rules.read`) AND mirror explicit `alarms.*` denies into rules permissions (new forward-only
+  migration). Done in `cd96890` (`00051_rules_alarm_deny_mirror.sql` + semantic grant-seeding integration
+  test). RED observed (role allow + direct deny still yielded rules.manage); vet, unit, integration
+  authz/rules/store ok; parent spot check grant-seeding test ok. Gap: 00051 Down not exercised.
+- Open P2-03 advisories: `If-Match` hard requirement breaks stale SPA bundles / API clients during rollout
+  (no grace period); UI does not refetch on 409; per-user camera visibility not enforced on rule references;
+  web edit form can drop API-only condition fields (to fix in P2-05).
+
 ## Next step
-P2-03 (route: delegated writer).
+Review slice `2161587..HEAD` (correction + deny mirror + doc), then P2-04 (route: delegated writer).
