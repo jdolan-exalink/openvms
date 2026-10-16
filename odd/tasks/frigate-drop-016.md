@@ -21,7 +21,7 @@ Make Frigate 0.17 the minimum supported version across the product and delete th
 
 ## Tasks
 - [x] FR16-01 — Backend gate and dead-path removal (adapter, config_edit, inventory/api callers, mock, Go tests). Route: delegated direct (writer trigger: 2+ non-trivial files).
-- [ ] FR16-02 — Web UI and contract/docs cleanup (frigateSchema, FrigateCameraConfig, CuratedPanels, OpenAPI text, generated types, docs, web tests). Route: delegated direct.
+- [x] FR16-02 — Web UI and contract/docs cleanup (frigateSchema, FrigateCameraConfig, CuratedPanels, OpenAPI text, generated types, docs, web tests). Route: delegated direct.
 - [ ] FR16-03 — PR, CI green, merge.
 
 ## Acceptance
@@ -38,5 +38,11 @@ Make Frigate 0.17 the minimum supported version across the product and delete th
   - Removed: `ConfigEditable`, `ErrConfigEditUnsupported` (and its `config_edit_unsupported` API mapping), `supportsConfigData`, `setViaQuery`, `flattenQuery`, legacy query-param `UpdateCameraConfig` fallback, mock query-param simulation. Unreachable-gate errors now surface as 502 `frigate_unreachable` naming the version.
   - Rollback boundary: revert `37e006c`.
 
+- 2026-10-16: FR16-02 done (commit `48343fa`, delegated direct writer). Evidence:
+  - RED: `isLiveSection("detect")` test failed before implementation (version param still required).
+  - GREEN: `pnpm typecheck`, eslint on changed files, full web vitest (1541 passed), `go build ./...`, `go test ./internal/api/...` pass. Servers probe test confirms the 502 version message is displayed (already covered by `ErrorNote`).
+  - Changed: `isLiveSection(section)` no longer takes a version; removed `parseVersion`, `versionOk`, "requiere 0.16" copy, CuratedPanels tooltip; OpenAPI text and 409s for 0.16 removed, types regenerated; README and decisions.md state the 0.17 minimum. `LiveBadge` kept (real per-section restart semantics).
+  - Rollback boundary: revert `48343fa`.
+
 ## Next step
-FR16-02 (web `isLiveSection`/`versionOk`/"requiere 0.16", OpenAPI text, docs; check `config_edit_unsupported` use in web).
+FR16-03: PR, CI green, merge.
