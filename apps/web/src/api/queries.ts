@@ -347,6 +347,16 @@ export const alarmsQuery = (filter: AlarmFilter = {}) =>
     refetchInterval: 15_000,
   });
 
+export const alarmsInfiniteQuery = (filter: AlarmFilter = {}) =>
+  infiniteQueryOptions({
+    queryKey: ["alarms", "infinite", filter],
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) =>
+      unwrap(await api.GET("/api/v1/alarms", { params: { query: { ...filter, cursor: pageParam } } })),
+    getNextPageParam: (last) => last.next_cursor,
+    refetchInterval: 15_000,
+  });
+
 export const alarmAssigneesQuery = (alarmId?: string) =>
   queryOptions({
     queryKey: ["alarms", alarmId, "assignees"],

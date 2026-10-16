@@ -1,14 +1,15 @@
 import { useT } from "@/i18n";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CheckCheck, UserPlus, Users } from "lucide-react";
 import { useState } from "react";
 import { api, unwrap, type Schemas } from "@/api/client";
-import { alarmAssigneesQuery, alarmEventsQuery, alarmsQuery, camerasQuery, type AlarmFilter } from "@/api/queries";
+import { alarmAssigneesQuery, alarmEventsQuery, alarmsInfiniteQuery, camerasQuery, meQuery, type AlarmFilter } from "@/api/queries";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
-import { Button, Chip, Empty, ErrorNote, Field, PageHeader, Pill, type PillTone, Select, Table, Th } from "@/components/ui";
+import { Button, Chip, Empty, ErrorNote, Field, LinkButton, PageHeader, Pill, type PillTone, Select, Table, Th } from "@/components/ui";
 import { VehicleFacts } from "@/components/VehicleMark";
 import { fmtDateTime } from "@/lib/format";
+import { can } from "@/lib/perm";
 
 type Alarm = Schemas["Alarm"];
 type AlarmStatus = Schemas["AlarmStatus"];
@@ -25,7 +26,7 @@ const statusBadgeStyles: Record<AlarmStatus, { label: string; tone: PillTone }> 
 export function Alarms() {
   const t = useT();
   const qc = useQueryClient();
-  const [filter, setFilter] = useState<AlarmFilter>({ status_group: "active" });
+  const [filter, setFilter] = useState<AlarmFilter>({ status_group: "active", sort: "priority" });
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [assignAlarm, setAssignAlarm] = useState<Alarm | null>(null);
   const [selectedUserId, setSelectedUserId] = useState<string>("");
@@ -42,8 +43,9 @@ export function Alarms() {
     { key: "all", label: "Todas", filter: {} },
   ];
 
-  const alarms = useQuery(alarmsQuery(filter));
+  const alarms = useInfiniteQuery(alarmsInfiniteQuery(filter));
   const cameras = useQuery(camerasQuery());
+  const me = useQuery(meQuery);
 
   const assignees = useQuery(alarmAssigneesQuery(assignAlarm?.id));
   const alarmEvents = useQuery(alarmEventsQuery(eventsAlarm?.id));
@@ -99,7 +101,7 @@ export function Alarms() {
     },
   });
 
-  const items = alarms.data ?? [];
+  const items = alarms.data?.pages.flatMap((page) => page.items) ?? [];
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -189,6 +191,20 @@ export function Alarms() {
             </Select>
           </div>
         )}
+        <div className="flex items-center gap-2">
+          <label htmlFor="sort-alarms" className="text-sm font-medium text-on-surface-variant">
+            Orden:
+          </label>
+          <Select
+            id="sort-alarms"
+            value={filter.sort ?? "priority"}
+            onChange={(e) => setFilter((prev) => ({ ...prev, sort: e.target.value as AlarmFilter["sort"] }))}
+            className="h-11 sm:w-56"
+          >
+            <option value="priority">Prioridad</option>
+            <option value="last_event_at">Actividad más reciente</option>
+          </Select>
+        </div>
       </div>
 
       {/* Bulk action toolbar */}
@@ -317,6 +333,19 @@ export function Alarms() {
                   </td>
                   <td className="text-right whitespace-nowrap">
                     <div className="inline-flex items-center justify-end gap-1.5">
+                      {can(me.data, "recordings.view") && (
+                        <LinkButton
+                          variant="tonal"
+                          to="/playback"
+                          search={{
+                            camera: a.camera_id,
+                            t: Math.floor(new Date(a.last_event_at ?? a.event_start_time).getTime() / 1000) - 5,
+                          }}
+                          title="La captura del evento no garantiza que exista video grabado para ese momento."
+                        >
+                          Ver grabación
+                        </LinkButton>
+                      )}
                       {a.status === "open" && (
                         <Button
                           size="sm"
@@ -362,6 +391,18 @@ export function Alarms() {
             })}
           </tbody>
         </Table>
+      )}
+
+      {alarms.hasNextPage && (
+        <div className="flex justify-center">
+          <Button
+            variant="tonal"
+            onClick={() => void alarms.fetchNextPage()}
+            disabled={alarms.isFetchingNextPage}
+          >
+            {alarms.isFetchingNextPage ? "Cargando..." : "Cargar más alarmas"}
+          </Button>
+        </div>
       )}
 
       {/* Correlated Events Modal */}

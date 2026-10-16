@@ -1,8 +1,9 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { QueryClient, QueryClientProvider, useInfiniteQuery } from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useRealtimeFeed, subscribeFrames } from "./realtime";
+import { alarmsInfiniteQuery } from "@/api/queries";
 
 class FakeSocket {
   static instances: FakeSocket[] = [];
@@ -58,6 +59,75 @@ afterEach(() => {
 });
 
 describe("useRealtimeFeed", () => {
+
+  it("refreshes priority alarm pages from fresh cursors on updates and reconnect", async () => {
+    vi.useRealTimers();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+    const requests: URL[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (req: Request) => {
+      const url = new URL(req.url);
+      requests.push(url);
+      const cursor = url.searchParams.get("cursor");
+      const nextCursor = cursor
+        ? undefined
+        : requests.length === 1
+          ? "cursor-initial"
+          : requests.length === 3
+            ? "cursor-after-open"
+            : requests.length === 5
+              ? "cursor-after-create"
+              : requests.length === 7
+                ? "cursor-after-update"
+              : "cursor-after-reconnect";
+      const items = cursor
+        ? [{ id: "page-two" }]
+        : requests.length >= 5
+          ? [{ id: "new-alarm", status: "open" }, { id: "page-one", status: requests.length >= 7 ? "acknowledged" : "open" }]
+          : [{ id: "page-one", status: "open" }];
+      return new Response(JSON.stringify({ items, next_cursor: nextCursor }), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }));
+
+    const filter = { status_group: "active" as const, sort: "priority" as const, camera_id: "cam-1" };
+    const { result } = renderHook(() => {
+      useRealtimeFeed({ random: () => 1 });
+      return useInfiniteQuery(alarmsInfiniteQuery(filter));
+    }, { wrapper });
+
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(1));
+    await act(async () => { await result.current.fetchNextPage(); });
+    await waitFor(() => expect(result.current.data?.pages).toHaveLength(2));
+    expect(requests.map((url) => url.searchParams.get("sort"))).toEqual(["priority", "priority"]);
+    expect(requests.map((url) => url.searchParams.get("camera_id"))).toEqual(["cam-1", "cam-1"]);
+
+    act(() => sock(0).open());
+    await waitFor(() => expect(requests).toHaveLength(4));
+    expect(requests[3]?.searchParams.get("cursor")).toBe("cursor-after-open");
+
+    act(() => sock(0).message({ type: "alarm.created", data: { id: "new-alarm" } }));
+    await waitFor(() => expect(requests).toHaveLength(6));
+    expect(requests[4]?.searchParams.get("cursor")).toBeNull();
+    expect(requests[5]?.searchParams.get("cursor")).toBe("cursor-after-create");
+    await waitFor(() => expect(result.current.data?.pages.flatMap((page) => page.items.map((item) => item.id))).toEqual(["new-alarm", "page-one", "page-two"]));
+
+    act(() => sock(0).message({ type: "alarm.updated", data: { id: "page-one", status: "acknowledged" } }));
+    await waitFor(() => expect(requests).toHaveLength(8));
+    expect(requests[6]?.searchParams.get("cursor")).toBeNull();
+    expect(requests[7]?.searchParams.get("cursor")).toBe("cursor-after-update");
+    await waitFor(() => expect(result.current.data?.pages[0]?.items[1]?.status).toBe("acknowledged"));
+    const visibleIds = result.current.data?.pages.flatMap((page) => page.items.map((item) => item.id)) ?? [];
+    expect(new Set(visibleIds).size).toBe(visibleIds.length);
+
+    act(() => sock(0).drop(1006));
+    await waitFor(() => expect(FakeSocket.instances).toHaveLength(2), { timeout: 3_000 });
+    act(() => sock(1).open());
+    await waitFor(() => expect(requests).toHaveLength(10));
+    expect(requests[9]?.searchParams.get("cursor")).toBe("cursor-after-reconnect");
+    expect(requests.every((url) => url.searchParams.get("sort") === "priority")).toBe(true);
+    expect(requests.every((url) => url.searchParams.get("camera_id") === "cam-1")).toBe(true);
+  });
 
   it("invalidates maps on reconnect and resync", () => {
     const { keys, invalidate } = setup();
@@ -181,8 +251,8 @@ describe("useRealtimeFeed", () => {
 describe("notification frames", () => {
   it("invalidates the notifications cache on notification.created", () => {
     const { keys } = setup();
-    sock(0).open();
-    sock(0).message({ type: "notification.created", data: {} });
+    act(() => sock(0).open());
+    act(() => sock(0).message({ type: "notification.created", data: {} }));
     expect(keys()).toContain(JSON.stringify(["notifications"]));
   });
 });
