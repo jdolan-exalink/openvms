@@ -334,4 +334,3 @@ func TestConditionsSchedule(t *testing.T) {
 		})
 	}
 }
-

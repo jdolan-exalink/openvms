@@ -653,5 +653,3 @@ DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng`,
 		t.Fatalf("camera inside map zone created %d notifications, want 1", n)
 	}
 }
-
-

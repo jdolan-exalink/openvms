@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -53,7 +54,8 @@ func TestValidateConditions(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
 			}
-			if _, ok := err.(*ValidationError); !ok {
+			var verr *ValidationError
+			if !errors.As(err, &verr) {
 				t.Fatalf("error type = %T, want *ValidationError", err)
 			}
 			if !strings.Contains(err.Error(), tt.wantErr) {
