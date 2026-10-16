@@ -39,7 +39,7 @@ Phase 0 and Phase 2 established the alarm and rules foundation. Remaining work i
 - [x] P3-01 authored source diff: 84 lines (73 additions, 6 deletions in source/test files; tracker is separate documentation).
 - [x] Work-unit runtime scenario: N/A (browser UI-only behavior; no runtime/hardware boundary exercised).
 - [x] Rollback boundary: revert `apps/web/src/api/queries.ts`, `apps/web/src/routes/Alarms.tsx`, and `apps/web/src/routes/Alarms.test.tsx` to remove this behavior; no API/database changes.
-- [ ] Work-unit commit identity: pending commit.
+- [x] Work-unit commit: `fb4b75e` (`feat(alarms): add priority inbox pagination`) on `feat/https-agent-ingress`.
 - Known blocker: Phase 4 wizard needs a product decision. P3-04 is conditional on confirmed gap.
 
 ## Next step
