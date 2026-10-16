@@ -289,23 +289,28 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 		if int(current.Version) != req.ExpectedVersion {
 			return ErrVersionConflict
 		}
-		// Validate the rule as it will look after the change, not just the patch.
-		effTrigger := TriggerType(current.TriggerType)
-		if req.TriggerType != nil {
-			effTrigger = *req.TriggerType
-		}
-		effCond := Conditions{}
-		if req.Conditions != nil {
-			effCond = *req.Conditions
-		} else if len(current.Conditions) > 0 {
-			_ = json.Unmarshal(current.Conditions, &effCond)
-		}
-		if err := ValidateConditions(effTrigger, effCond); err != nil {
-			return err
-		}
-		if req.Conditions != nil {
-			if err := checkConditionRefs(ctx, q, *actor.TenantID, effCond); err != nil {
+		// Validate the merged rule only when the patch touches what the validator
+		// checks, so unrelated edits (e.g. disabling) still work on legacy rows.
+		if req.Conditions != nil || req.TriggerType != nil {
+			effTrigger := TriggerType(current.TriggerType)
+			if req.TriggerType != nil {
+				effTrigger = *req.TriggerType
+			}
+			effCond := Conditions{}
+			if req.Conditions != nil {
+				effCond = *req.Conditions
+			} else if len(current.Conditions) > 0 {
+				if err := json.Unmarshal(current.Conditions, &effCond); err != nil {
+					return fmt.Errorf("decode stored conditions for rule %s: %w", id, err)
+				}
+			}
+			if err := ValidateConditions(effTrigger, effCond); err != nil {
 				return err
+			}
+			if req.Conditions != nil {
+				if err := checkConditionRefs(ctx, q, *actor.TenantID, effCond); err != nil {
+					return err
+				}
 			}
 		}
 

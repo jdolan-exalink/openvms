@@ -136,3 +136,73 @@ func TestRuleUpdateRequiresExpectedVersion(t *testing.T) {
 		t.Fatalf("err = %v, want ValidationError", err)
 	}
 }
+
+// insertLegacyRule stores a rule directly, bypassing validation, to mimic rows
+// written before ValidateConditions existed.
+func (f *fixture) insertLegacyRule(conditions string) uuid.UUID {
+	f.t.Helper()
+	id := uuid.New()
+	err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(),
+			`INSERT INTO rules (id, tenant_id, name, trigger_type, conditions, actions, enabled)
+			 VALUES ($1, $2, 'legacy', 'event', $3::jsonb, '{}'::jsonb, true)`,
+			id, f.env.Demo.TenantID, conditions)
+		return err
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return id
+}
+
+func TestRuleUpdateNonConditionPatchOnLegacyInvalidRule(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	actor := f.ruleManager()
+
+	// An event rule with duration_seconds > 0 is rejected by ValidateConditions today.
+	id := f.insertLegacyRule(`{"duration_seconds": 30}`)
+
+	off := false
+	updated, err := f.svc.UpdateRule(ctx, actor, id, rules.UpdateRuleRequest{ExpectedVersion: 1, Enabled: &off})
+	if err != nil {
+		t.Fatalf("disabling a legacy-invalid rule: %v", err)
+	}
+	if updated.Enabled || updated.Version != 2 {
+		t.Fatalf("updated = %+v, want disabled at version 2", updated)
+	}
+	vs := f.versions(id)
+	if len(vs) != 1 || vs[0].Version != 2 {
+		t.Fatalf("rule_versions = %+v, want a single row for version 2", vs)
+	}
+
+	// Touching conditions re-validates the merged rule and is still rejected.
+	_, err = f.svc.UpdateRule(ctx, actor, id, rules.UpdateRuleRequest{
+		ExpectedVersion: 2,
+		Conditions:      &rules.Conditions{DurationSeconds: 60},
+	})
+	var ve *rules.ValidationError
+	if !errors.As(err, &ve) {
+		t.Fatalf("invalid condition patch err = %v, want ValidationError", err)
+	}
+}
+
+func TestRuleUpdateCorruptStoredConditionsSurfacesError(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	actor := f.ruleManager()
+
+	// Valid JSON of the wrong shape cannot decode into Conditions.
+	id := f.insertLegacyRule(`{"labels": "person"}`)
+
+	// A trigger change forces validation against the stored conditions.
+	tr := rules.TriggerCameraOffline
+	_, err := f.svc.UpdateRule(ctx, actor, id, rules.UpdateRuleRequest{ExpectedVersion: 1, TriggerType: &tr})
+	if err == nil {
+		t.Fatal("expected an error for corrupt stored conditions")
+	}
+	var ve *rules.ValidationError
+	if errors.As(err, &ve) {
+		t.Fatalf("err = %v, want an internal error, not ValidationError", err)
+	}
+}
