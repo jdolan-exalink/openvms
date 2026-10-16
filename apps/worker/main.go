@@ -117,6 +117,7 @@ func run() error {
 	adapters := inventory.NewAdapters(inv)
 
 	rulesSvc := rules.NewService(st, &jetstreamPublisher{js: js}, log)
+	rulesSvc.ZoneResolver = rules.NewStoreZoneResolver(st)
 	syncer := &events.Syncer{
 		Store: st, Adapters: adapters, Blobs: objects, Log: log,
 		Rules:    rulesSvc,

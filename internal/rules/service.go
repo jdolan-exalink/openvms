@@ -64,7 +64,11 @@ func NewService(st *store.Store, pub Publisher, log *slog.Logger) *Service {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{Store: st, Pub: pub, Log: log, Debounce: DefaultDebounce}
+	var zr ZoneResolver
+	if st != nil {
+		zr = NewStoreZoneResolver(st)
+	}
+	return &Service{Store: st, Pub: pub, Log: log, Debounce: DefaultDebounce, ZoneResolver: zr}
 }
 
 // claim records that rule fired for resourceID and reports whether it may run its actions:

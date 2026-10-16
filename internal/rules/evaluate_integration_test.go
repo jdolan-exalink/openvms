@@ -598,3 +598,60 @@ func TestEvaluateEventCameraGroupScheduleAndCooldown(t *testing.T) {
 	}
 }
 
+func TestEvaluateEventMapZoneResolver(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+
+	camInside := f.env.Cameras["frigate-h01/acceso_norte"]
+	camOutside := f.env.Cameras["frigate-h01/plaza"]
+
+	// Create a map zone polygon covering lng [-64.20, -64.15], lat [-31.45, -31.40].
+	zoneID := uuid.New()
+	poly := `{"type":"Polygon","coordinates":[[[-64.20,-31.45],[-64.15,-31.45],[-64.15,-31.40],[-64.20,-31.40],[-64.20,-31.45]]]}`
+	if err := f.exec(`
+INSERT INTO map_zones (id, tenant_id, site_id, name, kind, geometry, min_lat, min_lng, max_lat, max_lng)
+VALUES ($1, $2, $3, 'Zona Restringida Norte', 'security', $4::jsonb, -31.45, -64.20, -31.40, -64.15)`,
+		zoneID, camInside.TenantID, camInside.SiteID, poly,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// Place camInside inside the polygon (-31.42, -64.18) and camOutside outside (-31.55, -64.30).
+	if err := f.exec(`
+INSERT INTO map_placements (tenant_id, site_id, entity_type, entity_id, lat, lng)
+VALUES
+  ($1, $2, 'camera', $3, -31.42, -64.18),
+  ($1, $2, 'camera', $4, -31.55, -64.30)
+ON CONFLICT (entity_type, entity_id) WHERE floor_id IS NULL
+DO UPDATE SET lat = EXCLUDED.lat, lng = EXCLUDED.lng`,
+		camInside.TenantID, camInside.SiteID, camInside.ID, camOutside.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	ruleID := f.addRule("Regla Zona Mapa", rules.TriggerEvent, rules.Conditions{
+		MapZoneIDs: []uuid.UUID{zoneID},
+	}, rules.Actions{NotifyInApp: true}, true)
+
+	// Event from camera outside map zone -> must not match.
+	evOut := f.eventCtx("person")
+	evOut.CameraID, evOut.CameraName = camOutside.ID, camOutside.DisplayName
+	if err := f.svc.EvaluateEvent(ctx, evOut); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(ruleID); n != 0 {
+		t.Fatalf("camera outside map zone created %d notifications, want 0", n)
+	}
+
+	// Event from camera inside map zone -> resolved dynamically via StoreZoneResolver and matches.
+	evIn := f.eventCtx("person")
+	evIn.CameraID, evIn.CameraName = camInside.ID, camInside.DisplayName
+	if err := f.svc.EvaluateEvent(ctx, evIn); err != nil {
+		t.Fatal(err)
+	}
+	if n := f.notifications(ruleID); n != 1 {
+		t.Fatalf("camera inside map zone created %d notifications, want 1", n)
+	}
+}
+
+
