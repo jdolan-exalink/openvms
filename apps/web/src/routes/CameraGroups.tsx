@@ -2,8 +2,8 @@ import { useT } from "@/i18n";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Plus } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { api, type Schemas, unwrap } from "@/api/client";
-import { cameraGroupsQuery, camerasQuery, meQuery, tenantsQuery } from "@/api/queries";
+import { ApiError, api, type Schemas, unwrap } from "@/api/client";
+import { cameraGroupsQuery, camerasQuery, meQuery, serversQuery, sitesQuery, tenantsQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { Icon } from "@/components/Icon";
@@ -81,7 +81,9 @@ export function CameraGroups() {
                   {g.description && <div className="text-xs text-muted">{g.description}</div>}
                 </td>
                 <td className="text-sm text-muted">
-                  {g.camera_ids.length === 1 ? "1 cámara" : `${g.camera_ids.length} cámaras`}
+                  <div>{g.member_count_total === 1 ? "1 cámara" : `${g.member_count_total} cámaras`}</div>
+                  {g.filter && <div className="text-xs">Dynamic</div>}
+                  {g.member_count_hidden > 0 && <div className="text-xs">{g.member_count_hidden} hidden from you</div>}
                 </td>
                 <td className="text-right">
                   {can(me.data, "permissions.manage") && (
@@ -128,19 +130,40 @@ function CameraGroupForm({
     description: group?.description ?? "",
     camera_ids: group?.camera_ids ?? ([] as string[]),
   });
+  const [kind, setKind] = useState<"manual" | "dynamic">(group?.filter ? "dynamic" : "manual");
+  const [filter, setFilter] = useState({
+    site_ids: group?.filter?.site_ids ?? ([] as string[]),
+    server_ids: group?.filter?.server_ids ?? ([] as string[]),
+    tags: (group?.filter?.tags ?? []).join(", "),
+    name_contains: group?.filter?.name_contains ?? "",
+  });
+  const dynamic = kind === "dynamic";
+  const sites = useQuery({ ...sitesQuery, enabled: dynamic });
+  const servers = useQuery({ ...serversQuery, enabled: dynamic });
+  const filterEmpty =
+    !filter.site_ids.length && !filter.server_ids.length && !filter.tags.split(",").some((x) => x.trim()) && !filter.name_contains.trim();
+  const pickersFailed = dynamic && (sites.isError || servers.isError);
 
   const save = useMutation({
     mutationFn: async () => {
-      const payload: Schemas["CameraGroupInput"] = {
-        tenant_id: f.tenant_id,
-        name: f.name.trim(),
-        description: f.description.trim(),
-        camera_ids: f.camera_ids,
-      };
+      const base = { tenant_id: f.tenant_id, name: f.name.trim(), description: f.description.trim() };
+      const tags = filter.tags.split(",").map((x) => x.trim()).filter(Boolean);
+      const name_contains = filter.name_contains.trim();
+      const payload: Schemas["CameraGroupInput"] = dynamic
+        ? {
+            ...base,
+            filter: {
+              ...(filter.site_ids.length ? { site_ids: filter.site_ids } : {}),
+              ...(filter.server_ids.length ? { server_ids: filter.server_ids } : {}),
+              ...(tags.length ? { tags } : {}),
+              ...(name_contains ? { name_contains } : {}),
+            },
+          }
+        : { ...base, camera_ids: f.camera_ids };
       if (group) {
         return unwrap(
           await api.PUT("/api/v1/camera-groups/{groupId}", {
-            params: { path: { groupId: group.id } },
+            params: { path: { groupId: group.id }, header: { "If-Match": String(group.version) } },
             body: payload,
           }),
         );
@@ -152,6 +175,8 @@ function CameraGroupForm({
       onDone();
     },
   });
+
+  const stale = save.error instanceof ApiError && save.error.status === 409 && /modified by someone else/.test(save.error.message);
 
   const remove = useMutation({
     mutationFn: async () =>
@@ -166,6 +191,8 @@ function CameraGroupForm({
     },
   });
 
+  const toggleIn = (key: "site_ids" | "server_ids", id: string) =>
+    setFilter((x) => ({ ...x, [key]: x[key].includes(id) ? x[key].filter((v) => v !== id) : [...x[key], id] }));
   const toggle = (id: string) =>
     setF((x) => ({
       ...x,
@@ -215,6 +242,49 @@ function CameraGroupForm({
             <TextInput value={f.description} onChange={(e) => setF({ ...f, description: e.target.value })} />
           </Field>
         </div>
+        <Field label="Group type">
+          <Select value={kind} disabled={!!group} onChange={(e) => setKind(e.target.value as "manual" | "dynamic")}>
+            <option value="manual">Manual (pick cameras)</option>
+            <option value="dynamic">Dynamic (filter)</option>
+          </Select>
+        </Field>
+        {dynamic && (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs text-muted">
+              Cameras that match every field below are members automatically. Within a field, any value matches.
+            </p>
+            <fieldset className="flex flex-col gap-2">
+              <legend className="text-sm font-medium">Sites</legend>
+              {sites.isPending && <span className="text-xs text-muted">Loading sites…</span>}
+              {sites.isError && <span role="alert" className="text-xs text-bad">Could not load sites.</span>}
+              <div className="flex flex-wrap gap-2">
+                {sites.data?.map((x) => (
+                  <Checkbox key={x.id} className="rounded-full bg-surface-2 px-3" checked={filter.site_ids.includes(x.id)} onChange={() => toggleIn("site_ids", x.id)} label={x.name} />
+                ))}
+              </div>
+            </fieldset>
+            <fieldset className="flex flex-col gap-2">
+              <legend className="text-sm font-medium">Servers</legend>
+              {servers.isPending && <span className="text-xs text-muted">Loading servers…</span>}
+              {servers.isError && <span role="alert" className="text-xs text-bad">Could not load servers.</span>}
+              <div className="flex flex-wrap gap-2">
+                {servers.data?.map((x) => (
+                  <Checkbox key={x.id} className="rounded-full bg-surface-2 px-3" checked={filter.server_ids.includes(x.id)} onChange={() => toggleIn("server_ids", x.id)} label={x.name} />
+                ))}
+              </div>
+            </fieldset>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field label="Tags (comma separated)">
+                <TextInput value={filter.tags} onChange={(e) => setFilter({ ...filter, tags: e.target.value })} />
+              </Field>
+              <Field label="Name contains">
+                <TextInput value={filter.name_contains} onChange={(e) => setFilter({ ...filter, name_contains: e.target.value })} />
+              </Field>
+            </div>
+            {filterEmpty && <p className="text-xs text-bad">Select at least one site, server, tag or name filter.</p>}
+          </div>
+        )}
+        {!dynamic && (
         <fieldset className="flex flex-col gap-2">
           <legend className="text-sm font-medium">Cámaras del grupo</legend>
           {cameras.length === 0 && <span className="text-xs text-muted">No hay cámaras disponibles.</span>}
@@ -224,9 +294,19 @@ function CameraGroupForm({
             ))}
           </div>
         </fieldset>
-        <ErrorNote error={save.error} />
+        )}
+        {stale ? (
+          <p role="alert" className="flex flex-wrap items-center gap-2 rounded-m3-lg bg-bad/12 px-4 py-3 text-sm text-bad">
+            This group was changed by someone else since you opened it.
+            <Button size="sm" variant="tonal" onClick={onDone}>
+              Reload latest
+            </Button>
+          </p>
+        ) : (
+          <ErrorNote error={save.error} />
+        )}
         <div className="flex items-center gap-2 pt-2">
-          <Button type="submit" variant="primary" disabled={save.isPending}>
+          <Button type="submit" variant="primary" disabled={save.isPending || (dynamic && (filterEmpty || pickersFailed))}>
             {save.isPending ? "Guardando…" : "Guardar"}
           </Button>
           <Button variant="text" onClick={onDone}>Cancelar</Button>

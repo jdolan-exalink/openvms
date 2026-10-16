@@ -10,6 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/bootstrap"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
 )
@@ -164,4 +166,59 @@ func TestDynamicCameraGroups(t *testing.T) {
 			}
 		}
 	})
+}
+
+// A manual group edited by a user who can see and manage only some of its cameras must keep the rest.
+func TestManualGroupUpdateKeepsHiddenMembers(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	acceso := env.Cameras["frigate-h01/acceso_norte"]
+	plaza := env.Cameras["frigate-h01/plaza"]
+	muelle := env.Cameras["frigate-c01/muelle"]
+	tenant := acceso.TenantID
+
+	g, err := env.Svc.CreateCameraGroup(ctx, env.Admin, inventory.CameraGroupInput{
+		TenantID: tenant, Name: "Mixto", CameraIDs: []uuid.UUID{acceso.ID, plaza.ID, muelle.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, _, err := bootstrap.TenantUser(ctx, env.Store, tenant, "parcial")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []authz.Permission{authz.CamerasView, authz.CamerasManage} {
+		for _, cam := range []uuid.UUID{acceso.ID, muelle.ID} {
+			cam := cam
+			if _, err := env.Svc.CreateGrant(ctx, env.Admin, inventory.GrantInput{
+				SubjectType: "user", SubjectID: user.UserID, Permission: p, Effect: authz.Allow, ScopeType: authz.ScopeCamera, ScopeID: &cam,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	gid := g.ID
+	if _, err := env.Svc.CreateGrant(ctx, env.Admin, inventory.GrantInput{
+		SubjectType: "user", SubjectID: user.UserID, Permission: authz.CamerasManage, Effect: authz.Allow, ScopeType: authz.ScopeCameraGroup, ScopeID: &gid,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	actor := env.Actor(t, "parcial")
+	// The caller sees acceso and muelle; plaza is hidden. Dropping muelle must not drop plaza.
+	got, err := env.Svc.ReplaceCameraGroup(ctx, actor, g.ID, inventory.CameraGroupInput{
+		TenantID: tenant, Name: "Mixto", CameraIDs: []uuid.UUID{acceso.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MemberCountTotal != 2 || got.MemberCountHidden != 1 || !slices.Equal(got.CameraIDs, []uuid.UUID{acceso.ID}) {
+		t.Fatalf("after update = %v total %d hidden %d", got.CameraIDs, got.MemberCountTotal, got.MemberCountHidden)
+	}
+	full, err := env.Svc.GetCameraGroup(ctx, env.Admin, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full.MemberCountTotal != 2 || !slices.Contains(full.CameraIDs, plaza.ID) || slices.Contains(full.CameraIDs, muelle.ID) {
+		t.Fatalf("admin view members = %v", full.CameraIDs)
+	}
 }
