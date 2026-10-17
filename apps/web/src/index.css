@@ -3,6 +3,15 @@
 /* Themes are selected with data-theme on <html> (ristretto, dracula, light); see lib/theme.ts.
    Ristretto is also the plain :root fallback so an unthemed document stays dark. */
 @custom-variant light (&:where([data-theme="light"], [data-theme="light"] *));
+/* shell-md: the desktop shell (nav rail, context sidebar) from the md breakpoint up, except on phones.
+   AppShell marks phones with data-device="phone" so a phone in landscape keeps the mobile shell. */
+@custom-variant shell-md {
+  @media (width >= 48rem) {
+    &:where(:not([data-device="phone"], [data-device="phone"] *)) {
+      @slot;
+    }
+  }
+}
 
 @theme {
   --font-sans: "Manrope Variable", "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;

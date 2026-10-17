@@ -16,6 +16,9 @@ export function useHorizontalSwipe(onSwipe: (direction: 1 | -1) => void, blocked
   const start = useRef<{ x: number; y: number } | null>(null);
   return {
     onPointerDown: (event: PointerEvent) => {
+      // A primary pointer is the first contact of a gesture. Any id still tracked is stale (its up or
+      // cancel never reached us, e.g. released outside the element), so start from a clean slate.
+      if (event.isPrimary !== false) pointers.current.clear();
       pointers.current.add(event.pointerId);
       start.current = pointers.current.size === 1 && !blocked() ? { x: event.clientX, y: event.clientY } : null;
     },

@@ -1,5 +1,6 @@
 import { useT } from "@/i18n";
 import { cn } from "@/lib/cn";
+import { useIsPhoneDevice } from "@/lib/useIsPhoneDevice";
 import {
   clampSidebarWidth, loadSidebarWidth, maxSidebarWidth, saveSidebarWidth, SIDEBAR_DEFAULT_WIDTH, SIDEBAR_KEYBOARD_STEP, SIDEBAR_MIN_WIDTH,
 } from "@/lib/sidebarWidth";
@@ -121,7 +122,7 @@ function SidebarResizeHandle({ width, onDragChange }: { width: number; onDragCha
       onLostPointerCapture={endDrag}
       onDoubleClick={() => setSidebarWidth(SIDEBAR_DEFAULT_WIDTH, true)}
       onKeyDown={onKeyDown}
-      className="group absolute inset-y-0 right-0 z-10 hidden w-1.5 cursor-col-resize touch-none justify-center outline-none md:flex"
+      className="group absolute inset-y-0 right-0 z-10 hidden w-1.5 cursor-col-resize touch-none justify-center outline-none shell-md:flex"
     >
       <span className="h-full w-0.5 bg-transparent transition-colors group-hover:bg-accent/60 group-focus-visible:bg-accent group-active:bg-accent" aria-hidden />
     </div>
@@ -157,7 +158,7 @@ export function TopBarActionsSlot({ className }: { className?: string }) {
 
 interface AppShellProps {
   primaryNav: ReactNode;
-  /** Mobile-only navigation (below md); it renders its own fixed positioning and data-shell-region. */
+  /** Mobile-only navigation (below the shell breakpoint, always on phones); it renders its own fixed positioning and data-shell-region. */
   bottomNav?: ReactNode;
   contextSidebar?: ReactNode;
   /** Fit the workspace to the viewport (no page scroll) from the md breakpoint up. */
@@ -169,6 +170,7 @@ interface AppShellProps {
 
 export function AppShell({ primaryNav, bottomNav, contextSidebar, fitViewport = false, compactBottomNav = false, children }: AppShellProps) {
   const t = useT();
+  const phone = useIsPhoneDevice();
   const collapsed = useSyncExternalStore(subscribeSidebarCollapsed, getSidebarCollapsed, () => false);
   const width = useSyncExternalStore(subscribeSidebarWidth, getSidebarWidth, () => SIDEBAR_DEFAULT_WIDTH);
   const [resizing, setResizing] = useState(false);
@@ -184,14 +186,14 @@ export function AppShell({ primaryNav, bottomNav, contextSidebar, fitViewport = 
       </a>
       <div className={cn(
         // Notch, status bar and landscape side insets are handled once here (viewport-fit=cover); they are 0 on desktop.
-        "flex flex-col bg-surface-dim pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:flex-row",
+        "flex flex-col bg-surface-dim pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shell-md:flex-row",
         fitViewport ? "h-dvh max-h-dvh min-h-0 overflow-hidden" : "min-h-dvh",
-      )} data-shell="openvms">
-        <aside aria-label="Primary Nav Rail" className="hidden shrink-0 overflow-y-auto md:static md:flex" data-shell-region="primary-nav">
+      )} data-shell="openvms" data-device={phone ? "phone" : undefined}>
+        <aside aria-label="Primary Nav Rail" className="hidden shrink-0 overflow-y-auto shell-md:static shell-md:flex" data-shell-region="primary-nav">
           {primaryNav}
         </aside>
         {contextSidebar != null && (
-          <div className={cn("relative shrink-0", !collapsed && "md:h-dvh")} data-shell-region="context-sidebar-frame">
+          <div className={cn("relative shrink-0", !collapsed && "shell-md:h-dvh")} data-shell-region="context-sidebar-frame">
             <aside
               aria-label="Context Sidebar"
               aria-hidden={collapsed || undefined}
@@ -200,14 +202,14 @@ export function AppShell({ primaryNav, bottomNav, contextSidebar, fitViewport = 
               // Capped by the viewport (40%, 480 px) but never below the minimum; see lib/sidebarWidth.
               style={{ "--sidebar-w": `min(${width}px, max(${SIDEBAR_MIN_WIDTH}px, min(480px, 40vw)))` } as CSSProperties}
               className={cn(
-                "w-full min-w-0 border-b border-line bg-surface px-3 py-4 md:flex md:h-dvh md:w-(--sidebar-w) md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-b-0 md:border-r",
-                "md:transition-[width,padding,border-color] md:duration-200 motion-reduce:transition-none",
-                resizing && "md:transition-none",
-                collapsed && "hidden md:block md:w-0 md:overflow-hidden md:border-transparent md:px-0",
+                "w-full min-w-0 border-b border-line bg-surface px-3 py-4 shell-md:flex shell-md:h-dvh shell-md:w-(--sidebar-w) shell-md:flex-col shell-md:overflow-y-auto shell-md:overflow-x-hidden shell-md:border-b-0 shell-md:border-r",
+                "shell-md:transition-[width,padding,border-color] shell-md:duration-200 motion-reduce:transition-none",
+                resizing && "shell-md:transition-none",
+                collapsed && "hidden shell-md:block shell-md:w-0 shell-md:overflow-hidden shell-md:border-transparent shell-md:px-0",
               )}
               data-shell-region="context-sidebar"
             >
-              <div ref={setSidebarTarget} className="flex min-h-0 min-w-0 flex-col gap-3 md:min-w-[calc(var(--sidebar-w)-1.5rem)] md:flex-1">
+              <div ref={setSidebarTarget} className="flex min-h-0 min-w-0 flex-col gap-3 shell-md:min-w-[calc(var(--sidebar-w)-1.5rem)] shell-md:flex-1">
                 {contextSidebar}
               </div>
             </aside>
@@ -219,8 +221,8 @@ export function AppShell({ primaryNav, bottomNav, contextSidebar, fitViewport = 
           // radius and background but no margins so their viewport maths is unchanged.
           "min-w-0 flex-1 px-4 outline-none",
           compactBottomNav ? "pb-[calc(3.5rem+env(safe-area-inset-bottom))]" : "pb-[calc(5rem+env(safe-area-inset-bottom))]",
-          "md:rounded-m3-2xl md:bg-surface md:px-8",
-          fitViewport ? "flex min-h-0 flex-col overflow-hidden pt-3 md:pb-3" : "pt-6 md:m-3 md:ml-0 md:pb-6",
+          "shell-md:rounded-m3-2xl shell-md:bg-surface shell-md:px-8",
+          fitViewport ? "flex min-h-0 flex-col overflow-hidden pt-3 shell-md:pb-3" : "pt-6 shell-md:m-3 shell-md:ml-0 shell-md:pb-6",
         )} data-shell-region="main-workspace">
           {children}
         </main>
