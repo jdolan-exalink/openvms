@@ -1,9 +1,37 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell, setContextSidebarCollapsed } from "./AppShell";
+
+function stubDevice(phone: boolean) {
+  vi.stubGlobal("matchMedia", (query: string) => ({ matches: phone && query === "(pointer: coarse)", media: query, addEventListener() {}, removeEventListener() {} }));
+  vi.stubGlobal("screen", { width: phone ? 844 : 1920, height: phone ? 390 : 1080 }); // phone in landscape
+}
 
 describe("AppShell", () => {
   beforeEach(() => localStorage.clear());
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("marks phone devices so the shell keeps the mobile layout even in landscape", () => {
+    stubDevice(true);
+    const { container } = render(
+      <AppShell primaryNav={<nav>Nav</nav>} bottomNav={<nav>Bottom</nav>}>
+        <h1>Route</h1>
+      </AppShell>,
+    );
+    expect(container.querySelector('[data-shell="openvms"]')).toHaveAttribute("data-device", "phone");
+    expect(screen.getByLabelText("Primary Nav Rail").className).toMatch(/shell-md:flex/);
+    expect(screen.getByLabelText("Primary Nav Rail").className).not.toMatch(/(^|\s)md:/);
+  });
+
+  it("does not mark desktops and tablets", () => {
+    stubDevice(false);
+    const { container } = render(
+      <AppShell primaryNav={<nav>Nav</nav>}>
+        <h1>Route</h1>
+      </AppShell>,
+    );
+    expect(container.querySelector('[data-shell="openvms"]')).not.toHaveAttribute("data-device");
+  });
 
   it("provides named primary navigation and main workspace regions", () => {
     render(
@@ -12,7 +40,7 @@ describe("AppShell", () => {
       </AppShell>,
     );
 
-    expect(screen.getByLabelText("Primary Nav Rail")).toHaveClass("hidden", "md:flex");
+    expect(screen.getByLabelText("Primary Nav Rail")).toHaveClass("hidden", "shell-md:flex");
     expect(screen.getByRole("complementary", { name: "Primary Nav Rail" })).toHaveTextContent("Existing navigation");
     const main = screen.getByRole("main", { name: "Main Workspace" });
     expect(main).toContainElement(screen.getByRole("heading", { name: "Current route" }));
@@ -29,7 +57,7 @@ describe("AppShell", () => {
     );
     expect(container.querySelector('[data-shell="openvms"]')).not.toHaveClass("pl-16");
     expect(screen.getByRole("main", { name: "Main Workspace" }).className).toMatch(/pb-\[calc\(5rem\+env\(safe-area-inset-bottom\)\)\]/);
-    expect(screen.getByRole("main", { name: "Main Workspace" })).toHaveClass("md:rounded-m3-2xl", "md:bg-surface");
+    expect(screen.getByRole("main", { name: "Main Workspace" })).toHaveClass("shell-md:rounded-m3-2xl", "shell-md:bg-surface");
     expect(screen.getByText("Bottom")).toBeInTheDocument();
   });
 
@@ -64,8 +92,8 @@ describe("AppShell", () => {
       </AppShell>,
     );
     const main = screen.getByRole("main", { name: "Main Workspace" });
-    expect(main).toHaveClass("md:rounded-m3-2xl", "md:bg-surface");
-    expect(main.className).not.toMatch(/md:m[trbl]?-/);
+    expect(main).toHaveClass("shell-md:rounded-m3-2xl", "shell-md:bg-surface");
+    expect(main.className).not.toMatch(/shell-md:m[trbl]?-/);
   });
 
   it("renders the context sidebar only when the current route supplies context", () => {
@@ -77,8 +105,8 @@ describe("AppShell", () => {
 
     const contextSidebar = screen.getByRole("complementary", { name: "Context Sidebar" });
     expect(contextSidebar).toHaveTextContent("Camera context");
-    expect(container.querySelector('[data-shell="openvms"]')).toHaveClass("flex-col", "md:flex-row");
-    expect(contextSidebar).toHaveClass("w-full", "md:w-(--sidebar-w)", "md:overflow-x-hidden", "border-b", "md:border-b-0", "md:border-r");
+    expect(container.querySelector('[data-shell="openvms"]')).toHaveClass("flex-col", "shell-md:flex-row");
+    expect(contextSidebar).toHaveClass("w-full", "shell-md:w-(--sidebar-w)", "shell-md:overflow-x-hidden", "border-b", "shell-md:border-b-0", "shell-md:border-r");
   });
 
   it("collapses the context sidebar to zero width and hides it from assistive tech", () => {
@@ -91,9 +119,9 @@ describe("AppShell", () => {
     act(() => setContextSidebarCollapsed(true));
     const contextSidebar = document.querySelector('[data-shell-region="context-sidebar"]');
     expect(contextSidebar).toHaveAttribute("aria-hidden", "true");
-    expect(contextSidebar).toHaveClass("md:w-0", "md:overflow-hidden");
+    expect(contextSidebar).toHaveClass("shell-md:w-0", "shell-md:overflow-hidden");
     act(() => setContextSidebarCollapsed(false));
-    expect(screen.getByRole("complementary", { name: "Context Sidebar" })).not.toHaveClass("md:w-0");
+    expect(screen.getByRole("complementary", { name: "Context Sidebar" })).not.toHaveClass("shell-md:w-0");
   });
 
   it("exposes an accessible resize separator that resizes by keyboard, persists and resets on double click", () => {

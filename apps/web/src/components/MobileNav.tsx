@@ -76,7 +76,7 @@ export function MobileNav({ me, features, pathname, compact = false }: { me: Sch
     <>
       <div
         data-shell-region="bottom-nav"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-outline-variant bg-surface-1 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-outline-variant bg-surface-1 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] shell-md:hidden"
       >
         <nav aria-label={t("common.mobileNav")} className={cn("flex items-stretch gap-1 px-2", compact ? "h-14 pt-1 pb-0.5" : "h-20 pt-3 pb-4")}>
           {primary.map((item) => {
@@ -103,7 +103,7 @@ export function MobileNav({ me, features, pathname, compact = false }: { me: Sch
       </div>
 
       {open && (
-        <div data-shell-region="bottom-nav-sheet" className="fixed inset-0 z-50 flex items-end md:hidden">
+        <div data-shell-region="bottom-nav-sheet" className="fixed inset-0 z-50 flex items-end shell-md:hidden">
           <div className="absolute inset-0 bg-scrim/50" aria-hidden onClick={close} />
           <div
             ref={sheetRef}
