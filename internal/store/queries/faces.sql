@@ -12,9 +12,13 @@ SELECT * FROM face_persons WHERE tenant_id = @tenant_id AND id = @id AND deleted
 
 -- name: CreateFacePersonIfNameFree :one
 -- Collisions on (tenant_id, frigate_name) return no row so the caller retries with a suffix;
--- any other violation (display name) still raises.
+-- any other violation (display name) still raises. A name with a pending remote cleanup is also
+-- taken, so that cleanup can never delete a new person's face.
 INSERT INTO face_persons (tenant_id, display_name, frigate_name, notes, created_by, updated_by)
-VALUES (@tenant_id, @display_name, @frigate_name, @notes, @created_by, @created_by)
+SELECT @tenant_id, @display_name, @frigate_name, @notes, @created_by, @created_by
+WHERE NOT EXISTS (
+  SELECT 1 FROM face_remote_cleanup c WHERE c.tenant_id = @tenant_id AND c.frigate_name = @frigate_name
+)
 ON CONFLICT (tenant_id, frigate_name) DO NOTHING
 RETURNING *;
 

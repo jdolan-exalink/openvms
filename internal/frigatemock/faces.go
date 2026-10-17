@@ -16,6 +16,64 @@ type faceLibrary struct {
 	faces  map[string]map[string][]byte
 	train  map[string][]byte
 	nextID int
+	// calls records mutating requests as "op:name" (create, register, delete, rename).
+	calls []string
+	// drop counts, per operation, how many upcoming responses are replaced by a 502 AFTER the
+	// write was applied: the "write succeeded but the response was lost" case.
+	drop map[string]int
+}
+
+// FaceCalls returns the mutating face requests received so far, as "op:name".
+func (s *Server) FaceCalls() []string {
+	l := s.lib()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string(nil), l.calls...)
+}
+
+// SeedFaceImage puts an image straight into the library (a face that exists in Frigate
+// independently of any OpenVMS sync). An empty id list entry is not needed: pass no data to
+// create an empty folder.
+func (s *Server) SeedFaceImage(name, id string, data []byte) {
+	l := s.lib()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.faces[name] == nil {
+		l.faces[name] = map[string][]byte{}
+	}
+	if id != "" {
+		l.faces[name][id] = data
+	}
+}
+
+// DeleteFaceForTest removes a whole face folder, as an operator does in Frigate's own UI.
+func (s *Server) DeleteFaceForTest(name string) {
+	l := s.lib()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.faces, name)
+}
+
+// DropFaceResponses makes the next n responses of op ("create", "register", "delete") fail with
+// 502 after the write has been applied.
+func (s *Server) DropFaceResponses(op string, n int) {
+	l := s.lib()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.drop == nil {
+		l.drop = map[string]int{}
+	}
+	l.drop[op] = n
+}
+
+// record notes a mutating call and reports whether its response must be dropped. Callers hold l.mu.
+func (l *faceLibrary) record(op, name string) bool {
+	l.calls = append(l.calls, op+":"+name)
+	if l.drop[op] > 0 {
+		l.drop[op]--
+		return true
+	}
+	return false
 }
 
 func (s *Server) lib() *faceLibrary {
@@ -101,6 +159,10 @@ func (s *Server) createFace(w http.ResponseWriter, r *http.Request) {
 	if _, ok := l.faces[name]; !ok {
 		l.faces[name] = map[string][]byte{}
 	}
+	if l.record("create", name) {
+		writeStatusJSON(w, http.StatusBadGateway, map[string]any{"success": false})
+		return
+	}
 	writeJSON(w, map[string]any{"success": true, "message": "Successfully created face folder."})
 }
 
@@ -125,6 +187,10 @@ func (s *Server) registerFace(w http.ResponseWriter, r *http.Request) {
 	l.nextID++
 	id := fmt.Sprintf("%s-%04d.webp", name, l.nextID)
 	l.faces[name][id] = data
+	if l.record("register", name) {
+		writeStatusJSON(w, http.StatusBadGateway, map[string]any{"success": false})
+		return
+	}
 	writeJSON(w, map[string]any{"success": true, "message": "Successfully registered " + id + "."})
 }
 
@@ -149,6 +215,10 @@ func (s *Server) deleteFaceImages(w http.ResponseWriter, r *http.Request) {
 	// Frigate removes the folder once its last image is gone.
 	if imgs, ok := l.faces[name]; ok && len(imgs) == 0 {
 		delete(l.faces, name)
+	}
+	if l.record("delete", name) {
+		writeStatusJSON(w, http.StatusBadGateway, map[string]any{"success": false})
+		return
 	}
 	writeJSON(w, map[string]any{"success": true, "message": "Successfully deleted faces."})
 }

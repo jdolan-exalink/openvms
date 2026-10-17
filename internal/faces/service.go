@@ -42,6 +42,8 @@ const (
 	ActionImageAdded    = "FACE_IMAGE_ADDED"
 	ActionImageRemoved  = "FACE_IMAGE_REMOVED"
 	ActionImageRead     = "FACE_IMAGE_READ"
+	// ActionSyncRetried records a manual sync retry (FACE-02).
+	ActionSyncRetried = "FACE_SYNC_RETRIED"
 )
 
 // Blobs stores enrollment image bytes; *objectstore.Store implements it.
@@ -146,6 +148,25 @@ func (s *Service) audit(ctx context.Context, q *db.Queries, actor authz.Actor, t
 		TenantID: &tenantID, ActorID: &actor.UserID, ActorName: actor.Username, Action: action,
 		TargetType: targetType, TargetID: &targetID, RequestID: logging.RequestID(ctx), Ip: httpx.ClientIP(ctx), Details: b,
 	})
+}
+
+// personLockKey is the advisory-lock key serializing everything that changes or syncs one
+// person: registry writers take it before their row locks, the sync worker holds it while it
+// reads desired state and writes to Frigate, so a stale revision can never overwrite a newer one.
+func personLockKey(personID uuid.UUID) string { return "face:" + personID.String() }
+
+func lockPerson(ctx context.Context, q *db.Queries, personID uuid.UUID) error {
+	return q.LockFacePersonSync(ctx, personLockKey(personID))
+}
+
+// bumpRevision records a new desired state for the person and makes every non-disabled
+// per-server job due again. Callers hold the person lock.
+func bumpRevision(ctx context.Context, q *db.Queries, tenantID, personID uuid.UUID) error {
+	rev, err := q.BumpFacePersonRevision(ctx, db.BumpFacePersonRevisionParams{TenantID: tenantID, ID: personID})
+	if err != nil {
+		return store.Classify(err)
+	}
+	return q.PropagateFaceRevision(ctx, db.PropagateFaceRevisionParams{TenantID: tenantID, PersonID: personID, DesiredRevision: rev})
 }
 
 func cleanName(name string) (string, error) {
@@ -290,6 +311,9 @@ func (s *Service) UpdatePerson(ctx context.Context, actor authz.Actor, tenantID,
 // as a tombstone so the registry sync can propagate the deletion to every Frigate.
 func (s *Service) DeletePerson(ctx context.Context, actor authz.Actor, tenantID, id uuid.UUID) error {
 	err := s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		if err := lockPerson(ctx, q, id); err != nil {
+			return err
+		}
 		if _, err := q.SoftDeleteFacePerson(ctx, db.SoftDeleteFacePersonParams{TenantID: tenantID, ID: id, UpdatedBy: &actor.UserID}); err != nil {
 			return store.Classify(err)
 		}
@@ -303,6 +327,9 @@ func (s *Service) DeletePerson(ctx context.Context, actor authz.Actor, tenantID,
 			}
 		}
 		if err := q.DeleteFacePersonImages(ctx, db.DeleteFacePersonImagesParams{TenantID: tenantID, PersonID: id}); err != nil {
+			return err
+		}
+		if err := bumpRevision(ctx, q, tenantID, id); err != nil {
 			return err
 		}
 		return s.audit(ctx, q, actor, tenantID, ActionPersonDeleted, "face_person", id, map[string]any{"person_id": id, "images_removed": len(imgs)})
@@ -381,6 +408,9 @@ func (s *Service) AddImage(ctx context.Context, actor authz.Actor, tenantID, per
 	key := imageKey(tenantID, personID, imageID)
 	var out Image
 	err = s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		if err := lockPerson(ctx, q, personID); err != nil {
+			return err
+		}
 		// The row lock serializes concurrent adds for this person, so the cap check below
 		// cannot be raced past by parallel uploads.
 		if _, err := q.LockFacePersonForUpdate(ctx, db.LockFacePersonForUpdateParams{TenantID: tenantID, ID: personID}); err != nil {
@@ -403,6 +433,9 @@ func (s *Service) AddImage(ctx context.Context, actor authz.Actor, tenantID, per
 			return store.Classify(err)
 		}
 		out = toImage(row)
+		if err := bumpRevision(ctx, q, tenantID, personID); err != nil {
+			return err
+		}
 		return s.audit(ctx, q, actor, tenantID, ActionImageAdded, "face_person_image", imageID,
 			map[string]any{"person_id": personID, "image_id": imageID, "sha256": meta.SHA256, "size_bytes": meta.Size})
 	})
@@ -441,6 +474,9 @@ func (s *Service) rollbackImage(ctx context.Context, actor authz.Actor, tenantID
 // RemoveImage deletes one enrollment image (faces.manage).
 func (s *Service) RemoveImage(ctx context.Context, actor authz.Actor, tenantID, personID, imageID uuid.UUID) error {
 	return s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		if err := lockPerson(ctx, q, personID); err != nil {
+			return err
+		}
 		row, err := q.GetFacePersonImage(ctx, db.GetFacePersonImageParams{TenantID: tenantID, PersonID: personID, ID: imageID})
 		if err != nil {
 			return store.Classify(err)
@@ -451,9 +487,70 @@ func (s *Service) RemoveImage(ctx context.Context, actor authz.Actor, tenantID, 
 		if err := q.DeleteFacePersonImage(ctx, db.DeleteFacePersonImageParams{TenantID: tenantID, PersonID: personID, ID: imageID}); err != nil {
 			return err
 		}
+		if err := bumpRevision(ctx, q, tenantID, personID); err != nil {
+			return err
+		}
 		return s.audit(ctx, q, actor, tenantID, ActionImageRemoved, "face_person_image", imageID,
 			map[string]any{"person_id": personID, "image_id": imageID})
 	})
+}
+
+// SyncStatus is the per-server sync state of one person, for the Faces UI.
+type SyncStatus struct {
+	ServerID        uuid.UUID
+	ServerName      string
+	Status          string // pending, processing, synced, failed, conflict, disabled
+	DesiredRevision int64
+	SyncedRevision  int64
+	Owned           bool
+	LastError       string
+	LastSyncedAt    *time.Time
+	UpdatedAt       time.Time
+}
+
+// ListSyncStatus reports how the person is synced on every server of the tenant (faces.view).
+func (s *Service) ListSyncStatus(ctx context.Context, actor authz.Actor, tenantID, personID uuid.UUID) ([]SyncStatus, error) {
+	out := []SyncStatus{}
+	err := s.tx(ctx, actor, tenantID, authz.FacesView, func(q *db.Queries) error {
+		if _, err := q.GetFacePerson(ctx, db.GetFacePersonParams{TenantID: tenantID, ID: personID}); err != nil {
+			return store.Classify(err)
+		}
+		rows, err := q.ListFaceSyncStatus(ctx, db.ListFaceSyncStatusParams{TenantID: tenantID, PersonID: personID})
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			st := SyncStatus{ServerID: r.ServerID, ServerName: r.ServerName, Status: r.Status, DesiredRevision: r.DesiredRevision,
+				SyncedRevision: r.SyncedRevision, Owned: r.Owned, LastSyncedAt: r.LastSyncedAt, UpdatedAt: r.UpdatedAt}
+			if r.LastError != nil {
+				st.LastError = *r.LastError
+			}
+			out = append(out, st)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// RetrySync requeues the person's failed and conflicting server jobs (faces.manage) and
+// returns how many were requeued. A conflict is re-evaluated from scratch: it clears once the
+// foreign face that caused it is gone.
+func (s *Service) RetrySync(ctx context.Context, actor authz.Actor, tenantID, personID uuid.UUID) (int, error) {
+	var n int64
+	err := s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		if err := lockPerson(ctx, q, personID); err != nil {
+			return err
+		}
+		if _, err := q.GetFacePerson(ctx, db.GetFacePersonParams{TenantID: tenantID, ID: personID}); err != nil {
+			return store.Classify(err)
+		}
+		var err error
+		if n, err = q.RetryFaceServerSync(ctx, db.RetryFaceServerSyncParams{TenantID: tenantID, PersonID: personID}); err != nil {
+			return err
+		}
+		return s.audit(ctx, q, actor, tenantID, ActionSyncRetried, "face_person", personID, map[string]any{"person_id": personID, "jobs": n})
+	})
+	return int(n), err
 }
 
 // ReadImage returns the image bytes (faces.view) and audits the read.
