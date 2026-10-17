@@ -12,7 +12,7 @@ const server = (id: string, name: string, site_id: string, extra: object = {}) =
   name,
   base_url: `https://${name}:8971`,
   status: "online",
-  frigate_version: "0.16",
+  frigate_version: "0.17",
   camera_count: 4,
   ...extra,
 });
@@ -984,7 +984,7 @@ describe("Servers", () => {
         "/api/v1/servers": () => json({ items: [] }),
         "/api/v1/sites": () => json({ items: [{ id: "s2", name: "Exalink" }] }),
         "/api/v1/me": () => json(manager),
-        "POST /api/v1/servers/probe": () => json({ frigate_version: "0.16", adapter: "v1", cameras: [], capabilities: { review: false, preview: false, exports: false, lpr: false, face_recognition: false, semantic_search: false, audio: false, ptz: false } }),
+        "POST /api/v1/servers/probe": () => json({ frigate_version: "0.17", adapter: "v1", cameras: [], capabilities: { review: false, preview: false, exports: false, lpr: false, face_recognition: false, semantic_search: false, audio: false, ptz: false } }),
         "POST /api/v1/servers": () => json({ id: "server-1", site_id: "s2", name: "Frigate existente", base_url: "http://10.1.1.144:5000", status: "online", camera_count: 0 }),
       }));
       vi.stubGlobal("fetch", fetchMock);
@@ -1001,6 +1001,27 @@ describe("Servers", () => {
       const paths = fetchMock.mock.calls.map(([r]) => new URL((r as Request).url).pathname);
       expect(paths).toContain("/api/v1/servers/probe");
       expect(paths).not.toContain("/api/v1/servers/provision");
+    });
+
+    it("shows the minimum-version error when the probe rejects an unsupported Frigate", async () => {
+      const message = "Frigate 0.16.1 is not supported, OpenVMS requires Frigate 0.17 or later";
+      const fetchMock = vi.fn(stubApi({
+        "/api/v1/servers": () => json({ items: [] }),
+        "/api/v1/sites": () => json({ items: [{ id: "s2", name: "Exalink" }] }),
+        "/api/v1/me": () => json(manager),
+        "POST /api/v1/servers/probe": () => json({ code: "frigate_unreachable", message }, 502),
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: "Registrar servidor" }));
+      fireEvent.click(screen.getByRole("button", { name: /Registrar un Frigate existente/ }));
+      const form = screen.getByRole("form", { name: "Importar servidor Frigate existente" });
+      fireEvent.change(within(form).getByLabelText("Sitio"), { target: { value: "s2" } });
+      fireEvent.change(within(form).getByLabelText("Nombre"), { target: { value: "Frigate viejo" } });
+      fireEvent.change(within(form).getByLabelText("Acceso a Frigate"), { target: { value: "none" } });
+      fireEvent.change(within(form).getByPlaceholderText("http://10.20.0.11:5000"), { target: { value: "http://10.1.1.145:5000" } });
+      fireEvent.click(within(form).getByRole("button", { name: "Probar conexión" }));
+      expect(await within(form).findByRole("alert")).toHaveTextContent(message);
     });
 
     it("requires a site and server display name, then explicitly opts into first-contact SSH trust", async () => {

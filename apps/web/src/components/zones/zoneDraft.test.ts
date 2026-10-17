@@ -16,7 +16,7 @@ describe("zone draft round-trip", () => {
 
   it("converts legacy absolute zone coordinates and writes relative ones", () => {
     const value: ZoneEditorValue = { zones: { z: { coordinates: "640,360,1280,360,1280,720" } }, motionMask: [], objectMask: [], objectFilterMasks: {} };
-    const out = draftToValue(buildDraft(value, { width: 1280, height: 720 }, "0.16.0"), "0.16.0");
+    const out = draftToValue(buildDraft(value, { width: 1280, height: 720 }, "0.17.0"), "0.17.0");
     expect(out.zones.z?.coordinates).toBe("0.5,0.5,1,0.5,1,1");
   });
 });

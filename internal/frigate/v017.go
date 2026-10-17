@@ -320,34 +320,13 @@ func (a *v017) UpdateCameraConfig(ctx context.Context, camera string, update Cam
 		return CameraFrigateConfig{}, err
 	}
 
-	if a.ConfigEditable() {
-		// Apply through the generic patch path so detect/objects reach running processes
-		// (requires_restart=0 + update_topic) instead of only being saved to config.yml.
-		if patch := legacyPatch(update); len(patch) > 0 {
-			if _, err := a.ApplyCameraPatch(ctx, camera, patch); err != nil {
-				return CameraFrigateConfig{}, err
-			}
-		}
-		return a.GetCameraConfig(ctx, camera)
-	}
-
-	params := url.Values{}
-	if update.DetectEnabled != nil {
-		params.Set(fmt.Sprintf("cameras.%s.detect.enabled", camera), strconv.FormatBool(*update.DetectEnabled))
-	}
-	if update.LPREnabled != nil {
-		params.Set(fmt.Sprintf("cameras.%s.lpr.enabled", camera), strconv.FormatBool(*update.LPREnabled))
-	}
-	if update.TrackedObjects != nil {
-		params.Set(fmt.Sprintf("cameras.%s.objects.track", camera), strings.Join(update.TrackedObjects, ","))
-	}
-
-	if len(params) > 0 {
-		if _, err := a.c.send(ctx, http.MethodPut, "/api/config/set", params, nil); err != nil {
+	// Apply through the generic patch path so detect/objects reach running processes
+	// (requires_restart=0 + update_topic) instead of only being saved to config.yml.
+	if patch := legacyPatch(update); len(patch) > 0 {
+		if _, err := a.ApplyCameraPatch(ctx, camera, patch); err != nil {
 			return CameraFrigateConfig{}, err
 		}
 	}
-
 	return a.GetCameraConfig(ctx, camera)
 }
 

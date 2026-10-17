@@ -78,10 +78,9 @@ describe("sections, live and secrets", () => {
     expect(orderSections(["zones", "zzz", "detect", "name", "enabled_in_config", "ffmpeg", "aaa"])).toEqual(["ffmpeg", "detect", "zones", "aaa", "zzz"]);
   });
 
-  it("treats everything as restart-required before Frigate 0.17", () => {
-    expect(isLiveSection("detect", "0.16.2")).toBe(false);
-    expect(isLiveSection("detect", "0.17.0-abc")).toBe(true);
-    expect(isLiveSection("ffmpeg", "0.17.0")).toBe(false);
+  it("hot-reloads only the sections Frigate applies live", () => {
+    expect(isLiveSection("detect")).toBe(true);
+    expect(isLiveSection("ffmpeg")).toBe(false);
   });
 
   it("flags credential paths", () => {

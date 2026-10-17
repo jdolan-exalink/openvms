@@ -21,6 +21,8 @@ capacidades fuera del MVP mantienen sus propios pendientes; no se declaran cerra
 
 Requisitos: Docker con Compose v2. Para desarrollo local también Go 1.26 y Node 22 con pnpm (`corepack enable`).
 
+Versión de Frigate soportada: **0.17 o posterior**. OpenVMS rechaza al registrar o conectar un servidor con Frigate 0.16 o anterior e informa la versión detectada; actualiza ese Frigate antes de registrarlo.
+
 ```bash
 cp .env.example .env      # opcional
 docker compose up -d      # o: make up

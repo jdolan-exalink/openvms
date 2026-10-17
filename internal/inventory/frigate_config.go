@@ -97,7 +97,7 @@ func mapConfigErr(err error) error {
 		return nil
 	case errors.As(err, &cv):
 		return invalid("%s", cv.Message)
-	case errors.Is(err, frigate.ErrConfigEditUnsupported), errors.Is(err, frigate.ErrNotFound):
+	case errors.Is(err, frigate.ErrNotFound):
 		return err
 	}
 	return &FrigateError{Err: err}
@@ -133,7 +133,7 @@ func (s *Service) GetCameraFrigateConfigFull(ctx context.Context, actor authz.Ac
 	}
 	doc := FrigateCameraConfigDoc{
 		CameraID: cam.ID, CameraName: cam.RemoteName, ServerID: cam.ServerID,
-		FrigateVersion: a.Version(), Editable: canConfig && a.ConfigEditable(),
+		FrigateVersion: a.Version(), Editable: canConfig,
 	}
 	if canSecrets {
 		cfg, err := a.CameraConfig(ctx, cam.RemoteName, true)
@@ -216,9 +216,6 @@ func (s *Service) PatchCameraFrigateConfig(ctx context.Context, actor authz.Acto
 	a, err := s.frigateAdapter(ctx, srv)
 	if err != nil {
 		return FrigatePatchResult{}, err
-	}
-	if !a.ConfigEditable() {
-		return FrigatePatchResult{}, frigate.ErrConfigEditUnsupported
 	}
 	before, err := a.RawConfig(ctx)
 	if err != nil {
@@ -345,9 +342,6 @@ func (s *Service) SaveServerFrigateRaw(ctx context.Context, actor authz.Actor, s
 	if err != nil {
 		return FrigateRawSaveResult{}, err
 	}
-	if !a.ConfigEditable() {
-		return FrigateRawSaveResult{}, frigate.ErrConfigEditUnsupported
-	}
 	return s.writeRaw(ctx, actor, srv, a, yamlText, restart, RevisionRawSave, ActionFrigateConfigRawSaved, nil)
 }
 
@@ -403,9 +397,6 @@ func (s *Service) RollbackServerFrigateConfig(ctx context.Context, actor authz.A
 	a, err := s.frigateAdapter(ctx, srv)
 	if err != nil {
 		return FrigateRawSaveResult{}, err
-	}
-	if !a.ConfigEditable() {
-		return FrigateRawSaveResult{}, frigate.ErrConfigEditUnsupported
 	}
 	return s.writeRaw(ctx, actor, srv, a, rev.BeforeYaml, false, RevisionRollback, ActionFrigateConfigRolledBack,
 		map[string]any{"rolled_back_revision_id": rev.ID})
@@ -543,9 +534,6 @@ func (s *Service) AddCameraToFrigate(ctx context.Context, actor authz.Actor, ser
 	a, err := s.frigateAdapter(ctx, srv)
 	if err != nil {
 		return AddCameraToFrigateResult{}, err
-	}
-	if !a.ConfigEditable() {
-		return AddCameraToFrigateResult{}, frigate.ErrConfigEditUnsupported
 	}
 
 	rawYAML, err := a.RawConfig(ctx)
