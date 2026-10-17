@@ -20,7 +20,7 @@ Phone Live (`apps/web/src/components/LivePhone.tsx`) is a single-column stack of
 - Delivery: `ask-on-risk`, cached `stacked-to-main`.
 
 ## Tasks
-- [ ] LP-01 — Safe areas and space on phone Live. Route: delegated direct.
+- [x] LP-01 — Safe areas and space on phone Live. Route: delegated direct. Commit `7058bc6`; rollback boundary: revert it (touches AppShell, MobileNav, Layout and their tests only).
 - [ ] LP-02 — Landscape and fullscreen single-camera view. Route: delegated direct.
 - [ ] LP-03 — Pinch-zoom/pan in the single-camera view. Route: delegated direct.
 - [ ] LP-04 — Multi-camera phone layout redesign (pending research + user decision).
@@ -33,6 +33,16 @@ Phone Live (`apps/web/src/components/LivePhone.tsx`) is a single-column stack of
 
 ## Progress
 - 2026-10-17: branch `feat/live-phone-pwa` from `origin/main` (`7c1d074`); exploration done (map of PWA config, LivePhone, chrome, tests).
+
+- LP-01 evidence: RED 4 failed (AppShell insets/compact, MobileNav insets/compact) before implementation. GREEN: AppShell + MobileNav + Layout + LivePhone 47/47. `pnpm typecheck` clean, eslint on changed files clean, `git diff --check` clean. Behavior: shell root pads `env(safe-area-inset-top|left|right)`; bottom nav pads left/right and its More sheet pads sides; on /live the bottom bar is `h-14` (was `h-20`) with main reserving `3.5rem`+inset, and the page header is `min-h-11` with tighter margins on phones (desktop unchanged).
+
+## Manual device checklist (to be run by the parent on real devices; NOT run yet)
+- [ ] iOS standalone PWA, portrait: no content under the status bar/notch or home indicator on Live, Events and More sheet.
+- [ ] iOS standalone PWA, landscape: nothing under the notch/side insets; single camera fills the screen.
+- [ ] Android standalone PWA (portrait and landscape): same checks; system bars not overlapped.
+- [ ] Compact Live chrome: bottom bar and header targets remain comfortable to tap (>= 44px) and all nav destinations reachable (including More).
+- [ ] Fullscreen toggle in the single camera: enters and exits (Android native fullscreen; iPhone immersive fallback); back button still closes the camera.
+- [ ] Pinch-zoom, pan when zoomed, double-tap toggle/reset in the single camera; page swiping in the multi view is unaffected.
 
 ## Next step
 LP-01..LP-03 (writer) in parallel with LP-04 research.
