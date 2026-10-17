@@ -25,6 +25,7 @@ const eventSeverities = [
   { value: "detection", label: "Detección" },
 ];
 const defaultMinutes = 5;
+const wizardSteps = ["Alcance", "Condiciones", "Acciones", "Revisión y activación"] as const;
 
 /** Rules: guided form for automation rules (no JSON). Requires rules.read (rules.manage to change). */
 export function Rules() {
@@ -177,7 +178,33 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
     notify_in_app: rule?.actions.notify_in_app ?? true,
     severity: (rule?.actions.severity ?? "warning") as NotifSeverity,
     channel_ids: rule?.actions.channel_ids ?? ([] as string[]),
+    enabled: rule?.enabled ?? true,
   });
+  const [step, setStep] = useState(0);
+  const [stepError, setStepError] = useState("");
+  const nextStep = () => {
+    if (step === 0 && !f.name.trim()) {
+      setStepError("Ingresá un nombre para continuar.");
+      return;
+    }
+    if (step === 1 && f.trigger === "event" && Boolean(f.schedule_start) !== Boolean(f.schedule_end)) {
+      setStepError("Completá ambos horarios para definir un rango.");
+      return;
+    }
+    if (step === 1 && f.trigger === "event" && f.cooldown_seconds.trim()) {
+      const cooldown = Number(f.cooldown_seconds);
+      if (!Number.isInteger(cooldown) || cooldown < 0 || cooldown > 86400) {
+        setStepError("El cooldown debe estar entre 0 y 86400 segundos.");
+        return;
+      }
+    }
+    if (step === 1 && f.trigger !== "event" && (!Number.isFinite(Number(f.minutes)) || Number(f.minutes) < 1)) {
+      setStepError("Ingresá una duración de al menos un minuto.");
+      return;
+    }
+    setStepError("");
+    setStep((current) => Math.min(current + 1, wizardSteps.length - 1));
+  };
   const [simulation, setSimulation] = useState<Schemas["RuleSimulation"] | null>(null);
   const [conflictRule, setConflictRule] = useState<Rule | null>(null);
 
@@ -235,9 +262,10 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
           severity: f.severity,
           ...(f.channel_ids.length ? { channel_ids: f.channel_ids } : {}),
         },
+          enabled: f.enabled,
       };
       if (rule) return unwrap(await api.PATCH("/api/v1/rules/{ruleId}", { params: { path: { ruleId: rule.id }, header: { "If-Match": String(rule.version) } }, body }));
-      return unwrap(await api.POST("/api/v1/rules", { body: { ...body, enabled: true } }));
+      return unwrap(await api.POST("/api/v1/rules", { body }));
     },
     onSuccess: onDone,
     onError: async (error) => {
@@ -267,6 +295,15 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
         }}
         className="flex flex-col gap-4"
       >
+        <div className="flex items-center justify-between gap-3 rounded-m3-md bg-surface-2 p-3" aria-live="polite">
+          <span>Paso {step + 1} de 4: {wizardSteps[step]}</span>
+          <div className="flex gap-2">
+            {step > 0 && <Button type="button" variant="text" onClick={() => { setStepError(""); setStep((current) => current - 1); }}>Anterior</Button>}
+            {step < wizardSteps.length - 1 && <Button type="button" variant="tonal" onClick={nextStep}>Siguiente</Button>}
+          </div>
+        </div>
+        {stepError && <p role="alert" className="text-sm text-bad">{stepError}</p>}
+        <div style={{ display: step === 0 ? "flex" : "none" }} className="flex flex-col gap-4">
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Nombre">
             <TextInput required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
@@ -300,6 +337,7 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
           onToggle={(id) => setF({ ...f, site_ids: flip(f.site_ids, id) })}
           empty="No hay sitios disponibles."
         />
+
         {f.trigger !== "server_offline" && (
           <CheckGroup
             legend={f.trigger === "event" ? "Cámaras (vacío = todas)" : "Cámaras a vigilar (vacío = todas)"}
@@ -328,6 +366,12 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
               empty="No hay grupos disponibles."
             />
             <ErrorNote error={cameraGroups.error} />
+          </>
+        )}
+        </div>
+        <div style={{ display: step === 1 ? "flex" : "none" }} className="flex flex-col gap-4">
+        {f.trigger === "event" && (
+          <>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label="Cooldown (segundos)" hint="Vacío usa el valor predeterminado de 300 segundos.">
                 <TextInput type="number" min={0} max={86400} value={f.cooldown_seconds} onChange={(e) => setF({ ...f, cooldown_seconds: e.target.value })} />
@@ -335,8 +379,8 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
               <Field label="Zona horaria IANA" hint="Se prioriza la zona horaria del sitio; si no está configurada, se usa esta. Vacío usa UTC.">
                 <TextInput placeholder="America/Argentina/Buenos_Aires" value={f.schedule_timezone} onChange={(e) => setF({ ...f, schedule_timezone: e.target.value })} />
               </Field>
-              <Field label="Desde (HH:MM)"><TextInput type="time" required={!!f.schedule_end} value={f.schedule_start} onChange={(e) => setF({ ...f, schedule_start: e.target.value })} /></Field>
-              <Field label="Hasta (HH:MM)"><TextInput type="time" required={!!f.schedule_start} value={f.schedule_end} onChange={(e) => setF({ ...f, schedule_end: e.target.value })} /></Field>
+              <Field label="Desde (HH:MM)"><TextInput type="time" required={step === 1 && !!f.schedule_end} value={f.schedule_start} onChange={(e) => setF({ ...f, schedule_start: e.target.value })} /></Field>
+              <Field label="Hasta (HH:MM)"><TextInput type="time" required={step === 1 && !!f.schedule_start} value={f.schedule_end} onChange={(e) => setF({ ...f, schedule_end: e.target.value })} /></Field>
             </div>
             <CheckGroup
               legend="Días de la semana (vacío = todos)"
@@ -389,10 +433,12 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
         )}
         {f.trigger !== "event" && (
           <Field label="Minutos sin conexión" hint="La regla se dispara cuando supera este tiempo.">
-            <TextInput type="number" min={1} required value={f.minutes} onChange={(e) => setF({ ...f, minutes: e.target.value })} />
+            <TextInput type="number" min={1} required={step === 1} value={f.minutes} onChange={(e) => setF({ ...f, minutes: e.target.value })} />
           </Field>
         )}
+        </div>
 
+        <div style={{ display: step === 2 ? "flex" : "none" }} className="flex flex-col gap-4">
         <fieldset className="flex flex-col gap-2">
           <legend className="text-sm font-medium">Acciones</legend>
           <Checkbox checked={f.create_alarm} onChange={(v) => setF({ ...f, create_alarm: v })} label="Crear alarma" />
@@ -413,18 +459,36 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
           onToggle={(id) => setF({ ...f, channel_ids: flip(f.channel_ids, id) })}
           empty="No hay canales configurados. Creálos en Canales."
         />
+        </div>
 
         <ErrorNote error={save.error} />
         {conflictRule && <div role="alert" className="rounded-m3-md bg-warning/10 p-3 text-sm">La regla cambió en el servidor. Tus cambios no se guardaron. <Button type="button" variant="tonal" onClick={() => onReloadRule(conflictRule)}>Cargar versión actual</Button></div>}
+        <div style={{ display: step === 3 ? "flex" : "none" }} className="flex flex-col gap-4">
+        <section aria-label="Resumen de la regla" className="rounded-m3-md border border-outline-variant p-3">
+          <h3 className="font-semibold">Resumen de la regla</h3>
+          <dl className="mt-2 grid gap-2 text-sm">
+            <div><dt className="font-medium">Nombre y disparador</dt><dd>{f.name.trim() || "Sin nombre"} · {triggerLabel[f.trigger]}</dd></div>
+            <div><dt className="font-medium">Alcance</dt><dd>{f.camera_ids.length ? cameras.data?.filter((camera) => f.camera_ids.includes(camera.id)).map((camera) => camera.display_name).join(", ") : "Todas las cámaras"}; {f.camera_group_ids.length ? cameraGroups.data?.filter((group) => f.camera_group_ids.includes(group.id)).map((group) => group.name).join(", ") : "Todos los grupos"}</dd></div>
+            <div><dt className="font-medium">Condiciones</dt><dd>{f.labels.length ? `Etiquetas: ${f.labels.join(", ")}` : "Sin filtro de etiquetas"}{f.zones.length ? ` · Zonas: ${f.zones.join(", ")}` : ""}</dd></div>
+            <div><dt className="font-medium">Acciones</dt><dd>{describeActions({ create_alarm: f.create_alarm, notify_in_app: f.notify_in_app, channel_ids: f.channel_ids })}</dd></div>
+          </dl>
+        </section>
         <div className="flex flex-col gap-2 rounded-m3-md border border-outline-variant p-3">
           <Button type="button" variant="tonal" disabled={simulate.isPending || f.trigger !== "event"} onClick={() => simulate.mutate()}>{simulate.isPending ? "Simulando…" : "Vista previa con eventos recientes"}</Button>
           <ErrorNote error={simulate.error} />
           {simulation && <div role="status" className="text-sm">Se evaluaron {simulation.evaluated} eventos recientes; {simulation.condition_matched} coinciden con las condiciones y {simulation.matched} quedan en la proyección de cooldown por cámara de {simulation.cooldown_seconds} s ({simulation.cooldown_suppressed} suprimidos). Es una estimación basada en los timestamps históricos; no consulta ejecuciones previas ni ejecuta acciones.{simulation.has_more && " Hay más eventos en la ventana; la vista previa usa los más recientes dentro del límite."}{simulation.matches.slice(0, 5).map((match) => <div key={match.event_id}>{match.camera_name} · {match.labels.join(", ")} · {new Date(match.start_time).toLocaleString()}</div>)}</div>}
         </div>
+        {step === wizardSteps.length - 1 && (
+          <fieldset className="rounded-m3-md border border-outline-variant p-3">
+            <legend className="text-sm font-medium">Activación</legend>
+            <Checkbox checked={f.enabled} onChange={(enabled) => setF({ ...f, enabled })} label="Activar regla al guardar" />
+          </fieldset>
+        )}
+        </div>
         <div className="flex items-center gap-2 pt-2">
-          <Button type="submit" variant="filled" disabled={save.isPending}>
+          {step === 3 && <Button type="submit" variant="filled" disabled={save.isPending}>
             {save.isPending ? "Guardando…" : "Guardar"}
-          </Button>
+          </Button>}
           <Button variant="text" onClick={onCancel}>Cancelar</Button>
         </div>
       </form>

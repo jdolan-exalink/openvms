@@ -205,6 +205,41 @@ type CameraOutage struct {
 	Since    time.Time
 }
 
+type CameraZone struct {
+	ID           uuid.UUID
+	TenantID     uuid.UUID
+	CameraID     uuid.UUID
+	Name         string
+	Points       json.RawMessage
+	Settings     json.RawMessage
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	SyncStatus   string
+	SyncRevision int64
+	LastApplied  []byte
+	SyncError    *string
+	DeletedAt    *time.Time
+}
+
+type CameraZoneSyncJob struct {
+	ZoneID             uuid.UUID
+	TenantID           uuid.UUID
+	CameraID           uuid.UUID
+	ActorUserID        *uuid.UUID
+	Operation          string
+	DesiredRevision    int64
+	DesiredConfig      []byte
+	LastApplied        []byte
+	Status             string
+	Attempts           int32
+	NextAttemptAt      time.Time
+	LeaseUntil         *time.Time
+	LastError          *string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	PreviousRemoteName *string
+}
+
 type ClipWatermarkJob struct {
 	ID            uuid.UUID
 	TenantID      uuid.UUID

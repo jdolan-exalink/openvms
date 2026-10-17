@@ -160,3 +160,66 @@ func TestSaveRawConfigValidationAndSchemaTrim(t *testing.T) {
 		t.Errorf("trimmed schema keeps only CameraConfig and what it references: %s", s)
 	}
 }
+
+func TestUpsertManagedCameraZonePatchesAndVerifiesOneZone(t *testing.T) {
+	ts, mock := startEditableMock(t, "0.17.2-mock")
+	a := connectMock(t, ts)
+	zone := map[string]any{"coordinates": "0,0,1,0,1,1"}
+	if err := a.UpsertManagedCameraZone(context.Background(), "acceso_norte", "managed", zone, true); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := a.CameraConfig(context.Background(), "acceso_norte", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	zones := cfg["zones"].(map[string]any)
+	if zones["ovms_managed"].(map[string]any)["coordinates"] != zone["coordinates"] {
+		t.Fatalf("managed zone not verified: %#v", zones["ovms_managed"])
+	}
+	for _, foreign := range []string{"entrada", "salida"} {
+		if zones[foreign] == nil {
+			t.Fatalf("foreign zone %q was lost", foreign)
+		}
+	}
+	calls := mock.SetCalls()
+	if len(calls) != 1 || calls[0].UpdateTopic != "config/cameras/acceso_norte/zones" {
+		t.Fatalf("expected one zone-only live patch, got %+v", calls)
+	}
+	camera := calls[0].ConfigData["cameras"].(map[string]any)["acceso_norte"].(map[string]any)
+	patchedZones := camera["zones"].(map[string]any)
+	if len(patchedZones) != 1 || patchedZones["ovms_managed"] == nil {
+		t.Fatalf("patch included unrelated zones: %#v", calls[0].ConfigData)
+	}
+}
+
+func TestUpsertManagedCameraZoneDoesNotDoublePrefix(t *testing.T) {
+	ts, mock := startEditableMock(t, "0.17.2-mock")
+	a := connectMock(t, ts)
+	if err := a.UpsertManagedCameraZone(context.Background(), "acceso_norte", "ovms_managed", map[string]any{"coordinates": "0,0,1,0,1,1"}, true); err != nil {
+		t.Fatal(err)
+	}
+	zones := mock.SetCalls()[0].ConfigData["cameras"].(map[string]any)["acceso_norte"].(map[string]any)["zones"].(map[string]any)
+	if len(zones) != 1 || zones["ovms_managed"] == nil {
+		t.Fatalf("zone prefix was not applied exactly once: %#v", zones)
+	}
+}
+
+func TestUpsertManagedCameraZoneRequiresConfigPermission(t *testing.T) {
+	ts, mock := startEditableMock(t, "0.17.2-mock")
+	a := connectMock(t, ts)
+	if err := a.UpsertManagedCameraZone(context.Background(), "acceso_norte", "managed", map[string]any{"coordinates": "0,0,1,0,1,1"}, false); !errors.Is(err, ErrConfigPermissionRequired) {
+		t.Fatalf("write without servers.config permission: %v", err)
+	}
+	if calls := mock.SetCalls(); len(calls) != 0 {
+		t.Fatalf("unauthorized request reached Frigate: %+v", calls)
+	}
+}
+
+func TestUpsertManagedCameraZoneRejectsReadBackMismatch(t *testing.T) {
+	ts, mock := startEditableMock(t, "0.17.2-mock")
+	mock.IgnoreConfigSet = true
+	a := connectMock(t, ts)
+	if err := a.UpsertManagedCameraZone(context.Background(), "acceso_norte", "managed", map[string]any{"coordinates": "0,0,1,0,1,1"}, true); err == nil {
+		t.Fatal("read-back mismatch was reported as success")
+	}
+}

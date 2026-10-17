@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -16,6 +17,12 @@ import (
 
 	"gopkg.in/yaml.v3"
 )
+
+// ErrConfigPermissionRequired means a caller attempted a managed-zone write without servers.config authorization.
+var ErrConfigPermissionRequired = errors.New("servers.config permission is required for Frigate writes")
+
+// ErrConfigReadBackMismatch means Frigate accepted a patch but did not retain the requested value.
+var ErrConfigReadBackMismatch = errors.New("camera-zone read-back from Frigate did not match the requested value")
 
 // ConfigValidationError is a rejected patch or a configuration Frigate refused (HTTP 400).
 type ConfigValidationError struct{ Message string }
@@ -379,6 +386,76 @@ func (a *v017) ApplyCameraPatch(ctx context.Context, camera string, patch map[st
 		results = append(results, res)
 	}
 	return results, nil
+}
+
+// UpsertManagedCameraZone patches one VMS-owned zone and verifies the effective config through
+// the structured config API. Frigate's config_data merge preserves other zones and camera settings.
+func (a *v017) UpsertManagedCameraZone(ctx context.Context, camera, zoneName string, zone map[string]any, hasConfigPermission bool) error {
+	if !hasConfigPermission {
+		return ErrConfigPermissionRequired
+	}
+	if !safeName.MatchString(camera) {
+		return &ConfigValidationError{Message: fmt.Sprintf("invalid camera name %q", camera)}
+	}
+	if !safeName.MatchString(zoneName) {
+		return &ConfigValidationError{Message: fmt.Sprintf("invalid zone name %q", zoneName)}
+	}
+	if len(zone) == 0 {
+		return &ConfigValidationError{Message: "managed zone config is empty"}
+	}
+	if p, bad := FindRedacted(zone); bad {
+		return &ConfigValidationError{Message: fmt.Sprintf("%s holds a redacted value; redacted values are never written back", p)}
+	}
+	remoteName := zoneName
+	if !strings.HasPrefix(remoteName, "ovms_") {
+		remoteName = "ovms_" + remoteName
+	}
+	results, err := a.ApplyCameraPatch(ctx, camera, map[string]any{"zones": map[string]any{remoteName: zone}})
+	if err != nil {
+		return err
+	}
+	if len(results) != 1 || results[0].Section != "zones" || !results[0].AppliedLive || results[0].RequiresRestart {
+		return fmt.Errorf("managed camera-zone patch did not apply live")
+	}
+	cfg, err := a.CameraConfig(ctx, camera, false)
+	if err != nil {
+		return err
+	}
+	zones, ok := cfg["zones"].(map[string]any)
+	if !ok || !reflect.DeepEqual(zones[remoteName], zone) {
+		return ErrConfigReadBackMismatch
+	}
+	return nil
+}
+
+// DeleteManagedCameraZone removes one explicitly OpenVMS-owned zone and verifies absence.
+// Callers must only invoke this for a persisted zone with a last-applied snapshot.
+func (a *v017) DeleteManagedCameraZone(ctx context.Context, camera, zoneName string, hasConfigPermission bool) error {
+	if !hasConfigPermission {
+		return ErrConfigPermissionRequired
+	}
+	if !safeName.MatchString(camera) || !safeName.MatchString(zoneName) {
+		return &ConfigValidationError{Message: "invalid camera or zone name"}
+	}
+	if !strings.HasPrefix(zoneName, "ovms_") {
+		zoneName = "ovms_" + zoneName
+	}
+	results, err := a.ApplyCameraPatch(ctx, camera, map[string]any{"zones": map[string]any{zoneName: ""}})
+	if err != nil {
+		return err
+	}
+	if len(results) != 1 || results[0].Section != "zones" || !results[0].AppliedLive || results[0].RequiresRestart {
+		return fmt.Errorf("managed camera-zone deletion did not apply live")
+	}
+	cfg, err := a.CameraConfig(ctx, camera, false)
+	if err != nil {
+		return err
+	}
+	zones, _ := cfg["zones"].(map[string]any)
+	if _, exists := zones[zoneName]; exists {
+		return ErrConfigReadBackMismatch
+	}
+	return nil
 }
 
 func (a *v017) setViaBody(ctx context.Context, camera, section string, value any, live bool) error {

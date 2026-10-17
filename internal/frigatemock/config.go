@@ -47,6 +47,32 @@ func (s *Server) ConfigYAML() string {
 	return s.renderLocked()
 }
 
+// SetCameraZoneForTest injects an external edit into the mock's effective configuration.
+func (s *Server) SetCameraZoneForTest(camera, name string, value map[string]any) {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	state := s.stateLocked()
+	cameras, _ := state["cameras"].(map[string]any)
+	cam, _ := cameras[camera].(map[string]any)
+	zones, _ := cam["zones"].(map[string]any)
+	if zones == nil {
+		zones = map[string]any{}
+		cam["zones"] = zones
+	}
+	zones[name] = value
+}
+
+// DeleteCameraZoneForTest simulates an upstream delete whose response was lost.
+func (s *Server) DeleteCameraZoneForTest(camera, name string) {
+	s.cfgMu.Lock()
+	defer s.cfgMu.Unlock()
+	state := s.stateLocked()
+	cameras, _ := state["cameras"].(map[string]any)
+	cam, _ := cameras[camera].(map[string]any)
+	zones, _ := cam["zones"].(map[string]any)
+	delete(zones, name)
+}
+
 // liveTopics mirrors CameraConfigUpdateEnum of Frigate 0.17.
 var liveTopics = map[string]bool{
 	"add": true, "audio": true, "audio_transcription": true, "birdseye": true, "detect": true,
@@ -278,11 +304,31 @@ func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	call.ConfigData = body.ConfigData
 	deepMerge(next, normalize(body.ConfigData))
+	// Frigate's structured config updater treats an empty zone value as deletion.
+	if cameras, ok := body.ConfigData["cameras"].(map[string]any); ok {
+		for camera, raw := range cameras {
+			cam, _ := raw.(map[string]any)
+			zones, _ := cam["zones"].(map[string]any)
+			if len(zones) == 0 {
+				continue
+			}
+			effectiveCameras, _ := next["cameras"].(map[string]any)
+			effective, _ := effectiveCameras[camera].(map[string]any)
+			effectiveZones, _ := effective["zones"].(map[string]any)
+			for name, value := range zones {
+				if value == "" {
+					delete(effectiveZones, name)
+				}
+			}
+		}
+	}
 	if err := validate(next); err != nil {
 		invalidConfig(w, err)
 		return
 	}
-	s.cfg = next
+	if !s.IgnoreConfigSet {
+		s.cfg = next
+	}
 	s.setCalls = append(s.setCalls, call)
 	if body.UpdateTopic != "" {
 		parts := strings.Split(body.UpdateTopic, "/")

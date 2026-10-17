@@ -1299,6 +1299,94 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/zones:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [cameras]
+      operationId: listCameraZones
+      summary: List persisted zones for a camera
+      description: Requires cameras.view. Points use normalized 0..1 camera-frame coordinates.
+      responses:
+        "200":
+          description: Persisted camera zones
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraZoneList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [cameras]
+      operationId: createCameraZone
+      summary: Persist a camera zone and assign its stable ID
+      description: Requires cameras.manage. Zone names are Frigate-compatible lowercase identifiers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraZoneInput" }
+      responses:
+        "201":
+          description: Created camera zone
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraZone" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/cameras/{cameraId}/zones/{zoneId}:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: zoneId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      tags: [cameras]
+      operationId: updateCameraZone
+      summary: Update a persisted camera zone without changing its stable ID
+      description: Requires cameras.manage. Points use normalized 0..1 camera-frame coordinates.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraZoneInput" }
+      responses:
+        "200":
+          description: Updated camera zone
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraZone" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [cameras]
+      operationId: deleteCameraZone
+      summary: Delete a persisted camera zone
+      description: Requires cameras.manage. Deletes only a zone belonging to the path camera.
+      responses:
+        "204": { description: Zone deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/cameras/{cameraId}/zones/{zoneId}/sync:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: zoneId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: retryCameraZoneSync
+      summary: Manually retry a terminal camera-zone synchronization
+      description: Requires cameras.manage. Requeues only failed or conflicted persisted zones.
+      responses:
+        "202": { description: Camera-zone synchronization queued }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/v1/servers/{serverId}/frigate-config/schema:
     parameters:
       - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -4691,6 +4779,50 @@ components:
         onvif_endpoint: { type: string, maxLength: 2048, nullable: true }
         onvif_profile: { type: string, maxLength: 64, nullable: true }
         onvif_version: { type: string, maxLength: 64, nullable: true }
+    CameraZonePoint:
+      type: object
+      required: [x, y]
+      properties:
+        x: { type: number, minimum: 0, maximum: 1 }
+        y: { type: number, minimum: 0, maximum: 1 }
+      description: Normalized coordinate within the camera frame; persisted to three decimal places.
+    CameraZoneInput:
+      type: object
+      required: [name, points]
+      properties:
+        name: { type: string, pattern: "^[a-z0-9_]+$", maxLength: 128 }
+        points:
+          type: array
+          minItems: 3
+          items: { $ref: "#/components/schemas/CameraZonePoint" }
+        settings:
+          type: object
+          additionalProperties: true
+          description: Frigate zone options other than name and coordinates, preserved for synchronization.
+    CameraZone:
+      allOf:
+        - $ref: "#/components/schemas/CameraZoneInput"
+        - type: object
+          required: [id, camera_id, settings, created_at, updated_at]
+          properties:
+            id: { type: string, format: uuid, readOnly: true }
+            camera_id: { type: string, format: uuid, readOnly: true }
+            settings: { type: object, additionalProperties: true }
+            created_at: { type: string, format: date-time, readOnly: true }
+            updated_at: { type: string, format: date-time, readOnly: true }
+            sync_status:
+              type: string
+              enum: [pending, synced, failed, conflict]
+              readOnly: true
+              description: State of synchronization to Frigate; failed and conflict can be retried with retryCameraZoneSync.
+            sync_error: { type: string, readOnly: true, description: Last synchronization failure or conflict reason; absent unless failed or conflicted. }
+    CameraZoneList:
+      type: object
+      required: [zones]
+      properties:
+        zones:
+          type: array
+          items: { $ref: "#/components/schemas/CameraZone" }
     CameraFrigateConfig:
       type: object
       required: [camera_id, camera_name, server_id, detect_enabled, tracked_objects, lpr_enabled, zones]

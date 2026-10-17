@@ -19,4 +19,15 @@ describe("zone draft round-trip", () => {
     const out = draftToValue(buildDraft(value, { width: 1280, height: 720 }, "0.17.0"), "0.17.0");
     expect(out.zones.z?.coordinates).toBe("0.5,0.5,1,0.5,1,1");
   });
+
+  it("keeps persisted zone identities through a rename and only emits managed metadata in managed mode", () => {
+    const value: ZoneEditorValue = { zones: { entrada: { coordinates: c } }, managedZones: { entrada: { id: "z1" } }, motionMask: [], objectMask: [], objectFilterMasks: {} };
+    const draft = buildDraft(value, undefined, "0.17.0");
+    expect(draft.items[0]?.managedId).toBe("z1");
+    draft.items[0]!.name = "entrada_norte";
+    draft.items.push({ uid: "new", kind: "zone", scope: "", name: "nueva", points: draft.items[0]!.points, enabled: true, config: {}, colorIndex: 1, managed: true });
+    const out = draftToValue(draft, "0.17.0");
+    expect(out.managedZones).toEqual({ entrada_norte: { id: "z1" }, nueva: {} });
+    expect(draftToValue(buildDraft({ ...value, managedZones: undefined }, undefined, "0.17.0"), "0.17.0").managedZones).toBeUndefined();
+  });
 });

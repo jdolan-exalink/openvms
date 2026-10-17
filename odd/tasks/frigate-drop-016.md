@@ -22,7 +22,7 @@ Make Frigate 0.17 the minimum supported version across the product and delete th
 ## Tasks
 - [x] FR16-01 — Backend gate and dead-path removal (adapter, config_edit, inventory/api callers, mock, Go tests). Route: delegated direct (writer trigger: 2+ non-trivial files).
 - [x] FR16-02 — Web UI and contract/docs cleanup (frigateSchema, FrigateCameraConfig, CuratedPanels, OpenAPI text, generated types, docs, web tests). Route: delegated direct.
-- [ ] FR16-03 — PR, CI green, merge.
+- [x] FR16-03 — PR, CI green, merge. PR #71 merged (`a438709`); CI all green; RDD `medium`, 1-lens review approved and acknowledged. Advisories: R3-unsupported-version-maps-to-unreachable (WARNING, `adapter.go:233-234` — 0.16 surfaces as 502 `frigate_unreachable`; consider a dedicated `frigate_version_unsupported` code), R3-probe-rejection-not-proved-backend (SUGGESTION, `frigate_test.go:87-104`).
 
 ## Acceptance
 - Connecting to a 0.16 (or older) server fails with an error that names the version and the 0.17 minimum; 0.17 and 0.18 behave unchanged.
@@ -45,4 +45,4 @@ Make Frigate 0.17 the minimum supported version across the product and delete th
   - Rollback boundary: revert `48343fa`.
 
 ## Next step
-FR16-03: PR, CI green, merge.
+Done. Follow-up: Phase 4–5 branch drops its zone-sync `unsupported` state (P5-02-04).

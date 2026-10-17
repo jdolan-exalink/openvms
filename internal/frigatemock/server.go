@@ -42,7 +42,9 @@ type Server struct {
 	cfgMu    sync.Mutex
 	cfg      map[string]any
 	setCalls []SetCall
-	saves    []SaveCall
+	// IgnoreConfigSet simulates a partial upstream write that reports success but does not persist.
+	IgnoreConfigSet bool
+	saves           []SaveCall
 }
 
 const tokenCookie = "frigate_token"

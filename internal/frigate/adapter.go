@@ -52,6 +52,9 @@ type Adapter interface {
 	// ApplyCameraPatch merges a patch (top-level section -> value) into one camera, live
 	// where Frigate allows it.
 	ApplyCameraPatch(ctx context.Context, camera string, patch map[string]any) ([]SectionResult, error)
+	// UpsertManagedCameraZone updates exactly one OpenVMS-owned zone on supported Frigate versions and verifies it by read-back.
+	UpsertManagedCameraZone(ctx context.Context, camera, zoneName string, zone map[string]any, hasConfigPermission bool) error
+	DeleteManagedCameraZone(ctx context.Context, camera, zoneName string, hasConfigPermission bool) error
 	// SaveRawConfig validates and writes a full config.yml, optionally restarting Frigate.
 	SaveRawConfig(ctx context.Context, yaml string, restart bool) error
 }

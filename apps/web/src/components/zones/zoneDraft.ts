@@ -17,6 +17,11 @@ export type ItemKind = "zone" | "motion" | "object";
 export interface ZoneEditorValue {
   /** `zones` section keyed by zone name; `coordinates` is a "x1,y1,..." string. */
   zones: Record<string, Record<string, unknown>>;
+  /**
+   * Zones persisted by OpenVMS (keyed like `zones`, `id` = stable zone ID). When present the editor is
+   * in managed mode: new zones are persisted instead of written straight to the Frigate config.
+   */
+  managedZones?: Record<string, { id?: string }>;
   /** `motion.mask` */
   motionMask: unknown;
   /** `objects.mask` (global object mask) */
@@ -41,12 +46,18 @@ export interface EditorItem {
   /** Zone config without `coordinates`. */
   config?: Record<string, unknown>;
   colorIndex: number;
+  /** Zone owned by OpenVMS: persisted through the camera-zone API; unsaved until it has a `managedId`. */
+  managed?: boolean;
+  /** Stable ID of the persisted zone. */
+  managedId?: string;
 }
 
 export interface Draft {
   items: EditorItem[];
   formats: { motion: MaskFormat; objectGlobal: MaskFormat; filters: Record<string, MaskFormat> };
   nextColor: number;
+  /** True when the value carried `managedZones`: new zones are OpenVMS-owned. */
+  managedMode: boolean;
 }
 
 const maskItem = (m: MaskItem, kind: ItemKind, scope: string, colorIndex: number): EditorItem => ({
@@ -66,6 +77,7 @@ export function buildDraft(value: ZoneEditorValue, frame: Partial<FrameSize> | u
   let c = 0;
   for (const [name, cfg] of Object.entries(value.zones ?? {})) {
     const { coordinates, ...config } = cfg ?? {};
+    const managed = value.managedZones?.[name];
     items.push({
       uid: newId("item"),
       kind: "zone",
@@ -75,6 +87,7 @@ export function buildDraft(value: ZoneEditorValue, frame: Partial<FrameSize> | u
       enabled: true,
       config,
       colorIndex: c++,
+      ...(managed ? { managed: true, managedId: managed.id } : {}),
     });
   }
   const motion = parseMasks(value.motionMask, frame, version);
@@ -87,7 +100,7 @@ export function buildDraft(value: ZoneEditorValue, frame: Partial<FrameSize> | u
     filters[label] = l.format;
     l.items.forEach((m) => items.push(maskItem(m, "object", label, c++)));
   }
-  return { items, formats: { motion: motion.format, objectGlobal: global.format, filters }, nextColor: c };
+  return { items, formats: { motion: motion.format, objectGlobal: global.format, filters }, nextColor: c, managedMode: value.managedZones !== undefined };
 }
 
 const toMask = (it: EditorItem): MaskItem => ({
@@ -102,8 +115,10 @@ const toMask = (it: EditorItem): MaskItem => ({
 export function draftToValue(draft: Draft, version: string | null | undefined): ZoneEditorValue {
   const fallback: MaskFormat = usesDictMasks(version) ? "dict-map" : "list";
   const zones: ZoneEditorValue["zones"] = {};
+  const managedZones: NonNullable<ZoneEditorValue["managedZones"]> = {};
   for (const it of draft.items.filter((i) => i.kind === "zone" && i.points.length >= 3)) {
     zones[it.name] = { ...it.config, coordinates: serializeCoordinates(it.points) };
+    if (it.managed) managedZones[it.name] = it.managedId ? { id: it.managedId } : {};
   }
   const masks = (kind: ItemKind, scope: string) => draft.items.filter((i) => i.kind === kind && i.scope === scope).map(toMask);
   const objectFilterMasks: Record<string, unknown> = {};
@@ -113,6 +128,7 @@ export function draftToValue(draft: Draft, version: string | null | undefined): 
   }
   return {
     zones,
+    ...(draft.managedMode ? { managedZones } : {}),
     motionMask: serializeMasks({ format: draft.formats.motion, items: masks("motion", "") }),
     objectMask: serializeMasks({ format: draft.formats.objectGlobal, items: masks("object", "") }),
     objectFilterMasks,
