@@ -24,6 +24,12 @@ const (
 	LPRView   Permission = "lpr.view"
 	LPRSearch Permission = "lpr.search"
 
+	// FacesView reveals person names and recognitions; FacesManage enrolls, edits and
+	// deletes persons and manages face recognition configuration. Both are tenant-scoped:
+	// the person registry is a tenant-wide biometric catalog, not a per-camera resource.
+	FacesView   Permission = "faces.view"
+	FacesManage Permission = "faces.manage"
+
 	ExportsCreate   Permission = "exports.create"
 	ExportsDownload Permission = "exports.download"
 	ExportsDelete   Permission = "exports.delete"
@@ -101,6 +107,8 @@ var Catalog = []Definition{
 	{SnapshotsDownload, "Descargar snapshots", ScopeCamera},
 	{LPRView, "Ver lecturas de patentes", ScopeCamera},
 	{LPRSearch, "Buscar patentes", ScopeCamera},
+	{FacesView, "Ver personas reconocidas y reconocimientos faciales", ScopeTenant},
+	{FacesManage, "Registrar, editar y eliminar personas y configurar reconocimiento facial", ScopeTenant},
 	{ExportsCreate, "Crear exportaciones de video", ScopeCamera},
 	{ExportsDownload, "Descargar exportaciones", ScopeCamera},
 	{ExportsDelete, "Borrar exportaciones", ScopeCamera},
