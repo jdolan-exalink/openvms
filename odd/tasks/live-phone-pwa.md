@@ -21,7 +21,7 @@ Phone Live (`apps/web/src/components/LivePhone.tsx`) is a single-column stack of
 
 ## Tasks
 - [x] LP-01 — Safe areas and space on phone Live. Route: delegated direct. Commit `7058bc6`; rollback boundary: revert it (touches AppShell, MobileNav, Layout and their tests only).
-- [ ] LP-02 — Landscape and fullscreen single-camera view. Route: delegated direct.
+- [x] LP-02 — Landscape and fullscreen single-camera view. Route: delegated direct. Commit `a7cc79b`; rollback boundary: revert it (LivePhone, `lib/useImmersive.ts`, live i18n, LivePhone tests).
 - [ ] LP-03 — Pinch-zoom/pan in the single-camera view. Route: delegated direct.
 - [ ] LP-04 — Multi-camera phone layout redesign (pending research + user decision).
 - [ ] LP-05 — Review, PR, CI, merge, deploy (deploy only with user confirmation).
@@ -35,6 +35,7 @@ Phone Live (`apps/web/src/components/LivePhone.tsx`) is a single-column stack of
 - 2026-10-17: branch `feat/live-phone-pwa` from `origin/main` (`7c1d074`); exploration done (map of PWA config, LivePhone, chrome, tests).
 
 - LP-01 evidence: RED 4 failed (AppShell insets/compact, MobileNav insets/compact) before implementation. GREEN: AppShell + MobileNav + Layout + LivePhone 47/47. `pnpm typecheck` clean, eslint on changed files clean, `git diff --check` clean. Behavior: shell root pads `env(safe-area-inset-top|left|right)`; bottom nav pads left/right and its More sheet pads sides; on /live the bottom bar is `h-14` (was `h-20`) with main reserving `3.5rem`+inset, and the page header is `min-h-11` with tighter margins on phones (desktop unchanged).
+- LP-02 evidence: RED 8 failed (new immersive describe in LivePhone.test) before implementation. GREEN: LivePhone 31/31, AppShell + i18n 44/44 together. typecheck clean, eslint clean (after fixing react-hooks/set-state-in-effect), `git diff --check` clean. Behavior: `useImmersive` (Fullscreen API with webkit prefix, CSS fixed inset-0 fallback, refused request keeps CSS mode, system exit returns to previous state, closing the camera exits), landscape auto-fills via `(orientation: landscape)`; section is `fixed inset-0 z-[60]` with all four safe-area insets, header becomes a gradient overlay, picture uses object-fit contain. No orientation lock requested (optional; skipped). Known limitation: in immersive/landscape the REC timeline dock is covered (mode toggle stays in the overlay).
 
 ## Manual device checklist (to be run by the parent on real devices; NOT run yet)
 - [ ] iOS standalone PWA, portrait: no content under the status bar/notch or home indicator on Live, Events and More sheet.
