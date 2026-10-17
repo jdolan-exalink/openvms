@@ -18,7 +18,7 @@ Today OpenVMS only detects whether a Frigate has `face_recognition.enabled` (bad
 4. **Managed config**: enable/tune face recognition per server and camera from OpenVMS (model size, thresholds) through the existing Frigate config editor, with restart-required notice.
 
 ## Scope / tasks
-- [ ] FACE-01 — Foundation: permissions (`faces.view`, `faces.manage`) + role grants migration, persons/images schema (RLS), image storage (existing central object storage), audit actions, Frigate adapter face-library methods + mock support. Route: delegated direct.
+- [x] FACE-01 — Foundation: permissions (`faces.view`, `faces.manage`) + role grants migration, persons/images schema (RLS), image storage (existing central object storage), audit actions, Frigate adapter face-library methods + mock support. Route: delegated direct. Commits: `8361d3f` (schema, permissions, service), `247f741` (Frigate adapter + mock).
 - [ ] FACE-02 — Registry sync: worker pushes persons/images to face-enabled servers (create/register/rename/delete), drift detection, deletion propagation + `sub_label` scrub, idempotent retries (reuse camera-zone sync patterns). Route: delegated direct.
 - [ ] FACE-03 — API + Faces page: persons CRUD, enrollment upload, train from recent detections (Frigate train list / `event_id` classify), per-person recognitions timeline from events, name redaction without `faces.view`. Route: delegated direct.
 - [ ] FACE-04 — Managed configuration: per server/camera enable, model size, thresholds via config editor; capability per camera; restart notice. Route: delegated direct.
@@ -33,5 +33,16 @@ Today OpenVMS only detects whether a Frigate has `face_recognition.enabled` (bad
 ## Progress
 - 2026-10-17: branch `feat/face-recognition` from `origin/main` (`a578c6b`); research and decisions recorded.
 
+### FACE-01 evidence (2026-10-17)
+- Verified Frigate API (source `frigate/api/classification.py`, tag v0.17.0): `GET /faces` returns `{name: [files]}` and lists a `train` key for unclassified attempts; no admin or enabled check. All other `/faces` routes answer 400 `{"message":"Face recognition is not enabled.","success":false}` when disabled. `PUT /faces/{old}/rename` body `{new_name}` EXISTS in 0.17 (so no 0.17-only gap; adapter still maps 404/405 to `ErrFaceRenameUnsupported`). `POST /faces/{name}/create` reports `success:false` even on success (Frigate quirk; adapter relies on the HTTP status). `POST /faces/train/{name}/classify` has no admin dependency; accepts `training_file` or `event_id`. Register/delete/create/rename need Frigate admin credentials. Not verified against 0.18 source or a live server.
+- Schema `migrations/00056_face_persons.sql`: `face_persons` (soft delete via `deleted_at`, `frigate_name` unique per tenant including tombstones, `display_name` unique per tenant case-insensitively among live rows) and `face_person_images` (FK `(person_id, tenant_id)` cascade, unique `(person_id, sha256)`); RLS forced on both. Image bytes in the central object store (`internal/platform/objectstore`, key `tenant/{tid}/faces/{person}/{image}`), same as branding logos.
+- Permissions `faces.view` / `faces.manage` (tenant scope). Seeding mirrors platform/tenant grants: `tenant.manage` allow/deny -> `faces.manage`; `lpr.view` allow/deny and `tenant.manage` allow -> `faces.view`. Camera/site-scoped LPR grants do not carry over.
+- TDD RED: `go test ./internal/authz` failed (undefined `FacesView`/`FacesManage`); `internal/faces` tests failed to compile (undefined `validateImage`, `NormalizeFrigateName`, `Service`); schema/RLS/grant tests ran against a tree without the migration; `internal/frigate` faces tests failed to compile (unknown `Server.FaceRecognition`, `ListFaces`...). GREEN after implementation.
+- Checks (all pass): `go build ./... && go vet ./...`; `golangci-lint run ./...` 0 issues; `go test -race -count=1 ./...` ok; `go test -count=1 -tags integration ./internal/faces/... ./internal/frigate/... ./internal/authz/... ./migrations/...` ok; also `./internal/bootstrap/... ./internal/inventory/... ./internal/frigatemock/...` integration ok; `git diff --check` clean.
+- Rollback boundary: revert commits `247f741` and `8361d3f`. Migration 00056 Down drops both tables and deletes all `faces.*` grants (including hand-made ones) but not object-store blobs; treat as forward-only once persons exist in production.
+- Audit: actions `FACE_PERSON_CREATED/UPDATED/DELETED`, `FACE_IMAGE_ADDED/REMOVED/READ`; details hold ids/sha256/size only, never names, notes or bytes.
+- No HTTP/OpenAPI yet: handlers + OpenAPI belong to FACE-03.
+- Route: delegated direct (single bounded writer).
+
 ## Next step
-FACE-01.
+FACE-02.
