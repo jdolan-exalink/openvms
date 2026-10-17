@@ -1,13 +1,28 @@
-import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Icon } from "@/components/Icon";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
+import type { ZoneSyncStates, ZoneSyncStatus } from "@/lib/cameraZones";
 import { type EditorItem, type ItemIssues, type ItemKind, colorOf } from "./zoneDraft";
 
 export const TAB_LABELS: Record<ItemKind, string> = {
   zone: "Zonas",
   motion: "Máscaras de movimiento",
   object: "Máscaras de objetos",
+};
+
+const SYNC_LABELS: Record<ZoneSyncStatus, string> = {
+  pending: "Pendiente",
+  synced: "Sincronizada",
+  failed: "Error de sincronización",
+  conflict: "Conflicto",
+};
+
+const SYNC_TONES: Record<ZoneSyncStatus, string> = {
+  pending: "bg-surface-3 text-on-surface-variant",
+  synced: "bg-surface-3 text-ok",
+  failed: "bg-surface-3 text-bad",
+  conflict: "bg-surface-3 text-bad",
 };
 
 const EMPTY: Record<ItemKind, string> = {
@@ -28,6 +43,8 @@ export function ZoneList({
   onToggleHidden,
   onDelete,
   onNew,
+  syncStates,
+  onRetrySync,
 }: {
   tab: ItemKind;
   onTab: (t: ItemKind) => void;
@@ -41,6 +58,10 @@ export function ZoneList({
   onToggleHidden: (uid: string) => void;
   onDelete: (uid: string) => void;
   onNew: () => void;
+  /** Sync state of persisted zones by zone ID; live, independent from the edited draft. */
+  syncStates?: ZoneSyncStates;
+  /** Present only when the user may retry a failed or conflicted synchronization. */
+  onRetrySync?: (zoneId: string) => void;
 }) {
   const tabs = Object.keys(TAB_LABELS) as ItemKind[];
   return (
@@ -77,6 +98,7 @@ export function ZoneList({
             {items.map((it) => {
               const hasError = (issues[it.uid]?.errors.length ?? 0) > 0;
               const isHidden = hidden.has(it.uid);
+              const sync = it.managedId ? syncStates?.[it.managedId] : undefined;
               return (
                 <li
                   key={it.uid}
@@ -97,6 +119,14 @@ export function ZoneList({
                     {it.kind === "object" && <span className="ml-1 text-xs text-muted">({it.scope || "global"})</span>}
                     {hasError && <span className="ml-1 text-xs text-bad">· revisar</span>}
                   </button>
+                  {sync && (
+                    <span title={sync.error} className={cn("shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold", SYNC_TONES[sync.status])}>
+                      {SYNC_LABELS[sync.status]}
+                    </span>
+                  )}
+                  {sync && it.managedId && onRetrySync && (sync.status === "failed" || sync.status === "conflict") && (
+                    <IconButton icon={RefreshCw} aria-label={`Reintentar sincronización de ${it.name}`} onClick={() => onRetrySync(it.managedId!)} />
+                  )}
                   <IconButton
                     icon={isHidden ? EyeOff : Eye}
                     aria-label={`${isHidden ? "Mostrar" : "Ocultar"} ${it.name}`}

@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Icon } from "@/components/Icon";
 import { Button, IconButton, Select } from "@/components/ui";
+import type { ZoneSyncStates } from "@/lib/cameraZones";
 import { knownLabels, labelName } from "@/lib/format";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { type Point, hasSelfIntersection, isValidZoneName, newId, removeVertex } from "@/lib/zoneGeometry";
@@ -43,6 +44,14 @@ export interface ZoneEditorModalProps {
   renderLabelPicker?: (props: LabelPickerProps) => ReactNode;
   /** Labels offered by the fallback picker and for object-mask scopes. Defaults to the known labels. */
   availableLabels?: string[];
+  /** Live sync state of the persisted (OpenVMS-owned) zones, by zone ID. */
+  syncStates?: ZoneSyncStates;
+  /** Retries a failed or conflicted zone synchronization; omit when the user lacks the permission. */
+  onRetrySync?: (zoneId: string) => void;
+  /** True while the parent persists the result; blocks a second save. */
+  saving?: boolean;
+  /** Persistence error from the parent; the editor stays open so nothing is lost. */
+  saveError?: string | null;
 }
 
 const SHORTCUTS: [string, string][] = [
@@ -99,6 +108,10 @@ function ZoneEditorDialog({
   onSave,
   renderLabelPicker,
   availableLabels,
+  syncStates,
+  onRetrySync,
+  saving,
+  saveError,
 }: ZoneEditorModalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -191,6 +204,7 @@ function ZoneEditorDialog({
       enabled: true,
       config: drawing.kind === "zone" ? { inertia: 3, loitering_time: 0 } : undefined,
       colorIndex: draft.nextColor,
+      ...(drawing.kind === "zone" && draft.managedMode ? { managed: true } : {}),
     };
     mutate((d) => ({ ...d, items: [...d.items, item], nextColor: d.nextColor + 1 }));
     setDrawing(null);
@@ -302,6 +316,8 @@ function ZoneEditorDialog({
                 }
                 onDelete={(uid) => setConfirm({ type: "delete", uid })}
                 onNew={startDraw}
+                syncStates={syncStates}
+                onRetrySync={onRetrySync}
               />
               {tab === "object" && (
                 <label className="flex flex-col gap-1 text-sm">
@@ -370,13 +386,13 @@ function ZoneEditorDialog({
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <p role={hasErrors ? "alert" : undefined} className={hasErrors ? "text-sm text-bad" : "text-sm text-muted"}>
-              {hasErrors ? "Hay figuras con errores; corrígelas para guardar." : dirty ? "Cambios sin guardar." : "Sin cambios."}
+            <p role={hasErrors || saveError ? "alert" : undefined} className={hasErrors || saveError ? "text-sm text-bad" : "text-sm text-muted"}>
+              {saveError ?? (hasErrors ? "Hay figuras con errores; corrígelas para guardar." : dirty ? "Cambios sin guardar." : "Sin cambios.")}
             </p>
             <div className="flex gap-2">
               <Button variant="text" onClick={requestClose}>Cancelar</Button>
-              <Button variant="primary" disabled={!draft || !dirty || hasErrors || !!drawing} onClick={() => draft && onSave(draftToValue(draft, frigateVersion))}>
-                Guardar cambios
+              <Button variant="primary" disabled={!draft || !dirty || hasErrors || !!drawing || !!saving} onClick={() => draft && onSave(draftToValue(draft, frigateVersion))}>
+                {saving ? "Guardando…" : "Guardar cambios"}
               </Button>
             </div>
           </div>

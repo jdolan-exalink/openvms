@@ -1,5 +1,5 @@
 -- name: ListCameraZonesByCamera :many
-SELECT id, tenant_id, camera_id, name, points, settings, created_at, updated_at
+SELECT id, tenant_id, camera_id, name, points, settings, created_at, updated_at, sync_status, sync_error
 FROM camera_zones
 WHERE tenant_id = @tenant_id AND camera_id = @camera_id AND deleted_at IS NULL
 ORDER BY created_at, id;

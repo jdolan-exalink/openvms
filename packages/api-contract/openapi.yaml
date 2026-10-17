@@ -4810,6 +4810,12 @@ components:
             settings: { type: object, additionalProperties: true }
             created_at: { type: string, format: date-time, readOnly: true }
             updated_at: { type: string, format: date-time, readOnly: true }
+            sync_status:
+              type: string
+              enum: [pending, synced, failed, conflict]
+              readOnly: true
+              description: State of synchronization to Frigate; failed and conflict can be retried with retryCameraZoneSync.
+            sync_error: { type: string, readOnly: true, description: Last synchronization failure or conflict reason; absent unless failed or conflicted. }
     CameraZoneList:
       type: object
       required: [zones]

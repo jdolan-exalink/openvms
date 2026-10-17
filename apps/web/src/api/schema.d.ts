@@ -3714,6 +3714,13 @@ export interface components {
             readonly created_at: string;
             /** Format: date-time */
             readonly updated_at: string;
+            /**
+             * @description State of synchronization to Frigate; failed and conflict can be retried with retryCameraZoneSync.
+             * @enum {string}
+             */
+            readonly sync_status?: "pending" | "synced" | "failed" | "conflict";
+            /** @description Last synchronization failure or conflict reason; absent unless failed or conflicted. */
+            readonly sync_error?: string;
         };
         CameraZoneList: {
             zones: components["schemas"]["CameraZone"][];

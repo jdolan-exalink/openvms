@@ -10,7 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { type FormEvent, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { cameraFrigateDocQuery, cameraQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
+import { cameraFrigateDocQuery, cameraQuery, cameraZonesQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FrigateHistory } from "@/components/frigate/FrigateHistory";
@@ -27,6 +27,7 @@ import {
 } from "@/lib/frigateSchema";
 import { pickerLabels } from "@/lib/labelEmoji";
 import { can } from "@/lib/perm";
+import { persistedToEditorValue, planManagedZoneChanges, splitFrigateZones, zoneSyncStates, type ZoneChangePlan } from "@/lib/cameraZones";
 
 type SectionResult = Schemas["FrigateSectionResult"];
 const HISTORY = "__history";
@@ -112,6 +113,11 @@ export function FrigateCameraConfig() {
   const [reviewing, setReviewing] = useState(false);
   const [results, setResults] = useState<SectionResult[]>([]);
   const [zoneEditor, setZoneEditor] = useState(false);
+  const canManageCameras = can(me.data, "cameras.manage");
+  // Persisted zones are the source of truth for OpenVMS-owned zones; without the permission (or the
+  // list) the editor falls back to editing the Frigate config directly.
+  const persistedZones = useQuery({ ...cameraZonesQuery(cameraId), enabled: canManageCameras });
+  const managedZones = canManageCameras ? persistedZones.data : undefined;
   const [restartPending, setRestartPending] = useState<Record<string, boolean>>({});
 
   const root = schema.data as JSchema | undefined;
@@ -169,17 +175,51 @@ export function FrigateCameraConfig() {
 
   const activeSection = active ?? sections[0] ?? GENERAL;
 
+  const frigateZones = () => (isRec(valueOf("zones")) ? valueOf("zones") : {}) as ZoneEditorValue["zones"];
+
   const zoneEditorValue = (): ZoneEditorValue => {
     const objects = (valueOf("objects") ?? {}) as Record<string, unknown>;
     const filters = (isRec(objects.filters) ? objects.filters : {}) as Record<string, Record<string, unknown>>;
     const filterMasks: Record<string, unknown> = {};
     for (const [label, f] of Object.entries(filters)) if (isRec(f) && f.mask !== undefined) filterMasks[label] = f.mask;
-    return {
-      zones: (isRec(valueOf("zones")) ? valueOf("zones") : {}) as ZoneEditorValue["zones"],
+    const common = {
       motionMask: (valueOf("motion") as Record<string, unknown> | undefined)?.mask,
       objectMask: objects.mask,
       objectFilterMasks: filterMasks,
     };
+    if (!managedZones) return { zones: frigateZones(), ...common };
+    const { foreign } = splitFrigateZones(frigateZones(), new Set(managedZones.map((z) => z.name)));
+    const persisted = persistedToEditorValue(managedZones);
+    return { zones: { ...foreign, ...persisted.zones }, managedZones: persisted.managedZones, ...common };
+  };
+
+  const persistZones = useMutation({
+    mutationFn: async (plan: ZoneChangePlan) => {
+      // Removals first so a rename into a freed name cannot collide.
+      for (const zoneId of plan.remove) unwrap(await api.DELETE("/api/v1/cameras/{cameraId}/zones/{zoneId}", { params: { path: { cameraId, zoneId } } }));
+      for (const { id: zoneId, input } of plan.update) unwrap(await api.PUT("/api/v1/cameras/{cameraId}/zones/{zoneId}", { params: { path: { cameraId, zoneId } }, body: input }));
+      for (const input of plan.create) unwrap(await api.POST("/api/v1/cameras/{cameraId}/zones", { params: { path: { cameraId } }, body: input }));
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ["cameras", cameraId, "zones"] }),
+  });
+
+  const retryZoneSync = useMutation({
+    mutationFn: async (zoneId: string) => unwrap(await api.POST("/api/v1/cameras/{cameraId}/zones/{zoneId}/sync", { params: { path: { cameraId, zoneId } } })),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["cameras", cameraId, "zones"] }),
+  });
+
+  const closeZoneEditor = () => {
+    setZoneEditor(false);
+    persistZones.reset();
+  };
+
+  const submitZoneEditor = (next: ZoneEditorValue) => {
+    if (!managedZones || !next.managedZones) return saveZoneEditor(next);
+    const plan = planManagedZoneChanges(managedZones, next);
+    // Foreign zones keep the Frigate-config path; OpenVMS-owned keys reach the patch unchanged.
+    const { preserved } = splitFrigateZones(frigateZones(), new Set(managedZones.map((z) => z.name)));
+    const foreignZones = Object.fromEntries(Object.entries(next.zones).filter(([name]) => !(name in next.managedZones!)));
+    persistZones.mutate(plan, { onSuccess: () => saveZoneEditor({ ...next, zones: { ...foreignZones, ...preserved } }) });
   };
 
   const saveZoneEditor = (next: ZoneEditorValue) => {
@@ -210,7 +250,7 @@ export function FrigateCameraConfig() {
       }
       return out;
     });
-    setZoneEditor(false);
+    closeZoneEditor();
   };
 
   const detectDraft = valueOf("detect") as Record<string, unknown> | undefined;
@@ -692,14 +732,18 @@ export function FrigateCameraConfig() {
       {zoneEditor && (
         <ZoneEditorModal
           open
-          onClose={() => setZoneEditor(false)}
+          onClose={closeZoneEditor}
           cameraId={cameraId}
           snapshotUrl={`/media/v1/cameras/${cameraId}/snapshot.jpg`}
           frameWidth={typeof detectDraft?.width === "number" ? detectDraft.width : undefined}
           frameHeight={typeof detectDraft?.height === "number" ? detectDraft.height : undefined}
           value={zoneEditorValue()}
           frigateVersion={version}
-          onSave={saveZoneEditor}
+          onSave={submitZoneEditor}
+          syncStates={managedZones ? zoneSyncStates(managedZones) : undefined}
+          onRetrySync={managedZones ? (zoneId) => retryZoneSync.mutate(zoneId) : undefined}
+          saving={persistZones.isPending}
+          saveError={persistZones.isError ? `No se pudieron guardar las zonas: ${persistZones.error.message}` : null}
           renderLabelPicker={({ value, onChange, ariaLabel }) => <LabelPicker label={ariaLabel} value={value} onChange={onChange} />}
           availableLabels={zoneLabels}
         />

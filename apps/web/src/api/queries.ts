@@ -145,6 +145,15 @@ export const cameraQuery = (cameraId: string) =>
     retry: false,
   });
 
+/** Persisted camera zones with their sync state; polled while the worker still has pending work. */
+export const cameraZonesQuery = (cameraId: string) =>
+  queryOptions({
+    queryKey: ["cameras", cameraId, "zones"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/cameras/{cameraId}/zones", { params: { path: { cameraId } } })).zones,
+    refetchInterval: (query) => (query.state.data?.some((z) => z.sync_status === "pending") ? 3_000 : false),
+    retry: false,
+  });
+
 export const frigateSchemaQuery = (serverId: string | undefined) =>
   queryOptions({
     queryKey: ["servers", serverId, "frigate-schema"],

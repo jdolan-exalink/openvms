@@ -33,6 +33,9 @@ type CameraZone struct {
 	Settings  json.RawMessage   `json:"settings"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
+	// SyncStatus is pending, synced, failed or conflict; SyncError explains the last two.
+	SyncStatus string  `json:"sync_status"`
+	SyncError  *string `json:"sync_error,omitempty"`
 }
 
 // CameraZoneInput is the editable camera-zone payload. ID is assigned on create and retained on
@@ -98,6 +101,7 @@ func (s *Service) ListCameraZones(ctx context.Context, actor authz.Actor, camera
 			if err != nil {
 				return err
 			}
+			zone.SyncStatus, zone.SyncError = row.SyncStatus, row.SyncError
 			zones = append(zones, zone)
 		}
 		return nil
@@ -131,6 +135,7 @@ func (s *Service) CreateCameraZone(ctx context.Context, actor authz.Actor, camer
 			return err
 		}
 		out, err = cameraZoneFromRow(row.ID, row.CameraID, row.Name, row.Points, row.Settings, row.CreatedAt, row.UpdatedAt)
+		out.SyncStatus = "pending" // the desired state was just queued
 		return err
 	})
 	return out, err
@@ -180,6 +185,7 @@ func (s *Service) UpdateCameraZone(ctx context.Context, actor authz.Actor, camer
 			return err
 		}
 		out, err = cameraZoneFromRow(row.ID, row.CameraID, row.Name, row.Points, row.Settings, row.CreatedAt, row.UpdatedAt)
+		out.SyncStatus = "pending" // the desired state was just queued
 		return err
 	})
 	return out, err

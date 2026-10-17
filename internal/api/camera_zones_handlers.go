@@ -117,8 +117,13 @@ func toCameraZone(zone inventory.CameraZone) (gen.CameraZone, error) {
 		points = append(points, gen.CameraZonePoint{X: float32(p.X), Y: float32(p.Y)})
 	}
 	id, cameraID, createdAt, updatedAt := zone.ID, zone.CameraID, zone.CreatedAt, zone.UpdatedAt
-	return gen.CameraZone{
+	out := gen.CameraZone{
 		Id: &id, CameraId: &cameraID, Name: zone.Name, Points: points, Settings: settings,
-		CreatedAt: &createdAt, UpdatedAt: &updatedAt,
-	}, nil
+		CreatedAt: &createdAt, UpdatedAt: &updatedAt, SyncError: zone.SyncError,
+	}
+	if zone.SyncStatus != "" {
+		status := gen.CameraZoneSyncStatus(zone.SyncStatus)
+		out.SyncStatus = &status
+	}
+	return out, nil
 }

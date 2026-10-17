@@ -376,7 +376,7 @@ func (q *Queries) GetCameraZoneSyncTarget(ctx context.Context, arg GetCameraZone
 }
 
 const listCameraZonesByCamera = `-- name: ListCameraZonesByCamera :many
-SELECT id, tenant_id, camera_id, name, points, settings, created_at, updated_at
+SELECT id, tenant_id, camera_id, name, points, settings, created_at, updated_at, sync_status, sync_error
 FROM camera_zones
 WHERE tenant_id = $1 AND camera_id = $2 AND deleted_at IS NULL
 ORDER BY created_at, id
@@ -388,14 +388,16 @@ type ListCameraZonesByCameraParams struct {
 }
 
 type ListCameraZonesByCameraRow struct {
-	ID        uuid.UUID
-	TenantID  uuid.UUID
-	CameraID  uuid.UUID
-	Name      string
-	Points    json.RawMessage
-	Settings  json.RawMessage
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID         uuid.UUID
+	TenantID   uuid.UUID
+	CameraID   uuid.UUID
+	Name       string
+	Points     json.RawMessage
+	Settings   json.RawMessage
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	SyncStatus string
+	SyncError  *string
 }
 
 func (q *Queries) ListCameraZonesByCamera(ctx context.Context, arg ListCameraZonesByCameraParams) ([]ListCameraZonesByCameraRow, error) {
@@ -416,6 +418,8 @@ func (q *Queries) ListCameraZonesByCamera(ctx context.Context, arg ListCameraZon
 			&i.Settings,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SyncStatus,
+			&i.SyncError,
 		); err != nil {
 			return nil, err
 		}

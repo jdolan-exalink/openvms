@@ -198,3 +198,42 @@ func TestRetryCameraZoneSyncRequiresTerminalStateAndManagePermission(t *testing.
 		}
 	}
 }
+
+func TestCameraZoneResponsesExposeSyncState(t *testing.T) {
+	te := setupMapsTest(t, false)
+	ctx := context.Background()
+	cam := te.Cameras["frigate-h01/acceso_norte"]
+	path := "/api/v1/cameras/" + cam.ID.String() + "/zones"
+	input := gen.CameraZoneInput{Name: "sync_state", Points: []gen.CameraZonePoint{{X: 0.1, Y: 0.1}, {X: 0.9, Y: 0.1}, {X: 0.5, Y: 0.9}}}
+	status, _, body := te.request(http.MethodPost, path, te.AdminToken, nil, input)
+	if status != http.StatusCreated {
+		t.Fatalf("create status = %d: %s", status, body)
+	}
+	var created gen.CameraZone
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatal(err)
+	}
+	if created.SyncStatus == nil || *created.SyncStatus != gen.CameraZoneSyncStatusPending || created.SyncError != nil {
+		t.Fatalf("created zone sync state = %v / %v, want pending without error", created.SyncStatus, created.SyncError)
+	}
+
+	err := te.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE camera_zones SET sync_status = 'conflict', sync_error = 'remote managed zone differs' WHERE id = $1`, *created.Id)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, _, body = te.request(http.MethodGet, path, te.AdminToken, nil, nil)
+	if status != http.StatusOK {
+		t.Fatalf("list status = %d: %s", status, body)
+	}
+	var listed gen.CameraZoneList
+	if err := json.Unmarshal(body, &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Zones) != 1 || listed.Zones[0].SyncStatus == nil || *listed.Zones[0].SyncStatus != gen.CameraZoneSyncStatusConflict ||
+		listed.Zones[0].SyncError == nil || *listed.Zones[0].SyncError != "remote managed zone differs" {
+		t.Fatalf("listed sync state = %+v", listed.Zones)
+	}
+}

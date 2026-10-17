@@ -6,10 +6,27 @@ import { json, stubApi } from "@/test-utils";
 import { FrigateCameraConfig } from "./FrigateCameraConfig";
 
 vi.mock("@/components/zones/ZoneEditorModal", () => ({
-  ZoneEditorModal: ({ value, onSave }: { value: { zones: Record<string, unknown> }; onSave: (v: unknown) => void }) => (
+  ZoneEditorModal: ({ value, onSave, onRetrySync, saveError }: { value: { zones: Record<string, unknown>; managedZones?: Record<string, unknown> }; onSave: (v: unknown) => void; onRetrySync?: (id: string) => void; saveError?: string | null }) => (
     <div role="dialog" aria-label="Editor de zonas">
       <span>{Object.keys(value.zones).join(",")}</span>
+      {value.managedZones && <span data-testid="managed">{Object.keys(value.managedZones).join(",")}</span>}
+      {saveError && <span role="alert">{saveError}</span>}
       <button type="button" onClick={() => onSave({ zones: { patio: { coordinates: "0.1,0.1,0.9,0.1,0.5,0.9" } }, motionMask: [], objectMask: undefined, objectFilterMasks: {} })}>guardar zonas</button>
+      <button
+        type="button"
+        onClick={() =>
+          onSave({
+            zones: { patio: { coordinates: "0,0,1,0,1,1" }, entrada: { inertia: 3, coordinates: "0.2,0.2,0.9,0.1,0.5,0.9" }, nueva: { coordinates: "0.2,0.2,0.8,0.2,0.5,0.7" } },
+            managedZones: { entrada: { id: "z1" }, nueva: {} },
+            motionMask: [],
+            objectMask: undefined,
+            objectFilterMasks: {},
+          })
+        }
+      >
+        guardar gestionadas
+      </button>
+      {onRetrySync && <button type="button" onClick={() => onRetrySync("z1")}>reintentar z1</button>}
     </div>
   ),
 }));
@@ -191,5 +208,69 @@ describe("FrigateCameraConfig", () => {
     expect(await screen.findByLabelText("Host")).toHaveValue("10.1.1.220");
     expect(screen.getByText(/1 sección modificada/)).toBeInTheDocument();
   });
-});
 
+  describe("persisted OpenVMS zones", () => {
+    const zone = (id: string, name: string, status: string) => ({ id, camera_id: "c1", name, points: [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.5, y: 0.9 }], settings: { inertia: 3 }, created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z", sync_status: status });
+    const frigateConfig = { zones: { patio: { coordinates: "0,0,1,0,1,1" }, ovms_entrada: { inertia: 3, coordinates: "0.1,0.1,0.9,0.1,0.5,0.9" }, ovms_borrar: { inertia: 3, coordinates: "0.1,0.1,0.9,0.1,0.5,0.9" } }, detect: { enabled: true, fps: 5 } };
+    const manage = () => json({ id: "u", tenant_id: "t", grants: [{ permission: "cameras.manage", effect: "allow" }] });
+    const zonesList = () => json({ zones: [zone("z1", "entrada", "failed"), zone("z2", "borrar", "synced")] });
+    const methods = (fetchMock: ReturnType<typeof mount>) => fetchMock.mock.calls.map(([r]) => `${(r as Request).method} ${new URL((r as Request).url).pathname}`);
+
+    it("edits persisted zones through the camera-zone API and leaves their Frigate keys untouched", async () => {
+      const fetchMock = mount({ config: frigateConfig }, {
+        "/api/v1/me": manage,
+        "/api/v1/cameras/c1/zones": zonesList,
+        "POST /api/v1/cameras/c1/zones": () => json(zone("z3", "nueva", "pending"), 201),
+        "PUT /api/v1/cameras/c1/zones/z1": () => json(zone("z1", "entrada", "pending")),
+        "DELETE /api/v1/cameras/c1/zones/z2": () => new Response(null, { status: 204 }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /Zonas/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
+      expect(await screen.findByText("patio,entrada,borrar")).toBeInTheDocument();
+      expect(screen.getByTestId("managed")).toHaveTextContent("entrada,borrar");
+      fireEvent.click(screen.getByRole("button", { name: "guardar gestionadas" }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Editor de zonas" })).not.toBeInTheDocument());
+      const calls = methods(fetchMock);
+      expect(calls).toEqual(expect.arrayContaining(["DELETE /api/v1/cameras/c1/zones/z2", "PUT /api/v1/cameras/c1/zones/z1", "POST /api/v1/cameras/c1/zones"]));
+      const post = fetchMock.mock.calls.map(([r]) => r as Request).find((r) => r.method === "POST" && r.url.endsWith("/zones"))!;
+      expect(await post.clone().json()).toEqual({ name: "nueva", points: [{ x: 0.2, y: 0.2 }, { x: 0.8, y: 0.2 }, { x: 0.5, y: 0.7 }], settings: {} });
+      // Foreign zones are unchanged and ovms_ keys are preserved, so no Frigate patch is pending.
+      expect(screen.getByRole("button", { name: "Revisar cambios" })).toBeDisabled();
+      expect(calls).not.toContain("PATCH /api/v1/cameras/c1/frigate-config");
+    });
+
+    it("keeps the editor open and shows the error when persisting fails", async () => {
+      mount({ config: frigateConfig }, {
+        "/api/v1/me": manage,
+        "/api/v1/cameras/c1/zones": zonesList,
+        "DELETE /api/v1/cameras/c1/zones/z2": () => json({ code: "forbidden", message: "sin permiso" }, 403),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /Zonas/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
+      fireEvent.click(await screen.findByRole("button", { name: "guardar gestionadas" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(/No se pudieron guardar las zonas/);
+      expect(screen.getByRole("dialog", { name: "Editor de zonas" })).toBeInTheDocument();
+    });
+
+    it("retries a failed zone synchronization only for users who can manage cameras", async () => {
+      const fetchMock = mount({ config: frigateConfig }, {
+        "/api/v1/me": manage,
+        "/api/v1/cameras/c1/zones": zonesList,
+        "POST /api/v1/cameras/c1/zones/z1/sync": () => new Response(null, { status: 202 }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /Zonas/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
+      fireEvent.click(await screen.findByRole("button", { name: "reintentar z1" }));
+      await waitFor(() => expect(methods(fetchMock)).toContain("POST /api/v1/cameras/c1/zones/z1/sync"));
+    });
+
+    it("falls back to the plain Frigate zones without the manage permission", async () => {
+      mount({ config: frigateConfig }, { "/api/v1/cameras/c1/zones": zonesList });
+      fireEvent.click(await screen.findByRole("button", { name: /Zonas/ }));
+      fireEvent.click(await screen.findByRole("button", { name: "Editar zonas" }));
+      expect(await screen.findByText("patio,ovms_entrada,ovms_borrar")).toBeInTheDocument();
+      expect(screen.queryByTestId("managed")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "reintentar z1" })).not.toBeInTheDocument();
+    });
+  });
+});
