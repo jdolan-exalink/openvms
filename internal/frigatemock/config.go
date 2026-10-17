@@ -102,7 +102,7 @@ func (s *Server) stateLocked() map[string]any {
 		if tracked == nil {
 			tracked = []string{"person"}
 		}
-		cams[c.Name] = map[string]any{
+		camCfg := map[string]any{
 			"name":    c.Name,
 			"enabled": true,
 			"detect":  map[string]any{"enabled": detectEnabled, "width": 1280, "height": 720, "fps": 5},
@@ -117,13 +117,21 @@ func (s *Server) stateLocked() map[string]any {
 			},
 			"onvif": map[string]any{"host": "10.0.0.10", "port": 8000, "user": "onvifuser", "password": "onvifpass"},
 		}
+		if s.FaceRecognition {
+			camCfg["face_recognition"] = map[string]any{"enabled": true}
+		}
+		cams[c.Name] = camCfg
 	}
-	s.cfg = normalize(map[string]any{
+	root := map[string]any{
 		"cameras": cams,
 		"mqtt":    map[string]any{"enabled": true, "topic_prefix": s.TopicPrefix},
 		"version": s.Version,
 		"go2rtc":  map[string]any{"streams": map[string]any{}},
-	})
+	}
+	if s.FaceRecognition {
+		root["face_recognition"] = map[string]any{"enabled": true, "model_size": "small"}
+	}
+	s.cfg = normalize(root)
 	return s.cfg
 }
 
