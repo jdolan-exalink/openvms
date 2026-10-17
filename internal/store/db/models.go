@@ -381,6 +381,13 @@ type ExportShare struct {
 	RevokedAt    *time.Time
 }
 
+type FaceBlobPurge struct {
+	StorageKey string
+	TenantID   uuid.UUID
+	Attempts   int32
+	CreatedAt  time.Time
+}
+
 type FacePerson struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID

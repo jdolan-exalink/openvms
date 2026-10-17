@@ -3,6 +3,7 @@ package frigate
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"mime/multipart"
@@ -20,7 +21,8 @@ var (
 	// ErrFaceRecognitionDisabled means Frigate answered 400 "Face recognition is not enabled.".
 	ErrFaceRecognitionDisabled = errors.New("face recognition is not enabled in frigate")
 	// ErrFaceRenameUnsupported means this Frigate has no PUT /api/faces/{name}/rename route
-	// (verified present in 0.17 and 0.18; older servers answer 404/405).
+	// (answers FastAPI's default 404 or 405). The route was verified in the 0.17 source; 0.18
+	// was not verified.
 	ErrFaceRenameUnsupported = errors.New("this frigate version does not support renaming faces")
 	// ErrInvalidFaceName means a face name is not a Frigate-safe identifier. Names are embedded
 	// in request paths and in Frigate's on-disk folder names, so they are validated first.
@@ -137,8 +139,26 @@ func (a *v017) RenameFace(ctx context.Context, oldName, newName string) error {
 		return err
 	}
 	_, err := a.c.send(ctx, http.MethodPut, "/api/faces/"+url.PathEscape(oldName)+"/rename", nil, map[string]any{"new_name": newName})
-	if errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("%w: %w", ErrFaceRenameUnsupported, err)
+	return classifyRenameErr(err)
+}
+
+// classifyRenameErr tells a missing route from a missing source face. A route miss is
+// FastAPI's default 404 body ({"detail":"Not Found"}, no "success" key) or a 405; any other
+// 404 means the route exists and the source face does not, and stays a plain ErrNotFound.
+func classifyRenameErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	var nf *NotFoundError
+	if errors.As(err, &nf) {
+		var body struct {
+			Detail  string `json:"detail"`
+			Success *bool  `json:"success"`
+		}
+		if json.Unmarshal([]byte(nf.Body), &body) == nil && body.Success == nil && body.Detail == "Not Found" {
+			return fmt.Errorf("%w: %w", ErrFaceRenameUnsupported, err)
+		}
+		return err
 	}
 	var se *StatusError
 	if errors.As(err, &se) && se.Status == http.StatusMethodNotAllowed {

@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
@@ -24,6 +25,13 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
+)
+
+const (
+	maxNameAttempts = 8
+	// cleanupTimeout bounds detached cleanup work (metadata rollback, blob deletion) that must
+	// finish even when the request context is already canceled.
+	cleanupTimeout = 15 * time.Second
 )
 
 // Audit actions (PRD §66 naming convention).
@@ -172,28 +180,26 @@ func (s *Service) CreatePerson(ctx context.Context, actor authz.Actor, tenantID 
 	}
 	var out Person
 	err = s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
-		frigateName := NormalizeFrigateName(name)
+		// The unique (tenant, frigate_name) index is the arbiter: a taken name yields no row and
+		// the insert is retried with a random suffix, so concurrent creates cannot collide.
+		base := NormalizeFrigateName(name)
+		frigateName := base
 		for attempt := 0; ; attempt++ {
-			taken, err := q.FaceFrigateNameTaken(ctx, db.FaceFrigateNameTakenParams{TenantID: tenantID, FrigateName: frigateName})
-			if err != nil {
-				return err
+			row, err := q.CreateFacePersonIfNameFree(ctx, db.CreateFacePersonIfNameFreeParams{
+				TenantID: tenantID, DisplayName: name, FrigateName: frigateName, Notes: notes, CreatedBy: &actor.UserID,
+			})
+			if err == nil {
+				out = toPerson(row, 0)
+				return s.audit(ctx, q, actor, tenantID, ActionPersonCreated, "face_person", row.ID, map[string]any{"person_id": row.ID})
 			}
-			if !taken {
-				break
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return store.Classify(err)
 			}
-			if attempt >= 5 {
-				return fmt.Errorf("could not allocate a unique Frigate name for %d attempts", attempt)
+			if attempt >= maxNameAttempts {
+				return fmt.Errorf("could not allocate a unique Frigate name after %d attempts", attempt+1)
 			}
-			frigateName = NormalizeFrigateName(name) + "_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:6]
+			frigateName = base + "_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:6]
 		}
-		row, err := q.CreateFacePerson(ctx, db.CreateFacePersonParams{
-			TenantID: tenantID, DisplayName: name, FrigateName: frigateName, Notes: notes, CreatedBy: &actor.UserID,
-		})
-		if err != nil {
-			return store.Classify(err)
-		}
-		out = toPerson(row, 0)
-		return s.audit(ctx, q, actor, tenantID, ActionPersonCreated, "face_person", row.ID, map[string]any{"person_id": row.ID})
 	})
 	return out, err
 }
@@ -283,7 +289,6 @@ func (s *Service) UpdatePerson(ctx context.Context, actor authz.Actor, tenantID,
 // DeletePerson removes a person and every central image (faces.manage). The person row stays
 // as a tombstone so the registry sync can propagate the deletion to every Frigate.
 func (s *Service) DeletePerson(ctx context.Context, actor authz.Actor, tenantID, id uuid.UUID) error {
-	var keys []string
 	err := s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
 		if _, err := q.SoftDeleteFacePerson(ctx, db.SoftDeleteFacePersonParams{TenantID: tenantID, ID: id, UpdatedBy: &actor.UserID}); err != nil {
 			return store.Classify(err)
@@ -293,28 +298,56 @@ func (s *Service) DeletePerson(ctx context.Context, actor authz.Actor, tenantID,
 			return err
 		}
 		for _, i := range imgs {
-			keys = append(keys, i.StorageKey)
+			if err := q.EnqueueFaceBlobPurge(ctx, db.EnqueueFaceBlobPurgeParams{StorageKey: i.StorageKey, TenantID: tenantID}); err != nil {
+				return err
+			}
 		}
 		if err := q.DeleteFacePersonImages(ctx, db.DeleteFacePersonImagesParams{TenantID: tenantID, PersonID: id}); err != nil {
 			return err
 		}
-		return s.audit(ctx, q, actor, tenantID, ActionPersonDeleted, "face_person", id, map[string]any{"person_id": id, "images_removed": len(keys)})
+		return s.audit(ctx, q, actor, tenantID, ActionPersonDeleted, "face_person", id, map[string]any{"person_id": id, "images_removed": len(imgs)})
 	})
-	if err != nil {
-		return err
-	}
-	s.deleteBlobs(ctx, keys)
-	return nil
+	return err
 }
 
-// deleteBlobs removes object-store bytes after the metadata commit. A failure leaves an
-// unreferenced blob (logged by key only), never a dangling metadata row.
-func (s *Service) deleteBlobs(ctx context.Context, keys []string) {
-	for _, k := range keys {
-		if err := s.Blobs.Delete(ctx, k); err != nil && s.Log != nil {
-			s.Log.WarnContext(ctx, "faces: delete image blob failed", "key", k, "error", err)
+// PurgeBlobs deletes queued object-store bytes (at most limit per call). Blob deletion is
+// deliberately not part of any request: keys are queued in the transaction that drops the image
+// row and removed here, with each delete bounded by its own detached timeout, so a canceled
+// request or a down object store never strands bytes. Failed keys stay queued for the next pass.
+func (s *Service) PurgeBlobs(ctx context.Context, limit int) error {
+	if limit < 1 {
+		return nil
+	}
+	var rows []db.FaceBlobPurge
+	if err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		var err error
+		rows, err = q.ListFaceBlobPurge(ctx, int32(min(limit, 1000))) //nolint:gosec // bounded above
+		return err
+	}); err != nil {
+		return err
+	}
+	for _, r := range rows {
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+		derr := s.Blobs.Delete(dctx, r.StorageKey)
+		cancel()
+		if derr != nil && !errors.Is(derr, store.ErrNotFound) {
+			if s.Log != nil {
+				s.Log.WarnContext(ctx, "faces: delete image blob failed", "key", r.StorageKey, "error", derr)
+			}
+			if err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+				return q.BumpFaceBlobPurgeAttempts(ctx, r.StorageKey)
+			}); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+			return q.DeleteFaceBlobPurge(ctx, r.StorageKey)
+		}); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
 // ListImages lists a person's enrollment images (faces.view).
@@ -348,7 +381,9 @@ func (s *Service) AddImage(ctx context.Context, actor authz.Actor, tenantID, per
 	key := imageKey(tenantID, personID, imageID)
 	var out Image
 	err = s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
-		if _, err := q.GetFacePerson(ctx, db.GetFacePersonParams{TenantID: tenantID, ID: personID}); err != nil {
+		// The row lock serializes concurrent adds for this person, so the cap check below
+		// cannot be raced past by parallel uploads.
+		if _, err := q.LockFacePersonForUpdate(ctx, db.LockFacePersonForUpdateParams{TenantID: tenantID, ID: personID}); err != nil {
 			return store.Classify(err)
 		}
 		n, err := q.CountFacePersonImages(ctx, db.CountFacePersonImagesParams{TenantID: tenantID, PersonID: personID})
@@ -375,45 +410,50 @@ func (s *Service) AddImage(ctx context.Context, actor authz.Actor, tenantID, per
 		return Image{}, err
 	}
 	if err := s.Blobs.Put(ctx, key, data, meta.ContentType); err != nil {
-		s.rollbackImage(ctx, actor, tenantID, personID, imageID)
+		s.rollbackImage(ctx, actor, tenantID, personID, imageID, key)
 		return Image{}, fmt.Errorf("store face image: %w", err)
 	}
 	return out, nil
 }
 
-func (s *Service) rollbackImage(ctx context.Context, actor authz.Actor, tenantID, personID, imageID uuid.UUID) {
-	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
-		if err := q.DeleteFacePersonImage(ctx, db.DeleteFacePersonImageParams{TenantID: tenantID, PersonID: personID, ID: imageID}); err != nil {
+// rollbackImage removes the metadata of an image whose bytes could not be stored. It runs on a
+// detached, bounded context: the failure that triggers it is often the request context itself
+// being canceled, and a canceled rollback would leave a row pointing at nothing. The key is
+// also queued for blob deletion in case the store kept a partial write.
+func (s *Service) rollbackImage(ctx context.Context, actor authz.Actor, tenantID, personID, imageID uuid.UUID, key string) {
+	rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	err := s.Store.Tx(rctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		if err := q.DeleteFacePersonImage(rctx, db.DeleteFacePersonImageParams{TenantID: tenantID, PersonID: personID, ID: imageID}); err != nil {
 			return err
 		}
-		return s.audit(ctx, q, actor, tenantID, ActionImageRemoved, "face_person_image", imageID,
+		if err := q.EnqueueFaceBlobPurge(rctx, db.EnqueueFaceBlobPurgeParams{StorageKey: key, TenantID: tenantID}); err != nil {
+			return err
+		}
+		return s.audit(rctx, q, actor, tenantID, ActionImageRemoved, "face_person_image", imageID,
 			map[string]any{"person_id": personID, "image_id": imageID, "reason": "storage_failed"})
 	})
 	if err != nil && s.Log != nil {
-		s.Log.ErrorContext(ctx, "faces: rollback of image metadata failed", "image_id", imageID, "error", err)
+		s.Log.ErrorContext(rctx, "faces: rollback of image metadata failed", "image_id", imageID, "error", err)
 	}
 }
 
 // RemoveImage deletes one enrollment image (faces.manage).
 func (s *Service) RemoveImage(ctx context.Context, actor authz.Actor, tenantID, personID, imageID uuid.UUID) error {
-	var key string
-	err := s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+	return s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
 		row, err := q.GetFacePersonImage(ctx, db.GetFacePersonImageParams{TenantID: tenantID, PersonID: personID, ID: imageID})
 		if err != nil {
 			return store.Classify(err)
 		}
-		key = row.StorageKey
+		if err := q.EnqueueFaceBlobPurge(ctx, db.EnqueueFaceBlobPurgeParams{StorageKey: row.StorageKey, TenantID: tenantID}); err != nil {
+			return err
+		}
 		if err := q.DeleteFacePersonImage(ctx, db.DeleteFacePersonImageParams{TenantID: tenantID, PersonID: personID, ID: imageID}); err != nil {
 			return err
 		}
 		return s.audit(ctx, q, actor, tenantID, ActionImageRemoved, "face_person_image", imageID,
 			map[string]any{"person_id": personID, "image_id": imageID})
 	})
-	if err != nil {
-		return err
-	}
-	s.deleteBlobs(ctx, []string{key})
-	return nil
 }
 
 // ReadImage returns the image bytes (faces.view) and audits the read.
