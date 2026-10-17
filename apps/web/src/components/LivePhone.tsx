@@ -5,6 +5,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { cameraFoldersQuery, camerasQuery, meQuery, serversQuery, sitesQuery } from "@/api/queries";
 import type { Schemas } from "@/api/client";
 import { setContextSidebarCollapsed } from "@/components/AppShell";
+import { ZoomFrame } from "@/components/DigitalZoom";
 import { MsePlayer } from "@/components/MsePlayer";
 import { LiveModeToggle } from "@/components/LiveModeToggle";
 import { LiveRecDock } from "@/components/LiveRecDock";
@@ -25,6 +26,8 @@ type Camera = Schemas["Camera"];
 export const PHONE_PAGE_SIZE = 4;
 /** Horizontal travel (px) a drag needs to count as a page swipe. */
 const SWIPE_THRESHOLD = 50;
+/** Scale a double tap zooms the single camera to. */
+const DOUBLE_TAP_ZOOM = 2.5;
 
 const statusDot = (status?: string) => (status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-warn");
 
@@ -79,9 +82,21 @@ function SingleCamera({ camera, fill }: { camera: Camera; fill: boolean }) {
   }, [main, fill]);
   return (
     <div data-testid="phone-stage" className={stageClass(fill)}>
-      <img src={snapshotUrl(camera.id)} alt="" draggable={false} className="absolute inset-0 size-full object-contain" />
-      <MsePlayer persistent cameraId={camera.id} quality="sub" serverId={camera.server_id} objectFit={fill ? "contain" : "fill"} className="absolute inset-0 size-full" />
-      <div ref={stage} data-testid="phone-main-layer" className="absolute inset-0" />
+      {/* Pinch/pan/double tap live only here: the multi view needs one-finger swipes for paging. A new camera resets the zoom. */}
+      <ZoomFrame
+        touch
+        enhanceable={false}
+        doubleTapZoom={DOUBLE_TAP_ZOOM}
+        resetKey={camera.id}
+        className="absolute inset-0 size-full"
+        picture={() => (
+          <>
+            <img src={snapshotUrl(camera.id)} alt="" draggable={false} className="absolute inset-0 size-full object-contain" />
+            <MsePlayer persistent cameraId={camera.id} quality="sub" serverId={camera.server_id} objectFit={fill ? "contain" : "fill"} className="absolute inset-0 size-full" />
+            <div ref={stage} data-testid="phone-main-layer" className="absolute inset-0" />
+          </>
+        )}
+      />
     </div>
   );
 }

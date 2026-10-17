@@ -515,3 +515,89 @@ describe("Live phone immersive single camera", () => {
     expect(exit).toHaveBeenCalled();
   });
 });
+
+describe("Live phone pinch-zoom in the single camera", () => {
+  beforeEach(() => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 100, width: 200, height: 100, toJSON: () => ({}) } as DOMRect);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const zoomLayer = (single: HTMLElement) => within(single).getByTestId("phone-main-layer").parentElement as HTMLElement;
+  const touch = (frame: HTMLElement, type: "pointerDown" | "pointerMove" | "pointerUp", id: number, x: number, y: number) =>
+    fireEvent[type](frame, { pointerId: id, pointerType: "touch", isPrimary: id === 1, clientX: x, clientY: y, button: 0 });
+  const frameOf = (single: HTMLElement) => zoomLayer(single).parentElement as HTMLElement;
+  const pinchOut = (frame: HTMLElement) => {
+    touch(frame, "pointerDown", 1, 80, 50);
+    touch(frame, "pointerDown", 2, 120, 50);
+    touch(frame, "pointerMove", 2, 160, 50);
+    touch(frame, "pointerUp", 2, 160, 50);
+    touch(frame, "pointerUp", 1, 80, 50);
+  };
+
+  async function openSingle(path = "/?camera=c1") {
+    stubPhone(true);
+    stubBackend([camera("c1", "North"), camera("c2", "East")]);
+    const view = renderPage(Live, path);
+    return { ...view, single: await screen.findByTestId("live-phone-single") };
+  }
+
+  it("zooms the picture with two fingers and shows the reset chip", async () => {
+    const { single } = await openSingle();
+    expect(zoomLayer(single).style.transform).toBe("");
+    pinchOut(frameOf(single));
+    expect(zoomLayer(single).style.transform).toMatch(/scale\(2\)/);
+    expect(within(single).getByRole("button", { name: /Restablecer/ })).toBeInTheDocument();
+  });
+
+  it("pans with one finger once zoomed", async () => {
+    const { single } = await openSingle();
+    const frame = frameOf(single);
+    pinchOut(frame);
+    const before = zoomLayer(single).style.transform;
+    touch(frame, "pointerDown", 1, 100, 50);
+    touch(frame, "pointerMove", 1, 80, 50);
+    expect(zoomLayer(single).style.transform).not.toBe(before);
+  });
+
+  it("toggles with a double tap", async () => {
+    const { single } = await openSingle();
+    const frame = frameOf(single);
+    const tap = () => {
+      touch(frame, "pointerDown", 1, 100, 50);
+      touch(frame, "pointerUp", 1, 100, 50);
+    };
+    tap();
+    tap();
+    expect(zoomLayer(single).style.transform).toMatch(/scale\(2\.5\)/);
+    tap();
+    tap();
+    expect(zoomLayer(single).style.transform).toBe("");
+  });
+
+  it("resets when the camera changes", async () => {
+    const { single, router } = await openSingle();
+    pinchOut(frameOf(single));
+    expect(zoomLayer(single).style.transform).not.toBe("");
+    await act(async () => void (await router.navigate({ to: "/", search: { camera: "c2" } as never })));
+    const next = await screen.findByTestId("live-phone-single");
+    expect(zoomLayer(next).style.transform).toBe("");
+  });
+
+  it("starts at 1x again after leaving and reopening the camera", async () => {
+    const { single } = await openSingle();
+    pinchOut(frameOf(single));
+    fireEvent.click(screen.getByRole("button", { name: "Volver" }));
+    await waitFor(() => expect(screen.queryByTestId("live-phone-single")).toBeNull());
+    fireEvent.click(await screen.findByRole("button", { name: "Ver North" }));
+    const again = await screen.findByTestId("live-phone-single");
+    expect(zoomLayer(again).style.transform).toBe("");
+  });
+
+  it("does not add zoom handling to the multi-camera list", async () => {
+    stubPhone(true);
+    stubBackend([camera("c1", "North")]);
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver North" });
+    expect(screen.getByTestId("live-phone-pages").querySelector('[style*="touch-action"]')).toBeNull();
+  });
+});

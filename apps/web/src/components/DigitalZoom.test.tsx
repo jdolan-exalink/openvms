@@ -99,3 +99,52 @@ describe("ZoomFrame with tile-owned zoom", () => {
     expect(second).toHaveBeenCalledWith(zoomed);
   });
 });
+
+describe("ZoomFrame on a phone", () => {
+  const phoneMedia = () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)", media: query, addEventListener() {}, removeEventListener() {} }));
+    vi.stubGlobal("screen", { width: 390, height: 844 });
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  const gesture = (frame: HTMLElement) => (type: "pointerDown" | "pointerMove" | "pointerUp", id: number, x: number, y: number) =>
+    fireEvent[type](frame, { pointerId: id, pointerType: "touch", isPrimary: id === 1, clientX: x, clientY: y, button: 0 });
+
+  it("keeps touch gestures off by default, as the phone grid relies on swiping", () => {
+    phoneMedia();
+    const zooms: DigitalZoom[] = [];
+    const view = render(<ZoomFrame resetKey="a" onZoom={(z) => zooms.push(z)} />);
+    const touch = gesture(view.container.firstElementChild as HTMLElement);
+    touch("pointerDown", 1, 80, 50);
+    touch("pointerDown", 2, 120, 50);
+    touch("pointerMove", 2, 160, 50);
+    expect(zooms.at(-1)?.scale ?? 1).toBe(1);
+  });
+
+  it("pinches when the caller opts in with touch", () => {
+    phoneMedia();
+    const zooms: DigitalZoom[] = [];
+    const view = render(<ZoomFrame touch resetKey="a" onZoom={(z) => zooms.push(z)} />);
+    const touch = gesture(view.container.firstElementChild as HTMLElement);
+    touch("pointerDown", 1, 80, 50);
+    touch("pointerDown", 2, 120, 50);
+    touch("pointerMove", 2, 160, 50);
+    expect(zooms.at(-1)?.scale).toBeCloseTo(2);
+  });
+
+  it("toggles zoom on a double tap: in toward the tap, then back to 1x", () => {
+    const zooms: DigitalZoom[] = [];
+    const view = render(<ZoomFrame touch doubleTapZoom={2.5} resetKey="a" onZoom={(z) => zooms.push(z)} />);
+    const touch = gesture(view.container.firstElementChild as HTMLElement);
+    const tapTwice = (x: number, y: number) => {
+      touch("pointerDown", 1, x, y);
+      touch("pointerUp", 1, x, y);
+      touch("pointerDown", 1, x, y);
+      touch("pointerUp", 1, x, y);
+    };
+    tapTwice(100, 50);
+    expect(zooms.at(-1)).toMatchObject({ scale: 2.5, x: -150, y: -75 });
+    tapTwice(100, 50);
+    expect(zooms.at(-1)?.scale).toBe(1);
+  });
+});
