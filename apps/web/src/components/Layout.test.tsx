@@ -203,6 +203,13 @@ describe("primary navigation and context header", () => {
     expect(within(bar).getByRole("button", { name: "Más" })).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("compacts the page header and the bottom bar on Live to give the video room", async () => {
+    await renderAt("/live", ["live.view"]);
+    expect(screen.getByLabelText("Encabezado de página")).toHaveClass("min-h-11", "pb-1");
+    expect(screen.getByRole("navigation", { name: "Navegación móvil" })).toHaveClass("h-14");
+    expect(screen.getByRole("main", { name: "Main Workspace" }).className).toMatch(/pb-\[calc\(3\.5rem\+/);
+  });
+
   it("opens a More sheet with the remaining permitted destinations and closes it with Escape returning focus", async () => {
     await renderAt("/events", ["live.view", "events.view", "servers.view", "alarms.view", "lpr.view"]);
     const more = screen.getByRole("button", { name: "Más" });

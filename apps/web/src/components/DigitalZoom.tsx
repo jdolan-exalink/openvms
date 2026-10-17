@@ -18,7 +18,7 @@ import {
   type EnhancementMode,
 } from "@/lib/enhancement/types";
 import { generateCssFilterString } from "@/lib/enhancement/webgl";
-import { IDENTITY_ZOOM, panBy, pinchZoom, wheelPixels, zoomAtPoint, zoomTransform, type DigitalZoom } from "@/lib/live/digitalZoom";
+import { clampZoom, IDENTITY_ZOOM, panBy, pinchZoom, wheelPixels, zoomAtPoint, zoomTransform, type DigitalZoom } from "@/lib/live/digitalZoom";
 import { TouchDoubleTap } from "@/lib/touch";
 import { useIsPhoneDevice } from "@/lib/useIsPhoneDevice";
 
@@ -55,6 +55,13 @@ type ZoomFrameProps = {
   onEnhance?: (filter: string) => void;
   /** Enable dynamic visual enhancement engine and UI controls. Defaults to true. */
   enhanceable?: boolean;
+  /**
+   * Force touch gestures (pinch, one-finger pan, double tap) on, even on phones. Phones leave them off
+   * by default because the multi-camera list swipes between pages; the single camera view sets this.
+   */
+  touch?: boolean;
+  /** When set, a double tap at 1x zooms to this scale around the tap (a double tap while zoomed still resets). */
+  doubleTapZoom?: number;
   children?: ReactNode;
 };
 
@@ -86,6 +93,8 @@ export function ZoomFrame({
   mediaSource,
   onEnhance,
   enhanceable = true,
+  touch: forceTouch,
+  doubleTapZoom,
   children,
 }: ZoomFrameProps) {
   const [frameEl, setFrameEl] = useState<HTMLDivElement | null>(null);
@@ -105,7 +114,7 @@ export function ZoomFrame({
   const zoomRef = useRef(zoom);
   const drag = useRef<{ id: number; x: number; y: number } | null>(null);
   const phone = useIsPhoneDevice();
-  const touchGestures = !phone;
+  const touchGestures = forceTouch ?? !phone;
   const [pinching, setPinching] = useState(false);
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinch = useRef<{ distance: number; mid: { x: number; y: number } } | null>(null);
@@ -264,7 +273,15 @@ export function ZoomFrame({
 
   useEffect(() => {
     tap.listen((event) => {
-      if (zoomRef.current.scale <= 1) return;
+      if (zoomRef.current.scale <= 1) {
+        const rect = frameEl?.getBoundingClientRect();
+        if (!doubleTapZoom || !rect) return;
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        event.stopPropagation();
+        applyZoom(clampZoom({ scale: doubleTapZoom, x: x * (1 - doubleTapZoom), y: y * (1 - doubleTapZoom) }, rect.width, rect.height));
+        return;
+      }
       event.stopPropagation();
       applyZoom(IDENTITY_ZOOM);
     });

@@ -162,10 +162,12 @@ interface AppShellProps {
   contextSidebar?: ReactNode;
   /** Fit the workspace to the viewport (no page scroll) from the md breakpoint up. */
   fitViewport?: boolean;
+  /** The bottom navigation is the compact bar (Live on phones), so less room is reserved under the content. */
+  compactBottomNav?: boolean;
   children: ReactNode;
 }
 
-export function AppShell({ primaryNav, bottomNav, contextSidebar, fitViewport = false, children }: AppShellProps) {
+export function AppShell({ primaryNav, bottomNav, contextSidebar, fitViewport = false, compactBottomNav = false, children }: AppShellProps) {
   const t = useT();
   const collapsed = useSyncExternalStore(subscribeSidebarCollapsed, getSidebarCollapsed, () => false);
   const width = useSyncExternalStore(subscribeSidebarWidth, getSidebarWidth, () => SIDEBAR_DEFAULT_WIDTH);
@@ -180,7 +182,11 @@ export function AppShell({ primaryNav, bottomNav, contextSidebar, fitViewport = 
       >
         {t("common.skipToContent")}
       </a>
-      <div className={cn("flex flex-col bg-surface-dim md:flex-row", fitViewport ? "h-dvh max-h-dvh min-h-0 overflow-hidden" : "min-h-dvh")} data-shell="openvms">
+      <div className={cn(
+        // Notch, status bar and landscape side insets are handled once here (viewport-fit=cover); they are 0 on desktop.
+        "flex flex-col bg-surface-dim pt-[env(safe-area-inset-top)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:flex-row",
+        fitViewport ? "h-dvh max-h-dvh min-h-0 overflow-hidden" : "min-h-dvh",
+      )} data-shell="openvms">
         <aside aria-label="Primary Nav Rail" className="hidden shrink-0 overflow-y-auto md:static md:flex" data-shell-region="primary-nav">
           {primaryNav}
         </aside>
@@ -211,7 +217,9 @@ export function AppShell({ primaryNav, bottomNav, contextSidebar, fitViewport = 
         <main id="main-content" tabIndex={-1} aria-label="Main Workspace" className={cn(
           // Content sits on a raised sheet beside the rail. Fit-viewport routes (Live, Maps) keep the
           // radius and background but no margins so their viewport maths is unchanged.
-          "min-w-0 flex-1 px-4 pb-[calc(5rem+env(safe-area-inset-bottom))] outline-none md:rounded-m3-2xl md:bg-surface md:px-8",
+          "min-w-0 flex-1 px-4 outline-none",
+          compactBottomNav ? "pb-[calc(3.5rem+env(safe-area-inset-bottom))]" : "pb-[calc(5rem+env(safe-area-inset-bottom))]",
+          "md:rounded-m3-2xl md:bg-surface md:px-8",
           fitViewport ? "flex min-h-0 flex-col overflow-hidden pt-3 md:pb-3" : "pt-6 md:m-3 md:ml-0 md:pb-6",
         )} data-shell-region="main-workspace">
           {children}

@@ -4,8 +4,8 @@ import { json, renderPage, stubApi } from "@/test-utils";
 import { Live } from "@/routes/Live";
 
 vi.mock("@/components/MsePlayer", () => ({
-  MsePlayer: ({ cameraId, quality, persistent }: { cameraId: string; quality?: string; persistent?: boolean }) => (
-    <div data-testid="player" data-camera={cameraId} data-quality={quality} data-persistent={String(!!persistent)} />
+  MsePlayer: ({ cameraId, quality, persistent, objectFit }: { cameraId: string; quality?: string; persistent?: boolean; objectFit?: string }) => (
+    <div data-testid="player" data-camera={cameraId} data-quality={quality} data-persistent={String(!!persistent)} data-fit={objectFit} />
   ),
 }));
 
@@ -39,8 +39,13 @@ function fakeMainSession() {
   return { video, attach };
 }
 
-function stubPhone(phone: boolean) {
-  vi.stubGlobal("matchMedia", (query: string) => ({ matches: phone && query === "(pointer: coarse)", media: query, addEventListener() {}, removeEventListener() {} }));
+function stubPhone(phone: boolean, opts: { landscape?: boolean } = {}) {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: (phone && query === "(pointer: coarse)") || (!!opts.landscape && query === "(orientation: landscape)"),
+    media: query,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
   vi.stubGlobal("screen", { width: phone ? 390 : 1920, height: phone ? 844 : 1080 });
 }
 
@@ -79,9 +84,15 @@ const pickScope = (name: string) => {
   fireEvent.click(within(sheet()).getByRole("button", { name }));
 };
 
+/** The remembered phone layout is per user (tenant t1, user u1 in stubBackend). */
+const LAYOUT_KEY = "openvms.livephone.layout.v1:t1:u1";
+const seedLayout = (layout: string, key = LAYOUT_KEY) => localStorage.setItem(key, JSON.stringify({ layout }));
+
 beforeEach(() => {
   hls.onTime.clear();
   localStorage.clear();
+  // The default layout is the snapshot grid; the original suites exercise the list.
+  seedLayout("list");
   fakeMainSession();
 });
 afterEach(() => vi.unstubAllGlobals());
@@ -406,5 +417,565 @@ describe("Live phone GRABADO", () => {
     pickScope("Cam 2");
     const single = await screen.findByTestId("live-phone-single");
     await waitFor(() => expect(within(single).getByTestId("rec-player")).toHaveAttribute("data-camera", "c2"));
+  });
+});
+
+describe("Live phone immersive single camera", () => {
+  const fs = { element: null as Element | null };
+  const request = vi.fn(function (this: Element) {
+    fs.element = this;
+    return Promise.resolve();
+  });
+  const exit = vi.fn(() => {
+    fs.element = null;
+    document.dispatchEvent(new Event("fullscreenchange"));
+    return Promise.resolve();
+  });
+
+  beforeEach(() => {
+    fs.element = null;
+    request.mockClear();
+    exit.mockClear();
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fs.element });
+    Object.defineProperty(document, "exitFullscreen", { configurable: true, value: exit });
+    Object.defineProperty(HTMLElement.prototype, "requestFullscreen", { configurable: true, value: request });
+  });
+  afterEach(() => {
+    delete (document as unknown as Record<string, unknown>).fullscreenElement;
+    delete (document as unknown as Record<string, unknown>).exitFullscreen;
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).requestFullscreen;
+  });
+
+  async function openSingle(opts: { landscape?: boolean } = {}) {
+    stubPhone(true, opts);
+    stubBackend([camera("c1", "North")]);
+    renderPage(Live, "/?camera=c1");
+    return screen.findByTestId("live-phone-single");
+  }
+
+  it("stays inline in portrait and offers a fullscreen button", async () => {
+    const single = await openSingle();
+    expect(single).not.toHaveClass("fixed");
+    expect(within(single).getByRole("button", { name: "Pantalla completa" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(single).getByTestId("phone-stage")).toHaveClass("aspect-video");
+  });
+
+  it("requests native fullscreen on the container and covers the app chrome safely", async () => {
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.contexts[0]).toBe(single);
+    expect(single).toHaveClass("fixed", "inset-0", "pt-[env(safe-area-inset-top)]", "pl-[env(safe-area-inset-left)]", "pr-[env(safe-area-inset-right)]", "pb-[env(safe-area-inset-bottom)]");
+    expect(within(single).getByRole("button", { name: "Salir de pantalla completa" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(single).getByTestId("phone-stage")).toHaveClass("size-full");
+  });
+
+  it("returns to the previous state when the system leaves fullscreen", async () => {
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    fs.element = null;
+    act(() => void document.dispatchEvent(new Event("fullscreenchange")));
+    expect(single).not.toHaveClass("fixed");
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("exits through the toggle", async () => {
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    fireEvent.click(within(single).getByRole("button", { name: "Salir de pantalla completa" }));
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(single).not.toHaveClass("fixed");
+  });
+
+  it("falls back to CSS immersive mode where the Fullscreen API does not exist", async () => {
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).requestFullscreen;
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    expect(single).toHaveClass("fixed", "inset-0");
+    fireEvent.click(within(single).getByRole("button", { name: "Salir de pantalla completa" }));
+    expect(single).not.toHaveClass("fixed");
+  });
+
+  it("keeps the CSS immersive mode when native fullscreen is refused", async () => {
+    request.mockImplementationOnce(() => Promise.reject(new Error("denied")));
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    await Promise.resolve();
+    expect(single).toHaveClass("fixed");
+  });
+
+  it("fills the screen in landscape without any tap and contains the picture", async () => {
+    const { attach } = fakeMainSession();
+    const single = await openSingle({ landscape: true });
+    expect(attach).toHaveBeenCalled();
+    expect(single).toHaveClass("fixed", "inset-0");
+    expect(request).not.toHaveBeenCalled();
+    expect((sessions.main as { setObjectFit: ReturnType<typeof vi.fn> }).setObjectFit).toHaveBeenCalledWith("contain");
+  });
+
+  it("leaves fullscreen when the back button closes the camera", async () => {
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    fireEvent.click(within(single).getByRole("button", { name: "Volver" }));
+    await waitFor(() => expect(screen.queryByTestId("live-phone-single")).toBeNull());
+    expect(exit).toHaveBeenCalled();
+  });
+});
+
+describe("Live phone pinch-zoom in the single camera", () => {
+  beforeEach(() => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 100, width: 200, height: 100, toJSON: () => ({}) } as DOMRect);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const zoomLayer = (single: HTMLElement) => within(single).getByTestId("phone-main-layer").parentElement as HTMLElement;
+  const touch = (frame: HTMLElement, type: "pointerDown" | "pointerMove" | "pointerUp", id: number, x: number, y: number) =>
+    fireEvent[type](frame, { pointerId: id, pointerType: "touch", isPrimary: id === 1, clientX: x, clientY: y, button: 0 });
+  const frameOf = (single: HTMLElement) => zoomLayer(single).parentElement as HTMLElement;
+  const pinchOut = (frame: HTMLElement) => {
+    touch(frame, "pointerDown", 1, 80, 50);
+    touch(frame, "pointerDown", 2, 120, 50);
+    touch(frame, "pointerMove", 2, 160, 50);
+    touch(frame, "pointerUp", 2, 160, 50);
+    touch(frame, "pointerUp", 1, 80, 50);
+  };
+
+  async function openSingle(path = "/?camera=c1") {
+    stubPhone(true);
+    stubBackend([camera("c1", "North"), camera("c2", "East")]);
+    const view = renderPage(Live, path);
+    return { ...view, single: await screen.findByTestId("live-phone-single") };
+  }
+
+  it("zooms the picture with two fingers and shows the reset chip", async () => {
+    const { single } = await openSingle();
+    expect(zoomLayer(single).style.transform).toBe("");
+    pinchOut(frameOf(single));
+    expect(zoomLayer(single).style.transform).toMatch(/scale\(2\)/);
+    expect(within(single).getByRole("button", { name: /Restablecer/ })).toBeInTheDocument();
+  });
+
+  it("pans with one finger once zoomed", async () => {
+    const { single } = await openSingle();
+    const frame = frameOf(single);
+    pinchOut(frame);
+    const before = zoomLayer(single).style.transform;
+    touch(frame, "pointerDown", 1, 100, 50);
+    touch(frame, "pointerMove", 1, 80, 50);
+    expect(zoomLayer(single).style.transform).not.toBe(before);
+  });
+
+  it("toggles with a double tap", async () => {
+    const { single } = await openSingle();
+    const frame = frameOf(single);
+    const tap = () => {
+      touch(frame, "pointerDown", 1, 100, 50);
+      touch(frame, "pointerUp", 1, 100, 50);
+    };
+    tap();
+    tap();
+    expect(zoomLayer(single).style.transform).toMatch(/scale\(2\.5\)/);
+    tap();
+    tap();
+    expect(zoomLayer(single).style.transform).toBe("");
+  });
+
+  it("resets when the camera changes", async () => {
+    const { single, router } = await openSingle();
+    pinchOut(frameOf(single));
+    expect(zoomLayer(single).style.transform).not.toBe("");
+    await act(async () => void (await router.navigate({ to: "/", search: { camera: "c2" } as never })));
+    const next = await screen.findByTestId("live-phone-single");
+    expect(zoomLayer(next).style.transform).toBe("");
+  });
+
+  it("starts at 1x again after leaving and reopening the camera", async () => {
+    const { single } = await openSingle();
+    pinchOut(frameOf(single));
+    fireEvent.click(screen.getByRole("button", { name: "Volver" }));
+    await waitFor(() => expect(screen.queryByTestId("live-phone-single")).toBeNull());
+    fireEvent.click(await screen.findByRole("button", { name: "Ver North" }));
+    const again = await screen.findByTestId("live-phone-single");
+    expect(zoomLayer(again).style.transform).toBe("");
+  });
+
+  it("does not add zoom handling to the multi-camera list", async () => {
+    stubPhone(true);
+    stubBackend([camera("c1", "North")]);
+    renderPage(Live);
+    await screen.findByRole("button", { name: "Ver North" });
+    expect(screen.getByTestId("live-phone-pages").querySelector('[style*="touch-action"]')).toBeNull();
+  });
+});
+
+describe("Live phone layouts", () => {
+  const cams = (n: number, status = "online") => Array.from({ length: n }, (_, i) => ({ ...camera(`c${i + 1}`, `Cam ${i + 1}`), status }));
+  const toggle = (name: string) => screen.getByRole("button", { name });
+
+  afterEach(() => vi.useRealTimers());
+
+  it("defaults to the snapshot grid: tiles with snapshots and no live player", async () => {
+    localStorage.clear();
+    stubPhone(true);
+    stubBackend(cams(6));
+    renderPage(Live);
+    const grid = await screen.findByTestId("phone-grid");
+    expect(within(grid).getAllByRole("button", { name: /^Ver / })).toHaveLength(6);
+    expect(screen.queryAllByTestId("player")).toHaveLength(0);
+    expect(grid.querySelector('img[src^="/media/v1/cameras/c1/snapshot.jpg?h=360"]')).not.toBeNull();
+    expect(toggle("Cuadrícula")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByTestId("phone-page-status")).toBeNull();
+  });
+
+  it("marks offline cameras on their tile", async () => {
+    localStorage.clear();
+    stubPhone(true);
+    stubBackend(cams(2, "offline"));
+    renderPage(Live);
+    const grid = await screen.findByTestId("phone-grid");
+    expect(within(grid).getAllByText("Sin conexión")).toHaveLength(2);
+  });
+
+  it("opens the single camera from a tile", async () => {
+    localStorage.clear();
+    stubPhone(true);
+    stubBackend(cams(2));
+    const { router } = renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: "Ver Cam 2" }));
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ camera: "c2" }));
+    expect(await screen.findByTestId("live-phone-single")).toBeInTheDocument();
+  });
+
+  it("switches layout from the header toggle and remembers it for the user", async () => {
+    localStorage.clear();
+    stubPhone(true);
+    stubBackend(cams(6));
+    renderPage(Live);
+    await screen.findByTestId("phone-grid");
+    fireEvent.click(toggle("Lista"));
+    expect(screen.queryByTestId("phone-grid")).toBeNull();
+    expect(screen.getAllByTestId("player")).toHaveLength(4);
+    expect(toggle("Lista")).toHaveAttribute("aria-pressed", "true");
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!)).toEqual({ layout: "list" });
+    fireEvent.click(toggle("Enfoque"));
+    expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!)).toEqual({ layout: "focus" });
+  });
+
+  it("restores the remembered layout and ignores another user's choice", async () => {
+    localStorage.clear();
+    seedLayout("focus");
+    seedLayout("list", "openvms.livephone.layout.v1:t1:u2");
+    stubPhone(true);
+    stubBackend(cams(3));
+    renderPage(Live);
+    expect(await screen.findByTestId("phone-focus-strip")).toBeInTheDocument();
+    expect(toggle("Enfoque")).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("falls back to the grid for an unknown stored layout", async () => {
+    localStorage.clear();
+    seedLayout("carousel");
+    stubPhone(true);
+    stubBackend(cams(2));
+    renderPage(Live);
+    expect(await screen.findByTestId("phone-grid")).toBeInTheDocument();
+  });
+
+  it("offers site chips as a quick switcher next to the full scope sheet", async () => {
+    localStorage.clear();
+    stubPhone(true);
+    stubBackend([camera("c1", "North", "s1"), camera("c2", "East", "s2")]);
+    renderPage(Live);
+    const chips = await screen.findByRole("group", { name: "Sitios" });
+    expect(within(chips).getByRole("button", { name: "Todas" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(chips).getByRole("button", { name: "Beta" }));
+    expect(within(chips).getByRole("button", { name: "Beta" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(screen.getByTestId("phone-grid")).getAllByRole("button", { name: /^Ver / }).map((b) => b.getAttribute("aria-label"))).toEqual(["Ver East"]);
+    expect(scopeButton()).toHaveTextContent("Beta");
+    pickScope("Todas");
+    expect(within(chips).getByRole("button", { name: "Todas" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  describe("snapshot refresh", () => {
+    type Observer = { callback: IntersectionObserverCallback; target: Element | null };
+    const observers: Observer[] = [];
+    beforeEach(() => {
+      observers.length = 0;
+      class FakeObserver {
+        entry: Observer;
+        constructor(callback: IntersectionObserverCallback) {
+          this.entry = { callback, target: null };
+          observers.push(this.entry);
+        }
+        observe(target: Element) { this.entry.target = target; }
+        unobserve() {}
+        disconnect() {}
+      }
+      vi.stubGlobal("IntersectionObserver", FakeObserver);
+    });
+    const setVisible = (id: string, visible: boolean) => {
+      const img = document.querySelector(`[data-testid="phone-grid"] img[src*="/cameras/${id}/"]`)!;
+      const entry = observers.find((o) => o.target?.contains(img))!;
+      act(() => entry.callback([{ isIntersecting: visible, target: entry.target! } as IntersectionObserverEntry], {} as IntersectionObserver));
+    };
+    const src = (id: string) => document.querySelector(`[data-testid="phone-grid"] img[src*="/cameras/${id}/"]`)!.getAttribute("src");
+    const setHidden = (hidden: boolean) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+      act(() => void document.dispatchEvent(new Event("visibilitychange")));
+    };
+    afterEach(() => setHidden(false));
+
+    async function mountGrid() {
+      localStorage.clear();
+      stubPhone(true);
+      stubBackend(cams(3));
+      renderPage(Live);
+      await screen.findByTestId("phone-grid");
+      vi.useFakeTimers();
+    }
+
+    it("refreshes about every 10 s only the tiles on screen", async () => {
+      await mountGrid();
+      const first = src("c1");
+      setVisible("c1", true);
+      act(() => void vi.advanceTimersByTime(9_000));
+      expect(src("c1")).toBe(first);
+      act(() => void vi.advanceTimersByTime(1_500));
+      expect(src("c1")).not.toBe(first);
+      expect(src("c1")).toMatch(/^\/media\/v1\/cameras\/c1\/snapshot\.jpg\?h=360&_=\d+$/);
+      expect(src("c2")).toBe("/media/v1/cameras/c2/snapshot.jpg?h=360");
+      act(() => void vi.advanceTimersByTime(30_000));
+      expect(src("c3")).toBe("/media/v1/cameras/c3/snapshot.jpg?h=360");
+    });
+
+    it("stops refreshing a tile that scrolls out of view", async () => {
+      await mountGrid();
+      setVisible("c1", true);
+      act(() => void vi.advanceTimersByTime(10_500));
+      const refreshed = src("c1");
+      setVisible("c1", false);
+      act(() => void vi.advanceTimersByTime(60_000));
+      expect(src("c1")).toBe(refreshed);
+    });
+
+    it("pauses while the page is hidden and resumes when it returns", async () => {
+      await mountGrid();
+      setVisible("c1", true);
+      setHidden(true);
+      const before = src("c1");
+      act(() => void vi.advanceTimersByTime(60_000));
+      expect(src("c1")).toBe(before);
+      setHidden(false);
+      act(() => void vi.advanceTimersByTime(10_500));
+      expect(src("c1")).not.toBe(before);
+    });
+  });
+
+  it("uses more columns in landscape", async () => {
+    localStorage.clear();
+    stubPhone(true, { landscape: true });
+    stubBackend(cams(4));
+    renderPage(Live);
+    expect((await screen.findByTestId("phone-grid-list")).className).toMatch(/grid-cols-4/);
+  });
+
+  it("uses two columns in portrait", async () => {
+    localStorage.clear();
+    stubPhone(true);
+    stubBackend(cams(4));
+    renderPage(Live);
+    expect((await screen.findByTestId("phone-grid-list")).className).toMatch(/grid-cols-2/);
+  });
+
+  describe("focus", () => {
+    it("plays exactly one live camera and a snapshot strip switches it", async () => {
+      localStorage.clear();
+      seedLayout("focus");
+      stubPhone(true);
+      stubBackend(cams(3));
+      renderPage(Live);
+      const strip = await screen.findByTestId("phone-focus-strip");
+      expect(screen.getAllByTestId("player")).toHaveLength(1);
+      expect(screen.getByTestId("player")).toHaveAttribute("data-camera", "c1");
+      const { usePlayerSession } = await import("@/lib/live/PlayerSessionProvider");
+      expect(usePlayerSession).toHaveBeenCalledWith("c1", "main", "srv1");
+      expect(strip.querySelector('img[src^="/media/v1/cameras/c3/snapshot.jpg"]')).not.toBeNull();
+      expect(within(strip).getByRole("button", { name: "Mostrar Cam 1" })).toHaveAttribute("aria-current", "true");
+      fireEvent.click(within(strip).getByRole("button", { name: "Mostrar Cam 3" }));
+      expect(screen.getAllByTestId("player")).toHaveLength(1);
+      expect(screen.getByTestId("player")).toHaveAttribute("data-camera", "c3");
+      expect(usePlayerSession).toHaveBeenCalledWith("c3", "main", "srv1");
+      expect(within(strip).getByRole("button", { name: "Mostrar Cam 3" })).toHaveAttribute("aria-current", "true");
+    });
+
+    it("scrolls the strip sideways in portrait and vertically beside the picture in landscape", async () => {
+      localStorage.clear();
+      seedLayout("focus");
+      stubPhone(true);
+      stubBackend(cams(3));
+      const { unmount } = renderPage(Live);
+      expect((await screen.findByTestId("phone-focus-strip")).className).toMatch(/overflow-x-auto/);
+      unmount();
+      stubPhone(true, { landscape: true });
+      renderPage(Live);
+      expect((await screen.findByTestId("phone-focus-strip")).className).toMatch(/overflow-y-auto/);
+    });
+
+    it("opens the single view of the live camera", async () => {
+      localStorage.clear();
+      seedLayout("focus");
+      stubPhone(true);
+      stubBackend(cams(3));
+      const { router } = renderPage(Live);
+      await screen.findByTestId("phone-focus-strip");
+      fireEvent.click(screen.getByRole("button", { name: "Mostrar Cam 2" }));
+      fireEvent.click(screen.getByRole("button", { name: "Ver Cam 2" }));
+      await waitFor(() => expect(router.state.location.search).toMatchObject({ camera: "c2" }));
+      await screen.findByTestId("live-phone-single");
+      expect(screen.getAllByTestId("player")).toHaveLength(1);
+    });
+  });
+
+  it("keeps GRABADO on recorded tiles whatever the layout", async () => {
+    localStorage.clear();
+    seedLayout("grid");
+    stubPhone(true);
+    stubBackend(cams(6), { recordings: true });
+    renderPage(Live, REC_URL);
+    await waitFor(() => expect(screen.getAllByTestId("rec-player")).toHaveLength(4));
+    expect(screen.queryByTestId("phone-grid")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cuadrícula" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Vivo" }));
+    expect(await screen.findByTestId("phone-grid")).toBeInTheDocument();
+  });
+});
+
+describe("Live phone single-view swipe between cameras", () => {
+  beforeEach(() => {
+    vi.spyOn(Element.prototype, "getBoundingClientRect").mockReturnValue({ x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 100, width: 200, height: 100, toJSON: () => ({}) } as DOMRect);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  const touch = (frame: HTMLElement, type: "pointerDown" | "pointerMove" | "pointerUp", id: number, x: number, y: number) =>
+    fireEvent[type](frame, { pointerId: id, pointerType: "touch", isPrimary: id === 1, clientX: x, clientY: y, button: 0 });
+  const swipe = (frame: HTMLElement, dx: number, dy = 0) => {
+    touch(frame, "pointerDown", 1, 200, 50);
+    touch(frame, "pointerMove", 1, 200 + dx, 50 + dy);
+    touch(frame, "pointerUp", 1, 200 + dx, 50 + dy);
+  };
+  const current = (router: { state: { location: { search: unknown } } }) => (router.state.location.search as { camera?: string }).camera;
+
+  async function open(id = "c2") {
+    localStorage.clear();
+    seedLayout("grid");
+    stubPhone(true);
+    stubBackend([camera("c1", "Aaa", "s1"), camera("c2", "Bbb", "s1"), camera("c3", "Ccc", "s1"), camera("c4", "Ddd", "s2")]);
+    const view = renderPage(Live, `/?camera=${id}`);
+    const single = await screen.findByTestId("live-phone-single");
+    return { ...view, single, frame: within(single).getByTestId("phone-main-layer").parentElement!.parentElement as HTMLElement };
+  }
+
+  it("moves to the next and previous camera in grid order", async () => {
+    const { router, frame } = await open();
+    swipe(frame, -120);
+    await waitFor(() => expect(current(router)).toBe("c3"));
+    swipe(frame, 120);
+    await waitFor(() => expect(current(router)).toBe("c2"));
+    swipe(frame, 120);
+    await waitFor(() => expect(current(router)).toBe("c1"));
+    swipe(frame, 120); // first camera: nowhere to go
+    expect(current(router)).toBe("c1");
+  });
+
+  it("follows the current scope and stops at its last camera", async () => {
+    const { router, frame } = await open("c3");
+    // Grid order is by site: Alpha (c1..c3) then Beta (c4).
+    swipe(frame, -120);
+    await waitFor(() => expect(current(router)).toBe("c4"));
+    swipe(frame, -120);
+    expect(current(router)).toBe("c4");
+  });
+
+  it("ignores short and mostly vertical drags", async () => {
+    const { router, frame } = await open();
+    swipe(frame, -20);
+    swipe(frame, -90, 100);
+    expect(current(router)).toBe("c2");
+  });
+
+  it("keeps the back button returning to the grid after swiping", async () => {
+    const { router, frame } = await open();
+    swipe(frame, -120);
+    await waitFor(() => expect(current(router)).toBe("c3"));
+    fireEvent.click(screen.getByRole("button", { name: "Volver" }));
+    await waitFor(() => expect(screen.queryByTestId("live-phone-single")).toBeNull());
+    expect(current(router)).toBeUndefined();
+  });
+
+  it("does not navigate while zoomed: a one-finger drag pans", async () => {
+    const { router, frame } = await open();
+    touch(frame, "pointerDown", 1, 80, 50);
+    touch(frame, "pointerDown", 2, 120, 50);
+    touch(frame, "pointerMove", 2, 160, 50);
+    touch(frame, "pointerUp", 2, 160, 50);
+    touch(frame, "pointerUp", 1, 80, 50);
+    swipe(frame, -120);
+    expect(current(router)).toBe("c2");
+  });
+
+  it("does not navigate with a pinch", async () => {
+    const { router, frame } = await open();
+    touch(frame, "pointerDown", 1, 40, 50);
+    touch(frame, "pointerDown", 2, 80, 50);
+    touch(frame, "pointerMove", 1, 0, 50);
+    touch(frame, "pointerUp", 2, 80, 50);
+    touch(frame, "pointerUp", 1, 0, 50);
+    expect(current(router)).toBe("c2");
+  });
+});
+
+describe("Live phone immersive picture and recording controls", () => {
+  const rec = "/?mode=rec&t=2026-09-30T12:00:00.000Z&camera=c1";
+
+  it("letterboxes the playing sub picture with contain when immersive and fills inline", async () => {
+    stubPhone(true);
+    stubBackend([camera("c1", "North")]);
+    const view = renderPage(Live, "/?camera=c1");
+    const single = await screen.findByTestId("live-phone-single");
+    expect(within(single).getByTestId("player")).toHaveAttribute("data-fit", "fill");
+    view.unmount();
+    stubPhone(true, { landscape: true });
+    renderPage(Live, "/?camera=c1");
+    expect(await screen.findByTestId("player")).toHaveAttribute("data-fit", "contain");
+  });
+
+  it("reveals the recording controls on demand in landscape GRABADO", async () => {
+    stubPhone(true, { landscape: true });
+    stubBackend([camera("c1", "North")], { recordings: true });
+    renderPage(Live, rec);
+    const single = await screen.findByTestId("live-phone-single");
+    expect(screen.queryByRole("region", { name: "Controles de grabación" })).toBeNull();
+    fireEvent.click(within(single).getByRole("button", { name: "Mostrar controles de grabación" }));
+    expect(within(single).getByRole("region", { name: "Controles de grabación" })).toBeInTheDocument();
+    expect(screen.getAllByRole("region", { name: "Controles de grabación" })).toHaveLength(1);
+    fireEvent.click(within(single).getByRole("button", { name: "Ocultar controles de grabación" }));
+    expect(screen.queryByRole("region", { name: "Controles de grabación" })).toBeNull();
+  });
+
+  it("keeps the dock inline in portrait GRABADO and offers no extra button", async () => {
+    stubPhone(true);
+    stubBackend([camera("c1", "North")], { recordings: true });
+    renderPage(Live, rec);
+    const single = await screen.findByTestId("live-phone-single");
+    expect(await screen.findByRole("region", { name: "Controles de grabación" })).not.toBeNull();
+    expect(within(single).queryByRole("button", { name: "Mostrar controles de grabación" })).toBeNull();
+  });
+
+  it("adds no recording button to immersive LIVE", async () => {
+    stubPhone(true, { landscape: true });
+    stubBackend([camera("c1", "North")], { recordings: true });
+    renderPage(Live, "/?camera=c1");
+    const single = await screen.findByTestId("live-phone-single");
+    expect(within(single).queryByRole("button", { name: "Mostrar controles de grabación" })).toBeNull();
   });
 });
