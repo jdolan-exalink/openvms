@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Maximize, Minimize } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { cameraFoldersQuery, camerasQuery, meQuery, serversQuery, sitesQuery } from "@/api/queries";
 import type { Schemas } from "@/api/client";
@@ -16,6 +16,7 @@ import { cn } from "@/lib/cn";
 import { usePlayerSession } from "@/lib/live/PlayerSessionProvider";
 import { can } from "@/lib/perm";
 import type { RecTransport } from "@/lib/useRecPlayback";
+import { useImmersive, useIsLandscape } from "@/lib/useImmersive";
 import { useRecSession } from "@/lib/useRecSession";
 
 type Camera = Schemas["Camera"];
@@ -29,6 +30,9 @@ const statusDot = (status?: string) => (status === "online" ? "bg-ok" : status =
 
 /** Where the gateway serves the latest frame; it sits under the player so a card is never a black box. */
 const snapshotUrl = (id: string) => `/media/v1/cameras/${id}/snapshot.jpg?h=360`;
+
+/** The single-camera picture box: 16:9 inline, the whole container when immersive. */
+const stageClass = (fill: boolean) => cn("relative w-full overflow-hidden bg-video", fill ? "size-full" : "aspect-video");
 
 /** What a card shows in GRABADO: the recorded tile of the shared transport instead of the live player. */
 type RecView = { state: RecTileState; transport: RecTransport; isMaster: boolean };
@@ -59,7 +63,7 @@ function CameraCard({ camera, playing, rec, onOpen }: { camera: Camera; playing:
  * the sub picture shows through until main reveals its first frame and then main covers it.
  * The sub session stays mounted underneath so going back to the list is instant.
  */
-function SingleCamera({ camera }: { camera: Camera }) {
+function SingleCamera({ camera, fill }: { camera: Camera; fill: boolean }) {
   const main = usePlayerSession(camera.id, "main", camera.server_id);
   const stage = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -69,19 +73,23 @@ function SingleCamera({ camera }: { camera: Camera }) {
     main.attach(el);
     return () => main.detach();
   }, [main]);
+  // Inline the picture fills a 16:9 box; immersive it is letterboxed (contain) on any screen shape.
+  useEffect(() => {
+    main?.setObjectFit(fill ? "contain" : undefined);
+  }, [main, fill]);
   return (
-    <div className="relative aspect-video w-full overflow-hidden bg-video">
+    <div data-testid="phone-stage" className={stageClass(fill)}>
       <img src={snapshotUrl(camera.id)} alt="" draggable={false} className="absolute inset-0 size-full object-contain" />
-      <MsePlayer persistent cameraId={camera.id} quality="sub" serverId={camera.server_id} className="absolute inset-0 size-full" />
+      <MsePlayer persistent cameraId={camera.id} quality="sub" serverId={camera.server_id} objectFit={fill ? "contain" : "fill"} className="absolute inset-0 size-full" />
       <div ref={stage} data-testid="phone-main-layer" className="absolute inset-0" />
     </div>
   );
 }
 
 /** SingleRecording is the single view in GRABADO: that camera's recording on the shared transport. */
-function SingleRecording({ camera, rec }: { camera: Camera; rec: RecView }) {
+function SingleRecording({ camera, rec, fill }: { camera: Camera; rec: RecView; fill: boolean }) {
   return (
-    <div className="relative aspect-video w-full overflow-hidden bg-video">
+    <div data-testid="phone-stage" className={stageClass(fill)}>
       <img src={snapshotUrl(camera.id)} alt="" draggable={false} className="absolute inset-0 size-full object-contain" />
       <RecTile cameraId={camera.id} name={camera.display_name} state={rec.state} transport={rec.transport} isMaster />
     </div>
@@ -110,6 +118,7 @@ export function LivePhone() {
   const scopeButton = useRef<HTMLButtonElement>(null);
   const gesture = useRef<{ x: number; y: number } | null>(null);
   const swiped = useRef(false);
+  const singleRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setContextSidebarCollapsed(true);
@@ -157,6 +166,11 @@ export function LivePhone() {
 
   const requested = typeof search.camera === "string" ? search.camera : undefined;
   const selected = requested ? all.find((camera) => camera.id === requested) : undefined;
+
+  // Immersive = fullscreen toggle, or landscape. It covers the app chrome (bottom bar, headers).
+  const landscape = useIsLandscape();
+  const { immersive, toggle: toggleImmersive } = useImmersive(singleRef, !!selected);
+  const fill = !!selected && (immersive || landscape);
 
   const open = (id: string) => void navigate({ to: ".", search: ((previous: Record<string, unknown>) => ({ ...previous, camera: id })) as never });
   const close = () => void navigate({ to: ".", replace: true, search: ((previous: Record<string, unknown>) => ({ ...previous, camera: undefined })) as never });
@@ -234,17 +248,40 @@ export function LivePhone() {
         </div>
       </div>
       {selected && (
-        <section data-testid="live-phone-single" aria-label={selected.display_name} className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-          <div className="flex shrink-0 items-center gap-2">
-            <IconButton icon={ArrowLeft} aria-label={tr("live.phoneBack")} title={tr("live.phoneBack")} onClick={close} />
-            <span className="min-w-0 flex-1 truncate text-base font-semibold">{selected.display_name}</span>
-            <span className="inline-flex shrink-0 items-center gap-1.5 text-xs text-on-surface-variant" role="status">
-              <span className={cn("size-2 rounded-full", statusDot(selected.status))} aria-hidden />
-              {selected.status}
-            </span>
-            {modeToggle}
+        <section
+          ref={singleRef}
+          data-testid="live-phone-single"
+          aria-label={selected.display_name}
+          className={cn(
+            "flex min-h-0 min-w-0 flex-1 flex-col gap-2",
+            // Covers the shell and keeps the picture clear of the notch, side insets and home indicator.
+            fill && "fixed inset-0 z-[60] gap-0 bg-black pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]",
+          )}
+        >
+          <div className={cn(fill ? "relative min-h-0 flex-1" : "contents")}>
+            <div
+              className={cn(
+                "flex shrink-0 items-center gap-2",
+                fill && "absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/70 to-transparent px-2 py-1 text-white",
+              )}
+            >
+              <IconButton icon={ArrowLeft} aria-label={tr("live.phoneBack")} title={tr("live.phoneBack")} onClick={close} />
+              <span className="min-w-0 flex-1 truncate text-base font-semibold">{selected.display_name}</span>
+              <span className={cn("inline-flex shrink-0 items-center gap-1.5 text-xs", fill ? "text-white/80" : "text-on-surface-variant")} role="status">
+                <span className={cn("size-2 rounded-full", statusDot(selected.status))} aria-hidden />
+                {selected.status}
+              </span>
+              {modeToggle}
+              <IconButton
+                icon={immersive ? Minimize : Maximize}
+                aria-label={immersive ? tr("live.phoneExitFullscreen") : tr("live.phoneFullscreen")}
+                title={immersive ? tr("live.phoneExitFullscreen") : tr("live.phoneFullscreen")}
+                aria-pressed={immersive}
+                onClick={toggleImmersive}
+              />
+            </div>
+            {rec ? <SingleRecording camera={selected} rec={recView(selected.id)!} fill={fill} /> : <SingleCamera camera={selected} fill={fill} />}
           </div>
-          {rec ? <SingleRecording camera={selected} rec={recView(selected.id)!} /> : <SingleCamera camera={selected} />}
         </section>
       )}
       {rec && (

@@ -39,6 +39,8 @@ const messages = {
   recordingsOf: "Gravações de {name}",
   backToGrid: "Voltar à grade",
   phoneBack: "Voltar",
+  phoneFullscreen: "Tela cheia",
+  phoneExitFullscreen: "Sair da tela cheia",
   phoneAllSites: "Todas",
   phoneSites: "Filtrar por site",
   phoneViewCamera: "Ver {name}",

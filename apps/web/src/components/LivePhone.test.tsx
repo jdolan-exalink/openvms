@@ -39,8 +39,13 @@ function fakeMainSession() {
   return { video, attach };
 }
 
-function stubPhone(phone: boolean) {
-  vi.stubGlobal("matchMedia", (query: string) => ({ matches: phone && query === "(pointer: coarse)", media: query, addEventListener() {}, removeEventListener() {} }));
+function stubPhone(phone: boolean, opts: { landscape?: boolean } = {}) {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: (phone && query === "(pointer: coarse)") || (!!opts.landscape && query === "(orientation: landscape)"),
+    media: query,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
   vi.stubGlobal("screen", { width: phone ? 390 : 1920, height: phone ? 844 : 1080 });
 }
 
@@ -406,5 +411,107 @@ describe("Live phone GRABADO", () => {
     pickScope("Cam 2");
     const single = await screen.findByTestId("live-phone-single");
     await waitFor(() => expect(within(single).getByTestId("rec-player")).toHaveAttribute("data-camera", "c2"));
+  });
+});
+
+describe("Live phone immersive single camera", () => {
+  const fs = { element: null as Element | null };
+  const request = vi.fn(function (this: Element) {
+    fs.element = this;
+    return Promise.resolve();
+  });
+  const exit = vi.fn(() => {
+    fs.element = null;
+    document.dispatchEvent(new Event("fullscreenchange"));
+    return Promise.resolve();
+  });
+
+  beforeEach(() => {
+    fs.element = null;
+    request.mockClear();
+    exit.mockClear();
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => fs.element });
+    Object.defineProperty(document, "exitFullscreen", { configurable: true, value: exit });
+    Object.defineProperty(HTMLElement.prototype, "requestFullscreen", { configurable: true, value: request });
+  });
+  afterEach(() => {
+    delete (document as unknown as Record<string, unknown>).fullscreenElement;
+    delete (document as unknown as Record<string, unknown>).exitFullscreen;
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).requestFullscreen;
+  });
+
+  async function openSingle(opts: { landscape?: boolean } = {}) {
+    stubPhone(true, opts);
+    stubBackend([camera("c1", "North")]);
+    renderPage(Live, "/?camera=c1");
+    return screen.findByTestId("live-phone-single");
+  }
+
+  it("stays inline in portrait and offers a fullscreen button", async () => {
+    const single = await openSingle();
+    expect(single).not.toHaveClass("fixed");
+    expect(within(single).getByRole("button", { name: "Pantalla completa" })).toHaveAttribute("aria-pressed", "false");
+    expect(within(single).getByTestId("phone-stage")).toHaveClass("aspect-video");
+  });
+
+  it("requests native fullscreen on the container and covers the app chrome safely", async () => {
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request.mock.contexts[0]).toBe(single);
+    expect(single).toHaveClass("fixed", "inset-0", "pt-[env(safe-area-inset-top)]", "pl-[env(safe-area-inset-left)]", "pr-[env(safe-area-inset-right)]", "pb-[env(safe-area-inset-bottom)]");
+    expect(within(single).getByRole("button", { name: "Salir de pantalla completa" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(single).getByTestId("phone-stage")).toHaveClass("size-full");
+  });
+
+  it("returns to the previous state when the system leaves fullscreen", async () => {
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    fs.element = null;
+    act(() => void document.dispatchEvent(new Event("fullscreenchange")));
+    expect(single).not.toHaveClass("fixed");
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it("exits through the toggle", async () => {
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    fireEvent.click(within(single).getByRole("button", { name: "Salir de pantalla completa" }));
+    expect(exit).toHaveBeenCalledTimes(1);
+    expect(single).not.toHaveClass("fixed");
+  });
+
+  it("falls back to CSS immersive mode where the Fullscreen API does not exist", async () => {
+    delete (HTMLElement.prototype as unknown as Record<string, unknown>).requestFullscreen;
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    expect(single).toHaveClass("fixed", "inset-0");
+    fireEvent.click(within(single).getByRole("button", { name: "Salir de pantalla completa" }));
+    expect(single).not.toHaveClass("fixed");
+  });
+
+  it("keeps the CSS immersive mode when native fullscreen is refused", async () => {
+    request.mockImplementationOnce(() => Promise.reject(new Error("denied")));
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    await Promise.resolve();
+    expect(single).toHaveClass("fixed");
+  });
+
+  it("fills the screen in landscape without any tap and contains the picture", async () => {
+    const { attach } = fakeMainSession();
+    const single = await openSingle({ landscape: true });
+    expect(attach).toHaveBeenCalled();
+    expect(single).toHaveClass("fixed", "inset-0");
+    expect(request).not.toHaveBeenCalled();
+    expect((sessions.main as { setObjectFit: ReturnType<typeof vi.fn> }).setObjectFit).toHaveBeenCalledWith("contain");
+  });
+
+  it("leaves fullscreen when the back button closes the camera", async () => {
+    const single = await openSingle();
+    fireEvent.click(within(single).getByRole("button", { name: "Pantalla completa" }));
+    fireEvent.click(within(single).getByRole("button", { name: "Volver" }));
+    await waitFor(() => expect(screen.queryByTestId("live-phone-single")).toBeNull());
+    expect(exit).toHaveBeenCalled();
   });
 });
