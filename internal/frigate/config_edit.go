@@ -18,14 +18,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ErrManagedZoneSyncUnsupported means safe managed-zone sync requires the structured Frigate 0.17 config API.
-var ErrManagedZoneSyncUnsupported = errors.New("managed camera-zone sync requires Frigate 0.17 or later")
-
 // ErrConfigPermissionRequired means a caller attempted a managed-zone write without servers.config authorization.
 var ErrConfigPermissionRequired = errors.New("servers.config permission is required for Frigate writes")
 
 // ErrConfigReadBackMismatch means Frigate accepted a patch but did not retain the requested value.
-var ErrConfigReadBackMismatch = errors.New("Frigate camera-zone read-back did not match the requested value")
+var ErrConfigReadBackMismatch = errors.New("camera-zone read-back from Frigate did not match the requested value")
 
 // ConfigValidationError is a rejected patch or a configuration Frigate refused (HTTP 400).
 type ConfigValidationError struct{ Message string }
@@ -391,9 +388,8 @@ func (a *v017) ApplyCameraPatch(ctx context.Context, camera string, patch map[st
 	return results, nil
 }
 
-// UpsertManagedCameraZone patches one VMS-owned zone and verifies the effective config. It
-// requires the structured 0.17 API because 0.16's dotted query route cannot safely express
-// zone objects. Frigate's config_data merge preserves other zones and camera settings.
+// UpsertManagedCameraZone patches one VMS-owned zone and verifies the effective config through
+// the structured config API. Frigate's config_data merge preserves other zones and camera settings.
 func (a *v017) UpsertManagedCameraZone(ctx context.Context, camera, zoneName string, zone map[string]any, hasConfigPermission bool) error {
 	if !hasConfigPermission {
 		return ErrConfigPermissionRequired

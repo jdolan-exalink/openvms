@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -417,5 +418,88 @@ func TestCameraZoneSyncRenameConflictsWithOccupiedDestination(t *testing.T) {
 	}
 	if !strings.Contains(mock.ConfigYAML(), "ovms_rename_source") || !strings.Contains(mock.ConfigYAML(), "coordinates: 1,1,2,1,1,2") {
 		t.Fatal("rename overwrote destination or deleted the old managed zone")
+	}
+}
+
+func TestCameraZoneSyncDeleteAfterUnappliedRenameRemovesOldRemoteKey(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+	input := inventory.CameraZoneInput{Name: "old_key", Points: []inventory.CameraZonePoint{{X: .1, Y: .1}, {X: .9, Y: .1}, {X: .5, Y: .9}}}
+	zone, err := env.Svc.CreateCameraZone(ctx, env.Admin, cam.ID, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Svc.ProcessCameraZoneSyncJobs(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	input.Name = "new_key"
+	if _, err := env.Svc.UpdateCameraZone(ctx, env.Admin, cam.ID, zone.ID, input); err != nil {
+		t.Fatal(err)
+	}
+	// The rename was never applied remotely when the zone is deleted.
+	if err := env.Svc.DeleteCameraZone(ctx, env.Admin, cam.ID, zone.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Svc.ProcessCameraZoneSyncJobs(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if yaml := env.Mocks["frigate-h01"].Server.ConfigYAML(); strings.Contains(yaml, "ovms_old_key") || strings.Contains(yaml, "ovms_new_key") {
+		t.Fatalf("deleted zone left an orphaned managed key behind: %s", yaml)
+	}
+	var status string
+	if err := env.Svc.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT sync_status FROM camera_zones WHERE id=$1`, zone.ID).Scan(&status)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status != "synced" {
+		t.Fatalf("delete status = %q, want synced", status)
+	}
+}
+
+func TestRetryCameraZoneSyncWaitsForPerZoneAdvisoryLock(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	cam := env.Cameras["frigate-h01/acceso_norte"]
+	zone, err := env.Svc.CreateCameraZone(ctx, env.Admin, cam.ID, inventory.CameraZoneInput{Name: "lock_order", Points: []inventory.CameraZonePoint{{X: .1, Y: .1}, {X: .9, Y: .1}, {X: .5, Y: .9}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Svc.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE camera_zone_sync_jobs SET status='failed' WHERE zone_id=$1`, zone.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE camera_zones SET sync_status='failed' WHERE id=$1`, zone.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	err = env.Svc.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		// Writers and workers take this lock before touching the zone and job rows. A retry
+		// that locks rows in the opposite order can deadlock against them, so it must queue.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, zone.ID.String()); err != nil {
+			return err
+		}
+		go func() { done <- env.Svc.RetryCameraZoneSync(ctx, env.Admin, cam.ID, zone.ID) }()
+		select {
+		case err := <-done:
+			t.Errorf("retry completed while the zone lock was held (err=%v)", err)
+			done <- err
+		case <-time.After(500 * time.Millisecond):
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("retry after lock release: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("retry did not complete after the zone lock was released")
 	}
 }

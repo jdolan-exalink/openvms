@@ -3,7 +3,6 @@ package inventory
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -14,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
-	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
@@ -28,10 +26,14 @@ func (s *Service) ProcessCameraZoneSyncJobs(ctx context.Context, limit int) erro
 	if limit < 1 {
 		return nil
 	}
+	if limit > math.MaxInt32 {
+		limit = math.MaxInt32
+	}
+	maxRows := int32(limit)
 	var jobs []db.CameraZoneSyncJob
 	err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		var err error
-		jobs, err = q.ClaimCameraZoneSyncJobs(ctx, db.ClaimCameraZoneSyncJobsParams{LeaseSeconds: 120, MaxAttempts: cameraZoneSyncMaxAttempts, MaxRows: int32(limit)})
+		jobs, err = q.ClaimCameraZoneSyncJobs(ctx, db.ClaimCameraZoneSyncJobsParams{LeaseSeconds: 120, MaxAttempts: cameraZoneSyncMaxAttempts, MaxRows: maxRows})
 		return err
 	})
 	if err != nil {
@@ -88,10 +90,7 @@ func (s *Service) processCameraZoneSyncJob(ctx context.Context, claimed db.Camer
 		if err != nil {
 			return s.retryZoneJob(ctx, q, job, err)
 		}
-		remoteName := target.Name
-		if !strings.HasPrefix(remoteName, "ovms_") {
-			remoteName = "ovms_" + remoteName
-		}
+		remoteName := managedZoneKey(target.Name)
 		config, err := adapter.CameraConfig(ctx, target.RemoteName, false)
 		if err != nil {
 			return s.retryZoneJob(ctx, q, job, err)
@@ -105,17 +104,30 @@ func (s *Service) processCameraZoneSyncJob(ctx context.Context, claimed db.Camer
 			}
 		}
 		if job.Operation == "delete" {
-			if !exists {
-				return s.finishZoneJob(ctx, q, job, "synced", "", time.Time{}, []byte("null"))
-			}
-			if previous == nil || !jsonEqual(current, previous) {
-				return s.conflictZoneJob(ctx, q, job, "remote managed zone differs from the last applied state")
-			}
-			if err := adapter.DeleteManagedCameraZone(ctx, target.RemoteName, target.Name, true); err != nil {
-				if errors.Is(err, frigate.ErrManagedZoneSyncUnsupported) {
-					return s.finishZoneJob(ctx, q, job, "unsupported", err.Error(), time.Time{}, nil)
+			// An unapplied rename leaves the last-applied zone under its previous remote key, so
+			// both keys are candidates. Every existing candidate must match the last-applied
+			// state before any is removed; otherwise nothing is deleted.
+			keys := []string{remoteName}
+			if job.PreviousRemoteName != nil {
+				if oldName := managedZoneKey(*job.PreviousRemoteName); oldName != remoteName {
+					keys = append(keys, oldName)
 				}
-				return s.retryZoneJob(ctx, q, job, err)
+			}
+			var existing []string
+			for _, key := range keys {
+				value, ok := zones[key]
+				if !ok {
+					continue
+				}
+				if previous == nil || !jsonEqual(value, previous) {
+					return s.conflictZoneJob(ctx, q, job, "remote managed zone differs from the last applied state")
+				}
+				existing = append(existing, key)
+			}
+			for _, key := range existing {
+				if err := adapter.DeleteManagedCameraZone(ctx, target.RemoteName, key, true); err != nil {
+					return s.retryZoneJob(ctx, q, job, err)
+				}
 			}
 			return s.finishZoneJob(ctx, q, job, "synced", "", time.Time{}, []byte("null"))
 		}
@@ -128,10 +140,7 @@ func (s *Service) processCameraZoneSyncJob(ctx context.Context, claimed db.Camer
 			return s.finishZoneJob(ctx, q, job, "failed", err.Error(), time.Time{}, nil)
 		}
 		if job.PreviousRemoteName != nil && *job.PreviousRemoteName != target.Name {
-			oldName := *job.PreviousRemoteName
-			if !strings.HasPrefix(oldName, "ovms_") {
-				oldName = "ovms_" + oldName
-			}
+			oldName := managedZoneKey(*job.PreviousRemoteName)
 			oldValue, oldExists := zones[oldName]
 			if oldExists && (previous == nil || !jsonEqual(oldValue, previous)) {
 				return s.conflictZoneJob(ctx, q, job, "renamed remote zone differs from the last applied state")
@@ -141,9 +150,6 @@ func (s *Service) processCameraZoneSyncJob(ctx context.Context, claimed db.Camer
 			}
 			if oldExists && exists && jsonEqual(current, zoneValue) {
 				if err := adapter.DeleteManagedCameraZone(ctx, target.RemoteName, oldName, true); err != nil {
-					if errors.Is(err, frigate.ErrManagedZoneSyncUnsupported) {
-						return s.finishZoneJob(ctx, q, job, "unsupported", err.Error(), time.Time{}, nil)
-					}
 					return s.retryZoneJob(ctx, q, job, err)
 				}
 				return s.finishZoneJob(ctx, q, job, "synced", "", time.Time{}, mustJSON(zoneValue))
@@ -153,17 +159,11 @@ func (s *Service) processCameraZoneSyncJob(ctx context.Context, claimed db.Camer
 			}
 			if !exists || !jsonEqual(current, zoneValue) {
 				if err := adapter.UpsertManagedCameraZone(ctx, target.RemoteName, target.Name, zoneValue, true); err != nil {
-					if errors.Is(err, frigate.ErrManagedZoneSyncUnsupported) {
-						return s.finishZoneJob(ctx, q, job, "unsupported", err.Error(), time.Time{}, nil)
-					}
 					return s.retryZoneJob(ctx, q, job, err)
 				}
 			}
 			if oldExists {
 				if err := adapter.DeleteManagedCameraZone(ctx, target.RemoteName, oldName, true); err != nil {
-					if errors.Is(err, frigate.ErrManagedZoneSyncUnsupported) {
-						return s.finishZoneJob(ctx, q, job, "unsupported", err.Error(), time.Time{}, nil)
-					}
 					return s.retryZoneJob(ctx, q, job, err)
 				}
 			}
@@ -182,13 +182,17 @@ func (s *Service) processCameraZoneSyncJob(ctx context.Context, claimed db.Camer
 			return s.conflictZoneJob(ctx, q, job, "remote managed zone has no OpenVMS last-applied state")
 		}
 		if err := adapter.UpsertManagedCameraZone(ctx, target.RemoteName, target.Name, zoneValue, true); err != nil {
-			if errors.Is(err, frigate.ErrManagedZoneSyncUnsupported) {
-				return s.finishZoneJob(ctx, q, job, "unsupported", err.Error(), time.Time{}, nil)
-			}
 			return s.retryZoneJob(ctx, q, job, err)
 		}
 		return s.finishZoneJob(ctx, q, job, "synced", "", time.Time{}, mustJSON(zoneValue))
 	})
+}
+
+func managedZoneKey(name string) string {
+	if strings.HasPrefix(name, "ovms_") {
+		return name
+	}
+	return "ovms_" + name
 }
 
 func desiredFrigateZone(desired, camera map[string]any) (map[string]any, error) {
@@ -267,6 +271,11 @@ func (s *Service) finishZoneJob(ctx context.Context, q *db.Queries, j db.CameraZ
 // RetryCameraZoneSync requeues a terminal job after rechecking tenant ownership and manage permission.
 func (s *Service) RetryCameraZoneSync(ctx context.Context, actor authz.Actor, cameraID, zoneID uuid.UUID) error {
 	return s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
+		// Same lock as writers and workers: retry touches the job row then the zone row, the
+		// opposite of their order, so unserialized it could deadlock against them.
+		if err := q.LockCameraZoneSync(ctx, zoneID.String()); err != nil {
+			return err
+		}
 		job, err := q.GetCameraZoneSyncJob(ctx, zoneID)
 		if err != nil {
 			return notFoundOr(err)

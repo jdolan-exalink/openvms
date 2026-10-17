@@ -1157,7 +1157,7 @@ export interface paths {
         put?: never;
         /**
          * Manually retry a terminal camera-zone synchronization
-         * @description Requires cameras.manage. Requeues only failed, unsupported, or conflicted persisted zones.
+         * @description Requires cameras.manage. Requeues only failed or conflicted persisted zones.
          */
         post: operations["retryCameraZoneSync"];
         delete?: never;

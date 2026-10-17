@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -127,5 +128,73 @@ VALUES ($1, $2, $3, $4::jsonb)`, cam.TenantID, cam.ID, "missing_coordinate_"+tes
 	status, _, _ = te.request(http.MethodDelete, zonePath, te.AdminToken, nil, nil)
 	if status != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want %d", status, http.StatusNoContent)
+	}
+}
+
+func TestRetryCameraZoneSyncRequiresTerminalStateAndManagePermission(t *testing.T) {
+	te := setupMapsTest(t, false)
+	ctx := context.Background()
+	cam := te.Cameras["frigate-h01/acceso_norte"]
+	path := "/api/v1/cameras/" + cam.ID.String() + "/zones"
+	input := gen.CameraZoneInput{Name: "retry_me", Points: []gen.CameraZonePoint{{X: 0.1, Y: 0.1}, {X: 0.9, Y: 0.1}, {X: 0.5, Y: 0.9}}}
+	status, _, body := te.request(http.MethodPost, path, te.AdminToken, nil, input)
+	if status != http.StatusCreated {
+		t.Fatalf("create status = %d: %s", status, body)
+	}
+	var created gen.CameraZone
+	if err := json.Unmarshal(body, &created); err != nil {
+		t.Fatal(err)
+	}
+	retryPath := fmt.Sprintf("%s/%s/sync", path, created.Id.String())
+	setState := func(state string) {
+		t.Helper()
+		err := te.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `UPDATE camera_zone_sync_jobs SET status = $2, attempts = 8, last_error = 'boom' WHERE zone_id = $1`, *created.Id, state); err != nil {
+				return err
+			}
+			_, err := tx.Exec(ctx, `UPDATE camera_zones SET sync_status = $2, sync_error = 'boom' WHERE id = $1`, *created.Id, state)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A freshly created zone is still pending: not a terminal state.
+	if status, _, body := te.request(http.MethodPost, retryPath, te.AdminToken, nil, nil); status != http.StatusConflict {
+		t.Fatalf("retry of pending zone = %d, want %d: %s", status, http.StatusConflict, body)
+	}
+	setState("synced")
+	if status, _, body := te.request(http.MethodPost, retryPath, te.AdminToken, nil, nil); status != http.StatusConflict {
+		t.Fatalf("retry of synced zone = %d, want %d: %s", status, http.StatusConflict, body)
+	}
+
+	setState("failed")
+	if status, _, body := te.request(http.MethodPost, retryPath, te.Demo.Tokens["operador"], nil, nil); status != http.StatusForbidden {
+		t.Fatalf("operator retry = %d, want %d: %s", status, http.StatusForbidden, body)
+	}
+	other := te.Cameras["frigate-c01/ruta_1"]
+	if status, _, _ := te.request(http.MethodPost, fmt.Sprintf("/api/v1/cameras/%s/zones/%s/sync", other.ID, created.Id), te.AdminToken, nil, nil); status != http.StatusNotFound {
+		t.Fatalf("cross-camera retry = %d, want %d", status, http.StatusNotFound)
+	}
+	if status, _, _ := te.request(http.MethodPost, fmt.Sprintf("%s/%s/sync", path, uuid.New()), te.AdminToken, nil, nil); status != http.StatusNotFound {
+		t.Fatalf("unknown zone retry = %d, want %d", status, http.StatusNotFound)
+	}
+
+	for _, state := range []string{"failed", "conflict"} {
+		setState(state)
+		if status, _, body := te.request(http.MethodPost, retryPath, te.AdminToken, nil, nil); status != http.StatusAccepted {
+			t.Fatalf("retry of %s zone = %d, want %d: %s", state, status, http.StatusAccepted, body)
+		}
+		var zoneState, jobState string
+		var attempts int
+		if err := te.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT z.sync_status, j.status, j.attempts FROM camera_zones z JOIN camera_zone_sync_jobs j ON j.zone_id = z.id WHERE z.id = $1`, *created.Id).Scan(&zoneState, &jobState, &attempts)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if zoneState != "pending" || jobState != "pending" || attempts != 0 {
+			t.Fatalf("after retry zone=%q job=%q attempts=%d, want pending/pending/0", zoneState, jobState, attempts)
+		}
 	}
 }

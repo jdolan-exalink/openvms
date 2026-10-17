@@ -471,7 +471,7 @@ WITH retried AS (
     SET status = 'pending', attempts = 0, next_attempt_at = now(), lease_until = NULL,
         last_error = NULL, actor_user_id = $1, updated_at = now()
     WHERE job.zone_id = $2 AND job.tenant_id = $3
-      AND (job.status IN ('failed', 'unsupported', 'conflict')
+      AND (job.status IN ('failed', 'conflict')
         OR (job.status = 'processing' AND job.attempts >= 8 AND job.lease_until <= now()))
     RETURNING job.zone_id, job.tenant_id
 )

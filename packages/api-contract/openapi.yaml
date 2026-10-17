@@ -1380,7 +1380,7 @@ paths:
       tags: [cameras]
       operationId: retryCameraZoneSync
       summary: Manually retry a terminal camera-zone synchronization
-      description: Requires cameras.manage. Requeues only failed, unsupported, or conflicted persisted zones.
+      description: Requires cameras.manage. Requeues only failed or conflicted persisted zones.
       responses:
         "202": { description: Camera-zone synchronization queued }
         "401": { $ref: "#/components/responses/Unauthorized" }
