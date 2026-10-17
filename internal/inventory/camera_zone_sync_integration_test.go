@@ -110,45 +110,6 @@ func TestCameraZoneSyncRetriesOfflineAndSuppressesStaleDesiredState(t *testing.T
 	}
 }
 
-func TestCameraZoneSync016RemainsUnsupportedWithoutRemoteWrite(t *testing.T) {
-	env := demofix.Setup(t)
-	ctx := context.Background()
-	cam := env.Cameras["frigate-h01/acceso_norte"]
-	zone, err := env.Svc.CreateCameraZone(ctx, env.Admin, cam.ID, inventory.CameraZoneInput{Name: "legacy", Points: []inventory.CameraZonePoint{{X: 0.1, Y: 0.1}, {X: 0.9, Y: 0.1}, {X: 0.5, Y: 0.9}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	env.Mocks["frigate-h01"].Server.Version = "0.16.0"
-	if err := env.Svc.ProcessCameraZoneSyncJobs(ctx, 10); err != nil {
-		t.Fatal(err)
-	}
-	var status string
-	if err := env.Svc.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-		return tx.QueryRow(ctx, `SELECT sync_status FROM camera_zones WHERE id = $1`, zone.ID).Scan(&status)
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if status != "unsupported" {
-		var e *string
-		_ = env.Svc.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-			return tx.QueryRow(ctx, `SELECT last_error FROM camera_zone_sync_jobs WHERE zone_id=$1`, zone.ID).Scan(&e)
-		})
-		t.Fatalf("Frigate 0.16 sync state = %q, want unsupported; error=%v", status, derefErr(e))
-	}
-	if calls := env.Mocks["frigate-h01"].Server.SetCalls(); len(calls) != 0 {
-		t.Fatalf("Frigate 0.16 received a write: %+v", calls)
-	}
-	if err := env.Svc.RetryCameraZoneSync(ctx, env.Admin, cam.ID, zone.ID); err != nil {
-		t.Fatalf("manual retry: %v", err)
-	}
-	if err := env.Svc.ProcessCameraZoneSyncJobs(ctx, 10); err != nil {
-		t.Fatal(err)
-	}
-	if calls := env.Mocks["frigate-h01"].Server.SetCalls(); len(calls) != 0 {
-		t.Fatalf("manual retry attempted an unsupported 0.16 write: %+v", calls)
-	}
-}
-
 func TestCameraZoneSyncConflictsWithUntrackedRemoteZoneWithoutOverwrite(t *testing.T) {
 	env := demofix.Setup(t)
 	ctx := context.Background()

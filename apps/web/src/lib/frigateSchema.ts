@@ -183,20 +183,13 @@ export function orderSections(names: string[]): string[] {
   return [...known, ...rest];
 }
 
-/** Sections Frigate 0.17+ hot-reloads (verified in FC-1). Frigate 0.16 applies nothing live. */
+/** Sections Frigate hot-reloads (verified in FC-1); every other section needs a restart. */
 const LIVE_SECTIONS = new Set([
   "enabled", "detect", "objects", "motion", "record", "snapshots", "zones", "review", "audio", "audio_transcription",
   "birdseye", "notifications", "semantic_search",
 ]);
 
-export function parseVersion(v: string): [number, number] | null {
-  const m = /(\d+)\.(\d+)/.exec(v);
-  return m ? [Number(m[1]), Number(m[2])] : null;
-}
-
-export function isLiveSection(section: string, version: string): boolean {
-  const p = parseVersion(version);
-  if (!p || (p[0] === 0 && p[1] < 17)) return false;
+export function isLiveSection(section: string): boolean {
   return LIVE_SECTIONS.has(section);
 }
 

@@ -53,7 +53,7 @@ function mount(doc: object, extra: Record<string, () => Response> = {}) {
 describe("FrigateCameraConfig", () => {
   it("edits a section, shows the diff and patches only the changed keys", async () => {
     const fetchMock = mount({}, {
-      "/api/v1/cameras/c1/frigate-config": () => json({ camera_id: "c1", camera_name: "acceso", server_id: "s1", frigate_version: "0.16.1", editable: true, secrets_visible: false, config: { detect: { enabled: true, fps: 5 }, onvif: { host: "h", password: "****" } } }),
+      "/api/v1/cameras/c1/frigate-config": () => json({ camera_id: "c1", camera_name: "acceso", server_id: "s1", frigate_version: "0.17.1", editable: true, secrets_visible: false, config: { detect: { enabled: true, fps: 5 }, onvif: { host: "h", password: "****" } } }),
     });
     const nav = await screen.findByRole("navigation", { name: "Secciones de configuración" });
     expect(within(nav).getByText("Detección")).toBeInTheDocument();
@@ -84,9 +84,9 @@ describe("FrigateCameraConfig", () => {
     expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
   });
 
-  it("is read-only on Frigate older than 0.16", async () => {
-    mount({ frigate_version: "0.14.1", editable: false });
-    expect(await screen.findByText(/requiere 0\.16 o superior/)).toBeInTheDocument();
+  it("is read-only without the config permission", async () => {
+    mount({ editable: false });
+    expect(await screen.findByText(/Necesitas el permiso servers\.config/)).toBeInTheDocument();
     expect(await screen.findByLabelText("Fps")).toBeDisabled();
     expect(screen.queryByRole("button", { name: "Revisar cambios" })).not.toBeInTheDocument();
   });

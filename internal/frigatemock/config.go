@@ -7,17 +7,14 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
 // SetCall records one PUT /api/config/set the mock applied, so tests can assert what
-// OpenVMS sent: dotted query parameters (Frigate 0.16 style) or a config_data body with
-// requires_restart and update_topic (0.17 style).
+// OpenVMS sent: a config_data body with requires_restart and update_topic.
 type SetCall struct {
-	Query           map[string]string
 	RequiresRestart *int
 	UpdateTopic     string
 	ConfigData      map[string]any
@@ -85,17 +82,6 @@ var liveTopics = map[string]bool{
 }
 
 var maskCreds = regexp.MustCompile(`://[^/@]*@`)
-
-// versionAtLeast compares the mock's version ("0.17.2-mock") against major.minor.
-func (s *Server) versionAtLeast(major, minor int) bool {
-	parts := strings.SplitN(strings.SplitN(s.Version, "-", 2)[0], ".", 3)
-	if len(parts) < 2 {
-		return false
-	}
-	ma, _ := strconv.Atoi(parts[0])
-	mi, _ := strconv.Atoi(parts[1])
-	return ma > major || (ma == major && mi >= minor)
-}
 
 // stateLocked lazily builds the configuration from Cameras. Callers hold cfgMu.
 func (s *Server) stateLocked() map[string]any {
@@ -297,48 +283,6 @@ func (s *Server) configSave(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"success": true, "message": "Config successfully saved."})
 }
 
-// setPath writes value at a dotted path, creating objects on the way.
-func setPath(cfg map[string]any, path string, value any) {
-	parts := strings.Split(path, ".")
-	cur := cfg
-	for _, p := range parts[:len(parts)-1] {
-		next, ok := cur[p].(map[string]any)
-		if !ok {
-			next = map[string]any{}
-			cur[p] = next
-		}
-		cur = next
-	}
-	cur[parts[len(parts)-1]] = value
-}
-
-func parseQueryValue(key, v string) any {
-	switch {
-	case v == "true" || v == "false":
-		return v == "true"
-	case v == "[]":
-		return []any{}
-	case strings.HasPrefix(v, "["):
-		var items []any
-		if json.Unmarshal([]byte(v), &items) == nil {
-			return items
-		}
-	}
-	if n, err := strconv.ParseFloat(v, 64); err == nil {
-		return n
-	}
-	if strings.Contains(v, ",") || strings.HasSuffix(key, ".track") {
-		items := []any{}
-		for _, p := range strings.Split(v, ",") {
-			if p = strings.TrimSpace(p); p != "" {
-				items = append(items, p)
-			}
-		}
-		return items
-	}
-	return v
-}
-
 func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		RequiresRestart *int           `json:"requires_restart"`
@@ -349,44 +293,34 @@ func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 	if len(raw) > 0 {
 		_ = json.Unmarshal(raw, &body)
 	}
-	call := SetCall{Query: map[string]string{}, RequiresRestart: body.RequiresRestart, UpdateTopic: body.UpdateTopic}
+	call := SetCall{RequiresRestart: body.RequiresRestart, UpdateTopic: body.UpdateTopic}
 
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 	next := normalize(s.stateLocked())
-	for k, vals := range r.URL.Query() {
-		if k == "" || len(vals) == 0 {
-			continue
-		}
-		call.Query[k] = vals[0]
-		setPath(next, k, parseQueryValue(k, vals[0]))
+	if body.ConfigData == nil {
+		http.Error(w, `{"message":"No configuration data provided"}`, http.StatusBadRequest)
+		return
 	}
-	switch {
-	case len(call.Query) > 0:
-	case body.ConfigData != nil && s.versionAtLeast(0, 17):
-		call.ConfigData = body.ConfigData
-		deepMerge(next, normalize(body.ConfigData))
-		// Frigate's structured config updater treats an empty zone value as deletion.
-		if cameras, ok := body.ConfigData["cameras"].(map[string]any); ok {
-			for camera, raw := range cameras {
-				cam, _ := raw.(map[string]any)
-				zones, _ := cam["zones"].(map[string]any)
-				if len(zones) == 0 {
-					continue
-				}
-				effectiveCameras, _ := next["cameras"].(map[string]any)
-				effective, _ := effectiveCameras[camera].(map[string]any)
-				effectiveZones, _ := effective["zones"].(map[string]any)
-				for name, value := range zones {
-					if value == "" {
-						delete(effectiveZones, name)
-					}
+	call.ConfigData = body.ConfigData
+	deepMerge(next, normalize(body.ConfigData))
+	// Frigate's structured config updater treats an empty zone value as deletion.
+	if cameras, ok := body.ConfigData["cameras"].(map[string]any); ok {
+		for camera, raw := range cameras {
+			cam, _ := raw.(map[string]any)
+			zones, _ := cam["zones"].(map[string]any)
+			if len(zones) == 0 {
+				continue
+			}
+			effectiveCameras, _ := next["cameras"].(map[string]any)
+			effective, _ := effectiveCameras[camera].(map[string]any)
+			effectiveZones, _ := effective["zones"].(map[string]any)
+			for name, value := range zones {
+				if value == "" {
+					delete(effectiveZones, name)
 				}
 			}
 		}
-	default:
-		http.Error(w, `{"message":"No configuration data provided"}`, http.StatusBadRequest)
-		return
 	}
 	if err := validate(next); err != nil {
 		invalidConfig(w, err)
@@ -396,7 +330,7 @@ func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 		s.cfg = next
 	}
 	s.setCalls = append(s.setCalls, call)
-	if body.UpdateTopic != "" && s.versionAtLeast(0, 17) {
+	if body.UpdateTopic != "" {
 		parts := strings.Split(body.UpdateTopic, "/")
 		if len(parts) != 4 || parts[0] != "config" || parts[1] != "cameras" || !liveTopics[parts[3]] {
 			// Frigate writes the file first and fails publishing; mimic that.

@@ -18,10 +18,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ErrConfigEditUnsupported means the server runs a Frigate older than 0.16, whose config API
-// cannot be edited safely from the VMS. Reads keep working.
-var ErrConfigEditUnsupported = errors.New("editing the Frigate configuration requires Frigate 0.16 or later")
-
 // ErrManagedZoneSyncUnsupported means safe managed-zone sync requires the structured Frigate 0.17 config API.
 var ErrManagedZoneSyncUnsupported = errors.New("managed camera-zone sync requires Frigate 0.17 or later")
 
@@ -133,21 +129,6 @@ func TouchesSecrets(patch map[string]any) bool {
 	}
 	return false
 }
-
-// ConfigEditable reports whether the config of this version may be edited (>= 0.16).
-func ConfigEditable(version string) bool {
-	major, minor, ok := parseVersion(version)
-	return ok && (major > 0 || minor >= 16)
-}
-
-// supportsConfigData reports whether PUT /api/config/set accepts config_data and
-// update_topic (Frigate >= 0.17). 0.16 only takes dotted query parameters.
-func supportsConfigData(version string) bool {
-	major, minor, ok := parseVersion(version)
-	return ok && (major > 0 || minor >= 17)
-}
-
-func (a *v017) ConfigEditable() bool { return ConfigEditable(a.version) }
 
 // --- schema -----------------------------------------------------------------------------
 
@@ -264,9 +245,6 @@ func (a *v017) RawPaths(ctx context.Context) (map[string]any, error) {
 // SaveRawConfig validates and writes a full config.yml. restart also restarts Frigate.
 // A configuration Frigate rejects comes back as *ConfigValidationError.
 func (a *v017) SaveRawConfig(ctx context.Context, yamlText string, restart bool) error {
-	if !a.ConfigEditable() {
-		return ErrConfigEditUnsupported
-	}
 	opt := "saveonly"
 	if restart {
 		opt = "restart"
@@ -380,9 +358,6 @@ func dig(m map[string]any, path ...string) any {
 // are applied live, the rest are saved and flagged as needing a restart. Results lists the
 // sections applied before any failure.
 func (a *v017) ApplyCameraPatch(ctx context.Context, camera string, patch map[string]any) ([]SectionResult, error) {
-	if !a.ConfigEditable() {
-		return nil, ErrConfigEditUnsupported
-	}
 	if !safeName.MatchString(camera) {
 		return nil, &ConfigValidationError{Message: fmt.Sprintf("invalid camera name %q", camera)}
 	}
@@ -403,22 +378,12 @@ func (a *v017) ApplyCameraPatch(ctx context.Context, camera string, patch map[st
 	if _, err := a.CameraConfig(ctx, camera, false); err != nil {
 		return nil, err
 	}
-	data := supportsConfigData(a.version)
 	results := make([]SectionResult, 0, len(sections))
 	for _, s := range sections {
 		res := SectionResult{Section: s}
-		var err error
-		if data {
-			res.AppliedLive = liveSections[s]
-			res.RequiresRestart = !res.AppliedLive
-			err = a.setViaBody(ctx, camera, s, patch[s], res.AppliedLive)
-		} else {
-			// 0.16: dotted query parameters only; Frigate keeps the new config in memory
-			// but publishes nothing, so every section needs a restart.
-			res.RequiresRestart = true
-			err = a.setViaQuery(ctx, camera, s, patch[s])
-		}
-		if err != nil {
+		res.AppliedLive = liveSections[s]
+		res.RequiresRestart = !res.AppliedLive
+		if err := a.setViaBody(ctx, camera, s, patch[s], res.AppliedLive); err != nil {
 			return results, asValidationError(err)
 		}
 		results = append(results, res)
@@ -432,9 +397,6 @@ func (a *v017) ApplyCameraPatch(ctx context.Context, camera string, patch map[st
 func (a *v017) UpsertManagedCameraZone(ctx context.Context, camera, zoneName string, zone map[string]any, hasConfigPermission bool) error {
 	if !hasConfigPermission {
 		return ErrConfigPermissionRequired
-	}
-	if !supportsConfigData(a.version) {
-		return ErrManagedZoneSyncUnsupported
 	}
 	if !safeName.MatchString(camera) {
 		return &ConfigValidationError{Message: fmt.Sprintf("invalid camera name %q", camera)}
@@ -476,9 +438,6 @@ func (a *v017) DeleteManagedCameraZone(ctx context.Context, camera, zoneName str
 	if !hasConfigPermission {
 		return ErrConfigPermissionRequired
 	}
-	if !supportsConfigData(a.version) {
-		return ErrManagedZoneSyncUnsupported
-	}
 	if !safeName.MatchString(camera) || !safeName.MatchString(zoneName) {
 		return &ConfigValidationError{Message: "invalid camera or zone name"}
 	}
@@ -514,74 +473,4 @@ func (a *v017) setViaBody(ctx context.Context, camera, section string, value any
 	}
 	_, err := a.c.send(ctx, http.MethodPut, "/api/config/set", nil, body)
 	return err
-}
-
-func (a *v017) setViaQuery(ctx context.Context, camera, section string, value any) error {
-	q := url.Values{}
-	if err := flattenQuery("cameras."+camera+"."+section, value, q); err != nil {
-		return err
-	}
-	_, err := a.c.send(ctx, http.MethodPut, "/api/config/set", q, map[string]any{"requires_restart": 0})
-	return err
-}
-
-// flattenQuery turns a nested value into dotted query parameters (Frigate 0.16 style).
-// Lists of scalars are comma-joined; lists of objects cannot be expressed.
-func flattenQuery(prefix string, v any, q url.Values) error {
-	switch t := v.(type) {
-	case map[string]any:
-		if len(t) == 0 {
-			return &ConfigValidationError{Message: fmt.Sprintf("%s: empty objects cannot be applied on Frigate 0.16", prefix)}
-		}
-		keys := make([]string, 0, len(t))
-		for k := range t {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			if !safeName.MatchString(k) {
-				return &ConfigValidationError{Message: fmt.Sprintf("%s: invalid key %q", prefix, k)}
-			}
-			if err := flattenQuery(prefix+"."+k, t[k], q); err != nil {
-				return err
-			}
-		}
-	case []any:
-		if len(t) == 0 {
-			q.Set(prefix, "[]")
-			return nil
-		}
-		parts := make([]string, 0, len(t))
-		for _, e := range t {
-			s, ok := scalarString(e)
-			if !ok || strings.Contains(s, ",") {
-				return &ConfigValidationError{Message: fmt.Sprintf("%s: this value needs Frigate 0.17 or later", prefix)}
-			}
-			parts = append(parts, s)
-		}
-		q.Set(prefix, strings.Join(parts, ","))
-	default:
-		s, ok := scalarString(v)
-		if !ok {
-			return &ConfigValidationError{Message: fmt.Sprintf("%s: unsupported value", prefix)}
-		}
-		q.Set(prefix, s)
-	}
-	return nil
-}
-
-func scalarString(v any) (string, bool) {
-	switch t := v.(type) {
-	case string:
-		return t, true
-	case bool:
-		return strconv.FormatBool(t), true
-	case float64:
-		return strconv.FormatFloat(t, 'f', -1, 64), true
-	case int:
-		return strconv.Itoa(t), true
-	case int64:
-		return strconv.FormatInt(t, 10), true
-	}
-	return "", false
 }

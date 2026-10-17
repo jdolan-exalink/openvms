@@ -22,7 +22,7 @@ import { ZoneEditorModal, type ZoneEditorValue } from "@/components/zones/ZoneEd
 import { Button, ErrorNote, Field, LinkButton, PageHeader, Select, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  buildPatch, deepEqual, diffValues, formatValue, isLiveSection, type JSchema, kindOf, orderSections, parseVersion, pathLabel, resolve, schemaAt,
+  buildPatch, deepEqual, diffValues, formatValue, isLiveSection, type JSchema, kindOf, orderSections, pathLabel, resolve, schemaAt,
   sectionLabel, validateTree,
 } from "@/lib/frigateSchema";
 import { pickerLabels } from "@/lib/labelEmoji";
@@ -122,8 +122,6 @@ export function FrigateCameraConfig() {
     [camProps, config]
   );
   const version = doc.data?.frigate_version ?? "";
-  const pv = parseVersion(version);
-  const versionOk = !pv || pv[0] > 0 || pv[1] >= 16;
   const readOnly = !doc.data?.editable;
   const canRestart = can(me.data, "servers.restart");
   const secretsVisible = !!doc.data?.secrets_visible;
@@ -250,7 +248,7 @@ export function FrigateCameraConfig() {
       )}
       {readOnly && (
         <p role="status" className="rounded-m3-lg bg-warn/10 px-4 py-3 text-sm text-warn">
-          {versionOk ? "Necesitas el permiso servers.config para editar esta configuración. Solo lectura." : "Esta versión de Frigate no permite editar desde OpenVMS (requiere 0.16 o superior)."}
+          Necesitas el permiso servers.config para editar esta configuración. Solo lectura.
         </p>
       )}
       {!secretsVisible && !readOnly && (
@@ -331,7 +329,7 @@ export function FrigateCameraConfig() {
                 </span>
                 <span className="flex items-center gap-1.5">
                   {dirty.includes("detect") && <span aria-label="con cambios" className="text-primary animate-pulse">●</span>}
-                  <LiveBadge live={isLiveSection("detect", version)} />
+                  <LiveBadge live={isLiveSection("detect")} />
                 </span>
               </button>
               <div className="grid grid-cols-2 gap-1 pt-0.5">
@@ -391,7 +389,7 @@ export function FrigateCameraConfig() {
                 </span>
                 <span className="flex items-center gap-1.5">
                   {dirty.includes("record") && <span aria-label="con cambios" className="text-primary animate-pulse">●</span>}
-                  <LiveBadge live={isLiveSection("record", version)} />
+                  <LiveBadge live={isLiveSection("record")} />
                 </span>
               </button>
               <div className="pt-0.5">
@@ -434,7 +432,7 @@ export function FrigateCameraConfig() {
                 </span>
                 <span className="flex items-center gap-1.5">
                   {dirty.includes("zones") && <span aria-label="con cambios" className="text-primary animate-pulse">●</span>}
-                  <LiveBadge live={isLiveSection("zones", version)} />
+                  <LiveBadge live={isLiveSection("zones")} />
                 </span>
               </button>
               <div className="pt-0.5">
@@ -537,14 +535,14 @@ export function FrigateCameraConfig() {
                 </span>
                 <span className="flex items-center gap-1.5">
                   {dirty.includes("ffmpeg") && <span aria-label="con cambios" className="text-primary">●</span>}
-                  <LiveBadge live={isLiveSection("ffmpeg", version)} />
+                  <LiveBadge live={isLiveSection("ffmpeg")} />
                 </span>
               </button>
             )}
 
             {/* 6. Secciones adicionales avanzadas */}
             {otherSections.map((s) => {
-              const live = isLiveSection(s, version);
+              const live = isLiveSection(s);
               const SIcon = getSectionIcon(s);
               return (
                 <button
@@ -709,7 +707,7 @@ export function FrigateCameraConfig() {
 
       {reviewing && (
         <Modal title="Revisar cambios" onClose={() => setReviewing(false)}>
-          <DiffList sections={dirty} before={config} after={edits} version={version} />
+          <DiffList sections={dirty} before={config} after={edits} />
           <ErrorNote error={apply.error} />
           <div className="flex justify-end gap-2">
             <Button variant="text" onClick={() => setReviewing(false)}>Volver</Button>
@@ -1618,12 +1616,10 @@ function DiffList({
   sections,
   before,
   after,
-  version,
 }: {
   sections: string[];
   before: Record<string, unknown>;
   after: Record<string, unknown>;
-  version: string;
 }) {
   return (
     <div className="flex flex-col gap-4 text-sm">
@@ -1631,7 +1627,7 @@ function DiffList({
         <div key={s}>
           <h3 className="mb-1 flex items-center justify-between font-medium">
             {sectionLabel(s)}
-            <LiveBadge live={isLiveSection(s, version)} />
+            <LiveBadge live={isLiveSection(s)} />
           </h3>
           <ul className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-3">
             {diffValues(before[s], after[s], [s]).map((c) => (

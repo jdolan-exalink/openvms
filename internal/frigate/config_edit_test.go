@@ -84,50 +84,6 @@ func TestLegacyUpdateAppliesLive(t *testing.T) {
 	}
 }
 
-func TestConfigEditGate(t *testing.T) {
-	ts, mock := startEditableMock(t, "0.15.1")
-	a := connectMock(t, ts)
-	ctx := context.Background()
-	if a.ConfigEditable() {
-		t.Fatal("0.15 must not be editable")
-	}
-	if _, err := a.ApplyCameraPatch(ctx, "acceso_norte", map[string]any{"detect": map[string]any{"fps": 5.0}}); !errors.Is(err, ErrConfigEditUnsupported) {
-		t.Errorf("patch on 0.15: %v", err)
-	}
-	if err := a.SaveRawConfig(ctx, "cameras: {}", false); !errors.Is(err, ErrConfigEditUnsupported) {
-		t.Errorf("save on 0.15: %v", err)
-	}
-	if len(mock.SetCalls()) != 0 {
-		t.Error("nothing may reach Frigate")
-	}
-	// Reads still work.
-	if _, err := a.CameraConfig(ctx, "acceso_norte", false); err != nil {
-		t.Errorf("read on 0.15: %v", err)
-	}
-}
-
-func TestPatchOn016UsesQueryParamsAndFlagsRestart(t *testing.T) {
-	ts, mock := startEditableMock(t, "0.16.0")
-	a := connectMock(t, ts)
-	res, err := a.ApplyCameraPatch(context.Background(), "acceso_norte", map[string]any{"detect": map[string]any{"fps": 8.0}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res) != 1 || res[0].AppliedLive || !res[0].RequiresRestart {
-		t.Fatalf("0.16 cannot apply live: %+v", res)
-	}
-	c := mock.SetCalls()[0]
-	if c.Query["cameras.acceso_norte.detect.fps"] != "8" || c.UpdateTopic != "" {
-		t.Errorf("call: %+v", c)
-	}
-	// Lists of objects cannot be expressed as query parameters.
-	_, err = a.ApplyCameraPatch(context.Background(), "acceso_norte", map[string]any{"ffmpeg": map[string]any{"inputs": []any{map[string]any{"path": "rtsp://x"}}}})
-	var cv *ConfigValidationError
-	if !errors.As(err, &cv) {
-		t.Errorf("want validation error, got %v", err)
-	}
-}
-
 func TestRedactedValuesAreNeverWritten(t *testing.T) {
 	ts, mock := startEditableMock(t, "0.17.2-mock")
 	a := connectMock(t, ts)
@@ -256,17 +212,6 @@ func TestUpsertManagedCameraZoneRequiresConfigPermission(t *testing.T) {
 	}
 	if calls := mock.SetCalls(); len(calls) != 0 {
 		t.Fatalf("unauthorized request reached Frigate: %+v", calls)
-	}
-}
-
-func TestUpsertManagedCameraZoneRejectsFrigate016(t *testing.T) {
-	ts, mock := startEditableMock(t, "0.16.0")
-	a := connectMock(t, ts)
-	if err := a.UpsertManagedCameraZone(context.Background(), "acceso_norte", "managed", map[string]any{"coordinates": "0,0,1,0,1,1"}, true); err == nil {
-		t.Fatal("Frigate 0.16 zone write unexpectedly succeeded")
-	}
-	if calls := mock.SetCalls(); len(calls) != 0 {
-		t.Fatalf("Frigate 0.16 received writes: %+v", calls)
 	}
 }
 

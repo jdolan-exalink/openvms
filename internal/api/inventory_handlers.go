@@ -230,7 +230,7 @@ func toServer(s inventory.ServerView) gen.Server {
 		Id: s.ID, TenantId: s.TenantID, SiteId: s.SiteID, Name: s.Name, BaseUrl: s.BaseUrl, AuthMode: gen.AuthMode(s.AuthMode), Username: s.Username,
 		TlsSkipVerify: s.TlsSkipVerify, FrigateVersion: s.FrigateVersion, Capabilities: toCaps(s),
 		EventAlarmMode: &mode,
-		Status: gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,
+		Status:         gen.HealthStatus(s.Status), LastSeenAt: s.LastSeenAt, LastCheckedAt: s.LastCheckedAt,
 		LastError: s.LastError, CameraCount: int(s.CameraCount), CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
 	out.AgentLastSeenAt, out.AgentVersion = s.AgentLastSeenAt, s.AgentVersion

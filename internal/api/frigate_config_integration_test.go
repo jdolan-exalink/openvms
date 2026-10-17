@@ -407,21 +407,16 @@ func TestFrigateConfigEditor(t *testing.T) {
 		}
 	})
 
-	t.Run("Frigate older than 0.16 is read-only", func(t *testing.T) {
-		mock.Version = "0.15.2"
+	t.Run("Frigate older than 0.17 is rejected", func(t *testing.T) {
+		mock.Version = "0.16.2"
 		t.Cleanup(func() { mock.Version = "0.17.2-mock" })
 		calls := len(mock.SetCalls())
-		if status, _ := patch(te.AdminToken, map[string]any{"detect": map[string]any{"fps": 3}}); status != http.StatusConflict {
-			t.Fatalf("patch on 0.15: %d", status)
+		status, raw := patch(te.AdminToken, map[string]any{"detect": map[string]any{"fps": 3}})
+		if status != http.StatusBadGateway || !strings.Contains(string(raw), "0.16.2") || !strings.Contains(string(raw), "0.17") {
+			t.Fatalf("patch on 0.16: %d %s", status, raw)
 		}
-		if status, _ := te.request(http.MethodPut, srvBase+"/raw", te.AdminToken, map[string]any{"yaml": "cameras: {}"}); status != http.StatusConflict {
-			t.Fatalf("raw put on 0.15: %d", status)
-		}
-		status, raw := te.request(http.MethodGet, base, te.AdminToken, nil)
-		var doc gen.FrigateCameraConfigDoc
-		decode(t, raw, &doc)
-		if status != http.StatusOK || doc.Editable {
-			t.Fatalf("0.15 read must work and not be editable: %d %s", status, raw)
+		if status, _ := te.request(http.MethodPut, srvBase+"/raw", te.AdminToken, map[string]any{"yaml": "cameras: {}"}); status != http.StatusBadGateway {
+			t.Fatalf("raw put on 0.16: %d", status)
 		}
 		if len(mock.SetCalls()) != calls {
 			t.Fatal("nothing may reach Frigate")
