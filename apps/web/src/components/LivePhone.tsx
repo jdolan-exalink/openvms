@@ -1,21 +1,27 @@
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
-import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Maximize, Minimize } from "lucide-react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { ArrowLeft, ChevronDown, ChevronLeft, ChevronRight, Maximize, Minimize, SlidersHorizontal } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { cameraFoldersQuery, camerasQuery, meQuery, serversQuery, sitesQuery } from "@/api/queries";
 import type { Schemas } from "@/api/client";
 import { setContextSidebarCollapsed } from "@/components/AppShell";
-import { ZoomFrame } from "@/components/DigitalZoom";
 import { MsePlayer } from "@/components/MsePlayer";
 import { LiveModeToggle } from "@/components/LiveModeToggle";
 import { LiveRecDock } from "@/components/LiveRecDock";
 import { PhoneCameraSheet } from "@/components/PhoneCameraSheet";
+import { PhoneFocus } from "@/components/PhoneFocus";
+import { PhoneGrid } from "@/components/PhoneGrid";
+import { PhoneLayoutToggle } from "@/components/PhoneLayoutToggle";
+import { SingleCamera, stageClass } from "@/components/PhoneSingleCamera";
 import { RecTile, type RecTileState } from "@/components/RecTile";
 import { IconButton } from "@/components/ui";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/cn";
-import { usePlayerSession } from "@/lib/live/PlayerSessionProvider";
+import type { DigitalZoom } from "@/lib/live/digitalZoom";
 import { can } from "@/lib/perm";
+import { loadPhoneLayout, phoneLayoutKey, savePhoneLayout, type PhoneLayout } from "@/lib/phoneLayoutPrefs";
+import { snapshotUrl, statusDot } from "@/lib/phoneSnapshot";
+import { isHorizontalSwipe, useHorizontalSwipe } from "@/lib/useHorizontalSwipe";
 import type { RecTransport } from "@/lib/useRecPlayback";
 import { useImmersive, useIsLandscape } from "@/lib/useImmersive";
 import { useRecSession } from "@/lib/useRecSession";
@@ -24,19 +30,6 @@ type Camera = Schemas["Camera"];
 
 /** Cameras per page: the only ones streaming at once, so a phone never decodes more than 4 videos. */
 export const PHONE_PAGE_SIZE = 4;
-/** Horizontal travel (px) a drag needs to count as a page swipe. */
-const SWIPE_THRESHOLD = 50;
-/** Scale a double tap zooms the single camera to. */
-const DOUBLE_TAP_ZOOM = 2.5;
-
-const statusDot = (status?: string) => (status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-warn");
-
-/** Where the gateway serves the latest frame; it sits under the player so a card is never a black box. */
-const snapshotUrl = (id: string) => `/media/v1/cameras/${id}/snapshot.jpg?h=360`;
-
-/** The single-camera picture box: 16:9 inline, the whole container when immersive. */
-const stageClass = (fill: boolean) => cn("relative w-full overflow-hidden bg-video", fill ? "size-full" : "aspect-video");
-
 /** What a card shows in GRABADO: the recorded tile of the shared transport instead of the live player. */
 type RecView = { state: RecTileState; transport: RecTransport; isMaster: boolean };
 
@@ -59,48 +52,6 @@ function CameraCard({ camera, playing, rec, onOpen }: { camera: Camera; playing:
   );
 }
 
-/**
- * SingleCamera opens instantly: the sub session of the list (already playing, same persistent
- * session) is shown at once while the main session warms in a layer on top. A session's
- * `<video>` stays transparent until its decoder has a picture (PlayerSession.revealFrame), so
- * the sub picture shows through until main reveals its first frame and then main covers it.
- * The sub session stays mounted underneath so going back to the list is instant.
- */
-function SingleCamera({ camera, fill }: { camera: Camera; fill: boolean }) {
-  const main = usePlayerSession(camera.id, "main", camera.server_id);
-  const stage = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const el = stage.current;
-    if (!main || !el) return;
-    main.setMuted(true);
-    main.attach(el);
-    return () => main.detach();
-  }, [main]);
-  // Inline the picture fills a 16:9 box; immersive it is letterboxed (contain) on any screen shape.
-  useEffect(() => {
-    main?.setObjectFit(fill ? "contain" : undefined);
-  }, [main, fill]);
-  return (
-    <div data-testid="phone-stage" className={stageClass(fill)}>
-      {/* Pinch/pan/double tap live only here: the multi view needs one-finger swipes for paging. A new camera resets the zoom. */}
-      <ZoomFrame
-        touch
-        enhanceable={false}
-        doubleTapZoom={DOUBLE_TAP_ZOOM}
-        resetKey={camera.id}
-        className="absolute inset-0 size-full"
-        picture={() => (
-          <>
-            <img src={snapshotUrl(camera.id)} alt="" draggable={false} className="absolute inset-0 size-full object-contain" />
-            <MsePlayer persistent cameraId={camera.id} quality="sub" serverId={camera.server_id} objectFit={fill ? "contain" : "fill"} className="absolute inset-0 size-full" />
-            <div ref={stage} data-testid="phone-main-layer" className="absolute inset-0" />
-          </>
-        )}
-      />
-    </div>
-  );
-}
-
 /** SingleRecording is the single view in GRABADO: that camera's recording on the shared transport. */
 function SingleRecording({ camera, rec, fill }: { camera: Camera; rec: RecView; fill: boolean }) {
   return (
@@ -112,8 +63,12 @@ function SingleRecording({ camera, rec, fill }: { camera: Camera; rec: RecView; 
 }
 
 /**
- * LivePhone is Live below the `md` breakpoint: pages of 4 camera cards (2x2, only the current
- * page streams, on the sub stream over its snapshot) and a single-camera view that swaps sub to main.
+ * LivePhone is Live on phones. Three layouts, remembered per user (default grid):
+ * - grid: every camera in scope as a snapshot tile, refreshed only while on screen; no live stream.
+ * - focus: one large live camera and a strip of snapshots to switch it; one live stream.
+ * - list: pages of 4 camera cards (only the current page streams, on the sub stream over its snapshot).
+ * GRABADO always uses the list's recorded tiles. A tap opens the single-camera view (sub swaps to main),
+ * where a one-finger swipe moves to the next/previous camera in scope.
  * Leaving a page unmounts its players; usePlayerSession releases the sessions, which the
  * PlayerSessionManager keeps WARM for its TTL (30 s), so going back soon is instant.
  * The open camera lives in `?camera=<id>`, so the system back button and Maps handoffs work.
@@ -134,6 +89,9 @@ export function LivePhone() {
   const gesture = useRef<{ x: number; y: number } | null>(null);
   const swiped = useRef(false);
   const singleRef = useRef<HTMLElement>(null);
+  const zoomScale = useRef(1);
+  const [focusId, setFocusId] = useState<string | undefined>();
+  const [recControls, setRecControls] = useState(false);
 
   useEffect(() => {
     setContextSidebarCollapsed(true);
@@ -158,6 +116,11 @@ export function LivePhone() {
     setSiteId(id);
     setPage(0);
   };
+  // Quick site switcher: only sites that have cameras, in name order.
+  const siteChips = useMemo(() => {
+    const present = new Set(all.map((camera) => camera.site_id));
+    return (sites.data ?? []).filter((site) => present.has(site.id)).sort((a, b) => a.name.localeCompare(b.name)).map((site) => ({ id: site.id as string | null, name: site.name }));
+  }, [all, sites.data]);
   const scopeName = siteId ? (siteName.get(siteId) ?? tr("live.phoneAllSites")) : tr("live.phoneAllSites");
 
   const onPointerDown = (event: PointerEvent) => {
@@ -170,13 +133,22 @@ export function LivePhone() {
     if (!start) return;
     const dx = event.clientX - start.x;
     const dy = event.clientY - start.y;
-    if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    if (!isHorizontalSwipe(dx, dy)) return;
     swiped.current = true;
     go(dx < 0 ? 1 : -1);
   };
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "ArrowRight") go(1);
     else if (event.key === "ArrowLeft") go(-1);
+  };
+
+  // The layout is saved per tenant and user, so it is only known once /me answers.
+  const prefsKey = me.data ? phoneLayoutKey(me.data.tenant_id ?? null, me.data.id) : null;
+  const [saved, setSaved] = useState<{ key: string | null; layout: PhoneLayout }>({ key: null, layout: "grid" });
+  if (prefsKey && saved.key !== prefsKey) setSaved({ key: prefsKey, layout: loadPhoneLayout(prefsKey) });
+  const chooseLayout = (layout: PhoneLayout) => {
+    setSaved({ key: prefsKey, layout });
+    if (prefsKey) savePhoneLayout(prefsKey, layout);
   };
 
   const requested = typeof search.camera === "string" ? search.camera : undefined;
@@ -189,6 +161,18 @@ export function LivePhone() {
 
   const open = (id: string) => void navigate({ to: ".", search: ((previous: Record<string, unknown>) => ({ ...previous, camera: id })) as never });
   const close = () => void navigate({ to: ".", replace: true, search: ((previous: Record<string, unknown>) => ({ ...previous, camera: undefined })) as never });
+
+  // Swiping the single view walks the cameras in scope in grid order (the whole list when the camera is outside it).
+  // It replaces the history entry so back still returns to the multi view. A zoomed picture pans instead.
+  const walk = selected && shown.some((camera) => camera.id === selected.id) ? shown : all;
+  const swapCamera = (direction: 1 | -1) => {
+    const next = selected ? walk[walk.findIndex((camera) => camera.id === selected.id) + direction] : undefined;
+    if (next) void navigate({ to: ".", replace: true, search: ((previous: Record<string, unknown>) => ({ ...previous, camera: next.id })) as never });
+  };
+  const swipeNav = useHorizontalSwipe(swapCamera, () => zoomScale.current > 1);
+  const trackZoom = (zoom: DigitalZoom) => {
+    zoomScale.current = zoom.scale;
+  };
 
   // GRABADO: the same session as the desktop grid (transport, coverage, master, URL time), fed with
   // the cameras on screen: the 4 of the current page, or only the open one in the single view.
@@ -209,6 +193,10 @@ export function LivePhone() {
     const state: RecTileState = denied.has(id) ? "denied" : recLimited.has(id) ? "limited" : recData.loaded.includes(id) && !hasCoverage(id) ? "empty" : "player";
     return { state, transport, isMaster: id === masterId };
   };
+  // GRABADO keeps the list's recorded tiles whatever the saved layout; the layout comes back with LIVE.
+  const layout = rec ? "list" : saved.layout;
+  const ready = !me.isPending;
+  const immersiveRec = fill && rec;
   const modeToggle = session.canRec ? <LiveModeToggle rec={rec} onChange={session.setMode} touch /> : null;
 
   return (
@@ -228,8 +216,30 @@ export function LivePhone() {
             <span className="truncate">{scopeName}</span>
             <ChevronDown className="size-4 shrink-0 text-on-surface-variant" aria-hidden />
           </button>
+          {!rec && ready && <PhoneLayoutToggle value={saved.layout} onChange={chooseLayout} />}
           {modeToggle}
         </div>
+        {!rec && ready && saved.layout !== "list" && sites.data && siteChips.length > 1 && (
+          <div role="group" aria-label={tr("live.phoneSiteChips")} className="flex shrink-0 gap-1.5 overflow-x-auto pb-0.5">
+            {[{ id: null, name: tr("live.phoneAllSites") }, ...siteChips].map((chip) => (
+              <button
+                key={chip.id ?? "all"}
+                type="button"
+                aria-pressed={siteId === chip.id}
+                onClick={() => pickSite(chip.id)}
+                className={cn(
+                  "m3-press inline-flex h-9 shrink-0 items-center rounded-full px-3.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-primary",
+                  siteId === chip.id ? "bg-primary text-on-primary" : "bg-surface-1 text-on-surface",
+                )}
+              >
+                {chip.name}
+              </button>
+            ))}
+          </div>
+        )}
+        {ready && layout === "grid" && <PhoneGrid cameras={shown} landscape={landscape} onOpen={open} />}
+        {ready && layout === "focus" && !selected && <PhoneFocus cameras={shown} activeId={focusId} landscape={landscape} onSelect={setFocusId} onOpen={open} />}
+        {ready && layout === "list" && (<>
         <div
           data-testid="live-phone-pages"
           tabIndex={0}
@@ -261,6 +271,7 @@ export function LivePhone() {
           </span>
           <IconButton icon={ChevronRight} aria-label={tr("live.phoneNextPage")} title={tr("live.phoneNextPage")} disabled={current >= pageCount - 1} onClick={() => go(1)} />
         </div>
+        </>)}
       </div>
       {selected && (
         <section
@@ -287,6 +298,15 @@ export function LivePhone() {
                 {selected.status}
               </span>
               {modeToggle}
+              {immersiveRec && (
+                <IconButton
+                  icon={SlidersHorizontal}
+                  aria-label={recControls ? tr("live.phoneHideRecControls") : tr("live.phoneRecControls")}
+                  title={recControls ? tr("live.phoneHideRecControls") : tr("live.phoneRecControls")}
+                  aria-pressed={recControls}
+                  onClick={() => setRecControls((open) => !open)}
+                />
+              )}
               <IconButton
                 icon={immersive ? Minimize : Maximize}
                 aria-label={immersive ? tr("live.phoneExitFullscreen") : tr("live.phoneFullscreen")}
@@ -295,11 +315,20 @@ export function LivePhone() {
                 onClick={toggleImmersive}
               />
             </div>
-            {rec ? <SingleRecording camera={selected} rec={recView(selected.id)!} fill={fill} /> : <SingleCamera camera={selected} fill={fill} />}
+            {/* display: contents keeps the picture box layout while the wrapper listens for swipes bubbling from it. */}
+            <div className="contents" {...swipeNav}>
+              {rec ? <SingleRecording camera={selected} rec={recView(selected.id)!} fill={fill} /> : <SingleCamera camera={selected} fill={fill} onZoom={trackZoom} />}
+            </div>
+            {/* The fullscreen/landscape section covers the page dock, so the transport is revealed on demand over the picture. */}
+            {immersiveRec && recControls && (
+              <div className="absolute inset-x-0 bottom-0 z-10 max-h-[60%] overflow-y-auto bg-surface-1/95 backdrop-blur">
+                <LiveRecDock compact transport={transport} cameras={session.timelineCameras} events={recData.events} now={session.now} selectedId={selected.id} />
+              </div>
+            )}
           </div>
         </section>
       )}
-      {rec && (
+      {rec && !immersiveRec && (
         <LiveRecDock compact transport={transport} cameras={session.timelineCameras} events={recData.events} now={session.now} selectedId={selected?.id} />
       )}
       {sheetOpen && (
