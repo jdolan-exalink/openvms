@@ -80,12 +80,13 @@ export function Layout() {
               </nav>
             </div>
           }
-          bottomNav={<MobileNav me={me.data} features={features} pathname={pathname} />}
+          bottomNav={<MobileNav me={me.data} features={features} pathname={pathname} compact={isLive} />}
+          compactBottomNav={isLive}
           fitViewport={fitWorkspace}
           contextSidebar={isLive ? <div id="live-context-sidebar" className="flex min-h-0 flex-col gap-3" /> : undefined}
         >
           <div className={cn("min-w-0", fitWorkspace && "flex min-h-0 flex-1 flex-col")}>
-            <header data-shell-region="page-header" className={cn("flex min-h-14 items-center justify-between gap-3 border-b border-line", fitWorkspace ? "mb-2 shrink-0 pb-2 md:min-h-11" : "mb-6 pb-4")} aria-label={t("common.pageHeader")}>
+            <header data-shell-region="page-header" className={cn("flex items-center justify-between gap-3 border-b border-line", isLive ? "min-h-11 mb-1 shrink-0 pb-1 md:mb-2 md:pb-2" : fitWorkspace ? "min-h-14 mb-2 shrink-0 pb-2 md:min-h-11" : "min-h-14 mb-6 pb-4")} aria-label={t("common.pageHeader")}>
               <div className="flex min-w-0 items-center gap-3">
                 {/* On /live the mode toggle replaces the breadcrumb to save space; the title stays for screen readers. */}
                 <div className={cn("min-w-0", isLive && "sr-only")}>

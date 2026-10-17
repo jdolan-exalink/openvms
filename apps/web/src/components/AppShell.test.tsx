@@ -33,6 +33,30 @@ describe("AppShell", () => {
     expect(screen.getByText("Bottom")).toBeInTheDocument();
   });
 
+  it("keeps content out of the notch and side insets on the whole shell", () => {
+    const { container } = render(
+      <AppShell primaryNav={<nav>Nav</nav>}>
+        <h1>Route</h1>
+      </AppShell>,
+    );
+    expect(container.querySelector('[data-shell="openvms"]')).toHaveClass(
+      "pt-[env(safe-area-inset-top)]",
+      "pl-[env(safe-area-inset-left)]",
+      "pr-[env(safe-area-inset-right)]",
+    );
+  });
+
+  it("reserves a shorter bottom strip when the bottom navigation is compact", () => {
+    render(
+      <AppShell primaryNav={<nav>Nav</nav>} bottomNav={<nav>Bottom</nav>} compactBottomNav>
+        <h1>Route</h1>
+      </AppShell>,
+    );
+    const main = screen.getByRole("main", { name: "Main Workspace" });
+    expect(main.className).toMatch(/pb-\[calc\(3\.5rem\+env\(safe-area-inset-bottom\)\)\]/);
+    expect(main.className).not.toMatch(/calc\(5rem/);
+  });
+
   it("keeps the raised sheet look free of margins in fit-viewport mode", () => {
     render(
       <AppShell primaryNav={<nav>Nav</nav>} fitViewport>

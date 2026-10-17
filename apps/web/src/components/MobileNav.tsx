@@ -30,7 +30,7 @@ const itemClasses = "group flex min-h-11 flex-1 flex-col items-center justify-ce
  * Mobile navigation (hidden from md up): a bottom bar with up to four primary destinations and a
  * "More" item that opens a modal sheet with every other permitted destination.
  */
-export function MobileNav({ me, features, pathname }: { me: Schemas["Me"] | undefined; features: FeatureFlags; pathname: string }) {
+export function MobileNav({ me, features, pathname, compact = false }: { me: Schemas["Me"] | undefined; features: FeatureFlags; pathname: string; compact?: boolean }) {
   const t = useT();
   const { primary, more } = bottomNavModel(me, features);
   const [open, setOpen] = useState(false);
@@ -76,9 +76,9 @@ export function MobileNav({ me, features, pathname }: { me: Schemas["Me"] | unde
     <>
       <div
         data-shell-region="bottom-nav"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-outline-variant bg-surface-1 pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 border-t border-outline-variant bg-surface-1 pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] md:hidden"
       >
-        <nav aria-label={t("common.mobileNav")} className="flex h-20 items-stretch gap-1 px-2 pt-3 pb-4">
+        <nav aria-label={t("common.mobileNav")} className={cn("flex items-stretch gap-1 px-2", compact ? "h-14 pt-1 pb-0.5" : "h-20 pt-3 pb-4")}>
           {primary.map((item) => {
             const active = isNavItemActive(item, pathname);
             return (
@@ -111,7 +111,7 @@ export function MobileNav({ me, features, pathname }: { me: Schemas["Me"] | unde
             aria-modal="true"
             aria-label={t("nav.moreTitle")}
             onKeyDown={trapTab}
-            className="relative flex max-h-[85dvh] w-full flex-col rounded-t-m3-2xl bg-surface-1 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl"
+            className="relative flex max-h-[85dvh] w-full flex-col rounded-t-m3-2xl bg-surface-1 px-4 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pl-[calc(1rem+env(safe-area-inset-left))] pr-[calc(1rem+env(safe-area-inset-right))] shadow-2xl"
           >
             <div className="mb-2 flex items-center justify-between">
               <p className="text-base font-semibold text-on-surface">{t("nav.moreTitle")}</p>
