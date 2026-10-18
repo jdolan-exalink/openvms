@@ -3,7 +3,6 @@ package faces
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -191,6 +190,20 @@ func (s *Service) trainServer(ctx context.Context, actor authz.Actor, tenantID, 
 	return srv, err
 }
 
+// RemoteError is a failed call to a Frigate server; Reason is sanitized (never an address or
+// a response body) and safe to show to the caller.
+type RemoteError struct{ Reason string }
+
+func (e *RemoteError) Error() string { return "frigate: " + e.Reason }
+
+// unreachable turns a remote failure into a RemoteError; a missing attempt stays not-found.
+func unreachable(err error) error {
+	if errors.Is(err, store.ErrNotFound) {
+		return err
+	}
+	return &RemoteError{Reason: remoteReason(err)}
+}
+
 func fetchAttempt(ctx context.Context, a frigate.Adapter, file string) ([]byte, string, error) {
 	cctx, cancel := context.WithTimeout(ctx, trainTimeout)
 	defer cancel()
@@ -212,11 +225,11 @@ func (s *Service) TrainAttemptImage(ctx context.Context, actor authz.Actor, tena
 	}
 	a, err := s.adapter(ctx, srv)
 	if err != nil {
-		return nil, "", fmt.Errorf("face train image: %w", err)
+		return nil, "", unreachable(err)
 	}
 	data, ct, err := fetchAttempt(ctx, a, file)
 	if err != nil {
-		return nil, "", err
+		return nil, "", unreachable(err)
 	}
 	err = s.tx(ctx, actor, tenantID, authz.FacesView, func(q *db.Queries) error {
 		return s.audit(ctx, q, actor, tenantID, ActionTrainRead, "face_train", serverID, map[string]any{"scope": "image", "server_id": serverID})
@@ -258,11 +271,11 @@ func (s *Service) AssignTrainAttempt(ctx context.Context, actor authz.Actor, ten
 	}
 	a, err := s.adapter(ctx, srv)
 	if err != nil {
-		return res, fmt.Errorf("face train assign: %w", err)
+		return res, unreachable(err)
 	}
 	data, ct, err := fetchAttempt(ctx, a, in.File)
 	if err != nil {
-		return res, err
+		return res, unreachable(err)
 	}
 	// Frigate serves webp; parameters ("; charset") and unknown types fall back to sniffing.
 	ct = strings.TrimSpace(strings.SplitN(ct, ";", 2)[0])
@@ -273,7 +286,7 @@ func (s *Service) AssignTrainAttempt(ctx context.Context, actor authz.Actor, ten
 		ct = http.DetectContentType(data)
 	}
 
-	personID := uuid.Nil
+	var personID uuid.UUID
 	if in.PersonID != nil {
 		personID = *in.PersonID
 	} else {

@@ -11,6 +11,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
+	"github.com/jdolan-exalink/openvms/internal/faces"
 	"github.com/jdolan-exalink/openvms/internal/health"
 	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
@@ -46,6 +47,7 @@ type Handlers struct {
 	Provision       *provision.Service
 	AgentEnroll     *agentenroll.Service
 	Events          *events.Service
+	Faces           *faces.Service
 	Alarms          *alarms.Service
 	Identity        *identity.Service
 	Media           *media.Service
