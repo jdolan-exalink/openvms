@@ -4,6 +4,7 @@ import clientStation from "./locales/es/clientStation";
 import common from "./locales/es/common";
 import dashboard from "./locales/es/dashboard";
 import events from "./locales/es/events";
+import faces from "./locales/es/faces";
 import labels from "./locales/es/labels";
 import live from "./locales/es/live";
 import maps from "./locales/es/maps";
@@ -23,6 +24,7 @@ export const sourceModules = {
   common,
   dashboard,
   events,
+  faces,
   labels,
   live,
   maps,

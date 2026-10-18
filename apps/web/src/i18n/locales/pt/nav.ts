@@ -6,6 +6,7 @@ const messages = {
   alarms: "Alarmes",
   events: "Eventos",
   plates: "Placas",
+  faces: "Rostos",
   recordings: "Gravações",
   exports: "Exportações",
   cases: "Casos",

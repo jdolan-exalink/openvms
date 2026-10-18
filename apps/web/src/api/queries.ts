@@ -435,3 +435,44 @@ export const notificationsQuery = (filter: NotificationFilter = {}) =>
     queryKey: ["notifications", filter],
     queryFn: async () => unwrap(await api.GET("/api/v1/notifications", { params: { query: filter } })),
   });
+
+// Faces (central person registry, training from detections, recognition timeline).
+export const facePersonsQuery = queryOptions({
+  queryKey: ["faces", "persons"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons")).items,
+});
+
+export const faceImagesQuery = (personId: string) =>
+  queryOptions({
+    queryKey: ["faces", "images", personId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons/{personId}/images", { params: { path: { personId } } })).items,
+  });
+
+export const faceSyncQuery = (personId: string) =>
+  queryOptions({
+    queryKey: ["faces", "sync", personId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons/{personId}/sync", { params: { path: { personId } } })).items,
+    // The worker converges in the background; keep the badges close to it while the detail is open.
+    refetchInterval: 10_000,
+  });
+
+export const faceTrainQuery = queryOptions({
+  queryKey: ["faces", "train"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/faces/train")),
+  staleTime: 15_000,
+});
+
+export type FaceRecognitionFilter = { person_id?: string[]; camera_id?: string[]; from?: string; to?: string; limit?: number };
+
+export const faceRecognitionsQuery = (filter: FaceRecognitionFilter) =>
+  infiniteQueryOptions({
+    queryKey: ["faces", "recognitions", filter],
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) =>
+      unwrap(await api.GET("/api/v1/faces/recognitions", { params: { query: { ...filter, cursor: pageParam } } })),
+    getNextPageParam: (last) => last.next_cursor,
+  });
+
+/** Enrollment photos are served only to authorized sessions and never as public URLs. */
+export const faceImageUrl = (personId: string, imageId: string) => `/api/v1/faces/persons/${personId}/images/${imageId}`;
+export const faceTrainImageUrl = (serverId: string, file: string) => `/api/v1/faces/train/${serverId}/image?file=${encodeURIComponent(file)}`;

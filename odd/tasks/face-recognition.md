@@ -20,7 +20,7 @@ Today OpenVMS only detects whether a Frigate has `face_recognition.enabled` (bad
 ## Scope / tasks
 - [x] FACE-01 — Foundation: permissions (`faces.view`, `faces.manage`) + role grants migration, persons/images schema (RLS), image storage (existing central object storage), audit actions, Frigate adapter face-library methods + mock support. Route: delegated direct. Commits: `8361d3f` (schema, permissions, service), `247f741` (Frigate adapter + mock).
 - [x] FACE-02 — Registry sync: worker pushes persons/images to face-enabled servers (create/register/delete), drift detection, deletion propagation + `sub_label` scrub, idempotent retries (reuse camera-zone sync patterns). Route: delegated direct. Commits: `2374937` (FACE-01 advisory fixes), `07cf886` (sync).
-- [ ] FACE-03 — API + Faces page: persons CRUD, enrollment upload, train from recent detections (Frigate train list / `event_id` classify), per-person recognitions timeline from events, name redaction without `faces.view`. Route: delegated direct.
+- [x] FACE-03 — API + Faces page: persons CRUD, enrollment upload, train from recent detections, per-person recognitions timeline from events, name redaction without `faces.view`. Route: delegated direct. Commits: `80b3486` (scrub completeness + erased-name block), `af11e09` (redaction, timeline, train service), `03ceee3` (HTTP API), `5247153` (web page).
 - [ ] FACE-04 — Managed configuration: per server/camera enable, model size, thresholds via config editor; capability per camera; restart notice. Route: delegated direct.
 - [ ] FACE-05 — Watchlists: rule conditions on persons/watchlists → alarms (known persons). Route: delegated direct.
 - [ ] FACE-06 — Review per work unit, chained PRs (`stacked-to-main`), CI, merge, deploy (with user OK).
@@ -69,5 +69,22 @@ Today OpenVMS only detects whether a Frigate has `face_recognition.enabled` (bad
 - Deleting an empty owned face folder relies on a bogus-id delete probe (Frigate removes empty folders after a delete); unverified against a live server. Frigate-side images added by hand to an owned face are removed as drift; FACE-03 train-from-detection must add images centrally first.
 - sub_labels namespace is shared with Frigate LPR known-plate labels; scrub is exact match on `frigate_name`.
 
+### FACE-03 evidence (2026-10-18)
+- Part 0: `ScrubEventSubLabel` no longer uses SKIP LOCKED (waits for locked rows) and the purge keeps the tombstone while any event still carries the name. Migration `00058_face_erased_names.sql` (`face_erased_names`, RLS): the name is recorded at the start of the purge; `events` syncer drops erased names (30 day retention, `ErasedNameRetention`/`ErasedFaceNameRetention`) from ingested `sub_labels`; creating a person with that Frigate name clears the marker; worker prunes expired rows. RED seen: lock test left the name behind; erased-name tests failed on the missing table.
+- Redaction: `faces.Redactor` (one query per call) strips `sub_labels` equal to a registered person's `frigate_name` of the event's own tenant unless the caller holds `faces.view` there. Applied in events list/detail, the `sub_label` filter (hidden values dropped, so probing matches nothing), alarm list/detail/lifecycle responses and alarm events. LPR behavior unchanged. RED seen for events and alarms tests.
+- API (OpenAPI first, `/api/v1/faces/...`): persons list/create/get/patch/delete; images list, multipart upload, authorized get (`Cache-Control: private, no-store`), delete; per-person sync status and retry; `recognitions` (cursor, person/camera/date filters, camera-scoped by events.view); `train` list, `train/{serverId}/image`, `train/assign`. Platform admins pass `tenant_id`; members always use their own. Audit: new `FACE_PERSON_READ`, `FACE_RECOGNITIONS_READ`, `FACE_TRAIN_READ`, `FACE_TRAIN_ASSIGNED`; details hold ids and counts only. Adapter gained `FaceTrainImage` (GET `/clips/faces/train/<file>`); mock serves it and `POST /faces/train/delete`.
+- Train assign fetches the attempt, adds it centrally (so the sync distributes it), then deletes the train attempt on Frigate best effort.
+- Web: `/faces` (nav under Investigation, `faces.view`), tabs Personas / Entrenar / Reconocimientos, es/en/pt.
+- TDD honesty: service/API/web tests were written before the implementation (RED by missing symbols or failures for Part 0, redaction); the service and API tests were not executed red before implementation.
+- Checks (all pass): `go build ./... && go vet ./...`; `golangci-lint run ./...` 0 issues; `go test -race -count=1 ./...` ok; `go test -count=1 -tags integration ./internal/faces/... ./internal/api/... ./internal/events/... ./internal/alarms/...` ok; web `pnpm typecheck`, eslint on changed files, `vitest run` 183 files / 1629 tests ok; `git diff --check` clean.
+- Rollback: revert `5247153`, `03ceee3`, `af11e09` in that order; `80b3486` includes migration 00058 (Down drops `face_erased_names`).
+
+### FACE-03 open questions
+- Train file name format (`<event id>-<unix time>-<label>-<score>.webp`) and `/clips/faces/train` plus `POST /faces/train/delete` are unverified against a live Frigate; fields stay empty if parsing fails.
+- Recognitions carry no score (reviews only store names); links go to playback, not an event detail page (Events has no id route).
+- Platform admins without a tenant must pass `tenant_id`; the web page does not offer a tenant picker.
+- Alarms already exposed LPR plate text in `event_sub_labels` without redaction; only face names were addressed.
+- Redaction treats names of tombstoned persons as hidden until purge; a name equal to a person's `frigate_name` in the same tenant is assumed to be a face name (shared namespace with LPR known plates).
+
 ## Next step
-FACE-03 (API + Faces page); handlers should expose `ListSyncStatus` and `RetrySync`.
+FACE-04 (managed configuration).

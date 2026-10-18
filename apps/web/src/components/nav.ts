@@ -1,6 +1,6 @@
 import {
   Bell, BellRing, Building, Camera, CarFront, ClipboardList, Download, Eye, GitBranch, History, KeyRound, LayoutDashboard, Layers, Map as MapIcon,
-  Palette, Send, Server, ShieldCheck, SlidersHorizontal, UserCog, Users, UsersRound, Video, Zap, BriefcaseBusiness, MonitorCog,
+  Palette, ScanFace, Send, Server, ShieldCheck, SlidersHorizontal, UserCog, Users, UsersRound, Video, Zap, BriefcaseBusiness, MonitorCog,
   type LucideIcon,
 } from "lucide-react";
 import type { MessageKey } from "@/i18n";
@@ -37,6 +37,7 @@ export const navGroups: NavGroup[] = [
       { label: "nav.alarms", icon: Bell, to: "/alarms", permission: "alarms.view" },
       { label: "nav.events", icon: Zap, to: "/events", permission: "events.view" },
       { label: "nav.plates", icon: CarFront, to: "/plates", permission: "lpr.view" },
+      { label: "nav.faces", icon: ScanFace, to: "/faces", permission: "faces.view" },
       { label: "nav.recordings", icon: History, to: "/playback", permission: "recordings.view" },
       { label: "nav.exports", icon: Download, to: "/exports" },
       { label: "nav.cases", icon: BriefcaseBusiness, milestone: "M8" },
