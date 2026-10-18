@@ -55,6 +55,20 @@ type Adapter interface {
 	// UpsertManagedCameraZone updates exactly one OpenVMS-owned zone on supported Frigate versions and verifies it by read-back.
 	UpsertManagedCameraZone(ctx context.Context, camera, zoneName string, zone map[string]any, hasConfigPermission bool) error
 	DeleteManagedCameraZone(ctx context.Context, camera, zoneName string, hasConfigPermission bool) error
+	// ListFaces reads the Frigate face library (GET /api/faces): images per person and the
+	// unclassified train attempts. Works whether or not face recognition is enabled.
+	ListFaces(ctx context.Context) (FaceLibrary, error)
+	// CreateFace creates an empty person folder. Mutating face methods need Frigate admin
+	// credentials and return ErrFaceRecognitionDisabled when face recognition is off.
+	CreateFace(ctx context.Context, name string) error
+	// RegisterFaceImage uploads one enrollment image (multipart "file") for a person.
+	RegisterFaceImage(ctx context.Context, name, filename string, data []byte) error
+	// DeleteFaceImages removes images (ids as listed by ListFaces) from a person.
+	DeleteFaceImages(ctx context.Context, name string, ids []string) error
+	// RenameFace renames a person; ErrFaceRenameUnsupported when the server lacks the route.
+	RenameFace(ctx context.Context, oldName, newName string) error
+	// ClassifyTrainAttempt files an unclassified train attempt under a person.
+	ClassifyTrainAttempt(ctx context.Context, name, trainingFile string) error
 	// SaveRawConfig validates and writes a full config.yml, optionally restarting Frigate.
 	SaveRawConfig(ctx context.Context, yaml string, restart bool) error
 }
@@ -97,6 +111,9 @@ type Camera struct {
 	Enabled bool
 	Zones   []string
 	LPR     bool
+	// FaceRecognition is the effective per-camera face recognition toggle: the camera's own
+	// face_recognition.enabled, else the global one. Read-only; managing it is FACE-04.
+	FaceRecognition bool
 	// LiveStream is the go2rtc stream for grids (substream); HQStream for single view.
 	// Both are empty when the camera has no go2rtc restream.
 	LiveStream string

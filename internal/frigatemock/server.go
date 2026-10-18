@@ -36,6 +36,16 @@ type Server struct {
 	// an empty, non-nil slice reports no streams at all.
 	Go2RTCStreams []string
 
+	// FaceRecognition turns face recognition on: GET /api/config reports face_recognition.enabled
+	// (globally and per camera) and the /api/faces library routes work; when false they answer
+	// Frigate's 400 "Face recognition is not enabled.".
+	FaceRecognition bool
+	// FaceRenameUnsupported makes PUT /api/faces/{old}/rename 404, like a Frigate without it.
+	FaceRenameUnsupported bool
+
+	faceOnce sync.Once
+	faceLib  *faceLibrary
+
 	token string
 
 	// cfg is the editable configuration behind /api/config, built from Cameras on first use.
@@ -64,6 +74,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/config/schema.json", s.auth(s.configSchema))
 	mux.HandleFunc("POST /api/config/save", s.auth(s.configSave))
 	mux.HandleFunc("GET /api/go2rtc/streams", s.auth(s.go2rtcStreams))
+	mux.HandleFunc("GET /api/faces", s.auth(s.listFaces))
+	mux.HandleFunc("POST /api/faces/{name}/create", s.auth(s.createFace))
+	mux.HandleFunc("POST /api/faces/{name}/register", s.auth(s.registerFace))
+	mux.HandleFunc("POST /api/faces/{name}/delete", s.auth(s.deleteFaceImages))
+	mux.HandleFunc("PUT /api/faces/{old}/rename", s.auth(s.renameFace))
+	mux.HandleFunc("POST /api/faces/train/{name}/classify", s.auth(s.classifyTrain))
 	mux.HandleFunc("GET /api/stats", s.auth(s.stats))
 	mux.HandleFunc("GET /api/review", s.auth(s.listReviews))
 	mux.HandleFunc("GET /api/review/{id}", s.auth(s.getReview))

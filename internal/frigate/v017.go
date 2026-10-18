@@ -26,11 +26,12 @@ type toggle struct {
 }
 
 type cameraConfig struct {
-	Enabled *bool          `json:"enabled"`
-	Zones   map[string]any `json:"zones"`
-	LPR     *toggle        `json:"lpr"`
-	Audio   *toggle        `json:"audio"`
-	ONVIF   *struct {
+	Enabled         *bool          `json:"enabled"`
+	Zones           map[string]any `json:"zones"`
+	LPR             *toggle        `json:"lpr"`
+	FaceRecognition *toggle        `json:"face_recognition"`
+	Audio           *toggle        `json:"audio"`
+	ONVIF           *struct {
 		Host string `json:"host"`
 	} `json:"onvif"`
 	Live *struct {
@@ -98,10 +99,11 @@ func (a *v017) ListCameras(ctx context.Context) ([]Camera, error) {
 	out := make([]Camera, 0, len(cfg.Cameras))
 	for name, cc := range cfg.Cameras {
 		cam := Camera{
-			Name:    name,
-			Enabled: cc.Enabled == nil || *cc.Enabled,
-			LPR:     on(cc.LPR) || (cc.LPR == nil && on(cfg.LPR)),
-			Zones:   make([]string, 0, len(cc.Zones)),
+			Name:            name,
+			Enabled:         cc.Enabled == nil || *cc.Enabled,
+			LPR:             on(cc.LPR) || (cc.LPR == nil && on(cfg.LPR)),
+			FaceRecognition: on(cc.FaceRecognition) || (cc.FaceRecognition == nil && on(cfg.FaceRecognition)),
+			Zones:           make([]string, 0, len(cc.Zones)),
 		}
 		for z := range cc.Zones {
 			cam.Zones = append(cam.Zones, z)

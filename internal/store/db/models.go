@@ -381,6 +381,33 @@ type ExportShare struct {
 	RevokedAt    *time.Time
 }
 
+type FacePerson struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	DisplayName string
+	FrigateName string
+	Notes       string
+	CreatedBy   *uuid.UUID
+	UpdatedBy   *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	DeletedAt   *time.Time
+}
+
+type FacePersonImage struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	PersonID    uuid.UUID
+	StorageKey  string
+	ContentType string
+	SizeBytes   int32
+	Sha256      string
+	Width       *int32
+	Height      *int32
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
+}
+
 type FrigateConfigRevision struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID
