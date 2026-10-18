@@ -12,6 +12,7 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
 - [x] FRF-01 — Face updates evaluate only the gained `sub_labels`. Route: delegated direct (writer trigger: 3 tasks across 2+ non-trivial files).
 - [x] FRF-02 — The face resolver uses the evaluation transaction (no nested connection); the per-tenant cache stays. Route: delegated direct.
 - [x] FRF-03 — Watchlist deletion and rule create/update serialize on the watchlist rows (`FOR UPDATE` on delete, `FOR SHARE` on reference checks). Route: delegated direct.
+- [x] FRF-04 — A failing face resolver query is isolated in a savepoint so it cannot abort the evaluation transaction (native review advisory `R3-resolver-error-aborts-evaluation-tx`). Route: delegated direct.
 
 ## Accepted, not changed
 - `R3-cache-staleness`: the 15 s per-tenant snapshot (`DefaultFaceCacheTTL`) is a documented tradeoff; watchlist edits reach the worker within that time.
@@ -40,6 +41,10 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
 - RED: `go test -count=1 -tags integration -run TestWatchlistDeleteWaitsForAConcurrentRuleReference ./internal/faces/` failed: `delete after the rule committed = <nil>, want conflict`; `-run TestRuleCreateWaitsForAConcurrentWatchlistDelete ./internal/rules/` failed: `rule create finished while the watchlist delete was in flight: <nil>`.
 - GREEN: new queries `LockFaceWatchlist` (`FOR UPDATE`, before the rule count in `DeleteWatchlist`) and `LockFaceWatchlistsByIDs` (`FOR SHARE`, replaces `CountFaceWatchlistsByIDs` in `checkFaceRefs`); both tests pass. Person delete has no count-then-delete pattern, so it is unchanged.
 - Both tests use deterministic interleavings: a held transaction plays one side with the real lock statement, the real service plays the other, asserting it blocks and then reaches the right outcome.
+
+### FRF-04
+- RED: `go test -count=1 -tags integration -run TestEvaluateEventResolverFailureDoesNotAbortOtherRules ./internal/rules/` failed: `evaluation with a failing resolver: ERROR: current transaction is aborted, commands ignored until end of transaction block (SQLSTATE 25P02)`. Rules run in `created_at` order, so the failing person rule precedes the plain rule.
+- GREEN: `Service.faceNamesIsolated` runs the resolver on a savepoint (`tx.Begin`), rolled back on error and released on success; `matchesFaces` takes the evaluation `pgx.Tx`. The MaxConns=1 test still passes (no second connection).
 
 ## Next step
 FRF-01..03 through one bounded writer.

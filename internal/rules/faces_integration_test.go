@@ -4,6 +4,7 @@ package rules_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -20,6 +21,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/store"
+	"github.com/jdolan-exalink/openvms/internal/store/db"
 	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
 )
 
@@ -360,5 +362,34 @@ func TestRuleCreateWaitsForAConcurrentWatchlistDelete(t *testing.T) {
 	var bad *rules.ValidationError
 	if r := <-created; !errors.As(r.err, &bad) {
 		t.Fatalf("rule create after the delete committed = %v, want validation error", r.err)
+	}
+}
+
+// failingFaces is a resolver whose query fails inside PostgreSQL (invalid jsonb), which aborts the
+// transaction it ran on unless the caller isolated it.
+type failingFaces struct{}
+
+func (failingFaces) FaceNames(ctx context.Context, q *db.Queries, tenantID uuid.UUID, _, _ []uuid.UUID) (map[string]struct{}, error) {
+	return nil, q.InsertRuleVersion(ctx, db.InsertRuleVersionParams{RuleID: uuid.New(), TenantID: tenantID, Version: 1, Snapshot: json.RawMessage("{")})
+}
+
+// A resolver failure means "this person rule does not match"; it must not abort the evaluation
+// transaction and silence the rules evaluated after it.
+func TestEvaluateEventResolverFailureDoesNotAbortOtherRules(t *testing.T) {
+	f := newFixture(t)
+	ana := f.person("Ana", "ana")
+	// Rules are evaluated in creation order, so the failing person rule goes first.
+	faceRule := f.addRule("Vigilancia", rules.TriggerEvent, rules.Conditions{FacePersonIDs: []uuid.UUID{ana}}, rules.Actions{NotifyInApp: true}, true)
+	plain := f.addRule("Todo", rules.TriggerEvent, rules.Conditions{}, rules.Actions{NotifyInApp: true}, true)
+	f.svc.Faces = failingFaces{}
+
+	if err := f.svc.EvaluateEvent(context.Background(), f.faceEvent("ana")); err != nil {
+		t.Fatalf("evaluation with a failing resolver: %v", err)
+	}
+	if n := f.notifications(faceRule); n != 0 {
+		t.Fatalf("person rule with a failing resolver created %d notifications, want 0", n)
+	}
+	if n := f.notifications(plain); n != 1 {
+		t.Fatalf("rule after the failing resolver created %d notifications, want 1", n)
 	}
 }

@@ -646,13 +646,32 @@ func (s *Service) faceNames(ctx context.Context, q *db.Queries, tenantID uuid.UU
 	return s.Faces.FaceNames(ctx, q, tenantID, c.FacePersonIDs, c.FaceWatchlistIDs)
 }
 
-// matchesFaces is the person part of an event rule, resolved through q (the evaluation transaction). A resolver failure does not match (and is
-// logged without names): missing an alarm for one event is safer than alarming on the wrong one.
-func (s *Service) matchesFaces(ctx context.Context, q *db.Queries, ev EventContext, rule Rule) bool {
+// faceNamesIsolated is faceNames on a savepoint of tx: released on success, rolled back on error.
+func (s *Service) faceNamesIsolated(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, c Conditions) (map[string]struct{}, error) {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names, err := s.faceNames(ctx, db.New(sp), tenantID, c)
+	if err != nil {
+		_ = sp.Rollback(ctx)
+		return nil, err
+	}
+	if err := sp.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// matchesFaces is the person part of an event rule, resolved on the evaluation transaction tx. A
+// resolver failure does not match (and is logged without names): missing an alarm for one event is
+// safer than alarming on the wrong one. The resolver runs in a savepoint, so a failing query rolls
+// back only itself instead of aborting the transaction the remaining rules still need.
+func (s *Service) matchesFaces(ctx context.Context, tx pgx.Tx, ev EventContext, rule Rule) bool {
 	if len(ev.SubLabels) == 0 {
 		return false
 	}
-	names, err := s.faceNames(ctx, q, ev.TenantID, rule.Conditions)
+	names, err := s.faceNamesIsolated(ctx, tx, ev.TenantID, rule.Conditions)
 	if err != nil {
 		s.Log.WarnContext(ctx, "resolve face conditions", "error", err, "rule_id", rule.ID)
 		return false
@@ -706,7 +725,7 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 			if !rule.Conditions.MatchesEvent(ev) {
 				continue
 			}
-			if hasFaces && !s.matchesFaces(ctx, q, ev, rule) {
+			if hasFaces && !s.matchesFaces(ctx, tx, ev, rule) {
 				continue
 			}
 
