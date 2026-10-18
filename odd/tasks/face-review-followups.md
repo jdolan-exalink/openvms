@@ -9,7 +9,7 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
 - Deleting a watchlist counts the rules that use it, and creating/updating a rule counts the watchlists it references; neither takes a lock (`internal/faces/watchlists.go:251`, `internal/rules/service.go:1096`). Running concurrently, they can commit a rule that points at a deleted watchlist, which then silently never fires.
 
 ## Scope / tasks
-- [ ] FRF-01 — Face updates evaluate only the gained `sub_labels`. Route: delegated direct (writer trigger: 3 tasks across 2+ non-trivial files).
+- [x] FRF-01 — Face updates evaluate only the gained `sub_labels`. Route: delegated direct (writer trigger: 3 tasks across 2+ non-trivial files).
 - [ ] FRF-02 — The face resolver uses the evaluation transaction (no nested connection); the per-tenant cache stays. Route: delegated direct.
 - [ ] FRF-03 — Watchlist deletion and rule create/update serialize on the watchlist rows (`FOR UPDATE` on delete, `FOR SHARE` on reference checks). Route: delegated direct.
 
@@ -26,6 +26,11 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
 
 ## Progress
 - 2026-10-18: branch `fix/face-review-followups` from `main` `d9ca1fc`; advisories verified against current code.
+
+## Evidence
+### FRF-01
+- RED: `go test -count=1 -tags integration -run TestSyncerFaceUpdateEvaluatesOnlyTheGainedNames ./internal/events/` failed: `after the second name: 3 notifications, want 2`.
+- GREEN: same test plus `-run 'TestSyncer.*(Face|Person)'` pass after `syncer.go` passes `GainedSubLabels` on face updates. Full checks at the end of the run.
 
 ## Next step
 FRF-01..03 through one bounded writer.
