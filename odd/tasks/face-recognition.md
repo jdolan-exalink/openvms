@@ -21,7 +21,7 @@ Today OpenVMS only detects whether a Frigate has `face_recognition.enabled` (bad
 - [x] FACE-01 — Foundation: permissions (`faces.view`, `faces.manage`) + role grants migration, persons/images schema (RLS), image storage (existing central object storage), audit actions, Frigate adapter face-library methods + mock support. Route: delegated direct. Commits: `8361d3f` (schema, permissions, service), `247f741` (Frigate adapter + mock).
 - [x] FACE-02 — Registry sync: worker pushes persons/images to face-enabled servers (create/register/delete), drift detection, deletion propagation + `sub_label` scrub, idempotent retries (reuse camera-zone sync patterns). Route: delegated direct. Commits: `2374937` (FACE-01 advisory fixes), `07cf886` (sync).
 - [x] FACE-03 — API + Faces page: persons CRUD, enrollment upload, train from recent detections, per-person recognitions timeline from events, name redaction without `faces.view`. Route: delegated direct. Commits: `80b3486` (scrub completeness + erased-name block), `af11e09` (redaction, timeline, train service), `03ceee3` (HTTP API), `5247153` (web page).
-- [ ] FACE-04 — Managed configuration: per server/camera enable, model size, thresholds via config editor; capability per camera; restart notice. Route: delegated direct.
+- [x] FACE-04 — Managed configuration: per server/camera enable, model size, thresholds via config editor; capability per camera; restart notice. Route: delegated direct. Commits: `1c784eb` (FACE-03 advisory fixes), `1eda2ef` (contract + generated clients, migration 00059), `8b7577a` (store capability refresh query), `13ec6e9` (backend), `b67884b` (web tab).
 - [ ] FACE-05 — Watchlists: rule conditions on persons/watchlists → alarms (known persons). Route: delegated direct.
 - [ ] FACE-06 — Review per work unit, chained PRs (`stacked-to-main`), CI, merge, deploy (with user OK).
 
@@ -86,5 +86,19 @@ Today OpenVMS only detects whether a Frigate has `face_recognition.enabled` (bad
 - Alarms already exposed LPR plate text in `event_sub_labels` without redaction; only face names were addressed.
 - Redaction treats names of tombstoned persons as hidden until purge; a name equal to a person's `frigate_name` in the same tenant is assumed to be a face name (shared namespace with LPR known plates).
 
+### FACE-04 evidence (2026-10-18)
+- Advisory fixes found while closing FACE-03 landed first in `1c784eb`: assign discards a person created only for a failed first image, oversized Frigate train images fail instead of truncating, validation errors are no longer rewritten as unreachable-server errors, alarm redaction errors after a committed change are logged and fail closed.
+- Contract (`1eda2ef`): `GET /api/v1/faces/config` (faces.view + servers.view per server; `can_edit` reflects faces.manage + servers.config) and `PATCH /api/v1/faces/config/{serverId}`; config revision kind `server_patch` (migration 00059).
+- Backend (`13ec6e9`): adapter reads the running `face_recognition` section and writes the global section through `PUT /config/set` (restart flagged); inventory validates Frigate ranges and writes one `server_patch` revision (global) plus `camera_patch` revisions per camera override, so history and rollback of the config editor apply; capability flags refresh after a change (`8b7577a`) and periodically in the health poller.
+- Web (`b67884b`): Faces "Configuracion" tab (hidden without servers.view), per server card with status, model, threshold and cameras on; inline editor sends only changed fields, validates ranges client side, per-camera enable and min area inline; restart notice shared with the camera config page through `lib/frigateRestart.ts` (session-remembered, restart button only with servers.restart).
+- TDD: backend and `ConfigTab.test.tsx` tests (6 cases: gating, listing, minimal PATCH + restart flow, camera toggle without restart permission, range refusal, unreadable server) cover the behaviors; ConfigTab was written by an interrupted writer, so RED for the web part is not independently observed. Honest note.
+- Checks: web `pnpm typecheck`, eslint on changed files clean, `vitest run` 1642 tests pass, `git diff --check` clean; Go checks listed in the final report.
+- Rollback boundary: revert `b67884b`, `13ec6e9`, `8b7577a`, `1eda2ef` in that order (migration 00059 Down restores the old kind constraint); `1c784eb` is independent.
+
+### FACE-04 open questions
+- `PUT /config/set` payload and the running-config read are verified against the mock and Frigate 0.17 source only, not a live server.
+- Capability refresh is periodic (health poller) plus on change; a Frigate restarted by hand is noticed on the next poll.
+- Per-camera `min_area` and `enabled` are edited inline; per-camera detail beyond that stays in the camera config page.
+
 ## Next step
-FACE-04 (managed configuration).
+FACE-05 (watchlists).
