@@ -46,5 +46,12 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
 - RED: `go test -count=1 -tags integration -run TestEvaluateEventResolverFailureDoesNotAbortOtherRules ./internal/rules/` failed: `evaluation with a failing resolver: ERROR: current transaction is aborted, commands ignored until end of transaction block (SQLSTATE 25P02)`. Rules run in `created_at` order, so the failing person rule precedes the plain rule.
 - GREEN: `Service.faceNamesIsolated` runs the resolver on a savepoint (`tx.Begin`), rolled back on error and released on success; `matchesFaces` takes the evaluation `pgx.Tx`. The MaxConns=1 test still passes (no second connection).
 
+### Native review (2026-10-18)
+- FRF-01..03 candidate: consent granted, reliability lens approved and acknowledged (lineage `review-35d6ced8ad6666b3`); its advisory `R3-resolver-error-aborts-evaluation-tx` became FRF-04.
+- FRF-01..04 candidate (10 files, 401 lines): consent granted, reliability lens approved and acknowledged (lineage `review-fbb7809237f5915d`). Informational advisories:
+  - `R3-for-share-privilege` (`internal/rules/service.go:1122`): not applicable; `openvms_app` gets SELECT/INSERT/UPDATE/DELETE on every new table through the default privileges of migration 00002, and the `tenant_isolation` policies of 00060 cover all commands.
+  - `R3-holder-error-hangs-test`, `R3-negative-timing-assertion` (`internal/faces/watchlists_integration_test.go:190-197`): test robustness only; left as follow-up.
+  - `R3-savepoint-per-face-rule` (`internal/rules/service.go:650-664`): one savepoint per person rule, including cache hits; accepted for simplicity.
+
 ## Next step
 FRF-01..03 through one bounded writer.
