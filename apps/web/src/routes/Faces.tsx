@@ -5,16 +5,18 @@ import { ConfigTab } from "@/components/faces/ConfigTab";
 import { PersonsTab } from "@/components/faces/PersonsTab";
 import { RecognitionsTab } from "@/components/faces/RecognitionsTab";
 import { TrainTab } from "@/components/faces/TrainTab";
+import { WatchlistsTab } from "@/components/faces/WatchlistsTab";
 import { Empty, PageHeader } from "@/components/ui";
 import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 
-type Tab = "people" | "train" | "recognitions" | "config";
+type Tab = "people" | "train" | "recognitions" | "lists" | "config";
 const tabs: { id: Tab; label: MessageKey }[] = [
   { id: "people", label: "faces.tabPeople" },
   { id: "train", label: "faces.tabTrain" },
   { id: "recognitions", label: "faces.tabRecognitions" },
+  { id: "lists", label: "faces.tabLists" },
   { id: "config", label: "faces.tabConfig" },
 ];
 
@@ -70,6 +72,7 @@ export function Faces() {
             {tab === "people" && <PersonsTab canManage={canManage} />}
             {tab === "train" && <TrainTab canManage={canManage} />}
             {tab === "recognitions" && <RecognitionsTab />}
+            {tab === "lists" && <WatchlistsTab canManage={canManage} />}
             {tab === "config" && canConfig && <ConfigTab canRestart={can(me.data, "servers.restart")} />}
           </div>
         </>

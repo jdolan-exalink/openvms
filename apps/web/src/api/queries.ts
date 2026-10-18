@@ -442,6 +442,11 @@ export const facePersonsQuery = queryOptions({
   queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons")).items,
 });
 
+export const faceWatchlistsQuery = queryOptions({
+  queryKey: ["faces", "watchlists"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/faces/watchlists")).items,
+});
+
 export const faceImagesQuery = (personId: string) =>
   queryOptions({
     queryKey: ["faces", "images", personId],
