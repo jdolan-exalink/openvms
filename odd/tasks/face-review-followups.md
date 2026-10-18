@@ -10,7 +10,7 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
 
 ## Scope / tasks
 - [x] FRF-01 — Face updates evaluate only the gained `sub_labels`. Route: delegated direct (writer trigger: 3 tasks across 2+ non-trivial files).
-- [ ] FRF-02 — The face resolver uses the evaluation transaction (no nested connection); the per-tenant cache stays. Route: delegated direct.
+- [x] FRF-02 — The face resolver uses the evaluation transaction (no nested connection); the per-tenant cache stays. Route: delegated direct.
 - [ ] FRF-03 — Watchlist deletion and rule create/update serialize on the watchlist rows (`FOR UPDATE` on delete, `FOR SHARE` on reference checks). Route: delegated direct.
 
 ## Accepted, not changed
@@ -31,6 +31,10 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
 ### FRF-01
 - RED: `go test -count=1 -tags integration -run TestSyncerFaceUpdateEvaluatesOnlyTheGainedNames ./internal/events/` failed: `after the second name: 3 notifications, want 2`.
 - GREEN: same test plus `-run 'TestSyncer.*(Face|Person)'` pass after `syncer.go` passes `GainedSubLabels` on face updates. Full checks at the end of the run.
+
+### FRF-02
+- RED: `go test -count=1 -tags integration -run TestEvaluateEventResolvesFacesInsideTheEvaluationTransaction ./internal/rules/` failed: `evaluation with a single pooled connection: timeout: context already done: context deadline exceeded` (pool MaxConns=1, empty face cache).
+- GREEN: `FaceResolver.FaceNames` takes the caller's `*db.Queries` (nil opens its own transaction); `EvaluateEvent` passes its transaction; `Service.FaceNames` keeps its signature (nil querier) for the API handler. Face/person/watchlist/EvaluateEvent integration tests pass.
 
 ## Next step
 FRF-01..03 through one bounded writer.

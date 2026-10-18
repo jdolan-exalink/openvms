@@ -10,12 +10,15 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/bootstrap"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/rules"
+	"github.com/jdolan-exalink/openvms/internal/store"
+	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
 )
 
 // person inserts a live registered person and returns its id.
@@ -277,5 +280,32 @@ func TestRuleUpdateKeepsFaceConditionsForEditorsWithoutFacesView(t *testing.T) {
 	}
 	if _, err := f.svc.UpdateRule(ctx, withFaces, created.ID, rules.UpdateRuleRequest{Conditions: &changed}); err != nil {
 		t.Fatalf("change with faces.view = %v", err)
+	}
+}
+
+// EvaluateEvent holds a transaction while it resolves the face conditions. With a single pool
+// connection a resolver that opens its own transaction would wait forever for a second one, so
+// this only passes when the resolver reads through the evaluation transaction.
+func TestEvaluateEventResolvesFacesInsideTheEvaluationTransaction(t *testing.T) {
+	f := newFixture(t)
+	ana := f.person("Ana", "ana")
+	rule := f.addRule("Vigilancia", rules.TriggerEvent, rules.Conditions{FacePersonIDs: []uuid.UUID{ana}}, rules.Actions{NotifyInApp: true}, true)
+
+	cfg := f.env.Pool.Config()
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	svc := rules.NewService(&store.Store{Pool: pool}, &recordingPublisher{}, pgtest.Discard()) // empty face cache
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := svc.EvaluateEvent(ctx, f.faceEvent("ana")); err != nil {
+		t.Fatalf("evaluation with a single pooled connection: %v", err)
+	}
+	if n := f.notifications(rule); n != 1 {
+		t.Fatalf("recognized person created %d notifications, want 1", n)
 	}
 }

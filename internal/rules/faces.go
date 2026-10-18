@@ -38,8 +38,10 @@ func MatchesFaces(subLabels []string, names map[string]struct{}) bool {
 
 // FaceResolver resolves the persons and watchlists of a face condition to the set of Frigate
 // names (event sub_labels) they stand for. Unknown, deleted or foreign ids resolve to nothing.
+// q is the caller's tenant-scoped querier: a caller already inside a transaction passes it so the
+// resolver does not take a second pool connection; nil makes the resolver open its own.
 type FaceResolver interface {
-	FaceNames(ctx context.Context, tenantID uuid.UUID, personIDs, watchlistIDs []uuid.UUID) (map[string]struct{}, error)
+	FaceNames(ctx context.Context, q *db.Queries, tenantID uuid.UUID, personIDs, watchlistIDs []uuid.UUID) (map[string]struct{}, error)
 }
 
 // faceIndex is the snapshot of one tenant: live persons by id and watchlist membership.
@@ -90,7 +92,7 @@ func (r *StoreFaceResolver) ttl() time.Duration {
 	return DefaultFaceCacheTTL
 }
 
-func (r *StoreFaceResolver) index(ctx context.Context, tenantID uuid.UUID) (faceIndex, error) {
+func (r *StoreFaceResolver) index(ctx context.Context, q *db.Queries, tenantID uuid.UUID) (faceIndex, error) {
 	r.mu.Lock()
 	cached, ok := r.cache[tenantID]
 	r.mu.Unlock()
@@ -98,7 +100,7 @@ func (r *StoreFaceResolver) index(ctx context.Context, tenantID uuid.UUID) (face
 		return cached, nil
 	}
 	idx := faceIndex{loaded: r.now(), names: map[uuid.UUID]string{}, members: map[uuid.UUID][]uuid.UUID{}}
-	err := r.Store.Tx(ctx, store.ScopeFor(authz.Actor{TenantID: &tenantID}), func(q *db.Queries) error {
+	load := func(q *db.Queries) error {
 		persons, err := q.ListFaceNameIndex(ctx, tenantID)
 		if err != nil {
 			return err
@@ -114,7 +116,13 @@ func (r *StoreFaceResolver) index(ctx context.Context, tenantID uuid.UUID) (face
 			idx.members[m.WatchlistID] = append(idx.members[m.WatchlistID], m.PersonID)
 		}
 		return nil
-	})
+	}
+	var err error
+	if q != nil {
+		err = load(q)
+	} else {
+		err = r.Store.Tx(ctx, store.ScopeFor(authz.Actor{TenantID: &tenantID}), load)
+	}
 	if err != nil {
 		return faceIndex{}, err
 	}
@@ -127,12 +135,12 @@ func (r *StoreFaceResolver) index(ctx context.Context, tenantID uuid.UUID) (face
 	return idx, nil
 }
 
-func (r *StoreFaceResolver) FaceNames(ctx context.Context, tenantID uuid.UUID, personIDs, watchlistIDs []uuid.UUID) (map[string]struct{}, error) {
+func (r *StoreFaceResolver) FaceNames(ctx context.Context, q *db.Queries, tenantID uuid.UUID, personIDs, watchlistIDs []uuid.UUID) (map[string]struct{}, error) {
 	out := map[string]struct{}{}
 	if r == nil || r.Store == nil {
 		return out, nil
 	}
-	idx, err := r.index(ctx, tenantID)
+	idx, err := r.index(ctx, q, tenantID)
 	if err != nil {
 		return nil, err
 	}
