@@ -421,5 +421,18 @@ describe("Rules route", () => {
       expect(calls[0]?.body).toMatchObject({ conditions: { face_person_ids: ["p1"], face_watchlist_ids: ["w1"] } });
       expect(seen).toEqual([]);
     });
+
+    it("does not query persons or watchlists for a platform administrator without a tenant", async () => {
+      const seen: string[] = [];
+      const platform = { ...withFaces, tenant_id: null } as unknown as typeof withFaces;
+      stub([], facesHandler(platform, seen));
+      renderPage(() => <Rules />);
+      fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Vigilancia" } });
+      advanceWizard(dialog, 1);
+      expect(within(dialog).queryByText(/Personas reconocidas/)).not.toBeInTheDocument();
+      expect(seen).toEqual([]);
+    });
   });
 });

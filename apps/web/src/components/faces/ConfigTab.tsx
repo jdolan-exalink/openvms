@@ -24,9 +24,9 @@ const numberFields = [
 type NumberKey = (typeof numberFields)[number]["key"];
 
 /** ConfigTab lists the face recognition settings of every server and edits them (faces.manage + servers.config). */
-export function ConfigTab({ canRestart }: { canRestart: boolean }) {
+export function ConfigTab({ canRestart, tenantId }: { canRestart: boolean; tenantId?: string }) {
   const t = useT();
-  const servers = useQuery(faceConfigQuery);
+  const servers = useQuery(faceConfigQuery(tenantId));
   const [editing, setEditing] = useState<string | null>(null);
 
   return (

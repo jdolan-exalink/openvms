@@ -155,11 +155,12 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
   const sites = useQuery(sitesQuery);
   const channels = useQuery(channelsQuery);
   // Person and watchlist pickers need faces.view: without it the API refuses them and the
-  // conditions already stored in the rule are sent back untouched.
+  // conditions already stored in the rule are sent back untouched. Platform administrators
+  // without a tenant cannot manage rules, so they never load a tenant's persons either.
   const me = useQuery(meQuery);
-  const canFaces = can(me.data, "faces.view");
-  const persons = useQuery({ ...facePersonsQuery, enabled: canFaces });
-  const watchlists = useQuery({ ...faceWatchlistsQuery, enabled: canFaces });
+  const canFaces = can(me.data, "faces.view") && !!me.data?.tenant_id;
+  const persons = useQuery({ ...facePersonsQuery(), enabled: canFaces });
+  const watchlists = useQuery({ ...faceWatchlistsQuery(), enabled: canFaces });
   const templates = useQuery({ queryKey: ["rule-templates"], queryFn: async () => unwrap(await api.GET("/api/v1/rules/templates")).items });
   const c = rule?.conditions ?? {};
   const [f, setF] = useState({
