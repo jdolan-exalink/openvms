@@ -10,6 +10,14 @@ import (
 
 func intp(v int) *int { return &v }
 
+func manyIDs(n int) []uuid.UUID {
+	out := make([]uuid.UUID, n)
+	for i := range out {
+		out[i] = uuid.New()
+	}
+	return out
+}
+
 func TestValidateConditions(t *testing.T) {
 	id := []uuid.UUID{uuid.New()}
 	tests := []struct {
@@ -40,6 +48,12 @@ func TestValidateConditions(t *testing.T) {
 		{"schedule start without end", TriggerEvent, Conditions{Schedule: &RuleSchedule{StartTime: "08:00"}}, "start_time and end_time"},
 		{"schedule day out of range", TriggerEvent, Conditions{Schedule: &RuleSchedule{DaysOfWeek: []int{7}}}, "days_of_week"},
 		{"schedule negative day", TriggerEvent, Conditions{Schedule: &RuleSchedule{DaysOfWeek: []int{-1}}}, "days_of_week"},
+		{"event accepts face persons and watchlists", TriggerEvent, Conditions{FacePersonIDs: id, FaceWatchlistIDs: id}, ""},
+		{"camera_offline rejects face_person_ids", TriggerCameraOffline, Conditions{FacePersonIDs: id}, "face_person_ids"},
+		{"server_offline rejects face_watchlist_ids", TriggerServerOffline, Conditions{FaceWatchlistIDs: id}, "face_watchlist_ids"},
+		{"too many face persons", TriggerEvent, Conditions{FacePersonIDs: manyIDs(MaxFaceRefs + 1)}, "face_person_ids"},
+		{"too many face watchlists", TriggerEvent, Conditions{FaceWatchlistIDs: manyIDs(MaxFaceRefs + 1)}, "face_watchlist_ids"},
+		{"face refs at the bound", TriggerEvent, Conditions{FacePersonIDs: manyIDs(MaxFaceRefs)}, ""},
 		{"schedule unknown timezone", TriggerEvent, Conditions{Schedule: &RuleSchedule{Timezone: "Mars/Olympus"}}, "timezone"},
 	}
 	for _, tt := range tests {

@@ -440,3 +440,67 @@ func TestRulePermissionsSplitReadAndManage(t *testing.T) {
 		t.Fatalf("notifications.manage list rules code = %d, want 403: %s", code, body)
 	}
 }
+
+// Person and watchlist conditions round-trip through the API; setting them needs faces.view.
+func TestRuleFaceConditionsRoundTripAndNeedFacesView(t *testing.T) {
+	te, token := setupRulesTest(t)
+	ctx := context.Background()
+	tenantID := te.Demo.TenantID
+	var person, list uuid.UUID
+	if err := te.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO face_persons (tenant_id, display_name, frigate_name) VALUES ($1, 'Ana', 'ana') RETURNING id`, tenantID).Scan(&person); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO face_watchlists (tenant_id, name) VALUES ($1, 'VIP') RETURNING id`, tenantID).Scan(&list)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{
+		"name": "Ana vista", "trigger_type": "event", "enabled": true,
+		"conditions": map[string]any{"face_person_ids": []string{person.String()}, "face_watchlist_ids": []string{list.String()}},
+		"actions":    map[string]any{"notify_in_app": true},
+	}
+	if code, out := te.request("POST", "/api/v1/rules", token, body); code != http.StatusForbidden {
+		t.Fatalf("create without faces.view = %d %s, want 403", code, out)
+	}
+	if _, err := te.Svc.CreateGrant(ctx, te.Admin, inventory.GrantInput{
+		SubjectType: "user", SubjectID: userIDOf(t, te, token), Permission: authz.FacesView, Effect: authz.Allow, ScopeType: authz.ScopeTenant, ScopeID: &tenantID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, out := te.request("POST", "/api/v1/rules", token, body)
+	if code != http.StatusCreated {
+		t.Fatalf("create with faces.view = %d %s", code, out)
+	}
+	var created gen.Rule
+	if err := json.Unmarshal(out, &created); err != nil {
+		t.Fatal(err)
+	}
+	c := created.Conditions
+	if c.FacePersonIds == nil || len(*c.FacePersonIds) != 1 || (*c.FacePersonIds)[0] != person || c.FaceWatchlistIds == nil || (*c.FaceWatchlistIds)[0] != list {
+		t.Fatalf("created conditions = %+v, want the face ids back", c)
+	}
+	bad := map[string]any{
+		"name": "offline", "trigger_type": "camera_offline", "enabled": true,
+		"conditions": map[string]any{"face_person_ids": []string{person.String()}},
+		"actions":    map[string]any{"notify_in_app": true},
+	}
+	if code, out := te.request("POST", "/api/v1/rules", token, bad); code != http.StatusBadRequest {
+		t.Fatalf("offline rule with person condition = %d %s, want 400", code, out)
+	}
+}
+
+func userIDOf(t *testing.T, te *testAlarmsEnv, token string) uuid.UUID {
+	t.Helper()
+	code, out := te.request("GET", "/api/v1/me", token, nil)
+	if code != http.StatusOK {
+		t.Fatalf("me = %d %s", code, out)
+	}
+	var me struct {
+		ID uuid.UUID `json:"id"`
+	}
+	if err := json.Unmarshal(out, &me); err != nil {
+		t.Fatal(err)
+	}
+	return me.ID
+}

@@ -85,6 +85,11 @@ type NewEvent struct {
 	Labels   []string  `json:"labels"`
 	Zones    []string  `json:"zones"`
 	Start    time.Time `json:"start_time"`
+	// SubLabels are the recognized names of the review (after erased face names were dropped) and
+	// GainedSubLabels the ones the stored event did not have before this upsert. Internal to rule
+	// evaluation: never published or serialized, because they may be face names.
+	SubLabels       []string `json:"-"`
+	GainedSubLabels []string `json:"-"`
 }
 
 // OpenedAlarm is published when an alert event opens an alarm.
@@ -289,6 +294,9 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	}
 
 	var created []NewEvent
+	// Events that were already known but gained recognized names: only person rules are
+	// evaluated for them (Frigate usually names a face after it opened the review).
+	var recognized []NewEvent
 	cameraNames := map[uuid.UUID]string{}
 	var opened []OpenedAlarm
 	updated := newAlarmUpdates()
@@ -301,6 +309,10 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 			ev, isNew, err := upsertReview(ctx, tx, srv, cam.ID, cam.LPR, r)
 			if err != nil {
 				return err
+			}
+			if !isNew && len(ev.GainedSubLabels) > 0 {
+				recognized = append(recognized, ev)
+				cameraNames[cam.ID] = cam.Name
 			}
 			if isNew {
 				created = append(created, ev)
@@ -345,14 +357,21 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 		s.OnAlarmUpdated(ctx, updated.list)
 	}
 	if s.Rules != nil {
-		for _, ev := range created {
+		evaluate := func(ev NewEvent, faceUpdate bool) {
 			rc := rules.EventContext{
 				ID: ev.ID, TenantID: ev.TenantID, SiteID: ev.SiteID, ServerID: ev.ServerID, CameraID: ev.CameraID,
-				CameraName: cameraNames[ev.CameraID], Severity: ev.Severity, Labels: ev.Labels, Zones: ev.Zones, Start: ev.Start,
+				CameraName: cameraNames[ev.CameraID], Severity: ev.Severity, Labels: ev.Labels, SubLabels: ev.SubLabels,
+				FaceUpdate: faceUpdate, Zones: ev.Zones, Start: ev.Start,
 			}
 			if err := s.Rules.EvaluateEvent(ctx, rc); err != nil {
 				s.Log.WarnContext(ctx, "evaluate rules", "error", err, "event_id", ev.ID)
 			}
+		}
+		for _, ev := range created {
+			evaluate(ev, false)
+		}
+		for _, ev := range recognized {
+			evaluate(ev, true)
 		}
 	}
 	return nil
@@ -473,6 +492,7 @@ func upsertReview(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID
 	}
 	var id uuid.UUID
 	var inserted bool
+	var gained []string
 	// Plates come from lpr_reads already stored for any of the review's detections, and
 	// has_snapshot from object_snapshots the same way (see markHasSnapshot/upsertObjectSnapshot):
 	// both converge on every upsert regardless of whether the review or its tracked objects were
@@ -480,6 +500,7 @@ func upsertReview(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID
 	// has_snapshot, is never reset once true (see internal/events/service.go for why: gating
 	// must survive a camera later being switched off LPR).
 	err = tx.QueryRow(ctx, `
+WITH previous AS (SELECT sub_labels FROM events WHERE server_id = $3 AND remote_id = $5)
 INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, sub_labels, zones, audio,
                     detection_ids, start_time, end_time, reviewed, plates, has_snapshot, lpr)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
@@ -501,17 +522,19 @@ ON CONFLICT (server_id, remote_id) DO UPDATE SET
     has_snapshot = events.has_snapshot OR excluded.has_snapshot,
     lpr = events.lpr OR excluded.lpr,
     updated_at = now()
-RETURNING id, (xmax = 0)`,
+RETURNING id, (xmax = 0),
+    coalesce((SELECT array_agg(l) FROM unnest($8::text[]) AS l WHERE l <> ALL (coalesce((SELECT sub_labels FROM previous), '{}'))), '{}')`,
 		srv.TenantID, srv.SiteID, srv.ID, cameraID, r.ID, severity(r.Severity),
 		nonNil(r.Data.Objects), subLabels, nonNil(r.Data.Zones), nonNil(r.Data.Audio),
 		detections, start, end, r.HasBeenReviewed, cameraLPR,
-	).Scan(&id, &inserted)
+	).Scan(&id, &inserted, &gained)
 	if err != nil {
 		return NewEvent{}, false, fmt.Errorf("upsert review %s: %w", r.ID, err)
 	}
 	return NewEvent{
 		ID: id, TenantID: srv.TenantID, SiteID: srv.SiteID, ServerID: srv.ID, CameraID: cameraID,
 		Severity: severity(r.Severity), Labels: nonNil(r.Data.Objects), Zones: nonNil(r.Data.Zones), Start: start,
+		SubLabels: subLabels, GainedSubLabels: gained,
 	}, inserted, nil
 }
 

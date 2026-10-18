@@ -50,6 +50,12 @@ func toRule(r rules.Rule) gen.Rule {
 	if len(c.MapZoneIDs) > 0 {
 		cond.MapZoneIds = &c.MapZoneIDs
 	}
+	if len(c.FacePersonIDs) > 0 {
+		cond.FacePersonIds = &c.FacePersonIDs
+	}
+	if len(c.FaceWatchlistIDs) > 0 {
+		cond.FaceWatchlistIds = &c.FaceWatchlistIDs
+	}
 	if c.CooldownSeconds != nil {
 		v := *c.CooldownSeconds
 		cond.CooldownSeconds = &v
@@ -130,6 +136,12 @@ func fromRuleConditions(c *gen.RuleConditions) rules.Conditions {
 	}
 	if c.MapZoneIds != nil {
 		out.MapZoneIDs = *c.MapZoneIds
+	}
+	if c.FacePersonIds != nil {
+		out.FacePersonIDs = *c.FacePersonIds
+	}
+	if c.FaceWatchlistIds != nil {
+		out.FaceWatchlistIDs = *c.FaceWatchlistIds
 	}
 	if c.CooldownSeconds != nil {
 		v := *c.CooldownSeconds
@@ -372,6 +384,14 @@ func (h *Handlers) SimulateRule(ctx context.Context, r gen.SimulateRuleRequestOb
 	if err != nil {
 		return nil, err
 	}
+	// Event sub_labels arrive already redacted for the caller, so a caller without faces.view
+	// can never match a person condition by simulation.
+	var faceNames map[string]struct{}
+	if a.TenantID != nil {
+		if faceNames, err = h.Rules.FaceNames(ctx, *a.TenantID, conditions); err != nil {
+			return nil, err
+		}
+	}
 	cooldown := int(rules.DefaultDebounce.Seconds())
 	if conditions.CooldownSeconds != nil && *conditions.CooldownSeconds > 0 {
 		cooldown = *conditions.CooldownSeconds
@@ -392,6 +412,9 @@ func (h *Handlers) SimulateRule(ctx context.Context, r gen.SimulateRuleRequestOb
 			Labels: event.Labels, Zones: event.Zones, MapZoneIDs: mapZones, Start: event.StartTime,
 			VehicleType: vehicleType(event.Vehicle), VehicleColor: vehicleColor(event.Vehicle),
 		})
+		if match && conditions.HasFaceConditions() {
+			match = rules.MatchesFaces(event.SubLabels, faceNames)
+		}
 		if !match {
 			continue
 		}
