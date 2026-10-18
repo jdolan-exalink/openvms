@@ -67,6 +67,9 @@ type Adapter interface {
 	DeleteFaceImages(ctx context.Context, name string, ids []string) error
 	// RenameFace renames a person; ErrFaceRenameUnsupported when the server lacks the route.
 	RenameFace(ctx context.Context, oldName, newName string) error
+	// FaceTrainImage downloads one unclassified train attempt (a file name as listed in
+	// FaceLibrary.Train) from Frigate's static /clips/faces/train route.
+	FaceTrainImage(ctx context.Context, file string) ([]byte, string, error)
 	// ClassifyTrainAttempt files an unclassified train attempt under a person.
 	ClassifyTrainAttempt(ctx context.Context, name, trainingFile string) error
 	// SaveRawConfig validates and writes a full config.yml, optionally restarting Frigate.

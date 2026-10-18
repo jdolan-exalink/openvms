@@ -66,3 +66,19 @@ DELETE FROM face_person_images WHERE tenant_id = @tenant_id AND person_id = @per
 
 -- name: DeleteFacePersonImages :exec
 DELETE FROM face_person_images WHERE tenant_id = @tenant_id AND person_id = @person_id;
+
+-- name: ListFaceNamesIn :many
+-- Which of these labels are the Frigate name of a registered person (tombstones included: the
+-- name stays in stored events until the purge scrubs it). Row level security limits the result
+-- to the caller's tenants.
+SELECT tenant_id, frigate_name FROM face_persons WHERE frigate_name = ANY(@names::text[]);
+
+-- name: ListFaceSyncSummary :many
+-- Per-person count of sync jobs by status (the UI folds them into a few buckets).
+SELECT person_id, status, count(*)::int AS n FROM face_server_sync
+WHERE tenant_id = @tenant_id GROUP BY person_id, status;
+
+-- name: ListFaceCapableServers :many
+SELECT * FROM frigate_servers
+WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
+ORDER BY lower(name), id;

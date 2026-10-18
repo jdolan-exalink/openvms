@@ -44,6 +44,15 @@ const (
 	ActionImageRead     = "FACE_IMAGE_READ"
 	// ActionSyncRetried records a manual sync retry (FACE-02).
 	ActionSyncRetried = "FACE_SYNC_RETRIED"
+	// ActionPersonRead records a read of person data (list, detail, image list). Details hold
+	// counts and ids only.
+	ActionPersonRead = "FACE_PERSON_READ"
+	// ActionRecognitionsRead records a read of the recognition timeline.
+	ActionRecognitionsRead = "FACE_RECOGNITIONS_READ"
+	// ActionTrainRead records a read of Frigate's unclassified attempts (list or image).
+	ActionTrainRead = "FACE_TRAIN_READ"
+	// ActionTrainAssigned records an attempt becoming an enrollment image.
+	ActionTrainAssigned = "FACE_TRAIN_ASSIGNED"
 )
 
 // Blobs stores enrollment image bytes; *objectstore.Store implements it.
@@ -57,6 +66,8 @@ type Service struct {
 	Store *store.Store
 	Blobs Blobs
 	Log   *slog.Logger
+	// Adapters reaches the Frigate servers for the train-from-detections feature; nil disables it.
+	Adapters AdapterSource
 }
 
 // Person is one registered person. FrigateName is the stable identifier used in every Frigate
@@ -68,8 +79,32 @@ type Person struct {
 	FrigateName string
 	Notes       string
 	ImageCount  int
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// Sync folds the per-server sync jobs of the person into counters (list and detail reads).
+	Sync      SyncSummary
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// SyncSummary counts a person's per-server sync jobs by state. Pending includes jobs being
+// processed.
+type SyncSummary struct {
+	Total, Synced, Pending, Failed, Conflict, Disabled int
+}
+
+func (s *SyncSummary) add(status string, n int) {
+	s.Total += n
+	switch status {
+	case SyncSynced:
+		s.Synced += n
+	case SyncFailed:
+		s.Failed += n
+	case SyncConflict:
+		s.Conflict += n
+	case SyncDisabled:
+		s.Disabled += n
+	default:
+		s.Pending += n
+	}
 }
 
 // Image is the metadata of one enrollment image (bytes are read with ReadImage).
@@ -144,9 +179,13 @@ func (s *Service) audit(ctx context.Context, q *db.Queries, actor authz.Actor, t
 	if err != nil {
 		return err
 	}
+	var target *uuid.UUID
+	if targetID != uuid.Nil {
+		target = &targetID
+	}
 	return q.InsertAudit(ctx, db.InsertAuditParams{
 		TenantID: &tenantID, ActorID: &actor.UserID, ActorName: actor.Username, Action: action,
-		TargetType: targetType, TargetID: &targetID, RequestID: logging.RequestID(ctx), Ip: httpx.ClientIP(ctx), Details: b,
+		TargetType: targetType, TargetID: target, RequestID: logging.RequestID(ctx), Ip: httpx.ClientIP(ctx), Details: b,
 	})
 }
 
@@ -237,11 +276,26 @@ func (s *Service) ListPersons(ctx context.Context, actor authz.Actor, tenantID u
 		if err != nil {
 			return err
 		}
-		for _, r := range rows {
-			out = append(out, Person{ID: r.ID, TenantID: r.TenantID, DisplayName: r.DisplayName, FrigateName: r.FrigateName,
-				Notes: r.Notes, ImageCount: int(r.ImageCount), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt})
+		sums, err := q.ListFaceSyncSummary(ctx, tenantID)
+		if err != nil {
+			return err
 		}
-		return nil
+		byPerson := map[uuid.UUID]*SyncSummary{}
+		for _, r := range sums {
+			if byPerson[r.PersonID] == nil {
+				byPerson[r.PersonID] = &SyncSummary{}
+			}
+			byPerson[r.PersonID].add(r.Status, int(r.N))
+		}
+		for _, r := range rows {
+			p := Person{ID: r.ID, TenantID: r.TenantID, DisplayName: r.DisplayName, FrigateName: r.FrigateName,
+				Notes: r.Notes, ImageCount: int(r.ImageCount), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+			if sum := byPerson[r.ID]; sum != nil {
+				p.Sync = *sum
+			}
+			out = append(out, p)
+		}
+		return s.audit(ctx, q, actor, tenantID, ActionPersonRead, "face_person", uuid.Nil, map[string]any{"scope": "list", "count": len(out)})
 	})
 	return out, err
 }
@@ -259,7 +313,16 @@ func (s *Service) GetPerson(ctx context.Context, actor authz.Actor, tenantID, id
 			return err
 		}
 		out = toPerson(row, int(n))
-		return nil
+		sums, err := q.ListFaceSyncSummary(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		for _, r := range sums {
+			if r.PersonID == id {
+				out.Sync.add(r.Status, int(r.N))
+			}
+		}
+		return s.audit(ctx, q, actor, tenantID, ActionPersonRead, "face_person", id, map[string]any{"scope": "detail", "person_id": id})
 	})
 	return out, err
 }
@@ -395,7 +458,8 @@ func (s *Service) ListImages(ctx context.Context, actor authz.Actor, tenantID, p
 		for _, r := range rows {
 			out = append(out, toImage(r))
 		}
-		return nil
+		return s.audit(ctx, q, actor, tenantID, ActionPersonRead, "face_person", personID,
+			map[string]any{"scope": "images", "person_id": personID, "count": len(out)})
 	})
 	return out, err
 }

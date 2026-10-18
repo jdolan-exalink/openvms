@@ -15,6 +15,7 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/faces"
 	"github.com/jdolan-exalink/openvms/internal/platform/httpx"
 	"github.com/jdolan-exalink/openvms/internal/platform/logging"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -322,6 +323,9 @@ func (s *Service) ListPage(ctx context.Context, actor authz.Actor, f Filter) (Pa
 		for i, r := range rows {
 			out.Items[i] = mapListAlarmRow(r)
 		}
+		if err := redactAlarmFaceNames(ctx, q, chk, out.Items); err != nil {
+			return err
+		}
 		if hasMore && len(out.Items) > 0 {
 			out.NextCursor = encodeAlarmCursor(sortMode, out.Items[len(out.Items)-1])
 		}
@@ -376,6 +380,17 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, alarmID uui
 				LinkedAt:     r.LinkedAt,
 			}
 		}
+		lists := make([][]string, len(items))
+		for i := range items {
+			lists[i] = items[i].SubLabels
+		}
+		rd, err := faces.NewRedactor(ctx, q, chk, lists...)
+		if err != nil {
+			return err
+		}
+		for i := range items {
+			items[i].SubLabels = rd.Strip(row.TenantID, items[i].SubLabels)
+		}
 		return nil
 	})
 	return items, err
@@ -397,10 +412,47 @@ func (s *Service) Get(ctx context.Context, actor authz.Actor, id uuid.UUID) (Ala
 			return err
 		}
 
-		res = mapGetAlarmRow(row)
+		one := []Alarm{mapGetAlarmRow(row)}
+		if err := redactAlarmFaceNames(ctx, q, chk, one); err != nil {
+			return err
+		}
+		res = one[0]
 		return nil
 	})
 	return res, err
+}
+
+// redactAlarmFaceNames removes recognized face names from the event sub_labels of callers
+// without faces.view, so alarms never reveal what the events API redacts.
+func redactAlarmFaceNames(ctx context.Context, q *db.Queries, chk *access.Checker, items []Alarm) error {
+	lists := make([][]string, len(items))
+	for i := range items {
+		lists[i] = items[i].EventSubLabels
+	}
+	rd, err := faces.NewRedactor(ctx, q, chk, lists...)
+	if err != nil || !rd.Active() {
+		return err
+	}
+	for i := range items {
+		items[i].EventSubLabels = rd.Strip(items[i].TenantID, items[i].EventSubLabels)
+	}
+	return nil
+}
+
+// redactResult applies the face-name redaction to the Alarm a lifecycle operation returns.
+func (s *Service) redactResult(ctx context.Context, actor authz.Actor, a *Alarm) error {
+	return s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		chk, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		one := []Alarm{*a}
+		if err := redactAlarmFaceNames(ctx, q, chk, one); err != nil {
+			return err
+		}
+		*a = one[0]
+		return nil
+	})
 }
 
 func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
@@ -470,6 +522,9 @@ func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UU
 	})
 	if err == nil && published {
 		s.publish(ctx, "acknowledged", res)
+	}
+	if err == nil {
+		err = s.redactResult(ctx, actor, &res)
 	}
 	return res, err
 }
@@ -558,6 +613,9 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 	if err == nil && published {
 		s.publish(ctx, "assigned", res)
 	}
+	if err == nil {
+		err = s.redactResult(ctx, actor, &res)
+	}
 	return res, err
 }
 
@@ -628,6 +686,9 @@ func (s *Service) Investigate(ctx context.Context, actor authz.Actor, id uuid.UU
 	})
 	if err == nil && published {
 		s.publish(ctx, "investigating", res)
+	}
+	if err == nil {
+		err = s.redactResult(ctx, actor, &res)
 	}
 	return res, err
 }
@@ -700,6 +761,9 @@ func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID, 
 	if err == nil && published {
 		s.publish(ctx, "resolved", res)
 	}
+	if err == nil {
+		err = s.redactResult(ctx, actor, &res)
+	}
 	return res, err
 }
 
@@ -770,6 +834,9 @@ func (s *Service) Close(ctx context.Context, actor authz.Actor, id uuid.UUID, co
 	})
 	if err == nil && published {
 		s.publish(ctx, "closed", res)
+	}
+	if err == nil {
+		err = s.redactResult(ctx, actor, &res)
 	}
 	return res, err
 }

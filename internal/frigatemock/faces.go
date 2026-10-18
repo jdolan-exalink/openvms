@@ -110,6 +110,35 @@ func (s *Server) AddFaceTrainAttempt(file string) {
 	l.train[file] = []byte("train:" + file)
 }
 
+// AddFaceTrainImage injects an unclassified attempt with real image bytes.
+func (s *Server) AddFaceTrainImage(file string, data []byte) {
+	l := s.lib()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.train[file] = append([]byte(nil), data...)
+}
+
+// faceFile serves GET /clips/faces/{name}/{file}, the static route Frigate's UI uses to show
+// library and train images.
+func (s *Server) faceFile(w http.ResponseWriter, r *http.Request) {
+	l := s.lib()
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var data []byte
+	var ok bool
+	if name := r.PathValue("name"); name == "train" {
+		data, ok = l.train[r.PathValue("file")]
+	} else {
+		data, ok = l.faces[name][r.PathValue("file")]
+	}
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", http.DetectContentType(data))
+	_, _ = w.Write(data)
+}
+
 func sortedKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
@@ -209,6 +238,13 @@ func (s *Server) deleteFaceImages(w http.ResponseWriter, r *http.Request) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	name := r.PathValue("name")
+	if name == "train" {
+		for _, id := range body.IDs {
+			delete(l.train, id)
+		}
+		writeJSON(w, map[string]any{"success": true, "message": "Successfully deleted faces."})
+		return
+	}
 	for _, id := range body.IDs {
 		delete(l.faces[name], id)
 	}

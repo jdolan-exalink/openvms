@@ -94,6 +94,16 @@ func (f *fixture) exec(sql string, args ...any) {
 	}
 }
 
+func (f *fixture) queryRow(sql string, dest any, args ...any) {
+	f.t.Helper()
+	err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), sql, args...).Scan(dest)
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 func (f *fixture) scanInt(sql string, args ...any) int {
 	f.t.Helper()
 	var n int

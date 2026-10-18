@@ -271,6 +271,86 @@ func (q *Queries) ListFaceBlobPurge(ctx context.Context, maxRows int32) ([]FaceB
 	return items, nil
 }
 
+const listFaceCapableServers = `-- name: ListFaceCapableServers :many
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers
+WHERE tenant_id = $1 AND deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
+ORDER BY lower(name), id
+`
+
+func (q *Queries) ListFaceCapableServers(ctx context.Context, tenantID uuid.UUID) ([]FrigateServer, error) {
+	rows, err := q.db.Query(ctx, listFaceCapableServers, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FrigateServer{}
+	for rows.Next() {
+		var i FrigateServer
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.SiteID,
+			&i.Name,
+			&i.BaseUrl,
+			&i.Username,
+			&i.PasswordSealed,
+			&i.TlsSkipVerify,
+			&i.FrigateVersion,
+			&i.Capabilities,
+			&i.Status,
+			&i.LastSeenAt,
+			&i.LastCheckedAt,
+			&i.LastError,
+			&i.Stats,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DeletedBy,
+			&i.AuthMode,
+			&i.EventAlarmMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFaceNamesIn = `-- name: ListFaceNamesIn :many
+SELECT tenant_id, frigate_name FROM face_persons WHERE frigate_name = ANY($1::text[])
+`
+
+type ListFaceNamesInRow struct {
+	TenantID    uuid.UUID
+	FrigateName string
+}
+
+// Which of these labels are the Frigate name of a registered person (tombstones included: the
+// name stays in stored events until the purge scrubs it). Row level security limits the result
+// to the caller's tenants.
+func (q *Queries) ListFaceNamesIn(ctx context.Context, names []string) ([]ListFaceNamesInRow, error) {
+	rows, err := q.db.Query(ctx, listFaceNamesIn, names)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFaceNamesInRow{}
+	for rows.Next() {
+		var i ListFaceNamesInRow
+		if err := rows.Scan(&i.TenantID, &i.FrigateName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFacePersonImages = `-- name: ListFacePersonImages :many
 SELECT id, tenant_id, person_id, storage_key, content_type, size_bytes, sha256, width, height, created_by, created_at FROM face_person_images WHERE tenant_id = $1 AND person_id = $2 ORDER BY created_at, id
 `
@@ -357,6 +437,38 @@ func (q *Queries) ListFacePersons(ctx context.Context, tenantID uuid.UUID) ([]Li
 			&i.SyncRevision,
 			&i.ImageCount,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFaceSyncSummary = `-- name: ListFaceSyncSummary :many
+SELECT person_id, status, count(*)::int AS n FROM face_server_sync
+WHERE tenant_id = $1 GROUP BY person_id, status
+`
+
+type ListFaceSyncSummaryRow struct {
+	PersonID uuid.UUID
+	Status   string
+	N        int32
+}
+
+// Per-person count of sync jobs by status (the UI folds them into a few buckets).
+func (q *Queries) ListFaceSyncSummary(ctx context.Context, tenantID uuid.UUID) ([]ListFaceSyncSummaryRow, error) {
+	rows, err := q.db.Query(ctx, listFaceSyncSummary, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFaceSyncSummaryRow{}
+	for rows.Next() {
+		var i ListFaceSyncSummaryRow
+		if err := rows.Scan(&i.PersonID, &i.Status, &i.N); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
