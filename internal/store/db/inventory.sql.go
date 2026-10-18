@@ -1771,6 +1771,22 @@ func (q *Queries) UpdateServer(ctx context.Context, arg UpdateServerParams) erro
 	return err
 }
 
+const updateServerCapabilities = `-- name: UpdateServerCapabilities :exec
+UPDATE frigate_servers SET capabilities = $1, updated_at = now()
+WHERE id = $2 AND capabilities IS DISTINCT FROM $1::jsonb
+`
+
+type UpdateServerCapabilitiesParams struct {
+	Capabilities json.RawMessage
+	ID           uuid.UUID
+}
+
+// Refreshes only the capability flags (face recognition, LPR...) without touching the version.
+func (q *Queries) UpdateServerCapabilities(ctx context.Context, arg UpdateServerCapabilitiesParams) error {
+	_, err := q.db.Exec(ctx, updateServerCapabilities, arg.Capabilities, arg.ID)
+	return err
+}
+
 const updateServerDiscovery = `-- name: UpdateServerDiscovery :exec
 UPDATE frigate_servers SET frigate_version = $1, capabilities = $2, updated_at = now()
 WHERE id = $3

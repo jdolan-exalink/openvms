@@ -113,6 +113,11 @@ WHERE id = @id AND deleted_at IS NULL;
 UPDATE frigate_servers SET frigate_version = @frigate_version, capabilities = @capabilities, updated_at = now()
 WHERE id = @id;
 
+-- name: UpdateServerCapabilities :exec
+-- Refreshes only the capability flags (face recognition, LPR...) without touching the version.
+UPDATE frigate_servers SET capabilities = @capabilities, updated_at = now()
+WHERE id = @id AND capabilities IS DISTINCT FROM @capabilities::jsonb;
+
 -- name: UpdateServerHealth :exec
 UPDATE frigate_servers SET
     status = @status,
