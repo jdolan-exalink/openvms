@@ -43,9 +43,20 @@ type HealthPoller struct {
 	OnChange       func(ctx context.Context, c StatusChange)
 	OnCameraChange func(ctx context.Context, c CameraStatusChange)
 
+	// CapabilityInterval is how often each server's capability flags (face recognition, LPR...)
+	// are re-read from Frigate; zero means DefaultCapabilityInterval. A flag that changes on the
+	// Frigate side (enabled in config.yml and restarted) is picked up here.
+	CapabilityInterval time.Duration
+
+	capMu        sync.Mutex
+	capRefreshed map[uuid.UUID]time.Time
+
 	// Adapters is shared with the event syncer; nil creates a private pool.
 	Adapters *Adapters
 }
+
+// DefaultCapabilityInterval is the capability refresh period of the health poller.
+const DefaultCapabilityInterval = 2 * time.Minute
 
 // Storage above this share of used space marks a server degraded (PRD §61 "Disk > 90%").
 const storageDegradedRatio = 0.9
@@ -184,6 +195,9 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 		p.Svc.Log.ErrorContext(ctx, "health: store result", "server_id", srv.ID, "error", err)
 		return
 	}
+	if status != "offline" && a != nil {
+		p.refreshCapabilities(ctx, srv, a)
+	}
 	if status != srv.Status && p.OnChange != nil {
 		p.OnChange(ctx, StatusChange{ServerID: srv.ID, TenantID: srv.TenantID, SiteID: srv.SiteID, From: srv.Status, To: status, Error: errMsg, At: now})
 	}
@@ -191,5 +205,27 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 		for _, c := range camChanges {
 			p.OnCameraChange(ctx, c)
 		}
+	}
+}
+
+// refreshCapabilities re-reads the capability flags of an online server at most once per
+// CapabilityInterval and stores them when they changed.
+func (p *HealthPoller) refreshCapabilities(ctx context.Context, srv db.FrigateServer, a frigate.Adapter) {
+	every := p.CapabilityInterval
+	if every <= 0 {
+		every = DefaultCapabilityInterval
+	}
+	p.capMu.Lock()
+	if p.capRefreshed == nil {
+		p.capRefreshed = map[uuid.UUID]time.Time{}
+	}
+	if last, ok := p.capRefreshed[srv.ID]; ok && time.Since(last) < every {
+		p.capMu.Unlock()
+		return
+	}
+	p.capRefreshed[srv.ID] = time.Now()
+	p.capMu.Unlock()
+	if err := p.Svc.refreshCapabilities(ctx, srv.ID, func(context.Context) (frigate.Adapter, error) { return a, nil }); err != nil {
+		p.Svc.Log.WarnContext(ctx, "health: capability refresh failed", "server_id", srv.ID, "error", err)
 	}
 }
