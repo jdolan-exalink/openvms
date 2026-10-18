@@ -25,4 +25,11 @@ describe("MobileNav", () => {
     expect(bar).not.toHaveClass("h-20");
     expect(screen.getByRole("button", { name: "Más" })).toHaveClass("min-h-11");
   });
+
+  it("hides the bar only on the desktop shell, so phones in landscape keep it", () => {
+    render(<MobileNav me={me} features={features} pathname="/events" />);
+    const region = screen.getByRole("navigation", { name: "Navegación móvil" }).closest('[data-shell-region="bottom-nav"]');
+    expect(region).toHaveClass("shell-md:hidden");
+    expect(region).not.toHaveClass("md:hidden");
+  });
 });

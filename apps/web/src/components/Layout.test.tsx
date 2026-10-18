@@ -63,7 +63,7 @@ describe("primary navigation and context header", () => {
     await screen.findByRole("navigation", { name: "Navegación principal" });
     const rail = screen.getByRole("complementary", { name: "Primary Nav Rail" });
     // No rail on mobile: the bottom navigation takes over below md.
-    expect(rail).toHaveClass("hidden", "md:flex");
+    expect(rail).toHaveClass("hidden", "shell-md:flex");
     const eventsLink = within(rail).getByRole("link", { name: "Eventos" });
     expect(eventsLink).toHaveAttribute("aria-current", "page");
     // Icon-only rail: the label is the accessible name and a tooltip, never visible text.
@@ -195,7 +195,7 @@ describe("primary navigation and context header", () => {
     expect(screen.getByRole("link", { name: "Saltar al contenido" })).toHaveAttribute("href", "#main-content");
 
     const bar = screen.getByRole("navigation", { name: "Navegación móvil" });
-    expect(bar.closest('[data-shell-region="bottom-nav"]')).toHaveClass("md:hidden");
+    expect(bar.closest('[data-shell-region="bottom-nav"]')).toHaveClass("shell-md:hidden");
     const links = within(bar).getAllByRole("link");
     expect(links.map((link) => link.textContent)).toEqual(["En vivo", "Eventos", "Patentes", "Alarmas"]);
     expect(within(bar).getByRole("link", { name: "Eventos" })).toHaveAttribute("aria-current", "page");
