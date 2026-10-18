@@ -603,3 +603,29 @@ func TestSyncTombstonePurgesWhenServerLostFaceCapabilityAndCleansUpLater(t *test
 		t.Fatalf("cleanup obligations left = %d, want 0", n)
 	}
 }
+
+func TestSyncTombstoneWithFailedDeleteIsRetryable(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	p := sf.person("Ana", 1)
+	sf.run()
+	if err := sf.svc.DeletePerson(context.Background(), sf.manager, sf.tenant, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The remote delete exhausted its attempts (e.g. wrong credentials), so the tombstone is stuck.
+	sf.exec(`UPDATE face_server_sync SET status = 'failed', last_error = 'unauthorized' WHERE person_id = $1 AND server_id = $2`, p.ID, sf.h01ID)
+	sf.run()
+	if n := sf.scanInt(`SELECT count(*) FROM face_persons WHERE id = $1`, p.ID); n != 1 {
+		t.Fatal("setup: tombstone should still block on its failed delete")
+	}
+	if n, err := sf.svc.RetrySync(context.Background(), sf.manager, sf.tenant, p.ID); err != nil || n != 1 {
+		t.Fatalf("retry on a deleted person = %d, %v; want 1 requeued job", n, err)
+	}
+	sf.run()
+	if _, ok := sf.h01.FaceLibrary()[p.FrigateName]; ok {
+		t.Fatal("remote face was not deleted after retrying the tombstone")
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM face_persons WHERE id = $1`, p.ID); n != 0 {
+		t.Fatal("tombstone was not purged after a successful retry")
+	}
+}

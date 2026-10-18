@@ -534,14 +534,15 @@ func (s *Service) ListSyncStatus(ctx context.Context, actor authz.Actor, tenantI
 
 // RetrySync requeues the person's failed and conflicting server jobs (faces.manage) and
 // returns how many were requeued. A conflict is re-evaluated from scratch: it clears once the
-// foreign face that caused it is gone.
+// foreign face that caused it is gone. Deleted persons are included, so a remote delete that
+// exhausted its attempts can still be retried and the tombstone purged.
 func (s *Service) RetrySync(ctx context.Context, actor authz.Actor, tenantID, personID uuid.UUID) (int, error) {
 	var n int64
 	err := s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
 		if err := lockPerson(ctx, q, personID); err != nil {
 			return err
 		}
-		if _, err := q.GetFacePerson(ctx, db.GetFacePersonParams{TenantID: tenantID, ID: personID}); err != nil {
+		if _, err := q.GetFacePersonAny(ctx, db.GetFacePersonAnyParams{TenantID: tenantID, ID: personID}); err != nil {
 			return store.Classify(err)
 		}
 		var err error
