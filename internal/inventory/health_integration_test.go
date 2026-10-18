@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
@@ -108,5 +109,51 @@ func TestHealthPollerOnCameraChange(t *testing.T) {
 	}
 	if !foundUnknown {
 		t.Errorf("expected camera transitions to unknown when server offline, got: %+v", camChanges)
+	}
+}
+
+func TestHealthPollerRefreshesCapabilitiesPeriodically(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	cam := env.Cameras["frigate-h01/plaza"]
+	flag := func() bool {
+		var on bool
+		if err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT coalesce((capabilities->>'face_recognition')::bool, false) FROM frigate_servers WHERE id = $1`, cam.ServerID).Scan(&on)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return on
+	}
+	setFlag := func(on bool) {
+		if err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE frigate_servers SET capabilities = capabilities || jsonb_build_object('face_recognition', $2::boolean) WHERE id = $1`, cam.ServerID, on)
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Frigate runs with face recognition on while OpenVMS still believes it is off.
+	manager := faceActor(t, env, authz.FacesView, authz.FacesManage, authz.ServersView, authz.ServersConfig)
+	if _, err := env.Svc.PatchFaceConfig(ctx, manager, env.Demo.TenantID, cam.ServerID, inventory.FaceConfigPatch{Enabled: fp(true)}); err != nil {
+		t.Fatal(err)
+	}
+	setFlag(false)
+	poller := &inventory.HealthPoller{Svc: env.Svc, Interval: time.Second, Concurrency: 2, CapabilityInterval: time.Hour}
+	poller.PollOnce(ctx)
+	if !flag() {
+		t.Fatal("the first poll did not refresh capabilities")
+	}
+
+	// Within the interval a stale value is left alone; once it elapses the poll corrects it.
+	setFlag(false)
+	poller.PollOnce(ctx)
+	if flag() {
+		t.Fatal("capabilities were refreshed before the interval elapsed")
+	}
+	poller.CapabilityInterval = time.Nanosecond
+	poller.PollOnce(ctx)
+	if !flag() {
+		t.Fatal("capabilities.face_recognition did not follow Frigate")
 	}
 }
