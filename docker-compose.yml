@@ -44,6 +44,7 @@ services:
       test: ["CMD-SHELL", "pg_isready -U openvms -d openvms"]
       interval: 5s
       retries: 20
+    restart: unless-stopped
 
   valkey:
     image: valkey/valkey:8-alpine
@@ -52,6 +53,7 @@ services:
       test: ["CMD", "valkey-cli", "ping"]
       interval: 5s
       retries: 20
+    restart: unless-stopped
 
   nats:
     image: nats:2.11-alpine
@@ -62,6 +64,7 @@ services:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz?js-enabled-only=true"]
       interval: 5s
       retries: 20
+    restart: unless-stopped
 
   seaweedfs:
     image: chrislusf/seaweedfs:latest
@@ -74,11 +77,13 @@ services:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz"]
       interval: 5s
       retries: 30
+    restart: unless-stopped
 
   mosquitto:
     image: eclipse-mosquitto:2
     ports: ["127.0.0.1:1883:1883"]
     volumes: [./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro]
+    restart: unless-stopped
 
   frigate-helvecia:
     profiles: [mock]
@@ -222,12 +227,14 @@ services:
       default: {}
       onvif-agent:
         ipv4_address: ${OPENVMS_AGENT_WEB_IPV4:-172.29.240.4}
+    restart: unless-stopped
 
   prometheus:
     profiles: [observability]
     image: prom/prometheus:v3.5.0
     volumes: [./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro]
     ports: ["127.0.0.1:9090:9090"]
+    restart: unless-stopped
 
   grafana:
     profiles: [observability]
@@ -237,6 +244,7 @@ services:
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
     volumes: [./deploy/grafana/provisioning:/etc/grafana/provisioning:ro]
     ports: ["127.0.0.1:3000:3000"]
+    restart: unless-stopped
 
 networks:
   onvif-agent:
