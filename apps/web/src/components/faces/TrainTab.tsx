@@ -8,7 +8,7 @@ import { fmtDateTime } from "@/lib/format";
 
 const NEW_PERSON = "__new__";
 
-function AttemptCard({ attempt, persons, canManage }: { attempt: Schemas["FaceTrainAttempt"]; persons: Schemas["FacePerson"][]; canManage: boolean }) {
+function AttemptCard({ attempt, persons, canManage, tenantId }: { attempt: Schemas["FaceTrainAttempt"]; persons: Schemas["FacePerson"][]; canManage: boolean; tenantId?: string }) {
   const t = useT();
   const qc = useQueryClient();
   const [target, setTarget] = useState("");
@@ -18,7 +18,7 @@ function AttemptCard({ attempt, persons, canManage }: { attempt: Schemas["FaceTr
     mutationFn: async () => {
       const base = { server_id: attempt.server_id, file: attempt.file };
       const body = target === NEW_PERSON ? { ...base, new_person_display_name: newName.trim() } : { ...base, person_id: target };
-      return unwrap(await api.POST("/api/v1/faces/train/assign", { body }));
+      return unwrap(await api.POST("/api/v1/faces/train/assign", { params: { query: { tenant_id: tenantId } }, body }));
     },
     onSuccess: async (res) => {
       setHint(t("faces.assigned", { name: res.person.display_name }));
@@ -38,7 +38,7 @@ function AttemptCard({ attempt, persons, canManage }: { attempt: Schemas["FaceTr
   return (
     <li className="flex flex-col gap-2 rounded-m3-xl bg-surface-1 p-3">
       <img
-        src={faceTrainImageUrl(attempt.server_id, attempt.file)}
+        src={faceTrainImageUrl(attempt.server_id, attempt.file, tenantId)}
         alt={t("faces.attemptAlt", { server: attempt.server_name })}
         loading="lazy"
         className="aspect-square w-full rounded-m3-lg bg-surface-2 object-cover"
@@ -76,10 +76,10 @@ function AttemptCard({ attempt, persons, canManage }: { attempt: Schemas["FaceTr
 }
 
 /** TrainTab shows Frigate's unclassified attempts so a manager can turn them into enrollment photos. */
-export function TrainTab({ canManage }: { canManage: boolean }) {
+export function TrainTab({ canManage, tenantId }: { canManage: boolean; tenantId?: string }) {
   const t = useT();
-  const train = useQuery(faceTrainQuery);
-  const persons = useQuery(facePersonsQuery);
+  const train = useQuery(faceTrainQuery(tenantId));
+  const persons = useQuery(facePersonsQuery(tenantId));
   const data = train.data;
   const failing = data?.servers.filter((s) => s.error) ?? [];
 

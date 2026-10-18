@@ -13,18 +13,18 @@ import { fmtDateTime } from "@/lib/format";
  * PersonDetail is one person: editable name and notes, the enrollment photo gallery, and the
  * per-server sync state. Without faces.manage everything is read-only.
  */
-export function PersonDetail({ person, canManage, onBack }: { person: Schemas["FacePerson"]; canManage: boolean; onBack: () => void }) {
+export function PersonDetail({ person, canManage, tenantId, onBack }: { person: Schemas["FacePerson"]; canManage: boolean; tenantId?: string; onBack: () => void }) {
   const t = useT();
   const qc = useQueryClient();
-  const images = useQuery(faceImagesQuery(person.id));
-  const syncStatus = useQuery(faceSyncQuery(person.id));
+  const images = useQuery(faceImagesQuery(person.id, tenantId));
+  const syncStatus = useQuery(faceSyncQuery(person.id, tenantId));
   const [name, setName] = useState(person.display_name);
   const [notes, setNotes] = useState(person.notes);
   const [confirmPerson, setConfirmPerson] = useState(false);
   const [confirmImage, setConfirmImage] = useState<{ id: string; n: number } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ["faces"] });
-  const path = { params: { path: { personId: person.id } } };
+  const path = { params: { path: { personId: person.id }, query: { tenant_id: tenantId } } };
 
   const save = useMutation({
     mutationFn: async (e: FormEvent) => {
@@ -37,13 +37,13 @@ export function PersonDetail({ person, canManage, onBack }: { person: Schemas["F
     mutationFn: async (file: File) => {
       const form = new FormData();
       form.append("file", file);
-      return postForm<Schemas["FaceImage"]>(`/api/v1/faces/persons/${person.id}/images`, form);
+      return postForm<Schemas["FaceImage"]>(`/api/v1/faces/persons/${person.id}/images${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`, form);
     },
     onSuccess: refresh,
   });
   const removeImage = useMutation({
     mutationFn: async (imageId: string) =>
-      unwrap(await api.DELETE("/api/v1/faces/persons/{personId}/images/{imageId}", { params: { path: { personId: person.id, imageId } } })),
+      unwrap(await api.DELETE("/api/v1/faces/persons/{personId}/images/{imageId}", { params: { path: { personId: person.id, imageId }, query: { tenant_id: tenantId } } })),
     onSuccess: () => {
       setConfirmImage(null);
       return refresh();
@@ -105,7 +105,7 @@ export function PersonDetail({ person, canManage, onBack }: { person: Schemas["F
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6" aria-label={t("faces.gallery")}>
             {images.data.map((img, i) => (
               <li key={img.id} className="relative overflow-hidden rounded-m3-lg bg-surface-2">
-                <img src={faceImageUrl(person.id, img.id)} alt={t("faces.imageAlt", { n: i + 1, name: person.display_name })} loading="lazy" className="aspect-square w-full object-cover" />
+                <img src={faceImageUrl(person.id, img.id, tenantId)} alt={t("faces.imageAlt", { n: i + 1, name: person.display_name })} loading="lazy" className="aspect-square w-full object-cover" />
                 {canManage && (
                   <span className="absolute top-1 right-1">
                     <IconButton icon={Trash2} size="sm" variant="tonal" aria-label={t("faces.deleteImage", { n: i + 1 })} title={t("faces.deleteImage", { n: i + 1 })} onClick={() => setConfirmImage({ id: img.id, n: i + 1 })} />

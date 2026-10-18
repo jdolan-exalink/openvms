@@ -7,9 +7,9 @@ import { useT } from "@/i18n";
 import { fmtDateTime, fromLocalInput } from "@/lib/format";
 
 /** RecognitionsTab is the timeline of recognized people, newest first, with person/camera/date filters. */
-export function RecognitionsTab() {
+export function RecognitionsTab({ tenantId }: { tenantId?: string }) {
   const t = useT();
-  const persons = useQuery(facePersonsQuery);
+  const persons = useQuery(facePersonsQuery(tenantId));
   const cameras = useQuery(camerasQuery({}));
   const [person, setPerson] = useState("");
   const [camera, setCamera] = useState("");
@@ -22,6 +22,7 @@ export function RecognitionsTab() {
       from: fromLocalInput(from),
       to: fromLocalInput(to),
       limit: 24,
+      tenant_id: tenantId,
     }),
   );
   const items = list.data?.pages.flatMap((p) => p.items) ?? [];

@@ -158,8 +158,8 @@ function RuleForm({ rule, onDone, onCancel, onReloadRule }: { rule?: Rule; onDon
   // conditions already stored in the rule are sent back untouched.
   const me = useQuery(meQuery);
   const canFaces = can(me.data, "faces.view");
-  const persons = useQuery({ ...facePersonsQuery, enabled: canFaces });
-  const watchlists = useQuery({ ...faceWatchlistsQuery, enabled: canFaces });
+  const persons = useQuery({ ...facePersonsQuery(), enabled: canFaces });
+  const watchlists = useQuery({ ...faceWatchlistsQuery(), enabled: canFaces });
   const templates = useQuery({ queryKey: ["rule-templates"], queryFn: async () => unwrap(await api.GET("/api/v1/rules/templates")).items });
   const c = rule?.conditions ?? {};
   const [f, setF] = useState({

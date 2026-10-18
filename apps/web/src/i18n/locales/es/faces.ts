@@ -1,6 +1,7 @@
 const messages = {
   title: "Rostros",
   description: "Personas registradas, entrenamiento a partir de detecciones y reconocimientos.",
+  tenant: "Organización",
   tabs: "Secciones de rostros",
   tabPeople: "Personas",
   tabTrain: "Entrenar",

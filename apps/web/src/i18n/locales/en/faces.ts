@@ -1,6 +1,7 @@
 const messages = {
   title: "Faces",
   description: "Registered people, training from detections and recognitions.",
+  tenant: "Organization",
   tabs: "Faces sections",
   tabPeople: "People",
   tabTrain: "Train",

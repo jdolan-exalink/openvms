@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { meQuery } from "@/api/queries";
+import { meQuery, tenantsQuery } from "@/api/queries";
 import { ConfigTab } from "@/components/faces/ConfigTab";
 import { PersonsTab } from "@/components/faces/PersonsTab";
 import { RecognitionsTab } from "@/components/faces/RecognitionsTab";
 import { TrainTab } from "@/components/faces/TrainTab";
 import { WatchlistsTab } from "@/components/faces/WatchlistsTab";
-import { Empty, PageHeader } from "@/components/ui";
+import { Empty, Field, PageHeader, Select } from "@/components/ui";
 import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
@@ -20,6 +20,16 @@ const tabs: { id: Tab; label: MessageKey }[] = [
   { id: "config", label: "faces.tabConfig" },
 ];
 
+const TENANT_KEY = "faces.tenant";
+
+function storedTenant(): string | null {
+  try {
+    return localStorage.getItem(TENANT_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Faces: the central person registry, training from Frigate's unclassified attempts, and the
  * recognition timeline. Everything needs faces.view; changes need faces.manage (the API
@@ -29,6 +39,22 @@ export function Faces() {
   const t = useT();
   const me = useQuery(meQuery);
   const [tab, setTab] = useState<Tab>("people");
+  // Platform administrators have no tenant of their own: the faces API needs the one they act on.
+  const isPlatform = me.data?.tenant_id === null;
+  const tenants = useQuery({ ...tenantsQuery, enabled: isPlatform });
+  const [pickedTenant, setPickedTenant] = useState<string | null>(storedTenant);
+  const tenantList = tenants.data ?? [];
+  const tenantId = isPlatform ? (tenantList.find((x) => x.id === pickedTenant)?.id ?? tenantList[0]?.id) : undefined;
+  // Members pass nothing; a platform administrator renders nothing until a tenant is selected.
+  const ready = !isPlatform || tenantId !== undefined;
+  function pickTenant(id: string) {
+    setPickedTenant(id);
+    try {
+      localStorage.setItem(TENANT_KEY, id);
+    } catch {
+      // The choice is a per-viewer convenience; the page works without storage.
+    }
+  }
   const canView = can(me.data, "faces.view");
   const canManage = can(me.data, "faces.manage");
   // The settings live on the servers, so they also need servers.view (the API checks it per server).
@@ -47,7 +73,18 @@ export function Faces() {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6">
       <PageHeader title={t("faces.title")} description={t("faces.description")} />
-      {canView && (
+      {canView && isPlatform && (
+        <Field label={t("faces.tenant")}>
+          <Select value={tenantId ?? ""} onChange={(e) => pickTenant(e.target.value)} className="max-w-xs">
+            {tenantList.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      )}
+      {canView && ready && (
         <>
           <div role="tablist" aria-label={t("faces.tabs")} className="flex gap-1 border-b border-outline-variant">
             {visibleTabs.map((item) => (
@@ -69,11 +106,11 @@ export function Faces() {
             ))}
           </div>
           <div role="tabpanel" id={`faces-panel-${tab}`} aria-labelledby={`faces-tab-${tab}`}>
-            {tab === "people" && <PersonsTab canManage={canManage} />}
-            {tab === "train" && <TrainTab canManage={canManage} />}
-            {tab === "recognitions" && <RecognitionsTab />}
-            {tab === "lists" && <WatchlistsTab canManage={canManage} />}
-            {tab === "config" && canConfig && <ConfigTab canRestart={can(me.data, "servers.restart")} />}
+            {tab === "people" && <PersonsTab canManage={canManage} tenantId={tenantId} />}
+            {tab === "train" && <TrainTab canManage={canManage} tenantId={tenantId} />}
+            {tab === "recognitions" && <RecognitionsTab tenantId={tenantId} />}
+            {tab === "lists" && <WatchlistsTab canManage={canManage} tenantId={tenantId} />}
+            {tab === "config" && canConfig && <ConfigTab canRestart={can(me.data, "servers.restart")} tenantId={tenantId} />}
           </div>
         </>
       )}
