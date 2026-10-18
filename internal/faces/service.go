@@ -210,6 +210,10 @@ func (s *Service) CreatePerson(ctx context.Context, actor authz.Actor, tenantID 
 				TenantID: tenantID, DisplayName: name, FrigateName: frigateName, Notes: notes, CreatedBy: &actor.UserID,
 			})
 			if err == nil {
+				// A new person owns the name again: recognitions must be ingested normally.
+				if err := q.ClearFaceErasedName(ctx, db.ClearFaceErasedNameParams{TenantID: tenantID, Name: frigateName}); err != nil {
+					return err
+				}
 				out = toPerson(row, 0)
 				return s.audit(ctx, q, actor, tenantID, ActionPersonCreated, "face_person", row.ID, map[string]any{"person_id": row.ID})
 			}

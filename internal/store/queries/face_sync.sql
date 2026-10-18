@@ -141,15 +141,29 @@ SELECT EXISTS (
 
 -- name: ScrubEventSubLabel :execrows
 -- Removes a recognized name from stored event sub_labels in batches. Exact element match, so it
--- is idempotent and never touches other labels.
+-- is idempotent and never touches other labels. Rows locked by a concurrent writer are waited
+-- for, never skipped: a skipped row would keep the name after the person row is purged.
 WITH batch AS (
     SELECT e.id FROM events e
     WHERE e.tenant_id = @tenant_id AND e.sub_labels @> ARRAY[@name::text]
     LIMIT @max_rows
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE
 )
 UPDATE events AS ev SET sub_labels = array_remove(ev.sub_labels, @name::text)
 FROM batch WHERE ev.id = batch.id;
+
+-- name: CountEventsWithSubLabel :one
+SELECT count(*) FROM events WHERE tenant_id = @tenant_id AND sub_labels @> ARRAY[@name::text];
+
+-- name: RecordFaceErasedName :exec
+INSERT INTO face_erased_names (tenant_id, frigate_name) VALUES (@tenant_id, @name)
+ON CONFLICT (tenant_id, frigate_name) DO UPDATE SET erased_at = now();
+
+-- name: ClearFaceErasedName :exec
+DELETE FROM face_erased_names WHERE tenant_id = @tenant_id AND frigate_name = @name;
+
+-- name: PruneFaceErasedNames :execrows
+DELETE FROM face_erased_names WHERE erased_at < now() - make_interval(secs => @retention_seconds::float8);
 
 -- name: RecordFaceRemoteCleanup :exec
 INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)

@@ -436,6 +436,29 @@ func nonNil(s []string) []string {
 	return s
 }
 
+// ErasedFaceNameRetention bounds how long the names of purged face persons are dropped from
+// ingested sub_labels (Frigate's review retention; keep in sync with faces.ErasedNameRetention).
+const ErasedFaceNameRetention = 30 * 24 * time.Hour
+
+// dropErasedFaceNames removes sub_labels that name a purged face person of the tenant, so a
+// review Frigate still serves cannot write an erased name back into the index.
+func dropErasedFaceNames(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, labels []string) ([]string, error) {
+	if len(labels) == 0 {
+		return labels, nil
+	}
+	var kept []string
+	err := tx.QueryRow(ctx, `
+SELECT coalesce(array_agg(l ORDER BY o), '{}') FROM unnest($1::text[]) WITH ORDINALITY AS t(l, o)
+WHERE NOT EXISTS (SELECT 1 FROM face_erased_names n
+                  WHERE n.tenant_id = $2 AND n.frigate_name = t.l
+                    AND n.erased_at > now() - make_interval(secs => $3::float8))`,
+		labels, tenantID, ErasedFaceNameRetention.Seconds()).Scan(&kept)
+	if err != nil {
+		return nil, fmt.Errorf("filter erased face names: %w", err)
+	}
+	return kept, nil
+}
+
 func upsertReview(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID uuid.UUID, cameraLPR bool, r frigate.Review) (NewEvent, bool, error) {
 	var end *time.Time
 	if r.EndTime != nil {
@@ -444,6 +467,10 @@ func upsertReview(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID
 	}
 	start := fromUnix(r.StartTime)
 	detections := nonNil(r.Data.Detections)
+	subLabels, err := dropErasedFaceNames(ctx, tx, srv.TenantID, nonNil(r.Data.SubLabels))
+	if err != nil {
+		return NewEvent{}, false, err
+	}
 	var id uuid.UUID
 	var inserted bool
 	// Plates come from lpr_reads already stored for any of the review's detections, and
@@ -452,7 +479,7 @@ func upsertReview(ctx context.Context, tx pgx.Tx, srv db.FrigateServer, cameraID
 	// seen first. lpr records the camera's LPR capability at ingestion time and, like
 	// has_snapshot, is never reset once true (see internal/events/service.go for why: gating
 	// must survive a camera later being switched off LPR).
-	err := tx.QueryRow(ctx, `
+	err = tx.QueryRow(ctx, `
 INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, sub_labels, zones, audio,
                     detection_ids, start_time, end_time, reviewed, plates, has_snapshot, lpr)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
@@ -476,7 +503,7 @@ ON CONFLICT (server_id, remote_id) DO UPDATE SET
     updated_at = now()
 RETURNING id, (xmax = 0)`,
 		srv.TenantID, srv.SiteID, srv.ID, cameraID, r.ID, severity(r.Severity),
-		nonNil(r.Data.Objects), nonNil(r.Data.SubLabels), nonNil(r.Data.Zones), nonNil(r.Data.Audio),
+		nonNil(r.Data.Objects), subLabels, nonNil(r.Data.Zones), nonNil(r.Data.Audio),
 		detections, start, end, r.HasBeenReviewed, cameraLPR,
 	).Scan(&id, &inserted)
 	if err != nil {

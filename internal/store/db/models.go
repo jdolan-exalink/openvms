@@ -388,6 +388,12 @@ type FaceBlobPurge struct {
 	CreatedAt  time.Time
 }
 
+type FaceErasedName struct {
+	TenantID    uuid.UUID
+	FrigateName string
+	ErasedAt    time.Time
+}
+
 type FacePerson struct {
 	ID           uuid.UUID
 	TenantID     uuid.UUID
