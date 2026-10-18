@@ -1396,8 +1396,9 @@ export interface paths {
          *     pagination. Filtering by label, zone, sub_label, time or plate needs events.search.
          *     On LPR-capable cameras, sub_label carries recognized plate text, so — like plate — it
          *     is only returned and searchable there with lpr.view / lpr.search. On cameras without
-         *     LPR capability, sub_label is an ordinary event field (e.g. a recognized face name) and
-         *     follows normal events.view / events.search.
+         *     LPR capability, sub_label is an ordinary event field and follows normal events.view /
+         *     events.search. A sub_label equal to a registered person's face name is redacted
+         *     everywhere (and cannot be searched) unless the caller holds faces.view.
          */
         get: operations["listEvents"];
         put?: never;
@@ -1528,6 +1529,240 @@ export interface paths {
         get: operations["getEventThumbnail"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/persons": {
+        parameters: {
+            query?: {
+                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the registered persons with image count and per-server sync summary (faces.view)
+         * @description Every read of person data is audited.
+         */
+        get: operations["listFacePersons"];
+        put?: never;
+        /** Register a person (faces.manage) */
+        post: operations["createFacePerson"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/persons/{personId}": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        /** Get one person (faces.view) */
+        get: operations["getFacePerson"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a person (faces.manage)
+         * @description Removes the person and its enrollment images centrally, then propagates the deletion to
+         *     every Frigate server and scrubs the name from stored events once all servers converged.
+         */
+        delete: operations["deleteFacePerson"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a person or edit its notes (faces.manage)
+         * @description Omitted fields keep their value. The identifier used inside Frigate never changes.
+         */
+        patch: operations["updateFacePerson"];
+        trace?: never;
+    };
+    "/api/v1/faces/persons/{personId}/images": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        /** List a person's enrollment images (faces.view) */
+        get: operations["listFaceImages"];
+        put?: never;
+        /**
+         * Upload an enrollment image (faces.manage)
+         * @description Multipart form with one `file` part: JPEG, PNG or WebP, at most 5 MB, and at most 20
+         *     images per person. Identical images are rejected as a conflict.
+         */
+        post: operations["uploadFaceImage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/persons/{personId}/images/{imageId}": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Download an enrollment image (faces.view)
+         * @description Biometric data. Only served to authorized callers, every read is audited and responses are never cached publicly.
+         */
+        get: operations["getFaceImage"];
+        put?: never;
+        post?: never;
+        /** Remove an enrollment image (faces.manage) */
+        delete: operations["deleteFaceImage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/persons/{personId}/sync": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        /** Per-server sync status of a person (faces.view) */
+        get: operations["listFaceSyncStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/persons/{personId}/sync/retry": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Requeue the failed or conflicting server syncs of a person (faces.manage) */
+        post: operations["retryFaceSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/recognitions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recognition timeline built from the events index (faces.view)
+         * @description Events whose sub_labels carry a registered person's name, newest first with keyset
+         *     pagination, limited to the cameras the caller holds events.view on. An event that
+         *     recognized several persons yields one row per person. Use the event endpoints for the
+         *     thumbnail and the playback link.
+         */
+        get: operations["listFaceRecognitions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/train": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Recent unclassified face attempts of every face-enabled server (faces.view)
+         * @description Reads Frigate's train folder (attempts saved with save_attempts). A server that cannot be
+         *     reached is reported in `servers` and does not fail the request.
+         */
+        get: operations["listFaceTrainAttempts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/train/{serverId}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Picture of one attempt, proxied from Frigate (faces.view)
+         * @description Biometric data. Audited and never exposed as a public URL.
+         */
+        get: operations["getFaceTrainImage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/train/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Turn an attempt into an enrollment image of a person (faces.manage)
+         * @description Fetches the attempt from Frigate and adds it to the central registry (an existing person,
+         *     or a new one), so the registry sync distributes it to every server. The attempt is then
+         *     deleted from Frigate on a best-effort basis.
+         */
+        post: operations["assignFaceTrainAttempt"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4083,6 +4318,138 @@ export interface components {
             items: components["schemas"]["Event"][];
             /** @description Pass as cursor to get the next page. Absent on the last page. */
             next_cursor?: string;
+        };
+        FaceSyncSummary: {
+            total: number;
+            synced: number;
+            /** @description Waiting or being processed. */
+            pending: number;
+            failed: number;
+            /** @description A face with the same name and its own images already exists in that Frigate. */
+            conflict: number;
+            /** @description Face recognition is not enabled on that server. */
+            disabled: number;
+        };
+        FacePerson: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            display_name: string;
+            /** @description Identifier of the face inside Frigate; it is the sub_label Frigate reports when it recognizes the person. */
+            frigate_name: string;
+            notes: string;
+            image_count: number;
+            sync: components["schemas"]["FaceSyncSummary"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FacePersonCreate: {
+            display_name: string;
+            notes?: string;
+        };
+        FacePersonUpdate: {
+            display_name?: string;
+            notes?: string;
+        };
+        FaceImage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            person_id: string;
+            content_type: string;
+            size_bytes: number;
+            width: number;
+            height: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        FaceSyncStatus: {
+            /** Format: uuid */
+            server_id: string;
+            server_name: string;
+            /** @enum {string} */
+            status: "pending" | "processing" | "synced" | "failed" | "conflict" | "disabled";
+            owned: boolean;
+            /** Format: int64 */
+            desired_revision: number;
+            /** Format: int64 */
+            synced_revision: number;
+            last_error?: string;
+            /** Format: date-time */
+            last_synced_at?: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FaceRecognition: {
+            /** Format: uuid */
+            event_id: string;
+            /** Format: uuid */
+            person_id: string;
+            person_name: string;
+            /** Format: uuid */
+            camera_id: string;
+            camera_name: string;
+            /** Format: uuid */
+            site_id: string;
+            site_name: string;
+            server_name: string;
+            /** Format: date-time */
+            start_time: string;
+            /** Format: date-time */
+            end_time?: string;
+            has_thumbnail: boolean;
+            has_snapshot: boolean;
+        };
+        FaceRecognitionPage: {
+            items: components["schemas"]["FaceRecognition"][];
+            /** @description Pass as cursor to get the next page. Absent on the last page. */
+            next_cursor?: string;
+        };
+        FaceTrainAttempt: {
+            /** Format: uuid */
+            server_id: string;
+            server_name: string;
+            /** @description Handle of the attempt in that server's train folder. */
+            file: string;
+            /**
+             * Format: date-time
+             * @description Parsed from the file name when it follows Frigate's naming; absent otherwise.
+             */
+            seen_at?: string;
+            /** @description Name Frigate guessed, or unknown; parsed from the file name when possible. */
+            label?: string;
+            /** Format: double */
+            score?: number;
+        };
+        FaceTrainServer: {
+            /** Format: uuid */
+            server_id: string;
+            server_name: string;
+            /** @description Short reason when the server could not be read. */
+            error?: string;
+        };
+        FaceTrainList: {
+            items: components["schemas"]["FaceTrainAttempt"][];
+            /** @description One entry per face-enabled server of the tenant; empty when none has face recognition enabled. */
+            servers: components["schemas"]["FaceTrainServer"][];
+        };
+        /** @description Exactly one of person_id and new_person_display_name. */
+        FaceTrainAssign: {
+            /** Format: uuid */
+            server_id: string;
+            file: string;
+            /** Format: uuid */
+            person_id?: string;
+            new_person_display_name?: string;
+        };
+        FaceTrainAssignResult: {
+            person: components["schemas"]["FacePerson"];
+            image: components["schemas"]["FaceImage"];
+            /** @description Whether the attempt was also deleted from Frigate. */
+            attempt_removed: boolean;
         };
         /**
          * @default general
@@ -7981,6 +8348,456 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    listFacePersons: {
+        parameters: {
+            query?: {
+                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Persons */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FacePerson"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createFacePerson: {
+        parameters: {
+            query?: {
+                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FacePersonCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FacePerson"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getFacePerson: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Person */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FacePerson"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteFacePerson: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    updateFacePerson: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FacePersonUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FacePerson"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    listFaceImages: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FaceImage"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    uploadFaceImage: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": {
+                    /** Format: binary */
+                    file: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Stored */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceImage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getFaceImage: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteFaceImage: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listFaceSyncStatus: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One entry per server of the tenant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FaceSyncStatus"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    retryFaceSync: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description How many server jobs were requeued */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        requeued: number;
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listFaceRecognitions: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+                person_id?: string[];
+                camera_id?: string[];
+                from?: string;
+                to?: string;
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A page of recognitions */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceRecognitionPage"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listFaceTrainAttempts: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Attempts newest first, and how each server answered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceTrainList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    getFaceTrainImage: {
+        parameters: {
+            query: {
+                file: string;
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": string;
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    assignFaceTrainAttempt: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceTrainAssign"];
+            };
+        };
+        responses: {
+            /** @description Assigned */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceTrainAssignResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
             502: components["responses"]["FrigateUnreachable"];
         };
     };
