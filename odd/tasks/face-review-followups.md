@@ -54,4 +54,4 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
   - `R3-savepoint-per-face-rule` (`internal/rules/service.go:650-664`): one savepoint per person rule, including cache hits; accepted for simplicity.
 
 ## Next step
-FRF-01..03 through one bounded writer.
+All FRF tasks done and reviewed. Next: open the PR against `main` (needs user OK), then the FACE-03 product questions.
