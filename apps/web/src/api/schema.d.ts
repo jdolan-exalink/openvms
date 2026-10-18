@@ -1683,6 +1683,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/faces/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Face recognition settings of every server in scope (faces.view and servers.view)
+         * @description Reads the running configuration of each server the caller holds servers.view on. A server
+         *     that cannot be read is reported with `error` and does not fail the request. Settings are
+         *     what Frigate is running now; a saved change only shows after Frigate restarts.
+         */
+        get: operations["listFaceConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/config/{serverId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Enable or tune face recognition on a server (faces.manage and servers.config)
+         * @description Writes the `face_recognition` section through the Frigate configuration editor (a revision
+         *     and an audit row per change). Global and per-camera face recognition settings only take
+         *     effect after Frigate restarts, so restart_required is always true when something changed.
+         *     Values are validated against Frigate's documented ranges.
+         */
+        patch: operations["patchFaceConfig"];
+        trace?: never;
+    };
     "/api/v1/faces/recognitions": {
         parameters: {
             query?: never;
@@ -4026,7 +4071,7 @@ export interface components {
             actor_user_id?: string | null;
             actor_name: string;
             /** @enum {string} */
-            kind: "camera_patch" | "raw_save" | "rollback";
+            kind: "camera_patch" | "server_patch" | "raw_save" | "rollback";
             sections: string[];
             patch: {
                 [key: string]: unknown;
@@ -4430,6 +4475,73 @@ export interface components {
             server_name: string;
             /** @description Short reason when the server could not be read. */
             error?: string;
+        };
+        FaceCameraConfig: {
+            /** Format: uuid */
+            camera_id: string;
+            name: string;
+            /** @description Effective value (the camera override */
+            enabled: boolean;
+            /** @description The camera's own face_recognition.enabled; null when unset. */
+            enabled_override?: boolean | null;
+            /** @description The camera's own face_recognition.min_area; null when unset. */
+            min_area?: number | null;
+        };
+        FaceServerConfig: {
+            /** Format: uuid */
+            server_id: string;
+            server_name: string;
+            site_name: string;
+            frigate_version: string;
+            /** @description True when the caller holds faces.manage and servers.config on this server. */
+            can_edit: boolean;
+            /** @description Short reason when the server could not be read; the settings are then absent. */
+            error?: string;
+            enabled?: boolean;
+            /** @enum {string} */
+            model_size?: "small" | "large";
+            /** Format: double */
+            detection_threshold?: number;
+            /** Format: double */
+            recognition_threshold?: number;
+            /** Format: double */
+            unknown_score?: number;
+            min_faces?: number;
+            min_area?: number;
+            save_attempts?: number;
+            blur_confidence_filter?: boolean;
+            cameras: components["schemas"]["FaceCameraConfig"][];
+        };
+        FaceConfigList: {
+            items: components["schemas"]["FaceServerConfig"][];
+        };
+        /** @description Only the fields present change. min_area null is not supported; send a number. */
+        FaceCameraConfigPatch: {
+            /** Format: uuid */
+            camera_id: string;
+            enabled?: boolean;
+            min_area?: number;
+        };
+        /** @description Only the fields present change; an empty patch is rejected. */
+        FaceConfigPatch: {
+            enabled?: boolean;
+            /** @enum {string} */
+            model_size?: "small" | "large";
+            /** Format: double */
+            detection_threshold?: number;
+            /** Format: double */
+            recognition_threshold?: number;
+            /** Format: double */
+            unknown_score?: number;
+            min_faces?: number;
+            min_area?: number;
+            save_attempts?: number;
+            blur_confidence_filter?: boolean;
+            cameras?: components["schemas"]["FaceCameraConfigPatch"][];
+        };
+        FaceConfigPatchResult: {
+            revision_ids: string[];
+            restart_required: boolean;
         };
         FaceTrainList: {
             items: components["schemas"]["FaceTrainAttempt"][];
@@ -8679,6 +8791,63 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listFaceConfig: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One entry per server */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceConfigList"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    patchFaceConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceConfigPatch"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceConfigPatchResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
         };
     };
     listFaceRecognitions: {

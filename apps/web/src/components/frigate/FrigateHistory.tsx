@@ -11,8 +11,9 @@ import { type DiffLine, lineDiff, sectionLabel } from "@/lib/frigateSchema";
 
 type Revision = Schemas["FrigateConfigRevision"];
 
-const kindLabel: Record<Revision["kind"], string> = {
+export const kindLabel: Record<Revision["kind"], string> = {
   camera_patch: "Cambio de cámara",
+  server_patch: "Cambio del servidor",
   raw_save: "Edición del YAML",
   rollback: "Restauración",
 };
