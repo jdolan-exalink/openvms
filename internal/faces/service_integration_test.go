@@ -499,6 +499,9 @@ func TestImagesStorageLimitsAndAudit(t *testing.T) {
 	if err := f.svc.DeletePerson(ctx, manager, f.tenant, p.ID); err != nil {
 		t.Fatal(err)
 	}
+	if err := f.svc.PurgeBlobs(ctx, 100); err != nil {
+		t.Fatal(err)
+	}
 	if f.blobs.keys() != 0 {
 		t.Errorf("blobs left after person delete: %d", f.blobs.keys())
 	}

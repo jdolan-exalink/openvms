@@ -22,7 +22,6 @@ CREATE TABLE face_persons (
 -- deletion has been propagated to every Frigate.
 CREATE UNIQUE INDEX face_persons_frigate_name_key ON face_persons (tenant_id, frigate_name);
 CREATE UNIQUE INDEX face_persons_display_name_key ON face_persons (tenant_id, lower(display_name)) WHERE deleted_at IS NULL;
-CREATE INDEX face_persons_tenant_idx ON face_persons (tenant_id, lower(display_name)) WHERE deleted_at IS NULL;
 
 CREATE TABLE face_person_images (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -43,16 +42,29 @@ CREATE TABLE face_person_images (
 );
 CREATE INDEX face_person_images_person_idx ON face_person_images (tenant_id, person_id, created_at, id);
 
+-- Object-store keys whose bytes must be deleted. A key is queued in the same transaction that
+-- drops its image row, so a crash or a down object store never strands a blob; the worker
+-- deletes the bytes (detached from any request) and removes the entry.
+CREATE TABLE face_blob_purge (
+    storage_key text PRIMARY KEY,
+    tenant_id   uuid NOT NULL REFERENCES tenants (id),
+    attempts    integer NOT NULL DEFAULT 0,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+
 ALTER TABLE face_persons ENABLE ROW LEVEL SECURITY;
 ALTER TABLE face_persons FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON face_persons USING (app_tenant_visible(tenant_id)) WITH CHECK (app_tenant_visible(tenant_id));
+ALTER TABLE face_blob_purge ENABLE ROW LEVEL SECURITY;
+ALTER TABLE face_blob_purge FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON face_blob_purge USING (app_tenant_visible(tenant_id)) WITH CHECK (app_tenant_visible(tenant_id));
 ALTER TABLE face_person_images ENABLE ROW LEVEL SECURITY;
 ALTER TABLE face_person_images FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON face_person_images USING (app_tenant_visible(tenant_id)) WITH CHECK (app_tenant_visible(tenant_id));
 
--- Seed grants: faces.manage mirrors tenant.manage (allow and deny), faces.view mirrors lpr.view
--- (the closest privacy-sensitive recognition permission) and is also implied by a faces.manage
--- allow. Only platform/tenant-scoped grants carry over: faces.* are tenant-scoped, so camera,
+-- Seed grants: faces.manage mirrors tenant.manage (allow and deny). faces.view mirrors lpr.view
+-- (the closest privacy-sensitive recognition permission; allow and deny) and is also granted
+-- wherever tenant.manage is allowed (a manager can always view). Only platform/tenant-scoped grants carry over: faces.* are tenant-scoped, so camera,
 -- site or server scoped LPR grants have no equivalent. Idempotent (ON CONFLICT DO NOTHING).
 INSERT INTO permission_grants (tenant_id, subject_type, subject_id, permission, effect, scope_type, scope_id, created_by)
 SELECT g.tenant_id, g.subject_type, g.subject_id, 'faces.manage', g.effect, g.scope_type, g.scope_id, g.created_by
@@ -72,5 +84,6 @@ ON CONFLICT DO NOTHING;
 -- store blobs under tenant/*/faces/ are NOT deleted) and the faces.* grants, including any an
 -- operator created by hand.
 DELETE FROM permission_grants WHERE permission IN ('faces.view', 'faces.manage');
+DROP TABLE IF EXISTS face_blob_purge;
 DROP TABLE IF EXISTS face_person_images;
 DROP TABLE IF EXISTS face_persons;

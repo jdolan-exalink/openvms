@@ -1,8 +1,3 @@
--- name: CreateFacePerson :one
-INSERT INTO face_persons (tenant_id, display_name, frigate_name, notes, created_by, updated_by)
-VALUES (@tenant_id, @display_name, @frigate_name, @notes, @created_by, @created_by)
-RETURNING *;
-
 -- name: GetFacePerson :one
 SELECT * FROM face_persons WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL;
 
@@ -12,8 +7,33 @@ FROM face_persons p
 WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NULL
 ORDER BY lower(p.display_name), p.id;
 
--- name: FaceFrigateNameTaken :one
-SELECT EXISTS (SELECT 1 FROM face_persons WHERE tenant_id = @tenant_id AND frigate_name = @frigate_name);
+-- name: LockFacePersonForUpdate :one
+SELECT * FROM face_persons WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL FOR UPDATE;
+
+-- name: CreateFacePersonIfNameFree :one
+-- Collisions on (tenant_id, frigate_name) return no row so the caller retries with a suffix;
+-- any other violation (display name) still raises. A name with a pending remote cleanup is also
+-- taken, so that cleanup can never delete a new person's face.
+INSERT INTO face_persons (tenant_id, display_name, frigate_name, notes, created_by, updated_by)
+SELECT @tenant_id, @display_name, @frigate_name, @notes, @created_by, @created_by
+WHERE NOT EXISTS (
+  SELECT 1 FROM face_remote_cleanup c WHERE c.tenant_id = @tenant_id AND c.frigate_name = @frigate_name
+)
+ON CONFLICT (tenant_id, frigate_name) DO NOTHING
+RETURNING *;
+
+-- name: EnqueueFaceBlobPurge :exec
+INSERT INTO face_blob_purge (storage_key, tenant_id) VALUES (@storage_key, @tenant_id)
+ON CONFLICT (storage_key) DO NOTHING;
+
+-- name: ListFaceBlobPurge :many
+SELECT * FROM face_blob_purge ORDER BY created_at, storage_key LIMIT @max_rows;
+
+-- name: DeleteFaceBlobPurge :exec
+DELETE FROM face_blob_purge WHERE storage_key = @storage_key;
+
+-- name: BumpFaceBlobPurgeAttempts :exec
+UPDATE face_blob_purge SET attempts = attempts + 1 WHERE storage_key = @storage_key;
 
 -- name: UpdateFacePerson :one
 UPDATE face_persons

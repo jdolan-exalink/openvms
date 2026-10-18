@@ -37,6 +37,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/alarms"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
+	"github.com/jdolan-exalink/openvms/internal/faces"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/media"
 	"github.com/jdolan-exalink/openvms/internal/notify"
@@ -116,6 +117,8 @@ func run() error {
 	inv := inventory.New(st, sealer, log)
 	adapters := inventory.NewAdapters(inv)
 	go runCameraZoneSync(ctx, inv, log)
+	go runFaceSync(ctx, &faces.Syncer{Store: st, Blobs: objects, Adapters: adapters, Log: log},
+		&faces.Service{Store: st, Blobs: objects, Log: log}, log)
 
 	rulesSvc := rules.NewService(st, &jetstreamPublisher{js: js}, log)
 	rulesSvc.ZoneResolver = rules.NewStoreZoneResolver(st)
@@ -288,6 +291,26 @@ func runCameraZoneSync(ctx context.Context, svc *inventory.Service, log *slog.Lo
 		case <-ticker.C:
 			if err := svc.ProcessCameraZoneSyncJobs(ctx, 25); err != nil && ctx.Err() == nil {
 				log.WarnContext(ctx, "process camera-zone sync jobs", "error", err)
+			}
+		}
+	}
+}
+
+// runFaceSync converges the Frigate face libraries with the central registry (FACE-02) and
+// deletes queued enrollment image blobs. Both are idempotent and safe to run on every replica.
+func runFaceSync(ctx context.Context, syncer *faces.Syncer, svc *faces.Service, log *slog.Logger) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := syncer.RunOnce(ctx, 25); err != nil && ctx.Err() == nil {
+				log.WarnContext(ctx, "process face sync jobs", "error", err)
+			}
+			if err := svc.PurgeBlobs(ctx, 100); err != nil && ctx.Err() == nil {
+				log.WarnContext(ctx, "purge face image blobs", "error", err)
 			}
 		}
 	}

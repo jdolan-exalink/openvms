@@ -200,6 +200,20 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("frigate %s %s: status %d: %s", e.Method, e.Path, e.Status, snippet([]byte(e.Body)))
 }
 
+// NotFoundError is a 404 answer. It matches ErrNotFound and keeps the response body so callers
+// can tell a missing route (FastAPI's {"detail":"Not Found"}) from a missing resource.
+type NotFoundError struct {
+	Method string
+	Path   string
+	Body   string
+}
+
+func (e *NotFoundError) Error() string {
+	return fmt.Sprintf("frigate %s %s: %s", e.Method, e.Path, ErrNotFound)
+}
+
+func (e *NotFoundError) Is(target error) bool { return target == ErrNotFound }
+
 // send performs a request with an optional JSON body and returns the response body.
 func (c *client) send(ctx context.Context, method, path string, query url.Values, payload any) ([]byte, error) {
 	var raw []byte
@@ -235,7 +249,7 @@ func (c *client) sendRaw(ctx context.Context, method, path string, query url.Val
 	}
 	switch {
 	case resp.StatusCode == http.StatusNotFound:
-		return nil, fmt.Errorf("frigate %s %s: %w", method, path, ErrNotFound)
+		return nil, &NotFoundError{Method: method, Path: path, Body: string(body)}
 	case resp.StatusCode >= 300:
 		return nil, &StatusError{Method: method, Path: path, Status: resp.StatusCode, Body: string(body)}
 	}

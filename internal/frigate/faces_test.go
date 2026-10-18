@@ -167,3 +167,18 @@ func TestPerCameraFaceRecognitionCapability(t *testing.T) {
 		}
 	}
 }
+
+func TestRenameFaceNotFoundIsNotConflatedWithMissingRoute(t *testing.T) {
+	routeMissing := &NotFoundError{Method: "PUT", Path: "/api/faces/ana/rename", Body: `{"detail":"Not Found"}`}
+	if err := classifyRenameErr(routeMissing); !errors.Is(err, ErrFaceRenameUnsupported) {
+		t.Errorf("FastAPI route miss = %v, want ErrFaceRenameUnsupported", err)
+	}
+	missingFace := &NotFoundError{Method: "PUT", Path: "/api/faces/ana/rename", Body: `{"success":false,"message":"Face not found"}`}
+	err := classifyRenameErr(missingFace)
+	if errors.Is(err, ErrFaceRenameUnsupported) {
+		t.Errorf("missing source face must not be reported as unsupported: %v", err)
+	}
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("missing source face = %v, want ErrNotFound", err)
+	}
+}

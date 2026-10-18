@@ -12,6 +12,15 @@ import (
 	"github.com/google/uuid"
 )
 
+const bumpFaceBlobPurgeAttempts = `-- name: BumpFaceBlobPurgeAttempts :exec
+UPDATE face_blob_purge SET attempts = attempts + 1 WHERE storage_key = $1
+`
+
+func (q *Queries) BumpFaceBlobPurgeAttempts(ctx context.Context, storageKey string) error {
+	_, err := q.db.Exec(ctx, bumpFaceBlobPurgeAttempts, storageKey)
+	return err
+}
+
 const countFacePersonImages = `-- name: CountFacePersonImages :one
 SELECT count(*)::int FROM face_person_images WHERE tenant_id = $1 AND person_id = $2
 `
@@ -28,13 +37,17 @@ func (q *Queries) CountFacePersonImages(ctx context.Context, arg CountFacePerson
 	return column_1, err
 }
 
-const createFacePerson = `-- name: CreateFacePerson :one
+const createFacePersonIfNameFree = `-- name: CreateFacePersonIfNameFree :one
 INSERT INTO face_persons (tenant_id, display_name, frigate_name, notes, created_by, updated_by)
-VALUES ($1, $2, $3, $4, $5, $5)
-RETURNING id, tenant_id, display_name, frigate_name, notes, created_by, updated_by, created_at, updated_at, deleted_at
+SELECT $1, $2, $3, $4, $5, $5
+WHERE NOT EXISTS (
+  SELECT 1 FROM face_remote_cleanup c WHERE c.tenant_id = $1 AND c.frigate_name = $3
+)
+ON CONFLICT (tenant_id, frigate_name) DO NOTHING
+RETURNING id, tenant_id, display_name, frigate_name, notes, created_by, updated_by, created_at, updated_at, deleted_at, sync_revision
 `
 
-type CreateFacePersonParams struct {
+type CreateFacePersonIfNameFreeParams struct {
 	TenantID    uuid.UUID
 	DisplayName string
 	FrigateName string
@@ -42,8 +55,11 @@ type CreateFacePersonParams struct {
 	CreatedBy   *uuid.UUID
 }
 
-func (q *Queries) CreateFacePerson(ctx context.Context, arg CreateFacePersonParams) (FacePerson, error) {
-	row := q.db.QueryRow(ctx, createFacePerson,
+// Collisions on (tenant_id, frigate_name) return no row so the caller retries with a suffix;
+// any other violation (display name) still raises. A name with a pending remote cleanup is also
+// taken, so that cleanup can never delete a new person's face.
+func (q *Queries) CreateFacePersonIfNameFree(ctx context.Context, arg CreateFacePersonIfNameFreeParams) (FacePerson, error) {
+	row := q.db.QueryRow(ctx, createFacePersonIfNameFree,
 		arg.TenantID,
 		arg.DisplayName,
 		arg.FrigateName,
@@ -62,8 +78,18 @@ func (q *Queries) CreateFacePerson(ctx context.Context, arg CreateFacePersonPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.SyncRevision,
 	)
 	return i, err
+}
+
+const deleteFaceBlobPurge = `-- name: DeleteFaceBlobPurge :exec
+DELETE FROM face_blob_purge WHERE storage_key = $1
+`
+
+func (q *Queries) DeleteFaceBlobPurge(ctx context.Context, storageKey string) error {
+	_, err := q.db.Exec(ctx, deleteFaceBlobPurge, storageKey)
+	return err
 }
 
 const deleteFacePersonImage = `-- name: DeleteFacePersonImage :exec
@@ -95,24 +121,23 @@ func (q *Queries) DeleteFacePersonImages(ctx context.Context, arg DeleteFacePers
 	return err
 }
 
-const faceFrigateNameTaken = `-- name: FaceFrigateNameTaken :one
-SELECT EXISTS (SELECT 1 FROM face_persons WHERE tenant_id = $1 AND frigate_name = $2)
+const enqueueFaceBlobPurge = `-- name: EnqueueFaceBlobPurge :exec
+INSERT INTO face_blob_purge (storage_key, tenant_id) VALUES ($1, $2)
+ON CONFLICT (storage_key) DO NOTHING
 `
 
-type FaceFrigateNameTakenParams struct {
-	TenantID    uuid.UUID
-	FrigateName string
+type EnqueueFaceBlobPurgeParams struct {
+	StorageKey string
+	TenantID   uuid.UUID
 }
 
-func (q *Queries) FaceFrigateNameTaken(ctx context.Context, arg FaceFrigateNameTakenParams) (bool, error) {
-	row := q.db.QueryRow(ctx, faceFrigateNameTaken, arg.TenantID, arg.FrigateName)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
+func (q *Queries) EnqueueFaceBlobPurge(ctx context.Context, arg EnqueueFaceBlobPurgeParams) error {
+	_, err := q.db.Exec(ctx, enqueueFaceBlobPurge, arg.StorageKey, arg.TenantID)
+	return err
 }
 
 const getFacePerson = `-- name: GetFacePerson :one
-SELECT id, tenant_id, display_name, frigate_name, notes, created_by, updated_by, created_at, updated_at, deleted_at FROM face_persons WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
+SELECT id, tenant_id, display_name, frigate_name, notes, created_by, updated_by, created_at, updated_at, deleted_at, sync_revision FROM face_persons WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL
 `
 
 type GetFacePersonParams struct {
@@ -134,6 +159,7 @@ func (q *Queries) GetFacePerson(ctx context.Context, arg GetFacePersonParams) (F
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.SyncRevision,
 	)
 	return i, err
 }
@@ -216,6 +242,35 @@ func (q *Queries) InsertFacePersonImage(ctx context.Context, arg InsertFacePerso
 	return i, err
 }
 
+const listFaceBlobPurge = `-- name: ListFaceBlobPurge :many
+SELECT storage_key, tenant_id, attempts, created_at FROM face_blob_purge ORDER BY created_at, storage_key LIMIT $1
+`
+
+func (q *Queries) ListFaceBlobPurge(ctx context.Context, maxRows int32) ([]FaceBlobPurge, error) {
+	rows, err := q.db.Query(ctx, listFaceBlobPurge, maxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FaceBlobPurge{}
+	for rows.Next() {
+		var i FaceBlobPurge
+		if err := rows.Scan(
+			&i.StorageKey,
+			&i.TenantID,
+			&i.Attempts,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFacePersonImages = `-- name: ListFacePersonImages :many
 SELECT id, tenant_id, person_id, storage_key, content_type, size_bytes, sha256, width, height, created_by, created_at FROM face_person_images WHERE tenant_id = $1 AND person_id = $2 ORDER BY created_at, id
 `
@@ -258,24 +313,25 @@ func (q *Queries) ListFacePersonImages(ctx context.Context, arg ListFacePersonIm
 }
 
 const listFacePersons = `-- name: ListFacePersons :many
-SELECT p.id, p.tenant_id, p.display_name, p.frigate_name, p.notes, p.created_by, p.updated_by, p.created_at, p.updated_at, p.deleted_at, (SELECT count(*) FROM face_person_images i WHERE i.person_id = p.id)::int AS image_count
+SELECT p.id, p.tenant_id, p.display_name, p.frigate_name, p.notes, p.created_by, p.updated_by, p.created_at, p.updated_at, p.deleted_at, p.sync_revision, (SELECT count(*) FROM face_person_images i WHERE i.person_id = p.id)::int AS image_count
 FROM face_persons p
 WHERE p.tenant_id = $1 AND p.deleted_at IS NULL
 ORDER BY lower(p.display_name), p.id
 `
 
 type ListFacePersonsRow struct {
-	ID          uuid.UUID
-	TenantID    uuid.UUID
-	DisplayName string
-	FrigateName string
-	Notes       string
-	CreatedBy   *uuid.UUID
-	UpdatedBy   *uuid.UUID
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   *time.Time
-	ImageCount  int32
+	ID           uuid.UUID
+	TenantID     uuid.UUID
+	DisplayName  string
+	FrigateName  string
+	Notes        string
+	CreatedBy    *uuid.UUID
+	UpdatedBy    *uuid.UUID
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
+	SyncRevision int64
+	ImageCount   int32
 }
 
 func (q *Queries) ListFacePersons(ctx context.Context, tenantID uuid.UUID) ([]ListFacePersonsRow, error) {
@@ -298,6 +354,7 @@ func (q *Queries) ListFacePersons(ctx context.Context, tenantID uuid.UUID) ([]Li
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.SyncRevision,
 			&i.ImageCount,
 		); err != nil {
 			return nil, err
@@ -310,11 +367,39 @@ func (q *Queries) ListFacePersons(ctx context.Context, tenantID uuid.UUID) ([]Li
 	return items, nil
 }
 
+const lockFacePersonForUpdate = `-- name: LockFacePersonForUpdate :one
+SELECT id, tenant_id, display_name, frigate_name, notes, created_by, updated_by, created_at, updated_at, deleted_at, sync_revision FROM face_persons WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE
+`
+
+type LockFacePersonForUpdateParams struct {
+	TenantID uuid.UUID
+	ID       uuid.UUID
+}
+
+func (q *Queries) LockFacePersonForUpdate(ctx context.Context, arg LockFacePersonForUpdateParams) (FacePerson, error) {
+	row := q.db.QueryRow(ctx, lockFacePersonForUpdate, arg.TenantID, arg.ID)
+	var i FacePerson
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.DisplayName,
+		&i.FrigateName,
+		&i.Notes,
+		&i.CreatedBy,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+		&i.SyncRevision,
+	)
+	return i, err
+}
+
 const softDeleteFacePerson = `-- name: SoftDeleteFacePerson :one
 UPDATE face_persons
 SET deleted_at = now(), updated_by = $1, updated_at = now()
 WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL
-RETURNING id, tenant_id, display_name, frigate_name, notes, created_by, updated_by, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, display_name, frigate_name, notes, created_by, updated_by, created_at, updated_at, deleted_at, sync_revision
 `
 
 type SoftDeleteFacePersonParams struct {
@@ -337,6 +422,7 @@ func (q *Queries) SoftDeleteFacePerson(ctx context.Context, arg SoftDeleteFacePe
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.SyncRevision,
 	)
 	return i, err
 }
@@ -345,7 +431,7 @@ const updateFacePerson = `-- name: UpdateFacePerson :one
 UPDATE face_persons
 SET display_name = $1, notes = $2, updated_by = $3, updated_at = now()
 WHERE tenant_id = $4 AND id = $5 AND deleted_at IS NULL
-RETURNING id, tenant_id, display_name, frigate_name, notes, created_by, updated_by, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, display_name, frigate_name, notes, created_by, updated_by, created_at, updated_at, deleted_at, sync_revision
 `
 
 type UpdateFacePersonParams struct {
@@ -376,6 +462,7 @@ func (q *Queries) UpdateFacePerson(ctx context.Context, arg UpdateFacePersonPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.SyncRevision,
 	)
 	return i, err
 }

@@ -381,17 +381,25 @@ type ExportShare struct {
 	RevokedAt    *time.Time
 }
 
+type FaceBlobPurge struct {
+	StorageKey string
+	TenantID   uuid.UUID
+	Attempts   int32
+	CreatedAt  time.Time
+}
+
 type FacePerson struct {
-	ID          uuid.UUID
-	TenantID    uuid.UUID
-	DisplayName string
-	FrigateName string
-	Notes       string
-	CreatedBy   *uuid.UUID
-	UpdatedBy   *uuid.UUID
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   *time.Time
+	ID           uuid.UUID
+	TenantID     uuid.UUID
+	DisplayName  string
+	FrigateName  string
+	Notes        string
+	CreatedBy    *uuid.UUID
+	UpdatedBy    *uuid.UUID
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
+	SyncRevision int64
 }
 
 type FacePersonImage struct {
@@ -406,6 +414,40 @@ type FacePersonImage struct {
 	Height      *int32
 	CreatedBy   *uuid.UUID
 	CreatedAt   time.Time
+}
+
+type FaceRemoteCleanup struct {
+	TenantID    uuid.UUID
+	ServerID    uuid.UUID
+	FrigateName string
+	CreatedAt   time.Time
+}
+
+type FaceServerImage struct {
+	ServerID       uuid.UUID
+	ImageID        uuid.UUID
+	PersonID       uuid.UUID
+	TenantID       uuid.UUID
+	FrigateImageID string
+	CreatedAt      time.Time
+}
+
+type FaceServerSync struct {
+	ServerID        uuid.UUID
+	PersonID        uuid.UUID
+	TenantID        uuid.UUID
+	DesiredRevision int64
+	SyncedRevision  int64
+	Status          string
+	Owned           bool
+	Attempts        int32
+	HardFailures    int32
+	NextAttemptAt   time.Time
+	LeaseUntil      *time.Time
+	LastError       *string
+	LastSyncedAt    *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 type FrigateConfigRevision struct {
