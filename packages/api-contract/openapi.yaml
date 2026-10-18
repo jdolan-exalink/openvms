@@ -2138,6 +2138,55 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/config:
+    get:
+      tags: [faces]
+      operationId: listFaceConfig
+      summary: Face recognition settings of every server in scope (faces.view and servers.view)
+      description: |
+        Reads the running configuration of each server the caller holds servers.view on. A server
+        that cannot be read is reported with `error` and does not fail the request. Settings are
+        what Frigate is running now; a saved change only shows after Frigate restarts.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: One entry per server
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceConfigList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/config/{serverId}:
+    patch:
+      tags: [faces]
+      operationId: patchFaceConfig
+      summary: Enable or tune face recognition on a server (faces.manage and servers.config)
+      description: |
+        Writes the `face_recognition` section through the Frigate configuration editor (a revision
+        and an audit row per change). Global and per-camera face recognition settings only take
+        effect after Frigate restarts, so restart_required is always true when something changed.
+        Values are validated against Frigate's documented ranges.
+      parameters:
+        - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceConfigPatch" }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceConfigPatchResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/faces/recognitions:
     get:
       tags: [faces]
@@ -5213,7 +5262,7 @@ components:
         camera_id: { type: string, format: uuid, nullable: true }
         actor_user_id: { type: string, format: uuid, nullable: true }
         actor_name: { type: string }
-        kind: { type: string, enum: [camera_patch, raw_save, rollback] }
+        kind: { type: string, enum: [camera_patch, server_patch, raw_save, rollback] }
         sections: { type: array, items: { type: string } }
         patch: { type: object, additionalProperties: true }
         before_yaml: { type: string, description: Only with servers.config.secrets and include_yaml=true. }
@@ -5660,6 +5709,68 @@ components:
         server_id: { type: string, format: uuid }
         server_name: { type: string }
         error: { type: string, description: "Short reason when the server could not be read." }
+    FaceCameraConfig:
+      type: object
+      required: [camera_id, name, enabled]
+      properties:
+        camera_id: { type: string, format: uuid }
+        name: { type: string }
+        enabled: { type: boolean, description: Effective value (the camera override, else the global switch). }
+        enabled_override: { type: boolean, nullable: true, description: The camera's own face_recognition.enabled; null when unset. }
+        min_area: { type: integer, nullable: true, description: The camera's own face_recognition.min_area; null when unset. }
+    FaceServerConfig:
+      type: object
+      required: [server_id, server_name, site_name, frigate_version, can_edit, cameras]
+      properties:
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        site_name: { type: string }
+        frigate_version: { type: string }
+        can_edit: { type: boolean, description: True when the caller holds faces.manage and servers.config on this server. }
+        error: { type: string, description: Short reason when the server could not be read; the settings are then absent. }
+        enabled: { type: boolean }
+        model_size: { type: string, enum: [small, large] }
+        detection_threshold: { type: number, format: double }
+        recognition_threshold: { type: number, format: double }
+        unknown_score: { type: number, format: double }
+        min_faces: { type: integer }
+        min_area: { type: integer }
+        save_attempts: { type: integer }
+        blur_confidence_filter: { type: boolean }
+        cameras: { type: array, items: { $ref: "#/components/schemas/FaceCameraConfig" } }
+    FaceConfigList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/FaceServerConfig" } }
+    FaceCameraConfigPatch:
+      type: object
+      required: [camera_id]
+      description: Only the fields present change. min_area null is not supported; send a number.
+      properties:
+        camera_id: { type: string, format: uuid }
+        enabled: { type: boolean }
+        min_area: { type: integer, minimum: 0, maximum: 1000000 }
+    FaceConfigPatch:
+      type: object
+      description: Only the fields present change; an empty patch is rejected.
+      properties:
+        enabled: { type: boolean }
+        model_size: { type: string, enum: [small, large] }
+        detection_threshold: { type: number, format: double, minimum: 0, maximum: 1 }
+        recognition_threshold: { type: number, format: double, minimum: 0, maximum: 1 }
+        unknown_score: { type: number, format: double, minimum: 0, maximum: 1 }
+        min_faces: { type: integer, minimum: 1, maximum: 6 }
+        min_area: { type: integer, minimum: 0, maximum: 1000000 }
+        save_attempts: { type: integer, minimum: 0, maximum: 10000 }
+        blur_confidence_filter: { type: boolean }
+        cameras: { type: array, maxItems: 500, items: { $ref: "#/components/schemas/FaceCameraConfigPatch" } }
+    FaceConfigPatchResult:
+      type: object
+      required: [revision_ids, restart_required]
+      properties:
+        revision_ids: { type: array, items: { type: string, format: uuid } }
+        restart_required: { type: boolean }
     FaceTrainList:
       type: object
       required: [items, servers]
