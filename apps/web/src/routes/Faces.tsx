@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { meQuery } from "@/api/queries";
+import { ConfigTab } from "@/components/faces/ConfigTab";
 import { PersonsTab } from "@/components/faces/PersonsTab";
 import { RecognitionsTab } from "@/components/faces/RecognitionsTab";
 import { TrainTab } from "@/components/faces/TrainTab";
@@ -9,11 +10,12 @@ import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 
-type Tab = "people" | "train" | "recognitions";
+type Tab = "people" | "train" | "recognitions" | "config";
 const tabs: { id: Tab; label: MessageKey }[] = [
   { id: "people", label: "faces.tabPeople" },
   { id: "train", label: "faces.tabTrain" },
   { id: "recognitions", label: "faces.tabRecognitions" },
+  { id: "config", label: "faces.tabConfig" },
 ];
 
 /**
@@ -27,6 +29,9 @@ export function Faces() {
   const [tab, setTab] = useState<Tab>("people");
   const canView = can(me.data, "faces.view");
   const canManage = can(me.data, "faces.manage");
+  // The settings live on the servers, so they also need servers.view (the API checks it per server).
+  const canConfig = canView && can(me.data, "servers.view");
+  const visibleTabs = tabs.filter((item) => item.id !== "config" || canConfig);
 
   if (me.isSuccess && !canView) {
     return (
@@ -43,7 +48,7 @@ export function Faces() {
       {canView && (
         <>
           <div role="tablist" aria-label={t("faces.tabs")} className="flex gap-1 border-b border-outline-variant">
-            {tabs.map((item) => (
+            {visibleTabs.map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -65,6 +70,7 @@ export function Faces() {
             {tab === "people" && <PersonsTab canManage={canManage} />}
             {tab === "train" && <TrainTab canManage={canManage} />}
             {tab === "recognitions" && <RecognitionsTab />}
+            {tab === "config" && canConfig && <ConfigTab canRestart={can(me.data, "servers.restart")} />}
           </div>
         </>
       )}
