@@ -635,19 +635,43 @@ WHERE c.id = $1 AND c.tenant_id = $2`, cameraID, tenantID).Scan(&tz)
 // FaceNames resolves the face conditions of c to the recognized names they stand for. Without
 // a resolver it resolves to nobody, so a person rule never matches by accident.
 func (s *Service) FaceNames(ctx context.Context, tenantID uuid.UUID, c Conditions) (map[string]struct{}, error) {
+	return s.faceNames(ctx, nil, tenantID, c)
+}
+
+// faceNames is FaceNames reading through q, the caller's transaction, when it is not nil.
+func (s *Service) faceNames(ctx context.Context, q *db.Queries, tenantID uuid.UUID, c Conditions) (map[string]struct{}, error) {
 	if s.Faces == nil || !c.HasFaceConditions() {
 		return map[string]struct{}{}, nil
 	}
-	return s.Faces.FaceNames(ctx, tenantID, c.FacePersonIDs, c.FaceWatchlistIDs)
+	return s.Faces.FaceNames(ctx, q, tenantID, c.FacePersonIDs, c.FaceWatchlistIDs)
 }
 
-// matchesFaces is the person part of an event rule. A resolver failure does not match (and is
-// logged without names): missing an alarm for one event is safer than alarming on the wrong one.
-func (s *Service) matchesFaces(ctx context.Context, ev EventContext, rule Rule) bool {
+// faceNamesIsolated is faceNames on a savepoint of tx: released on success, rolled back on error.
+func (s *Service) faceNamesIsolated(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, c Conditions) (map[string]struct{}, error) {
+	sp, err := tx.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	names, err := s.faceNames(ctx, db.New(sp), tenantID, c)
+	if err != nil {
+		_ = sp.Rollback(ctx)
+		return nil, err
+	}
+	if err := sp.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return names, nil
+}
+
+// matchesFaces is the person part of an event rule, resolved on the evaluation transaction tx. A
+// resolver failure does not match (and is logged without names): missing an alarm for one event is
+// safer than alarming on the wrong one. The resolver runs in a savepoint, so a failing query rolls
+// back only itself instead of aborting the transaction the remaining rules still need.
+func (s *Service) matchesFaces(ctx context.Context, tx pgx.Tx, ev EventContext, rule Rule) bool {
 	if len(ev.SubLabels) == 0 {
 		return false
 	}
-	names, err := s.FaceNames(ctx, ev.TenantID, rule.Conditions)
+	names, err := s.faceNamesIsolated(ctx, tx, ev.TenantID, rule.Conditions)
 	if err != nil {
 		s.Log.WarnContext(ctx, "resolve face conditions", "error", err, "rule_id", rule.ID)
 		return false
@@ -701,7 +725,7 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 			if !rule.Conditions.MatchesEvent(ev) {
 				continue
 			}
-			if hasFaces && !s.matchesFaces(ctx, ev, rule) {
+			if hasFaces && !s.matchesFaces(ctx, tx, ev, rule) {
 				continue
 			}
 
@@ -1093,11 +1117,13 @@ func checkFaceRefs(ctx context.Context, q *db.Queries, chk *access.Checker, tena
 		}
 	}
 	if len(newLists) > 0 {
-		n, err := q.CountFaceWatchlistsByIDs(ctx, db.CountFaceWatchlistsByIDsParams{TenantID: tenantID, Ids: newLists})
+		// Locked until the rule commits, so a watchlist delete cannot slip in between this check and
+		// the rule write (see faces.Service.DeleteWatchlist).
+		locked, err := q.LockFaceWatchlistsByIDs(ctx, db.LockFaceWatchlistsByIDsParams{TenantID: tenantID, Ids: newLists})
 		if err != nil {
 			return store.Classify(err)
 		}
-		if int(n) != len(newLists) {
+		if len(locked) != len(newLists) {
 			return &ValidationError{Msg: "unknown or inaccessible id in conditions.face_watchlist_ids"}
 		}
 	}

@@ -248,6 +248,10 @@ func (s *Service) DeleteWatchlist(ctx context.Context, actor authz.Actor, tenant
 		if _, err := q.GetFaceWatchlist(ctx, db.GetFaceWatchlistParams{TenantID: tenantID, ID: id}); err != nil {
 			return store.Classify(err)
 		}
+		// Wait for any rule create/update that holds the list, so the count below includes it.
+		if _, err := q.LockFaceWatchlist(ctx, db.LockFaceWatchlistParams{TenantID: tenantID, ID: id}); err != nil {
+			return store.Classify(err)
+		}
 		used, err := q.CountRulesUsingFaceWatchlist(ctx, db.CountRulesUsingFaceWatchlistParams{TenantID: tenantID, ID: id.String()})
 		if err != nil {
 			return err

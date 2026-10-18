@@ -358,9 +358,15 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	}
 	if s.Rules != nil {
 		evaluate := func(ev NewEvent, faceUpdate bool) {
+			// A face update carries only the names gained since the last pull, so the person
+			// rules that already fired for the earlier names are not evaluated again.
+			subLabels := ev.SubLabels
+			if faceUpdate {
+				subLabels = ev.GainedSubLabels
+			}
 			rc := rules.EventContext{
 				ID: ev.ID, TenantID: ev.TenantID, SiteID: ev.SiteID, ServerID: ev.ServerID, CameraID: ev.CameraID,
-				CameraName: cameraNames[ev.CameraID], Severity: ev.Severity, Labels: ev.Labels, SubLabels: ev.SubLabels,
+				CameraName: cameraNames[ev.CameraID], Severity: ev.Severity, Labels: ev.Labels, SubLabels: subLabels,
 				FaceUpdate: faceUpdate, Zones: ev.Zones, Start: ev.Start,
 			}
 			if err := s.Rules.EvaluateEvent(ctx, rc); err != nil {

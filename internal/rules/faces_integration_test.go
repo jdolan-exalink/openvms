@@ -4,18 +4,25 @@ package rules_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/bootstrap"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/rules"
+	"github.com/jdolan-exalink/openvms/internal/store"
+	"github.com/jdolan-exalink/openvms/internal/store/db"
+	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
 )
 
 // person inserts a live registered person and returns its id.
@@ -277,5 +284,112 @@ func TestRuleUpdateKeepsFaceConditionsForEditorsWithoutFacesView(t *testing.T) {
 	}
 	if _, err := f.svc.UpdateRule(ctx, withFaces, created.ID, rules.UpdateRuleRequest{Conditions: &changed}); err != nil {
 		t.Fatalf("change with faces.view = %v", err)
+	}
+}
+
+// EvaluateEvent holds a transaction while it resolves the face conditions. With a single pool
+// connection a resolver that opens its own transaction would wait forever for a second one, so
+// this only passes when the resolver reads through the evaluation transaction.
+func TestEvaluateEventResolvesFacesInsideTheEvaluationTransaction(t *testing.T) {
+	f := newFixture(t)
+	ana := f.person("Ana", "ana")
+	rule := f.addRule("Vigilancia", rules.TriggerEvent, rules.Conditions{FacePersonIDs: []uuid.UUID{ana}}, rules.Actions{NotifyInApp: true}, true)
+
+	cfg := f.env.Pool.Config()
+	cfg.MaxConns = 1
+	pool, err := pgxpool.NewWithConfig(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	svc := rules.NewService(&store.Store{Pool: pool}, &recordingPublisher{}, pgtest.Discard()) // empty face cache
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := svc.EvaluateEvent(ctx, f.faceEvent("ana")); err != nil {
+		t.Fatalf("evaluation with a single pooled connection: %v", err)
+	}
+	if n := f.notifications(rule); n != 1 {
+		t.Fatalf("recognized person created %d notifications, want 1", n)
+	}
+}
+
+// A watchlist delete in flight holds the row; a rule create referencing it must wait for the
+// delete and then be refused, instead of committing a rule that points at a removed list.
+func TestRuleCreateWaitsForAConcurrentWatchlistDelete(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	list := f.watchlist("VIP")
+	actor := f.faceUser(authz.FacesView)
+
+	locked, release := make(chan struct{}), make(chan struct{})
+	holder := make(chan error, 1)
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock() // a failed assertion must not leave the holder transaction open
+	go func() {
+		holder <- f.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			// What a watchlist delete does: lock the row exclusively, then remove it.
+			if _, err := tx.Exec(ctx, `SELECT id FROM face_watchlists WHERE id = $1 FOR UPDATE`, list); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM face_watchlists WHERE id = $1`, list); err != nil {
+				return err
+			}
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+
+	type result struct{ err error }
+	created := make(chan result, 1)
+	go func() {
+		_, err := f.svc.CreateRule(ctx, actor, rules.CreateRuleRequest{Name: "vip", TriggerType: rules.TriggerEvent, Enabled: true,
+			Conditions: rules.Conditions{FaceWatchlistIDs: []uuid.UUID{list}}})
+		created <- result{err}
+	}()
+	select {
+	case r := <-created:
+		t.Fatalf("rule create finished while the watchlist delete was in flight: %v", r.err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	unblock()
+	if err := <-holder; err != nil {
+		t.Fatal(err)
+	}
+	var bad *rules.ValidationError
+	if r := <-created; !errors.As(r.err, &bad) {
+		t.Fatalf("rule create after the delete committed = %v, want validation error", r.err)
+	}
+}
+
+// failingFaces is a resolver whose query fails inside PostgreSQL (invalid jsonb), which aborts the
+// transaction it ran on unless the caller isolated it.
+type failingFaces struct{}
+
+func (failingFaces) FaceNames(ctx context.Context, q *db.Queries, tenantID uuid.UUID, _, _ []uuid.UUID) (map[string]struct{}, error) {
+	return nil, q.InsertRuleVersion(ctx, db.InsertRuleVersionParams{RuleID: uuid.New(), TenantID: tenantID, Version: 1, Snapshot: json.RawMessage("{")})
+}
+
+// A resolver failure means "this person rule does not match"; it must not abort the evaluation
+// transaction and silence the rules evaluated after it.
+func TestEvaluateEventResolverFailureDoesNotAbortOtherRules(t *testing.T) {
+	f := newFixture(t)
+	ana := f.person("Ana", "ana")
+	// Rules are evaluated in creation order, so the failing person rule goes first.
+	faceRule := f.addRule("Vigilancia", rules.TriggerEvent, rules.Conditions{FacePersonIDs: []uuid.UUID{ana}}, rules.Actions{NotifyInApp: true}, true)
+	plain := f.addRule("Todo", rules.TriggerEvent, rules.Conditions{}, rules.Actions{NotifyInApp: true}, true)
+	f.svc.Faces = failingFaces{}
+
+	if err := f.svc.EvaluateEvent(context.Background(), f.faceEvent("ana")); err != nil {
+		t.Fatalf("evaluation with a failing resolver: %v", err)
+	}
+	if n := f.notifications(faceRule); n != 0 {
+		t.Fatalf("person rule with a failing resolver created %d notifications, want 0", n)
+	}
+	if n := f.notifications(plain); n != 1 {
+		t.Fatalf("rule after the failing resolver created %d notifications, want 1", n)
 	}
 }

@@ -98,6 +98,33 @@ func TestSyncerPersonRuleFiresOnceWhenTheNameArrivesLater(t *testing.T) {
 	}
 }
 
+// A second person recognized on the same review re-evaluates the person rules with the gained name
+// only: the rule of the first person must not fire again once its debounce window has passed.
+func TestSyncerFaceUpdateEvaluatesOnlyTheGainedNames(t *testing.T) {
+	f := newFaceRuleFixture(t)
+	svc := rules.NewService(f.env.Store, nopPublisher{}, pgtest.Discard())
+	svc.Debounce = time.Nanosecond // nothing is debounced: a repeated evaluation would fire again
+	f.syncer.Rules = svc
+	personA := f.addPerson("Zaira", faceName)
+	personB := f.addPerson("Bruno", "bruno_face")
+	f.addRule(map[string]any{"face_person_ids": []string{personA.String()}}, map[string]any{"notify_in_app": true})
+	f.addRule(map[string]any{"face_person_ids": []string{personB.String()}}, map[string]any{"notify_in_app": true})
+	start := time.Now().Add(-time.Minute)
+
+	f.putRecognized("face-4", "zebra", start)
+	f.sync()
+	f.putRecognized("face-4", "zebra", start, faceName)
+	f.sync()
+	if n, _ := f.counts(); n != 1 {
+		t.Fatalf("after the first name: %d notifications, want 1 (rule of the first person)", n)
+	}
+	f.putRecognized("face-4", "zebra", start, faceName, "bruno_face")
+	f.sync()
+	if n, _ := f.counts(); n != 2 {
+		t.Fatalf("after the second name: %d notifications, want 2 (rule of the second person only; the first must not refire)", n)
+	}
+}
+
 func TestSyncerPersonRuleAlarmRedactsTheNameWithoutFacesView(t *testing.T) {
 	f := newFaceRuleFixture(t)
 	ctx := context.Background()
