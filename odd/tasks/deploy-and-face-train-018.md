@@ -11,7 +11,9 @@ Make a deploy of the local compose stack one reproducible command, and show date
 - [x] DFT-01 — Parse fractional Unix timestamps in face train file names (0.17 integer form keeps working). Route: inline (one function + its test).
   - RED: `go test -run TestParseTrainFile ./internal/faces/` failed: `1792014454.926961-ctk7qb-1792014467.366228-unknown-0.webp: not parsed`.
   - GREEN: `strconv.ParseFloat` for the attempt time (`internal/faces/train.go:63`); unit tests pass, `go vet`, golangci-lint 0 issues, `go test -tags integration -run Train ./internal/faces/ ./internal/api/` ok.
-- [ ] DFT-02 — `make deploy`: preflight (clean tree on the default branch, fast-forward pull), protected Postgres dump, rollback tags of current api/worker/web images, build with version/commit, `docker compose up -d`, wait for `/health/ready`, print the rollback command; fail fast at any step. Route: delegated direct (writer trigger: Makefile + script + docs).
+- [x] DFT-02 — `make deploy`: preflight (clean tree on the default branch, fast-forward pull), protected Postgres dump, rollback tags of current api/worker/web images, build with version/commit, `docker compose up -d`, wait for `/health/ready`, print the rollback command; fail fast at any step. Route: delegated direct (writer trigger: Makefile + script + docs).
+  - RED: `sh deploy/deploy_test.sh` failed before `deploy/deploy.sh` existed (missing steps, dirty-tree message).
+  - GREEN: `deploy/deploy.sh` (+ `DEPLOY_DRY_RUN=1`), `make deploy`, `make rollback TAG=<ts>`, COMMIT/BUILD_TIME build args for api/relay/worker, README "Despliegue". Checks: `sh deploy/deploy_test.sh` ok, `sh -n`/`bash -n` clean, `make -n deploy` ok, `docker compose config --quiet` ok, `go test ./deploy/agent/compose/` ok, `git diff --check` clean; shellcheck not installed. The real deploy was not run.
 
 ## Constraints and checks
 - Strict TDD (user global config). Go runner: `GOPROXY=off GOTOOLCHAIN=local GOCACHE=/tmp/openvms-go-build-cache go test ./internal/faces/...`. Shell: `sh -n`, `shellcheck` if available, `make -n deploy`.
@@ -21,4 +23,4 @@ Make a deploy of the local compose stack one reproducible command, and show date
 - 2026-10-18: branch `feat/deploy-and-face-train-018` from `main` `be86882`.
 
 ## Next step
-DFT-02 through one writer.
+Run `make deploy` on the live host after merge (user decision).

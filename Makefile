@@ -19,6 +19,16 @@ help: ## List targets
 up: ## Build and start the full stack in Docker (web on http://localhost:8000)
 	VERSION=$(VERSION) AGENT_VERSION=$(AGENT_VERSION) docker compose up -d --build
 
+.PHONY: deploy
+deploy: ## Deploy the local stack: preflight, DB dump, rollback tags, build, up, health check (deploy/deploy.sh)
+	./deploy/deploy.sh
+
+.PHONY: rollback
+rollback: ## Retag images to rollback-$(TAG) and restart without build (no DB restore): make rollback TAG=<ts>
+	@test -n "$(TAG)" || { echo "usage: make rollback TAG=<timestamp>"; exit 1; }
+	@for s in api relay worker web; do docker image inspect openvms-$$s:rollback-$(TAG) >/dev/null 2>&1 && docker tag openvms-$$s:rollback-$(TAG) openvms-$$s:latest || echo "no rollback tag for $$s"; done
+	docker compose up -d --no-build
+
 .PHONY: down
 down: ## Stop the stack (keeps volumes)
 	docker compose down
