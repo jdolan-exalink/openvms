@@ -60,11 +60,12 @@ func parseTrainFile(file string) (seen *time.Time, label string, score *float64)
 	if err != nil {
 		return nil, "", nil
 	}
-	ts, err := strconv.ParseInt(parts[len(parts)-3], 10, 64)
-	if err != nil || ts <= 0 {
+	// Frigate 0.17 writes whole seconds; 0.18 adds a fraction (1792014467.366228).
+	ts, err := strconv.ParseFloat(parts[len(parts)-3], 64)
+	if err != nil || ts < 1 {
 		return nil, "", nil
 	}
-	t := time.Unix(ts, 0).UTC()
+	t := time.Unix(int64(ts), 0).UTC()
 	return &t, parts[len(parts)-2], &sc
 }
 
