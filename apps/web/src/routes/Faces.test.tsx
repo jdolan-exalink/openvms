@@ -26,11 +26,13 @@ type Backend = {
   fail: { upload?: number; patch?: number };
   /** The caller's tenant; null makes the caller a platform administrator. */
   tenantId: string | null;
+  /** What the tenants list answers: a status code makes it fail. */
+  tenants: { id: string; name: string }[] | number;
 };
 
 function install(over: Partial<Backend> = {}) {
   const b: Backend = {
-    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], train: { items: [], servers: [] }, recognitions: [[]], cameras: [], fail: {}, tenantId: "t1",
+    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], train: { items: [], servers: [] }, recognitions: [[]], cameras: [], fail: {}, tenantId: "t1", tenants: [{ id: "t1", name: "Alfa" }, { id: "t2", name: "Beta" }],
     ...over,
   };
   const calls: Call[] = [];
@@ -53,7 +55,7 @@ function install(over: Partial<Backend> = {}) {
         return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: b.tenantId,
           grants: b.permissions.map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
       }
-      if (p === "/api/v1/tenants") return json({ items: [{ id: "t1", name: "Alfa" }, { id: "t2", name: "Beta" }] });
+      if (p === "/api/v1/tenants") return typeof b.tenants === "number" ? json({ code: "internal", message: "tenants down" }, b.tenants) : json({ items: b.tenants });
       if (p === "/api/v1/faces/persons" && input.method === "GET") return json({ items: b.persons });
       if (p === "/api/v1/faces/persons" && input.method === "POST") return json(person("new", (call.body as { display_name: string }).display_name), 201);
       if (/\/images$/.test(p) && input.method === "GET") return json({ items: b.images });
@@ -132,6 +134,31 @@ describe("Faces page as a platform administrator", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Reconocimientos" }));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/recognitions")).toBe(true));
     expect(calls.filter((c) => c.path === "/api/v1/faces/recognitions").every((c) => c.search.get("tenant_id") === "t2")).toBe(true);
+  });
+
+  it("drops the open person when the tenant changes", async () => {
+    install({ tenantId: null, persons: [person("p1", "Ana")] });
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
+    expect(await screen.findByRole("button", { name: "Volver a la lista" })).toBeInTheDocument();
+    await screen.findByRole("option", { name: "Beta" });
+    fireEvent.change(screen.getByLabelText("Organización"), { target: { value: "t2" } });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Volver a la lista" })).not.toBeInTheDocument());
+    expect(await screen.findByRole("button", { name: "Nueva persona" })).toBeInTheDocument();
+  });
+
+  it("shows the error when the tenants cannot be loaded", async () => {
+    const { calls } = install({ tenantId: null, tenants: 500 });
+    renderPage(Faces);
+    expect(await screen.findByText("tenants down")).toBeInTheDocument();
+    expect(calls.some((c) => c.path.startsWith("/api/v1/faces"))).toBe(false);
+  });
+
+  it("says so when there are no tenants", async () => {
+    const { calls } = install({ tenantId: null, tenants: [] });
+    renderPage(Faces);
+    expect(await screen.findByText("No hay organizaciones para mostrar.")).toBeInTheDocument();
+    expect(calls.some((c) => c.path.startsWith("/api/v1/faces"))).toBe(false);
   });
 
   it("keeps members unchanged: no selector and no tenant_id", async () => {

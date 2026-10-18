@@ -6,7 +6,7 @@ import { PersonsTab } from "@/components/faces/PersonsTab";
 import { RecognitionsTab } from "@/components/faces/RecognitionsTab";
 import { TrainTab } from "@/components/faces/TrainTab";
 import { WatchlistsTab } from "@/components/faces/WatchlistsTab";
-import { Empty, Field, PageHeader, Select } from "@/components/ui";
+import { Empty, ErrorNote, Field, PageHeader, Select } from "@/components/ui";
 import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
@@ -84,6 +84,8 @@ export function Faces() {
           </Select>
         </Field>
       )}
+      {canView && isPlatform && <ErrorNote error={tenants.error} />}
+      {canView && isPlatform && tenants.isSuccess && tenantList.length === 0 && <Empty>{t("faces.noTenants")}</Empty>}
       {canView && ready && (
         <>
           <div role="tablist" aria-label={t("faces.tabs")} className="flex gap-1 border-b border-outline-variant">
@@ -105,7 +107,7 @@ export function Faces() {
               </button>
             ))}
           </div>
-          <div role="tabpanel" id={`faces-panel-${tab}`} aria-labelledby={`faces-tab-${tab}`}>
+          <div key={tenantId ?? "own"} role="tabpanel" id={`faces-panel-${tab}`} aria-labelledby={`faces-tab-${tab}`}>
             {tab === "people" && <PersonsTab canManage={canManage} tenantId={tenantId} />}
             {tab === "train" && <TrainTab canManage={canManage} tenantId={tenantId} />}
             {tab === "recognitions" && <RecognitionsTab tenantId={tenantId} />}
