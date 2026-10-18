@@ -299,3 +299,25 @@ func TestTrainListReportsUnreachableServersWithoutFailing(t *testing.T) {
 		}
 	}
 }
+
+// A new person created for an attempt must not outlive a failed image add: no orphan person.
+func TestAssignToNewPersonLeavesNoOrphanWhenStorageFails(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	ctx := context.Background()
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.h01.AddFaceTrainImage(trainFile, pngOf(t, 9))
+	sf.blobs.failPut = true
+	if _, err := sf.svc.AssignTrainAttempt(ctx, sf.manager, sf.tenant, faces.AssignInput{ServerID: sf.h01ID, File: trainFile, NewPersonName: "Dora"}); err == nil {
+		t.Fatal("assign succeeded although the image could not be stored")
+	}
+	sf.blobs.failPut = false
+	persons, err := sf.svc.ListPersons(ctx, sf.manager, sf.tenant)
+	if err != nil || len(persons) != 0 {
+		t.Fatalf("persons after a failed assign = %+v, %v; want none", persons, err)
+	}
+	// The attempt is untouched and the name is free again.
+	if _, err := sf.svc.AssignTrainAttempt(ctx, sf.manager, sf.tenant, faces.AssignInput{ServerID: sf.h01ID, File: trainFile, NewPersonName: "Dora"}); err != nil {
+		t.Fatalf("retry after failure: %v", err)
+	}
+}

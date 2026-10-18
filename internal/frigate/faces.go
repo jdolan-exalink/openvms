@@ -25,6 +25,8 @@ var (
 	// (answers FastAPI's default 404 or 405). The route was verified in the 0.17 source; 0.18
 	// was not verified.
 	ErrFaceRenameUnsupported = errors.New("this frigate version does not support renaming faces")
+	// ErrFaceImageTooLarge means a train attempt exceeds the size cap.
+	ErrFaceImageTooLarge = errors.New("face image is too large")
 	// ErrInvalidFaceName means a face name is not a Frigate-safe identifier. Names are embedded
 	// in request paths and in Frigate's on-disk folder names, so they are validated first.
 	ErrInvalidFaceName = errors.New("invalid face name: use 1-50 lowercase letters, digits or underscores")
@@ -203,9 +205,13 @@ func (a *v017) FaceTrainImage(ctx context.Context, file string) ([]byte, string,
 	if resp.StatusCode >= 300 {
 		return nil, "", fmt.Errorf("frigate train image: status %d", resp.StatusCode)
 	}
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxFaceImageBytes))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxFaceImageBytes+1))
 	if err != nil {
 		return nil, "", err
+	}
+	if len(b) > maxFaceImageBytes {
+		// Never hand back a silently truncated picture: it would be enrolled as a corrupt image.
+		return nil, "", ErrFaceImageTooLarge
 	}
 	ct := resp.Header.Get("Content-Type")
 	if ct == "" || ct == "application/octet-stream" {

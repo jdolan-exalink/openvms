@@ -93,3 +93,15 @@ func TestValidateImage(t *testing.T) {
 		})
 	}
 }
+
+func TestUnreachableKeepsCallerErrorsAndSanitizesTheRest(t *testing.T) {
+	var ve *ValidationError
+	if err := unreachable(invalid("bad")); !errors.As(err, &ve) {
+		t.Fatalf("validation error was rewritten to %T", err)
+	}
+	var re *RemoteError
+	err := unreachable(errors.New("dial tcp 10.0.0.5:5000: connection refused"))
+	if !errors.As(err, &re) || strings.Contains(re.Reason, "10.0.0.5") {
+		t.Fatalf("remote failure = %v, want a sanitized RemoteError", err)
+	}
+}

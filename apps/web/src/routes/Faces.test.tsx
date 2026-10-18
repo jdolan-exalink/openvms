@@ -22,11 +22,13 @@ type Backend = {
   train: Schemas["FaceTrainList"];
   recognitions: Schemas["FaceRecognition"][][];
   cameras: unknown[];
+  /** Forces an error answer: status codes for the image upload and the person PATCH. */
+  fail: { upload?: number; patch?: number };
 };
 
 function install(over: Partial<Backend> = {}) {
   const b: Backend = {
-    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], train: { items: [], servers: [] }, recognitions: [[]], cameras: [],
+    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], train: { items: [], servers: [] }, recognitions: [[]], cameras: [], fail: {},
     ...over,
   };
   const calls: Call[] = [];
@@ -52,11 +54,15 @@ function install(over: Partial<Backend> = {}) {
       if (p === "/api/v1/faces/persons" && input.method === "GET") return json({ items: b.persons });
       if (p === "/api/v1/faces/persons" && input.method === "POST") return json(person("new", (call.body as { display_name: string }).display_name), 201);
       if (/\/images$/.test(p) && input.method === "GET") return json({ items: b.images });
-      if (/\/images$/.test(p) && input.method === "POST") return json(b.images[0], 201);
+      if (/\/images$/.test(p) && input.method === "POST") {
+        if (b.fail.upload) return json({ code: "invalid", message: "unsupported picture" }, b.fail.upload);
+        return json(b.images[0], 201);
+      }
       if (/\/images\/[^/]+$/.test(p) && input.method === "DELETE") return new Response(null, { status: 204 });
       if (/\/sync$/.test(p)) return json({ items: b.syncStatus });
       if (/\/sync\/retry$/.test(p)) return json({ requeued: 1 });
       if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "DELETE") return new Response(null, { status: 204 });
+      if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "PATCH" && b.fail.patch) return json({ code: "conflict", message: "name already in use" }, b.fail.patch);
       if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "PATCH") return json({ ...b.persons[0], ...(call.body as object) });
       if (p === "/api/v1/faces/train") return json(b.train);
       if (p === "/api/v1/faces/train/assign") return json({ person: person("p1", "Ana"), image: { id: "i9" }, attempt_removed: true }, 201);
@@ -152,6 +158,37 @@ describe("Faces page", () => {
     fireEvent.click(screen.getByRole("button", { name: "Eliminar foto 1" }));
     fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Eliminar foto" }));
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/faces/persons/p1/images/i1")).toBe(true));
+  });
+
+  it("saves edits to a person with a trimmed PATCH and keeps the form disabled until something changed", async () => {
+    const { calls } = install({ persons: [person("p1", "Ana")] });
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
+    const save = await screen.findByRole("button", { name: "Guardar" });
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "  Ana María  " } });
+    fireEvent.change(screen.getByLabelText("Notas"), { target: { value: " visita " } });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() => expect(calls.find((c) => c.method === "PATCH" && c.path === "/api/v1/faces/persons/p1")?.body).toEqual({ display_name: "Ana María", notes: "visita" }));
+  });
+
+  it("shows the API message when saving a person fails", async () => {
+    install({ persons: [person("p1", "Ana")], fail: { patch: 409 } });
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
+    fireEvent.change(await screen.findByLabelText("Nombre"), { target: { value: "Beto" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    expect(await screen.findByText("name already in use")).toBeInTheDocument();
+  });
+
+  it("shows the API error of a failed upload (postForm error path)", async () => {
+    install({ persons: [person("p1", "Ana")], fail: { upload: 400 } });
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
+    const file = new File([new Uint8Array([1])], "a.png", { type: "image/png" });
+    fireEvent.change(await screen.findByLabelText("Subir foto"), { target: { files: [file] } });
+    expect(await screen.findByText("unsupported picture")).toBeInTheDocument();
   });
 
   it("asks for confirmation before deleting a person and explains the propagation", async () => {

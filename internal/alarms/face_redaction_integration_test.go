@@ -16,6 +16,10 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/store"
 )
 
+type cancelPub struct{ cancel context.CancelFunc }
+
+func (p cancelPub) Publish(context.Context, string, []byte) error { p.cancel(); return nil }
+
 // Alarms expose the sub_labels of their events; a registered person's name must be redacted
 // there for callers without faces.view (list, detail, event list and lifecycle responses).
 func TestAlarmsRedactFaceNamesWithoutFacesView(t *testing.T) {
@@ -83,6 +87,20 @@ func TestAlarmsRedactFaceNamesWithoutFacesView(t *testing.T) {
 		}
 		if !slices.Equal(a.EventSubLabels, want) {
 			t.Fatalf("acknowledge sub_labels = %v, want %v", a.EventSubLabels, want)
+		}
+	})
+	t.Run("redaction failure after commit is not a client error", func(t *testing.T) {
+		// The publish step runs after the commit and before the redaction; canceling the request
+		// there makes the redaction fail while the mutation is already applied.
+		cctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		failing := &alarms.Service{Store: c.env.Store, Pub: cancelPub{cancel}}
+		a, err := failing.Investigate(cctx, user, res.AlarmID)
+		if err != nil {
+			t.Fatalf("committed mutation returned an error to the client: %v", err)
+		}
+		if a.Status != "investigating" || len(a.EventSubLabels) != 0 {
+			t.Fatalf("status %q sub_labels %v, want investigating with labels withheld", a.Status, a.EventSubLabels)
 		}
 	})
 	t.Run("faces.view reveals", func(t *testing.T) {
