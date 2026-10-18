@@ -456,6 +456,24 @@ type FaceServerSync struct {
 	UpdatedAt       time.Time
 }
 
+type FaceWatchlist struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	Name        string
+	Description string
+	CreatedBy   *uuid.UUID
+	UpdatedBy   *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type FaceWatchlistMember struct {
+	TenantID    uuid.UUID
+	WatchlistID uuid.UUID
+	PersonID    uuid.UUID
+	CreatedAt   time.Time
+}
+
 type FrigateConfigRevision struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID

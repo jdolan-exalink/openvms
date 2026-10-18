@@ -2138,6 +2138,101 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/watchlists:
+    parameters:
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "Needed only by platform administrators; members of a tenant always act on their own." }
+    get:
+      tags: [faces]
+      operationId: listFaceWatchlists
+      summary: List the watchlists of known persons (faces.view)
+      description: Every read is audited. Members are person ids; resolve names with the persons list.
+      responses:
+        "200":
+          description: Watchlists
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/FaceWatchlist" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [faces]
+      operationId: createFaceWatchlist
+      summary: Create a watchlist (faces.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceWatchlistCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceWatchlist" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/watchlists/{watchlistId}:
+    parameters:
+      - { name: watchlistId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [faces]
+      operationId: getFaceWatchlist
+      summary: Get one watchlist (faces.view)
+      responses:
+        "200":
+          description: Watchlist
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceWatchlist" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [faces]
+      operationId: updateFaceWatchlist
+      summary: Rename a watchlist or replace its members (faces.manage)
+      description: Omitted fields keep their value; person_ids replaces the whole member list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceWatchlistUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceWatchlist" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [faces]
+      operationId: deleteFaceWatchlist
+      summary: Delete a watchlist (faces.manage)
+      description: Answers 409 while an alarm rule still uses the watchlist.
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/v1/faces/config:
     get:
       tags: [faces]
@@ -5642,6 +5737,30 @@ components:
       properties:
         display_name: { type: string, minLength: 1, maxLength: 120 }
         notes: { type: string, maxLength: 2000 }
+    FaceWatchlist:
+      type: object
+      required: [id, tenant_id, name, description, person_ids, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        person_ids: { type: array, items: { type: string, format: uuid } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    FaceWatchlistCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        person_ids: { type: array, maxItems: 500, items: { type: string, format: uuid } }
+    FaceWatchlistUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        person_ids: { type: array, maxItems: 500, items: { type: string, format: uuid } }
     FaceImage:
       type: object
       required: [id, person_id, content_type, size_bytes, width, height, created_at]
@@ -6362,6 +6481,16 @@ components:
         map_zone_ids:
           type: array
           description: Event rules only. Match events from cameras inside or linked to these map zones.
+          items: { type: string, format: uuid }
+        face_person_ids:
+          type: array
+          maxItems: 100
+          description: Event rules only. Match events whose recognized face (sub_label) is one of these registered persons. Combined with face_watchlist_ids as "any of". Needs faces.view to set.
+          items: { type: string, format: uuid }
+        face_watchlist_ids:
+          type: array
+          maxItems: 100
+          description: Event rules only. Match events whose recognized face belongs to any person of these watchlists, resolved when the event is evaluated.
           items: { type: string, format: uuid }
         schedule: { $ref: "#/components/schemas/RuleSchedule" }
         cooldown_seconds:
