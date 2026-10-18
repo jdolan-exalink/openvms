@@ -68,3 +68,21 @@ describe("router: client station", () => {
     expect(router.state.location.pathname).toBe("/client-station");
   });
 });
+
+describe("router: faces", () => {
+  it("resolves /faces and tells a user without faces.view they cannot see it", async () => {
+    stubLiveRoutes();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/faces"] }), context: { queryClient: client } });
+
+    render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Rostros", level: 1 })).toBeInTheDocument();
+    expect(await screen.findByText("No tienes permiso para ver el reconocimiento facial.")).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe("/faces");
+  });
+});

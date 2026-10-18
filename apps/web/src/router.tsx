@@ -18,6 +18,7 @@ const Cameras = lazyRouteComponent(() => import("./routes/Cameras"), "Cameras");
 const Dashboard = lazyRouteComponent(() => import("./routes/Dashboard"), "Dashboard");
 const Events = lazyRouteComponent(() => import("./routes/Events"), "Events");
 const Exports = lazyRouteComponent(() => import("./routes/Exports"), "Exports");
+const Faces = lazyRouteComponent(() => import("./routes/Faces"), "Faces");
 const FrigateCameraConfig = lazyRouteComponent(() => import("./routes/FrigateCameraConfig"), "FrigateCameraConfig");
 const Groups = lazyRouteComponent(() => import("./routes/Groups"), "Groups");
 const Live = lazyRouteComponent(() => import("./routes/Live"), "Live");
@@ -188,6 +189,7 @@ export const routeTree = rootRoute.addChildren([
     alarmsRoute,
     eventsRoute,
     child("/plates", Plates),
+    child("/faces", Faces),
     playbackRoute,
     child("/exports", Exports),
     settingsRoute.addChildren([

@@ -1,0 +1,255 @@
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Schemas } from "@/api/client";
+import { json, renderPage } from "@/test-utils";
+import { Faces } from "./Faces";
+
+afterEach(() => vi.unstubAllGlobals());
+
+const sync = (over: Partial<Schemas["FaceSyncSummary"]> = {}): Schemas["FaceSyncSummary"] => ({ total: 2, synced: 2, pending: 0, failed: 0, conflict: 0, disabled: 0, ...over });
+const person = (id: string, name: string, over: Partial<Schemas["FacePerson"]> = {}): Schemas["FacePerson"] => ({
+  id, tenant_id: "t1", display_name: name, frigate_name: name.toLowerCase(), notes: "", image_count: 2, sync: sync(),
+  created_at: "2026-10-01T10:00:00Z", updated_at: "2026-10-01T10:00:00Z", ...over,
+});
+
+type Call = { method: string; path: string; search: URLSearchParams; body?: unknown; contentType?: string };
+
+type Backend = {
+  permissions: string[];
+  persons: Schemas["FacePerson"][];
+  images: Schemas["FaceImage"][];
+  syncStatus: Schemas["FaceSyncStatus"][];
+  train: Schemas["FaceTrainList"];
+  recognitions: Schemas["FaceRecognition"][][];
+  cameras: unknown[];
+};
+
+function install(over: Partial<Backend> = {}) {
+  const b: Backend = {
+    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], train: { items: [], servers: [] }, recognitions: [[]], cameras: [],
+    ...over,
+  };
+  const calls: Call[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (raw: Request | string, init?: RequestInit) => {
+      // The typed client passes a Request; multipart uploads go through plain fetch(url, init).
+      const input = typeof raw === "string" ? { url: new URL(raw, "http://localhost").href, method: init?.method ?? "GET", headers: new Headers(init?.headers) } : raw;
+      const url = new URL(input.url);
+      const call: Call = { method: input.method, path: url.pathname, search: url.searchParams, contentType: input.headers.get("content-type") ?? undefined };
+      if (typeof raw === "string") {
+        call.body = init?.body;
+      } else if (input.method !== "GET") {
+        const text = await raw.clone().text();
+        call.body = call.contentType?.includes("json") && text ? JSON.parse(text) : text;
+      }
+      calls.push(call);
+      const p = url.pathname;
+      if (p === "/api/v1/me") {
+        return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1",
+          grants: b.permissions.map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
+      }
+      if (p === "/api/v1/faces/persons" && input.method === "GET") return json({ items: b.persons });
+      if (p === "/api/v1/faces/persons" && input.method === "POST") return json(person("new", (call.body as { display_name: string }).display_name), 201);
+      if (/\/images$/.test(p) && input.method === "GET") return json({ items: b.images });
+      if (/\/images$/.test(p) && input.method === "POST") return json(b.images[0], 201);
+      if (/\/images\/[^/]+$/.test(p) && input.method === "DELETE") return new Response(null, { status: 204 });
+      if (/\/sync$/.test(p)) return json({ items: b.syncStatus });
+      if (/\/sync\/retry$/.test(p)) return json({ requeued: 1 });
+      if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "DELETE") return new Response(null, { status: 204 });
+      if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "PATCH") return json({ ...b.persons[0], ...(call.body as object) });
+      if (p === "/api/v1/faces/train") return json(b.train);
+      if (p === "/api/v1/faces/train/assign") return json({ person: person("p1", "Ana"), image: { id: "i9" }, attempt_removed: true }, 201);
+      if (p === "/api/v1/faces/recognitions") {
+        const idx = url.searchParams.get("cursor") ? 1 : 0;
+        const items = b.recognitions[idx] ?? [];
+        return json({ items, next_cursor: idx === 0 && b.recognitions.length > 1 ? "c1" : undefined });
+      }
+      if (p === "/api/v1/cameras") return json({ items: b.cameras });
+      return json({ code: "not_found", message: "not found" }, 404);
+    }),
+  );
+  return { calls, b };
+}
+
+const rec = (id: string, who: string, cam: string, personId = "p1"): Schemas["FaceRecognition"] => ({
+  event_id: id, person_id: personId, person_name: who, camera_id: `cam-${cam}`, camera_name: cam, site_id: "s1", site_name: "Sitio", server_name: "h01",
+  start_time: "2026-10-17T12:00:00Z", has_thumbnail: true, has_snapshot: false,
+});
+
+describe("Faces page", () => {
+  it("shows no data and no calls when the user lacks faces.view", async () => {
+    const { calls } = install({ permissions: ["events.view"] });
+    renderPage(Faces);
+    expect(await screen.findByText("No tienes permiso para ver el reconocimiento facial.")).toBeInTheDocument();
+    expect(calls.some((c) => c.path.startsWith("/api/v1/faces"))).toBe(false);
+  });
+
+  it("lists people, filters by search, and offers no write controls to a viewer", async () => {
+    install({ permissions: ["faces.view"], persons: [person("p1", "Ana"), person("p2", "Beto", { sync: sync({ total: 2, synced: 1, failed: 1 }) })] });
+    renderPage(Faces);
+    const list = await screen.findByRole("list", { name: "Personas registradas" });
+    expect(within(list).getByText("Ana")).toBeInTheDocument();
+    expect(within(list).getByText("2 de 2 servidores sincronizados")).toBeInTheDocument();
+    expect(within(list).getByText("1 de 2 servidores sincronizados")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Nueva persona" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Buscar persona"), { target: { value: "bet" } });
+    expect(within(screen.getByRole("list", { name: "Personas registradas" })).queryByText("Ana")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Beto/ }));
+    expect(await screen.findByRole("heading", { name: "Beto" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Eliminar persona" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Subir foto")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reintentar" })).not.toBeInTheDocument();
+  });
+
+  it("explains the empty state and warns when no server has face recognition", async () => {
+    install({ persons: [] });
+    renderPage(Faces);
+    expect(await screen.findByText(/Todavía no hay personas registradas/)).toBeInTheDocument();
+    install({ persons: [person("p1", "Ana", { sync: sync({ total: 2, synced: 0, disabled: 2 }) })] });
+    renderPage(Faces);
+    expect(await screen.findByText(/Ningún servidor tiene activado el reconocimiento facial: las personas se guardan aquí/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ir a Servidores" })).toHaveAttribute("href", "/servers");
+  });
+
+  it("creates a person", async () => {
+    const { calls } = install({ persons: [] });
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("button", { name: "Nueva persona" }));
+    fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "  Carla  " } });
+    fireEvent.change(screen.getByLabelText("Notas"), { target: { value: "vip" } });
+    fireEvent.click(screen.getByRole("button", { name: "Crear persona" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/faces/persons")?.body).toEqual({ display_name: "Carla", notes: "vip" }));
+  });
+
+  it("shows a person's photos, sync status, and lets a manager upload, delete and retry", async () => {
+    const { calls } = install({
+      persons: [person("p1", "Ana")],
+      images: [{ id: "i1", person_id: "p1", content_type: "image/png", size_bytes: 10, width: 4, height: 4, created_at: "2026-10-01T10:00:00Z" }],
+      syncStatus: [
+        { server_id: "s1", server_name: "h01", status: "synced", owned: true, desired_revision: 2, synced_revision: 2, updated_at: "2026-10-01T10:00:00Z" },
+        { server_id: "s2", server_name: "c01", status: "conflict", owned: false, desired_revision: 2, synced_revision: 0, updated_at: "2026-10-01T10:00:00Z", last_error: "same name" },
+      ],
+    });
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
+    const img = await screen.findByAltText("Foto 1 de Ana");
+    expect(img).toHaveAttribute("src", "/api/v1/faces/persons/p1/images/i1");
+    expect(await screen.findByText("Sincronizado")).toBeInTheDocument();
+    expect(screen.getByText("Conflicto")).toBeInTheDocument();
+
+    const file = new File([new Uint8Array([1, 2, 3])], "a.png", { type: "image/png" });
+    fireEvent.change(screen.getByLabelText("Subir foto"), { target: { files: [file] } });
+    await waitFor(() => {
+      const body = calls.find((c) => c.method === "POST" && c.path === "/api/v1/faces/persons/p1/images")?.body;
+      expect(body).toBeInstanceOf(FormData);
+      expect(((body as FormData).get("file") as File).name).toBe("a.png");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Reintentar" }));
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/persons/p1/sync/retry" && c.method === "POST")).toBe(true));
+
+    fireEvent.click(screen.getByRole("button", { name: "Eliminar foto 1" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Eliminar foto" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/faces/persons/p1/images/i1")).toBe(true));
+  });
+
+  it("asks for confirmation before deleting a person and explains the propagation", async () => {
+    const { calls } = install({ persons: [person("p1", "Ana")] });
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Eliminar persona" }));
+    const dialog = await screen.findByRole("dialog", { name: "Eliminar a Ana" });
+    expect(within(dialog).getByText(/se quitará de todos los servidores Frigate y se borrará su nombre de los eventos guardados/)).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "DELETE")).toBe(false);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Eliminar persona" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/faces/persons/p1")).toBe(true));
+  });
+
+  describe("Entrenar", () => {
+    const attempts = {
+      items: [
+        { server_id: "s1", server_name: "h01", file: "a.webp", score: 0.41, seen_at: "2026-10-17T12:00:00Z" },
+        { server_id: "s1", server_name: "h01", file: "b.webp" },
+      ],
+      servers: [{ server_id: "s1", server_name: "h01" }, { server_id: "s2", server_name: "c01", error: "the server could not be reached" }],
+    };
+
+    it("points to Servers when no server has face recognition", async () => {
+      install({ train: { items: [], servers: [] } });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+      expect(await screen.findByText(/Ningún servidor tiene activado el reconocimiento facial\. La configuración administrada/)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Ir a Servidores" })).toHaveAttribute("href", "/servers");
+    });
+
+    it("shows attempts through the proxied thumbnail endpoint and reports unreachable servers", async () => {
+      install({ persons: [person("p1", "Ana")], train: attempts });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+      const imgs = await screen.findAllByAltText("Intento de reconocimiento en h01");
+      expect(imgs[0]).toHaveAttribute("src", "/api/v1/faces/train/s1/image?file=a.webp");
+      expect(screen.getByText("c01: the server could not be reached")).toBeInTheDocument();
+      expect(screen.getByText("Puntaje 0.41")).toBeInTheDocument();
+    });
+
+    it("assigns an attempt to an existing person and to a new one", async () => {
+      const { calls } = install({ persons: [person("p1", "Ana")], train: attempts });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+      const selects = await screen.findAllByLabelText("Asignar a");
+      await screen.findAllByRole("option", { name: "Ana" });
+      fireEvent.click(screen.getAllByRole("button", { name: "Asignar" })[0]!);
+      expect(await screen.findByText("Elige una persona o escribe un nombre.")).toBeInTheDocument();
+      fireEvent.change(selects[0]!, { target: { value: "p1" } });
+      fireEvent.click(screen.getAllByRole("button", { name: "Asignar" })[0]!);
+      await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/faces/train/assign").map((c) => c.body)).toEqual([{ server_id: "s1", file: "a.webp", person_id: "p1" }]));
+      expect(await screen.findByText("Foto agregada a Ana.")).toBeInTheDocument();
+
+      fireEvent.change(screen.getAllByLabelText("Asignar a")[1]!, { target: { value: "__new__" } });
+      fireEvent.change(await screen.findByLabelText("Nombre de la nueva persona"), { target: { value: "Dora" } });
+      fireEvent.click(screen.getAllByRole("button", { name: "Asignar" })[1]!);
+      await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/faces/train/assign").map((c) => c.body)).toContainEqual({ server_id: "s1", file: "b.webp", new_person_display_name: "Dora" }));
+    });
+
+    it("hides the assign controls from a viewer", async () => {
+      install({ permissions: ["faces.view"], persons: [person("p1", "Ana")], train: attempts });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+      await screen.findAllByAltText("Intento de reconocimiento en h01");
+      expect(screen.queryByRole("button", { name: "Asignar" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("Reconocimientos", () => {
+    it("lists recognitions with playback links, filters by person and pages", async () => {
+      const { calls } = install({
+        persons: [person("p1", "Ana"), person("p2", "Beto")],
+        recognitions: [[rec("e1", "Ana", "plaza")], [rec("e2", "Beto", "muelle", "p2")]],
+      });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("tab", { name: "Reconocimientos" }));
+      const list = await screen.findByRole("list", { name: "Reconocimientos recientes" });
+      expect(within(list).getByText("Ana")).toBeInTheDocument();
+      expect(within(list).getByText("plaza")).toBeInTheDocument();
+      const link = within(list).getByRole("link", { name: "Ver grabación" });
+      expect(link.getAttribute("href")).toMatch(/^\/playback\?/);
+      expect(link.getAttribute("href")).toContain("camera=cam-plaza");
+      expect(within(list).getByAltText("Captura del evento en plaza")).toHaveAttribute("src", "/api/v1/events/e1/thumbnail");
+
+      fireEvent.click(screen.getByRole("button", { name: "Cargar más" }));
+      expect(await screen.findByText("muelle")).toBeInTheDocument();
+
+      await screen.findByRole("option", { name: "Beto" });
+      fireEvent.change(screen.getByLabelText("Persona"), { target: { value: "p2" } });
+      await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/recognitions" && c.search.getAll("person_id").join() === "p2")).toBe(true));
+    });
+
+    it("shows an empty state", async () => {
+      install({ recognitions: [[]] });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("tab", { name: "Reconocimientos" }));
+      expect(await screen.findByText("No hay reconocimientos para estos filtros.")).toBeInTheDocument();
+    });
+  });
+});

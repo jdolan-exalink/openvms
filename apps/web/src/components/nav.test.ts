@@ -82,3 +82,13 @@ describe("client station nav", () => {
     expect(isNavItemVisible(item!, meWith(), allFeatures)).toBe(true);
   });
 });
+
+describe("faces nav", () => {
+  const item = navGroups.find((g) => g.title === "nav.investigation")?.items.find((i) => i.to === "/faces");
+  it("sits under investigation, gated by faces.view", () => {
+    expect(item?.label).toBe("nav.faces");
+    expect(item?.permission).toBe("faces.view");
+    expect(isNavItemVisible(item!, meWith("events.view"), allFeatures)).toBe(false);
+    expect(isNavItemVisible(item!, meWith("faces.view"), allFeatures)).toBe(true);
+  });
+});

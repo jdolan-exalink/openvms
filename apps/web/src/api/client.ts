@@ -53,3 +53,24 @@ export function unwrap<T>({ data, error, response }: Result<T>): T {
   const body = (error ?? {}) as Partial<Schemas["Error"]>;
   throw new ApiError(response.status, body.code ?? "error", body.message ?? `La API respondió ${response.status}`);
 }
+
+/**
+ * postForm sends multipart form data, which the typed client cannot build, with the same
+ * session/token and CSRF headers as every other request. It throws ApiError like unwrap.
+ */
+export async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const headers = new Headers(csrfHeader);
+  const token = currentToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const response = await globalThis.fetch(path, { method: "POST", body: form, headers, credentials: "same-origin" });
+  if (response.status === 401 && window.location.pathname !== "/login") {
+    clearToken();
+    window.location.assign("/login");
+  }
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const err = (body ?? {}) as Partial<Schemas["Error"]>;
+    throw new ApiError(response.status, err.code ?? "error", err.message ?? `La API respondió ${response.status}`);
+  }
+  return body as T;
+}
