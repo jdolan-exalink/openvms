@@ -439,9 +439,12 @@ func redactAlarmFaceNames(ctx context.Context, q *db.Queries, chk *access.Checke
 	return nil
 }
 
-// redactResult applies the face-name redaction to the Alarm a lifecycle operation returns.
-func (s *Service) redactResult(ctx context.Context, actor authz.Actor, a *Alarm) error {
-	return s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+// redactResult applies the face-name redaction to the Alarm a lifecycle operation returns. The
+// mutation is already committed, so a redaction failure must not turn into an error for the
+// client (it would retry an applied change): it is logged and the response fails closed, with
+// the event sub_labels dropped rather than shown unredacted.
+func (s *Service) redactResult(ctx context.Context, actor authz.Actor, a *Alarm) {
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		chk, err := access.Load(ctx, q, actor)
 		if err != nil {
 			return err
@@ -453,6 +456,12 @@ func (s *Service) redactResult(ctx context.Context, actor authz.Actor, a *Alarm)
 		*a = one[0]
 		return nil
 	})
+	if err != nil {
+		a.EventSubLabels = nil
+		if s.Log != nil {
+			s.Log.ErrorContext(ctx, "alarms: face-name redaction failed after commit; sub_labels withheld", "alarm_id", a.ID, "error", err)
+		}
+	}
 }
 
 func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
@@ -524,7 +533,7 @@ func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UU
 		s.publish(ctx, "acknowledged", res)
 	}
 	if err == nil {
-		err = s.redactResult(ctx, actor, &res)
+		s.redactResult(ctx, actor, &res)
 	}
 	return res, err
 }
@@ -614,7 +623,7 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 		s.publish(ctx, "assigned", res)
 	}
 	if err == nil {
-		err = s.redactResult(ctx, actor, &res)
+		s.redactResult(ctx, actor, &res)
 	}
 	return res, err
 }
@@ -688,7 +697,7 @@ func (s *Service) Investigate(ctx context.Context, actor authz.Actor, id uuid.UU
 		s.publish(ctx, "investigating", res)
 	}
 	if err == nil {
-		err = s.redactResult(ctx, actor, &res)
+		s.redactResult(ctx, actor, &res)
 	}
 	return res, err
 }
@@ -762,7 +771,7 @@ func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID, 
 		s.publish(ctx, "resolved", res)
 	}
 	if err == nil {
-		err = s.redactResult(ctx, actor, &res)
+		s.redactResult(ctx, actor, &res)
 	}
 	return res, err
 }
@@ -836,7 +845,7 @@ func (s *Service) Close(ctx context.Context, actor authz.Actor, id uuid.UUID, co
 		s.publish(ctx, "closed", res)
 	}
 	if err == nil {
-		err = s.redactResult(ctx, actor, &res)
+		s.redactResult(ctx, actor, &res)
 	}
 	return res, err
 }

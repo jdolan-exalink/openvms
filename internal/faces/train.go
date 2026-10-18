@@ -190,6 +190,16 @@ func (s *Service) trainServer(ctx context.Context, actor authz.Actor, tenantID, 
 	return srv, err
 }
 
+// discardNewPerson deletes a person created moments ago whose first image could not be added.
+// It runs on a detached, bounded context because the failure is often the request context.
+func (s *Service) discardNewPerson(ctx context.Context, actor authz.Actor, tenantID, personID uuid.UUID) {
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	if err := s.DeletePerson(dctx, actor, tenantID, personID); err != nil && s.Log != nil {
+		s.Log.ErrorContext(dctx, "faces: could not discard the person created for a failed assign", "person_id", personID, "error", err)
+	}
+}
+
 // RemoteError is a failed call to a Frigate server; Reason is sanitized (never an address or
 // a response body) and safe to show to the caller.
 type RemoteError struct{ Reason string }
@@ -198,7 +208,8 @@ func (e *RemoteError) Error() string { return "frigate: " + e.Reason }
 
 // unreachable turns a remote failure into a RemoteError; a missing attempt stays not-found.
 func unreachable(err error) error {
-	if errors.Is(err, store.ErrNotFound) {
+	var ve *ValidationError
+	if errors.Is(err, store.ErrNotFound) || errors.As(err, &ve) {
 		return err
 	}
 	return &RemoteError{Reason: remoteReason(err)}
@@ -210,6 +221,9 @@ func fetchAttempt(ctx context.Context, a frigate.Adapter, file string) ([]byte, 
 	data, ct, err := a.FaceTrainImage(cctx, file)
 	if errors.Is(err, frigate.ErrNotFound) {
 		return nil, "", store.ErrNotFound
+	}
+	if errors.Is(err, frigate.ErrFaceImageTooLarge) {
+		return nil, "", invalid("the attempt picture is too large")
 	}
 	return data, ct, err
 }
@@ -287,6 +301,7 @@ func (s *Service) AssignTrainAttempt(ctx context.Context, actor authz.Actor, ten
 	}
 
 	var personID uuid.UUID
+	created := false
 	if in.PersonID != nil {
 		personID = *in.PersonID
 	} else {
@@ -294,10 +309,14 @@ func (s *Service) AssignTrainAttempt(ctx context.Context, actor authz.Actor, ten
 		if err != nil {
 			return res, err
 		}
-		personID = p.ID
+		personID, created = p.ID, true
 	}
 	img, err := s.AddImage(ctx, actor, tenantID, personID, data, ct)
 	if err != nil {
+		if created {
+			// The person exists only for this image: do not leave an empty orphan behind.
+			s.discardNewPerson(ctx, actor, tenantID, personID)
+		}
 		return res, err
 	}
 	res.Image = img

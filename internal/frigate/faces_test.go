@@ -183,6 +183,19 @@ func TestRenameFaceNotFoundIsNotConflatedWithMissingRoute(t *testing.T) {
 	}
 }
 
+func TestFaceTrainImageOverCapIsAnErrorNotTruncated(t *testing.T) {
+	ts, mock := startFaceMock(t, "0.17.2-mock", true)
+	a := connectMock(t, ts)
+	mock.AddFaceTrainImage("big.webp", make([]byte, maxFaceImageBytes+1))
+	mock.AddFaceTrainImage("max.webp", make([]byte, maxFaceImageBytes))
+	if _, _, err := a.FaceTrainImage(context.Background(), "big.webp"); !errors.Is(err, ErrFaceImageTooLarge) {
+		t.Fatalf("oversized attempt = %v, want ErrFaceImageTooLarge", err)
+	}
+	if b, _, err := a.FaceTrainImage(context.Background(), "max.webp"); err != nil || len(b) != maxFaceImageBytes {
+		t.Fatalf("attempt at the cap = %d bytes, %v", len(b), err)
+	}
+}
+
 func TestFaceTrainImageAndTrainDelete(t *testing.T) {
 	ts, mock := startFaceMock(t, "0.17.2-mock", true)
 	a := connectMock(t, ts)
