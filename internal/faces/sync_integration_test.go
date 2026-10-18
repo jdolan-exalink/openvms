@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -627,5 +628,84 @@ func TestSyncTombstoneWithFailedDeleteIsRetryable(t *testing.T) {
 	}
 	if n := sf.scanInt(`SELECT count(*) FROM face_persons WHERE id = $1`, p.ID); n != 0 {
 		t.Fatal("tombstone was not purged after a successful retry")
+	}
+}
+
+// A row locked by a concurrent writer (for example the events syncer upserting a review) must
+// not make the scrub skip it: the name has to be gone before the person row is purged.
+func TestPurgeScrubsEventRowsLockedByConcurrentWriters(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	ana := sf.person("Ana", 1)
+	sf.run()
+	cam := sf.env.Cameras["frigate-h01/acceso_norte"]
+	for _, remote := range []string{"l1", "l2"} {
+		sf.exec(`INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, sub_labels, start_time)
+		         VALUES ($1, $2, $3, $4, $5, 'alert', $6, now())`, cam.TenantID, cam.SiteID, cam.ServerID, cam.ID, remote, []string{ana.FrigateName})
+	}
+	if err := sf.svc.DeletePerson(context.Background(), sf.manager, sf.tenant, ana.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	locked, release, held := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		held <- sf.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(context.Background(), `SELECT id FROM events WHERE remote_id = 'l1' FOR UPDATE`); err != nil {
+				return err
+			}
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+	done := make(chan error, 1)
+	go func() {
+		var err error
+		for i := 0; i < 4 && err == nil; i++ {
+			err = sf.y.RunOnce(context.Background(), 50)
+		}
+		done <- err
+	}()
+	time.Sleep(700 * time.Millisecond)
+	close(release)
+	if err := <-held; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	sf.run()
+	if n := sf.scanInt(`SELECT count(*) FROM events WHERE $1 = ANY(sub_labels)`, ana.FrigateName); n != 0 {
+		t.Fatalf("%d events still carry the name of a purged person", n)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM face_persons WHERE id = $1`, ana.ID); n != 0 {
+		t.Fatal("tombstone was not purged")
+	}
+}
+
+// Purging records the name so a later re-ingestion of a recent review cannot write it back;
+// registering a new person with that name makes it legitimate again.
+func TestPurgeRecordsErasedNameAndRecreationClearsIt(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	ana := sf.person("Ana", 1)
+	sf.run()
+	if err := sf.svc.DeletePerson(context.Background(), sf.manager, sf.tenant, ana.ID); err != nil {
+		t.Fatal(err)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM face_erased_names WHERE frigate_name = $1`, ana.FrigateName); n != 0 {
+		t.Fatal("name recorded before the purge completed")
+	}
+	sf.run()
+	if n := sf.scanInt(`SELECT count(*) FROM face_erased_names WHERE tenant_id = $1 AND frigate_name = $2`, sf.tenant, ana.FrigateName); n != 1 {
+		t.Fatalf("erased name rows = %d, want 1", n)
+	}
+	again := sf.person("Ana")
+	if again.FrigateName != ana.FrigateName {
+		t.Fatalf("setup: name %q was not reused (%q)", ana.FrigateName, again.FrigateName)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM face_erased_names WHERE frigate_name = $1`, ana.FrigateName); n != 0 {
+		t.Fatal("recreating the person did not clear the erased marker")
 	}
 }

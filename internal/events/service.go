@@ -16,6 +16,7 @@ import (
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/faces"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
@@ -405,7 +406,17 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 				return err
 			}
 			b.add("(NOT (c.lpr OR e.lpr) OR e.camera_id = ANY(?))", lprSearchCams)
-			b.add("e.sub_labels && ?", f.SubLabels)
+			// A face name is not searchable without faces.view: it is dropped from the filter,
+			// so probing it answers exactly like a label nobody has.
+			filterRedactor, err := faces.NewRedactor(ctx, db.New(tx), c, f.SubLabels)
+			if err != nil {
+				return err
+			}
+			if values := filterRedactor.DropHiddenFilterValues(f.SubLabels); len(values) > 0 {
+				b.add("e.sub_labels && ?", values)
+			} else {
+				b.where = append(b.where, "false")
+			}
 		}
 		if f.Severity != "" {
 			b.add("e.severity = ?", f.Severity)
@@ -462,7 +473,11 @@ func (s *Service) ListEvents(ctx context.Context, actor authz.Actor, f Filter) (
 			}
 			out.Items = append(out.Items, e)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		rows.Close()
+		return redactFaceNames(ctx, tx, c, out.Items)
 	})
 	if err != nil {
 		return out, err
@@ -502,7 +517,29 @@ func getEvent(ctx context.Context, tx pgx.Tx, c *access.Checker, p authz.Permiss
 			e.SubLabels = []string{}
 		}
 	}
-	return e, nil
+	redacted := []Event{e}
+	if err := redactFaceNames(ctx, tx, c, redacted); err != nil {
+		return e, err
+	}
+	return redacted[0], nil
+}
+
+// redactFaceNames removes recognized face names from the sub_labels of callers without
+// faces.view (strict privacy like LPR). It runs after the plate redaction and is independent of
+// the camera's LPR capability: the name is biometric identity wherever it was recognized.
+func redactFaceNames(ctx context.Context, tx pgx.Tx, c *access.Checker, items []Event) error {
+	lists := make([][]string, 0, len(items))
+	for _, e := range items {
+		lists = append(lists, e.SubLabels)
+	}
+	r, err := faces.NewRedactor(ctx, db.New(tx), c, lists...)
+	if err != nil || !r.Active() {
+		return err
+	}
+	for i := range items {
+		items[i].SubLabels = r.Strip(items[i].TenantID, items[i].SubLabels)
+	}
+	return nil
 }
 
 func (s *Service) GetEvent(ctx context.Context, actor authz.Actor, id uuid.UUID) (Event, error) {

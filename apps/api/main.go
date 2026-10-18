@@ -42,6 +42,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/control"
 	"github.com/jdolan-exalink/openvms/internal/events"
+	"github.com/jdolan-exalink/openvms/internal/faces"
 	"github.com/jdolan-exalink/openvms/internal/health"
 	"github.com/jdolan-exalink/openvms/internal/identity"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
@@ -182,6 +183,7 @@ func run() error {
 		Provision:     provisioner,
 		AgentEnroll:   agentEnroll,
 		Events:        &events.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
+		Faces:         &faces.Service{Store: st, Blobs: store, Adapters: adapters, Log: log},
 		Alarms:        alarmsSvc,
 		Media:         mediaSvc,
 		Maps:          mapsSvc,

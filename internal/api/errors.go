@@ -11,6 +11,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/branding"
 	"github.com/jdolan-exalink/openvms/internal/clipwatermark"
 	"github.com/jdolan-exalink/openvms/internal/events"
+	"github.com/jdolan-exalink/openvms/internal/faces"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/maps"
@@ -37,11 +38,17 @@ func statusFor(err error) (int, string, string) {
 	var vae *visionai.ValidationError
 	var we *notify.WahaError
 	var fe *inventory.FrigateError
+	var fve *faces.ValidationError
+	var fre *faces.RemoteError
 	switch {
 	case errors.As(err, &ve):
 		return http.StatusBadRequest, "invalid", ve.Msg
 	case errors.As(err, &be):
 		return http.StatusBadRequest, "invalid", be.Msg
+	case errors.As(err, &fve):
+		return http.StatusBadRequest, "invalid", fve.Msg
+	case errors.As(err, &fre):
+		return http.StatusBadGateway, "frigate_unreachable", "could not reach Frigate: " + fre.Reason
 	case errors.As(err, &ave):
 		return http.StatusBadRequest, "invalid", ave.Msg
 	case errors.As(err, &rve):
@@ -92,7 +99,7 @@ func statusFor(err error) (int, string, string) {
 		return http.StatusBadRequest, "invalid", err.Error()
 	case errors.Is(err, alarms.ErrInvalidTransition):
 		return http.StatusConflict, "invalid_transition", err.Error()
-	case errors.Is(err, events.ErrInvalidCursor), errors.Is(err, alarms.ErrInvalidCursor):
+	case errors.Is(err, events.ErrInvalidCursor), errors.Is(err, alarms.ErrInvalidCursor), errors.Is(err, faces.ErrInvalidCursor):
 		return http.StatusBadRequest, "invalid_cursor", "the pagination cursor is not valid"
 	case errors.Is(err, agentenroll.ErrInvalidToken):
 		// One answer for unknown, used and expired tokens, so tokens cannot be probed.

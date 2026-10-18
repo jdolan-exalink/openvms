@@ -93,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /exports/{file}", s.auth(s.exportFile))
 	mux.HandleFunc("GET /api/{camera}/{file}", s.auth(s.latest))
 	mux.HandleFunc("GET /clips/review/{file}", s.auth(s.thumb))
+	mux.HandleFunc("GET /clips/faces/{name}/{file}", s.auth(s.faceFile))
 	return mux
 }
 

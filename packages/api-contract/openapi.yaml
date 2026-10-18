@@ -19,6 +19,7 @@ tags:
   - name: events
   - name: vision-ai
   - name: lpr
+  - name: faces
   - name: audit
   - name: live
   - name: playback
@@ -1733,8 +1734,9 @@ paths:
         pagination. Filtering by label, zone, sub_label, time or plate needs events.search.
         On LPR-capable cameras, sub_label carries recognized plate text, so — like plate — it
         is only returned and searchable there with lpr.view / lpr.search. On cameras without
-        LPR capability, sub_label is an ordinary event field (e.g. a recognized face name) and
-        follows normal events.view / events.search.
+        LPR capability, sub_label is an ordinary event field and follows normal events.view /
+        events.search. A sub_label equal to a registered person's face name is redacted
+        everywhere (and cannot be searched) unless the caller holds faces.view.
       parameters:
         - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
@@ -1913,6 +1915,324 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/faces/persons:
+    parameters:
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "Needed only by platform administrators; members of a tenant always act on their own." }
+    get:
+      tags: [faces]
+      operationId: listFacePersons
+      summary: List the registered persons with image count and per-server sync summary (faces.view)
+      description: Every read of person data is audited.
+      responses:
+        "200":
+          description: Persons
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/FacePerson" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [faces]
+      operationId: createFacePerson
+      summary: Register a person (faces.manage)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FacePersonCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FacePerson" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/persons/{personId}:
+    parameters:
+      - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [faces]
+      operationId: getFacePerson
+      summary: Get one person (faces.view)
+      responses:
+        "200":
+          description: Person
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FacePerson" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [faces]
+      operationId: updateFacePerson
+      summary: Rename a person or edit its notes (faces.manage)
+      description: Omitted fields keep their value. The identifier used inside Frigate never changes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FacePersonUpdate" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FacePerson" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [faces]
+      operationId: deleteFacePerson
+      summary: Delete a person (faces.manage)
+      description: |
+        Removes the person and its enrollment images centrally, then propagates the deletion to
+        every Frigate server and scrubs the name from stored events once all servers converged.
+      responses:
+        "204": { description: Deleted }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/persons/{personId}/images:
+    parameters:
+      - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [faces]
+      operationId: listFaceImages
+      summary: List a person's enrollment images (faces.view)
+      responses:
+        "200":
+          description: Image metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/FaceImage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [faces]
+      operationId: uploadFaceImage
+      summary: Upload an enrollment image (faces.manage)
+      description: |
+        Multipart form with one `file` part: JPEG, PNG or WebP, at most 5 MB, and at most 20
+        images per person. Identical images are rejected as a conflict.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        "201":
+          description: Stored
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceImage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/persons/{personId}/images/{imageId}:
+    parameters:
+      - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: imageId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [faces]
+      operationId: getFaceImage
+      summary: Download an enrollment image (faces.view)
+      description: "Biometric data. Only served to authorized callers, every read is audited and responses are never cached publicly."
+      responses:
+        "200":
+          description: The image
+          content:
+            image/*: { schema: { type: string, format: binary } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [faces]
+      operationId: deleteFaceImage
+      summary: Remove an enrollment image (faces.manage)
+      responses:
+        "204": { description: Removed }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/persons/{personId}/sync:
+    parameters:
+      - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [faces]
+      operationId: listFaceSyncStatus
+      summary: Per-server sync status of a person (faces.view)
+      responses:
+        "200":
+          description: One entry per server of the tenant
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/FaceSyncStatus" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/persons/{personId}/sync/retry:
+    parameters:
+      - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    post:
+      tags: [faces]
+      operationId: retryFaceSync
+      summary: Requeue the failed or conflicting server syncs of a person (faces.manage)
+      responses:
+        "200":
+          description: How many server jobs were requeued
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [requeued]
+                properties:
+                  requeued: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/recognitions:
+    get:
+      tags: [faces]
+      operationId: listFaceRecognitions
+      summary: Recognition timeline built from the events index (faces.view)
+      description: |
+        Events whose sub_labels carry a registered person's name, newest first with keyset
+        pagination, limited to the cameras the caller holds events.view on. An event that
+        recognized several persons yields one row per person. Use the event endpoints for the
+        thumbnail and the playback link.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+        - { name: person_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: camera_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - { name: cursor, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: A page of recognitions
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceRecognitionPage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/train:
+    get:
+      tags: [faces]
+      operationId: listFaceTrainAttempts
+      summary: Recent unclassified face attempts of every face-enabled server (faces.view)
+      description: |
+        Reads Frigate's train folder (attempts saved with save_attempts). A server that cannot be
+        reached is reported in `servers` and does not fail the request.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Attempts newest first, and how each server answered
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceTrainList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/train/{serverId}/image:
+    get:
+      tags: [faces]
+      operationId: getFaceTrainImage
+      summary: Picture of one attempt, proxied from Frigate (faces.view)
+      description: "Biometric data. Audited and never exposed as a public URL."
+      parameters:
+        - { name: serverId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: file, in: query, required: true, schema: { type: string, maxLength: 255 } }
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The image
+          content:
+            image/*: { schema: { type: string, format: binary } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/faces/train/assign:
+    post:
+      tags: [faces]
+      operationId: assignFaceTrainAttempt
+      summary: Turn an attempt into an enrollment image of a person (faces.manage)
+      description: |
+        Fetches the attempt from Frigate and adds it to the central registry (an existing person,
+        or a new one), so the registry sync distributes it to every server. The attempt is then
+        deleted from Frigate on a best-effort basis.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceTrainAssign" }
+      responses:
+        "201":
+          description: Assigned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceTrainAssignResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/lpr/reads:
     get:
@@ -5239,6 +5559,134 @@ components:
         next_cursor:
           type: string
           description: Pass as cursor to get the next page. Absent on the last page.
+    FaceSyncSummary:
+      type: object
+      required: [total, synced, pending, failed, conflict, disabled]
+      properties:
+        total: { type: integer }
+        synced: { type: integer }
+        pending: { type: integer, description: "Waiting or being processed." }
+        failed: { type: integer }
+        conflict: { type: integer, description: "A face with the same name and its own images already exists in that Frigate." }
+        disabled: { type: integer, description: "Face recognition is not enabled on that server." }
+    FacePerson:
+      type: object
+      required: [id, tenant_id, display_name, frigate_name, notes, image_count, sync, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        tenant_id: { type: string, format: uuid }
+        display_name: { type: string }
+        frigate_name: { type: string, description: "Identifier of the face inside Frigate; it is the sub_label Frigate reports when it recognizes the person." }
+        notes: { type: string }
+        image_count: { type: integer }
+        sync: { $ref: "#/components/schemas/FaceSyncSummary" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    FacePersonCreate:
+      type: object
+      required: [display_name]
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 120 }
+        notes: { type: string, maxLength: 2000 }
+    FacePersonUpdate:
+      type: object
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 120 }
+        notes: { type: string, maxLength: 2000 }
+    FaceImage:
+      type: object
+      required: [id, person_id, content_type, size_bytes, width, height, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        person_id: { type: string, format: uuid }
+        content_type: { type: string }
+        size_bytes: { type: integer }
+        width: { type: integer }
+        height: { type: integer }
+        created_at: { type: string, format: date-time }
+    FaceSyncStatus:
+      type: object
+      required: [server_id, server_name, status, owned, desired_revision, synced_revision, updated_at]
+      properties:
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        status: { type: string, enum: [pending, processing, synced, failed, conflict, disabled] }
+        owned: { type: boolean }
+        desired_revision: { type: integer, format: int64 }
+        synced_revision: { type: integer, format: int64 }
+        last_error: { type: string }
+        last_synced_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    FaceRecognition:
+      type: object
+      required: [event_id, person_id, person_name, camera_id, camera_name, site_id, site_name, server_name, start_time, has_thumbnail, has_snapshot]
+      properties:
+        event_id: { type: string, format: uuid }
+        person_id: { type: string, format: uuid }
+        person_name: { type: string }
+        camera_id: { type: string, format: uuid }
+        camera_name: { type: string }
+        site_id: { type: string, format: uuid }
+        site_name: { type: string }
+        server_name: { type: string }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        has_thumbnail: { type: boolean }
+        has_snapshot: { type: boolean }
+    FaceRecognitionPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FaceRecognition" }
+        next_cursor:
+          type: string
+          description: Pass as cursor to get the next page. Absent on the last page.
+    FaceTrainAttempt:
+      type: object
+      required: [server_id, server_name, file]
+      properties:
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        file: { type: string, description: "Handle of the attempt in that server's train folder." }
+        seen_at: { type: string, format: date-time, description: "Parsed from the file name when it follows Frigate's naming; absent otherwise." }
+        label: { type: string, description: "Name Frigate guessed, or unknown; parsed from the file name when possible." }
+        score: { type: number, format: double }
+    FaceTrainServer:
+      type: object
+      required: [server_id, server_name]
+      properties:
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        error: { type: string, description: "Short reason when the server could not be read." }
+    FaceTrainList:
+      type: object
+      required: [items, servers]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/FaceTrainAttempt" }
+        servers:
+          type: array
+          description: One entry per face-enabled server of the tenant; empty when none has face recognition enabled.
+          items: { $ref: "#/components/schemas/FaceTrainServer" }
+    FaceTrainAssign:
+      type: object
+      required: [server_id, file]
+      description: Exactly one of person_id and new_person_display_name.
+      properties:
+        server_id: { type: string, format: uuid }
+        file: { type: string, maxLength: 255 }
+        person_id: { type: string, format: uuid }
+        new_person_display_name: { type: string, maxLength: 120 }
+    FaceTrainAssignResult:
+      type: object
+      required: [person, image, attempt_removed]
+      properties:
+        person: { $ref: "#/components/schemas/FacePerson" }
+        image: { $ref: "#/components/schemas/FaceImage" }
+        attempt_removed: { type: boolean, description: "Whether the attempt was also deleted from Frigate." }
     VisionAISource:
       type: string
       enum: [general, personas, vehiculos, lpr, perimetro, alarmas]

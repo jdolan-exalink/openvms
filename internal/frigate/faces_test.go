@@ -182,3 +182,31 @@ func TestRenameFaceNotFoundIsNotConflatedWithMissingRoute(t *testing.T) {
 		t.Errorf("missing source face = %v, want ErrNotFound", err)
 	}
 }
+
+func TestFaceTrainImageAndTrainDelete(t *testing.T) {
+	ts, mock := startFaceMock(t, "0.17.2-mock", true)
+	a := connectMock(t, ts)
+	ctx := context.Background()
+	mock.AddFaceTrainImage("1700000000.1-abc-1700000100-unknown-0.4.webp", []byte("attempt-bytes"))
+
+	b, ct, err := a.FaceTrainImage(ctx, "1700000000.1-abc-1700000100-unknown-0.4.webp")
+	if err != nil || string(b) != "attempt-bytes" || ct == "" {
+		t.Fatalf("train image = %q %q %v", b, ct, err)
+	}
+	if _, _, err := a.FaceTrainImage(ctx, "missing.webp"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing attempt = %v, want ErrNotFound", err)
+	}
+	for _, bad := range []string{"../etc/passwd", "a/b.webp", "", "x y.webp"} {
+		if _, _, err := a.FaceTrainImage(ctx, bad); err == nil {
+			t.Errorf("file name %q was accepted", bad)
+		}
+	}
+	// Frigate's delete route works on the train folder too.
+	if err := a.DeleteFaceImages(ctx, "train", []string{"1700000000.1-abc-1700000100-unknown-0.4.webp"}); err != nil {
+		t.Fatal(err)
+	}
+	lib, _ := a.ListFaces(ctx)
+	if len(lib.Train) != 0 {
+		t.Fatalf("train attempts after delete = %v", lib.Train)
+	}
+}

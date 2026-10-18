@@ -426,6 +426,11 @@ func (y *Syncer) finish(ctx context.Context, q *db.Queries, job db.FaceServerSyn
 	return err
 }
 
+// ErasedNameRetention is how long an erased name keeps being dropped from ingested reviews:
+// the longest a review stays in Frigate (its default review retention is 30 days). It must
+// match events.ErasedFaceNameRetention.
+const ErasedNameRetention = 30 * 24 * time.Hour
+
 // PurgeTombstones finishes the deletion of persons whose Frigate faces are gone everywhere:
 // it scrubs the person's name from stored event sub_labels (batched, idempotent, audited per
 // batch) and then removes the person row. Image blobs were queued for deletion when the person
@@ -434,6 +439,12 @@ func (y *Syncer) finish(ctx context.Context, q *db.Queries, job db.FaceServerSyn
 func (y *Syncer) PurgeTombstones(ctx context.Context, limit int) error {
 	if limit < 1 {
 		return nil
+	}
+	if err := y.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		_, err := q.PruneFaceErasedNames(ctx, ErasedNameRetention.Seconds())
+		return err
+	}); err != nil {
+		return err
 	}
 	var persons []db.FacePerson
 	if err := y.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
@@ -452,6 +463,13 @@ func (y *Syncer) PurgeTombstones(ctx context.Context, limit int) error {
 }
 
 func (y *Syncer) purgeOne(ctx context.Context, p db.FacePerson) error {
+	// Before scrubbing, so reviews ingested while the scrub runs (and later ones Frigate still
+	// serves) cannot write the name back; see ErasedNameRetention.
+	if err := y.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		return q.RecordFaceErasedName(ctx, db.RecordFaceErasedNameParams{TenantID: p.TenantID, Name: p.FrigateName})
+	}); err != nil {
+		return err
+	}
 	total := int64(0)
 	for {
 		var n int64
@@ -481,6 +499,12 @@ func (y *Syncer) purgeOne(ctx context.Context, p db.FacePerson) error {
 		// Re-check under the lock: a retry or a late job could have reopened the person.
 		ok, err := q.FaceTombstonePurgeable(ctx, db.FaceTombstonePurgeableParams{TenantID: p.TenantID, ID: p.ID})
 		if err != nil || !ok {
+			return err
+		}
+		// The row is the memory of what to scrub: never drop it while a stored event still
+		// carries the name. The next pass resumes the scrub.
+		left, err := q.CountEventsWithSubLabel(ctx, db.CountEventsWithSubLabelParams{TenantID: p.TenantID, Name: p.FrigateName})
+		if err != nil || left > 0 {
 			return err
 		}
 		if err := q.RecordFaceRemoteCleanup(ctx, db.RecordFaceRemoteCleanupParams{TenantID: p.TenantID, ID: p.ID, Name: p.FrigateName}); err != nil {

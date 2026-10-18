@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/textproto"
@@ -36,6 +37,13 @@ var faceNameRE = regexp.MustCompile(`^[a-z0-9_]{1,50}$`)
 type FaceLibrary struct {
 	Faces map[string][]string
 	Train []string
+}
+
+var faceFileRE = regexp.MustCompile(`^[A-Za-z0-9._-]{1,255}$`)
+
+// ValidFaceFile reports whether file is a plain Frigate face image file name (no path parts).
+func ValidFaceFile(file string) bool {
+	return faceFileRE.MatchString(file) && !strings.Contains(file, "..")
 }
 
 func validFaceName(names ...string) error {
@@ -176,4 +184,32 @@ func (a *v017) ClassifyTrainAttempt(ctx context.Context, name, trainingFile stri
 	}
 	_, err := a.c.send(ctx, http.MethodPost, "/api/faces/train/"+url.PathEscape(name)+"/classify", nil, map[string]any{"training_file": trainingFile})
 	return faceErr(err)
+}
+
+const maxFaceImageBytes = 8 << 20
+
+func (a *v017) FaceTrainImage(ctx context.Context, file string) ([]byte, string, error) {
+	if !ValidFaceFile(file) {
+		return nil, "", fmt.Errorf("%w: %q", ErrInvalidFaceName, file)
+	}
+	resp, err := a.c.Open(ctx, "/clips/faces/train/"+url.PathEscape(file), nil, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, "", ErrNotFound
+	}
+	if resp.StatusCode >= 300 {
+		return nil, "", fmt.Errorf("frigate train image: status %d", resp.StatusCode)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxFaceImageBytes))
+	if err != nil {
+		return nil, "", err
+	}
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" || ct == "application/octet-stream" {
+		ct = http.DetectContentType(b)
+	}
+	return b, ct, nil
 }

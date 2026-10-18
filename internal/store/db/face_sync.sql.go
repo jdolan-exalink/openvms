@@ -88,6 +88,36 @@ func (q *Queries) ClaimFaceSyncJobs(ctx context.Context, arg ClaimFaceSyncJobsPa
 	return items, nil
 }
 
+const clearFaceErasedName = `-- name: ClearFaceErasedName :exec
+DELETE FROM face_erased_names WHERE tenant_id = $1 AND frigate_name = $2
+`
+
+type ClearFaceErasedNameParams struct {
+	TenantID uuid.UUID
+	Name     string
+}
+
+func (q *Queries) ClearFaceErasedName(ctx context.Context, arg ClearFaceErasedNameParams) error {
+	_, err := q.db.Exec(ctx, clearFaceErasedName, arg.TenantID, arg.Name)
+	return err
+}
+
+const countEventsWithSubLabel = `-- name: CountEventsWithSubLabel :one
+SELECT count(*) FROM events WHERE tenant_id = $1 AND sub_labels @> ARRAY[$2::text]
+`
+
+type CountEventsWithSubLabelParams struct {
+	TenantID uuid.UUID
+	Name     string
+}
+
+func (q *Queries) CountEventsWithSubLabel(ctx context.Context, arg CountEventsWithSubLabelParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countEventsWithSubLabel, arg.TenantID, arg.Name)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteFaceRemoteCleanup = `-- name: DeleteFaceRemoteCleanup :exec
 DELETE FROM face_remote_cleanup WHERE server_id = $1 AND frigate_name = $2
 `
@@ -572,6 +602,18 @@ func (q *Queries) PropagateFaceRevision(ctx context.Context, arg PropagateFaceRe
 	return err
 }
 
+const pruneFaceErasedNames = `-- name: PruneFaceErasedNames :execrows
+DELETE FROM face_erased_names WHERE erased_at < now() - make_interval(secs => $1::float8)
+`
+
+func (q *Queries) PruneFaceErasedNames(ctx context.Context, retentionSeconds float64) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneFaceErasedNames, retentionSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const purgeFacePerson = `-- name: PurgeFacePerson :execrows
 DELETE FROM face_persons WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NOT NULL
 `
@@ -587,6 +629,21 @@ func (q *Queries) PurgeFacePerson(ctx context.Context, arg PurgeFacePersonParams
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const recordFaceErasedName = `-- name: RecordFaceErasedName :exec
+INSERT INTO face_erased_names (tenant_id, frigate_name) VALUES ($1, $2)
+ON CONFLICT (tenant_id, frigate_name) DO UPDATE SET erased_at = now()
+`
+
+type RecordFaceErasedNameParams struct {
+	TenantID uuid.UUID
+	Name     string
+}
+
+func (q *Queries) RecordFaceErasedName(ctx context.Context, arg RecordFaceErasedNameParams) error {
+	_, err := q.db.Exec(ctx, recordFaceErasedName, arg.TenantID, arg.Name)
+	return err
 }
 
 const recordFaceRemoteCleanup = `-- name: RecordFaceRemoteCleanup :exec
@@ -635,7 +692,7 @@ WITH batch AS (
     SELECT e.id FROM events e
     WHERE e.tenant_id = $2 AND e.sub_labels @> ARRAY[$1::text]
     LIMIT $3
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE
 )
 UPDATE events AS ev SET sub_labels = array_remove(ev.sub_labels, $1::text)
 FROM batch WHERE ev.id = batch.id
@@ -648,7 +705,8 @@ type ScrubEventSubLabelParams struct {
 }
 
 // Removes a recognized name from stored event sub_labels in batches. Exact element match, so it
-// is idempotent and never touches other labels.
+// is idempotent and never touches other labels. Rows locked by a concurrent writer are waited
+// for, never skipped: a skipped row would keep the name after the person row is purged.
 func (q *Queries) ScrubEventSubLabel(ctx context.Context, arg ScrubEventSubLabelParams) (int64, error) {
 	result, err := q.db.Exec(ctx, scrubEventSubLabel, arg.Name, arg.TenantID, arg.MaxRows)
 	if err != nil {
