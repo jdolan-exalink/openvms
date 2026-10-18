@@ -26,6 +26,7 @@ import {
   sectionLabel, validateTree,
 } from "@/lib/frigateSchema";
 import { pickerLabels } from "@/lib/labelEmoji";
+import { loadRestart, saveRestart } from "@/lib/frigateRestart";
 import { can } from "@/lib/perm";
 import { persistedToEditorValue, planManagedZoneChanges, splitFrigateZones, zoneSyncStates, type ZoneChangePlan } from "@/lib/cameraZones";
 
@@ -80,23 +81,6 @@ function withMask(obj: Record<string, unknown> | undefined, server: unknown, nex
     return out;
   }
   return deepEqual(current, next) ? obj : { ...obj, mask: next };
-}
-
-const restartKey = (serverId: string) => `openvms.frigate-restart.${serverId}`;
-function loadRestart(serverId: string): boolean {
-  try {
-    return sessionStorage.getItem(restartKey(serverId)) === "1";
-  } catch {
-    return false;
-  }
-}
-function saveRestart(serverId: string, on: boolean) {
-  try {
-    if (on) sessionStorage.setItem(restartKey(serverId), "1");
-    else sessionStorage.removeItem(restartKey(serverId));
-  } catch {
-    /* storage unavailable */
-  }
 }
 
 export function FrigateCameraConfig() {

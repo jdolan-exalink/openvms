@@ -473,6 +473,11 @@ export const faceRecognitionsQuery = (filter: FaceRecognitionFilter) =>
     getNextPageParam: (last) => last.next_cursor,
   });
 
+export const faceConfigQuery = queryOptions({
+  queryKey: ["faces", "config"],
+  queryFn: async () => unwrap(await api.GET("/api/v1/faces/config")).items,
+});
+
 /** Enrollment photos are served only to authorized sessions and never as public URLs. */
 export const faceImageUrl = (personId: string, imageId: string) => `/api/v1/faces/persons/${personId}/images/${imageId}`;
 export const faceTrainImageUrl = (serverId: string, file: string) => `/api/v1/faces/train/${serverId}/image?file=${encodeURIComponent(file)}`;
