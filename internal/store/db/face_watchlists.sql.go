@@ -62,23 +62,6 @@ func (q *Queries) CountFacePersonsByIDs(ctx context.Context, arg CountFacePerson
 	return count, err
 }
 
-const countFaceWatchlistsByIDs = `-- name: CountFaceWatchlistsByIDs :one
-SELECT count(*) FROM face_watchlists
-WHERE tenant_id = $1 AND id = ANY($2::uuid[])
-`
-
-type CountFaceWatchlistsByIDsParams struct {
-	TenantID uuid.UUID
-	Ids      []uuid.UUID
-}
-
-func (q *Queries) CountFaceWatchlistsByIDs(ctx context.Context, arg CountFaceWatchlistsByIDsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countFaceWatchlistsByIDs, arg.TenantID, arg.Ids)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const countRulesUsingFaceWatchlist = `-- name: CountRulesUsingFaceWatchlist :one
 SELECT count(*) FROM rules
 WHERE tenant_id = $1 AND conditions -> 'face_watchlist_ids' @> to_jsonb($2::text)
@@ -286,6 +269,58 @@ func (q *Queries) ListFaceWatchlists(ctx context.Context, tenantID uuid.UUID) ([
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockFaceWatchlist = `-- name: LockFaceWatchlist :one
+SELECT id FROM face_watchlists WHERE tenant_id = $1 AND id = $2 FOR UPDATE
+`
+
+type LockFaceWatchlistParams struct {
+	TenantID uuid.UUID
+	ID       uuid.UUID
+}
+
+// Exclusive row lock taken before counting the rules that use the watchlist, so a rule create or
+// update that already checked it commits first and is counted.
+func (q *Queries) LockFaceWatchlist(ctx context.Context, arg LockFaceWatchlistParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, lockFaceWatchlist, arg.TenantID, arg.ID)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockFaceWatchlistsByIDs = `-- name: LockFaceWatchlistsByIDs :many
+SELECT id FROM face_watchlists
+WHERE tenant_id = $1 AND id = ANY($2::uuid[])
+ORDER BY id
+FOR SHARE
+`
+
+type LockFaceWatchlistsByIDsParams struct {
+	TenantID uuid.UUID
+	Ids      []uuid.UUID
+}
+
+// Shared row lock on the watchlists a rule is about to reference: a concurrent delete waits for
+// the rule's transaction (and then sees the rule). Ordered by id so two lockers never deadlock.
+func (q *Queries) LockFaceWatchlistsByIDs(ctx context.Context, arg LockFaceWatchlistsByIDsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, lockFaceWatchlistsByIDs, arg.TenantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []uuid.UUID{}
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

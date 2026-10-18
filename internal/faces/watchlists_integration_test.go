@@ -6,7 +6,9 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -153,5 +155,55 @@ func TestWatchlistInUseByARuleCannotBeDeleted(t *testing.T) {
 	sf.exec(`DELETE FROM rules WHERE tenant_id = $1`, sf.tenant)
 	if err := sf.svc.DeleteWatchlist(ctx, sf.manager, sf.tenant, wl.ID); err != nil {
 		t.Fatalf("delete once unused = %v", err)
+	}
+}
+
+// A rule create that already checked the watchlist holds its row; a delete racing it must wait for
+// that transaction and then see the new rule instead of removing a list the rule points at.
+func TestWatchlistDeleteWaitsForAConcurrentRuleReference(t *testing.T) {
+	sf := newSyncFixture(t)
+	ctx := context.Background()
+	wl, err := sf.svc.CreateWatchlist(ctx, sf.manager, sf.tenant, faces.WatchlistInput{Name: "VIP"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	locked, release := make(chan struct{}), make(chan struct{})
+	holder := make(chan error, 1)
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock() // a failed assertion must not leave the holder transaction open
+	go func() {
+		holder <- sf.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			// What a rule create does: lock the referenced list (shared), then insert the rule.
+			if _, err := tx.Exec(ctx, `SELECT id FROM face_watchlists WHERE id = $1 FOR SHARE`, wl.ID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO rules (tenant_id, name, trigger_type, conditions, actions) VALUES ($1, 'vip', 'event', jsonb_build_object('face_watchlist_ids', jsonb_build_array($2::text)), '{}'::jsonb)`, sf.tenant, wl.ID); err != nil {
+				return err
+			}
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+
+	deleted := make(chan error, 1)
+	go func() { deleted <- sf.svc.DeleteWatchlist(ctx, sf.manager, sf.tenant, wl.ID) }()
+	select {
+	case err := <-deleted:
+		t.Fatalf("delete finished while a rule create held the list: %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	unblock()
+	if err := <-holder; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-deleted; !errors.Is(err, store.ErrConflict) {
+		t.Fatalf("delete after the rule committed = %v, want conflict", err)
+	}
+	if _, err := sf.svc.GetWatchlist(ctx, sf.manager, sf.tenant, wl.ID); err != nil {
+		t.Fatalf("watchlist referenced by a rule is gone: %v", err)
 	}
 }

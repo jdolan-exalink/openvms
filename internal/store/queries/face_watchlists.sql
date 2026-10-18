@@ -46,9 +46,18 @@ DELETE FROM face_watchlist_members WHERE tenant_id = @tenant_id AND person_id = 
 SELECT count(*) FROM face_persons
 WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND id = ANY(@ids::uuid[]);
 
--- name: CountFaceWatchlistsByIDs :one
-SELECT count(*) FROM face_watchlists
-WHERE tenant_id = @tenant_id AND id = ANY(@ids::uuid[]);
+-- name: LockFaceWatchlistsByIDs :many
+-- Shared row lock on the watchlists a rule is about to reference: a concurrent delete waits for
+-- the rule's transaction (and then sees the rule). Ordered by id so two lockers never deadlock.
+SELECT id FROM face_watchlists
+WHERE tenant_id = @tenant_id AND id = ANY(@ids::uuid[])
+ORDER BY id
+FOR SHARE;
+
+-- name: LockFaceWatchlist :one
+-- Exclusive row lock taken before counting the rules that use the watchlist, so a rule create or
+-- update that already checked it commits first and is counted.
+SELECT id FROM face_watchlists WHERE tenant_id = @tenant_id AND id = @id FOR UPDATE;
 
 -- name: CountRulesUsingFaceWatchlist :one
 SELECT count(*) FROM rules

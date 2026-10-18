@@ -1098,11 +1098,13 @@ func checkFaceRefs(ctx context.Context, q *db.Queries, chk *access.Checker, tena
 		}
 	}
 	if len(newLists) > 0 {
-		n, err := q.CountFaceWatchlistsByIDs(ctx, db.CountFaceWatchlistsByIDsParams{TenantID: tenantID, Ids: newLists})
+		// Locked until the rule commits, so a watchlist delete cannot slip in between this check and
+		// the rule write (see faces.Service.DeleteWatchlist).
+		locked, err := q.LockFaceWatchlistsByIDs(ctx, db.LockFaceWatchlistsByIDsParams{TenantID: tenantID, Ids: newLists})
 		if err != nil {
 			return store.Classify(err)
 		}
-		if int(n) != len(newLists) {
+		if len(locked) != len(newLists) {
 			return &ValidationError{Msg: "unknown or inaccessible id in conditions.face_watchlist_ids"}
 		}
 	}

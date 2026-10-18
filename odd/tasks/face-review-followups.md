@@ -11,7 +11,7 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
 ## Scope / tasks
 - [x] FRF-01 — Face updates evaluate only the gained `sub_labels`. Route: delegated direct (writer trigger: 3 tasks across 2+ non-trivial files).
 - [x] FRF-02 — The face resolver uses the evaluation transaction (no nested connection); the per-tenant cache stays. Route: delegated direct.
-- [ ] FRF-03 — Watchlist deletion and rule create/update serialize on the watchlist rows (`FOR UPDATE` on delete, `FOR SHARE` on reference checks). Route: delegated direct.
+- [x] FRF-03 — Watchlist deletion and rule create/update serialize on the watchlist rows (`FOR UPDATE` on delete, `FOR SHARE` on reference checks). Route: delegated direct.
 
 ## Accepted, not changed
 - `R3-cache-staleness`: the 15 s per-tenant snapshot (`DefaultFaceCacheTTL`) is a documented tradeoff; watchlist edits reach the worker within that time.
@@ -35,6 +35,11 @@ Close the reliability advisories left by the FACE-05 reviews (PR #87 four-lens r
 ### FRF-02
 - RED: `go test -count=1 -tags integration -run TestEvaluateEventResolvesFacesInsideTheEvaluationTransaction ./internal/rules/` failed: `evaluation with a single pooled connection: timeout: context already done: context deadline exceeded` (pool MaxConns=1, empty face cache).
 - GREEN: `FaceResolver.FaceNames` takes the caller's `*db.Queries` (nil opens its own transaction); `EvaluateEvent` passes its transaction; `Service.FaceNames` keeps its signature (nil querier) for the API handler. Face/person/watchlist/EvaluateEvent integration tests pass.
+
+### FRF-03
+- RED: `go test -count=1 -tags integration -run TestWatchlistDeleteWaitsForAConcurrentRuleReference ./internal/faces/` failed: `delete after the rule committed = <nil>, want conflict`; `-run TestRuleCreateWaitsForAConcurrentWatchlistDelete ./internal/rules/` failed: `rule create finished while the watchlist delete was in flight: <nil>`.
+- GREEN: new queries `LockFaceWatchlist` (`FOR UPDATE`, before the rule count in `DeleteWatchlist`) and `LockFaceWatchlistsByIDs` (`FOR SHARE`, replaces `CountFaceWatchlistsByIDs` in `checkFaceRefs`); both tests pass. Person delete has no count-then-delete pattern, so it is unchanged.
+- Both tests use deterministic interleavings: a held transaction plays one side with the real lock statement, the real service plays the other, asserting it blocks and then reaches the right outcome.
 
 ## Next step
 FRF-01..03 through one bounded writer.

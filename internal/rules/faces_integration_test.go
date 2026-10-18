@@ -6,10 +6,12 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
@@ -307,5 +309,56 @@ func TestEvaluateEventResolvesFacesInsideTheEvaluationTransaction(t *testing.T) 
 	}
 	if n := f.notifications(rule); n != 1 {
 		t.Fatalf("recognized person created %d notifications, want 1", n)
+	}
+}
+
+// A watchlist delete in flight holds the row; a rule create referencing it must wait for the
+// delete and then be refused, instead of committing a rule that points at a removed list.
+func TestRuleCreateWaitsForAConcurrentWatchlistDelete(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	list := f.watchlist("VIP")
+	actor := f.faceUser(authz.FacesView)
+
+	locked, release := make(chan struct{}), make(chan struct{})
+	holder := make(chan error, 1)
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	defer unblock() // a failed assertion must not leave the holder transaction open
+	go func() {
+		holder <- f.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			// What a watchlist delete does: lock the row exclusively, then remove it.
+			if _, err := tx.Exec(ctx, `SELECT id FROM face_watchlists WHERE id = $1 FOR UPDATE`, list); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `DELETE FROM face_watchlists WHERE id = $1`, list); err != nil {
+				return err
+			}
+			close(locked)
+			<-release
+			return nil
+		})
+	}()
+	<-locked
+
+	type result struct{ err error }
+	created := make(chan result, 1)
+	go func() {
+		_, err := f.svc.CreateRule(ctx, actor, rules.CreateRuleRequest{Name: "vip", TriggerType: rules.TriggerEvent, Enabled: true,
+			Conditions: rules.Conditions{FaceWatchlistIDs: []uuid.UUID{list}}})
+		created <- result{err}
+	}()
+	select {
+	case r := <-created:
+		t.Fatalf("rule create finished while the watchlist delete was in flight: %v", r.err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	unblock()
+	if err := <-holder; err != nil {
+		t.Fatal(err)
+	}
+	var bad *rules.ValidationError
+	if r := <-created; !errors.As(r.err, &bad) {
+		t.Fatalf("rule create after the delete committed = %v, want validation error", r.err)
 	}
 }
