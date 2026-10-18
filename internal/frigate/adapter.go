@@ -52,6 +52,11 @@ type Adapter interface {
 	// ApplyCameraPatch merges a patch (top-level section -> value) into one camera, live
 	// where Frigate allows it.
 	ApplyCameraPatch(ctx context.Context, camera string, patch map[string]any) ([]SectionResult, error)
+	// FaceRecognitionSettings reads the running face_recognition configuration, global and per camera.
+	FaceRecognitionSettings(ctx context.Context) (FaceRecognitionSettings, error)
+	// ApplyServerPatch merges a patch into a global config section (face_recognition only); it is
+	// saved and needs a Frigate restart.
+	ApplyServerPatch(ctx context.Context, section string, value map[string]any) (SectionResult, error)
 	// UpsertManagedCameraZone updates exactly one OpenVMS-owned zone on supported Frigate versions and verifies it by read-back.
 	UpsertManagedCameraZone(ctx context.Context, camera, zoneName string, zone map[string]any, hasConfigPermission bool) error
 	DeleteManagedCameraZone(ctx context.Context, camera, zoneName string, hasConfigPermission bool) error
