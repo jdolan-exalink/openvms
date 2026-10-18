@@ -396,6 +396,10 @@ func (s *Service) DeletePerson(ctx context.Context, actor authz.Actor, tenantID,
 		if err := q.DeleteFacePersonImages(ctx, db.DeleteFacePersonImagesParams{TenantID: tenantID, PersonID: id}); err != nil {
 			return err
 		}
+		// A tombstone must not stay a member of any watchlist.
+		if err := q.RemoveFacePersonFromWatchlists(ctx, db.RemoveFacePersonFromWatchlistsParams{TenantID: tenantID, PersonID: id}); err != nil {
+			return err
+		}
 		if err := bumpRevision(ctx, q, tenantID, id); err != nil {
 			return err
 		}
