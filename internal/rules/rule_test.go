@@ -334,3 +334,32 @@ func TestConditionsSchedule(t *testing.T) {
 		})
 	}
 }
+
+func TestFaceConditionsAreMatchedAgainstResolvedNames(t *testing.T) {
+	if (rules.Conditions{Labels: []string{"person"}}).HasFaceConditions() {
+		t.Fatal("a rule without person conditions reports face conditions")
+	}
+	for _, c := range []rules.Conditions{{FacePersonIDs: []uuid.UUID{uuid.New()}}, {FaceWatchlistIDs: []uuid.UUID{uuid.New()}}} {
+		if !c.HasFaceConditions() {
+			t.Fatalf("%+v does not report face conditions", c)
+		}
+	}
+	names := map[string]struct{}{"ana": {}, "beto": {}}
+	cases := []struct {
+		name      string
+		subLabels []string
+		names     map[string]struct{}
+		want      bool
+	}{
+		{"recognized listed person", []string{"x", "beto"}, names, true},
+		{"unlisted person", []string{"carla"}, names, false},
+		{"no sub labels", nil, names, false},
+		{"list resolves to nobody", []string{"ana"}, map[string]struct{}{}, false},
+		{"exact match only", []string{"Ana"}, names, false},
+	}
+	for _, tc := range cases {
+		if got := rules.MatchesFaces(tc.subLabels, tc.names); got != tc.want {
+			t.Errorf("%s: MatchesFaces = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

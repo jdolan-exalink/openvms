@@ -26,19 +26,24 @@ type RuleSchedule struct {
 }
 
 type Conditions struct {
-	CameraIDs       []uuid.UUID   `json:"camera_ids,omitempty"`
-	CameraGroupIDs  []uuid.UUID   `json:"camera_group_ids,omitempty"`
-	ServerIDs       []uuid.UUID   `json:"server_ids,omitempty"`
-	SiteIDs         []uuid.UUID   `json:"site_ids,omitempty"`
-	Labels          []string      `json:"labels,omitempty"`
-	Zones           []string      `json:"zones,omitempty"`
-	MapZoneIDs      []uuid.UUID   `json:"map_zone_ids,omitempty"`
-	Severities      []string      `json:"severities,omitempty"`
-	VehicleTypes    []string      `json:"vehicle_types,omitempty"`
-	VehicleColors   []string      `json:"vehicle_colors,omitempty"`
-	DurationSeconds int           `json:"duration_seconds,omitempty"`
-	Schedule        *RuleSchedule `json:"schedule,omitempty"`
-	CooldownSeconds *int          `json:"cooldown_seconds,omitempty"`
+	CameraIDs      []uuid.UUID `json:"camera_ids,omitempty"`
+	CameraGroupIDs []uuid.UUID `json:"camera_group_ids,omitempty"`
+	ServerIDs      []uuid.UUID `json:"server_ids,omitempty"`
+	SiteIDs        []uuid.UUID `json:"site_ids,omitempty"`
+	Labels         []string    `json:"labels,omitempty"`
+	Zones          []string    `json:"zones,omitempty"`
+	MapZoneIDs     []uuid.UUID `json:"map_zone_ids,omitempty"`
+	// FacePersonIDs and FaceWatchlistIDs restrict event rules to recognized registered persons:
+	// the event's sub_labels must contain the Frigate name of any listed person or any member of
+	// a listed watchlist (see FaceResolver). Both empty means any person.
+	FacePersonIDs    []uuid.UUID   `json:"face_person_ids,omitempty"`
+	FaceWatchlistIDs []uuid.UUID   `json:"face_watchlist_ids,omitempty"`
+	Severities       []string      `json:"severities,omitempty"`
+	VehicleTypes     []string      `json:"vehicle_types,omitempty"`
+	VehicleColors    []string      `json:"vehicle_colors,omitempty"`
+	DurationSeconds  int           `json:"duration_seconds,omitempty"`
+	Schedule         *RuleSchedule `json:"schedule,omitempty"`
+	CooldownSeconds  *int          `json:"cooldown_seconds,omitempty"`
 }
 
 type Actions struct {
@@ -89,11 +94,16 @@ type EventContext struct {
 	SiteName       string
 	Severity       string
 	Labels         []string
-	Zones          []string
-	MapZoneIDs     []uuid.UUID
-	Start          time.Time
-	VehicleType    string
-	VehicleColor   string
+	// SubLabels are the names Frigate recognized on the event (faces, known plates).
+	SubLabels []string
+	// FaceUpdate marks a re-evaluation after an already-evaluated event gained recognized names:
+	// only rules with person conditions run, so every other rule does not fire a second time.
+	FaceUpdate   bool
+	Zones        []string
+	MapZoneIDs   []uuid.UUID
+	Start        time.Time
+	VehicleType  string
+	VehicleColor string
 }
 
 func containsID(ids []uuid.UUID, id uuid.UUID) bool {

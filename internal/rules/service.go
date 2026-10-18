@@ -61,6 +61,9 @@ type Service struct {
 	Debounce time.Duration
 	// ZoneResolver optionally maps frigate zones to map zones for an event.
 	ZoneResolver ZoneResolver
+	// Faces resolves person and watchlist conditions to recognized names. Without it a rule
+	// with person conditions never matches (fail closed).
+	Faces FaceResolver
 }
 
 // RuleVersionSnapshot is an immutable rule version exposed to authorized tenant users.
@@ -168,10 +171,12 @@ func NewService(st *store.Store, pub Publisher, log *slog.Logger) *Service {
 		log = slog.Default()
 	}
 	var zr ZoneResolver
+	var fr FaceResolver
 	if st != nil {
 		zr = NewStoreZoneResolver(st)
+		fr = NewStoreFaceResolver(st)
 	}
-	return &Service{Store: st, Pub: pub, Log: log, Debounce: DefaultDebounce, ZoneResolver: zr}
+	return &Service{Store: st, Pub: pub, Log: log, Debounce: DefaultDebounce, ZoneResolver: zr, Faces: fr}
 }
 
 // claim records that rule fired for resourceID and reports whether it may run its actions:
@@ -299,6 +304,9 @@ func (s *Service) CreateRule(ctx context.Context, actor authz.Actor, req CreateR
 		if err := checkConditionRefs(ctx, q, chk, *actor.TenantID, req.Conditions); err != nil {
 			return err
 		}
+		if err := checkFaceRefs(ctx, q, chk, *actor.TenantID, req.Conditions, Conditions{}); err != nil {
+			return err
+		}
 
 		row, err := q.CreateRule(ctx, db.CreateRuleParams{
 			TenantID:    *actor.TenantID,
@@ -409,6 +417,15 @@ func (s *Service) UpdateRule(ctx context.Context, actor authz.Actor, id uuid.UUI
 			}
 			if req.Conditions != nil {
 				if err := checkConditionRefs(ctx, q, chk, *actor.TenantID, effCond); err != nil {
+					return err
+				}
+				prev := Conditions{}
+				if len(current.Conditions) > 0 {
+					if err := json.Unmarshal(current.Conditions, &prev); err != nil {
+						return fmt.Errorf("decode stored conditions for rule %s: %w", id, err)
+					}
+				}
+				if err := checkFaceRefs(ctx, q, chk, *actor.TenantID, effCond, prev); err != nil {
 					return err
 				}
 			}
@@ -615,6 +632,29 @@ WHERE c.id = $1 AND c.tenant_id = $2`, cameraID, tenantID).Scan(&tz)
 	return tz
 }
 
+// FaceNames resolves the face conditions of c to the recognized names they stand for. Without
+// a resolver it resolves to nobody, so a person rule never matches by accident.
+func (s *Service) FaceNames(ctx context.Context, tenantID uuid.UUID, c Conditions) (map[string]struct{}, error) {
+	if s.Faces == nil || !c.HasFaceConditions() {
+		return map[string]struct{}{}, nil
+	}
+	return s.Faces.FaceNames(ctx, tenantID, c.FacePersonIDs, c.FaceWatchlistIDs)
+}
+
+// matchesFaces is the person part of an event rule. A resolver failure does not match (and is
+// logged without names): missing an alarm for one event is safer than alarming on the wrong one.
+func (s *Service) matchesFaces(ctx context.Context, ev EventContext, rule Rule) bool {
+	if len(ev.SubLabels) == 0 {
+		return false
+	}
+	names, err := s.FaceNames(ctx, ev.TenantID, rule.Conditions)
+	if err != nil {
+		s.Log.WarnContext(ctx, "resolve face conditions", "error", err, "rule_id", rule.ID)
+		return false
+	}
+	return MatchesFaces(ev.SubLabels, names)
+}
+
 // EvaluateEvent runs every enabled event rule of the tenant against a newly indexed event.
 func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 	if s.ZoneResolver != nil && len(ev.MapZoneIDs) == 0 {
@@ -654,7 +694,14 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 			if err != nil {
 				continue
 			}
+			hasFaces := rule.Conditions.HasFaceConditions()
+			if ev.FaceUpdate && !hasFaces {
+				continue
+			}
 			if !rule.Conditions.MatchesEvent(ev) {
+				continue
+			}
+			if hasFaces && !s.matchesFaces(ctx, ev, rule) {
 				continue
 			}
 
@@ -1020,4 +1067,50 @@ func checkConditionRefs(ctx context.Context, q *db.Queries, chk *access.Checker,
 		}
 	}
 	return nil
+}
+
+// checkFaceRefs validates the person and watchlist conditions. They name registered persons, so
+// setting or changing them needs faces.view; re-sending the stored values (an unrelated edit by
+// someone without faces.view) is accepted. Ids that no longer exist are refused only when they
+// are new: an existing rule may keep a reference to a person deleted since, which matches nobody.
+func checkFaceRefs(ctx context.Context, q *db.Queries, chk *access.Checker, tenantID uuid.UUID, c, prev Conditions) error {
+	newPersons := subtractIDs(uniqueIDs(c.FacePersonIDs), prev.FacePersonIDs)
+	newLists := subtractIDs(uniqueIDs(c.FaceWatchlistIDs), prev.FaceWatchlistIDs)
+	removed := len(subtractIDs(uniqueIDs(prev.FacePersonIDs), c.FacePersonIDs)) + len(subtractIDs(uniqueIDs(prev.FaceWatchlistIDs), c.FaceWatchlistIDs))
+	if len(newPersons) == 0 && len(newLists) == 0 && removed == 0 {
+		return nil
+	}
+	if err := chk.Require(authz.FacesView, access.Tenant(tenantID)); err != nil {
+		return err
+	}
+	if len(newPersons) > 0 {
+		n, err := q.CountFacePersonsByIDs(ctx, db.CountFacePersonsByIDsParams{TenantID: tenantID, Ids: newPersons})
+		if err != nil {
+			return store.Classify(err)
+		}
+		if int(n) != len(newPersons) {
+			return &ValidationError{Msg: "unknown or inaccessible id in conditions.face_person_ids"}
+		}
+	}
+	if len(newLists) > 0 {
+		n, err := q.CountFaceWatchlistsByIDs(ctx, db.CountFaceWatchlistsByIDsParams{TenantID: tenantID, Ids: newLists})
+		if err != nil {
+			return store.Classify(err)
+		}
+		if int(n) != len(newLists) {
+			return &ValidationError{Msg: "unknown or inaccessible id in conditions.face_watchlist_ids"}
+		}
+	}
+	return nil
+}
+
+// subtractIDs returns the ids of a that are not in b.
+func subtractIDs(a, b []uuid.UUID) []uuid.UUID {
+	var out []uuid.UUID
+	for _, id := range a {
+		if !containsID(b, id) {
+			out = append(out, id)
+		}
+	}
+	return out
 }

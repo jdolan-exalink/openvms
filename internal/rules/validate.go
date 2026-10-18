@@ -40,6 +40,12 @@ func ValidateConditions(trigger TriggerType, c Conditions) error {
 			return invalid("conditions.camera_group_ids is not valid for server_offline rules")
 		}
 	}
+	if len(c.FacePersonIDs) > MaxFaceRefs {
+		return invalid("conditions.face_person_ids must not exceed %d entries", MaxFaceRefs)
+	}
+	if len(c.FaceWatchlistIDs) > MaxFaceRefs {
+		return invalid("conditions.face_watchlist_ids must not exceed %d entries", MaxFaceRefs)
+	}
 	if c.CooldownSeconds != nil && (*c.CooldownSeconds < 0 || *c.CooldownSeconds > MaxCooldownSeconds) {
 		return invalid("conditions.cooldown_seconds must be between 0 and %d", MaxCooldownSeconds)
 	}
@@ -49,18 +55,20 @@ func ValidateConditions(trigger TriggerType, c Conditions) error {
 // rejectEventOnly refuses the fields that only event rules evaluate.
 func rejectEventOnly(trigger TriggerType, c Conditions) error {
 	set := map[string]bool{
-		"labels":           len(c.Labels) > 0,
-		"zones":            len(c.Zones) > 0,
-		"map_zone_ids":     len(c.MapZoneIDs) > 0,
-		"severities":       len(c.Severities) > 0,
-		"vehicle_types":    len(c.VehicleTypes) > 0,
-		"vehicle_colors":   len(c.VehicleColors) > 0,
-		"schedule":         c.Schedule != nil,
-		"cooldown_seconds": c.CooldownSeconds != nil,
-		"camera_group_ids": len(c.CameraGroupIDs) > 0 && trigger == TriggerCameraOffline,
+		"labels":             len(c.Labels) > 0,
+		"zones":              len(c.Zones) > 0,
+		"map_zone_ids":       len(c.MapZoneIDs) > 0,
+		"severities":         len(c.Severities) > 0,
+		"vehicle_types":      len(c.VehicleTypes) > 0,
+		"vehicle_colors":     len(c.VehicleColors) > 0,
+		"schedule":           c.Schedule != nil,
+		"cooldown_seconds":   c.CooldownSeconds != nil,
+		"face_person_ids":    len(c.FacePersonIDs) > 0,
+		"face_watchlist_ids": len(c.FaceWatchlistIDs) > 0,
+		"camera_group_ids":   len(c.CameraGroupIDs) > 0 && trigger == TriggerCameraOffline,
 	}
 	// Deterministic order for stable messages.
-	for _, k := range []string{"labels", "zones", "map_zone_ids", "severities", "vehicle_types", "vehicle_colors", "schedule", "cooldown_seconds", "camera_group_ids"} {
+	for _, k := range []string{"labels", "zones", "map_zone_ids", "severities", "vehicle_types", "vehicle_colors", "schedule", "cooldown_seconds", "face_person_ids", "face_watchlist_ids", "camera_group_ids"} {
 		if set[k] {
 			return invalid("conditions.%s is only valid for event rules", k)
 		}
