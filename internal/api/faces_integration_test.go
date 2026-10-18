@@ -374,3 +374,43 @@ func TestFacesAPIRecognitionsTrainAndRedaction(t *testing.T) {
 		t.Errorf("assign of a consumed attempt = %d, want 404", r.code)
 	}
 }
+
+func TestFaceConfigAPI(t *testing.T) {
+	f := newFaceAPI(t)
+	cam := f.env.Cameras["frigate-h01/acceso_norte"]
+	viewer := f.user(f.tenant, "viewer", authz.FacesView, authz.ServersView)
+	manager := f.user(f.tenant, "mgr", authz.FacesView, authz.FacesManage, authz.ServersView, authz.ServersConfig)
+	blind := f.user(f.tenant, "blind", authz.ServersView)
+
+	if r := f.js(blind, http.MethodGet, "/api/v1/faces/config", ""); r.code != http.StatusForbidden {
+		t.Fatalf("list without faces.view = %d", r.code)
+	}
+	r := f.js(viewer, http.MethodGet, "/api/v1/faces/config", "")
+	items, _ := r.json()["items"].([]any)
+	if r.code != http.StatusOK || len(items) != 2 {
+		t.Fatalf("list = %d %s", r.code, r.raw)
+	}
+	if first, _ := items[0].(map[string]any); first["can_edit"] != false || first["model_size"] == nil {
+		t.Fatalf("viewer item = %v", first)
+	}
+
+	body := `{"enabled":true,"model_size":"large","recognition_threshold":0.85,"cameras":[{"camera_id":"` + cam.ID.String() + `","min_area":900}]}`
+	path := "/api/v1/faces/config/" + cam.ServerID.String()
+	if r := f.js(viewer, http.MethodPatch, path, body); r.code != http.StatusForbidden {
+		t.Fatalf("patch as viewer = %d", r.code)
+	}
+	if r := f.js(manager, http.MethodPatch, path, `{"recognition_threshold":1.5}`); r.code != http.StatusBadRequest {
+		t.Fatalf("out of range = %d %s", r.code, r.raw)
+	}
+	if r := f.js(manager, http.MethodPatch, path, `{}`); r.code != http.StatusBadRequest {
+		t.Fatalf("empty patch = %d", r.code)
+	}
+	r = f.js(manager, http.MethodPatch, path, body)
+	ids, _ := r.json()["revision_ids"].([]any)
+	if r.code != http.StatusOK || r.json()["restart_required"] != true || len(ids) != 2 {
+		t.Fatalf("patch = %d %s", r.code, r.raw)
+	}
+	if r := f.js(manager, http.MethodPatch, "/api/v1/faces/config/"+uuid.NewString(), body); r.code != http.StatusNotFound {
+		t.Fatalf("unknown server = %d", r.code)
+	}
+}
