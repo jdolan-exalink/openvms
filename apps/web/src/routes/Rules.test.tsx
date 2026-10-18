@@ -378,4 +378,48 @@ describe("Rules route", () => {
     expect(await within(dialog).findByRole("checkbox", { name: /Correo operaciones/ })).toBeChecked();
     expect(within(dialog).getByRole("checkbox", { name: /Telegram guardia/ })).not.toBeChecked();
   });
+  describe("person conditions", () => {
+    const withFaces = { ...manager, grants: [...manager.grants, { permission: "faces.view", effect: "allow", scope_type: "tenant" }] };
+    const facesHandler = (me: typeof manager | typeof withFaces, seen: string[]) => (req: Request, url: URL) => {
+      if (url.pathname === "/api/v1/me") return json(me);
+      if (url.pathname.startsWith("/api/v1/faces/")) seen.push(url.pathname);
+      if (url.pathname === "/api/v1/faces/persons") return json({ items: [{ id: "p1", display_name: "Ana", frigate_name: "ana" }, { id: "p2", display_name: "Beto", frigate_name: "beto" }] });
+      if (url.pathname === "/api/v1/faces/watchlists") return json({ items: [{ id: "w1", name: "VIP", description: "", person_ids: ["p1"] }] });
+      void req;
+      return undefined;
+    };
+
+    it("offers person and watchlist pickers with faces.view and sends the selection", async () => {
+      const seen: string[] = [];
+      const calls = stub([], facesHandler(withFaces, seen));
+      renderPage(() => <Rules />);
+      fireEvent.click(await screen.findByRole("button", { name: /Nueva regla/ }));
+      const dialog = await screen.findByRole("dialog");
+      fireEvent.change(within(dialog).getByLabelText("Nombre"), { target: { value: "Vigilancia" } });
+      advanceWizard(dialog, 1);
+      fireEvent.click(await within(dialog).findByRole("checkbox", { name: "Ana" }));
+      fireEvent.click(await within(dialog).findByRole("checkbox", { name: "VIP" }));
+      advanceWizard(dialog, 2);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]?.body).toMatchObject({ conditions: { face_person_ids: ["p1"], face_watchlist_ids: ["w1"] } });
+    });
+
+    it("hides the pickers without faces.view and keeps the stored person conditions", async () => {
+      const seen: string[] = [];
+      const stored = makeRule({ conditions: { labels: ["person"], face_person_ids: ["p1"], face_watchlist_ids: ["w1"] } });
+      const calls = stub([stored], facesHandler(manager, seen));
+      renderPage(() => <Rules />);
+      fireEvent.click(await screen.findByRole("button", { name: "Editar Alertas de acceso" }));
+      const dialog = await screen.findByRole("dialog");
+      advanceWizard(dialog, 1);
+      expect(within(dialog).queryByText(/Personas reconocidas/)).not.toBeInTheDocument();
+      expect(within(dialog).queryByRole("checkbox", { name: "Ana" })).not.toBeInTheDocument();
+      advanceWizard(dialog, 2);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Guardar" }));
+      await waitFor(() => expect(calls).toHaveLength(1));
+      expect(calls[0]?.body).toMatchObject({ conditions: { face_person_ids: ["p1"], face_watchlist_ids: ["w1"] } });
+      expect(seen).toEqual([]);
+    });
+  });
 });
