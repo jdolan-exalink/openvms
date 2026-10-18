@@ -1683,6 +1683,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/faces/watchlists": {
+        parameters: {
+            query?: {
+                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the watchlists of known persons (faces.view)
+         * @description Every read is audited. Members are person ids; resolve names with the persons list.
+         */
+        get: operations["listFaceWatchlists"];
+        put?: never;
+        /** Create a watchlist (faces.manage) */
+        post: operations["createFaceWatchlist"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/watchlists/{watchlistId}": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        /** Get one watchlist (faces.view) */
+        get: operations["getFaceWatchlist"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a watchlist (faces.manage)
+         * @description Answers 409 while an alarm rule still uses the watchlist.
+         */
+        delete: operations["deleteFaceWatchlist"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename a watchlist or replace its members (faces.manage)
+         * @description Omitted fields keep their value; person_ids replaces the whole member list.
+         */
+        patch: operations["updateFaceWatchlist"];
+        trace?: never;
+    };
     "/api/v1/faces/config": {
         parameters: {
             query?: never;
@@ -4399,6 +4452,29 @@ export interface components {
             display_name?: string;
             notes?: string;
         };
+        FaceWatchlist: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            tenant_id: string;
+            name: string;
+            description: string;
+            person_ids: string[];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FaceWatchlistCreate: {
+            name: string;
+            description?: string;
+            person_ids?: string[];
+        };
+        FaceWatchlistUpdate: {
+            name?: string;
+            description?: string;
+            person_ids?: string[];
+        };
         FaceImage: {
             /** Format: uuid */
             id: string;
@@ -5171,6 +5247,10 @@ export interface components {
             camera_group_ids?: string[];
             /** @description Event rules only. Match events from cameras inside or linked to these map zones. */
             map_zone_ids?: string[];
+            /** @description Event rules only. Match events whose recognized face (sub_label) is one of these registered persons. Combined with face_watchlist_ids as "any of". Needs faces.view to set. */
+            face_person_ids?: string[];
+            /** @description Event rules only. Match events whose recognized face belongs to any person of these watchlists, resolved when the event is evaluated. */
+            face_watchlist_ids?: string[];
             schedule?: components["schemas"]["RuleSchedule"];
             /** @description Event rules only. Quiet period per rule and camera after firing; 0 or unset uses the 300 second default. */
             cooldown_seconds?: number;
@@ -8791,6 +8871,155 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    listFaceWatchlists: {
+        parameters: {
+            query?: {
+                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Watchlists */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FaceWatchlist"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    createFaceWatchlist: {
+        parameters: {
+            query?: {
+                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceWatchlistCreate"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceWatchlist"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getFaceWatchlist: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Watchlist */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceWatchlist"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteFaceWatchlist: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    updateFaceWatchlist: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                watchlistId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceWatchlistUpdate"];
+            };
+        };
+        responses: {
+            /** @description Updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceWatchlist"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listFaceConfig: {
