@@ -40,7 +40,8 @@ else
   docker info >/dev/null 2>&1 || die "the Docker daemon is not reachable (is it running? does your user have access to it?)"
   compose_major=""
   if cv=$(docker compose version 2>/dev/null); then
-    compose_major=$(printf '%s\n' "$cv" | sed -n 's/.*[vV]\{0,1\}\([0-9][0-9]*\)\.[0-9][0-9]*.*/\1/p' | head -n1)
+    # The first "N.M" of the line is the version ("v2.20.0", "2.26.1-4"); N is the major.
+    compose_major=$(printf '%s\n' "$cv" | grep -oE '[0-9]+\.[0-9]+' | head -n1 | cut -d. -f1)
   fi
   case $compose_major in ''|*[!0-9]*) compose_major=0 ;; esac
   if [ "$compose_major" -lt 2 ]; then

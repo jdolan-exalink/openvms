@@ -17,7 +17,7 @@ cat >"$tmp/bin/docker" <<'STUB'
 echo "docker $*" >>"$STUB_LOG"
 case "$*" in
   "info") [ -z "${STUB_DAEMON_DOWN:-}" ] || exit 1 ;;
-  "compose version") [ -z "${STUB_NO_V2:-}" ] || exit 1; echo "Docker Compose version v2.29.1" ;;
+  "compose version") [ -z "${STUB_NO_V2:-}" ] || exit 1; echo "${STUB_COMPOSE_VERSION:-Docker Compose version v2.29.1}" ;;
   "compose port web 443") echo "0.0.0.0:9443" ;;
   "compose port web 80") echo "0.0.0.0:9080" ;;
   "volume ls"*) [ -z "${STUB_VOLUMES:-}" ] || printf '%s\n' $STUB_VOLUMES ;;
@@ -133,6 +133,16 @@ out=$(run "$tmp/dry" INSTALL_DRY_RUN=1); rc=$?
 [ ! -e "$tmp/dry/.env" ] || fail "dry run created .env"
 grep -q 'compose up' "$STUB_LOG" && fail "dry run ran compose up"
 printf '%s\n' "$out" | grep -q 'docker compose up -d --build' || fail "dry run: up command not printed"
+
+# 9. The Compose major version is read from the first "N.M" of the version line.
+for v in "Docker Compose version 2.26.1-4" "Docker Compose version v2.20.0" "Docker Compose version v2.31.0-desktop.2" "Docker Compose version v2.1.0"; do
+  mkroot "$tmp/ver"; rm -f "$tmp/ver/.env"
+  out=$(run "$tmp/ver" STUB_COMPOSE_VERSION="$v"); rc=$?
+  [ "$rc" -eq 0 ] || fail "compose version '$v': rejected a valid v2: $out"
+done
+mkroot "$tmp/old"; rm -f "$tmp/old/.env"
+out=$(run "$tmp/old" STUB_COMPOSE_VERSION="docker-compose version 1.29.2, build 5becea4c"); rc=$?
+[ "$rc" -ne 0 ] || fail "compose version 1.29.2: accepted as v2"
 
 [ "$fails" -eq 0 ] && echo "ok: install tests passed"
 [ "$fails" -eq 0 ]
