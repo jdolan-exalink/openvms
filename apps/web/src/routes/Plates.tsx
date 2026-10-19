@@ -8,7 +8,7 @@ import { PlateReadCard } from "@/components/plates/PlateReadCard";
 import { type FilterChip, SearchSummary } from "@/components/SearchSummary";
 import { Button, Empty, ErrorNote, Field, Select, Switch, TextInput } from "@/components/ui";
 import { fromLocalInput, vehicleColorOptions, vehicleTypeOptions } from "@/lib/format";
-import { todayEventsRange } from "@/lib/eventsSearch";
+import { rangeEnd, todayEventsRange } from "@/lib/eventsSearch";
 import { can } from "@/lib/perm";
 import { useT } from "@/i18n";
 
@@ -18,15 +18,6 @@ const PAGE_SIZE = 12;
 
 function defaultForm(day = todayEventsRange()): Form {
   return { plate: "", exact: false, site: "", cameraGroup: "", vehicleType: "", vehicleColor: "", from: day.from, to: day.to };
-}
-
-/** The day control ends at 23:59; the query includes the rest of that minute up to midnight. */
-function rangeEnd(local: string): string | undefined {
-  const instant = fromLocalInput(local);
-  if (!instant || !local.endsWith("T23:59")) return instant;
-  const end = new Date(instant);
-  end.setMinutes(end.getMinutes() + 1);
-  return end.toISOString();
 }
 
 function toFilter(f: Form): PlateFilter {

@@ -21,18 +21,20 @@ type Backend = {
   syncStatus: Schemas["FaceSyncStatus"][];
   train: Schemas["FaceTrainList"];
   recognitions: Schemas["FaceRecognition"][][];
-  cameras: unknown[];
+  cameras: { id: string; display_name: string }[];
   /** Forces an error answer: status codes for the image upload and the person PATCH. */
   fail: { upload?: number; patch?: number };
   /** The caller's tenant; null makes the caller a platform administrator. */
   tenantId: string | null;
-  /** What the tenants list answers: a status code makes it fail. */
-  tenants: { id: string; name: string }[] | number;
+  sites: { id: string; name: string }[];
+  servers: { id: string; name: string; site_id: string }[];
+  groups: { id: string; name: string }[];
 };
 
 function install(over: Partial<Backend> = {}) {
   const b: Backend = {
-    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], train: { items: [], servers: [] }, recognitions: [[]], cameras: [], fail: {}, tenantId: "t1", tenants: [{ id: "t1", name: "Alfa" }, { id: "t2", name: "Beta" }],
+    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], train: { items: [], servers: [] }, recognitions: [[]], cameras: [], fail: {}, tenantId: "t1",
+    sites: [{ id: "s1", name: "Sede" }, { id: "s2", name: "Anexo" }], servers: [{ id: "srv1", name: "h01", site_id: "s1" }, { id: "srv2", name: "c01", site_id: "s2" }], groups: [{ id: "g1", name: "Accesos" }],
     ...over,
   };
   const calls: Call[] = [];
@@ -55,7 +57,9 @@ function install(over: Partial<Backend> = {}) {
         return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: b.tenantId,
           grants: b.permissions.map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
       }
-      if (p === "/api/v1/tenants") return typeof b.tenants === "number" ? json({ code: "internal", message: "tenants down" }, b.tenants) : json({ items: b.tenants });
+      if (p === "/api/v1/sites") return json({ items: b.sites });
+      if (p === "/api/v1/servers") return json({ items: b.servers });
+      if (p === "/api/v1/camera-groups") return json({ items: b.groups });
       if (p === "/api/v1/faces/persons" && input.method === "GET") return json({ items: b.persons });
       if (p === "/api/v1/faces/persons" && input.method === "POST") return json(person("new", (call.body as { display_name: string }).display_name), 201);
       if (/\/images$/.test(p) && input.method === "GET") return json({ items: b.images });
@@ -89,100 +93,51 @@ const rec = (id: string, who: string, cam: string, personId = "p1"): Schemas["Fa
 });
 
 describe("Faces page as a platform administrator", () => {
-  afterEach(() => localStorage.clear());
   const facesCalls = (calls: Call[]) => calls.filter((c) => c.path.startsWith("/api/v1/faces"));
 
-  it("defaults to the first tenant and sends tenant_id on every faces call", async () => {
+  it("needs no organization: no selector, no tenants request and no tenant_id on any faces call", async () => {
     const { calls } = install({ tenantId: null, persons: [person("p1", "Ana")] });
     renderPage(Faces);
     expect(await screen.findByRole("button", { name: /Ana/ })).toBeInTheDocument();
-    expect(screen.getByLabelText("Organización")).toHaveValue("t1");
-    const faces = facesCalls(calls);
-    expect(faces.length).toBeGreaterThan(0);
-    expect(faces.every((c) => c.search.get("tenant_id") === "t1")).toBe(true);
+    expect(screen.queryByLabelText("Organización")).not.toBeInTheDocument();
+    expect(calls.some((c) => c.path === "/api/v1/tenants")).toBe(false);
+    expect(facesCalls(calls).length).toBeGreaterThan(0);
+    expect(facesCalls(calls).some((c) => c.search.has("tenant_id"))).toBe(false);
   });
 
-  it("refetches with the other tenant when the selector changes and remembers the choice", async () => {
-    const { calls } = install({ tenantId: null, persons: [person("p1", "Ana")] });
-    const view = renderPage(Faces);
-    await screen.findByRole("button", { name: /Ana/ });
-    await screen.findByRole("option", { name: "Beta" });
-    fireEvent.change(screen.getByLabelText("Organización"), { target: { value: "t2" } });
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/persons" && c.search.get("tenant_id") === "t2")).toBe(true));
-    expect(localStorage.getItem("faces.tenant")).toBe("t2");
-    view.unmount();
-    const again = install({ tenantId: null, persons: [person("p1", "Ana")] });
-    renderPage(Faces);
-    await screen.findByRole("button", { name: /Ana/ });
-    expect(screen.getByLabelText("Organización")).toHaveValue("t2");
-    expect(facesCalls(again.calls).every((c) => c.search.get("tenant_id") === "t2")).toBe(true);
-  });
-
-  it("threads the tenant into mutations, images and the other tabs", async () => {
+  it("sends no tenant_id with mutations, images and the other tabs", async () => {
     const { calls } = install({ tenantId: null, persons: [person("p1", "Ana")], images: [{ id: "i1", person_id: "p1", content_type: "image/jpeg", size_bytes: 1, width: 1, height: 1, created_at: "2026-10-01T10:00:00Z" }] });
     renderPage(Faces);
-    await screen.findByRole("option", { name: "Beta" });
-    fireEvent.change(screen.getByLabelText("Organización"), { target: { value: "t2" } });
     fireEvent.click(await screen.findByRole("button", { name: "Nueva persona" }));
     fireEvent.change(screen.getByLabelText("Nombre"), { target: { value: "Carla" } });
     fireEvent.click(screen.getByRole("button", { name: "Crear persona" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/faces/persons")).toBe(true));
-    expect(calls.find((c) => c.method === "POST" && c.path === "/api/v1/faces/persons")?.search.get("tenant_id")).toBe("t2");
     fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/train")).toBe(true));
-    expect(calls.filter((c) => c.path === "/api/v1/faces/train").every((c) => c.search.get("tenant_id") === "t2")).toBe(true);
     fireEvent.click(screen.getByRole("tab", { name: "Reconocimientos" }));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/recognitions")).toBe(true));
-    expect(calls.filter((c) => c.path === "/api/v1/faces/recognitions").every((c) => c.search.get("tenant_id") === "t2")).toBe(true);
+    expect(facesCalls(calls).some((c) => c.search.has("tenant_id"))).toBe(false);
   });
 
-  it("sends the tenant with train thumbnails and assignments", async () => {
+  it("uses plain train thumbnail URLs and assigns without a tenant", async () => {
     const train = { items: [{ server_id: "s1", server_name: "h01", file: "a.webp" }], servers: [{ server_id: "s1", server_name: "h01" }] };
     const { calls } = install({ tenantId: null, persons: [person("p1", "Ana")], train });
     renderPage(Faces);
-    await screen.findByRole("option", { name: "Beta" });
-    fireEvent.change(screen.getByLabelText("Organización"), { target: { value: "t2" } });
     fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
     const img = await screen.findByAltText("Intento de reconocimiento en h01");
-    expect(img).toHaveAttribute("src", "/api/v1/faces/train/s1/image?file=a.webp&tenant_id=t2");
+    expect(img).toHaveAttribute("src", "/api/v1/faces/train/s1/image?file=a.webp");
     await screen.findAllByRole("option", { name: "Ana" });
     fireEvent.change(screen.getByLabelText("Asignar a"), { target: { value: "p1" } });
     fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/train/assign")).toBe(true));
-    expect(calls.find((c) => c.path === "/api/v1/faces/train/assign")?.search.get("tenant_id")).toBe("t2");
+    expect(calls.find((c) => c.path === "/api/v1/faces/train/assign")?.search.has("tenant_id")).toBe(false);
   });
 
-  it("drops the open person when the tenant changes", async () => {
-    install({ tenantId: null, persons: [person("p1", "Ana")] });
+  it("keeps the person image URL free of tenant_id", async () => {
+    install({ tenantId: null, persons: [person("p1", "Ana")], images: [{ id: "i1", person_id: "p1", content_type: "image/jpeg", size_bytes: 1, width: 1, height: 1, created_at: "2026-10-01T10:00:00Z" }] });
     renderPage(Faces);
     fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
-    expect(await screen.findByRole("button", { name: "Volver a la lista" })).toBeInTheDocument();
-    await screen.findByRole("option", { name: "Beta" });
-    fireEvent.change(screen.getByLabelText("Organización"), { target: { value: "t2" } });
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Volver a la lista" })).not.toBeInTheDocument());
-    expect(await screen.findByRole("button", { name: "Nueva persona" })).toBeInTheDocument();
-  });
-
-  it("shows the error when the tenants cannot be loaded", async () => {
-    const { calls } = install({ tenantId: null, tenants: 500 });
-    renderPage(Faces);
-    expect(await screen.findByText("tenants down")).toBeInTheDocument();
-    expect(calls.some((c) => c.path.startsWith("/api/v1/faces"))).toBe(false);
-  });
-
-  it("says so when there are no tenants", async () => {
-    const { calls } = install({ tenantId: null, tenants: [] });
-    renderPage(Faces);
-    expect(await screen.findByText("No hay organizaciones para mostrar.")).toBeInTheDocument();
-    expect(calls.some((c) => c.path.startsWith("/api/v1/faces"))).toBe(false);
-  });
-
-  it("keeps members unchanged: no selector and no tenant_id", async () => {
-    const { calls } = install({ persons: [person("p1", "Ana")] });
-    renderPage(Faces);
-    await screen.findByRole("button", { name: /Ana/ });
-    expect(screen.queryByLabelText("Organización")).not.toBeInTheDocument();
-    expect(facesCalls(calls).some((c) => c.search.has("tenant_id"))).toBe(false);
+    expect(await screen.findByAltText("Foto 1 de Ana")).toHaveAttribute("src", "/api/v1/faces/persons/p1/images/i1");
   });
 });
 
@@ -362,27 +317,60 @@ describe("Faces page", () => {
   });
 
   describe("Reconocimientos", () => {
-    it("lists recognitions with playback links, filters by person and pages", async () => {
-      const { calls } = install({
-        persons: [person("p1", "Ana"), person("p2", "Beto")],
-        recognitions: [[rec("e1", "Ana", "plaza")], [rec("e2", "Beto", "muelle", "p2")]],
-      });
+    const recCalls = (calls: Call[]) => calls.filter((c) => c.path === "/api/v1/faces/recognitions");
+
+    it("searches today by default and pages", async () => {
+      const { calls } = install({ persons: [person("p1", "Ana")], recognitions: [[rec("e1", "Ana", "plaza")], [rec("e2", "Beto", "muelle", "p2")]] });
       renderPage(Faces);
       fireEvent.click(await screen.findByRole("tab", { name: "Reconocimientos" }));
       const list = await screen.findByRole("list", { name: "Reconocimientos recientes" });
       expect(within(list).getByText("Ana")).toBeInTheDocument();
-      expect(within(list).getByText("plaza")).toBeInTheDocument();
+      const first = recCalls(calls)[0]!;
+      expect(first.search.get("from")).toBeTruthy();
+      expect(first.search.get("to")).toBeTruthy();
+      expect(first.search.has("tenant_id")).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: "Cargar más" }));
+      expect(await screen.findByText("muelle")).toBeInTheDocument();
+    });
+
+    it("lists recognitions with playback links and the event thumbnail", async () => {
+      install({ recognitions: [[rec("e1", "Ana", "plaza")]] });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("tab", { name: "Reconocimientos" }));
+      const list = await screen.findByRole("list", { name: "Reconocimientos recientes" });
       const link = within(list).getByRole("link", { name: "Ver grabación" });
       expect(link.getAttribute("href")).toMatch(/^\/playback\?/);
       expect(link.getAttribute("href")).toContain("camera=cam-plaza");
       expect(within(list).getByAltText("Captura del evento en plaza")).toHaveAttribute("src", "/api/v1/events/e1/thumbnail");
+    });
 
-      fireEvent.click(screen.getByRole("button", { name: "Cargar más" }));
-      expect(await screen.findByText("muelle")).toBeInTheDocument();
-
-      await screen.findByRole("option", { name: "Beto" });
-      fireEvent.change(screen.getByLabelText("Persona"), { target: { value: "p2" } });
-      await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/recognitions" && c.search.getAll("person_id").join() === "p2")).toBe(true));
+    it("maps site, camera group, camera and person to query params only after Buscar, with removable chips", async () => {
+      const { calls } = install({
+        persons: [person("p1", "Ana")], cameras: [{ id: "cam-plaza", display_name: "plaza" }], recognitions: [[rec("e1", "Ana", "plaza")]],
+      });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("tab", { name: "Reconocimientos" }));
+      await screen.findByRole("option", { name: "Anexo" });
+      await screen.findByRole("option", { name: "Ana" });
+      await screen.findByRole("option", { name: "plaza" });
+      const before = recCalls(calls).length;
+      fireEvent.change(screen.getByLabelText("Sitio"), { target: { value: "s2" } });
+      fireEvent.change(screen.getByLabelText("Grupo de cámaras"), { target: { value: "g1" } });
+      fireEvent.change(screen.getByLabelText("Cámara"), { target: { value: "cam-plaza" } });
+      fireEvent.change(screen.getByLabelText("Persona"), { target: { value: "p1" } });
+      expect(recCalls(calls).length).toBe(before);
+      fireEvent.click(screen.getByRole("button", { name: "Buscar" }));
+      await waitFor(() => {
+        const last = recCalls(calls).at(-1)!;
+        expect(last.search.getAll("site_id")).toEqual(["s2"]);
+        expect(last.search.getAll("camera_group_id")).toEqual(["g1"]);
+        expect(last.search.getAll("camera_id")).toEqual(["cam-plaza"]);
+        expect(last.search.getAll("person_id")).toEqual(["p1"]);
+      });
+      const chips = await screen.findByRole("list", { name: "Filtros aplicados" });
+      expect(within(chips).getByText("Sitio: Anexo")).toBeInTheDocument();
+      fireEvent.click(within(chips).getByRole("button", { name: /Sitio: Anexo/ }));
+      await waitFor(() => expect(recCalls(calls).at(-1)!.search.has("site_id")).toBe(false));
     });
 
     it("shows an empty state", async () => {
@@ -390,6 +378,20 @@ describe("Faces page", () => {
       renderPage(Faces);
       fireEvent.click(await screen.findByRole("tab", { name: "Reconocimientos" }));
       expect(await screen.findByText("No hay reconocimientos para estos filtros.")).toBeInTheDocument();
+    });
+  });
+
+  describe("Entrenar filters", () => {
+    it("narrows the attempts by site and server", async () => {
+      const { calls } = install({ train: { items: [], servers: [{ server_id: "srv1", server_name: "h01" }] } });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+      await screen.findByRole("option", { name: "Anexo" });
+      await screen.findByRole("option", { name: "c01" });
+      fireEvent.change(screen.getByLabelText("Sitio"), { target: { value: "s2" } });
+      await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/train" && c.search.getAll("site_id").join() === "s2")).toBe(true));
+      fireEvent.change(screen.getByLabelText("Servidor"), { target: { value: "srv2" } });
+      await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/train" && c.search.getAll("server_id").join() === "srv2")).toBe(true));
     });
   });
 });

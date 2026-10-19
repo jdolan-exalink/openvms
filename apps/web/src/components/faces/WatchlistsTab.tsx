@@ -11,10 +11,10 @@ type Watchlist = Schemas["FaceWatchlist"];
 type Person = Schemas["FacePerson"];
 
 /** WatchlistsTab manages named groups of registered people that alarm rules can reference. */
-export function WatchlistsTab({ canManage, tenantId }: { canManage: boolean; tenantId?: string }) {
+export function WatchlistsTab({ canManage }: { canManage: boolean }) {
   const t = useT();
-  const lists = useQuery(faceWatchlistsQuery(tenantId));
-  const persons = useQuery(facePersonsQuery(tenantId));
+  const lists = useQuery(faceWatchlistsQuery());
+  const persons = useQuery(facePersonsQuery());
   // "new" opens an empty editor; an id opens that list's editor.
   const [editing, setEditing] = useState<string | "new" | null>(null);
   const [deleting, setDeleting] = useState<Watchlist | null>(null);
@@ -32,7 +32,7 @@ export function WatchlistsTab({ canManage, tenantId }: { canManage: boolean; ten
           </Button>
         </div>
       )}
-      {canManage && editing === "new" && <Editor people={people} tenantId={tenantId} onClose={() => setEditing(null)} />}
+      {canManage && editing === "new" && <Editor people={people} onClose={() => setEditing(null)} />}
       {lists.isSuccess && lists.data.length === 0 && <Empty>{t("faces.wlEmpty")}</Empty>}
       {lists.data && lists.data.length > 0 && (
         <ul className="flex flex-col gap-3" aria-label={t("faces.wlList")}>
@@ -55,22 +55,22 @@ export function WatchlistsTab({ canManage, tenantId }: { canManage: boolean; ten
                     </div>
                   )}
                 </div>
-                {canManage && editing === w.id && <Editor key={w.id} list={w} people={people} tenantId={tenantId} onClose={() => setEditing(null)} />}
+                {canManage && editing === w.id && <Editor key={w.id} list={w} people={people} onClose={() => setEditing(null)} />}
               </Card>
             </li>
           ))}
         </ul>
       )}
-      {deleting && <DeleteDialog list={deleting} tenantId={tenantId} onClose={() => setDeleting(null)} />}
+      {deleting && <DeleteDialog list={deleting} onClose={() => setDeleting(null)} />}
     </div>
   );
 }
 
-function DeleteDialog({ list, tenantId, onClose }: { list: Watchlist; tenantId?: string; onClose: () => void }) {
+function DeleteDialog({ list, onClose }: { list: Watchlist; onClose: () => void }) {
   const t = useT();
   const qc = useQueryClient();
   const remove = useMutation({
-    mutationFn: async () => unwrap(await api.DELETE("/api/v1/faces/watchlists/{watchlistId}", { params: { path: { watchlistId: list.id }, query: { tenant_id: tenantId } } })),
+    mutationFn: async () => unwrap(await api.DELETE("/api/v1/faces/watchlists/{watchlistId}", { params: { path: { watchlistId: list.id } } })),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["faces", "watchlists"] });
       onClose();
@@ -89,7 +89,7 @@ function DeleteDialog({ list, tenantId, onClose }: { list: Watchlist; tenantId?:
   );
 }
 
-function Editor({ list, people, tenantId, onClose }: { list?: Watchlist; people: Person[]; tenantId?: string; onClose: () => void }) {
+function Editor({ list, people, onClose }: { list?: Watchlist; people: Person[]; onClose: () => void }) {
   const t = useT();
   const qc = useQueryClient();
   const [name, setName] = useState(list?.name ?? "");
@@ -104,14 +104,14 @@ function Editor({ list, people, tenantId, onClose }: { list?: Watchlist; people:
       const order = new Map(people.map((p, i) => [p.id, i]));
       const ids = [...members].sort((a, b) => (order.get(a) ?? people.length) - (order.get(b) ?? people.length));
       if (!list) {
-        return unwrap(await api.POST("/api/v1/faces/watchlists", { params: { query: { tenant_id: tenantId } }, body: { name: name.trim(), description: description.trim(), person_ids: ids } }));
+        return unwrap(await api.POST("/api/v1/faces/watchlists", { body: { name: name.trim(), description: description.trim(), person_ids: ids } }));
       }
       const body: Schemas["FaceWatchlistUpdate"] = {};
       if (name.trim() !== list.name) body.name = name.trim();
       if (description.trim() !== list.description) body.description = description.trim();
       const before = [...list.person_ids].sort().join(",");
       if (before !== [...ids].sort().join(",")) body.person_ids = ids;
-      return unwrap(await api.PATCH("/api/v1/faces/watchlists/{watchlistId}", { params: { path: { watchlistId: list.id }, query: { tenant_id: tenantId } }, body }));
+      return unwrap(await api.PATCH("/api/v1/faces/watchlists/{watchlistId}", { params: { path: { watchlistId: list.id } }, body }));
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ["faces", "watchlists"] });

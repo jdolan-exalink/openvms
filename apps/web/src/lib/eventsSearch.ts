@@ -1,4 +1,4 @@
-import { toLocalInput } from "@/lib/format";
+import { fromLocalInput, toLocalInput } from "@/lib/format";
 
 /** The Events filter form and its URL representation (applied filters live in the query string). */
 export type EventsForm = {
@@ -117,4 +117,13 @@ export function formToSearch(f: EventsForm, now = new Date()): EventsSearch {
     vtype: f.vehicleType,
     vcolor: f.vehicleColor,
   });
+}
+
+/** The day control ends at 23:59; the query includes the rest of that minute up to midnight. */
+export function rangeEnd(local: string): string | undefined {
+  const instant = fromLocalInput(local);
+  if (!instant || !local.endsWith("T23:59")) return instant;
+  const end = new Date(instant);
+  end.setMinutes(end.getMinutes() + 1);
+  return end.toISOString();
 }

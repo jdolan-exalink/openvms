@@ -8,10 +8,10 @@ import { Button, Empty, ErrorNote, Field, LinkButton, TextInput, Textarea } from
 import { useT } from "@/i18n";
 
 /** PersonsTab lists the registered people with their sync summary and opens a person's detail. */
-export function PersonsTab({ canManage, tenantId }: { canManage: boolean; tenantId?: string }) {
+export function PersonsTab({ canManage }: { canManage: boolean }) {
   const t = useT();
   const qc = useQueryClient();
-  const persons = useQuery(facePersonsQuery(tenantId));
+  const persons = useQuery(facePersonsQuery());
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
@@ -21,7 +21,7 @@ export function PersonsTab({ canManage, tenantId }: { canManage: boolean; tenant
   const create = useMutation({
     mutationFn: async (e: FormEvent) => {
       e.preventDefault();
-      return unwrap(await api.POST("/api/v1/faces/persons", { params: { query: { tenant_id: tenantId } }, body: { display_name: name.trim(), notes: notes.trim() } }));
+      return unwrap(await api.POST("/api/v1/faces/persons", { body: { display_name: name.trim(), notes: notes.trim() } }));
     },
     onSuccess: async (created) => {
       await qc.invalidateQueries({ queryKey: ["faces"] });
@@ -34,7 +34,7 @@ export function PersonsTab({ canManage, tenantId }: { canManage: boolean; tenant
 
   const all = persons.data ?? [];
   const selected = all.find((p) => p.id === selectedId);
-  if (selected) return <PersonDetail person={selected} canManage={canManage} tenantId={tenantId} onBack={() => setSelectedId(null)} />;
+  if (selected) return <PersonDetail person={selected} canManage={canManage} onBack={() => setSelectedId(null)} />;
 
   const shown = all.filter((p) => p.display_name.toLowerCase().includes(search.trim().toLowerCase()));
   // Every person is parked as "disabled" on every server when no server has face recognition on.
