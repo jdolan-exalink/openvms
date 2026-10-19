@@ -13,7 +13,7 @@ Faces works for every user, platform administrators included, without picking an
 - A registered person keeps syncing to ALL face-enabled servers of its organization (current model).
 
 ## Scope / tasks
-- [ ] FSS-01 — API without mandatory `tenant_id`: person/image/sync/watchlist routes resolve the tenant from the referenced object; list/create routes without one use the caller's tenant, or for a platform administrator the only tenant visible (400 only when several exist and none is given; `tenant_id` stays optional). Recognitions take `site_id`, `server_id`, `camera_group_id`, `camera_id`, person and dates, scoped by authorized cameras across tenants with name redaction per event tenant. Train lists attempts of every face-capable server the caller may see, filterable by `site_id`/`server_id`. Config list filterable by `site_id`. OpenAPI first + `make generate`. Route: delegated direct.
+- [x] FSS-01 — API without mandatory `tenant_id`: person/image/sync/watchlist routes resolve the tenant from the referenced object; list/create routes without one use the caller's tenant, or for a platform administrator the only tenant visible (400 only when several exist and none is given; `tenant_id` stays optional). Recognitions take `site_id`, `server_id`, `camera_group_id`, `camera_id`, person and dates, scoped by authorized cameras across tenants with name redaction per event tenant. Train lists attempts of every face-capable server the caller may see, filterable by `site_id`/`server_id`. Config list filterable by `site_id`. OpenAPI first + `make generate`. Route: delegated direct.
 - [ ] FSS-02 — Web: remove the "Organización" selector; Recognitions becomes a search like Plates (site, camera group, camera, person, dates, chips); Train and Config gain site/server filters; queries stop sending `tenant_id`. Route: delegated direct.
 
 ## Constraints and checks
@@ -24,5 +24,8 @@ Faces works for every user, platform administrators included, without picking an
 ## Progress
 - 2026-10-19: branch `feat/faces-site-server-scope` from `main` `928e57c`.
 
+- 2026-10-19: FSS-01 done (delegated writer). RED: new integration tests failed first (API: 400 `tenant_id is required` on persons/watchlists/train/config/recognitions and every object route; faces/inventory: compile errors for the new filters). GREEN: `go test -tags integration` faces, inventory, api (40m timeout; the default 10m is too short for the whole api package), events; `go test -race` faces/api/events; `golangci-lint` 0 issues; build/vet, generation (no extra diff), `pnpm typecheck`, `git diff --check` clean. Commits: `5ec99cc` (contract + generated), `6307e1b` (code + tests). Web needed no adjustment. Route: delegated direct (one writer; mapping done by the writer).
+- Design notes: `faces.Service` gains `SoleTenant`/`PersonTenant`/`WatchlistTenant`/`ServerTenant`; `ListRecognitions`, `ListTrainAttempts` and `inventory.ListFaceConfig` take a filter struct with optional `TenantID`; recognitions and train audit one row per organization read. Recognition rows of organizations where the caller lacks `faces.view` are left out (never shown with names).
+
 ## Next step
-FSS-01 through one writer.
+FSS-02 (web).
