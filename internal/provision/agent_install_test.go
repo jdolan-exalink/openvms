@@ -234,6 +234,7 @@ func TestRunAgentInstallUsesPinnedRootAndOnlyAgentTargets(t *testing.T) {
 func TestRunAgentInstallReconcilesAnExistingAgentAndClearsOldMTLSIdentity(t *testing.T) {
 	request := validAgentInstallRequest(t)
 	request.MTLS = mtlsInstall()
+	request.ReplaceExisting = true
 	conn := &fakeAgentInstallConn{preflightOutput: "openvms_install_preflight=agent_present version=0.2.1 os=ubuntu arch=" + runtime.GOARCH + " user=root\n"}
 	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
 		return conn, nil
@@ -265,6 +266,39 @@ func TestRunAgentInstallReconcilesAnExistingAgentAndClearsOldMTLSIdentity(t *tes
 	}
 }
 
+func TestRunAgentInstallRequiresExplicitConfirmationForUnknownExistingAgent(t *testing.T) {
+	request := validAgentInstallRequest(t)
+	request.MTLS = mtlsInstall()
+	conn := &fakeAgentInstallConn{preflightOutput: "openvms_install_preflight=agent_present version=unknown os=ubuntu arch=" + runtime.GOARCH + " user=root\n"}
+	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	})
+	if err == nil {
+		t.Fatal("unknown-version existing agent was replaced without explicit confirmation")
+	}
+	if conn.writes != 0 {
+		t.Fatalf("unconfirmed replacement wrote %d files", conn.writes)
+	}
+}
+
+func TestRunAgentInstallAllowsConfirmedUnknownExistingAgent(t *testing.T) {
+	request := validAgentInstallRequest(t)
+	request.MTLS = mtlsInstall()
+	request.ReplaceExisting = true
+	conn := &fakeAgentInstallConn{preflightOutput: "openvms_install_preflight=agent_present version=unknown os=ubuntu arch=" + runtime.GOARCH + " user=root\n"}
+	if err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	}); err != nil {
+		t.Fatalf("confirmed unknown-version replacement failed: %v", err)
+	}
+	if conn.writes == 0 {
+		t.Fatal("confirmed replacement did not install files")
+	}
+	if !strings.Contains(strings.Join(conn.commands, "\n"), "openvms_agent_identity_reset=ok") {
+		t.Fatal("confirmed unknown-version replacement did not reset the previous enrollment identity")
+	}
+}
+
 func TestRunAgentInstallRefusesUnknownExistingAgentWithoutMutation(t *testing.T) {
 	request := validAgentInstallRequest(t)
 	request.MTLS = mtlsInstall()
@@ -280,6 +314,7 @@ func TestRunAgentInstallRefusesUnknownExistingAgentWithoutMutation(t *testing.T)
 func TestRunAgentInstallRefusesNewerExistingAgentWithoutMutation(t *testing.T) {
 	request := validAgentInstallRequest(t)
 	request.MTLS = mtlsInstall()
+	request.ReplaceExisting = true
 	conn := &fakeAgentInstallConn{preflightOutput: "openvms_install_preflight=agent_present version=0.4.0 os=ubuntu arch=" + runtime.GOARCH + " user=root\n"}
 	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
 		return conn, nil
@@ -289,9 +324,23 @@ func TestRunAgentInstallRefusesNewerExistingAgentWithoutMutation(t *testing.T) {
 	}
 }
 
+func TestRunAgentInstallFailsClosedForUnsupportedExistingLayout(t *testing.T) {
+	request := validAgentInstallRequest(t)
+	request.MTLS = mtlsInstall()
+	request.ReplaceExisting = true
+	conn := &fakeAgentInstallConn{runErrAt: "exit 25", runErr: fakeExitError{25}}
+	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	})
+	if err == nil || conn.writes != 0 {
+		t.Fatalf("unsupported existing layout must fail before writes: err=%v writes=%d", err, conn.writes)
+	}
+}
+
 func TestRunAgentInstallReconfiguresCurrentVersionWithoutReplacingBinary(t *testing.T) {
 	request := validAgentInstallRequest(t)
 	request.MTLS = mtlsInstall()
+	request.ReplaceExisting = true
 	conn := &fakeAgentInstallConn{preflightOutput: "openvms_install_preflight=agent_present version=0.3.0 os=ubuntu arch=" + runtime.GOARCH + " user=root\n"}
 	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
 		return conn, nil

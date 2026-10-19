@@ -3651,6 +3651,8 @@ export interface components {
             ssh_port: number;
             /** @description Transient root SSH password; never persisted or echoed. */
             ssh_password: string;
+            /** @description Explicit confirmation to replace a detected or locally registered agent; replacement ends synchronization with its previous OpenVMS. */
+            replace_existing: boolean;
         };
         ServerAgentDiscoveryRequest: {
             /**
