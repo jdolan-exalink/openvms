@@ -36,6 +36,7 @@ type AgentInstallRequest struct {
 	ExpectedHostKey string `json:"-"`
 	hostKeyTrust    func(context.Context, string) error
 	Binary          []byte `json:"-"`
+	BundledVersion  string `json:"-"`
 	Token           string `json:"-"`
 	TLSListen       string `json:"-"`
 	TLSCertificate  []byte `json:"-"`
@@ -177,6 +178,8 @@ func agentInstallPreflight() string {
 . /etc/os-release
 case "${ID:-}" in ubuntu|debian) ;; *) exit 22 ;; esac
 command -v systemctl >/dev/null 2>&1 || exit 26
+case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) exit 23 ;; esac
+[ "$arch" = %s ] || exit 24
 if systemctl cat openvms-agent.service >/dev/null 2>&1; then
   # Read-only: report the installed agent version, never change anything. The agent binary
   # answers --version before it reads its token, and the token file is pointed at a missing
@@ -185,11 +188,9 @@ if systemctl cat openvms-agent.service >/dev/null 2>&1; then
   out=$(OPENVMS_AGENT_TOKEN_FILE=/nonexistent timeout 5 /usr/local/bin/openvms-agent --version 2>/dev/null </dev/null | head -n 1 | tr -d '\r') || out=
   case "$out" in ''|*[!0-9.]*) out=$(journalctl -u openvms-agent.service -o cat -n 200 --no-pager 2>/dev/null | sed -n 's/.*"version":"\([0-9][0-9.]*\)".*/\1/p' | tail -n 1) || out= ;; esac
   case "$out" in ''|*[!0-9.]*) ;; *) version=$out ;; esac
-  printf 'openvms_install_preflight=agent_present version=%%s\n' "$version"
+  printf 'openvms_install_preflight=agent_present version=%%s os=%%s arch=%%s user=root\n' "$version" "$ID" "$arch"
   exit 27
 fi
-case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) exit 23 ;; esac
-[ "$arch" = %s ] || exit 24
 for target in /usr/local/bin/openvms-agent /etc/openvms/agent.token /etc/openvms/agent.env /etc/systemd/system/openvms-agent.service /etc/openvms/agent.crt /etc/openvms/agent.key; do
   [ ! -e "$target" ] && [ ! -L "$target" ] || exit 25
 done
@@ -210,6 +211,14 @@ systemctl enable openvms-agent.service >/dev/null 2>&1
 systemctl restart openvms-agent.service >/dev/null 2>&1
 systemctl is-active --quiet openvms-agent.service >/dev/null 2>&1
 printf 'openvms_agent_install=active\n'`
+
+const agentInstallResetIdentity = `set -eu
+base=/var/lib/openvms-agent
+state="$base/agent-mtls"
+[ ! -L "$base" ] || exit 31
+[ ! -L "$state" ] || exit 32
+rm -rf -- "$state"
+printf 'openvms_agent_identity_reset=ok\n'`
 
 func runAgentInstallStep(ctx context.Context, conn AgentInstallConn, command string) (string, error) {
 	output, err := runAgentInstallStepDetailed(ctx, conn, command)

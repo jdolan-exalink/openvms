@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 )
@@ -20,6 +21,7 @@ const (
 	AgentInstallCodePreflightFailed    = "preflight_failed"
 	AgentInstallCodeTransferFailed     = "transfer_failed"
 	AgentInstallCodeActivationFailed   = "activation_failed"
+	AgentInstallCodeRegistrationFailed = "registration_failed"
 	AgentInstallCodeSSHAuthFailed      = "ssh_auth_failed"
 	AgentInstallCodeSSHConnectFailed   = "ssh_connection_failed"
 	agentInstallStagePreflight         = "preflight"
@@ -49,6 +51,8 @@ func (f *AgentInstallFailure) Error() string {
 		return "agent install file transfer failed"
 	case AgentInstallCodeActivationFailed:
 		return "agent install activation failed"
+	case AgentInstallCodeRegistrationFailed:
+		return "agent enrollment or health verification failed; registration was not saved"
 	default:
 		return "agent install preflight failed: " + f.Code
 	}
@@ -150,7 +154,7 @@ func parseAgentSemver(version string) ([3]int, bool) {
 func parseAgentPresentVersion(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Fields(line)
-		if len(fields) != 2 || fields[0] != agentPresentPreflightPrefix || !strings.HasPrefix(fields[1], "version=") {
+		if len(fields) < 2 || len(fields) > 5 || fields[0] != agentPresentPreflightPrefix || !strings.HasPrefix(fields[1], "version=") {
 			continue
 		}
 		version := strings.TrimPrefix(fields[1], "version=")
@@ -159,6 +163,21 @@ func parseAgentPresentVersion(output string) string {
 		}
 	}
 	return ""
+}
+
+func installedAgentPreflight(output string) (string, bool) {
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 5 || fields[0] != agentPresentPreflightPrefix || !strings.HasPrefix(fields[1], "version=") {
+			continue
+		}
+		version := strings.TrimPrefix(fields[1], "version=")
+		if _, ok := parseAgentSemver(version); !ok || fields[2] != "os=ubuntu" && fields[2] != "os=debian" || fields[3] != "arch="+runtime.GOARCH || fields[4] != "user=root" {
+			continue
+		}
+		return strings.TrimPrefix(version, "v"), true
+	}
+	return "", false
 }
 
 // compareAgentVersions says whether the installed agent is behind the bundled one.
@@ -178,6 +197,23 @@ func compareAgentVersions(installed, bundled string) string {
 		}
 	}
 	return AgentVersionUpToDate
+}
+
+func compareAgentVersionOrder(installed, bundled string) (int, bool) {
+	a, okA := parseAgentSemver(installed)
+	b, okB := parseAgentSemver(bundled)
+	if !okA || !okB {
+		return 0, false
+	}
+	for i := range a {
+		if a[i] < b[i] {
+			return -1, true
+		}
+		if a[i] > b[i] {
+			return 1, true
+		}
+	}
+	return 0, true
 }
 
 func agentInstalledMessage(installed, bundled string, managedHere bool) (string, string) {

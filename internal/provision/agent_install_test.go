@@ -46,12 +46,18 @@ func (f *fakeAgentInstallConn) Run(_ context.Context, command string) (string, e
 	}
 	if strings.Contains(command, "openvms_install_preflight") {
 		if f.preflightOutput != "" {
+			if strings.Contains(f.preflightOutput, "openvms_install_preflight=agent_present") {
+				return f.preflightOutput, fakeExitError{27}
+			}
 			return f.preflightOutput, nil
 		}
 		return "openvms_install_preflight=ok os=ubuntu arch=" + runtime.GOARCH + " user=root targets=absent\n", nil
 	}
 	if strings.Contains(command, "openvms_agent_install=active") {
 		return "openvms_agent_install=active\n", nil
+	}
+	if strings.Contains(command, "openvms_agent_identity_reset=ok") {
+		return "openvms_agent_identity_reset=ok\n", nil
 	}
 	return "active", nil
 }
@@ -117,7 +123,7 @@ func validAgentInstallRequest(t *testing.T) AgentInstallRequest {
 	t.Helper()
 	cert, key := newAgentInstallTLS(t, "192.0.2.10")
 	return AgentInstallRequest{
-		Host: "192.0.2.10", Port: 2202, User: "root", Password: "ssh-password-never-persist",
+		Host: "192.0.2.10", Port: 2202, User: "root", Password: "ssh-password-never-persist", BundledVersion: "0.3.0",
 		ExpectedHostKey: agentInstallTestPin, Binary: []byte("agent-binary"), Token: "agent-token-1234567890123456789012345678901234567890",
 		TLSListen: "0.0.0.0:7443", TLSCertificate: cert, TLSPrivateKey: key,
 	}
@@ -222,6 +228,82 @@ func TestRunAgentInstallUsesPinnedRootAndOnlyAgentTargets(t *testing.T) {
 		if !strings.Contains(string(conn.files["/etc/openvms/agent.env"]), want) {
 			t.Fatalf("agent environment lacks %q: %q", want, conn.files["/etc/openvms/agent.env"])
 		}
+	}
+}
+
+func TestRunAgentInstallReconcilesAnExistingAgentAndClearsOldMTLSIdentity(t *testing.T) {
+	request := validAgentInstallRequest(t)
+	request.MTLS = mtlsInstall()
+	conn := &fakeAgentInstallConn{preflightOutput: "openvms_install_preflight=agent_present version=0.2.1 os=ubuntu arch=" + runtime.GOARCH + " user=root\n"}
+	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	})
+	if err != nil {
+		t.Fatalf("RunAgentInstall existing agent: %v", err)
+	}
+	if string(conn.files["/usr/local/bin/openvms-agent"]) != string(request.Binary) {
+		t.Fatal("existing agent was not reconciled to the trusted bundled binary")
+	}
+	reset := -1
+	restart := -1
+	for i, command := range conn.commands {
+		if strings.Contains(command, "openvms_agent_identity_reset=ok") {
+			reset = i
+		}
+		if strings.Contains(command, "openvms_agent_install=active") {
+			restart = i
+		}
+	}
+	if reset < 0 || restart < 0 || reset >= restart {
+		t.Fatalf("existing mTLS identity must be cleared after staging and before restart: commands=%q", conn.commands)
+	}
+	commands := strings.Join(conn.commands, "\n")
+	for _, target := range []string{"base=/var/lib/openvms-agent", `state="$base/agent-mtls"`} {
+		if !strings.Contains(commands, target) {
+			t.Errorf("reconciliation did not reset old enrollment state %q: %s", target, commands)
+		}
+	}
+}
+
+func TestRunAgentInstallRefusesUnknownExistingAgentWithoutMutation(t *testing.T) {
+	request := validAgentInstallRequest(t)
+	request.MTLS = mtlsInstall()
+	conn := &fakeAgentInstallConn{preflightOutput: "openvms_install_preflight=agent_present version=unknown os=ubuntu arch=" + runtime.GOARCH + " user=root\n"}
+	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	})
+	if err == nil || len(conn.files) != 0 {
+		t.Fatalf("unknown existing agent should fail before mutation: err=%v files=%v", err, conn.files)
+	}
+}
+
+func TestRunAgentInstallRefusesNewerExistingAgentWithoutMutation(t *testing.T) {
+	request := validAgentInstallRequest(t)
+	request.MTLS = mtlsInstall()
+	conn := &fakeAgentInstallConn{preflightOutput: "openvms_install_preflight=agent_present version=0.4.0 os=ubuntu arch=" + runtime.GOARCH + " user=root\n"}
+	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	})
+	if err == nil || conn.writes != 0 {
+		t.Fatalf("newer agent must not be downgraded: err=%v writes=%d", err, conn.writes)
+	}
+}
+
+func TestRunAgentInstallReconfiguresCurrentVersionWithoutReplacingBinary(t *testing.T) {
+	request := validAgentInstallRequest(t)
+	request.MTLS = mtlsInstall()
+	conn := &fakeAgentInstallConn{preflightOutput: "openvms_install_preflight=agent_present version=0.3.0 os=ubuntu arch=" + runtime.GOARCH + " user=root\n"}
+	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, replaced := conn.files["/usr/local/bin/openvms-agent"]; replaced {
+		t.Fatal("agent already at bundled version was unnecessarily replaced")
+	}
+	if _, configured := conn.files["/etc/openvms/agent-enroll.token"]; !configured {
+		t.Fatal("same-version agent was not reconfigured for this controller enrollment")
 	}
 }
 

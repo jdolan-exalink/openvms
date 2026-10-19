@@ -74,14 +74,14 @@ describe("AgentJobStatusRegion", () => {
     expect(screen.getByText("North lab")).toBeInTheDocument();
   });
 
-  it("announces one authoritative install success without claiming HTTPS or camera readiness", async () => {
+  it("announces reconciled install success after authenticated HTTPS health without claiming camera readiness", async () => {
     setLocale("en");
     const { container } = renderJobShell(json({ ...queuedInstall, status: "succeeded", stage: "complete" }));
 
     fireEvent.click(screen.getByRole("button", { name: "Start tracking job" }));
 
-    const notice = await screen.findByText(/Agent files were installed and registration completed/i);
-    expect(notice).toHaveTextContent(/HTTPS health is not verified/i);
+    const notice = await screen.findByText(/agent was installed or reconciled/i);
+    expect(notice).toHaveTextContent(/authenticated HTTPS health verification/i);
     expect(notice).not.toHaveTextContent(/camera ready/i);
     expect(container.querySelectorAll("[data-agent-job-notice]")).toHaveLength(1);
     await waitFor(() => expect(screen.getByText("North lab")).toBeInTheDocument());
@@ -122,6 +122,7 @@ describe("AgentJobStatusRegion", () => {
     ["en", "agent_files_present", "agent files are already present"],
     ["en", "agent_already_installed", "An OpenVMS agent is already installed"],
     ["en", "transfer_failed", "could not be transferred"],
+    ["en", "registration_failed", "could not enroll with this OpenVMS"],
   ])("shows the localized reason for failure code %s/%s", async (locale, code, text) => {
     setLocale(locale);
     const { container } = renderJobShell(json({

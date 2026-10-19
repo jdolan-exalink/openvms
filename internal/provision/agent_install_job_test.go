@@ -118,7 +118,10 @@ func TestStartAgentInstallRegistersOnlyAfterRunnerSuccess(t *testing.T) {
 	var registeredCA []byte
 	var requested AgentInstallRequest
 	var trustStored int
+	var verificationOrder []string
 	svc := &Service{
+		AgentMTLS:                      &AgentMTLS{GRPCAddr: "vms.example.com:9443", APIURL: "https://vms.example.com"},
+		NewEnrollToken:                 func(context.Context, authz.Actor, uuid.UUID) (string, error) { return "fresh-enrollment-token", nil },
 		requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
 		agentInstallExists:             func(context.Context, authz.Actor, uuid.UUID) (bool, error) { return false, nil },
 		agentInstallBinary:             func() ([]byte, error) { return []byte("trusted fake binary"), nil },
@@ -142,10 +145,25 @@ func TestStartAgentInstallRegistersOnlyAfterRunnerSuccess(t *testing.T) {
 			return nil
 		},
 		agentInstallRegister: func(_ context.Context, _ authz.Actor, _ uuid.UUID, host string, port uint16, token string, ca []byte) error {
+			verificationOrder = append(verificationOrder, "register")
 			if host != "192.0.2.44" || port != agentInstallHTTPSPort {
 				t.Fatalf("registration target=%s:%d", host, port)
 			}
 			registered, registeredToken, registeredCA = true, token, append([]byte(nil), ca...)
+			return nil
+		},
+		agentInstallEnrollmentCheck: func(_ context.Context, _ authz.Actor, _ uuid.UUID, issuedAt time.Time) error {
+			if issuedAt.IsZero() {
+				t.Fatal("fresh enrollment token creation time was not captured")
+			}
+			verificationOrder = append(verificationOrder, "enrollment")
+			return nil
+		},
+		agentInstallHealthCheck: func(_ context.Context, host string, port uint16, token string, ca []byte) error {
+			if host != "192.0.2.44" || port != agentInstallHTTPSPort || token == "" || len(ca) == 0 {
+				t.Fatal("health verification was not bound to the install target and credentials")
+			}
+			verificationOrder = append(verificationOrder, "health")
 			return nil
 		},
 	}
@@ -168,11 +186,82 @@ func TestStartAgentInstallRegistersOnlyAfterRunnerSuccess(t *testing.T) {
 	if requested.Password != password || requested.User != "root" || requested.ExpectedHostKey != "" || requested.hostKeyTrust == nil || trustStored != 1 {
 		t.Fatal("runner did not receive transient root credentials and persisted first-contact trust")
 	}
+	if requested.MTLS == nil || !reflect.DeepEqual(verificationOrder, []string{"enrollment", "health", "register"}) {
+		t.Fatalf("registration order = %v, MTLS configured = %t", verificationOrder, requested.MTLS != nil)
+	}
 	if got := requested.String(); strings.Contains(got, password) {
 		t.Fatalf("runner request leaked password: %q", got)
 	}
 	if got, _ := json.Marshal(final); strings.Contains(string(got), registeredToken) || strings.Contains(string(got), string(registeredCA)) {
 		t.Fatalf("job response leaked credentials: %s", got)
+	}
+}
+
+func TestStartAgentInstallEnrollmentVerificationFailureDoesNotRegister(t *testing.T) {
+	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+	registered := false
+	svc := &Service{
+		AgentMTLS:                      &AgentMTLS{GRPCAddr: "vms.example.com:9443", APIURL: "https://vms.example.com"},
+		NewEnrollToken:                 func(context.Context, authz.Actor, uuid.UUID) (string, error) { return "fresh-enrollment-token", nil },
+		requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		agentInstallExists:             func(context.Context, authz.Actor, uuid.UUID) (bool, error) { return false, nil },
+		agentInstallBinary:             func() ([]byte, error) { return []byte("trusted fake binary"), nil },
+		agentInstallRun: func(_ context.Context, request AgentInstallRequest, _ func(string)) error {
+			if request.MTLS == nil || request.MTLS.EnrollToken != "fresh-enrollment-token" {
+				t.Fatal("runner did not receive a one-time token for fresh enrollment")
+			}
+			return nil
+		},
+		agentInstallEnrollmentCheck: func(context.Context, authz.Actor, uuid.UUID, time.Time) error {
+			return errors.New("remote enrollment details must not escape")
+		},
+		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+			registered = true
+			return nil
+		},
+	}
+	job, err := svc.StartServerAgentInstall(context.Background(), actor, serverID, validAgentInstallStartRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	final := waitAgentInstallJob(t, svc, actor, serverID, job)
+	if final.Status != "failed" || final.Code != AgentInstallCodeRegistrationFailed || registered {
+		t.Fatalf("job=%#v registered=%v", final, registered)
+	}
+	if strings.Contains(final.Message, "remote enrollment details") {
+		t.Fatalf("job exposed remote error: %#v", final)
+	}
+}
+
+func TestStartAgentInstallHealthFailureDoesNotRegister(t *testing.T) {
+	actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+	registered := false
+	svc := &Service{
+		AgentMTLS:                      &AgentMTLS{GRPCAddr: "vms.example.com:9443", APIURL: "https://vms.example.com"},
+		NewEnrollToken:                 func(context.Context, authz.Actor, uuid.UUID) (string, error) { return "fresh-enrollment-token", nil },
+		requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+		agentInstallExists:             func(context.Context, authz.Actor, uuid.UUID) (bool, error) { return false, nil },
+		agentInstallBinary:             func() ([]byte, error) { return []byte("trusted fake binary"), nil },
+		agentInstallRun:                func(context.Context, AgentInstallRequest, func(string)) error { return nil },
+		agentInstallEnrollmentCheck:    func(context.Context, authz.Actor, uuid.UUID, time.Time) error { return nil },
+		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error {
+			return errors.New("remote health body secret")
+		},
+		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+			registered = true
+			return nil
+		},
+	}
+	job, err := svc.StartServerAgentInstall(context.Background(), actor, serverID, validAgentInstallStartRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	final := waitAgentInstallJob(t, svc, actor, serverID, job)
+	if final.Status != "failed" || final.Code != AgentInstallCodeRegistrationFailed || registered {
+		t.Fatalf("job=%#v registered=%v", final, registered)
+	}
+	if strings.Contains(final.Message, "remote health body secret") {
+		t.Fatalf("job exposed remote error: %#v", final)
 	}
 }
 

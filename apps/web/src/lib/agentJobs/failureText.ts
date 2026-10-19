@@ -14,6 +14,7 @@ const failureKeys = {
   preflight_failed: "servers.agentFailPreflightFailed",
   transfer_failed: "servers.agentFailTransferFailed",
   activation_failed: "servers.agentFailActivationFailed",
+  registration_failed: "servers.agentFailRegistrationFailed",
   ssh_auth_failed: "servers.agentFailSshAuthFailed",
   ssh_connection_failed: "servers.agentFailSshConnectFailed",
 } as const satisfies Record<AgentInstallFailureCode, string>;
