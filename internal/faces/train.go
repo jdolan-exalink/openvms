@@ -3,6 +3,7 @@ package faces
 import (
 	"context"
 	"errors"
+	"math"
 	"net/http"
 	"sort"
 	"strconv"
@@ -51,6 +52,9 @@ type TrainList struct {
 	Servers  []TrainServer
 }
 
+// maxTrainUnix bounds attempt times to a sane range (year ~5138) so int64 conversion is safe.
+const maxTrainUnix = 1e11
+
 func parseTrainFile(file string) (seen *time.Time, label string, score *float64) {
 	parts := strings.Split(strings.TrimSuffix(file, "."+extOf(file)), "-")
 	if len(parts) < 4 {
@@ -60,11 +64,12 @@ func parseTrainFile(file string) (seen *time.Time, label string, score *float64)
 	if err != nil {
 		return nil, "", nil
 	}
-	ts, err := strconv.ParseInt(parts[len(parts)-3], 10, 64)
-	if err != nil || ts <= 0 {
+	// Frigate 0.17 writes whole seconds; 0.18 adds a fraction (1792014467.366228).
+	ts, err := strconv.ParseFloat(parts[len(parts)-3], 64)
+	if err != nil || math.IsNaN(ts) || math.IsInf(ts, 0) || ts < 1 || ts > maxTrainUnix {
 		return nil, "", nil
 	}
-	t := time.Unix(ts, 0).UTC()
+	t := time.Unix(int64(ts), 0).UTC()
 	return &t, parts[len(parts)-2], &sc
 }
 

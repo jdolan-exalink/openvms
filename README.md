@@ -90,6 +90,12 @@ Para conservar un certificado y una clave externos, definí ambos
 `OPENVMS_WEB_TLS_CERT_HOST_FILE` y `OPENVMS_WEB_TLS_KEY_HOST_FILE` con rutas del host. El
 contenedor valida que sean legibles, válidos y que coincidan; no reemplaza esos archivos.
 
+## Despliegue
+
+`make deploy` actualiza el stack local en un solo paso y se detiene ante cualquier fallo: verifica que el árbol esté limpio y en `main`, hace `git pull --ff-only`, genera un volcado protegido de Postgres en `.atl/deploy/<timestamp>/` (verificado con `pg_restore --list`), etiqueta las imágenes actuales como `rollback-<timestamp>`, construye con `COMMIT`, `BUILD_TIME` y `VERSION`, ejecuta `docker compose up -d` y espera `/health/ready`. Al terminar imprime el commit, la migración antes y después, el volcado y el comando de rollback.
+
+Variables opcionales: `DEPLOY_BRANCH`, `DEPLOY_SKIP_PULL=1`, `DEPLOY_SKIP_BACKUP=1`, `DEPLOY_DRY_RUN=1` (solo imprime los comandos). Para volver atrás: `make rollback TAG=<timestamp>` restaura las imágenes sin tocar la base de datos; si se aplicaron migraciones nuevas, restaura también el volcado con el comando que imprime el despliegue.
+
 ## Estructura
 
 ```text

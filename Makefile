@@ -19,6 +19,14 @@ help: ## List targets
 up: ## Build and start the full stack in Docker (web on http://localhost:8000)
 	VERSION=$(VERSION) AGENT_VERSION=$(AGENT_VERSION) docker compose up -d --build
 
+.PHONY: deploy
+deploy: ## Deploy the local stack: preflight, DB dump, rollback tags, build, up, health check (deploy/deploy.sh)
+	./deploy/deploy.sh
+
+.PHONY: rollback
+rollback: ## Retag images to rollback-$(TAG) and restart without build (no DB restore): make rollback TAG=<ts>
+	./deploy/rollback.sh "$(TAG)"
+
 .PHONY: down
 down: ## Stop the stack (keeps volumes)
 	docker compose down
