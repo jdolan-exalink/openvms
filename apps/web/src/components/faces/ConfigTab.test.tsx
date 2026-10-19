@@ -18,7 +18,7 @@ const server = (over: Partial<Schemas["FaceServerConfig"]> = {}): Schemas["FaceS
   ...over,
 });
 
-type Call = { method: string; path: string; body?: unknown };
+type Call = { method: string; path: string; search?: URLSearchParams; body?: unknown };
 
 function install(permissions: string[], servers: Schemas["FaceServerConfig"][]) {
   const calls: Call[] = [];
@@ -26,7 +26,7 @@ function install(permissions: string[], servers: Schemas["FaceServerConfig"][]) 
     "fetch",
     vi.fn(async (raw: Request) => {
       const url = new URL(raw.url);
-      const call: Call = { method: raw.method, path: url.pathname };
+      const call: Call = { method: raw.method, path: url.pathname, search: url.searchParams };
       if (raw.method !== "GET") {
         const text = await raw.clone().text();
         call.body = text ? JSON.parse(text) : undefined;
@@ -37,6 +37,7 @@ function install(permissions: string[], servers: Schemas["FaceServerConfig"][]) 
         return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1",
           grants: permissions.map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
       }
+      if (p === "/api/v1/sites") return json({ items: [{ id: "site1", name: "Sede" }, { id: "site2", name: "Anexo" }] });
       if (p === "/api/v1/faces/config" && raw.method === "GET") return json({ items: servers });
       if (p === "/api/v1/faces/config/s1" && raw.method === "PATCH") return json({ revision_ids: ["r1"], restart_required: true });
       if (p === "/api/v1/servers/s1/restart") return new Response(null, { status: 204 });
@@ -55,6 +56,15 @@ async function openConfig() {
 }
 
 describe("Faces configuration tab", () => {
+  it("narrows the list by site and never sends a tenant_id", async () => {
+    const calls = install(all, [server()]);
+    await openConfig();
+    await screen.findByRole("option", { name: "Anexo" });
+    fireEvent.change(screen.getByLabelText("Sitio"), { target: { value: "site2" } });
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/config" && c.search?.getAll("site_id").join() === "site2")).toBe(true));
+    expect(calls.filter((c) => c.path === "/api/v1/faces/config").some((c) => c.search?.has("tenant_id"))).toBe(false);
+  });
+
   it("is hidden without servers.view and never calls the config API", async () => {
     const calls = install(["faces.view"], [server()]);
     renderPage(Faces);

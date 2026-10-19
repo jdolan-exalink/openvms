@@ -1,30 +1,38 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ImagePlus, RefreshCw, Trash2 } from "lucide-react";
 import { type FormEvent, useRef, useState } from "react";
 import { api, postForm, type Schemas, unwrap } from "@/api/client";
-import { faceImagesQuery, faceImageUrl, faceSyncQuery } from "@/api/queries";
+import { faceImagesQuery, faceImageUrl, faceRecognitionsQuery, faceSyncQuery, meQuery } from "@/api/queries";
+import { RecognitionCard } from "@/components/faces/RecognitionCard";
 import { SyncBadge } from "@/components/faces/SyncBadge";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button, Card, ErrorNote, Field, IconButton, TextInput, Textarea } from "@/components/ui";
 import { useT } from "@/i18n";
 import { fmtDateTime } from "@/lib/format";
+import { can } from "@/lib/perm";
+
+const RECENT_LIMIT = 12;
 
 /**
  * PersonDetail is one person: editable name and notes, the enrollment photo gallery, and the
  * per-server sync state. Without faces.manage everything is read-only.
  */
-export function PersonDetail({ person, canManage, tenantId, onBack }: { person: Schemas["FacePerson"]; canManage: boolean; tenantId?: string; onBack: () => void }) {
+export function PersonDetail({ person, canManage, onBack }: { person: Schemas["FacePerson"]; canManage: boolean; onBack: () => void }) {
   const t = useT();
   const qc = useQueryClient();
-  const images = useQuery(faceImagesQuery(person.id, tenantId));
-  const syncStatus = useQuery(faceSyncQuery(person.id, tenantId));
+  const images = useQuery(faceImagesQuery(person.id));
+  const syncStatus = useQuery(faceSyncQuery(person.id));
+  const me = useQuery(meQuery);
+  const recent = useInfiniteQuery(faceRecognitionsQuery({ person_id: [person.id], limit: RECENT_LIMIT }));
+  const recentItems = recent.data?.pages[0]?.items ?? [];
+  const canPictures = can(me.data, "snapshots.view");
   const [name, setName] = useState(person.display_name);
   const [notes, setNotes] = useState(person.notes);
   const [confirmPerson, setConfirmPerson] = useState(false);
   const [confirmImage, setConfirmImage] = useState<{ id: string; n: number } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const refresh = () => qc.invalidateQueries({ queryKey: ["faces"] });
-  const path = { params: { path: { personId: person.id }, query: { tenant_id: tenantId } } };
+  const path = { params: { path: { personId: person.id } } };
 
   const save = useMutation({
     mutationFn: async (e: FormEvent) => {
@@ -37,13 +45,13 @@ export function PersonDetail({ person, canManage, tenantId, onBack }: { person: 
     mutationFn: async (file: File) => {
       const form = new FormData();
       form.append("file", file);
-      return postForm<Schemas["FaceImage"]>(`/api/v1/faces/persons/${person.id}/images${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`, form);
+      return postForm<Schemas["FaceImage"]>(`/api/v1/faces/persons/${person.id}/images`, form);
     },
     onSuccess: refresh,
   });
   const removeImage = useMutation({
     mutationFn: async (imageId: string) =>
-      unwrap(await api.DELETE("/api/v1/faces/persons/{personId}/images/{imageId}", { params: { path: { personId: person.id, imageId }, query: { tenant_id: tenantId } } })),
+      unwrap(await api.DELETE("/api/v1/faces/persons/{personId}/images/{imageId}", { params: { path: { personId: person.id, imageId } } })),
     onSuccess: () => {
       setConfirmImage(null);
       return refresh();
@@ -105,7 +113,7 @@ export function PersonDetail({ person, canManage, tenantId, onBack }: { person: 
           <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6" aria-label={t("faces.gallery")}>
             {images.data.map((img, i) => (
               <li key={img.id} className="relative overflow-hidden rounded-m3-lg bg-surface-2">
-                <img src={faceImageUrl(person.id, img.id, tenantId)} alt={t("faces.imageAlt", { n: i + 1, name: person.display_name })} loading="lazy" className="aspect-square w-full object-cover" />
+                <img src={faceImageUrl(person.id, img.id)} alt={t("faces.imageAlt", { n: i + 1, name: person.display_name })} loading="lazy" className="aspect-square w-full object-cover" />
                 {canManage && (
                   <span className="absolute top-1 right-1">
                     <IconButton icon={Trash2} size="sm" variant="tonal" aria-label={t("faces.deleteImage", { n: i + 1 })} title={t("faces.deleteImage", { n: i + 1 })} onClick={() => setConfirmImage({ id: img.id, n: i + 1 })} />
@@ -137,6 +145,18 @@ export function PersonDetail({ person, canManage, tenantId, onBack }: { person: 
             <p className="text-xs text-muted">{t("faces.uploadHint")}</p>
             <ErrorNote error={upload.error} />
           </div>
+        )}
+      </Card>
+
+      <Card title={t("faces.personRecent")}>
+        <ErrorNote error={recent.error} />
+        {recent.isSuccess && recentItems.length === 0 && <p className="text-sm text-on-surface-variant">{t("faces.personRecentEmpty")}</p>}
+        {recentItems.length > 0 && (
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label={t("faces.personRecent")}>
+            {recentItems.map((r) => (
+              <RecognitionCard key={r.event_id} r={r} showPerson={false} showImage={canPictures} />
+            ))}
+          </ul>
         )}
       </Card>
 

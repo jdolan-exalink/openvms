@@ -436,47 +436,53 @@ export const notificationsQuery = (filter: NotificationFilter = {}) =>
     queryFn: async () => unwrap(await api.GET("/api/v1/notifications", { params: { query: filter } })),
   });
 
-// Faces (central person registry, training from detections, recognition timeline).
-// Platform administrators have no tenant of their own, so every faces call carries the tenant
-// they picked; members pass undefined and the API uses their own.
-const faceTenant = (tenantId?: string) => (tenantId ? { tenant_id: tenantId } : {});
-
-export const facePersonsQuery = (tenantId?: string) =>
+// Faces (central person registry, training from detections, recognition timeline). The API
+// resolves the organization from the caller or from the object, so no call carries tenant_id.
+export const facePersonsQuery = () =>
   queryOptions({
-    queryKey: ["faces", "persons", tenantId],
-    queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons", { params: { query: faceTenant(tenantId) } })).items,
+    queryKey: ["faces", "persons"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons")).items,
   });
 
-export const faceWatchlistsQuery = (tenantId?: string) =>
+export const faceWatchlistsQuery = () =>
   queryOptions({
-    queryKey: ["faces", "watchlists", tenantId],
-    queryFn: async () => unwrap(await api.GET("/api/v1/faces/watchlists", { params: { query: faceTenant(tenantId) } })).items,
+    queryKey: ["faces", "watchlists"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/watchlists")).items,
   });
 
-export const faceImagesQuery = (personId: string, tenantId?: string) =>
+export const faceImagesQuery = (personId: string) =>
   queryOptions({
-    queryKey: ["faces", "images", personId, tenantId],
-    queryFn: async () =>
-      unwrap(await api.GET("/api/v1/faces/persons/{personId}/images", { params: { path: { personId }, query: faceTenant(tenantId) } })).items,
+    queryKey: ["faces", "images", personId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons/{personId}/images", { params: { path: { personId } } })).items,
   });
 
-export const faceSyncQuery = (personId: string, tenantId?: string) =>
+export const faceSyncQuery = (personId: string) =>
   queryOptions({
-    queryKey: ["faces", "sync", personId, tenantId],
-    queryFn: async () =>
-      unwrap(await api.GET("/api/v1/faces/persons/{personId}/sync", { params: { path: { personId }, query: faceTenant(tenantId) } })).items,
+    queryKey: ["faces", "sync", personId],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons/{personId}/sync", { params: { path: { personId } } })).items,
     // The worker converges in the background; keep the badges close to it while the detail is open.
     refetchInterval: 10_000,
   });
 
-export const faceTrainQuery = (tenantId?: string) =>
+export type FaceTrainFilter = { site_id?: string[]; server_id?: string[] };
+
+export const faceTrainQuery = (filter: FaceTrainFilter = {}) =>
   queryOptions({
-    queryKey: ["faces", "train", tenantId],
-    queryFn: async () => unwrap(await api.GET("/api/v1/faces/train", { params: { query: faceTenant(tenantId) } })),
+    queryKey: ["faces", "train", filter],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/train", { params: { query: filter } })),
     staleTime: 15_000,
   });
 
-export type FaceRecognitionFilter = { person_id?: string[]; camera_id?: string[]; from?: string; to?: string; limit?: number; tenant_id?: string };
+export type FaceRecognitionFilter = {
+  person_id?: string[];
+  site_id?: string[];
+  server_id?: string[];
+  camera_group_id?: string[];
+  camera_id?: string[];
+  from?: string;
+  to?: string;
+  limit?: number;
+};
 
 export const faceRecognitionsQuery = (filter: FaceRecognitionFilter) =>
   infiniteQueryOptions({
@@ -487,14 +493,14 @@ export const faceRecognitionsQuery = (filter: FaceRecognitionFilter) =>
     getNextPageParam: (last) => last.next_cursor,
   });
 
-export const faceConfigQuery = (tenantId?: string) =>
+export type FaceConfigFilter = { site_id?: string[] };
+
+export const faceConfigQuery = (filter: FaceConfigFilter = {}) =>
   queryOptions({
-    queryKey: ["faces", "config", tenantId],
-    queryFn: async () => unwrap(await api.GET("/api/v1/faces/config", { params: { query: faceTenant(tenantId) } })).items,
+    queryKey: ["faces", "config", filter],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/config", { params: { query: filter } })).items,
   });
 
 /** Enrollment photos are served only to authorized sessions and never as public URLs. */
-export const faceImageUrl = (personId: string, imageId: string, tenantId?: string) =>
-  `/api/v1/faces/persons/${personId}/images/${imageId}${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ""}`;
-export const faceTrainImageUrl = (serverId: string, file: string, tenantId?: string) =>
-  `/api/v1/faces/train/${serverId}/image?file=${encodeURIComponent(file)}${tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ""}`;
+export const faceImageUrl = (personId: string, imageId: string) => `/api/v1/faces/persons/${personId}/images/${imageId}`;
+export const faceTrainImageUrl = (serverId: string, file: string) => `/api/v1/faces/train/${serverId}/image?file=${encodeURIComponent(file)}`;

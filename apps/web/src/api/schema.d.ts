@@ -4442,10 +4442,28 @@ export interface components {
             notes: string;
             image_count: number;
             sync: components["schemas"]["FaceSyncSummary"];
+            last_recognition?: components["schemas"]["FaceLastRecognition"];
+            /**
+             * Format: uuid
+             * @description Oldest enrollment image; present only in the person list, to render a card thumbnail without one request per person.
+             */
+            first_image_id?: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /**
+         * @description The person's newest sighting on a camera the caller holds events.view on. Present only in
+         *     the person list, and absent when the person was never recognized there. Use the event
+         *     thumbnail endpoint (events.view) for the picture.
+         */
+        FaceLastRecognition: {
+            /** Format: uuid */
+            event_id: string;
+            /** Format: date-time */
+            start_time: string;
+            has_thumbnail: boolean;
         };
         FacePersonCreate: {
             display_name: string;

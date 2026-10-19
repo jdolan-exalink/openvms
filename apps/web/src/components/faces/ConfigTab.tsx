@@ -3,6 +3,7 @@ import { TriangleAlert } from "lucide-react";
 import { useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { faceConfigQuery } from "@/api/queries";
+import { emptyScope, type Scope, ScopeFilters } from "@/components/faces/ScopeFilters";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button, Card, Empty, ErrorNote, Field, Select, StatusBadge, Switch, TextInput } from "@/components/ui";
 import { useT, type MessageKey } from "@/i18n";
@@ -24,19 +25,22 @@ const numberFields = [
 type NumberKey = (typeof numberFields)[number]["key"];
 
 /** ConfigTab lists the face recognition settings of every server and edits them (faces.manage + servers.config). */
-export function ConfigTab({ canRestart, tenantId }: { canRestart: boolean; tenantId?: string }) {
+export function ConfigTab({ canRestart }: { canRestart: boolean }) {
   const t = useT();
-  const servers = useQuery(faceConfigQuery(tenantId));
+  const [scope, setScope] = useState<Scope>(emptyScope);
+  const config = useQuery(faceConfigQuery({ site_id: scope.site ? [scope.site] : undefined }));
+  const shown = config.data?.filter((s) => !scope.server || s.server_id === scope.server);
   const [editing, setEditing] = useState<string | null>(null);
 
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-on-surface-variant">{t("faces.cfgIntro")}</p>
-      <ErrorNote error={servers.error} />
-      {servers.isSuccess && servers.data.length === 0 && <Empty>{t("faces.cfgEmpty")}</Empty>}
-      {servers.data && servers.data.length > 0 && (
+      <ScopeFilters value={scope} onChange={setScope} />
+      <ErrorNote error={config.error} />
+      {shown && shown.length === 0 && <Empty>{t("faces.cfgEmpty")}</Empty>}
+      {shown && shown.length > 0 && (
         <ul className="flex flex-col gap-3" aria-label={t("faces.cfgList")}>
-          {servers.data.map((s) => (
+          {shown.map((s) => (
             <li key={s.server_id}>
               <ServerCard server={s} open={editing === s.server_id} onToggle={() => setEditing(editing === s.server_id ? null : s.server_id)} canRestart={canRestart} />
             </li>

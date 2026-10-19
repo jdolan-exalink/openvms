@@ -80,9 +80,20 @@ type Person struct {
 	Notes       string
 	ImageCount  int
 	// Sync folds the per-server sync jobs of the person into counters (list and detail reads).
-	Sync      SyncSummary
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Sync SyncSummary
+	// LastRecognition is the newest sighting on a camera the actor may view (list reads only).
+	LastRecognition *LastRecognition
+	// FirstImageID is the oldest enrollment image, the card thumbnail fallback (list reads only).
+	FirstImageID *uuid.UUID
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+// LastRecognition points at the event of a person's most recent sighting.
+type LastRecognition struct {
+	EventID      uuid.UUID
+	StartTime    time.Time
+	HasThumbnail bool
 }
 
 // SyncSummary counts a person's per-server sync jobs by state. Pending includes jobs being
@@ -287,9 +298,32 @@ func (s *Service) ListPersons(ctx context.Context, actor authz.Actor, tenantID u
 			}
 			byPerson[r.PersonID].add(r.Status, int(r.N))
 		}
+		// Latest sighting per person, only on cameras the actor may view (as the recognitions do).
+		c, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		cams, err := c.CameraIDs(ctx, authz.EventsView)
+		if err != nil {
+			return err
+		}
+		last := map[uuid.UUID]*LastRecognition{}
+		if len(cams) > 0 {
+			recs, err := q.ListFacePersonLastRecognitions(ctx, db.ListFacePersonLastRecognitionsParams{TenantID: tenantID, CameraIds: cams})
+			if err != nil {
+				return err
+			}
+			for _, r := range recs {
+				last[r.PersonID] = &LastRecognition{EventID: r.EventID, StartTime: r.StartTime, HasThumbnail: r.HasThumbnail}
+			}
+		}
 		for _, r := range rows {
 			p := Person{ID: r.ID, TenantID: r.TenantID, DisplayName: r.DisplayName, FrigateName: r.FrigateName,
-				Notes: r.Notes, ImageCount: int(r.ImageCount), CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+				Notes: r.Notes, ImageCount: int(r.ImageCount), LastRecognition: last[r.ID], CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+			if r.FirstImageID != uuid.Nil {
+				id := r.FirstImageID
+				p.FirstImageID = &id
+			}
 			if sum := byPerson[r.ID]; sum != nil {
 				p.Sync = *sum
 			}
