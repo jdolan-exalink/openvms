@@ -136,6 +136,22 @@ describe("Faces page as a platform administrator", () => {
     expect(calls.filter((c) => c.path === "/api/v1/faces/recognitions").every((c) => c.search.get("tenant_id") === "t2")).toBe(true);
   });
 
+  it("sends the tenant with train thumbnails and assignments", async () => {
+    const train = { items: [{ server_id: "s1", server_name: "h01", file: "a.webp" }], servers: [{ server_id: "s1", server_name: "h01" }] };
+    const { calls } = install({ tenantId: null, persons: [person("p1", "Ana")], train });
+    renderPage(Faces);
+    await screen.findByRole("option", { name: "Beta" });
+    fireEvent.change(screen.getByLabelText("Organización"), { target: { value: "t2" } });
+    fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+    const img = await screen.findByAltText("Intento de reconocimiento en h01");
+    expect(img).toHaveAttribute("src", "/api/v1/faces/train/s1/image?file=a.webp&tenant_id=t2");
+    await screen.findAllByRole("option", { name: "Ana" });
+    fireEvent.change(screen.getByLabelText("Asignar a"), { target: { value: "p1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/train/assign")).toBe(true));
+    expect(calls.find((c) => c.path === "/api/v1/faces/train/assign")?.search.get("tenant_id")).toBe("t2");
+  });
+
   it("drops the open person when the tenant changes", async () => {
     install({ tenantId: null, persons: [person("p1", "Ana")] });
     renderPage(Faces);

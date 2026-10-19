@@ -102,7 +102,7 @@ export function TrainTab({ canManage, tenantId }: { canManage: boolean; tenantId
       {data && data.items.length > 0 && (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label={t("faces.trainList")}>
           {data.items.map((a) => (
-            <AttemptCard key={`${a.server_id}/${a.file}`} attempt={a} persons={persons.data ?? []} canManage={canManage} />
+            <AttemptCard key={`${a.server_id}/${a.file}`} attempt={a} persons={persons.data ?? []} canManage={canManage} tenantId={tenantId} />
           ))}
         </ul>
       )}
