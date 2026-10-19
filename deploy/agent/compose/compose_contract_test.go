@@ -89,7 +89,7 @@ func TestComposeDeclaresConfigurablePrivateAgentBridge(t *testing.T) {
 	}
 }
 
-func TestAPIIsInternalOnlyAndUsesNoHostPortPublication(t *testing.T) {
+func TestAPIKeepsHTTPPrivateAndPublishesOnlyItsAuthenticatedAgentListener(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yml"))
 	if err != nil {
 		t.Fatal(err)
@@ -100,8 +100,9 @@ func TestAPIIsInternalOnlyAndUsesNoHostPortPublication(t *testing.T) {
 	}
 	services := asMap(t, document["services"])
 	api := asMap(t, services["api"])
-	if _, ok := api["ports"]; ok {
-		t.Fatal("API must stay private; browser traffic reaches it through the web proxy")
+	ports := asList(t, api["ports"])
+	if len(ports) != 1 || ports[0] != "${OPENVMS_AGENT_GRPC_PUBLISH_ADDR:-0.0.0.0}:${OPENVMS_AGENT_GRPC_HOST_PORT:-9443}:${OPENVMS_AGENT_GRPC_CONTAINER_PORT:-9443}" {
+		t.Fatalf("API must keep HTTP and control gRPC private and publish only the authenticated agent listener, ports=%v", ports)
 	}
 	web := asMap(t, services["web"])
 	webEnv := asMap(t, web["environment"])
@@ -521,6 +522,89 @@ func TestComposeWebTLSUsesPersistentGeneratedCertificateVolumeAndConfiguredSANs(
 	}
 	if strings.Contains(text, "create_host_path: false") && strings.Contains(text, "OPENVMS_WEB_TLS_CERT_HOST_FILE") {
 		t.Fatal("fresh deployment must not fail because optional external certificate files are absent")
+	}
+}
+
+func TestComposeAgentMTLSEnrollmentUsesDedicatedTLSAndReachableDefaults(t *testing.T) {
+	compose, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(compose, &document); err != nil {
+		t.Fatal(err)
+	}
+	api := asMap(t, asMap(t, document["services"])["api"])
+	env := asMap(t, api["environment"])
+	requiredEnv := map[string]string{
+		"GRPC_TLS_CERT_FILE":     "/etc/openvms/agent-grpc/tls.crt",
+		"GRPC_TLS_KEY_FILE":      "/etc/openvms/agent-grpc/tls.key",
+		"GRPC_AGENT_ADDR":        "${OPENVMS_AGENT_GRPC_BIND_HOST:-0.0.0.0}:${OPENVMS_AGENT_GRPC_CONTAINER_PORT:-9443}",
+		"AGENT_GRPC_PUBLIC_ADDR": "${OPENVMS_AGENT_GRPC_PUBLIC_ADDR:-${OPENVMS_HTTPS_SITE_IPV4:-localhost}:${OPENVMS_AGENT_GRPC_HOST_PORT:-9443}}",
+		"AGENT_API_PUBLIC_URL":   "${OPENVMS_AGENT_API_PUBLIC_URL:-https://${OPENVMS_HTTPS_SITE_IPV4:-localhost}:${WEB_HTTPS_PORT:-8443}}",
+		"AGENT_GRPC_CA_FILE":     "/etc/openvms/agent-grpc/tls.crt",
+		"AGENT_API_CA_FILE":      "/etc/openvms/api-ca/cert.pem",
+	}
+	for key, want := range requiredEnv {
+		if got, ok := env[key]; !ok || got != want {
+			t.Errorf("api environment %s = %v, want %q", key, got, want)
+		}
+	}
+	volumes := asList(t, api["volumes"])
+	for _, target := range []string{"/etc/openvms/agent-grpc/tls.crt", "/etc/openvms/agent-grpc/tls.key", "/etc/openvms/api-ca/cert.pem"} {
+		if !hasReadOnlyOptionalBind(t, volumes, target) {
+			t.Errorf("API must mount %s as a read-only configurable bind", target)
+		}
+	}
+	ports := asList(t, api["ports"])
+	if len(ports) != 1 || ports[0] != "${OPENVMS_AGENT_GRPC_PUBLISH_ADDR:-0.0.0.0}:${OPENVMS_AGENT_GRPC_HOST_PORT:-9443}:${OPENVMS_AGENT_GRPC_CONTAINER_PORT:-9443}" {
+		t.Fatalf("API must publish only its configurable authenticated agent gRPC listener, ports=%v", ports)
+	}
+	text := string(compose)
+	for _, required := range []string{"OPENVMS_AGENT_GRPC_TLS_CERT_HOST_FILE", "OPENVMS_AGENT_GRPC_TLS_KEY_HOST_FILE", "OPENVMS_AGENT_API_CA_HOST_FILE"} {
+		if !strings.Contains(text, required) {
+			t.Errorf("Compose TLS material must be independently configurable with %q", required)
+		}
+	}
+}
+
+func TestAgentGRPCTLSBootstrapCreatesIndependentTrustedHostCertificate(t *testing.T) {
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("OpenSSL is required for the local agent gRPC certificate bootstrap test")
+	}
+	output := filepath.Join(t.TempDir(), "agent-grpc")
+	script := filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-agent-grpc-tls.sh")
+	// #nosec G204 -- fixed repository script and t.TempDir output.
+	command := exec.Command("sh", script, "10.1.1.24", output)
+	if result, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("agent gRPC TLS bootstrap failed: %v: %s", err, result)
+	}
+	for name, mode := range map[string]os.FileMode{"tls.crt": 0o644, "tls.key": 0o600} {
+		info, err := os.Stat(filepath.Join(output, name))
+		if err != nil || info.Mode().Perm() != mode {
+			t.Fatalf("%s mode: info=%v err=%v, want %o", name, info, err, mode)
+		}
+	}
+	cert := filepath.Join(output, "tls.crt")
+	// #nosec G204 -- fixed openssl command validates only test-owned t.TempDir files.
+	if result, err := exec.Command("openssl", "x509", "-in", cert, "-noout", "-checkip", "10.1.1.24").CombinedOutput(); err != nil {
+		t.Fatalf("certificate does not verify the public agent address: %v: %s", err, result)
+	}
+	// #nosec G204 -- fixed openssl command verifies the generated certificate as its explicit trust anchor.
+	if result, err := exec.Command("openssl", "verify", "-CAfile", cert, cert).CombinedOutput(); err != nil {
+		t.Fatalf("generated certificate is not an explicit trust anchor: %v: %s", err, result)
+	}
+	marker := filepath.Join(output, "preserve")
+	if err := os.WriteFile(marker, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// #nosec G204 -- fixed repository script and t.TempDir output.
+	command = exec.Command("sh", script, "10.1.1.25", output)
+	if result, err := command.CombinedOutput(); err == nil {
+		t.Fatalf("bootstrap overwrote existing TLS material: %s", result)
+	}
+	if contents, err := os.ReadFile(marker); err != nil || string(contents) != "keep" {
+		t.Fatalf("existing material changed: contents=%q err=%v", contents, err)
 	}
 }
 

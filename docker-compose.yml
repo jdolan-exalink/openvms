@@ -121,6 +121,15 @@ services:
     build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: api, VERSION: "${VERSION:-}", COMMIT: "${COMMIT:-unknown}", BUILD_TIME: "${BUILD_TIME:-unknown}", AGENT_VERSION: "${AGENT_VERSION:-}" } }
     environment:
       <<: *go-env
+      # The API gRPC listener certificate is a dedicated local agent endpoint certificate;
+      # the public HTTPS certificate below is mounted only as enrollment trust material.
+      GRPC_TLS_CERT_FILE: /etc/openvms/agent-grpc/tls.crt
+      GRPC_TLS_KEY_FILE: /etc/openvms/agent-grpc/tls.key
+      GRPC_AGENT_ADDR: ${OPENVMS_AGENT_GRPC_BIND_HOST:-0.0.0.0}:${OPENVMS_AGENT_GRPC_CONTAINER_PORT:-9443}
+      AGENT_GRPC_PUBLIC_ADDR: ${OPENVMS_AGENT_GRPC_PUBLIC_ADDR:-${OPENVMS_HTTPS_SITE_IPV4:-localhost}:${OPENVMS_AGENT_GRPC_HOST_PORT:-9443}}
+      AGENT_API_PUBLIC_URL: ${OPENVMS_AGENT_API_PUBLIC_URL:-https://${OPENVMS_HTTPS_SITE_IPV4:-localhost}:${WEB_HTTPS_PORT:-8443}}
+      AGENT_GRPC_CA_FILE: /etc/openvms/agent-grpc/tls.crt
+      AGENT_API_CA_FILE: /etc/openvms/api-ca/cert.pem
       TRUST_FORWARDED_FOR: "true"
       CREDENTIAL_TRUSTED_PROXY_CIDRS: ${CREDENTIAL_TRUSTED_PROXY_CIDRS:-${OPENVMS_AGENT_WEB_IPV4:-172.29.240.4}/32}
       HOST_PROC: /host/proc
@@ -132,6 +141,26 @@ services:
       - /sys/class/drm:/host/drm:ro
       - /:/hostfs:ro
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports:/mnt/openvms/exports
+      - type: bind
+        source: ${OPENVMS_AGENT_GRPC_TLS_CERT_HOST_FILE:-./deploy/docker/local-tls/agent-grpc/tls.crt}
+        target: /etc/openvms/agent-grpc/tls.crt
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${OPENVMS_AGENT_GRPC_TLS_KEY_HOST_FILE:-./deploy/docker/local-tls/agent-grpc/tls.key}
+        target: /etc/openvms/agent-grpc/tls.key
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: ${OPENVMS_AGENT_API_CA_HOST_FILE:-${OPENVMS_WEB_TLS_CERT_HOST_FILE:-./deploy/docker/local-tls/tls.crt}}
+        target: /etc/openvms/api-ca/cert.pem
+        read_only: true
+        bind:
+          create_host_path: true
+    ports:
+      - "${OPENVMS_AGENT_GRPC_PUBLISH_ADDR:-0.0.0.0}:${OPENVMS_AGENT_GRPC_HOST_PORT:-9443}:${OPENVMS_AGENT_GRPC_CONTAINER_PORT:-9443}"
     depends_on:
       postgres: { condition: service_healthy }
       valkey: { condition: service_healthy }
