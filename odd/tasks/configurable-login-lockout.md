@@ -43,6 +43,7 @@ The local OpenVMS admin is getting locked before a successful login. The identit
 - Full verification: `GOCACHE=/tmp/openvms-go-build-cache go test -race ./...` passed; `docker compose --env-file /dev/null -f docker-compose.yml config >/dev/null` passed without printing interpolated values; `git diff --check` passed.
 - Runtime harness: N/A — deployment activation and service restart were explicitly out of scope.
 - Rollback boundary: revert the lockout config/parser, login behavior and SQL guard, Compose forwarding, docs, tests, and this task evidence together.
+- Work-unit commit: `4630e64` (`feat(auth): make login lockout configurable`).
 
 ## Next step
-Commit the verified work unit on the current feature branch; deployment activation remains a separate operator action.
+Parent orchestrator performs the native review; deployment activation remains a separate operator action.
