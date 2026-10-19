@@ -177,3 +177,75 @@ func TestObjectTenantResolution(t *testing.T) {
 		t.Errorf("SoleTenant with one tenant = %v, %v", got, err)
 	}
 }
+
+func TestListPersonsCarriesTheLatestVisibleRecognition(t *testing.T) {
+	sf := newSyncFixture(t)
+	ctx := context.Background()
+	sf.grantTenant(sf.manager.UserID, authz.EventsView)
+	ana := sf.person("Ana", 1, 2)
+	beto := sf.person("Beto")
+	firstImage := sf.addImageIDs(ana.ID)[0]
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	sf.event("frigate-h01/acceso_norte", "old", now.Add(-3*time.Hour), ana.FrigateName)
+	latestOnH01 := sf.event("frigate-h01/plaza", "mid", now.Add(-2*time.Hour), ana.FrigateName)
+	onC01 := sf.event("frigate-c01/muelle", "new", now.Add(-time.Hour), ana.FrigateName)
+
+	find := func(list []faces.Person, id uuid.UUID) faces.Person {
+		t.Helper()
+		for _, p := range list {
+			if p.ID == id {
+				return p
+			}
+		}
+		t.Fatalf("person %v not listed", id)
+		return faces.Person{}
+	}
+	list, err := sf.svc.ListPersons(ctx, sf.manager, sf.tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lr := find(list, ana.ID).LastRecognition; lr == nil || lr.EventID != onC01 || !lr.StartTime.Equal(now.Add(-time.Hour)) {
+		t.Fatalf("Ana latest recognition = %+v, want %v", lr, onC01)
+	}
+	if find(list, beto.ID).LastRecognition != nil {
+		t.Error("a person never recognized carries a recognition")
+	}
+	// The card thumbnail falls back to the first enrollment image, listed without a query per person.
+	if got := find(list, ana.ID).FirstImageID; got == nil || *got != firstImage {
+		t.Errorf("Ana first image = %v, want %v", got, firstImage)
+	}
+	if find(list, beto.ID).FirstImageID != nil {
+		t.Error("a person without photos carries a first image")
+	}
+
+	// Only cameras the caller may view count: with c01 hidden, the newest visible one is on h01.
+	viewer := sf.user(sf.tenant, "viewer", authz.FacesView)
+	sf.grantCamera(viewer.UserID, sf.env.Cameras["frigate-h01/plaza"].ID, authz.EventsView)
+	list, err = sf.svc.ListPersons(ctx, viewer, sf.tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lr := find(list, ana.ID).LastRecognition; lr == nil || lr.EventID != latestOnH01 {
+		t.Fatalf("camera-scoped latest = %+v, want %v", lr, latestOnH01)
+	}
+	// No camera access at all: the persons are listed without any recognition.
+	blind := sf.user(sf.tenant, "blind", authz.FacesView)
+	list, err = sf.svc.ListPersons(ctx, blind, sf.tenant)
+	if err != nil || len(list) != 2 || find(list, ana.ID).LastRecognition != nil {
+		t.Fatalf("without cameras = %+v, %v", list, err)
+	}
+}
+
+// addImageIDs lists the enrollment image ids of a person, oldest first.
+func (sf *syncFixture) addImageIDs(personID uuid.UUID) []uuid.UUID {
+	sf.t.Helper()
+	imgs, err := sf.svc.ListImages(context.Background(), sf.manager, sf.tenant, personID)
+	if err != nil {
+		sf.t.Fatal(err)
+	}
+	ids := make([]uuid.UUID, 0, len(imgs))
+	for _, i := range imgs {
+		ids = append(ids, i.ID)
+	}
+	return ids
+}

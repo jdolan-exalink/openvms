@@ -283,3 +283,29 @@ func TestFacesAPITrainAndConfigScopeBySiteAndServerWithoutTenant(t *testing.T) {
 		t.Errorf("member config = %d %s", mc.code, mc.raw)
 	}
 }
+
+func TestFacesAPIPersonsCarryTheLatestRecognition(t *testing.T) {
+	f := newFaceAPI(t)
+	mgr := f.user(f.tenant, "mgr", authz.FacesManage, authz.FacesView, authz.EventsView)
+	noCams := f.user(f.tenant, "nocams", authz.FacesView)
+	ana := f.js(mgr, "POST", "/api/v1/faces/persons", `{"display_name":"Ana"}`).json()
+	cam := f.env.Cameras["frigate-h01/plaza"]
+	ev := f.event(cam.TenantID, cam.SiteID, cam.ServerID, cam.ID, "last-1", ana["frigate_name"].(string))
+
+	lastOf := func(token string) map[string]any {
+		t.Helper()
+		r := f.js(token, "GET", "/api/v1/faces/persons", "")
+		items, _ := r.json()["items"].([]any)
+		if r.code != http.StatusOK || len(items) != 1 {
+			t.Fatalf("persons = %d %s", r.code, r.raw)
+		}
+		last, _ := items[0].(map[string]any)["last_recognition"].(map[string]any)
+		return last
+	}
+	if last := lastOf(mgr); last["event_id"] != ev.String() || last["has_thumbnail"] != false || last["start_time"] == nil {
+		t.Errorf("last_recognition = %v, want event %v", last, ev)
+	}
+	if last := lastOf(noCams); last != nil {
+		t.Errorf("a caller without camera access sees %v", last)
+	}
+}

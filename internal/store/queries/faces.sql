@@ -2,7 +2,9 @@
 SELECT * FROM face_persons WHERE tenant_id = @tenant_id AND id = @id AND deleted_at IS NULL;
 
 -- name: ListFacePersons :many
-SELECT p.*, (SELECT count(*) FROM face_person_images i WHERE i.person_id = p.id)::int AS image_count
+SELECT p.*, (SELECT count(*) FROM face_person_images i WHERE i.person_id = p.id)::int AS image_count,
+  -- The nil uuid stands for "no photo yet" (sqlc cannot type a nullable scalar subquery).
+  COALESCE((SELECT i.id FROM face_person_images i WHERE i.person_id = p.id ORDER BY i.created_at, i.id LIMIT 1), '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS first_image_id
 FROM face_persons p
 WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NULL
 ORDER BY lower(p.display_name), p.id;
@@ -91,3 +93,18 @@ WHERE tenant_id = ANY(@tenant_ids::uuid[]) AND deleted_at IS NULL AND capabiliti
   AND (cardinality(@site_ids::uuid[]) = 0 OR site_id = ANY(@site_ids::uuid[]))
   AND (cardinality(@server_ids::uuid[]) = 0 OR id = ANY(@server_ids::uuid[]))
 ORDER BY lower(name), id;
+
+-- name: ListFacePersonLastRecognitions :many
+-- The newest event per live person on the given cameras (the caller's events.view set). The
+-- lateral join stops at the first match per person, so the cost is one index probe each.
+SELECT p.id AS person_id, r.id AS event_id, r.start_time, r.has_thumbnail
+FROM face_persons p
+CROSS JOIN LATERAL (
+  SELECT e.id, e.start_time, (e.thumb_key <> '')::boolean AS has_thumbnail
+  FROM events e
+  WHERE e.tenant_id = p.tenant_id AND e.sub_labels @> ARRAY[p.frigate_name]
+    AND e.camera_id = ANY(@camera_ids::uuid[])
+  ORDER BY e.start_time DESC, e.id DESC
+  LIMIT 1
+) r
+WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NULL;

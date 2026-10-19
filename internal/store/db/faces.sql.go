@@ -450,8 +450,63 @@ func (q *Queries) ListFacePersonImages(ctx context.Context, arg ListFacePersonIm
 	return items, nil
 }
 
+const listFacePersonLastRecognitions = `-- name: ListFacePersonLastRecognitions :many
+SELECT p.id AS person_id, r.id AS event_id, r.start_time, r.has_thumbnail
+FROM face_persons p
+CROSS JOIN LATERAL (
+  SELECT e.id, e.start_time, (e.thumb_key <> '')::boolean AS has_thumbnail
+  FROM events e
+  WHERE e.tenant_id = p.tenant_id AND e.sub_labels @> ARRAY[p.frigate_name]
+    AND e.camera_id = ANY($1::uuid[])
+  ORDER BY e.start_time DESC, e.id DESC
+  LIMIT 1
+) r
+WHERE p.tenant_id = $2 AND p.deleted_at IS NULL
+`
+
+type ListFacePersonLastRecognitionsParams struct {
+	CameraIds []uuid.UUID
+	TenantID  uuid.UUID
+}
+
+type ListFacePersonLastRecognitionsRow struct {
+	PersonID     uuid.UUID
+	EventID      uuid.UUID
+	StartTime    time.Time
+	HasThumbnail bool
+}
+
+// The newest event per live person on the given cameras (the caller's events.view set). The
+// lateral join stops at the first match per person, so the cost is one index probe each.
+func (q *Queries) ListFacePersonLastRecognitions(ctx context.Context, arg ListFacePersonLastRecognitionsParams) ([]ListFacePersonLastRecognitionsRow, error) {
+	rows, err := q.db.Query(ctx, listFacePersonLastRecognitions, arg.CameraIds, arg.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFacePersonLastRecognitionsRow{}
+	for rows.Next() {
+		var i ListFacePersonLastRecognitionsRow
+		if err := rows.Scan(
+			&i.PersonID,
+			&i.EventID,
+			&i.StartTime,
+			&i.HasThumbnail,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFacePersons = `-- name: ListFacePersons :many
-SELECT p.id, p.tenant_id, p.display_name, p.frigate_name, p.notes, p.created_by, p.updated_by, p.created_at, p.updated_at, p.deleted_at, p.sync_revision, (SELECT count(*) FROM face_person_images i WHERE i.person_id = p.id)::int AS image_count
+SELECT p.id, p.tenant_id, p.display_name, p.frigate_name, p.notes, p.created_by, p.updated_by, p.created_at, p.updated_at, p.deleted_at, p.sync_revision, (SELECT count(*) FROM face_person_images i WHERE i.person_id = p.id)::int AS image_count,
+  -- The nil uuid stands for "no photo yet" (sqlc cannot type a nullable scalar subquery).
+  COALESCE((SELECT i.id FROM face_person_images i WHERE i.person_id = p.id ORDER BY i.created_at, i.id LIMIT 1), '00000000-0000-0000-0000-000000000000'::uuid)::uuid AS first_image_id
 FROM face_persons p
 WHERE p.tenant_id = $1 AND p.deleted_at IS NULL
 ORDER BY lower(p.display_name), p.id
@@ -470,6 +525,7 @@ type ListFacePersonsRow struct {
 	DeletedAt    *time.Time
 	SyncRevision int64
 	ImageCount   int32
+	FirstImageID uuid.UUID
 }
 
 func (q *Queries) ListFacePersons(ctx context.Context, tenantID uuid.UUID) ([]ListFacePersonsRow, error) {
@@ -494,6 +550,7 @@ func (q *Queries) ListFacePersons(ctx context.Context, tenantID uuid.UUID) ([]Li
 			&i.DeletedAt,
 			&i.SyncRevision,
 			&i.ImageCount,
+			&i.FirstImageID,
 		); err != nil {
 			return nil, err
 		}

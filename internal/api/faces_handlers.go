@@ -17,12 +17,17 @@ import (
 )
 
 func toFacePerson(p faces.Person) gen.FacePerson {
-	return gen.FacePerson{
+	out := gen.FacePerson{
 		Id: p.ID, TenantId: p.TenantID, DisplayName: p.DisplayName, FrigateName: p.FrigateName, Notes: p.Notes,
 		ImageCount: p.ImageCount, CreatedAt: p.CreatedAt, UpdatedAt: p.UpdatedAt,
 		Sync: gen.FaceSyncSummary{Total: p.Sync.Total, Synced: p.Sync.Synced, Pending: p.Sync.Pending, Failed: p.Sync.Failed,
 			Conflict: p.Sync.Conflict, Disabled: p.Sync.Disabled},
 	}
+	out.FirstImageId = p.FirstImageID
+	if lr := p.LastRecognition; lr != nil {
+		out.LastRecognition = &gen.FaceLastRecognition{EventId: lr.EventID, StartTime: lr.StartTime, HasThumbnail: lr.HasThumbnail}
+	}
+	return out
 }
 
 func toFaceImage(i faces.Image) gen.FaceImage {
