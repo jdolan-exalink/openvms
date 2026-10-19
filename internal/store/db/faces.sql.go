@@ -319,6 +319,64 @@ func (q *Queries) ListFaceCapableServers(ctx context.Context, tenantID uuid.UUID
 	return items, nil
 }
 
+const listFaceCapableServersScoped = `-- name: ListFaceCapableServersScoped :many
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers
+WHERE tenant_id = ANY($1::uuid[]) AND deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
+  AND (cardinality($2::uuid[]) = 0 OR site_id = ANY($2::uuid[]))
+  AND (cardinality($3::uuid[]) = 0 OR id = ANY($3::uuid[]))
+ORDER BY lower(name), id
+`
+
+type ListFaceCapableServersScopedParams struct {
+	TenantIds []uuid.UUID
+	SiteIds   []uuid.UUID
+	ServerIds []uuid.UUID
+}
+
+// Face-capable servers across the given tenants, narrowed by optional site and server filters
+// (an empty array means no restriction).
+func (q *Queries) ListFaceCapableServersScoped(ctx context.Context, arg ListFaceCapableServersScopedParams) ([]FrigateServer, error) {
+	rows, err := q.db.Query(ctx, listFaceCapableServersScoped, arg.TenantIds, arg.SiteIds, arg.ServerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FrigateServer{}
+	for rows.Next() {
+		var i FrigateServer
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.SiteID,
+			&i.Name,
+			&i.BaseUrl,
+			&i.Username,
+			&i.PasswordSealed,
+			&i.TlsSkipVerify,
+			&i.FrigateVersion,
+			&i.Capabilities,
+			&i.Status,
+			&i.LastSeenAt,
+			&i.LastCheckedAt,
+			&i.LastError,
+			&i.Stats,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DeletedBy,
+			&i.AuthMode,
+			&i.EventAlarmMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFaceNamesIn = `-- name: ListFaceNamesIn :many
 SELECT tenant_id, frigate_name FROM face_persons WHERE frigate_name = ANY($1::text[])
 `

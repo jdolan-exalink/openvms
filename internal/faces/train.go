@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/frigate"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -99,13 +101,38 @@ func remoteReason(err error) string {
 	}
 }
 
-// ListTrainAttempts lists the recent unclassified attempts of every face-enabled server of the
-// tenant (faces.view). A server that fails is reported in Servers and does not fail the list.
-func (s *Service) ListTrainAttempts(ctx context.Context, actor authz.Actor, tenantID uuid.UUID) (TrainList, error) {
+// TrainFilter narrows the attempts list. A nil TenantID covers every organization the actor holds
+// faces.view on; empty slices mean "no restriction".
+type TrainFilter struct {
+	TenantID  *uuid.UUID
+	SiteIDs   []uuid.UUID
+	ServerIDs []uuid.UUID
+}
+
+func nonNil(ids []uuid.UUID) []uuid.UUID {
+	if ids == nil {
+		return []uuid.UUID{}
+	}
+	return ids
+}
+
+// ListTrainAttempts lists the recent unclassified attempts of every face-enabled server the actor
+// may see (faces.view on its organization), optionally narrowed by site and server. A server that
+// fails is reported in Servers and does not fail the list.
+func (s *Service) ListTrainAttempts(ctx context.Context, actor authz.Actor, f TrainFilter) (TrainList, error) {
 	var servers []db.FrigateServer
-	if err := s.tx(ctx, actor, tenantID, authz.FacesView, func(q *db.Queries) error {
-		var err error
-		servers, err = q.ListFaceCapableServers(ctx, tenantID)
+	var tenants []uuid.UUID
+	if err := s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
+		q := db.New(tx)
+		c, err := access.Load(ctx, q, actor)
+		if err != nil {
+			return err
+		}
+		if tenants, err = readableTenants(ctx, tx, c, actor, f.TenantID); err != nil {
+			return err
+		}
+		servers, err = q.ListFaceCapableServersScoped(ctx, db.ListFaceCapableServersScopedParams{
+			TenantIds: nonNil(tenants), SiteIds: nonNil(f.SiteIDs), ServerIds: nonNil(f.ServerIDs)})
 		return err
 	}); err != nil {
 		return TrainList{}, err
@@ -158,9 +185,35 @@ func (s *Service) ListTrainAttempts(ctx context.Context, actor authz.Actor, tena
 	sortAttempts(out.Attempts)
 	out.Attempts = out.Attempts[:min(len(out.Attempts), maxTrainTotal)]
 
-	err := s.tx(ctx, actor, tenantID, authz.FacesView, func(q *db.Queries) error {
-		return s.audit(ctx, q, actor, tenantID, ActionTrainRead, "face_train", uuid.Nil,
-			map[string]any{"scope": "list", "servers": len(servers), "attempts": len(out.Attempts)})
+	// One audit row per organization whose servers were read; an empty read is still audited.
+	perTenant := map[uuid.UUID][2]int{} // servers, attempts
+	tenantOf := make(map[uuid.UUID]uuid.UUID, len(servers))
+	for _, srv := range servers {
+		tenantOf[srv.ID] = srv.TenantID
+		n := perTenant[srv.TenantID]
+		n[0]++
+		perTenant[srv.TenantID] = n
+	}
+	for _, a := range out.Attempts {
+		n := perTenant[tenantOf[a.ServerID]]
+		n[1]++
+		perTenant[tenantOf[a.ServerID]] = n
+	}
+	if len(perTenant) == 0 && len(tenants) > 0 {
+		perTenant[tenants[0]] = [2]int{}
+	}
+	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+		for _, t := range tenants {
+			n, ok := perTenant[t]
+			if !ok {
+				continue
+			}
+			if err := s.audit(ctx, q, actor, t, ActionTrainRead, "face_train", uuid.Nil,
+				map[string]any{"scope": "list", "servers": n[0], "attempts": n[1]}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return out, err
 }

@@ -90,7 +90,7 @@ func TestRecognitionsTimelineAuthzIsolationAndPaging(t *testing.T) {
 	e3 := sf.event("frigate-c01/muelle", "r3", now.Add(-time.Minute), beto.FrigateName)
 	sf.event("frigate-h01/plaza", "r4", now, "unrelated")
 
-	all, err := sf.svc.ListRecognitions(ctx, sf.manager, sf.tenant, faces.RecognitionFilter{})
+	all, err := sf.svc.ListRecognitions(ctx, sf.manager, faces.RecognitionFilter{TenantID: &sf.tenant})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,17 +102,17 @@ func TestRecognitionsTimelineAuthzIsolationAndPaging(t *testing.T) {
 		t.Fatalf("row not enriched: %+v", all.Items[0])
 	}
 
-	onlyAna, err := sf.svc.ListRecognitions(ctx, sf.manager, sf.tenant, faces.RecognitionFilter{PersonIDs: []uuid.UUID{ana.ID}})
+	onlyAna, err := sf.svc.ListRecognitions(ctx, sf.manager, faces.RecognitionFilter{TenantID: &sf.tenant, PersonIDs: []uuid.UUID{ana.ID}})
 	if err != nil || len(onlyAna.Items) != 2 || onlyAna.Items[0].EventID == e1 || onlyAna.Items[1].EventID != e1 {
 		t.Fatalf("per-person timeline = %+v, %v", onlyAna.Items, err)
 	}
 	cam := sf.env.Cameras["frigate-h01/plaza"].ID
-	byCam, err := sf.svc.ListRecognitions(ctx, sf.manager, sf.tenant, faces.RecognitionFilter{CameraIDs: []uuid.UUID{cam}})
+	byCam, err := sf.svc.ListRecognitions(ctx, sf.manager, faces.RecognitionFilter{TenantID: &sf.tenant, CameraIDs: []uuid.UUID{cam}})
 	if err != nil || len(byCam.Items) != 2 {
 		t.Fatalf("camera filter = %+v, %v", byCam.Items, err)
 	}
 	from := now.Add(-150 * time.Second)
-	byTime, err := sf.svc.ListRecognitions(ctx, sf.manager, sf.tenant, faces.RecognitionFilter{From: &from})
+	byTime, err := sf.svc.ListRecognitions(ctx, sf.manager, faces.RecognitionFilter{TenantID: &sf.tenant, From: &from})
 	if err != nil || len(byTime.Items) != 3 {
 		t.Fatalf("time filter = %+v, %v", byTime.Items, err)
 	}
@@ -121,7 +121,7 @@ func TestRecognitionsTimelineAuthzIsolationAndPaging(t *testing.T) {
 	var seen []string
 	cursor := ""
 	for i := 0; i < 6; i++ {
-		page, err := sf.svc.ListRecognitions(ctx, sf.manager, sf.tenant, faces.RecognitionFilter{Limit: 1, Cursor: cursor})
+		page, err := sf.svc.ListRecognitions(ctx, sf.manager, faces.RecognitionFilter{TenantID: &sf.tenant, Limit: 1, Cursor: cursor})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -135,32 +135,32 @@ func TestRecognitionsTimelineAuthzIsolationAndPaging(t *testing.T) {
 	if len(seen) != 4 {
 		t.Fatalf("paging returned %d rows, want 4", len(seen))
 	}
-	if _, err := sf.svc.ListRecognitions(ctx, sf.manager, sf.tenant, faces.RecognitionFilter{Cursor: "garbage"}); !errors.Is(err, faces.ErrInvalidCursor) {
+	if _, err := sf.svc.ListRecognitions(ctx, sf.manager, faces.RecognitionFilter{TenantID: &sf.tenant, Cursor: "garbage"}); !errors.Is(err, faces.ErrInvalidCursor) {
 		t.Fatalf("bad cursor = %v", err)
 	}
 
 	// Camera authz: faces.view alone shows nothing; events.view on one camera shows only that camera.
 	viewer := sf.user(sf.tenant, "viewer", authz.FacesView)
-	none, err := sf.svc.ListRecognitions(ctx, viewer, sf.tenant, faces.RecognitionFilter{})
+	none, err := sf.svc.ListRecognitions(ctx, viewer, faces.RecognitionFilter{TenantID: &sf.tenant})
 	if err != nil || len(none.Items) != 0 {
 		t.Fatalf("no camera access = %+v, %v", none.Items, err)
 	}
 	sf.grantCamera(viewer.UserID, sf.env.Cameras["frigate-c01/muelle"].ID, authz.EventsView)
-	one, err := sf.svc.ListRecognitions(ctx, viewer, sf.tenant, faces.RecognitionFilter{})
+	one, err := sf.svc.ListRecognitions(ctx, viewer, faces.RecognitionFilter{TenantID: &sf.tenant})
 	if err != nil || len(one.Items) != 1 || one.Items[0].EventID != e3 {
 		t.Fatalf("camera-scoped viewer = %+v, %v", one.Items, err)
 	}
 	// Without faces.view the timeline is forbidden, and another tenant sees nothing of this one.
 	blind := sf.user(sf.tenant, "blind")
-	if _, err := sf.svc.ListRecognitions(ctx, blind, sf.tenant, faces.RecognitionFilter{}); !errors.Is(err, access.ErrForbidden) {
+	if _, err := sf.svc.ListRecognitions(ctx, blind, faces.RecognitionFilter{TenantID: &sf.tenant}); !errors.Is(err, access.ErrForbidden) {
 		t.Fatalf("without faces.view = %v, want forbidden", err)
 	}
 	other := sf.otherTenant()
 	stranger := sf.user(other, "stranger", authz.FacesView)
-	if _, err := sf.svc.ListRecognitions(ctx, stranger, sf.tenant, faces.RecognitionFilter{}); !errors.Is(err, store.ErrNotFound) {
+	if _, err := sf.svc.ListRecognitions(ctx, stranger, faces.RecognitionFilter{TenantID: &sf.tenant}); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("cross tenant = %v, want not found", err)
 	}
-	mine, err := sf.svc.ListRecognitions(ctx, stranger, other, faces.RecognitionFilter{})
+	mine, err := sf.svc.ListRecognitions(ctx, stranger, faces.RecognitionFilter{TenantID: &other})
 	if err != nil || len(mine.Items) != 0 {
 		t.Fatalf("other tenant sees %+v, %v", mine.Items, err)
 	}
@@ -181,7 +181,7 @@ func TestTrainAttemptsListImageAndAssign(t *testing.T) {
 	// A server without face recognition is not asked at all.
 	sf.c01.AddFaceTrainImage("ignored.webp", pngOf(t, 11))
 
-	list, err := sf.svc.ListTrainAttempts(ctx, sf.manager, sf.tenant)
+	list, err := sf.svc.ListTrainAttempts(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestTrainAttemptsListImageAndAssign(t *testing.T) {
 	}
 	sf.run()
 	sameBytes(t, libraryBytes(sf.h01, res.Person.FrigateName), pngOf(t, 9))
-	list, _ = sf.svc.ListTrainAttempts(ctx, sf.manager, sf.tenant)
+	list, _ = sf.svc.ListTrainAttempts(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
 	if len(list.Attempts) != 1 {
 		t.Fatalf("attempts after assign = %d, want 1", len(list.Attempts))
 	}
@@ -281,7 +281,7 @@ func TestTrainListReportsUnreachableServersWithoutFailing(t *testing.T) {
 	sf.setCapability(sf.h01ID, sf.h01, true)
 	sf.setCapability(sf.c01ID, sf.c01, true)
 	sf.h01.AddFaceTrainImage(trainFile, pngOf(t, 9))
-	list, err := sf.svc.ListTrainAttempts(context.Background(), sf.manager, sf.tenant)
+	list, err := sf.svc.ListTrainAttempts(context.Background(), sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,19 +16,6 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/faces"
 )
 
-// faceTenant resolves the tenant a faces request acts on: the caller's own, or the explicit
-// tenant_id platform administrators must send. A member naming another tenant is answered 404 by
-// the service.
-func faceTenant(a authz.Actor, explicit *uuid.UUID) (uuid.UUID, error) {
-	switch {
-	case explicit != nil:
-		return *explicit, nil
-	case a.TenantID != nil:
-		return *a.TenantID, nil
-	}
-	return uuid.Nil, &faces.ValidationError{Msg: "tenant_id is required"}
-}
-
 func toFacePerson(p faces.Person) gen.FacePerson {
 	return gen.FacePerson{
 		Id: p.ID, TenantId: p.TenantID, DisplayName: p.DisplayName, FrigateName: p.FrigateName, Notes: p.Notes,
@@ -87,15 +74,6 @@ func (h *Handlers) ListFacePersons(ctx context.Context, r gen.ListFacePersonsReq
 	return out, nil
 }
 
-func (h *Handlers) faceCaller(ctx context.Context, explicit *uuid.UUID) (authz.Actor, uuid.UUID, error) {
-	a, err := actor(ctx)
-	if err != nil {
-		return a, uuid.Nil, err
-	}
-	tenant, err := faceTenant(a, explicit)
-	return a, tenant, err
-}
-
 func (h *Handlers) CreateFacePerson(ctx context.Context, r gen.CreateFacePersonRequestObject) (gen.CreateFacePersonResponseObject, error) {
 	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
 	if err != nil {
@@ -116,7 +94,7 @@ func (h *Handlers) CreateFacePerson(ctx context.Context, r gen.CreateFacePersonR
 }
 
 func (h *Handlers) GetFacePerson(ctx context.Context, r gen.GetFacePersonRequestObject) (gen.GetFacePersonResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.facePersonCaller(ctx, r.Params.TenantId, r.PersonId)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +106,7 @@ func (h *Handlers) GetFacePerson(ctx context.Context, r gen.GetFacePersonRequest
 }
 
 func (h *Handlers) UpdateFacePerson(ctx context.Context, r gen.UpdateFacePersonRequestObject) (gen.UpdateFacePersonResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.facePersonCaller(ctx, r.Params.TenantId, r.PersonId)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +122,7 @@ func (h *Handlers) UpdateFacePerson(ctx context.Context, r gen.UpdateFacePersonR
 }
 
 func (h *Handlers) DeleteFacePerson(ctx context.Context, r gen.DeleteFacePersonRequestObject) (gen.DeleteFacePersonResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.facePersonCaller(ctx, r.Params.TenantId, r.PersonId)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +133,7 @@ func (h *Handlers) DeleteFacePerson(ctx context.Context, r gen.DeleteFacePersonR
 }
 
 func (h *Handlers) ListFaceImages(ctx context.Context, r gen.ListFaceImagesRequestObject) (gen.ListFaceImagesResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.facePersonCaller(ctx, r.Params.TenantId, r.PersonId)
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +183,7 @@ type partInfo struct {
 }
 
 func (h *Handlers) UploadFaceImage(ctx context.Context, r gen.UploadFaceImageRequestObject) (gen.UploadFaceImageResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.facePersonCaller(ctx, r.Params.TenantId, r.PersonId)
 	if err != nil {
 		return nil, err
 	}
@@ -230,7 +208,7 @@ func (h *Handlers) UploadFaceImage(ctx context.Context, r gen.UploadFaceImageReq
 }
 
 func (h *Handlers) GetFaceImage(ctx context.Context, r gen.GetFaceImageRequestObject) (gen.GetFaceImageResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.facePersonCaller(ctx, r.Params.TenantId, r.PersonId)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +220,7 @@ func (h *Handlers) GetFaceImage(ctx context.Context, r gen.GetFaceImageRequestOb
 }
 
 func (h *Handlers) DeleteFaceImage(ctx context.Context, r gen.DeleteFaceImageRequestObject) (gen.DeleteFaceImageResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.facePersonCaller(ctx, r.Params.TenantId, r.PersonId)
 	if err != nil {
 		return nil, err
 	}
@@ -253,7 +231,7 @@ func (h *Handlers) DeleteFaceImage(ctx context.Context, r gen.DeleteFaceImageReq
 }
 
 func (h *Handlers) ListFaceSyncStatus(ctx context.Context, r gen.ListFaceSyncStatusRequestObject) (gen.ListFaceSyncStatusResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.facePersonCaller(ctx, r.Params.TenantId, r.PersonId)
 	if err != nil {
 		return nil, err
 	}
@@ -275,7 +253,7 @@ func (h *Handlers) ListFaceSyncStatus(ctx context.Context, r gen.ListFaceSyncSta
 }
 
 func (h *Handlers) RetryFaceSync(ctx context.Context, r gen.RetryFaceSyncRequestObject) (gen.RetryFaceSyncResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.facePersonCaller(ctx, r.Params.TenantId, r.PersonId)
 	if err != nil {
 		return nil, err
 	}
@@ -287,13 +265,14 @@ func (h *Handlers) RetryFaceSync(ctx context.Context, r gen.RetryFaceSyncRequest
 }
 
 func (h *Handlers) ListFaceRecognitions(ctx context.Context, r gen.ListFaceRecognitionsRequestObject) (gen.ListFaceRecognitionsResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
 	}
 	p := r.Params
-	page, err := h.Faces.ListRecognitions(ctx, a, tenant, faces.RecognitionFilter{
-		PersonIDs: uuids(p.PersonId), CameraIDs: uuids(p.CameraId), From: p.From, To: p.To,
+	page, err := h.Faces.ListRecognitions(ctx, a, faces.RecognitionFilter{
+		TenantID: p.TenantId, PersonIDs: uuids(p.PersonId), SiteIDs: uuids(p.SiteId), ServerIDs: uuids(p.ServerId),
+		CameraGroupIDs: uuids(p.CameraGroupId), CameraIDs: uuids(p.CameraId), From: p.From, To: p.To,
 		Cursor: deref(p.Cursor), Limit: deref(p.Limit),
 	})
 	if err != nil {
@@ -311,11 +290,12 @@ func (h *Handlers) ListFaceRecognitions(ctx context.Context, r gen.ListFaceRecog
 }
 
 func (h *Handlers) ListFaceTrainAttempts(ctx context.Context, r gen.ListFaceTrainAttemptsRequestObject) (gen.ListFaceTrainAttemptsResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	list, err := h.Faces.ListTrainAttempts(ctx, a, tenant)
+	list, err := h.Faces.ListTrainAttempts(ctx, a, faces.TrainFilter{
+		TenantID: r.Params.TenantId, SiteIDs: uuids(r.Params.SiteId), ServerIDs: uuids(r.Params.ServerId)})
 	if err != nil {
 		return nil, err
 	}
@@ -343,7 +323,7 @@ func (h *Handlers) ListFaceTrainAttempts(ctx context.Context, r gen.ListFaceTrai
 }
 
 func (h *Handlers) GetFaceTrainImage(ctx context.Context, r gen.GetFaceTrainImageRequestObject) (gen.GetFaceTrainImageResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.faceServerCaller(ctx, r.Params.TenantId, r.ServerId)
 	if err != nil {
 		return nil, err
 	}
@@ -355,12 +335,12 @@ func (h *Handlers) GetFaceTrainImage(ctx context.Context, r gen.GetFaceTrainImag
 }
 
 func (h *Handlers) AssignFaceTrainAttempt(ctx context.Context, r gen.AssignFaceTrainAttemptRequestObject) (gen.AssignFaceTrainAttemptResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
-	if err != nil {
-		return nil, err
-	}
 	if r.Body == nil {
 		return nil, &faces.ValidationError{Msg: "a request body is required"}
+	}
+	a, tenant, err := h.faceServerCaller(ctx, r.Params.TenantId, r.Body.ServerId)
+	if err != nil {
+		return nil, err
 	}
 	in := faces.AssignInput{ServerID: r.Body.ServerId, File: r.Body.File, PersonID: r.Body.PersonId}
 	if r.Body.NewPersonDisplayName != nil {
@@ -373,4 +353,49 @@ func (h *Handlers) AssignFaceTrainAttempt(ctx context.Context, r gen.AssignFaceT
 	return gen.AssignFaceTrainAttempt201JSONResponse{
 		Person: toFacePerson(res.Person), Image: toFaceImage(res.Image), AttemptRemoved: res.AttemptRemoved,
 	}, nil
+}
+
+// faceCaller resolves the actor and the tenant of a faces route that names no object (lists and
+// creates): the explicit tenant_id, else the member's own tenant, else, for a platform
+// administrator, the only organization that exists. A member naming another tenant is answered
+// 404 by the service.
+func (h *Handlers) faceCaller(ctx context.Context, explicit *uuid.UUID) (authz.Actor, uuid.UUID, error) {
+	return h.faceObjectCaller(ctx, explicit, h.Faces.SoleTenant)
+}
+
+// faceObjectCaller is faceCaller for a route that references an object: a platform administrator
+// without tenant_id acts on the tenant the object (resolve) belongs to. Members and explicit
+// tenants skip the lookup and are authorized by the service as always, so another tenant's
+// object stays 404.
+func (h *Handlers) faceObjectCaller(ctx context.Context, explicit *uuid.UUID, resolve func(context.Context, authz.Actor) (uuid.UUID, error)) (authz.Actor, uuid.UUID, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return a, uuid.Nil, err
+	}
+	switch {
+	case explicit != nil:
+		return a, *explicit, nil
+	case a.TenantID != nil:
+		return a, *a.TenantID, nil
+	}
+	tenant, err := resolve(ctx, a)
+	return a, tenant, err
+}
+
+func (h *Handlers) facePersonCaller(ctx context.Context, explicit *uuid.UUID, personID uuid.UUID) (authz.Actor, uuid.UUID, error) {
+	return h.faceObjectCaller(ctx, explicit, func(ctx context.Context, a authz.Actor) (uuid.UUID, error) {
+		return h.Faces.PersonTenant(ctx, a, personID)
+	})
+}
+
+func (h *Handlers) faceWatchlistCaller(ctx context.Context, explicit *uuid.UUID, watchlistID uuid.UUID) (authz.Actor, uuid.UUID, error) {
+	return h.faceObjectCaller(ctx, explicit, func(ctx context.Context, a authz.Actor) (uuid.UUID, error) {
+		return h.Faces.WatchlistTenant(ctx, a, watchlistID)
+	})
+}
+
+func (h *Handlers) faceServerCaller(ctx context.Context, explicit *uuid.UUID, serverID uuid.UUID) (authz.Actor, uuid.UUID, error) {
+	return h.faceObjectCaller(ctx, explicit, func(ctx context.Context, a authz.Actor) (uuid.UUID, error) {
+		return h.Faces.ServerTenant(ctx, a, serverID)
+	})
 }
