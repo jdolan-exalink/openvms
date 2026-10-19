@@ -1538,7 +1538,7 @@ export interface paths {
     "/api/v1/faces/persons": {
         parameters: {
             query?: {
-                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                /** @description Optional. Members act on their own organization; platform administrators may omit it when the object names its organization, or when only one organization exists. */
                 tenant_id?: string;
             };
             header?: never;
@@ -1686,7 +1686,7 @@ export interface paths {
     "/api/v1/faces/watchlists": {
         parameters: {
             query?: {
-                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                /** @description Optional. Members act on their own organization; platform administrators may omit it when the object names its organization, or when only one organization exists. */
                 tenant_id?: string;
             };
             header?: never;
@@ -1791,8 +1791,10 @@ export interface paths {
         /**
          * Recognition timeline built from the events index (faces.view)
          * @description Events whose sub_labels carry a registered person's name, newest first with keyset
-         *     pagination, limited to the cameras the caller holds events.view on. An event that
-         *     recognized several persons yields one row per person. Use the event endpoints for the
+         *     pagination, limited to the cameras the caller holds events.view on. No organization is
+         *     needed: rows come from every organization the caller holds faces.view on, filterable by
+         *     site, server, camera group and camera like the plate search. An event that recognized
+         *     several persons yields one row per person. Use the event endpoints for the
          *     thumbnail and the playback link.
          */
         get: operations["listFaceRecognitions"];
@@ -1812,8 +1814,9 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Recent unclassified face attempts of every face-enabled server (faces.view)
-         * @description Reads Frigate's train folder (attempts saved with save_attempts). A server that cannot be
+         * Recent unclassified face attempts of every face-enabled server in scope (faces.view)
+         * @description Reads Frigate's train folder (attempts saved with save_attempts) of every face-enabled
+         *     server the caller may see, filterable by site and server. A server that cannot be
          *     reached is reported in `servers` and does not fail the request.
          */
         get: operations["listFaceTrainAttempts"];
@@ -8546,7 +8549,7 @@ export interface operations {
     listFacePersons: {
         parameters: {
             query?: {
-                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                /** @description Optional. Members act on their own organization; platform administrators may omit it when the object names its organization, or when only one organization exists. */
                 tenant_id?: string;
             };
             header?: never;
@@ -8575,7 +8578,7 @@ export interface operations {
     createFacePerson: {
         parameters: {
             query?: {
-                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                /** @description Optional. Members act on their own organization; platform administrators may omit it when the object names its organization, or when only one organization exists. */
                 tenant_id?: string;
             };
             header?: never;
@@ -8876,7 +8879,7 @@ export interface operations {
     listFaceWatchlists: {
         parameters: {
             query?: {
-                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                /** @description Optional. Members act on their own organization; platform administrators may omit it when the object names its organization, or when only one organization exists. */
                 tenant_id?: string;
             };
             header?: never;
@@ -8905,7 +8908,7 @@ export interface operations {
     createFaceWatchlist: {
         parameters: {
             query?: {
-                /** @description Needed only by platform administrators; members of a tenant always act on their own. */
+                /** @description Optional. Members act on their own organization; platform administrators may omit it when the object names its organization, or when only one organization exists. */
                 tenant_id?: string;
             };
             header?: never;
@@ -9025,7 +9028,9 @@ export interface operations {
     listFaceConfig: {
         parameters: {
             query?: {
+                /** @description Optional. Platform administrators and members may omit it; it only narrows the list to one organization. */
                 tenant_id?: string;
+                site_id?: string[];
             };
             header?: never;
             path?: never;
@@ -9082,7 +9087,11 @@ export interface operations {
     listFaceRecognitions: {
         parameters: {
             query?: {
+                /** @description Optional. Omit it to search every organization the caller may see. */
                 tenant_id?: string;
+                site_id?: string[];
+                server_id?: string[];
+                camera_group_id?: string[];
                 person_id?: string[];
                 camera_id?: string[];
                 from?: string;
@@ -9114,7 +9123,10 @@ export interface operations {
     listFaceTrainAttempts: {
         parameters: {
             query?: {
+                /** @description Optional. Omit it to list the servers of every organization the caller may see. */
                 tenant_id?: string;
+                site_id?: string[];
+                server_id?: string[];
             };
             header?: never;
             path?: never;
