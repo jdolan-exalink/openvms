@@ -60,7 +60,10 @@ Importante: el comando es `docker compose` (con espacio, Compose v2). El paquete
 4. Configuración (.env)
 -----------------------
 
-Crear /root/openvms/.env a partir de .env.example. Lo importante:
+Primera instalación en un paso: `make install` crea .env desde .env.example con
+OPENVMS_MASTER_KEY y POSTGRES_PASSWORD aleatorios (si .env ya existe no lo toca),
+levanta el stack y espera /health/ready. Guardar la OPENVMS_MASTER_KEY generada.
+Para hacerlo a mano, crear /root/openvms/.env a partir de .env.example. Lo importante:
 
     # Clave maestra que cifra las contraseñas de Frigate y los secretos MFA.
     # GENERARLA UNA VEZ Y GUARDARLA: sin ella no se pueden leer las credenciales guardadas.

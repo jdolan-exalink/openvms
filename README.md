@@ -24,6 +24,14 @@ Requisitos: Docker con Compose v2. Para desarrollo local también Go 1.26 y Node
 Versión de Frigate soportada: **0.17 o posterior**. OpenVMS rechaza al registrar o conectar un servidor con Frigate 0.16 o anterior e informa la versión detectada; actualiza ese Frigate antes de registrarlo.
 
 ```bash
+make install              # primera instalación en un paso
+```
+
+`make install` (`deploy/install.sh`) verifica Docker y Compose v2 (con Compose v1, `docker-compose`, falla con un mensaje claro: no está soportado), crea `.env` desde `.env.example` con `OPENVMS_MASTER_KEY` y `POSTGRES_PASSWORD` aleatorios si `.env` no existe (nunca pisa uno existente), ejecuta `docker compose up -d --build`, espera `/health/ready` e imprime los pasos siguientes. Guardá `OPENVMS_MASTER_KEY`: sin ella no se pueden leer las credenciales cifradas. Si ya existe un volumen de Postgres, conserva su contraseña original aunque cambies `POSTGRES_PASSWORD`. Para actualizar después usá `make deploy`.
+
+Alternativa manual (siempre `docker compose` con espacio, Compose v2):
+
+```bash
 cp .env.example .env      # opcional
 docker compose up -d      # o: make up
 ```
