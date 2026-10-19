@@ -9,7 +9,7 @@ lleva el historial en [`CHANGELOG.md`](../CHANGELOG.md) con el formato
 | Componente | Archivo | Valor actual |
 | --- | --- | --- |
 | OpenVMS (API, relay, worker, web) | `VERSION` | `0.4.0` |
-| Agente de borde (`edge-agent`) | `deploy/agent/VERSION` | `0.2.2` |
+| Agente de borde (`edge-agent`) | `deploy/agent/VERSION` | `0.3.0` |
 
 Cada archivo contiene solo la versión y un salto de línea. `make`, `deploy/deploy.sh`,
 `deploy/install.sh` y los Dockerfiles leen estos archivos; nadie debe escribir una versión

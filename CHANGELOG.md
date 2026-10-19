@@ -38,6 +38,9 @@ history. This entry summarizes the work merged since that release (PRs #62 to #1
 - Operations: `make install` (Docker and Compose v2 check, generated secrets, health wait),
   `make deploy` (backup, rollback tags, health check) and `make rollback`.
 - Export and import of live view presentations.
+- Agent installation over SSH detects an agent that is already installed, reports its
+  version against the one this OpenVMS ships (up to date / outdated) and points to the
+  update flow, without overwriting it.
 - Release tooling: `VERSION` files, this changelog, a consistency test and the OpenVMS
   version on the login page, read from `/version.json`.
 
@@ -57,6 +60,9 @@ history. This entry summarizes the work merged since that release (PRs #62 to #1
 - Tracked objects are persisted per page, so a large LPR object sync backlog cannot pin
   the cursor.
 - The Compose major version is read from the first `N.M` of the version line.
+- Agent installation failures show the real reason (not root, unsupported OS or
+  architecture, existing agent or files, missing systemd, transfer or activation) instead of
+  "remote output was not retained", and the cause is always logged without secrets.
 - Rollback is atomic and fail-safe; the deploy health check is bounded.
 - Face fixes: tenant handling for platform admins, serialized watchlist deletion, rule
   evaluation of face conditions inside the transaction, hardened train assign and name
@@ -64,7 +70,8 @@ history. This entry summarizes the work merged since that release (PRs #62 to #1
 - The mobile shell stays on phones in landscape and stale swipe pointers are cleared.
 - Updated `kin-openapi` to v0.151.0 for HIGH CVEs.
 
-### Agent 0.2.2
+### Agent 0.3.0
 
-- The edge agent version is unified at 0.2.2 (`deploy/agent/VERSION`); before this release
-  the Go image defaulted to 0.2.1 while the Makefile and compose used 0.2.2.
+- The edge agent answers `--version` (used by the installer to detect installed agents).
+- The edge agent version lives in `deploy/agent/VERSION`; before this release the Go image
+  defaulted to 0.2.1 while the Makefile and compose used 0.2.2.
