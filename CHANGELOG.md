@@ -14,7 +14,8 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 - `make install` takes the first administrator password from `OPENVMS_ADMIN_PASSWORD`
   (`OPENVMS_ADMIN_PASSWORD='...' make install`) and writes it to the new `.env` without
-  printing it.
+  printing it. It validates the password up front: one shorter than 8 characters aborts before
+  anything is created or started.
 
 ### Changed
 
@@ -25,10 +26,17 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
   `COMPOSE_PROFILES=mqtt`). OpenVMS reads Frigate over HTTP and does not need it. A
   `mosquitto` container from an earlier deploy keeps running until removed with
   `docker compose rm -sf mosquitto`.
-
+- Password policy: 8 or more characters, with no composition rules (no character classes and
+  no username check). Applies to the web, the API and `vmsctl`.
 - README rewritten for 0.4.0: features by module, Compose v2 requirements, `make install`,
   `.env` reference, `make deploy`/`make rollback`, versions, agents and accelerators,
   security and troubleshooting.
+
+### Fixed
+
+- An invalid `OPENVMS_ADMIN_PASSWORD` no longer leaves the install without an administrator:
+  the API creates the admin with a generated one-time password, warns in the log and forces a
+  change at first login.
 
 ## [0.4.0] - 2026-10-19
 

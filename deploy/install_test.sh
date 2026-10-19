@@ -78,7 +78,7 @@ printf '%s\n' "$out" | grep -qF "$pw" && fail "happy path: postgres password pri
 printf '%s\n' "$out" | grep -qF 'c3R1Yi1tYXN0ZXI' && fail "happy path: master key printed"
 a=$(lineof 'docker compose up -d --build'); b=$(lineof 'https://localhost:9443/health/ready')
 [ -n "$a" ] && [ -n "$b" ] && [ "$a" -lt "$b" ] || fail "happy path: up must run before the health check"
-printf '%s\n' "$out" | grep -qF "vmsctl bootstrap" || fail "happy path: bootstrap hint missing"
+printf '%s\n' "$out" | grep -qF 'docker compose logs api | grep "initial admin"' || fail "happy path: admin password hint missing"
 printf '%s\n' "$out" | grep -qF "make deploy" || fail "happy path: make deploy mention missing"
 printf '%s\n' "$out" | grep -qF "9080" || fail "happy path: http port missing from summary"
 
@@ -154,6 +154,20 @@ mkroot "$tmp/adm2"; printf 'FOO=mine\n' >"$tmp/adm2/.env"
 out=$(run "$tmp/adm2" OPENVMS_ADMIN_PASSWORD="Adm1n-Secret-2026"); rc=$?
 [ "$(cat "$tmp/adm2/.env")" = "FOO=mine" ] || fail "admin password: existing .env modified"
 printf '%s\n' "$out" | grep -q 'OPENVMS_ADMIN_PASSWORD' || fail "admin password: no notice for an existing .env"
+
+# 11. A too short OPENVMS_ADMIN_PASSWORD (< 8 characters) fails up front: no .env, nothing started.
+mkroot "$tmp/short"; rm -f "$tmp/short/.env"; : >"$STUB_LOG"
+out=$(run "$tmp/short" OPENVMS_ADMIN_PASSWORD="abc1234"); rc=$?
+[ "$rc" -ne 0 ] || fail "short admin password: expected failure"
+printf '%s\n' "$out" | grep -q 'at least 8 characters' || fail "short admin password: message missing: $out"
+printf '%s\n' "$out" | grep -qF 'abc1234' && fail "short admin password: printed"
+[ ! -e "$tmp/short/.env" ] || fail "short admin password: created .env"
+grep -q 'compose up' "$STUB_LOG" && fail "short admin password: ran compose up"
+mkroot "$tmp/eight"; rm -f "$tmp/eight/.env"
+out=$(run "$tmp/eight" OPENVMS_ADMIN_PASSWORD="abcd1234"); rc=$?
+[ "$rc" -eq 0 ] || fail "8-character admin password: expected exit 0: $out"
+grep -q '^OPENVMS_ADMIN_PASSWORD=abcd1234$' "$tmp/eight/.env" || fail "8-character admin password: not written to .env"
+printf '%s\n' "$out" | grep -qF 'docker compose logs api | grep "initial admin"' || fail "summary: how to read the generated password missing"
 
 [ "$fails" -eq 0 ] && echo "ok: install tests passed"
 [ "$fails" -eq 0 ]
