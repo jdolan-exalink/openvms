@@ -513,7 +513,7 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 const recordLoginFailure = `-- name: RecordLoginFailure :one
 UPDATE users SET
     failed_logins = failed_logins + 1,
-    locked_until = CASE WHEN failed_logins + 1 >= $1::int THEN now() + make_interval(secs => $2::float8) ELSE locked_until END
+    locked_until = CASE WHEN $1::int > 0 AND failed_logins + 1 >= $1::int THEN now() + make_interval(secs => $2::float8) ELSE locked_until END
 WHERE id = $3
 RETURNING failed_logins, locked_until
 `
