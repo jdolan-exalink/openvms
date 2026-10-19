@@ -130,7 +130,7 @@ Todas las variables que lee `docker-compose.yml` están documentadas en `.env.ex
 | ONVIF y agente local | `ONVIF_ALLOWED_CIDRS`, `ONVIF_DISCOVERY_INTERFACES`, `OPENVMS_AGENT_*` | Solo para el perfil opcional `onvif-agent` y la red interna del agente. |
 | Metadatos de build | `VERSION`, `COMMIT`, `BUILD_TIME`, `AGENT_VERSION` | Déjelos vacíos: `make` y los scripts los completan. |
 
-El compose define además perfiles opcionales: `--profile mock` (Frigate simulados), `--profile observability` (Prometheus en `:9090` y Grafana en `:3000`, ambos solo en `127.0.0.1`) y `--profile onvif-agent` (agente de borde local).
+El compose no incluye datos de demostración. Define perfiles opcionales, que se activan con `--profile <nombre>` o con `COMPOSE_PROFILES=a,b` en `.env`: `--profile mqtt` (broker Mosquitto en `127.0.0.1:1883`; OpenVMS lee Frigate por HTTP y no lo necesita), `--profile observability` (Prometheus en `:9090` y Grafana en `:3000`, ambos solo en `127.0.0.1`) y `--profile onvif-agent` (agente de borde local).
 
 ## Actualizar y volver atrás
 
@@ -195,6 +195,7 @@ Aceleradores: el agente detecta **NVIDIA**, **Intel OpenVINO**, **Google Coral**
 | La API arranca pero no se puede entrar con la contraseña de `.env` | Solo se aplica en la primera creación del admin. Para cambiarla: `vmsctl passwd`. |
 | Patentes sin lecturas nuevas tras una caída | La sincronización de objetos continúa por páginas desde el cursor guardado; un backlog grande se drena en varias pasadas. Verifique en Servidores la columna "Eventos". |
 | Falla la instalación del agente | El mensaje en la web indica la causa (ver [Agentes y aceleradores](#agentes-y-aceleradores)); el log de la API la registra sin secretos. |
+| Sigue corriendo `mosquitto` tras actualizar desde una versión anterior | Ahora Mosquitto es opcional (perfil `mqtt`); el contenedor de despliegues previos sigue activo hasta quitarlo: `docker compose rm -sf mosquitto`. `make deploy` no falla por eso. |
 | Verificar estado | `curl -sk https://localhost:8443/health/ready`, `docker compose ps` y `docker compose logs -f api worker`. |
 
 ## Desarrollo
@@ -205,9 +206,9 @@ Requisitos: Go 1.26 y Node 22 con pnpm (`corepack enable`), además de Docker co
 make dev
 ```
 
-Levanta Postgres, Valkey, NATS, SeaweedFS, Mosquitto y los Frigate simulados en Docker, y corre la API (`:8080`) y la web con Vite (`:5173`) en la máquina local. `make help` lista el resto: `test`, `test-integration`, `lint`, `generate`, `build`.
+Usa `docker-compose.dev.yml` (solo desarrollo) además del compose principal: levanta Postgres, Valkey, NATS, SeaweedFS, Mosquitto y los Frigate simulados en Docker, y corre la API (`:8080`) y la web con Vite (`:5173`) en la máquina local. `make help` lista el resto: `test`, `test-integration`, `lint`, `generate`, `build`.
 
-Para tener los Frigate simulados con el stack completo: `docker compose --profile mock up -d`. Escuchan en `127.0.0.1:18971` (Helvecia, `admin` / `helvecia-dev`) y `127.0.0.1:28971` (Cayastá, `admin` / `cayasta-dev`); `vmsctl seed-demo` crea la organización de demostración que los usa.
+`make dev-down` los detiene. Para tener los Frigate simulados con el stack completo: `docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile mqtt up -d`. Escuchan en `127.0.0.1:18971` (Helvecia, `admin` / `helvecia-dev`) y `127.0.0.1:28971` (Cayastá, `admin` / `cayasta-dev`); `vmsctl seed-demo` crea la organización de demostración que los usa y requiere estos Frigate simulados (no existen en una instalación de producción).
 
 ### Estructura
 

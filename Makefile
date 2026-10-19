@@ -4,6 +4,8 @@ SHELL := /bin/bash
 VERSION ?= $(shell cat VERSION 2>/dev/null | tr -d '[:space:]')
 AGENT_VERSION ?= $(shell cat deploy/agent/VERSION 2>/dev/null | tr -d '[:space:]')
 INFRA := postgres valkey nats seaweedfs mosquitto frigate-helvecia frigate-cayasta
+# Development compose: base file + simulated Frigates + the optional mqtt profile (mosquitto).
+DEV_COMPOSE := docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile mqtt
 
 export DATABASE_URL ?= postgres://openvms:openvms@localhost:5432/openvms?sslmode=disable
 export VALKEY_ADDR ?= localhost:6379
@@ -41,10 +43,14 @@ down: ## Stop the stack (keeps volumes)
 	docker compose down
 
 .PHONY: dev
-dev: ## Start infra + mocks in Docker, run API and web locally with live reload of the web
-	docker compose up -d --build --wait $(INFRA)
+dev: ## Start infra + simulated Frigates (docker-compose.dev.yml) in Docker, run API and web locally with live reload of the web
+	$(DEV_COMPOSE) up -d --build --wait $(INFRA)
 	pnpm install
 	$(MAKE) -j2 dev-api dev-web
+
+.PHONY: dev-down
+dev-down: ## Stop the development stack started by `make dev` (keeps volumes)
+	$(DEV_COMPOSE) down
 
 .PHONY: dev-api
 dev-api:

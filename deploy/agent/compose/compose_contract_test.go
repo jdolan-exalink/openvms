@@ -1197,8 +1197,10 @@ func TestAutomaticWebTLSBootstrapSerializesConcurrentStartup(t *testing.T) {
 	}
 }
 
-func TestMosquittoHasHealthcheckAndMocksWaitForIt(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yml"))
+func loadComposeServices(t *testing.T, name string) map[string]any {
+	t.Helper()
+	data, err := os.ReadFile( // #nosec G304 -- fixed test fixture names
+		filepath.Join("..", "..", "..", name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1206,16 +1208,46 @@ func TestMosquittoHasHealthcheckAndMocksWaitForIt(t *testing.T) {
 	if err := yaml.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
 	}
-	services := asMap(t, document["services"])
+	return asMap(t, document["services"])
+}
+
+// A production compose never carries the simulated Frigates, and MQTT is an optional profile.
+func TestProductionComposeHasNoMocksAndMQTTIsOptional(t *testing.T) {
+	services := loadComposeServices(t, "docker-compose.yml")
+	for _, name := range []string{"frigate-helvecia", "frigate-cayasta"} {
+		if _, ok := services[name]; ok {
+			t.Fatalf("docker-compose.yml must not define the mock service %s; it belongs in docker-compose.dev.yml", name)
+		}
+	}
 	mosquitto := asMap(t, services["mosquitto"])
 	if _, ok := mosquitto["healthcheck"]; !ok {
 		t.Fatal("mosquitto must declare a healthcheck")
 	}
+	if mosquitto["restart"] != "unless-stopped" {
+		t.Fatalf("mosquitto restart policy = %#v", mosquitto["restart"])
+	}
+	profiles, _ := mosquitto["profiles"].([]any)
+	if len(profiles) != 1 || profiles[0] != "mqtt" {
+		t.Fatalf("mosquitto must be gated by the mqtt profile, got %#v", mosquitto["profiles"])
+	}
+	for name, raw := range services {
+		deps, _ := asMap(t, raw)["depends_on"].(map[string]any)
+		if _, ok := deps["mosquitto"]; ok {
+			t.Fatalf("%s must not depend on the optional mosquitto", name)
+		}
+	}
+}
+
+func TestDevComposeMocksWaitForHealthyMosquitto(t *testing.T) {
+	services := loadComposeServices(t, "docker-compose.dev.yml")
 	for _, name := range []string{"frigate-helvecia", "frigate-cayasta"} {
 		deps := asMap(t, asMap(t, services[name])["depends_on"])
 		dep := asMap(t, deps["mosquitto"])
 		if dep["condition"] != "service_healthy" {
 			t.Fatalf("%s must wait for a healthy mosquitto, got %#v", name, dep)
+		}
+		if _, ok := asMap(t, services[name])["profiles"]; ok {
+			t.Fatalf("%s must not be profile-gated in the dev file", name)
 		}
 	}
 }
