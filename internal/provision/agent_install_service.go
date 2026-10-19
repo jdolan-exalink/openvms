@@ -712,8 +712,8 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 			if !valid || request.MTLS == nil {
 				return preflightFailure(exit.status, preflight)
 			}
-			order, comparable := compareAgentVersionOrder(version, request.BundledVersion)
-			if !comparable || order > 0 {
+			order, versionComparable := compareAgentVersionOrder(version, request.BundledVersion)
+			if !versionComparable || order > 0 {
 				return preflightFailure(exit.status, preflight)
 			}
 			existingVersion = version
