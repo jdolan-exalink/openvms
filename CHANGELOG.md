@@ -10,6 +10,18 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ## [Unreleased]
 
+### Added
+
+- `make install` takes the first administrator password from `OPENVMS_ADMIN_PASSWORD`
+  (`OPENVMS_ADMIN_PASSWORD='...' make install`) and writes it to the new `.env` without
+  printing it.
+
+### Changed
+
+- README rewritten for 0.4.0: features by module, Compose v2 requirements, `make install`,
+  `.env` reference, `make deploy`/`make rollback`, versions, agents and accelerators,
+  security and troubleshooting.
+
 ## [0.4.0] - 2026-10-19
 
 Versioning restarts at 0.4.0. The earlier GitHub release `v0.3.0` (2026-10-15) stays as

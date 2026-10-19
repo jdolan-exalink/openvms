@@ -72,8 +72,12 @@ set_kv() {
     END { if (!done) print k "=" ENVIRON["_v"] }' "$1" >"$1.tmp" && mv "$1.tmp" "$1"
 }
 
+# OPENVMS_ADMIN_PASSWORD (and OPENVMS_ADMIN_USERNAME) given in the environment are written
+# to a new .env, so `OPENVMS_ADMIN_PASSWORD=... make install` sets the first admin password.
 if [ -e .env ]; then
   info ".env already exists, left untouched"
+  [ -z "${OPENVMS_ADMIN_PASSWORD:-}" ] ||
+    warn "OPENVMS_ADMIN_PASSWORD from the environment was not written: edit it in the existing .env"
   for key in OPENVMS_MASTER_KEY POSTGRES_PASSWORD; do
     grep -q "^$key=" .env ||
       warn "$key is not set in .env: compose falls back to its insecure development default"
@@ -89,6 +93,15 @@ else
   [ -n "$master" ] && [ -n "$pgpass" ] || { rm -f .env; die "could not generate secrets"; }
   (umask 077 && set_kv .env OPENVMS_MASTER_KEY "$master" && set_kv .env POSTGRES_PASSWORD "$pgpass") ||
     { rm -f .env; die "could not write secrets to .env"; }
+  if [ -n "${OPENVMS_ADMIN_PASSWORD:-}" ]; then
+    (umask 077 && set_kv .env OPENVMS_ADMIN_PASSWORD "$OPENVMS_ADMIN_PASSWORD") ||
+      { rm -f .env; die "could not write the admin password to .env"; }
+    info "first admin password taken from OPENVMS_ADMIN_PASSWORD (not printed)"
+  fi
+  if [ -n "${OPENVMS_ADMIN_USERNAME:-}" ]; then
+    (umask 077 && set_kv .env OPENVMS_ADMIN_USERNAME "$OPENVMS_ADMIN_USERNAME") ||
+      { rm -f .env; die "could not write the admin username to .env"; }
+  fi
   chmod 600 .env
   info "created .env (mode 0600) with a generated OPENVMS_MASTER_KEY and POSTGRES_PASSWORD (not printed)"
   info "back up OPENVMS_MASTER_KEY: encrypted data cannot be recovered without it"
