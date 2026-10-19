@@ -144,6 +144,26 @@ func serverAgentInstallJob(in provision.AgentInstallJob) gen.ServerAgentInstallJ
 		message := in.Message
 		out.Message = &message
 	}
+	if in.Code != "" {
+		code := gen.ServerAgentInstallJobCode(in.Code)
+		out.Code = &code
+	}
+	if in.InstalledVersion != "" {
+		version := in.InstalledVersion
+		out.InstalledVersion = &version
+	}
+	if in.BundledVersion != "" {
+		version := in.BundledVersion
+		out.BundledVersion = &version
+	}
+	if in.RegisteredHere {
+		registered := true
+		out.RegisteredHere = &registered
+	}
+	if in.VersionState != "" {
+		state := gen.ServerAgentInstallJobVersionState(in.VersionState)
+		out.VersionState = &state
+	}
 	return out
 }
 

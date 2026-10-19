@@ -177,7 +177,17 @@ func agentInstallPreflight() string {
 . /etc/os-release
 case "${ID:-}" in ubuntu|debian) ;; *) exit 22 ;; esac
 command -v systemctl >/dev/null 2>&1 || exit 26
-if systemctl cat openvms-agent.service >/dev/null 2>&1; then exit 27; fi
+if systemctl cat openvms-agent.service >/dev/null 2>&1; then
+  # Read-only: report the installed agent version, never change anything. The agent binary
+  # answers --version before it reads its token, and the token file is pointed at a missing
+  # path so an older agent without that flag exits immediately instead of starting.
+  version=unknown
+  out=$(OPENVMS_AGENT_TOKEN_FILE=/nonexistent timeout 5 /usr/local/bin/openvms-agent --version 2>/dev/null </dev/null | head -n 1 | tr -d '\r') || out=
+  case "$out" in ''|*[!0-9.]*) out=$(journalctl -u openvms-agent.service -o cat -n 200 --no-pager 2>/dev/null | sed -n 's/.*"version":"\([0-9][0-9.]*\)".*/\1/p' | tail -n 1) || out= ;; esac
+  case "$out" in ''|*[!0-9.]*) ;; *) version=$out ;; esac
+  printf 'openvms_install_preflight=agent_present version=%%s\n' "$version"
+  exit 27
+fi
 case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) exit 23 ;; esac
 [ "$arch" = %s ] || exit 24
 for target in /usr/local/bin/openvms-agent /etc/openvms/agent.token /etc/openvms/agent.env /etc/systemd/system/openvms-agent.service /etc/openvms/agent.crt /etc/openvms/agent.key; do
@@ -202,6 +212,17 @@ systemctl is-active --quiet openvms-agent.service >/dev/null 2>&1
 printf 'openvms_agent_install=active\n'`
 
 func runAgentInstallStep(ctx context.Context, conn AgentInstallConn, command string) (string, error) {
+	output, err := runAgentInstallStepDetailed(ctx, conn, command)
+	if err != nil {
+		return "", err
+	}
+	return output, nil
+}
+
+// runAgentInstallStepDetailed also returns the (already scrubbed) command output
+// when the remote command exited non-zero, so callers can parse machine lines.
+// A non-zero exit surfaces as *remoteStepError carrying only the status.
+func runAgentInstallStepDetailed(ctx context.Context, conn AgentInstallConn, command string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", errors.New("agent install cancelled")
 	}
@@ -209,6 +230,9 @@ func runAgentInstallStep(ctx context.Context, conn AgentInstallConn, command str
 	defer cancel()
 	output, err := conn.Run(stepCtx, command)
 	if err != nil {
+		if status, ok := remoteExitStatus(err); ok {
+			return output, &remoteStepError{status: status}
+		}
 		return "", errors.New("remote agent step failed")
 	}
 	return output, nil

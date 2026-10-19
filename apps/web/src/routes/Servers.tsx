@@ -1,4 +1,5 @@
 import { useT } from "@/i18n";
+import { agentInstallFailureText } from "@/lib/agentJobs/failureText";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Settings, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
@@ -371,7 +372,7 @@ function AgentInstallControl({
       </Button>
       {active && !open && <span role="status" className="text-xs text-muted">{t("servers.agentInstallContinues")}</span>}
       {visibleJob?.status === "succeeded" && <span role="status" className="text-xs text-ok">{t("servers.agentInstallSuccessUnverified")}</span>}
-      {visibleJob?.status === "failed" && <span role="alert" className="text-xs text-bad">{t("servers.agentInstallFailedCheckHost")}</span>}
+      {visibleJob?.status === "failed" && <span role="alert" className="text-xs text-bad">{agentInstallFailureText(visibleJob, t) ?? t("servers.agentInstallFailedCheckHost")}</span>}
       {otherOperationActive && <span role="status" className="text-xs text-muted">{t("servers.agentUpdateSSHBusy")}</span>}
       <AgentInstallDialog server={server} open={open} onClose={() => setOpen(false)} job={visibleJob} onJob={updateJob} otherOperationActive={otherOperationActive} onStart={onStart} onFailure={onFailure} />
     </>
@@ -1082,14 +1083,14 @@ function AgentInstallDialog({
           {snapshot?.status === "failed" && (
             <div className="flex flex-col gap-3">
               <p role="alert" className="rounded-m3-lg bg-bad/10 p-3 text-sm text-bad font-medium">
-                {snapshot.message && (
+                {agentInstallFailureText(snapshot, t) ?? (snapshot.message && (
                   snapshot.message.toLowerCase().includes("auth failed") ||
                   snapshot.message.toLowerCase().includes("authentication failed") ||
                   snapshot.message.toLowerCase().includes("invalid password") ||
                   snapshot.message.toLowerCase().includes("unable to authenticate")
                 )
                   ? "Error de contraseña o autenticación SSH. Verificá la contraseña ingresada y volvé a intentar."
-                  : (snapshot.message || t("servers.agentInstallFailedCheckHost"))}
+                  : (snapshot.message || t("servers.agentInstallFailedCheckHost")))}
               </p>
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <Button

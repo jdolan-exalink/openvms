@@ -26,7 +26,21 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/grpctls"
 )
 
+// runVersionFlag prints the build version and reports true when the arguments ask for it.
+// It runs before anything reads the token or opens a listener, so the install preflight can
+// query an agent binary without starting it.
+func runVersionFlag(args []string, out io.Writer) bool {
+	if len(args) != 1 || (args[0] != "--version" && args[0] != "-version" && args[0] != "version") {
+		return false
+	}
+	_, _ = fmt.Fprintln(out, buildinfo.Version)
+	return true
+}
+
 func main() {
+	if runVersionFlag(os.Args[1:], os.Stdout) {
+		return
+	}
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	token, err := os.ReadFile(env("OPENVMS_AGENT_TOKEN_FILE", "/etc/openvms/agent.token"))
 	if err != nil {
