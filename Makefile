@@ -19,6 +19,10 @@ help: ## List targets
 up: ## Build and start the full stack in Docker (web on http://localhost:8000)
 	VERSION=$(VERSION) AGENT_VERSION=$(AGENT_VERSION) docker compose up -d --build
 
+.PHONY: install
+install: ## First install: check Docker + Compose v2, create .env with random secrets, build, up, wait for health (deploy/install.sh)
+	./deploy/install.sh
+
 .PHONY: deploy
 deploy: ## Deploy the local stack: preflight, DB dump, rollback tags, build, up, health check (deploy/deploy.sh)
 	./deploy/deploy.sh
