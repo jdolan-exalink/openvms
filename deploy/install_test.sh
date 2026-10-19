@@ -11,7 +11,7 @@ fail() { echo "FAIL: $1"; fails=$((fails + 1)); }
 export STUB_LOG="$tmp/log"
 mkdir "$tmp/bin"
 # docker: logs every call. STUB_NO_V2=1 makes `docker compose version` fail,
-# STUB_DAEMON_DOWN=1 makes `docker info` fail, STUB_VOLUMES lists volume names.
+# STUB_DAEMON_DOWN=1 makes `docker info` fail.
 cat >"$tmp/bin/docker" <<'STUB'
 #!/bin/sh
 echo "docker $*" >>"$STUB_LOG"
@@ -20,7 +20,6 @@ case "$*" in
   "compose version") [ -z "${STUB_NO_V2:-}" ] || exit 1; echo "${STUB_COMPOSE_VERSION:-Docker Compose version v2.29.1}" ;;
   "compose port web 443") echo "0.0.0.0:9443" ;;
   "compose port web 80") echo "0.0.0.0:9080" ;;
-  "volume ls"*) [ -z "${STUB_VOLUMES:-}" ] || printf '%s\n' $STUB_VOLUMES ;;
 esac
 exit 0
 STUB
@@ -120,11 +119,11 @@ out=$(run "$tmp/to" STUB_CURL_FAIL=1); rc=$?
 [ "$rc" -ne 0 ] || fail "timeout: expected failure"
 grep -qF 'docker compose logs --tail 50 api' "$STUB_LOG" || fail "timeout: api logs not shown"
 
-# 7. Existing postgres volume warns about the password.
-mkroot "$tmp/vol"
-out=$(run "$tmp/vol" STUB_VOLUMES="openvms_postgres_data"); rc=$?
-[ "$rc" -eq 0 ] || fail "volume: expected exit 0: $out"
-printf '%s\n' "$out" | grep -qi 'volume.*password\|password.*volume' || fail "volume: warning missing"
+# 7. Existing bind-mounted postgres data warns that changing the password does not re-key it.
+mkroot "$tmp/pgdata"; mkdir -p "$tmp/pgdata/custom"; printf data >"$tmp/pgdata/custom/PG_VERSION"
+out=$(run "$tmp/pgdata" OPENVMS_POSTGRES_DATA_DIR="$tmp/pgdata/custom"); rc=$?
+[ "$rc" -eq 0 ] || fail "postgres data dir: expected exit 0: $out"
+printf '%s\n' "$out" | grep -qi 'postgres.*data.*password\|password.*postgres.*data' || fail "postgres data dir: warning missing"
 
 # 8. Dry run mutates nothing.
 mkroot "$tmp/dry"; : >"$STUB_LOG"

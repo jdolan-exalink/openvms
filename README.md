@@ -55,6 +55,20 @@ La contraseña del primer administrador se pasa así, en la misma línea: `make 
 
 **Guarde `OPENVMS_MASTER_KEY` fuera del servidor**: sin ella no se pueden leer las credenciales cifradas de los Frigate.
 
+### Almacenamiento persistente
+
+Compose guarda los datos persistentes en directorios del host. Los valores predeterminados son `./data/postgres` para PostgreSQL y `/mnt/cctv/openvms` para el resto; configure estos valores en el entorno privado del operador antes de ejecutar Compose:
+
+```bash
+export OPENVMS_POSTGRES_DATA_DIR=/srv/openvms/postgres
+export OPENVMS_DATA_DIR=/srv/openvms
+docker compose up -d
+```
+
+`OPENVMS_DATA_DIR` contiene subdirectorios `nats`, `seaweedfs`, `exports`, `waha`, `caddy` y `web-tls`. API y worker comparten el mismo directorio `exports`. El usuario del daemon de Docker debe poder escribir en los directorios de datos; asegure permisos y espacio disponible en el host antes de iniciar.
+
+El cambio de volúmenes nombrados a directorios bind **no migra datos**: Compose crea/usa directorios nuevos y PostgreSQL puede inicializar una base vacía. Los volúmenes nombrados anteriores quedan intactos y no se eliminan. Si necesita conservar datos, detenga la aplicación y planifique una copia/migración explícita antes de cambiar las rutas. Un directorio PostgreSQL existente conserva sus credenciales; cambiar `POSTGRES_PASSWORD` no vuelve a cifrar ni modifica la contraseña de una base ya inicializada. Para un reinicio deliberado, respalde primero y vacíe únicamente el directorio configurado después de confirmar su contenido.
+
 ### Primer acceso
 
 Al arrancar, la API crea sola el administrador de plataforma si la instalación no tiene ningún usuario de plataforma, y una organización con un sitio si no existe ninguna.
