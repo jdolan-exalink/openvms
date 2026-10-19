@@ -26,7 +26,7 @@ On 2026-10-19, the user added the home server at `10.1.1.60`. OpenVMS did not sh
 
 ## Progress
 - 2026-10-19: Created on `feat/automatic-agent-discovery`; mapping confirmed that `/api/v1/servers/{id}/agent` only recognizes this OpenVMS's `server_agents` row, while install preflight refuses any existing service (exit 27). No remote host was contacted.
-- 2026-10-19: AGD-01 implemented in `internal/provision/agent_discovery.go`; focused tests cover strict output parsing, transport-error redaction, and a read-only SSH command that excludes upload/service mutation. Verified with provision/API tests, repository golangci-lint, and web typecheck. Commit: pending.
+- 2026-10-19: AGD-01 implemented in `internal/provision/agent_discovery.go`; focused tests cover strict output parsing, transport-error redaction, and a read-only SSH command that excludes upload/service mutation. Verified with provision/API tests, repository golangci-lint, and web typecheck. Work-unit commit: `cf2f49e14b0c1871f8c6cfac53826a655be240e3` (`feat(provision): discover remote agent status read-only`).
 
 ## Next step
 Implement AGD-02 with strict TDD; then verify and record a local work-unit commit.
