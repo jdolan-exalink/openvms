@@ -514,13 +514,47 @@ func TestComposeWebTLSUsesPersistentGeneratedCertificateVolumeAndConfiguredSANs(
 		t.Fatal(err)
 	}
 	text := string(compose)
-	for _, required := range []string{"OPENVMS_HTTPS_SANS", "openvms-web-tls:/var/lib/openvms/tls", "OPENVMS_WEB_TLS_CERT_HOST_FILE", "OPENVMS_WEB_TLS_KEY_HOST_FILE"} {
+	for _, required := range []string{"OPENVMS_HTTPS_SANS", "${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/web-tls:/var/lib/openvms/tls", "OPENVMS_WEB_TLS_CERT_HOST_FILE", "OPENVMS_WEB_TLS_KEY_HOST_FILE"} {
 		if !strings.Contains(text, required) {
 			t.Errorf("compose must preserve automatic TLS/SAN and external certificate support, missing %q", required)
 		}
 	}
 	if strings.Contains(text, "create_host_path: false") && strings.Contains(text, "OPENVMS_WEB_TLS_CERT_HOST_FILE") {
 		t.Fatal("fresh deployment must not fail because optional external certificate files are absent")
+	}
+}
+
+func TestComposePersistentStateUsesConfigurableBindDirectories(t *testing.T) {
+	compose, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(compose)
+	for _, required := range []string{
+		"${OPENVMS_POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data",
+		"${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/nats:/data",
+		"${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/seaweedfs:/data",
+		"${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports:/mnt/openvms/exports",
+		"${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/waha:/app/.sessions",
+		"${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/caddy:/data",
+		"${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/web-tls:/var/lib/openvms/tls",
+	} {
+		if !strings.Contains(text, required) {
+			t.Errorf("compose must use persistent bind directory %q", required)
+		}
+	}
+	if strings.Contains(text, "postgres:/var/lib/postgresql/data") || strings.Contains(text, "- exports:/mnt/openvms/exports") {
+		t.Fatal("persistent application state must not use named volumes")
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(compose, &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := document["volumes"]; ok {
+		t.Fatal("central Compose file must not declare persistent named volumes")
+	}
+	if strings.Count(text, "${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports:/mnt/openvms/exports") != 2 {
+		t.Fatal("API and worker must continue sharing the same exports host directory")
 	}
 }
 

@@ -106,8 +106,9 @@ else
   info "created .env (mode 0600) with a generated OPENVMS_MASTER_KEY and POSTGRES_PASSWORD (not printed)"
   info "back up OPENVMS_MASTER_KEY: encrypted data cannot be recovered without it"
 fi
-if [ "$DRY" != 1 ] && docker volume ls --format '{{.Name}}' 2>/dev/null | grep -q 'postgres'; then
-  warn "a postgres volume already exists: it keeps the password it was created with, and changing POSTGRES_PASSWORD does not re-key the database"
+POSTGRES_DATA_DIR=${OPENVMS_POSTGRES_DATA_DIR:-./data/postgres}
+if [ -d "$POSTGRES_DATA_DIR" ] && [ -n "$(find "$POSTGRES_DATA_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+  warn "postgres data already exists in $POSTGRES_DATA_DIR: it keeps the password it was created with, and changing POSTGRES_PASSWORD does not re-key the database"
 fi
 
 # --- 3. Build and up --------------------------------------------------------

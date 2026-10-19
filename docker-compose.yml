@@ -39,7 +39,7 @@ services:
       POSTGRES_USER: openvms
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openvms}
     ports: ["127.0.0.1:5432:5432"]
-    volumes: [postgres:/var/lib/postgresql/data]
+    volumes: ["${OPENVMS_POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openvms -d openvms"]
       interval: 5s
@@ -59,7 +59,7 @@ services:
     image: nats:2.11-alpine
     command: ["-js", "-sd", "/data", "-m", "8222"]
     ports: ["127.0.0.1:4222:4222", "127.0.0.1:8222:8222"]
-    volumes: [nats:/data]
+    volumes: ["${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/nats:/data"]
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz?js-enabled-only=true"]
       interval: 5s
@@ -71,7 +71,7 @@ services:
     command: ["server", "-dir=/data", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-ip.bind=0.0.0.0"]
     ports: ["127.0.0.1:8333:8333"]
     volumes:
-      - seaweedfs:/data
+      - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/seaweedfs:/data
       - ./deploy/seaweedfs/s3.json:/etc/seaweedfs/s3.json:ro
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz"]
@@ -131,7 +131,7 @@ services:
       - /proc:/host/proc:ro
       - /sys/class/drm:/host/drm:ro
       - /:/hostfs:ro
-      - exports:/mnt/openvms/exports
+      - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports:/mnt/openvms/exports
     depends_on:
       postgres: { condition: service_healthy }
       valkey: { condition: service_healthy }
@@ -182,7 +182,7 @@ services:
       <<: *go-env
       HTTP_ADDR: ":8081"
     volumes:
-      - exports:/mnt/openvms/exports
+      - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports:/mnt/openvms/exports
     depends_on:
       api: { condition: service_started }
     restart: unless-stopped
@@ -197,7 +197,7 @@ services:
       WAHA_API_KEY: ${WAHA_API_KEY:-openvms-dev-waha-key}
       WHATSAPP_DEFAULT_ENGINE: NOWEB
       WHATSAPP_START_SESSION: default
-    volumes: [waha:/app/.sessions]
+    volumes: ["${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/waha:/app/.sessions"]
     expose: ["3000"]
     restart: unless-stopped
 
@@ -217,8 +217,8 @@ services:
     ports: ["${WEB_PORT:-8000}:80", "${WEB_HTTPS_PORT:-8443}:443"]
     depends_on: [api]
     volumes:
-      - caddy:/data
-      - openvms-web-tls:/var/lib/openvms/tls
+      - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/caddy:/data
+      - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/web-tls:/var/lib/openvms/tls
       - type: bind
         source: ${OPENVMS_WEB_TLS_CERT_HOST_FILE:-./deploy/docker/local-tls/tls.crt}
         target: /etc/caddy/tls.crt
@@ -259,12 +259,3 @@ networks:
     ipam:
       config:
         - subnet: ${OPENVMS_AGENT_SUBNET:-172.29.240.0/24}
-
-volumes:
-  postgres:
-  nats:
-  seaweedfs:
-  caddy:
-  openvms-web-tls:
-  waha:
-  exports:
