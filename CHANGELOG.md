@@ -13,7 +13,7 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 ## [0.4.0] - 2026-10-19
 
 Versioning restarts at 0.4.0. The earlier GitHub release `v0.3.0` (2026-10-15) stays as
-history. This entry summarizes the work merged since that release (PRs #62 to #102).
+history. This entry summarizes the work merged since that release (PRs #62 to #105).
 
 ### Added
 
@@ -38,6 +38,9 @@ history. This entry summarizes the work merged since that release (PRs #62 to #1
 - Operations: `make install` (Docker and Compose v2 check, generated secrets, health wait),
   `make deploy` (backup, rollback tags, health check) and `make rollback`.
 - Export and import of live view presentations.
+- `.env.example` documents every variable `docker-compose.yml` reads, including the
+  previously missing `OPENVMS_MASTER_KEY`, and `scripts/update-env-example.sh` regenerates
+  it and adds missing variables to an existing `.env` without touching its values.
 - Agent installation over SSH detects an agent that is already installed, reports its
   version against the one this OpenVMS ships (up to date / outdated) and points to the
   update flow, without overwriting it.
