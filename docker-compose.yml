@@ -83,6 +83,12 @@ services:
     image: eclipse-mosquitto:2
     ports: ["127.0.0.1:1883:1883"]
     volumes: [./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro]
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/#' -C 1 -W 3 >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
 
   frigate-helvecia:
@@ -95,7 +101,8 @@ services:
       MOCK_MQTT_URL: tcp://mosquitto:1883
       MOCK_PASSWORD: helvecia-dev
     ports: ["127.0.0.1:18971:8971"]
-    depends_on: [mosquitto]
+    depends_on:
+      mosquitto: { condition: service_healthy }
 
   frigate-cayasta:
     profiles: [mock]
@@ -107,7 +114,8 @@ services:
       MOCK_MQTT_URL: tcp://mosquitto:1883
       MOCK_PASSWORD: cayasta-dev
     ports: ["127.0.0.1:28971:8971"]
-    depends_on: [mosquitto]
+    depends_on:
+      mosquitto: { condition: service_healthy }
 
   api:
     build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: api, VERSION: "${VERSION:-dev}", COMMIT: "${COMMIT:-unknown}", BUILD_TIME: "${BUILD_TIME:-unknown}", AGENT_VERSION: "${AGENT_VERSION:-0.2.2}" } }
@@ -194,7 +202,7 @@ services:
     restart: unless-stopped
 
   web:
-    build: { context: ., dockerfile: deploy/docker/web.Dockerfile }
+    build: { context: ., dockerfile: deploy/docker/web.Dockerfile, args: { VERSION: "${VERSION:-dev}", COMMIT: "${COMMIT:-unknown}", BUILD_TIME: "${BUILD_TIME:-unknown}" } }
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
       HTTPS_SITE_ADDRESS: ${OPENVMS_HTTPS_SITE_IPV4:-:443}

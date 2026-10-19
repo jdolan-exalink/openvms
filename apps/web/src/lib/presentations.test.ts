@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_PRESENTATIONS, divisionName, gridSegments, loadCatalog, panesCover, presentationForCount, saveCatalog, toggleSegment, uniformPanes } from "./presentations";
+import { DEFAULT_PRESENTATIONS, divisionName, exportPresentations, gridSegments, importPresentations, loadCatalog, panesCover, presentationForCount, saveCatalog, toggleSegment, uniformPanes, uniformPresentation, type Presentation } from "./presentations";
 
 describe("presentations", () => {
   it("names one pane in the singular", () => {
@@ -61,5 +61,53 @@ describe("presentations", () => {
     expect(presentationForCount(DEFAULT_PRESENTATIONS, 10).name).toBe("4×4");
     expect(presentationForCount(DEFAULT_PRESENTATIONS, 30).name).toBe("6×6");
     expect(presentationForCount(DEFAULT_PRESENTATIONS, 40).name).toBe("8×6");
+  });
+});
+
+describe("presentation export and import", () => {
+  const custom = (id: string, name: string): Presentation => ({ ...uniformPresentation(2, 2, id), name, builtin: false });
+
+  it("exports only the custom presentations", () => {
+    const text = exportPresentations([...DEFAULT_PRESENTATIONS, custom("c-1", "Plaza")]);
+    const parsed = JSON.parse(text) as { presentations: Presentation[] };
+    expect(parsed.presentations.map((item) => item.id)).toEqual(["c-1"]);
+    expect(parsed.presentations[0]).toMatchObject({ name: "Plaza", columns: 2, rows: 2 });
+  });
+
+  it("round-trips an export into an empty catalog", () => {
+    const text = exportPresentations([custom("c-1", "Plaza"), custom("c-2", "Acceso")]);
+    const result = importPresentations(DEFAULT_PRESENTATIONS, text);
+    expect(result).toMatchObject({ imported: 2, rejected: 0 });
+    expect(result?.catalog.filter((item) => !item.builtin).map((item) => item.name)).toEqual(["Plaza", "Acceso"]);
+    expect(result?.catalog.slice(0, DEFAULT_PRESENTATIONS.length)).toEqual(DEFAULT_PRESENTATIONS);
+  });
+
+  it("replaces a custom presentation that has the same id", () => {
+    const text = exportPresentations([custom("c-1", "Nueva")]);
+    const result = importPresentations([...DEFAULT_PRESENTATIONS, custom("c-1", "Vieja"), custom("c-9", "Otra")], text);
+    expect(result?.imported).toBe(1);
+    expect(result?.catalog.filter((item) => !item.builtin).map((item) => item.name)).toEqual(["Nueva", "Otra"]);
+  });
+
+  it("rejects items that collide with a standard id or do not cover the grid, and keeps the valid ones", () => {
+    const text = JSON.stringify({
+      format: "openvms.presentations",
+      version: 1,
+      presentations: [
+        { ...custom("p1", "Pisa estándar") },
+        { id: "bad", name: "Rota", columns: 2, rows: 2, panes: [{ col: 0, row: 0, colSpan: 1, rowSpan: 1 }] },
+        42,
+        custom("ok", "Buena"),
+      ],
+    });
+    const result = importPresentations(DEFAULT_PRESENTATIONS, text);
+    expect(result).toMatchObject({ imported: 1, rejected: 3 });
+    expect(result?.catalog.filter((item) => !item.builtin).map((item) => item.id)).toEqual(["ok"]);
+  });
+
+  it("accepts a bare array and returns null for text that is not a presentations file", () => {
+    expect(importPresentations(DEFAULT_PRESENTATIONS, JSON.stringify([custom("c-1", "Plaza")]))?.imported).toBe(1);
+    expect(importPresentations(DEFAULT_PRESENTATIONS, "not json")).toBeNull();
+    expect(importPresentations(DEFAULT_PRESENTATIONS, JSON.stringify({ hello: 1 }))).toBeNull();
   });
 });
