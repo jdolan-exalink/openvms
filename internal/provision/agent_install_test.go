@@ -30,6 +30,7 @@ type fakeAgentInstallConn struct {
 	modes           map[string]os.FileMode
 	runErrAt        string
 	runErr          error
+	runErrOutput    string
 	preflightOutput string
 	writeErr        error
 	writes          int
@@ -38,6 +39,9 @@ type fakeAgentInstallConn struct {
 func (f *fakeAgentInstallConn) Run(_ context.Context, command string) (string, error) {
 	f.commands = append(f.commands, command)
 	if f.runErrAt != "" && strings.Contains(command, f.runErrAt) {
+		if f.runErrOutput != "" {
+			return f.runErrOutput, f.runErr
+		}
 		return "remote leaked detail", f.runErr
 	}
 	if strings.Contains(command, "openvms_install_preflight") {

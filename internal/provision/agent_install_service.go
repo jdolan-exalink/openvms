@@ -73,6 +73,8 @@ type AgentInstallJob struct {
 	Status  string    `json:"status"`
 	Stage   string    `json:"stage"`
 	Message string    `json:"message,omitempty"`
+	// Code is a stable machine-readable failure reason (see AgentInstallCode*).
+	Code string `json:"code,omitempty"`
 }
 
 func (job AgentInstallJob) String() string {
@@ -93,6 +95,12 @@ func (job *agentInstallJob) update(status, stage, message string) {
 	job.mu.Lock()
 	defer job.mu.Unlock()
 	job.snapshot.Status, job.snapshot.Stage, job.snapshot.Message = status, stage, message
+	job.updatedAt = time.Now()
+}
+func (job *agentInstallJob) fail(code, message string) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.snapshot.Status, job.snapshot.Stage, job.snapshot.Message, job.snapshot.Code = "failed", "failed", message, code
 	job.updatedAt = time.Now()
 }
 func (job *agentInstallJob) read() AgentInstallJob {
@@ -283,14 +291,7 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		}
 	}
 	if err := run(ctx, request, func(stage string) { job.update("running", stage, installStageMessage(stage)) }); err != nil {
-		errLower := strings.ToLower(err.Error())
-		if strings.Contains(errLower, "auth") || strings.Contains(errLower, "password") {
-			job.update("failed", "failed", "SSH authentication failed: invalid password or credentials")
-		} else if strings.Contains(errLower, "connection") {
-			job.update("failed", "failed", "Could not establish SSH. Verify reachability and root SSH access, then inspect the target before retrying.")
-		} else {
-			job.update("failed", "failed", "Agent installation failed; remote output was not retained")
-		}
+		s.failInstallJob(job, request.Host, err)
 		return
 	}
 	job.update("running", "registering", "Registering encrypted agent credentials and TLS trust")
@@ -307,6 +308,31 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		// #nosec G118 -- background task outlives caller request context
 		go s.OnAgentInstalled(context.WithoutCancel(ctx), actor, job.serverID)
 	}
+}
+
+// failInstallJob publishes the operator-facing reason for a failed install and always
+// logs the underlying error. Only the host, server id, stage, code and exit status are
+// logged: never the password, token, key material or remote output.
+func (s *Service) failInstallJob(job *agentInstallJob, host string, err error) {
+	var failure *AgentInstallFailure
+	if errors.As(err, &failure) {
+		message, _ := agentInstallFailureMessage(failure, "", false)
+		job.fail(failure.Code, message)
+		s.logger().Warn("agent install failed", "host", host, "server_id", job.serverID, "stage", failure.Stage, "code", failure.Code, "exit_status", failure.ExitStatus)
+		return
+	}
+	errLower := strings.ToLower(err.Error())
+	failure = &AgentInstallFailure{Stage: "unknown"}
+	switch {
+	case strings.Contains(errLower, "auth") || strings.Contains(errLower, "password"):
+		failure.Code = AgentInstallCodeSSHAuthFailed
+	case strings.Contains(errLower, "connection"):
+		failure.Code = AgentInstallCodeSSHConnectFailed
+	}
+	message, _ := agentInstallFailureMessage(failure, "", false)
+	job.fail(failure.Code, message)
+	// An untyped error is not guaranteed to be free of secrets, so only its type is logged.
+	s.logger().Warn("agent install failed", "host", host, "server_id", job.serverID, "stage", failure.Stage, "code", failure.Code, "error_type", fmt.Sprintf("%T", err))
 }
 
 func installStageMessage(stage string) string {
@@ -548,14 +574,21 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 	if err != nil {
 		errLower := strings.ToLower(err.Error())
 		if strings.Contains(errLower, "unable to authenticate") || strings.Contains(errLower, "password") || strings.Contains(errLower, "auth") {
-			return errors.New("agent install SSH authentication failed: invalid password")
+			return &AgentInstallFailure{Code: AgentInstallCodeSSHAuthFailed, Stage: agentInstallStageConnecting}
 		}
-		return errors.New("agent install SSH connection failed")
+		return &AgentInstallFailure{Code: AgentInstallCodeSSHConnectFailed, Stage: agentInstallStageConnecting}
 	}
 	defer conn.Close()
-	preflight, err := runAgentInstallStep(installCtx, conn, agentInstallPreflight())
-	if err != nil || !validAgentInstallPreflight(preflight) {
-		return errors.New("agent install preflight failed")
+	preflight, err := runAgentInstallStepDetailed(installCtx, conn, agentInstallPreflight())
+	if err != nil {
+		var exit *remoteStepError
+		if errors.As(err, &exit) {
+			return preflightFailure(exit.status)
+		}
+		return &AgentInstallFailure{Code: AgentInstallCodePreflightFailed, Stage: agentInstallStagePreflight}
+	}
+	if !validAgentInstallPreflight(preflight) {
+		return &AgentInstallFailure{Code: AgentInstallCodePreflightFailed, Stage: agentInstallStagePreflight}
 	}
 	files, err := agentInstallFiles(request)
 	if err != nil {
@@ -572,7 +605,7 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 		err = conn.WriteSFTPFile(fileCtx, file.path, file.mode, file.data)
 		fileCancel()
 		if err != nil {
-			return errors.New("agent install file transfer failed")
+			return &AgentInstallFailure{Code: AgentInstallCodeTransferFailed, Stage: agentInstallStageTransferring}
 		}
 	}
 	if progress != nil {
@@ -580,7 +613,7 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 	}
 	activation, err := runAgentInstallStep(installCtx, conn, agentInstallActivate)
 	if err != nil || strings.TrimSpace(activation) != "openvms_agent_install=active" {
-		return errors.New("agent install activation failed")
+		return &AgentInstallFailure{Code: AgentInstallCodeActivationFailed, Stage: agentInstallStageActivating}
 	}
 	return nil
 }

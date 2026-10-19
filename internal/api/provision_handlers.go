@@ -144,6 +144,10 @@ func serverAgentInstallJob(in provision.AgentInstallJob) gen.ServerAgentInstallJ
 		message := in.Message
 		out.Message = &message
 	}
+	if in.Code != "" {
+		code := gen.ServerAgentInstallJobCode(in.Code)
+		out.Code = &code
+	}
 	return out
 }
 

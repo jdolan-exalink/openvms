@@ -115,6 +115,39 @@ describe("AgentJobStatusRegion", () => {
     expect(container.querySelectorAll("[data-agent-job-notice]")).toHaveLength(1);
   });
 
+  it.each([
+    ["en", "not_root", "SSH user is not root"],
+    ["es", "unsupported_os", "sistema operativo no compatible"],
+    ["pt", "systemd_required", "systemd"],
+    ["en", "agent_files_present", "agent files are already present"],
+    ["en", "agent_already_installed", "An OpenVMS agent is already installed"],
+    ["en", "transfer_failed", "could not be transferred"],
+  ])("shows the localized reason for failure code %s/%s", async (locale, code, text) => {
+    setLocale(locale);
+    const { container } = renderJobShell(json({
+      ...queuedInstall,
+      status: "failed",
+      stage: "failed",
+      code,
+      message: "root-secret password and remote trace",
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start tracking job" }));
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(new RegExp(text, "i"));
+    expect(container).not.toHaveTextContent("root-secret");
+  });
+
+  it("ignores an unknown failure code and keeps the generic failure", async () => {
+    setLocale("en");
+    renderJobShell(json({ ...queuedInstall, status: "failed", stage: "failed", code: "rm -rf" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start tracking job" }));
+
+    expect(await screen.findByText("Agent installation failed.")).toBeInTheDocument();
+  });
+
   it.each([401, 403, 404])("shows unknown for an unavailable job after HTTP %s without announcing success or failure", async (status) => {
     setLocale("en");
     const { container } = renderJobShell(json({ code: "unavailable", message: "root-secret" }, status));

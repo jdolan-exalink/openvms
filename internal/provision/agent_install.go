@@ -202,6 +202,17 @@ systemctl is-active --quiet openvms-agent.service >/dev/null 2>&1
 printf 'openvms_agent_install=active\n'`
 
 func runAgentInstallStep(ctx context.Context, conn AgentInstallConn, command string) (string, error) {
+	output, err := runAgentInstallStepDetailed(ctx, conn, command)
+	if err != nil {
+		return "", err
+	}
+	return output, nil
+}
+
+// runAgentInstallStepDetailed also returns the (already scrubbed) command output
+// when the remote command exited non-zero, so callers can parse machine lines.
+// A non-zero exit surfaces as *remoteStepError carrying only the status.
+func runAgentInstallStepDetailed(ctx context.Context, conn AgentInstallConn, command string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", errors.New("agent install cancelled")
 	}
@@ -209,6 +220,9 @@ func runAgentInstallStep(ctx context.Context, conn AgentInstallConn, command str
 	defer cancel()
 	output, err := conn.Run(stepCtx, command)
 	if err != nil {
+		if status, ok := remoteExitStatus(err); ok {
+			return output, &remoteStepError{status: status}
+		}
 		return "", errors.New("remote agent step failed")
 	}
 	return output, nil

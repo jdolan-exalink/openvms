@@ -3666,6 +3666,11 @@ export interface components {
             /** @enum {string} */
             stage: "validating" | "connecting" | "transferring" | "activating" | "registering" | "complete" | "failed";
             message?: string;
+            /**
+             * @description Stable machine-readable failure reason of a failed install; clients localize it instead of showing message.
+             * @enum {string}
+             */
+            code?: "not_root" | "unsupported_os" | "unsupported_architecture" | "agent_files_present" | "systemd_required" | "agent_already_installed" | "preflight_failed" | "transfer_failed" | "activation_failed" | "ssh_auth_failed" | "ssh_connection_failed";
         };
         ServerAgentTLSConfig: {
             secure_port: number;

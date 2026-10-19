@@ -4834,6 +4834,10 @@ components:
         status: { type: string, enum: [queued, running, succeeded, failed] }
         stage: { type: string, enum: [validating, connecting, transferring, activating, registering, complete, failed] }
         message: { type: string, maxLength: 200 }
+        code:
+          type: string
+          description: Stable machine-readable failure reason of a failed install; clients localize it instead of showing message.
+          enum: [not_root, unsupported_os, unsupported_architecture, agent_files_present, systemd_required, agent_already_installed, preflight_failed, transfer_failed, activation_failed, ssh_auth_failed, ssh_connection_failed]
     ServerAgentTLSConfig:
       type: object
       additionalProperties: false

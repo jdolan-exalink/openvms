@@ -1,4 +1,5 @@
 import { useT } from "@/i18n";
+import { agentInstallFailureText } from "@/lib/agentJobs/failureText";
 import { useAgentJobs, type TrackedAgentJob } from "@/lib/agentJobs/AgentJobProvider";
 
 function operationLabel(entry: TrackedAgentJob, t: ReturnType<typeof useT>) {
@@ -49,7 +50,7 @@ export function AgentJobStatusRegion() {
       const succeeded = entry.job.status === "succeeded";
       const message = succeeded
         ? entry.kind === "install" ? t("servers.agentJobInstallSucceeded") : t("servers.agentJobUpdateSucceeded")
-        : entry.kind === "install" ? t("servers.agentJobInstallFailed") : t("servers.agentJobUpdateFailed");
+        : entry.kind === "install" ? agentInstallFailureText(entry.job, t) ?? t("servers.agentJobInstallFailed") : t("servers.agentJobUpdateFailed");
       return <div key={jobIdentity(entry)} data-agent-job-notice={jobIdentity(entry)} role={succeeded ? "status" : "alert"} aria-live={succeeded ? "polite" : "assertive"} className={`rounded-m3-lg border px-4 py-3 text-sm ${succeeded ? "border-ok/40 bg-ok/10" : "border-bad/40 bg-bad/10"}`}>
         <span className="font-semibold">{operationLabel(entry, t)}</span>
         <span className="mx-2 text-muted">·</span>
