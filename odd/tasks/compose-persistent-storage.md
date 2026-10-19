@@ -22,7 +22,7 @@ The initial admin password is only used when PostgreSQL is initialized without a
 - Delivery strategy: `ask-on-risk`; estimate one cohesive work unit and split only if a substantive boundary requires it.
 
 ## Tasks
-- [x] STOR-01 — Replace central Compose persistent named volumes with configurable host bind paths; preserve service-specific data directories; adjust installer warnings/tests for bind-mounted PostgreSQL; add/update storage documentation and Compose contract coverage. Route: delegated direct (mapping trigger: behavior spans Compose, install scripts/tests, and docs; writer trigger: multiple non-trivial files). Commit: pending final hash.
+- [x] STOR-01 — Replace central Compose persistent named volumes with configurable host bind paths; preserve service-specific data directories; adjust installer warnings/tests for bind-mounted PostgreSQL; add/update storage documentation and Compose contract coverage. Route: delegated direct (mapping trigger: behavior spans Compose, install scripts/tests, and docs; writer trigger: multiple non-trivial files). Commit: `1f1c3c6`.
 
 ## Acceptance criteria
 - PostgreSQL writes to the configurable project-local data path by default.
@@ -40,4 +40,4 @@ The initial admin password is only used when PostgreSQL is initialized without a
 - Route: delegated direct. Rollback boundary: revert the STOR-01 work-unit commit to restore named volumes, installer volume warning, and prior documentation/tests.
 
 ## Next step
-Record the work-unit commit hash here and in the Engram mirror.
+No remaining STOR-01 implementation work. Host ownership/space and any deliberate migration from previous named volumes remain operator responsibilities.
