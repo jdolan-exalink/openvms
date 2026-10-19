@@ -3670,7 +3670,7 @@ export interface components {
              * @description Stable machine-readable failure reason of a failed install; clients localize it instead of showing message.
              * @enum {string}
              */
-            code?: "not_root" | "unsupported_os" | "unsupported_architecture" | "agent_files_present" | "systemd_required" | "agent_already_installed" | "preflight_failed" | "transfer_failed" | "activation_failed" | "ssh_auth_failed" | "ssh_connection_failed";
+            code?: "not_root" | "unsupported_os" | "unsupported_architecture" | "agent_files_present" | "systemd_required" | "agent_already_installed" | "preflight_failed" | "transfer_failed" | "activation_failed" | "registration_failed" | "ssh_auth_failed" | "ssh_connection_failed";
             /** @description Version of the agent already present on the host */
             installed_version?: string;
             /** @description Agent version this OpenVMS ships */

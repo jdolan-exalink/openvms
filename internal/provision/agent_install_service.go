@@ -190,7 +190,7 @@ func (s *Service) StartServerAgentInstall(ctx context.Context, actor authz.Actor
 		return AgentInstallJob{}, errors.New("could not prepare agent TLS trust")
 	}
 
-	request := AgentInstallRequest{Host: in.Host, Port: in.Port, User: "root", Password: in.Password, Binary: binary, Token: token, TLSListen: net.JoinHostPort("0.0.0.0", fmt.Sprint(agentInstallHTTPSPort)), TLSCertificate: certificate, TLSPrivateKey: privateKey}
+	request := AgentInstallRequest{Host: in.Host, Port: in.Port, User: "root", Password: in.Password, Binary: binary, BundledVersion: s.bundledAgentVersion(), Token: token, TLSListen: net.JoinHostPort("0.0.0.0", fmt.Sprint(agentInstallHTTPSPort)), TLSCertificate: certificate, TLSPrivateKey: privateKey}
 	request.hostKeyTrust = func(ctx context.Context, fingerprint string) error {
 		return s.trustAgentSSHHostKey(ctx, actor, serverID, in.Host, in.Port, fingerprint)
 	}
@@ -289,7 +289,9 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 	// With the agent listener configured, the agent is enrolled for mutual TLS: a one-time token
 	// is created for this server now, as close to its use as possible (it lives 15 minutes), and
 	// written to the host with the settings. Without that configuration nothing changes.
+	var enrollmentIssuedAt time.Time
 	if s.AgentMTLS != nil && s.NewEnrollToken != nil {
+		enrollmentIssuedAt = time.Now()
 		enrollToken, err := s.NewEnrollToken(ctx, actor, job.serverID)
 		if err != nil {
 			s.logger().Warn("agent install: enrollment token not created", "server_id", job.serverID, "error", err)
@@ -312,6 +314,27 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		s.failInstallJob(ctx, actor, job, request.Host, err)
 		return
 	}
+	if request.MTLS != nil {
+		job.update("running", "registering", "Verifying fresh agent enrollment and HTTPS health")
+		enrollmentCheck := s.agentInstallEnrollmentCheck
+		if enrollmentCheck == nil {
+			enrollmentCheck = s.waitForFreshAgentEnrollment
+		}
+		if err := enrollmentCheck(ctx, actor, job.serverID, enrollmentIssuedAt); err != nil {
+			job.fail(AgentInstallCodeRegistrationFailed, "")
+			s.logger().Warn("agent install registration failed", "server_id", job.serverID, "reason", "enrollment_verification")
+			return
+		}
+	}
+	healthCheck := s.agentInstallHealthCheck
+	if healthCheck == nil {
+		healthCheck = waitForInstalledAgentHealth
+	}
+	if err := healthCheck(ctx, request.Host, agentInstallHTTPSPort, token, caPEM); err != nil {
+		job.fail(AgentInstallCodeRegistrationFailed, "")
+		s.logger().Warn("agent install registration failed", "server_id", job.serverID, "reason", "https_health_verification")
+		return
+	}
 	job.update("running", "registering", "Registering encrypted agent credentials and TLS trust")
 	register := s.agentInstallRegister
 	if register == nil {
@@ -321,10 +344,60 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		job.update("failed", "failed", "Agent files may be installed but registration failed; inspect the target before retrying")
 		return
 	}
-	job.update("succeeded", "complete", "Agent files installed and credentials registered; HTTPS health is not yet verified")
+	job.update("succeeded", "complete", "Agent files reconciled and credentials registered after HTTPS health verification")
 	if s.OnAgentInstalled != nil {
 		// #nosec G118 -- background task outlives caller request context
 		go s.OnAgentInstalled(context.WithoutCancel(ctx), actor, job.serverID)
+	}
+}
+
+func waitForInstalledAgentHealth(ctx context.Context, host string, port uint16, token string, ca []byte) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		err := checkRegisteredAgentUpdateHealth(ctx, host, port, token, AgentTLSConfig{SecurePort: uint32(port), TrustMode: AgentTLSTrustCustom, CAPEM: ca})
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return errors.New("agent HTTPS health verification failed")
+		}
+		select {
+		case <-ctx.Done():
+			return errors.New("agent HTTPS health verification failed")
+		case <-time.After(time.Second):
+		}
+	}
+}
+
+func (s *Service) waitForFreshAgentEnrollment(ctx context.Context, actor authz.Actor, serverID uuid.UUID, since time.Time) error {
+	if s.Store == nil || since.IsZero() {
+		return errors.New("agent enrollment verification unavailable")
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var certificates []db.AgentCertificate
+		err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
+			var err error
+			certificates, err = q.ListAgentCertificatesByServer(ctx, serverID)
+			return err
+		})
+		if err != nil {
+			return errors.New("agent enrollment verification unavailable")
+		}
+		now := time.Now()
+		for _, certificate := range certificates {
+			if !certificate.CreatedAt.Before(since.Add(-10*time.Second)) && certificate.NotAfter.After(now) && certificate.RevokedAt == nil && certificate.FirstUsedAt != nil {
+				return nil
+			}
+		}
+		if now.After(deadline) || ctx.Err() != nil {
+			return errors.New("fresh agent enrollment was not observed")
+		}
+		select {
+		case <-ctx.Done():
+			return errors.New("fresh agent enrollment was not observed")
+		case <-time.After(time.Second):
+		}
 	}
 }
 
@@ -627,20 +700,43 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 		return &AgentInstallFailure{Code: AgentInstallCodeSSHConnectFailed, Stage: agentInstallStageConnecting}
 	}
 	defer conn.Close()
+	existingVersion := ""
 	preflight, err := runAgentInstallStepDetailed(installCtx, conn, agentInstallPreflight())
 	if err != nil {
 		var exit *remoteStepError
 		if errors.As(err, &exit) {
-			return preflightFailure(exit.status, preflight)
+			if exit.status != 27 {
+				return preflightFailure(exit.status, preflight)
+			}
+			version, valid := installedAgentPreflight(preflight)
+			if !valid || request.MTLS == nil {
+				return preflightFailure(exit.status, preflight)
+			}
+			order, comparable := compareAgentVersionOrder(version, request.BundledVersion)
+			if !comparable || order > 0 {
+				return preflightFailure(exit.status, preflight)
+			}
+			existingVersion = version
+		} else {
+			return &AgentInstallFailure{Code: AgentInstallCodePreflightFailed, Stage: agentInstallStagePreflight}
 		}
-		return &AgentInstallFailure{Code: AgentInstallCodePreflightFailed, Stage: agentInstallStagePreflight}
-	}
-	if !validAgentInstallPreflight(preflight) {
+	} else if !validAgentInstallPreflight(preflight) {
 		return &AgentInstallFailure{Code: AgentInstallCodePreflightFailed, Stage: agentInstallStagePreflight}
 	}
 	files, err := agentInstallFiles(request)
 	if err != nil {
 		return errors.New("agent install payload is invalid")
+	}
+	if existingVersion != "" {
+		order, _ := compareAgentVersionOrder(existingVersion, request.BundledVersion)
+		if order == 0 {
+			for i, file := range files {
+				if file.path == "/usr/local/bin/openvms-agent" {
+					files = append(files[:i], files[i+1:]...)
+					break
+				}
+			}
+		}
 	}
 	if progress != nil {
 		progress("transferring")
@@ -658,6 +754,12 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 	}
 	if progress != nil {
 		progress("activating")
+	}
+	if existingVersion != "" {
+		identity, err := runAgentInstallStep(installCtx, conn, agentInstallResetIdentity)
+		if err != nil || strings.TrimSpace(identity) != "openvms_agent_identity_reset=ok" {
+			return &AgentInstallFailure{Code: AgentInstallCodeActivationFailed, Stage: agentInstallStageActivating}
+		}
 	}
 	activation, err := runAgentInstallStep(installCtx, conn, agentInstallActivate)
 	if err != nil || strings.TrimSpace(activation) != "openvms_agent_install=active" {

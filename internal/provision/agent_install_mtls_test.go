@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -153,8 +154,10 @@ func TestServerAgentInstallRequestsAnEnrollTokenWhenMTLSIsConfigured(t *testing.
 			seen = request.MTLS
 			return nil
 		},
-		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error { return nil },
-		agentInstallJobs:     map[uuid.UUID]*agentInstallJob{}, agentInstallByServer: map[uuid.UUID]uuid.UUID{},
+		agentInstallRegister:        func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error { return nil },
+		agentInstallEnrollmentCheck: func(context.Context, authz.Actor, uuid.UUID, time.Time) error { return nil },
+		agentInstallHealthCheck:     func(context.Context, string, uint16, string, []byte) error { return nil },
+		agentInstallJobs:            map[uuid.UUID]*agentInstallJob{}, agentInstallByServer: map[uuid.UUID]uuid.UUID{},
 	}
 	job := &agentInstallJob{serverID: serverID, snapshot: AgentInstallJob{ID: uuid.New()}}
 	svc.runServerAgentInstall(context.Background(), authz.Actor{UserID: uuid.New()}, job, AgentInstallRequest{Host: "192.0.2.10"}, "agent-token", nil)
@@ -178,8 +181,9 @@ func TestServerAgentInstallWithoutMTLSDoesNotTouchEnrollment(t *testing.T) {
 			seen = request.MTLS
 			return nil
 		},
-		agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error { return nil },
-		agentInstallJobs:     map[uuid.UUID]*agentInstallJob{}, agentInstallByServer: map[uuid.UUID]uuid.UUID{},
+		agentInstallRegister:    func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error { return nil },
+		agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error { return nil },
+		agentInstallJobs:        map[uuid.UUID]*agentInstallJob{}, agentInstallByServer: map[uuid.UUID]uuid.UUID{},
 	}
 	job := &agentInstallJob{serverID: uuid.New(), snapshot: AgentInstallJob{ID: uuid.New()}}
 	svc.runServerAgentInstall(context.Background(), authz.Actor{UserID: uuid.New()}, job, AgentInstallRequest{Host: "192.0.2.10"}, "agent-token", nil)

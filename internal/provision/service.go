@@ -75,6 +75,8 @@ type Service struct {
 	agentInstallCredentials        func(string) (string, []byte, []byte, error)
 	agentInstallRun                func(context.Context, AgentInstallRequest, func(string)) error
 	agentInstallRegister           func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error
+	agentInstallHealthCheck        func(context.Context, string, uint16, string, []byte) error
+	agentInstallEnrollmentCheck    func(context.Context, authz.Actor, uuid.UUID, time.Time) error
 	agentSSHHostKeyPersist         func(context.Context, authz.Actor, uuid.UUID, string, uint16, string) error
 	agentStatusArtifactLoader      func() (AgentArtifact, error)
 	agentStatusRoundTripper        http.RoundTripper

@@ -16,6 +16,10 @@ func TestServerAgentInstallJobExposesFailureCode(t *testing.T) {
 	if plain := serverAgentInstallJob(provision.AgentInstallJob{ID: uuid.New(), Status: "queued", Stage: "validating"}); plain.Code != nil {
 		t.Fatalf("code = %v on a job without one", plain.Code)
 	}
+	registration := serverAgentInstallJob(provision.AgentInstallJob{ID: uuid.New(), Status: "failed", Stage: "failed", Code: provision.AgentInstallCodeRegistrationFailed})
+	if registration.Code == nil || string(*registration.Code) != "registration_failed" {
+		t.Fatalf("registration failure code = %v", registration.Code)
+	}
 }
 
 func TestServerAgentInstallJobExposesVersionDetails(t *testing.T) {
