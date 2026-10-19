@@ -139,6 +139,66 @@ describe("AgentJobStatusRegion", () => {
     expect(container).not.toHaveTextContent("root-secret");
   });
 
+  it.each([
+    ["en", { version_state: "outdated", registered_here: false }, [/version 0\.2\.1 is already installed/i, /ships 0\.3\.0/, /outdated/, /another OpenVMS/i]],
+    ["en", { version_state: "up_to_date", registered_here: false }, [/version 0\.2\.1 is already installed/i, /up to date/]],
+    ["es", { version_state: "outdated", registered_here: true }, [/versión 0\.2\.1/, /desactualizado/, /Actualizar agente/]],
+    ["pt", { version_state: "outdated", registered_here: true }, [/versão 0\.2\.1/, /desatualizado/, /Atualizar agente/]],
+  ])("explains an already installed agent in %s", async (locale, extra, patterns) => {
+    setLocale(locale);
+    renderJobShell(json({
+      ...queuedInstall,
+      status: "failed",
+      stage: "failed",
+      code: "agent_already_installed",
+      installed_version: "0.2.1",
+      bundled_version: "0.3.0",
+      ...extra,
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start tracking job" }));
+
+    const notice = await screen.findByRole("alert");
+    for (const pattern of patterns) expect(notice).toHaveTextContent(pattern);
+  });
+
+  it("does not claim a comparison when the installed version is unknown", async () => {
+    setLocale("en");
+    renderJobShell(json({
+      ...queuedInstall,
+      status: "failed",
+      stage: "failed",
+      code: "agent_already_installed",
+      bundled_version: "0.3.0",
+      version_state: "unknown",
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start tracking job" }));
+
+    const notice = await screen.findByRole("alert");
+    expect(notice).toHaveTextContent(/unknown version/i);
+    expect(notice).not.toHaveTextContent(/outdated|up to date/i);
+  });
+
+  it("drops malformed version text from an already installed agent", async () => {
+    setLocale("en");
+    const { container } = renderJobShell(json({
+      ...queuedInstall,
+      status: "failed",
+      stage: "failed",
+      code: "agent_already_installed",
+      installed_version: "<script>x</script>",
+      bundled_version: "0.3.0",
+      version_state: "outdated",
+    }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Start tracking job" }));
+
+    await screen.findByRole("alert");
+    expect(container).not.toHaveTextContent("<script>");
+    expect(container).toHaveTextContent(/unknown version/i);
+  });
+
   it("ignores an unknown failure code and keeps the generic failure", async () => {
     setLocale("en");
     renderJobShell(json({ ...queuedInstall, status: "failed", stage: "failed", code: "rm -rf" }));

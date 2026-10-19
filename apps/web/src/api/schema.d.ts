@@ -3671,6 +3671,17 @@ export interface components {
              * @enum {string}
              */
             code?: "not_root" | "unsupported_os" | "unsupported_architecture" | "agent_files_present" | "systemd_required" | "agent_already_installed" | "preflight_failed" | "transfer_failed" | "activation_failed" | "ssh_auth_failed" | "ssh_connection_failed";
+            /** @description Version of the agent already present on the host */
+            installed_version?: string;
+            /** @description Agent version this OpenVMS ships */
+            bundled_version?: string;
+            /** @description True when this OpenVMS already has an agent registered for the server (use the update flow). */
+            registered_here?: boolean;
+            /**
+             * @description How the installed agent compares with the bundled one; unknown when either is not a MAJOR.MINOR.PATCH version.
+             * @enum {string}
+             */
+            version_state?: "up_to_date" | "outdated" | "unknown";
         };
         ServerAgentTLSConfig: {
             secure_port: number;

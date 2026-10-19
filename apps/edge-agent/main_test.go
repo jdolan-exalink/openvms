@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/agent"
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/onvif"
+	"github.com/jdolan-exalink/openvms/internal/platform/buildinfo"
 )
 
 type muxFakeDiscovery struct{ called bool }
@@ -180,4 +182,20 @@ func TestBuildMuxFeatureRoutesRemainIsolated(t *testing.T) {
 			t.Fatalf("configure status=%d", got)
 		}
 	})
+}
+
+func TestRunVersionFlagPrintsOnlyTheBuildVersion(t *testing.T) {
+	original := buildinfo.Version
+	buildinfo.Version = "1.2.3"
+	t.Cleanup(func() { buildinfo.Version = original })
+	for _, args := range [][]string{{"--version"}, {"-version"}, {"version"}} {
+		var out bytes.Buffer
+		if !runVersionFlag(args, &out) || out.String() != "1.2.3\n" {
+			t.Fatalf("args %v: handled output %q", args, out.String())
+		}
+	}
+	var out bytes.Buffer
+	if runVersionFlag(nil, &out) || runVersionFlag([]string{"--other"}, &out) || out.Len() != 0 {
+		t.Fatalf("version printed without a version argument: %q", out.String())
+	}
 }

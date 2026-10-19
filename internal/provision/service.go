@@ -70,6 +70,7 @@ type Service struct {
 	probeRoundTripper              http.RoundTripper
 	requireAgentInstallPermissions func(context.Context, authz.Actor, uuid.UUID) error
 	agentInstallExists             func(context.Context, authz.Actor, uuid.UUID) (bool, error)
+	agentInstallBundledVersion     func() string
 	agentInstallBinary             func() ([]byte, error)
 	agentInstallCredentials        func(string) (string, []byte, []byte, error)
 	agentInstallRun                func(context.Context, AgentInstallRequest, func(string)) error

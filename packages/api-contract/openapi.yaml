@@ -4838,6 +4838,10 @@ components:
           type: string
           description: Stable machine-readable failure reason of a failed install; clients localize it instead of showing message.
           enum: [not_root, unsupported_os, unsupported_architecture, agent_files_present, systemd_required, agent_already_installed, preflight_failed, transfer_failed, activation_failed, ssh_auth_failed, ssh_connection_failed]
+        installed_version: { type: string, maxLength: 64, description: Version of the agent already present on the host, when code is agent_already_installed and it could be read. }
+        bundled_version: { type: string, maxLength: 64, description: Agent version this OpenVMS ships, when code is agent_already_installed. }
+        registered_here: { type: boolean, description: True when this OpenVMS already has an agent registered for the server (use the update flow). }
+        version_state: { type: string, enum: [up_to_date, outdated, unknown], description: How the installed agent compares with the bundled one; unknown when either is not a MAJOR.MINOR.PATCH version. }
     ServerAgentTLSConfig:
       type: object
       additionalProperties: false

@@ -75,6 +75,13 @@ type AgentInstallJob struct {
 	Message string    `json:"message,omitempty"`
 	// Code is a stable machine-readable failure reason (see AgentInstallCode*).
 	Code string `json:"code,omitempty"`
+	// InstalledVersion, BundledVersion and VersionState describe an agent that was already
+	// present on the host (VersionState: up_to_date, outdated or unknown).
+	InstalledVersion string `json:"installed_version,omitempty"`
+	BundledVersion   string `json:"bundled_version,omitempty"`
+	VersionState     string `json:"version_state,omitempty"`
+	// RegisteredHere is true when this OpenVMS already has an agent registered for the server.
+	RegisteredHere bool `json:"registered_here,omitempty"`
 }
 
 func (job AgentInstallJob) String() string {
@@ -101,6 +108,17 @@ func (job *agentInstallJob) fail(code, message string) {
 	job.mu.Lock()
 	defer job.mu.Unlock()
 	job.snapshot.Status, job.snapshot.Stage, job.snapshot.Message, job.snapshot.Code = "failed", "failed", message, code
+	job.updatedAt = time.Now()
+}
+
+func (job *agentInstallJob) failInstalled(message string, failure *AgentInstallFailure, bundled, state string, registeredHere bool) {
+	job.mu.Lock()
+	defer job.mu.Unlock()
+	job.snapshot.Status, job.snapshot.Stage, job.snapshot.Message, job.snapshot.Code = "failed", "failed", message, failure.Code
+	job.snapshot.InstalledVersion, job.snapshot.VersionState, job.snapshot.RegisteredHere = failure.InstalledVersion, state, registeredHere
+	if _, ok := parseAgentSemver(bundled); ok {
+		job.snapshot.BundledVersion = strings.TrimPrefix(bundled, "v")
+	}
 	job.updatedAt = time.Now()
 }
 func (job *agentInstallJob) read() AgentInstallJob {
@@ -291,7 +309,7 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 		}
 	}
 	if err := run(ctx, request, func(stage string) { job.update("running", stage, installStageMessage(stage)) }); err != nil {
-		s.failInstallJob(job, request.Host, err)
+		s.failInstallJob(ctx, actor, job, request.Host, err)
 		return
 	}
 	job.update("running", "registering", "Registering encrypted agent credentials and TLS trust")
@@ -313,12 +331,19 @@ func (s *Service) runServerAgentInstall(parent context.Context, actor authz.Acto
 // failInstallJob publishes the operator-facing reason for a failed install and always
 // logs the underlying error. Only the host, server id, stage, code and exit status are
 // logged: never the password, token, key material or remote output.
-func (s *Service) failInstallJob(job *agentInstallJob, host string, err error) {
+func (s *Service) failInstallJob(ctx context.Context, actor authz.Actor, job *agentInstallJob, host string, err error) {
 	var failure *AgentInstallFailure
 	if errors.As(err, &failure) {
-		message, _ := agentInstallFailureMessage(failure, "", false)
-		job.fail(failure.Code, message)
-		s.logger().Warn("agent install failed", "host", host, "server_id", job.serverID, "stage", failure.Stage, "code", failure.Code, "exit_status", failure.ExitStatus)
+		if failure.Code == AgentInstallCodeAgentInstalled {
+			bundled := s.bundledAgentVersion()
+			registered := s.agentRegisteredHere(ctx, actor, job.serverID)
+			message, state := agentInstallFailureMessage(failure, bundled, registered)
+			job.failInstalled(message, failure, bundled, state, registered)
+		} else {
+			message, _ := agentInstallFailureMessage(failure, "", false)
+			job.fail(failure.Code, message)
+		}
+		s.logger().Warn("agent install failed", "host", host, "server_id", job.serverID, "stage", failure.Stage, "code", failure.Code, "exit_status", failure.ExitStatus, "installed_version", failure.InstalledVersion)
 		return
 	}
 	errLower := strings.ToLower(err.Error())
@@ -333,6 +358,29 @@ func (s *Service) failInstallJob(job *agentInstallJob, host string, err error) {
 	job.fail(failure.Code, message)
 	// An untyped error is not guaranteed to be free of secrets, so only its type is logged.
 	s.logger().Warn("agent install failed", "host", host, "server_id", job.serverID, "stage", failure.Stage, "code", failure.Code, "error_type", fmt.Sprintf("%T", err))
+}
+
+// bundledAgentVersion is the release label of the agent artifact this OpenVMS installs, or ""
+// when it is unavailable or not a release.
+func (s *Service) bundledAgentVersion() string {
+	if s.agentInstallBundledVersion != nil {
+		return s.agentInstallBundledVersion()
+	}
+	artifact, err := s.desiredAgentArtifact()
+	if err != nil {
+		return ""
+	}
+	return artifact.Identity.Version
+}
+
+// agentRegisteredHere reports whether this OpenVMS already has a server_agents row for the server.
+func (s *Service) agentRegisteredHere(ctx context.Context, actor authz.Actor, serverID uuid.UUID) bool {
+	if s.agentInstallExists != nil {
+		exists, err := s.agentInstallExists(ctx, actor, serverID)
+		return err == nil && exists
+	}
+	_, err := s.agentRow(ctx, actor, serverID)
+	return err == nil
 }
 
 func installStageMessage(stage string) string {
@@ -583,7 +631,7 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 	if err != nil {
 		var exit *remoteStepError
 		if errors.As(err, &exit) {
-			return preflightFailure(exit.status)
+			return preflightFailure(exit.status, preflight)
 		}
 		return &AgentInstallFailure{Code: AgentInstallCodePreflightFailed, Stage: agentInstallStagePreflight}
 	}

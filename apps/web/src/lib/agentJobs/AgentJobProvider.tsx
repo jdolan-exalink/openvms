@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "@/api/client";
-import { isAgentInstallFailureCode } from "./failureText";
+import { isAgentInstallFailureCode, safeAgentVersion, versionStates } from "./failureText";
 
 export type AgentJobKind = "install" | "update" | "uninstall";
 export type AgentJobOutcome = "tracking" | "unknown";
@@ -69,7 +69,15 @@ const safeMessages = new Set([
 
 function safeSnapshot(job: Schemas["ServerAgentInstallJob"]): Schemas["ServerAgentInstallJob"] {
   if (!validJob(job)) return job;
-  const code = isAgentInstallFailureCode(job.code) ? { code: job.code } : {};
+  const installed = safeAgentVersion(job.installed_version);
+  const bundled = safeAgentVersion(job.bundled_version);
+  const code = isAgentInstallFailureCode(job.code) ? {
+    code: job.code,
+    ...(installed ? { installed_version: installed } : {}),
+    ...(bundled ? { bundled_version: bundled } : {}),
+    ...(versionStates.some((state) => state === job.version_state) ? { version_state: job.version_state } : {}),
+    ...(job.registered_here === true ? { registered_here: true } : {}),
+  } : {};
   if (!job.message || !safeMessages.has(job.message)) return { id: job.id, status: job.status, stage: job.stage, ...code };
   return { id: job.id, status: job.status, stage: job.stage, message: job.message, ...code };
 }
