@@ -5733,8 +5733,22 @@ components:
         notes: { type: string }
         image_count: { type: integer }
         sync: { $ref: "#/components/schemas/FaceSyncSummary" }
+        last_recognition:
+          $ref: "#/components/schemas/FaceLastRecognition"
+        first_image_id: { type: string, format: uuid, description: "Oldest enrollment image; present only in the person list, to render a card thumbnail without one request per person." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    FaceLastRecognition:
+      type: object
+      description: |
+        The person's newest sighting on a camera the caller holds events.view on. Present only in
+        the person list, and absent when the person was never recognized there. Use the event
+        thumbnail endpoint (events.view) for the picture.
+      required: [event_id, start_time, has_thumbnail]
+      properties:
+        event_id: { type: string, format: uuid }
+        start_time: { type: string, format: date-time }
+        has_thumbnail: { type: boolean }
     FacePersonCreate:
       type: object
       required: [display_name]
