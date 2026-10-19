@@ -55,7 +55,7 @@ func (h *Handlers) InstallServerAgent(ctx context.Context, r gen.InstallServerAg
 		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
 	}
 	job, err := h.Provision.StartServerAgentInstall(ctx, a, r.ServerId, provision.AgentInstallStartRequest{
-		Host: r.Body.SshHost, Port: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
+		Host: r.Body.SshHost, Port: uint16(r.Body.SshPort), Password: *r.Body.SshPassword, ReplaceExisting: r.Body.ReplaceExisting,
 	})
 	if err != nil {
 		return nil, err

@@ -75,6 +75,56 @@ func TestStartAgentInstallExistingAgentRefusedBeforeArtifactOrRunner(t *testing.
 	}
 }
 
+func TestConfirmedReplacementPreservesExistingRegistrationUntilEnrollmentAndHealthSucceed(t *testing.T) {
+	for _, failurePoint := range []string{"enrollment", "health"} {
+		t.Run(failurePoint, func(t *testing.T) {
+			actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+			registrationPresent := true
+			registerCalls := 0
+			svc := &Service{
+				AgentMTLS:                      &AgentMTLS{GRPCAddr: "agent.example.test:9443", APIURL: "https://agent.example.test"},
+				NewEnrollToken:                 func(context.Context, authz.Actor, uuid.UUID) (string, error) { return "fresh-enrollment-token", nil },
+				requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+				agentInstallExists:             func(context.Context, authz.Actor, uuid.UUID) (bool, error) { return registrationPresent, nil },
+				agentInstallBinary:             func() ([]byte, error) { return []byte("trusted fake binary"), nil },
+				agentInstallRun: func(_ context.Context, request AgentInstallRequest, _ func(string)) error {
+					if !request.ReplaceExisting {
+						t.Fatal("replacement confirmation was not passed to the fresh SSH preflight")
+					}
+					return nil
+				},
+				agentInstallEnrollmentCheck: func(context.Context, authz.Actor, uuid.UUID, time.Time) error {
+					if failurePoint == "enrollment" {
+						return errors.New("enrollment unavailable")
+					}
+					return nil
+				},
+				agentInstallHealthCheck: func(context.Context, string, uint16, string, []byte) error {
+					if failurePoint == "health" {
+						return errors.New("health unavailable")
+					}
+					return nil
+				},
+				agentInstallRegister: func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error {
+					registerCalls++
+					registrationPresent = true
+					return nil
+				},
+			}
+			request := validAgentInstallStartRequest()
+			request.ReplaceExisting = true
+			job, err := svc.StartServerAgentInstall(context.Background(), actor, serverID, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			final := waitAgentInstallJob(t, svc, actor, serverID, job)
+			if final.Status != "failed" || registerCalls != 0 || !registrationPresent {
+				t.Fatalf("job=%#v register calls=%d registration present=%v", final, registerCalls, registrationPresent)
+			}
+		})
+	}
+}
+
 func TestAgentInstallJobDoesNotRetainOrSerializeCredentials(t *testing.T) {
 	password := "never-persist-ssh-password"
 	job := AgentInstallJob{ID: uuid.New(), Status: "running", Stage: "connecting", Message: "Connecting"}

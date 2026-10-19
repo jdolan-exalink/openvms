@@ -977,7 +977,7 @@ function AgentInstallDialog({
   const outcomeUnknown = tracked?.outcome === "unknown";
   const [dismissedJobId, setDismissedJobId] = useState<string | null>(null);
   const defaultHost = extractServerHost(server.base_url);
-  const [form, setForm] = useState({ host: defaultHost, port: "22", confirmed: false });
+  const [form, setForm] = useState({ host: defaultHost, port: "22", confirmed: false, replaceConfirmed: false });
   const [discoveryResult, setDiscoveryResult] = useState<Schemas["ServerAgentDiscoveryResult"] | null>(null);
   const [discoveryPending, setDiscoveryPending] = useState(false);
   const [discoveryFailed, setDiscoveryFailed] = useState(false);
@@ -994,6 +994,7 @@ function AgentInstallDialog({
         ssh_host: host.trim(),
         ssh_port: port,
         ssh_password: password,
+        replace_existing: form.replaceConfirmed,
       };
       return unwrap(await api.POST("/api/v1/servers/{serverId}/agent/install", { params: { path: { serverId: server.id } }, body }));
     },
@@ -1010,6 +1011,7 @@ function AgentInstallDialog({
   const timerActive = polling && !outcomeUnknown;
   const elapsedSeconds = useElapsedJob(acceptedAt, timerActive);
   const logs = useAgentJobLogs({ job: snapshot, isPending: start.isPending, kind: "install", outcomeUnknown, t });
+  const replacementRequired = discoveryResult?.state === "present" || discoveryResult?.ownership === "registered_here";
   const close = () => {
     if (start.isPending) return;
     httpsRedirect.cancel();
@@ -1051,17 +1053,21 @@ function AgentInstallDialog({
           )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("servers.agentInstallHostLabel")} hint={t("servers.agentInstallHostHint")}>
-              <TextInput required aria-label={t("servers.agentInstallHostLabel")} value={form.host} onChange={(event) => { setForm({ ...form, host: event.target.value }); setDiscoveryResult(null); setDiscoveryFailed(false); }} autoComplete="off" inputMode="decimal" placeholder="10.20.0.11" />
+              <TextInput required aria-label={t("servers.agentInstallHostLabel")} value={form.host} onChange={(event) => { setForm({ ...form, host: event.target.value, replaceConfirmed: false }); setDiscoveryResult(null); setDiscoveryFailed(false); }} autoComplete="off" inputMode="decimal" placeholder="10.20.0.11" />
             </Field>
             <Field label={t("servers.agentInstallPortLabel")}>
-              <TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={form.port} onChange={(event) => { setForm({ ...form, port: event.target.value }); setDiscoveryResult(null); setDiscoveryFailed(false); }} autoComplete="off" />
+              <TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={form.port} onChange={(event) => { setForm({ ...form, port: event.target.value, replaceConfirmed: false }); setDiscoveryResult(null); setDiscoveryFailed(false); }} autoComplete="off" />
             </Field>
             <Field label={t("servers.agentInstallPasswordLabel")} hint={t("servers.agentInstallPasswordHint")}>
-              <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad" autoComplete="off" maxLength={4096} onChange={() => { setDiscoveryResult(null); setDiscoveryFailed(false); }} />
+              <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad" autoComplete="off" maxLength={4096} onChange={() => { setDiscoveryResult(null); setDiscoveryFailed(false); setForm((current) => ({ ...current, replaceConfirmed: false })); }} />
             </Field>
           </div>
           {discoveryResult && <p role="status" className="rounded-m3-lg bg-surface-2 p-3 text-sm">{agentDiscoveryResultText(discoveryResult, t)}</p>}
           {discoveryFailed && <p role="alert" className="text-sm text-bad">{t("servers.agentDiscoveryError")}</p>}
+          {replacementRequired && <label className="flex items-start gap-3 rounded-m3-lg border border-warn/50 bg-surface-2 p-3 text-sm">
+            <input type="checkbox" checked={form.replaceConfirmed} onChange={(event) => setForm({ ...form, replaceConfirmed: event.target.checked })} />
+            <span>{t("servers.agentInstallReplaceConfirm")}</span>
+          </label>}
           <label className="flex items-start gap-3 rounded-m3-lg bg-surface-2 p-3 text-sm">
             <input type="checkbox" checked={form.confirmed} onChange={(event) => setForm({ ...form, confirmed: event.target.checked })} />
             <span>{t("servers.agentInstallConfirmScope")}</span>
@@ -1074,6 +1080,7 @@ function AgentInstallDialog({
               if (!password) return;
               if (passwordInputRef.current) passwordInputRef.current.value = "";
               pendingPasswordRef.current = "";
+              setForm((current) => ({ ...current, replaceConfirmed: false }));
               setDiscoveryResult(null);
               setDiscoveryFailed(false);
               setDiscoveryPending(true);
@@ -1086,7 +1093,7 @@ function AgentInstallDialog({
             }}>
               {discoveryPending ? t("servers.agentDiscoverySubmitting") : t("servers.agentDiscoveryAction")}
             </Button>
-            <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !form.confirmed || !isCanonicalIPv4(form.host.trim()) || !isValidSSHPort(form.port) || !secureBrowser}>
+            <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !form.confirmed || (replacementRequired && !form.replaceConfirmed) || !isCanonicalIPv4(form.host.trim()) || !isValidSSHPort(form.port) || !secureBrowser}>
               {start.isPending ? t("servers.agentInstallSubmitting") : t("servers.agentInstallSubmit")}
             </Button>
           </div>

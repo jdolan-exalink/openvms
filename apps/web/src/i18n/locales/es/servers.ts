@@ -101,6 +101,7 @@ export default {
   agentInstallPasswordLabel: "Contraseña SSH root",
   agentInstallPasswordHint: "Se usa solo para esta instalación y se borra al enviar o cerrar.",
   agentInstallConfirmScope: "Confirmo que quiero instalar únicamente el agente OpenVMS en este servidor existente.",
+  agentInstallReplaceConfirm: "Reemplazar el agente detectado o registrado. Esto elimina su identidad actual y detiene la sincronización con el OpenVMS anterior.",
   agentInstallHttpsRequired: "Se requiere abrir OpenVMS por HTTPS antes de enviar credenciales. Si usás un proxy, configurá un CIDR de proxy confiable para la ruta de instalación.",
   agentHttpsRedirectAction: "Abrir OpenVMS por HTTPS",
   agentHttpsRedirectChecking: "Consultando el puerto HTTPS configurado…",

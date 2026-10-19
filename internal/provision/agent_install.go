@@ -42,7 +42,8 @@ type AgentInstallRequest struct {
 	TLSCertificate  []byte `json:"-"`
 	TLSPrivateKey   []byte `json:"-"`
 	// MTLS, when set, enrolls the agent for mutual TLS; see AgentMTLSInstall.
-	MTLS *AgentMTLSInstall `json:"-"`
+	MTLS            *AgentMTLSInstall `json:"-"`
+	ReplaceExisting bool              `json:"-"`
 }
 
 // String deliberately exposes only non-secret connection metadata. This keeps
@@ -181,6 +182,12 @@ command -v systemctl >/dev/null 2>&1 || exit 26
 case "$(uname -m)" in x86_64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) exit 23 ;; esac
 [ "$arch" = %s ] || exit 24
 if systemctl cat openvms-agent.service >/dev/null 2>&1; then
+  # Only replace the supported OpenVMS layout; do not follow symlinks or overwrite
+  # installations that only happen to use the same systemd unit name.
+  [ -f /usr/local/bin/openvms-agent ] && [ -x /usr/local/bin/openvms-agent ] && [ ! -L /usr/local/bin/openvms-agent ] || exit 25
+  for target in /etc/openvms/agent.token /etc/openvms/agent.env /etc/systemd/system/openvms-agent.service; do
+    [ -f "$target" ] && [ ! -L "$target" ] || exit 25
+  done
   # Read-only: report the installed agent version, never change anything. The agent binary
   # answers --version before it reads its token, and the token file is pointed at a missing
   # path so an older agent without that flag exits immediately instead of starting.

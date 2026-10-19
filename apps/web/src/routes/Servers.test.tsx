@@ -190,6 +190,49 @@ describe("Servers", () => {
       expect(inspect).toBeDefined();
     });
 
+    it("requires explicit replacement confirmation and submits only after the operator confirms", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      const { calls } = setupAgentInstall(installGrants, async (request) => {
+        expect((await request.clone().json()).replace_existing).toBe(true);
+        return json({ id: "job-1", status: "queued", stage: "validating" }, 202);
+      }, undefined, undefined, undefined, async () => json({ state: "present", ownership: "unknown" }));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "one-time" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: /Inspeccionar agente por SSH/i }));
+      expect(await within(dialog).findByRole("status")).toHaveTextContent(/Agente detectado/i);
+      const submit = within(dialog).getByRole("button", { name: "Instalar agente" });
+      expect(submit).toBeDisabled();
+      expect(within(dialog).getByText(/elimina su identidad actual y detiene la sincronización con el OpenVMS anterior/i)).toBeInTheDocument();
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Reemplazar el agente detectado/i }));
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      expect(submit).toBeEnabled();
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancelar" }));
+      expect(calls.some((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/agent/install"))).toBe(false);
+    });
+
+    it("submits replacement confirmation after fresh inspection and explicit acknowledgement", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      const { calls } = setupAgentInstall(installGrants, async (request) => {
+        expect((await request.clone().json()).replace_existing).toBe(true);
+        return json({ id: "job-2", status: "queued", stage: "validating" }, 202);
+      }, undefined, undefined, undefined, async () => json({ state: "present", ownership: "unknown" }));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "inspection-password" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: /Inspeccionar agente por SSH/i }));
+      await within(dialog).findByRole("status");
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Reemplazar el agente detectado/i }));
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "install-password" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+      await waitFor(() => expect(calls.some((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/agent/install"))).toBe(true));
+    });
+
     it("shows no elapsed time while submission is pending and starts after a job is accepted", async () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       let accept!: (response: Response) => void;
@@ -370,7 +413,7 @@ describe("Servers", () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       const { calls } = setupAgentInstall(undefined, async (request) => {
         const body = await request.clone().json();
-        expect(body).toEqual({ ssh_host: "10.20.30.44", ssh_port: 2222, ssh_password: "secret-root-password" });
+        expect(body).toEqual({ ssh_host: "10.20.30.44", ssh_port: 2222, ssh_password: "secret-root-password", replace_existing: false });
         return json({ id: "job-1", status: "queued", stage: "validating" }, 202);
       });
       renderPage(Servers);

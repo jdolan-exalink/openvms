@@ -51,9 +51,10 @@ var (
 )
 
 type AgentInstallStartRequest struct {
-	Host     string
-	Port     uint16
-	Password string
+	Host            string
+	Port            uint16
+	Password        string
+	ReplaceExisting bool
 }
 
 func (request AgentInstallStartRequest) String() string {
@@ -162,12 +163,12 @@ func (s *Service) StartServerAgentInstall(ctx context.Context, actor authz.Actor
 		if err != nil {
 			return AgentInstallJob{}, err
 		}
-		if exists {
+		if exists && !in.ReplaceExisting {
 			return AgentInstallJob{}, ErrAgentAlreadyProvisioned
 		}
 	} else {
 		_, err := s.agentRow(ctx, actor, serverID)
-		if err == nil {
+		if err == nil && !in.ReplaceExisting {
 			return AgentInstallJob{}, ErrAgentAlreadyProvisioned
 		}
 		if !errors.Is(err, store.ErrNotFound) {
@@ -190,7 +191,7 @@ func (s *Service) StartServerAgentInstall(ctx context.Context, actor authz.Actor
 		return AgentInstallJob{}, errors.New("could not prepare agent TLS trust")
 	}
 
-	request := AgentInstallRequest{Host: in.Host, Port: in.Port, User: "root", Password: in.Password, Binary: binary, BundledVersion: s.bundledAgentVersion(), Token: token, TLSListen: net.JoinHostPort("0.0.0.0", fmt.Sprint(agentInstallHTTPSPort)), TLSCertificate: certificate, TLSPrivateKey: privateKey}
+	request := AgentInstallRequest{Host: in.Host, Port: in.Port, User: "root", Password: in.Password, Binary: binary, BundledVersion: s.bundledAgentVersion(), Token: token, TLSListen: net.JoinHostPort("0.0.0.0", fmt.Sprint(agentInstallHTTPSPort)), TLSCertificate: certificate, TLSPrivateKey: privateKey, ReplaceExisting: in.ReplaceExisting}
 	request.hostKeyTrust = func(ctx context.Context, fingerprint string) error {
 		return s.trustAgentSSHHostKey(ctx, actor, serverID, in.Host, in.Port, fingerprint)
 	}
@@ -750,6 +751,7 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 	}
 	defer conn.Close()
 	existingVersion := ""
+	existingInstalled := false
 	preflight, err := runAgentInstallStepDetailed(installCtx, conn, agentInstallPreflight())
 	if err != nil {
 		var exit *remoteStepError
@@ -758,14 +760,21 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 				return preflightFailure(exit.status, preflight)
 			}
 			version, valid := installedAgentPreflight(preflight)
-			if !valid || request.MTLS == nil {
+			if !valid || request.MTLS == nil || !request.ReplaceExisting {
 				return preflightFailure(exit.status, preflight)
 			}
-			order, versionComparable := compareAgentVersionOrder(version, request.BundledVersion)
-			if !versionComparable || order > 0 {
-				return preflightFailure(exit.status, preflight)
+			if version == "" {
+				if !request.ReplaceExisting {
+					return preflightFailure(exit.status, preflight)
+				}
+			} else {
+				order, versionComparable := compareAgentVersionOrder(version, request.BundledVersion)
+				if !versionComparable || order > 0 {
+					return preflightFailure(exit.status, preflight)
+				}
 			}
 			existingVersion = version
+			existingInstalled = true
 		} else {
 			return &AgentInstallFailure{Code: AgentInstallCodePreflightFailed, Stage: agentInstallStagePreflight}
 		}
@@ -776,7 +785,7 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 	if err != nil {
 		return errors.New("agent install payload is invalid")
 	}
-	if existingVersion != "" {
+	if existingInstalled {
 		order, _ := compareAgentVersionOrder(existingVersion, request.BundledVersion)
 		if order == 0 {
 			for i, file := range files {
@@ -804,7 +813,7 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 	if progress != nil {
 		progress("activating")
 	}
-	if existingVersion != "" {
+	if existingInstalled {
 		identity, err := runAgentInstallStep(installCtx, conn, agentInstallResetIdentity)
 		if err != nil || strings.TrimSpace(identity) != "openvms_agent_identity_reset=ok" {
 			return &AgentInstallFailure{Code: AgentInstallCodeActivationFailed, Stage: agentInstallStageActivating}
