@@ -78,7 +78,7 @@ func run(ctx context.Context, cmd string, args []string, out io.Writer) error {
 	case "bootstrap":
 		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 		user := fs.String("user", "admin", "platform administrator username")
-		password := fs.String("password", "", "also set this login password (min. 10 characters)")
+		password := fs.String("password", "", "also set this login password (min. 8 characters)")
 		_ = fs.Parse(args)
 		st, closeFn, err := open(ctx, dbURL, log)
 		if err != nil {

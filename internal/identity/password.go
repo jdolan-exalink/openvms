@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -24,41 +23,17 @@ const (
 	saltLen      = 16
 )
 
-// MinPasswordLength is the shortest password accepted.
-const MinPasswordLength = 10
+// MinPasswordLength is the shortest password accepted. It is the whole policy: there are
+// no character-class or username rules.
+const MinPasswordLength = 8
 
 // ErrWeakPassword is returned when a new password does not meet the policy.
 var ErrWeakPassword = errors.New("password too weak")
 
-// CheckPolicy enforces a minimum length and at least two character classes.
-func CheckPolicy(pw, username string) error {
+// CheckPolicy accepts any password of at least MinPasswordLength characters.
+func CheckPolicy(pw string) error {
 	if len([]rune(pw)) < MinPasswordLength {
 		return fmt.Errorf("%w: use at least %d characters", ErrWeakPassword, MinPasswordLength)
-	}
-	var lower, upper, digit, other bool
-	for _, r := range pw {
-		switch {
-		case unicode.IsLower(r):
-			lower = true
-		case unicode.IsUpper(r):
-			upper = true
-		case unicode.IsDigit(r):
-			digit = true
-		default:
-			other = true
-		}
-	}
-	classes := 0
-	for _, b := range []bool{lower, upper, digit, other} {
-		if b {
-			classes++
-		}
-	}
-	if classes < 2 {
-		return fmt.Errorf("%w: mix letters with numbers or symbols", ErrWeakPassword)
-	}
-	if username != "" && strings.Contains(strings.ToLower(pw), strings.ToLower(username)) {
-		return fmt.Errorf("%w: it must not contain the username", ErrWeakPassword)
 	}
 	return nil
 }

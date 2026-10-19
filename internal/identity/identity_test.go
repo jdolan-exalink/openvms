@@ -2,6 +2,7 @@ package identity
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,19 +29,26 @@ func TestPasswordHashRoundTrip(t *testing.T) {
 
 func TestPasswordPolicy(t *testing.T) {
 	cases := map[string]bool{
-		"short1":              false,
-		"alllowercaseletters": false,
-		"lowercase-and-1234":  true,
-		"juanperez-2026":      false, // contains the username
+		"abcd123":        false, // 7 characters
+		"":               false,
+		"abcd1234":       true, // exactly 8, no composition rules
+		"alllowercase":   true,
+		"12345678":       true,
+		"juanperez-2026": true, // may contain the username
+		"contraseñaÑ":    true,
+		"ñandú12":        false, // 7 runes (more than 7 bytes)
 	}
 	for pw, ok := range cases {
-		err := CheckPolicy(pw, "juanperez")
+		err := CheckPolicy(pw)
 		if ok != (err == nil) {
 			t.Errorf("%q: got %v", pw, err)
 		}
 		if err != nil && !errors.Is(err, ErrWeakPassword) {
 			t.Errorf("%q: error should wrap ErrWeakPassword", pw)
 		}
+	}
+	if err := CheckPolicy("short"); err == nil || !strings.Contains(err.Error(), "use at least 8 characters") {
+		t.Errorf("message = %v, want \"use at least 8 characters\"", err)
 	}
 }
 

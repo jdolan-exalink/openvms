@@ -228,7 +228,7 @@ func (s *Service) Logout(ctx context.Context, actor authz.Actor, token string) e
 
 // ChangePassword lets a user change their own password. Other sessions are closed.
 func (s *Service) ChangePassword(ctx context.Context, actor authz.Actor, current, next string) error {
-	if err := CheckPolicy(next, actor.Username); err != nil {
+	if err := CheckPolicy(next); err != nil {
 		return invalid("%s", err.Error())
 	}
 	hash, err := HashPassword(next)
@@ -466,7 +466,7 @@ func (s *Service) CreateUser(ctx context.Context, actor authz.Actor, in CreateUs
 	}
 	hash := ""
 	if in.Password != "" {
-		if err := CheckPolicy(in.Password, in.Username); err != nil {
+		if err := CheckPolicy(in.Password); err != nil {
 			return User{}, invalid("%s", err.Error())
 		}
 		var err error
@@ -569,7 +569,7 @@ func (s *Service) UpdateUser(ctx context.Context, actor authz.Actor, id uuid.UUI
 		}
 		changed := map[string]any{}
 		if in.Password != nil {
-			if err := CheckPolicy(*in.Password, u.Username); err != nil {
+			if err := CheckPolicy(*in.Password); err != nil {
 				return invalid("%s", err.Error())
 			}
 			hash, err := HashPassword(*in.Password)
