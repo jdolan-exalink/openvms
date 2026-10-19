@@ -65,6 +65,9 @@ type Syncer struct {
 	// Rules is evaluated for each newly inserted event, after commit (optional). Its errors are
 	// logged and never fail the sync.
 	Rules RuleEvaluator
+	// ObjectStopMargin overrides how much of the per-server deadline must remain for the
+	// tracked-objects pass to fetch another page (default 20s). Mainly for tests.
+	ObjectStopMargin time.Duration
 
 	now func() time.Time
 }
@@ -116,6 +119,11 @@ const (
 	// An object still open this long after it started (Frigate restarted mid-track and never
 	// closed it) no longer holds the object cursor back, so it cannot pin the cursor forever.
 	objectOpenHold = time.Hour
+	// Upper bound of object pages read in one pass.
+	objectMaxPages = 40
+	// A pass stops fetching further object pages once less than this is left of its deadline,
+	// leaving time to commit and to run the closing steps; the next pull continues from the cursor.
+	objectStopMargin = 20 * time.Second
 	// Thumbnails copied per server and pull; the rest wait for the next pull.
 	thumbsPerPull    = 40
 	maxThumbAttempts = 5
@@ -547,21 +555,33 @@ RETURNING id, (xmax = 0),
 // syncObjects reads tracked objects of every camera (oldest first): those with a plate are
 // stored in lpr_reads (LPR cameras only, since only they ever carry one), and every object
 // with has_snapshot=true marks its parent review's has_snapshot flag (every camera, PRD §44).
+//
+// Progress is committed page by page: each page's tracks, plates and snapshots are stored in
+// their own transaction together with the object cursor reached so far. A busy remote Frigate
+// with a backlog (after an outage, say) cannot be drained within one pass's deadline; if the
+// pass stored nothing until the last page, the deadline would cancel it before anything was
+// saved and the cursor would stay put forever. So a pass also stops, successfully, once the
+// deadline is close (see nearDeadline): the next pull continues from the saved cursor. A fetch
+// error still fails the pass, but every earlier page stays committed.
 func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigate.Adapter, cams map[string]cameraRef, st syncState) error {
 	from := s.clock().Add(-s.Backfill)
 	if st.objectCursor != nil {
 		from = st.objectCursor.Add(-objectOverlap)
 	}
 	after := unix(from)
-	var reads []frigate.TrackedObject
-	var snapshots []frigate.TrackedObject
-	var tracks []frigate.TrackedObject
 	newest := from
+	// Last cursor committed by this pass (or the one it started with): the cursor never goes back.
+	saved := st.objectCursor
 	// Oldest object that has not ended yet: its path keeps growing, so the cursor must not
 	// pass it or the object falls out of the re-read window with a partial path.
 	var openFrom *time.Time
 	stale := s.clock().Add(-objectOpenHold)
-	for page := 0; page < 40; page++ {
+	for page := 0; page < objectMaxPages; page++ {
+		// The first page is always attempted (the reviews pass may have used most of the budget,
+		// and objects must not be starved by it); later ones need headroom to finish and commit.
+		if page > 0 && s.nearDeadline(ctx) {
+			return nil
+		}
 		// No Cameras filter: every camera's objects are read, not only LPR-tagged ones. Plate
 		// extraction below is a client-side filter on o.Plate, not a "plates only" request to
 		// Frigate: this pass also needs every object's HasSnapshot, on every camera.
@@ -577,21 +597,50 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 			if o.EndTime == nil && t.After(stale) && (openFrom == nil || t.Before(*openFrom)) {
 				openFrom = &t
 			}
-			tracks = append(tracks, o)
-			if o.Plate != "" {
-				reads = append(reads, o)
-			}
-			if o.HasSnapshot {
-				snapshots = append(snapshots, o)
-			}
 		}
+		// The cursor moves to the newest object seen, or to the oldest one still open, and the
+		// next pull re-reads objectOverlap before it for plates recognized after an object
+		// started and for paths that kept growing.
+		cursor := newest
+		if openFrom != nil && openFrom.Before(cursor) {
+			cursor = *openFrom
+		}
+		if saved != nil && cursor.Before(*saved) {
+			cursor = *saved
+		}
+		if cursor.After(s.clock()) {
+			cursor = s.clock()
+		}
+		if err := s.storeObjectPage(ctx, srv, cams, items, &cursor); err != nil {
+			return err
+		}
+		saved = &cursor
 		if len(items) < objectPage || items[len(items)-1].StartTime <= after {
 			break
 		}
 		after = items[len(items)-1].StartTime
 	}
+	return nil
+}
+
+// nearDeadline reports whether ctx is over or has less than the stop margin left, i.e. another
+// page of work might not finish and commit in time.
+func (s *Syncer) nearDeadline(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	margin := s.ObjectStopMargin
+	if margin <= 0 {
+		margin = objectStopMargin
+	}
+	d, ok := ctx.Deadline()
+	return ok && time.Until(d) < margin
+}
+
+// storeObjectPage stores one page of tracked objects and moves the object cursor, atomically.
+func (s *Syncer) storeObjectPage(ctx context.Context, srv db.FrigateServer, cams map[string]cameraRef, items []frigate.TrackedObject, cursor *time.Time) error {
 	return s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
-		for _, o := range tracks {
+		for _, o := range items {
 			cam, ok := cams[o.Camera]
 			if !ok {
 				continue
@@ -600,17 +649,17 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 				return err
 			}
 		}
-		for _, o := range reads {
+		for _, o := range items {
 			cam, ok := cams[o.Camera]
-			if !ok {
+			if !ok || o.Plate == "" {
 				continue
 			}
 			if err := upsertPlate(ctx, tx, srv, cam.ID, o); err != nil {
 				return err
 			}
 		}
-		for _, o := range snapshots {
-			if _, ok := cams[o.Camera]; !ok {
+		for _, o := range items {
+			if _, ok := cams[o.Camera]; !ok || !o.HasSnapshot {
 				continue
 			}
 			// Persist the fact first (mirrors upsertPlate inserting into lpr_reads before
@@ -627,20 +676,7 @@ func (s *Syncer) syncObjects(ctx context.Context, srv db.FrigateServer, a frigat
 				return err
 			}
 		}
-		// The cursor moves to the newest object seen, or to the oldest one still open, and the
-		// next pull re-reads objectOverlap before it for plates recognized after an object
-		// started and for paths that kept growing.
-		cursor := newest
-		if openFrom != nil && openFrom.Before(cursor) {
-			cursor = *openFrom
-		}
-		if st.objectCursor != nil && cursor.Before(*st.objectCursor) {
-			cursor = *st.objectCursor
-		}
-		if cursor.After(s.clock()) {
-			cursor = s.clock()
-		}
-		return upsertCursor(ctx, tx, srv, "object_cursor", &cursor)
+		return upsertCursor(ctx, tx, srv, "object_cursor", cursor)
 	})
 }
 

@@ -41,6 +41,18 @@ type trackedObject struct {
 // Frigate ties it to per-object/config state we do not simulate, but this split gives every
 // camera (LPR or not) a mix of both for tests, instead of a flat true/false.
 func (s *Server) objects(w http.ResponseWriter, r *http.Request) {
+	n := s.objectCalls.Add(1)
+	if s.ObjectsFailAfter > 0 && n > int64(s.ObjectsFailAfter) {
+		http.Error(w, "injected failure", http.StatusServiceUnavailable)
+		return
+	}
+	if s.ObjectsDelay > 0 {
+		select {
+		case <-time.After(s.ObjectsDelay):
+		case <-r.Context().Done():
+			return
+		}
+	}
 	q := r.URL.Query()
 	after, _ := strconv.ParseFloat(q.Get("after"), 64)
 	before, _ := strconv.ParseFloat(q.Get("before"), 64)
