@@ -4,6 +4,7 @@ import { type FormEvent, useState } from "react";
 import { clearToken, setToken } from "@/api/auth";
 import { api, unwrap } from "@/api/client";
 import { AccountMenu } from "@/components/AccountMenu";
+import { AppVersion } from "@/components/AppVersion";
 import { Button, ErrorNote, Field, TextInput } from "@/components/ui";
 import { brandIcon as Brand } from "@/components/nav";
 import { useT } from "@/i18n";
@@ -132,6 +133,7 @@ export function Login() {
         >
           {mode === "password" ? t("auth.signInToken") : t("auth.signInPassword")}
         </Button>
+        <AppVersion className="text-center" />
       </div>
     </main>
   );

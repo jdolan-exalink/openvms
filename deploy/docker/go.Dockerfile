@@ -10,13 +10,17 @@
 #     (api, frigate-mock, vmsctl) stays on this, unaffected by the target above.
 FROM golang:1.26-alpine AS build
 ARG APP
-ARG VERSION=dev
-ARG AGENT_VERSION=0.2.1
+# VERSION / AGENT_VERSION: when empty or "dev" they are read from VERSION and
+# deploy/agent/VERSION (the single sources of truth), so a plain `docker compose up`
+# still produces versioned images.
+ARG VERSION=
+ARG AGENT_VERSION=
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
+COPY VERSION ./VERSION
 COPY apps ./apps
 COPY internal ./internal
 COPY migrations ./migrations
@@ -24,7 +28,10 @@ COPY deploy/agent ./deploy/agent
 COPY gen ./gen
 COPY proto ./proto
 COPY pkg ./pkg
-RUN CGO_ENABLED=0 go build -trimpath \
+RUN VERSION="${VERSION}"; AGENT_VERSION="${AGENT_VERSION}"; \
+    if [ -z "$VERSION" ] || [ "$VERSION" = "dev" ]; then VERSION=$(tr -d '[:space:]' < VERSION); fi; \
+    if [ -z "$AGENT_VERSION" ] || [ "$AGENT_VERSION" = "dev" ]; then AGENT_VERSION=$(tr -d '[:space:]' < deploy/agent/VERSION); fi; \
+    CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Version=${VERSION} \
       -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Commit=${COMMIT} \
@@ -44,12 +51,13 @@ RUN CGO_ENABLED=0 go build -trimpath \
 # The worker links onnxruntime and ships the vehicle-body model. The API stays
 # on the alpine build above.
 FROM golang:1.26-bookworm AS build-worker
-ARG VERSION=dev
+ARG VERSION=
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
+COPY VERSION ./VERSION
 COPY apps ./apps
 COPY internal ./internal
 COPY migrations ./migrations
@@ -58,7 +66,9 @@ COPY gen ./gen
 COPY proto ./proto
 COPY pkg ./pkg
 COPY models/vehicle-body.onnx /opt/openvms/vehicle-body.onnx
-RUN curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors -o /tmp/ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-linux-x64-1.29.0.tgz \
+RUN VERSION="${VERSION}"; \
+    if [ -z "$VERSION" ] || [ "$VERSION" = "dev" ]; then VERSION=$(tr -d '[:space:]' < VERSION); fi; \
+    curl -fsSL --retry 5 --retry-delay 2 --retry-connrefused --retry-all-errors -o /tmp/ort.tgz https://github.com/microsoft/onnxruntime/releases/download/v1.29.0/onnxruntime-linux-x64-1.29.0.tgz \
  && tar -xzf /tmp/ort.tgz -C /tmp \
  && cp /tmp/onnxruntime-linux-x64-1.29.0/lib/libonnxruntime.so.1.29.0 /opt/openvms/libonnxruntime.so.1.29.0 \
  && chmod 0644 /opt/openvms/vehicle-body.onnx /opt/openvms/libonnxruntime.so.1.29.0 \

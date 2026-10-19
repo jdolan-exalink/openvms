@@ -14,7 +14,7 @@
 #   DEPLOY_KEEP         newest rollback-* image tags per service and dump dirs kept
 #                       after a successful deploy (default: 5)
 #   DEPLOY_WAIT         seconds to wait for readiness (default: 120)
-#   VERSION             image version label (default: git describe)
+#   VERSION             image version label (default: the VERSION file)
 #   WEB_HTTPS_PORT      fallback HTTPS port if `docker compose port web 443` fails (default: 8443)
 set -eu
 
@@ -75,7 +75,7 @@ fi
 step 2 metadata
 COMMIT=$(git rev-parse --short HEAD)
 BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-VERSION=${VERSION:-$(git describe --tags --always 2>/dev/null || echo "$COMMIT")}
+VERSION=${VERSION:-$(tr -d '[:space:]' 2>/dev/null < VERSION || echo "$COMMIT")}
 export COMMIT BUILD_TIME VERSION
 
 migration_version() {

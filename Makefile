@@ -1,7 +1,8 @@
 # OpenVMS developer entry points. `make help` lists them.
 SHELL := /bin/bash
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-AGENT_VERSION ?= 0.2.2
+# Versions come from the VERSION files (docs/VERSIONING.md); the commit is a separate build label.
+VERSION ?= $(shell cat VERSION 2>/dev/null | tr -d '[:space:]')
+AGENT_VERSION ?= $(shell cat deploy/agent/VERSION 2>/dev/null | tr -d '[:space:]')
 INFRA := postgres valkey nats seaweedfs mosquitto frigate-helvecia frigate-cayasta
 
 export DATABASE_URL ?= postgres://openvms:openvms@localhost:5432/openvms?sslmode=disable
@@ -30,6 +31,10 @@ deploy: ## Deploy the local stack: preflight, DB dump, rollback tags, build, up,
 .PHONY: rollback
 rollback: ## Retag images to rollback-$(TAG) and restart without build (no DB restore): make rollback TAG=<ts>
 	./deploy/rollback.sh "$(TAG)"
+
+.PHONY: release-notes
+release-notes: ## Print the CHANGELOG.md section of a version (default: VERSION): make release-notes [V=0.4.0]
+	@awk -v v="$(or $(V),$(VERSION))" 'index($$0, "## [" v "]") == 1 {on=1; next} on && /^## \[/ {exit} on' CHANGELOG.md
 
 .PHONY: down
 down: ## Stop the stack (keeps volumes)

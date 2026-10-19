@@ -106,6 +106,10 @@ Variables opcionales: `DEPLOY_BRANCH`, `DEPLOY_SKIP_PULL=1`, `DEPLOY_SKIP_BACKUP
 
 La build web publica `/version.json` con `version`, `commit` y `buildTime` (los mismos `VERSION`, `COMMIT` y `BUILD_TIME` que reciben las imágenes Go). El broker `mosquitto` de desarrollo tiene healthcheck y los Frigate simulados esperan a que esté sano.
 
+### Versiones
+
+La versión de OpenVMS está en el archivo [`VERSION`](VERSION) y la del agente de borde en [`deploy/agent/VERSION`](deploy/agent/VERSION); las imágenes, `make` y los scripts de despliegue las leen de ahí (no de `git describe`). La pantalla de inicio de sesión muestra `OpenVMS vX.Y.Z`. El historial de cambios está en [`CHANGELOG.md`](CHANGELOG.md) y las reglas para subir versión y publicar una release en [`docs/VERSIONING.md`](docs/VERSIONING.md).
+
 ### Canal de control gRPC
 
 El canal de control gRPC (`GRPC_ADDR`, por defecto `:9090`) va en texto plano mientras no se definan `GRPC_TLS_CERT_FILE` y `GRPC_TLS_KEY_FILE` (ambas o ninguna): la API lo avisa al arrancar con `gRPC control channel is plaintext`. Para activar TLS, provisionar el certificado y la clave PEM, definir ambas variables en la API y reiniciarla; luego pasar los agentes y clientes a TLS. Detalles y orden de migración en [`docs/grpc-tls.md`](docs/grpc-tls.md).

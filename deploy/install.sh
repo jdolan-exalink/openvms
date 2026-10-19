@@ -10,7 +10,7 @@
 #   INSTALL_ROOT            repository root (default: parent of this script)
 #   INSTALL_ENV_EXAMPLE     template for a new .env (default: $INSTALL_ROOT/.env.example)
 #   INSTALL_WAIT            seconds to wait for readiness (default: 180)
-#   VERSION                 image version label (default: git describe)
+#   VERSION                 image version label (default: the VERSION file)
 #   WEB_HTTPS_PORT          fallback HTTPS port if `docker compose port web 443` fails (default: 8443)
 set -eu
 
@@ -101,7 +101,7 @@ fi
 step 3 "build and up"
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-VERSION=${VERSION:-$(git describe --tags --always 2>/dev/null || echo "$COMMIT")}
+VERSION=${VERSION:-$(tr -d '[:space:]' 2>/dev/null < VERSION || echo "$COMMIT")}
 export COMMIT BUILD_TIME VERSION
 info "commit $COMMIT, version $VERSION, built $BUILD_TIME"
 run docker compose up -d --build || die "docker compose up failed"

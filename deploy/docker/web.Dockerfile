@@ -17,8 +17,10 @@ COPY deploy/docker/web-entrypoint.sh /usr/local/bin/web-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/prepare-web-tls.sh /usr/local/bin/web-entrypoint.sh
 COPY --from=build /src/apps/web/dist /srv
 # Build metadata served as /version.json (revalidated on every load by the Caddyfile).
-ARG VERSION=dev
+# VERSION is empty or "dev" when built without the deploy scripts: read the repo VERSION file then.
+COPY VERSION /tmp/VERSION
+ARG VERSION=
 ARG COMMIT=unknown
 ARG BUILD_TIME=unknown
-RUN printf '{"version":"%s","commit":"%s","buildTime":"%s"}\n' "$VERSION" "$COMMIT" "$BUILD_TIME" > /srv/version.json
+RUN if [ -z "$VERSION" ] || [ "$VERSION" = "dev" ]; then VERSION=$(tr -d '[:space:]' < /tmp/VERSION); fi; printf '{"version":"%s","commit":"%s","buildTime":"%s"}\n' "$VERSION" "$COMMIT" "$BUILD_TIME" > /srv/version.json
 ENTRYPOINT ["/usr/local/bin/web-entrypoint.sh"]
