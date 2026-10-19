@@ -18,10 +18,22 @@ case "$*" in
   "compose port web 443") echo "${STUB_PORT:-0.0.0.0:9443}" ;;
   *"psql"*) echo 5 ;;
   *"pg_dump"*) echo DUMP ;;
+  "image inspect --format"*)
+    ref=$5
+    for t in $STUB_TAGS; do [ "$t" = "${ref#openvms-}" ] && { echo "id-$ref"; exit 0; }; done
+    exit 1 ;;
   "image inspect openvms-"*)
     for t in $STUB_TAGS; do [ "$t" = "${3#openvms-}" ] && exit 0; done
     exit 1 ;;
-  "tag "*) [ -z "${STUB_TAG_FAIL:-}" ] ;;
+  "image ls "*)
+    [ -n "${STUB_LS_TAGS:-}" ] && printf '%s\n' $STUB_LS_TAGS
+    [ -f "$STUB_TAGGED" ] && awk -v s="$3" '$1 == s {print $2}' "$STUB_TAGGED"
+    exit 0 ;;
+  "tag "*)
+    [ -z "${STUB_TAG_FAIL:-}" ] || exit 1
+    [ -n "${STUB_TAG_FAIL_ON:-}" ] && [ "$2" = "openvms-$STUB_TAG_FAIL_ON:rollback-${STUB_TAG_FAIL_TAG:-T1}" ] && exit 1
+    case $3 in openvms-*:rollback-*) echo "${3%%:*} ${3#*:}" >>"$STUB_TAGGED" ;; esac
+    exit 0 ;;
 esac
 STUB
 cat >"$tmp/bin/curl" <<'STUB'
@@ -31,6 +43,7 @@ echo '{"status":"ok"}'
 STUB
 chmod +x "$tmp/bin/docker" "$tmp/bin/curl"
 export STUB_LOG="$tmp/log"
+export STUB_TAGGED="$tmp/tagged"
 
 mkrepo() {
   git init -q -b main "$1"
@@ -113,6 +126,53 @@ out=$(STUB_TAGS="api:rollback-T1 web:rollback-T1" rb T1); rc=$?
 printf '%s\n' "$out" | grep -q 'retagged: api web' || fail "retagged list missing: $out"
 grep -q 'compose up -d --no-build' "$STUB_LOG" || fail "rollback did not run compose up --no-build"
 out=$(rb); [ $? -ne 0 ] || fail "rollback without TAG: expected failure"
+
+# 7. Atomic rollback: every tag is validated before the first retag, and a
+# mid-way retag failure restores the previous latest of the services already done.
+: >"$STUB_LOG"
+out=$(STUB_TAGS="api:latest relay:latest web:latest api:rollback-T1 relay:rollback-T1 web:rollback-T1" STUB_TAG_FAIL_ON=web rb T1); rc=$?
+[ "$rc" -ne 0 ] || fail "mid-way retag failure: expected failure"
+grep -q 'compose up' "$STUB_LOG" && fail "mid-way retag failure ran compose up"
+grep -qF 'docker tag id-openvms-api:latest openvms-api:latest' "$STUB_LOG" || fail "api latest not restored: $(cat "$STUB_LOG")"
+grep -qF 'docker tag id-openvms-relay:latest openvms-relay:latest' "$STUB_LOG" || fail "relay latest not restored"
+grep -qF 'docker tag id-openvms-web:latest' "$STUB_LOG" && fail "web was restored but never retagged"
+first_tag=$(grep -n '^docker tag' "$STUB_LOG" | head -n1 | cut -d: -f1)
+last_inspect=$(grep -n 'image inspect.*rollback-T1' "$STUB_LOG" | tail -n1 | cut -d: -f1)
+[ -n "$first_tag" ] && [ -n "$last_inspect" ] && [ "$last_inspect" -lt "$first_tag" ] || fail "tags must all be validated before the first retag"
+
+# 8. First deploy (nothing tagged): no 'make rollback' hint, a clear note instead.
+: >"$STUB_LOG"
+out=$(PATH="$tmp/bin:$PATH" DEPLOY_SKIP_PULL=1 DEPLOY_SKIP_BACKUP=1 STUB_TAGS="" DEPLOY_ROOT="$tmp/ok" bash "$here/deploy.sh" 2>&1); rc=$?
+[ "$rc" -eq 0 ] || fail "first deploy: expected exit 0: $out"
+printf '%s\n' "$out" | grep -q 'make rollback TAG=' && fail "first deploy printed a rollback hint"
+printf '%s\n' "$out" | grep -qi 'no rollback available' || fail "first deploy: missing 'no rollback available' note"
+: >"$STUB_LOG"
+out=$(PATH="$tmp/bin:$PATH" DEPLOY_SKIP_PULL=1 DEPLOY_SKIP_BACKUP=1 STUB_TAGS="api:latest" DEPLOY_ROOT="$tmp/ok" bash "$here/deploy.sh" 2>&1)
+printf '%s\n' "$out" | grep -q 'make rollback TAG=' || fail "tagged deploy: rollback hint missing"
+
+# 9. Retention: keep the newest DEPLOY_KEEP tags and dump dirs, never the new ones.
+mkrepo "$tmp/keep"
+for d in 20250101T000000Z 20250102T000000Z 20250103T000000Z 99990101T000000Z; do mkdir -p "$tmp/keep/.atl/deploy/$d"; done
+: >"$STUB_LOG"; rm -f "$tmp/tagged"
+out=$(PATH="$tmp/bin:$PATH" DEPLOY_SKIP_PULL=1 DEPLOY_SKIP_BACKUP=1 DEPLOY_KEEP=1 STUB_TAGS="api:latest" \
+  STUB_LS_TAGS="latest rollback-20250101T000000Z rollback-20250103T000000Z rollback-99990101T000000Z" DEPLOY_ROOT="$tmp/keep" bash "$here/deploy.sh" 2>&1); rc=$?
+[ "$rc" -eq 0 ] || fail "retention run: expected exit 0: $out"
+grep -qF 'docker rmi openvms-api:rollback-20250101T000000Z' "$STUB_LOG" || fail "old tag 20250101 not removed"
+grep -qF 'docker rmi openvms-api:rollback-20250103T000000Z' "$STUB_LOG" || fail "old tag 20250103 not removed"
+grep -qF 'rmi openvms-api:rollback-99990101T000000Z' "$STUB_LOG" && fail "newest tag removed"
+grep -qF 'rmi openvms-api:latest' "$STUB_LOG" && fail "non-rollback tag removed"
+ts_tag=$(awk '$1 == "openvms-api" {print $2}' "$tmp/tagged")
+[ -n "$ts_tag" ] && grep -qF "rmi openvms-api:$ts_tag" "$STUB_LOG" && fail "tag just created was removed"
+[ ! -d "$tmp/keep/.atl/deploy/20250101T000000Z" ] || fail "old dump dir kept"
+[ ! -d "$tmp/keep/.atl/deploy/20250103T000000Z" ] || fail "old dump dir 20250103 kept"
+[ -d "$tmp/keep/.atl/deploy/99990101T000000Z" ] || fail "newest dump dir removed"
+
+# 10. Retention in dry-run only reports.
+mkrepo "$tmp/keepdry"
+mkdir -p "$tmp/keepdry/.atl/deploy/20250101T000000Z" "$tmp/keepdry/.atl/deploy/20250102T000000Z"
+out=$(PATH="$tmp/bin:$PATH" DEPLOY_DRY_RUN=1 DEPLOY_SKIP_PULL=1 DEPLOY_KEEP=1 DEPLOY_ROOT="$tmp/keepdry" bash "$here/deploy.sh" 2>&1)
+printf '%s\n' "$out" | grep -q 'would remove.*20250101T000000Z' || fail "dry run: missing would-remove for the old dump: $out"
+[ -d "$tmp/keepdry/.atl/deploy/20250101T000000Z" ] || fail "dry run removed a dump dir"
 
 [ "$fails" -eq 0 ] && echo "ok: deploy and rollback tests passed"
 [ "$fails" -eq 0 ]

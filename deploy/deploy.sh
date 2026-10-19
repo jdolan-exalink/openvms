@@ -11,6 +11,8 @@
 #   DEPLOY_SKIP_BACKUP=1 skip the Postgres dump (explicit opt-out)
 #   DEPLOY_DRY_RUN=1    print mutating commands instead of running them
 #   DEPLOY_ROOT         repository root (default: parent of this script)
+#   DEPLOY_KEEP         newest rollback-* image tags per service and dump dirs kept
+#                       after a successful deploy (default: 5)
 #   DEPLOY_WAIT         seconds to wait for readiness (default: 120)
 #   VERSION             image version label (default: git describe)
 #   WEB_HTTPS_PORT      fallback HTTPS port if `docker compose port web 443` fails (default: 8443)
@@ -21,6 +23,7 @@ ROOT=${DEPLOY_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 BRANCH=${DEPLOY_BRANCH:-main}
 DRY=${DEPLOY_DRY_RUN:-0}
 WAIT=${DEPLOY_WAIT:-120}
+KEEP=${DEPLOY_KEEP:-5}
 IMAGES="api relay worker web"
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 
@@ -109,19 +112,29 @@ fi
 
 # --- 4. Rollback tags -------------------------------------------------------
 step 4 "rollback tags"
+TAGGED=0
 for svc in $IMAGES; do
   if [ "$DRY" = 1 ]; then
     info "+ docker tag openvms-$svc:latest openvms-$svc:rollback-$TS (if the image exists)"
   elif docker image inspect "openvms-$svc:latest" >/dev/null 2>&1; then
     docker tag "openvms-$svc:latest" "openvms-$svc:rollback-$TS"
+    TAGGED=$((TAGGED + 1))
     info "tagged openvms-$svc:rollback-$TS"
   else
     info "openvms-$svc has no image yet, skipped"
   fi
 done
 
+if [ "$DRY" != 1 ] && [ "$TAGGED" -eq 0 ]; then
+  info "no image was tagged (first deploy): no rollback available for images"
+fi
+
 rollback_help() {
-  echo "Rollback (images only, no database restore):  make rollback TAG=$TS"
+  if [ "$DRY" = 1 ] || [ "$TAGGED" -gt 0 ]; then
+    echo "Rollback (images only, no database restore):  make rollback TAG=$TS"
+  else
+    echo "No rollback available for images: nothing was tagged (first deploy)."
+  fi
   if [ -n "$DUMP" ]; then
     echo "If new migrations were applied, also restore the database from the dump (destructive, review first):"
     echo "  docker compose exec -T postgres pg_restore -U openvms -d openvms --clean --if-exists < $DUMP"
@@ -167,5 +180,32 @@ if [ "$DRY" = 1 ]; then MIG_AFTER=dry-run; else MIG_AFTER=$(migration_version); 
 echo "commit:     $COMMIT ($VERSION)"
 echo "migration:  $MIG_BEFORE -> $MIG_AFTER"
 echo "dump:       ${DUMP:-none}${SHA:+ (sha256 $SHA)}"
-echo "rollback:   tag rollback-$TS"
+if [ "$DRY" = 1 ] || [ "$TAGGED" -gt 0 ]; then echo "rollback:   tag rollback-$TS"; else echo "rollback:   none (first deploy)"; fi
 rollback_help
+
+# --- Retention --------------------------------------------------------------
+# Keep the newest $KEEP rollback-* tags per service and dump dirs; never remove
+# the ones created by this run. Timestamps sort lexicographically.
+case $KEEP in ''|*[!0-9]*) KEEP=5 ;; esac
+prune() {
+  echo
+  echo "retention: keeping the newest $KEEP rollback tags per service and dump dirs"
+  for svc in $IMAGES; do
+    docker image ls "openvms-$svc" --format '{{.Tag}}' 2>/dev/null | grep '^rollback-' | sort -ru |
+      tail -n +"$((KEEP + 1))" | while read -r t; do
+        [ "$t" = "rollback-$TS" ] && continue
+        if [ "$DRY" = 1 ]; then echo "   would remove image tag openvms-$svc:$t"
+        else docker rmi "openvms-$svc:$t" >/dev/null 2>&1 && echo "   removed image tag openvms-$svc:$t"; fi
+      done || true
+  done
+  if [ -d "$ROOT/.atl/deploy" ]; then
+    (cd "$ROOT/.atl/deploy" && ls -1 | grep -E '^[0-9]{8}T[0-9]{6}Z$' | sort -ru) | tail -n +"$((KEEP + 1))" |
+      while read -r d; do
+        [ "$d" = "$TS" ] && continue
+        if [ "$DRY" = 1 ]; then echo "   would remove dump dir .atl/deploy/$d"
+        else rm -rf "$ROOT/.atl/deploy/$d" && echo "   removed dump dir .atl/deploy/$d"; fi
+      done || true
+  fi
+  return 0
+}
+prune
