@@ -6,7 +6,7 @@ import { useT } from "@/i18n";
 import { Modal } from "@/components/Modal";
 import { cn } from "@/lib/cn";
 import {
-  clampGrid, DEFAULT_PRESENTATIONS, divisionName, gridSegments, MAX_GRID, samePanes, toggleSegment, uniformPresentation,
+  clampGrid, DEFAULT_PRESENTATIONS, divisionName, exportPresentations, gridSegments, importPresentations, MAX_GRID, samePanes, toggleSegment, uniformPresentation,
   type GridSegment, type Presentation,
 } from "@/lib/presentations";
 
@@ -148,6 +148,8 @@ export function PresentationEditor({
   onAccept: (catalog: Presentation[], selectedId: string) => void;
 }) {
   const [draft, setDraft] = useState(catalog);
+  const [notice, setNotice] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
   const [selectedId, setSelectedId] = useState(() => catalog.find((item) => samePanes(item.panes, active.panes) && item.columns === active.columns)?.id ?? catalog[0]?.id ?? "");
   const t = useT();
   const selected = draft.find((item) => item.id === selectedId) ?? draft[0];
@@ -167,6 +169,27 @@ export function PresentationEditor({
   const removeCustom = (id: string) => {
     setDraft((list) => list.filter((item) => item.id !== id));
     if (selectedId === id) setSelectedId(DEFAULT_PRESENTATIONS[0]?.id ?? "");
+  };
+
+  const exportViews = () => {
+    const blob = new Blob([exportPresentations(draft)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "openvms-vistas.json";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const importViews = async (file: File | undefined) => {
+    if (!file) return;
+    const result = importPresentations(draft, await file.text());
+    if (fileRef.current) fileRef.current.value = "";
+    if (!result) {
+      setNotice(t("live.importInvalid"));
+      return;
+    }
+    setDraft(result.catalog);
+    setNotice(t("live.importResult", { imported: result.imported, rejected: result.rejected }));
   };
 
   if (!selected) return null;
@@ -225,12 +248,18 @@ export function PresentationEditor({
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <Button
-          disabled={customs.length === 0}
-          onClick={() => { setDraft(DEFAULT_PRESENTATIONS); setSelectedId(DEFAULT_PRESENTATIONS[0]?.id ?? ""); }}
-        >
-          {t("live.removeCustom")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            disabled={customs.length === 0}
+            onClick={() => { setDraft(DEFAULT_PRESENTATIONS); setSelectedId(DEFAULT_PRESENTATIONS[0]?.id ?? ""); }}
+          >
+            {t("live.removeCustom")}
+          </Button>
+          <Button disabled={customs.length === 0} onClick={exportViews}>{t("live.exportViews")}</Button>
+          <Button onClick={() => fileRef.current?.click()}>{t("live.importViews")}</Button>
+          <input ref={fileRef} type="file" accept="application/json,.json" aria-label={t("live.importViews")} className="hidden" onChange={(event) => void importViews(event.target.files?.[0])} />
+          <p role="status" className="text-xs text-muted">{notice}</p>
+        </div>
         <div className="flex gap-2">
           <Button onClick={onCancel}>{t("common.cancel")}</Button>
           <Button variant="primary" onClick={() => onAccept(draft, selected.id)}>{t("common.accept")}</Button>

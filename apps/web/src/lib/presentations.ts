@@ -192,7 +192,7 @@ export function samePanes(a: Pane[], b: Pane[]): boolean {
 const CATALOG_KEY = "openvms.live.presentations.v2";
 const VIEW_PANES_KEY = "openvms.live.view-panes.v1";
 
-function parsePresentation(value: unknown): Presentation | null {
+export function parsePresentation(value: unknown): Presentation | null {
   if (!value || typeof value !== "object") return null;
   const item = value as Partial<Presentation>;
   if (typeof item.id !== "string" || !item.id) return null;
@@ -256,4 +256,48 @@ export function recallViewPanes(viewId: string, columns: number, cellCount: numb
   const panes = parsePanes(stored.columns, stored.rows, stored.panes);
   if (!panes) return null;
   return { columns: stored.columns, rows: stored.rows, panes };
+}
+
+const EXPORT_FORMAT = "openvms.presentations";
+
+/** exportPresentations serializes the custom (non-standard) presentations as a JSON file body. */
+export function exportPresentations(list: Presentation[]): string {
+  const presentations = list
+    .filter((item) => !item.builtin)
+    .map(({ id, name, columns, rows, panes }) => ({ id, name, columns, rows, panes }));
+  return JSON.stringify({ format: EXPORT_FORMAT, version: 1, presentations }, null, 2);
+}
+
+export type ImportResult = { catalog: Presentation[]; imported: number; rejected: number };
+
+/**
+ * importPresentations merges the valid presentations of an exported file into `list`. Each item goes
+ * through parsePresentation (panes must tile the grid, ids cannot collide with a standard). An item
+ * whose id matches an existing custom presentation replaces it, so importing the same file twice is
+ * idempotent. Returns null when the text is not a presentations file at all.
+ */
+export function importPresentations(list: Presentation[], text: string): ImportResult | null {
+  let items: unknown;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    items = Array.isArray(parsed) ? parsed : (parsed as { presentations?: unknown } | null)?.presentations;
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(items)) return null;
+  let catalog = list;
+  let imported = 0;
+  let rejected = 0;
+  for (const item of items) {
+    const presentation = parsePresentation(item);
+    if (!presentation) {
+      rejected++;
+      continue;
+    }
+    imported++;
+    catalog = catalog.some((existing) => !existing.builtin && existing.id === presentation.id)
+      ? catalog.map((existing) => (existing.id === presentation.id ? presentation : existing))
+      : [...catalog, presentation];
+  }
+  return { catalog, imported, rejected };
 }
