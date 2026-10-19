@@ -53,7 +53,7 @@ func (h *Handlers) CreateFaceWatchlist(ctx context.Context, r gen.CreateFaceWatc
 }
 
 func (h *Handlers) GetFaceWatchlist(ctx context.Context, r gen.GetFaceWatchlistRequestObject) (gen.GetFaceWatchlistResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.faceWatchlistCaller(ctx, r.Params.TenantId, r.WatchlistId)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (h *Handlers) GetFaceWatchlist(ctx context.Context, r gen.GetFaceWatchlistR
 }
 
 func (h *Handlers) UpdateFaceWatchlist(ctx context.Context, r gen.UpdateFaceWatchlistRequestObject) (gen.UpdateFaceWatchlistResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.faceWatchlistCaller(ctx, r.Params.TenantId, r.WatchlistId)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (h *Handlers) UpdateFaceWatchlist(ctx context.Context, r gen.UpdateFaceWatc
 }
 
 func (h *Handlers) DeleteFaceWatchlist(ctx context.Context, r gen.DeleteFaceWatchlistRequestObject) (gen.DeleteFaceWatchlistResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, tenant, err := h.faceWatchlistCaller(ctx, r.Params.TenantId, r.WatchlistId)
 	if err != nil {
 		return nil, err
 	}

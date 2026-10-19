@@ -8,11 +8,11 @@ import (
 )
 
 func (h *Handlers) ListFaceConfig(ctx context.Context, r gen.ListFaceConfigRequestObject) (gen.ListFaceConfigResponseObject, error) {
-	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	a, err := actor(ctx)
 	if err != nil {
 		return nil, err
 	}
-	list, err := h.Inv.ListFaceConfig(ctx, a, tenant)
+	list, err := h.Inv.ListFaceConfig(ctx, a, inventory.FaceConfigFilter{TenantID: r.Params.TenantId, SiteIDs: uuids(r.Params.SiteId)})
 	if err != nil {
 		return nil, err
 	}

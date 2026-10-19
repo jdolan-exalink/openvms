@@ -44,7 +44,7 @@ func TestFaceConfigListReadsRunningSettingsAndGatesEditing(t *testing.T) {
 	viewer := faceActor(t, env, authz.FacesView, authz.ServersView)
 	manager := faceActor(t, env, authz.FacesView, authz.FacesManage, authz.ServersView, authz.ServersConfig)
 
-	list, err := env.Svc.ListFaceConfig(ctx, viewer, tenant)
+	list, err := env.Svc.ListFaceConfig(ctx, viewer, inventory.FaceConfigFilter{TenantID: &tenant})
 	if err != nil || len(list) != 2 {
 		t.Fatalf("list = %d items, %v; want the two demo servers", len(list), err)
 	}
@@ -53,15 +53,15 @@ func TestFaceConfigListReadsRunningSettingsAndGatesEditing(t *testing.T) {
 			t.Fatalf("viewer item = %+v", it)
 		}
 	}
-	list, _ = env.Svc.ListFaceConfig(ctx, manager, tenant)
+	list, _ = env.Svc.ListFaceConfig(ctx, manager, inventory.FaceConfigFilter{TenantID: &tenant})
 	if !list[0].CanEdit || !list[1].CanEdit {
 		t.Fatal("a manager with servers.config cannot edit")
 	}
 	// Without faces.view nothing is listed; without servers.view no server shows up.
-	if _, err := env.Svc.ListFaceConfig(ctx, faceActor(t, env, authz.ServersView), tenant); !errors.Is(err, access.ErrForbidden) {
+	if _, err := env.Svc.ListFaceConfig(ctx, faceActor(t, env, authz.ServersView), inventory.FaceConfigFilter{TenantID: &tenant}); !errors.Is(err, access.ErrForbidden) {
 		t.Fatalf("no faces.view = %v, want forbidden", err)
 	}
-	if got, err := env.Svc.ListFaceConfig(ctx, faceActor(t, env, authz.FacesView), tenant); err != nil || len(got) != 0 {
+	if got, err := env.Svc.ListFaceConfig(ctx, faceActor(t, env, authz.FacesView), inventory.FaceConfigFilter{TenantID: &tenant}); err != nil || len(got) != 0 {
 		t.Fatalf("no servers.view = %d items, %v", len(got), err)
 	}
 }
@@ -128,7 +128,7 @@ func TestPatchFaceConfigWritesThroughTheEditorWithRevisionsAndRefreshesCapabilit
 	}
 
 	// The settings read back, and the capability flag followed so the registry sync can start.
-	list, _ := env.Svc.ListFaceConfig(ctx, manager, tenant)
+	list, _ := env.Svc.ListFaceConfig(ctx, manager, inventory.FaceConfigFilter{TenantID: &tenant})
 	var h01 inventory.FaceServerConfig
 	for _, it := range list {
 		if it.ServerID == cam.ServerID {
@@ -196,5 +196,40 @@ func TestPatchFaceConfigAuthorizationAndValidation(t *testing.T) {
 	}
 	if n := len(mock.SetCalls()); n != 0 {
 		t.Fatalf("rejected patches reached Frigate (%d writes)", n)
+	}
+}
+
+func TestFaceConfigListNeedsNoTenantAndFiltersBySite(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+
+	// A platform administrator has no tenant of its own and still sees every server.
+	all, err := env.Svc.ListFaceConfig(ctx, env.Admin, inventory.FaceConfigFilter{})
+	if err != nil || len(all) != 2 {
+		t.Fatalf("admin without tenant = %d items, %v; want the two demo servers", len(all), err)
+	}
+	site := env.Cameras["frigate-h01/acceso_norte"].SiteID
+	bySite, err := env.Svc.ListFaceConfig(ctx, env.Admin, inventory.FaceConfigFilter{SiteIDs: []uuid.UUID{site}})
+	if err != nil || len(bySite) != 1 {
+		t.Fatalf("site filter = %d of %d items, %v", len(bySite), len(all), err)
+	}
+	for _, it := range bySite {
+		if it.SiteName == "" {
+			t.Fatalf("filtered item without site: %+v", it)
+		}
+	}
+
+	// A member without a tenant argument gets its own tenant, never another one.
+	viewer := faceActor(t, env, authz.FacesView, authz.ServersView)
+	own, err := env.Svc.ListFaceConfig(ctx, viewer, inventory.FaceConfigFilter{})
+	if err != nil || len(own) != 2 {
+		t.Fatalf("member without tenant = %d items, %v", len(own), err)
+	}
+	other := uuid.New()
+	if _, err := env.Svc.ListFaceConfig(ctx, viewer, inventory.FaceConfigFilter{TenantID: &other}); err == nil {
+		t.Fatal("member naming another tenant succeeded")
+	}
+	if _, err := env.Svc.ListFaceConfig(ctx, faceActor(t, env, authz.ServersView), inventory.FaceConfigFilter{}); !errors.Is(err, access.ErrForbidden) {
+		t.Fatalf("member without faces.view = %v, want forbidden", err)
 	}
 }

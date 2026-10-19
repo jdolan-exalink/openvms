@@ -26,13 +26,18 @@ const (
 	maxRecognitionLimit     = 200
 )
 
-// RecognitionFilter narrows the recognition timeline. Empty slices mean "no restriction".
+// RecognitionFilter narrows the recognition timeline. Empty slices mean "no restriction". A nil
+// TenantID searches every organization the actor holds faces.view on.
 type RecognitionFilter struct {
-	PersonIDs []uuid.UUID
-	CameraIDs []uuid.UUID
-	From, To  *time.Time
-	Cursor    string
-	Limit     int
+	TenantID       *uuid.UUID
+	PersonIDs      []uuid.UUID
+	SiteIDs        []uuid.UUID
+	ServerIDs      []uuid.UUID
+	CameraGroupIDs []uuid.UUID
+	CameraIDs      []uuid.UUID
+	From, To       *time.Time
+	Cursor         string
+	Limit          int
 }
 
 // Recognition is one sighting: an event whose sub_labels carry a registered person's name.
@@ -82,12 +87,16 @@ func decodeRecognitionCursor(c string) (time.Time, uuid.UUID, uuid.UUID, error) 
 
 // ListRecognitions is the recognition timeline (faces.view), newest first with keyset
 // pagination. Events are limited to the cameras the actor holds events.view on, exactly like
-// the events API, so a person can never be tracked through cameras the caller cannot see. Only
-// live persons appear: the sightings of a deleted person are scrubbed.
-func (s *Service) ListRecognitions(ctx context.Context, actor authz.Actor, tenantID uuid.UUID, f RecognitionFilter) (RecognitionPage, error) {
+// the events API, so a person can never be tracked through cameras the caller cannot see. Rows
+// span every organization the actor holds faces.view on (names are never shown for the others,
+// whose rows are left out), narrowed by site, server, camera group and camera like the plate
+// search. Only live persons appear: the sightings of a deleted person are scrubbed.
+func (s *Service) ListRecognitions(ctx context.Context, actor authz.Actor, f RecognitionFilter) (RecognitionPage, error) {
 	var out RecognitionPage
-	if err := authorizeTenant(actor, tenantID); err != nil {
-		return out, err
+	if f.TenantID != nil {
+		if err := authorizeTenant(actor, *f.TenantID); err != nil {
+			return out, err
+		}
 	}
 	limit := f.Limit
 	if limit <= 0 {
@@ -108,15 +117,16 @@ func (s *Service) ListRecognitions(ctx context.Context, actor authz.Actor, tenan
 		if err != nil {
 			return err
 		}
-		if err := c.Require(authz.FacesView, access.Tenant(tenantID)); err != nil {
+		tenants, err := readableTenants(ctx, tx, c, actor, f.TenantID)
+		if err != nil {
 			return err
 		}
 		cams, err := c.CameraIDs(ctx, authz.EventsView)
 		if err != nil {
 			return err
 		}
-		args := []any{tenantID, cams}
-		where := []string{"e.tenant_id = $1", "e.camera_id = ANY($2)"}
+		args := []any{tenants, cams}
+		where := []string{"e.tenant_id = ANY($1)", "e.camera_id = ANY($2)"}
 		add := func(cond string, v any) {
 			args = append(args, v)
 			where = append(where, strings.ReplaceAll(cond, "?", "$"+strconv.Itoa(len(args))))
@@ -124,8 +134,18 @@ func (s *Service) ListRecognitions(ctx context.Context, actor authz.Actor, tenan
 		if len(f.PersonIDs) > 0 {
 			add("p.id = ANY(?)", f.PersonIDs)
 		}
+		if len(f.SiteIDs) > 0 {
+			add("e.site_id = ANY(?)", f.SiteIDs)
+		}
+		if len(f.ServerIDs) > 0 {
+			add("e.server_id = ANY(?)", f.ServerIDs)
+		}
 		if len(f.CameraIDs) > 0 {
 			add("e.camera_id = ANY(?)", f.CameraIDs)
+		}
+		if len(f.CameraGroupIDs) > 0 {
+			// Only narrows the already-permitted e.camera_id = ANY(cams) set above.
+			add("EXISTS (SELECT 1 FROM camera_group_members m WHERE m.camera_id = e.camera_id AND m.group_id = ANY(?))", f.CameraGroupIDs)
 		}
 		if f.From != nil {
 			add("e.start_time >= ?", *f.From)
@@ -141,7 +161,7 @@ func (s *Service) ListRecognitions(ctx context.Context, actor authz.Actor, tenan
 		args = append(args, limit+1)
 		rows, err := tx.Query(ctx, `
 SELECT e.id, p.id, p.display_name, e.camera_id, c.display_name, e.site_id, s.name, fs.name,
-       e.start_time, e.end_time, e.thumb_key <> '', e.has_snapshot
+       e.start_time, e.end_time, e.thumb_key <> '', e.has_snapshot, e.tenant_id
 FROM events e
 JOIN face_persons p ON p.tenant_id = e.tenant_id AND p.deleted_at IS NULL AND p.frigate_name = ANY(e.sub_labels)
 JOIN cameras c ON c.id = e.camera_id
@@ -154,13 +174,16 @@ LIMIT $%d`, len(args)), args...)
 			return err
 		}
 		defer rows.Close()
+		var rowTenants []uuid.UUID
 		for rows.Next() {
 			var r Recognition
+			var tenant uuid.UUID
 			if err := rows.Scan(&r.EventID, &r.PersonID, &r.PersonName, &r.CameraID, &r.CameraName, &r.SiteID, &r.SiteName,
-				&r.ServerName, &r.StartTime, &r.EndTime, &r.HasThumbnail, &r.HasSnapshot); err != nil {
+				&r.ServerName, &r.StartTime, &r.EndTime, &r.HasThumbnail, &r.HasSnapshot, &tenant); err != nil {
 				return err
 			}
 			out.Items = append(out.Items, r)
+			rowTenants = append(rowTenants, tenant)
 		}
 		if err := rows.Err(); err != nil {
 			return err
@@ -170,8 +193,29 @@ LIMIT $%d`, len(args)), args...)
 		if len(f.PersonIDs) == 1 {
 			target = f.PersonIDs[0]
 		}
-		return s.audit(ctx, q, actor, tenantID, ActionRecognitionsRead, "face_person", target,
-			map[string]any{"count": min(len(out.Items), limit), "persons": len(f.PersonIDs), "cameras": len(f.CameraIDs)})
+		// One audit row per organization whose names were shown; a read that returned nothing is
+		// still audited, against the first organization searched.
+		counts := map[uuid.UUID]int{}
+		for i, t := range rowTenants {
+			if i < limit {
+				counts[t]++
+			}
+		}
+		if len(counts) == 0 && len(tenants) > 0 {
+			counts[tenants[0]] = 0
+		}
+		for _, t := range tenants {
+			n, ok := counts[t]
+			if !ok {
+				continue
+			}
+			if err := s.audit(ctx, q, actor, t, ActionRecognitionsRead, "face_person", target,
+				map[string]any{"count": n, "persons": len(f.PersonIDs), "cameras": len(f.CameraIDs),
+					"sites": len(f.SiteIDs), "servers": len(f.ServerIDs), "camera_groups": len(f.CameraGroupIDs)}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		return RecognitionPage{}, err

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -48,15 +49,29 @@ type FaceServerConfig struct {
 	Cameras        []FaceCameraView
 }
 
-// ListFaceConfig reads the running face recognition settings of every server of the tenant the
-// actor may see (servers.view), requiring faces.view. A server that cannot be read is reported,
-// not fatal. CanEdit says whether the actor may change it (faces.manage and servers.config).
-func (s *Service) ListFaceConfig(ctx context.Context, actor authz.Actor, tenantID uuid.UUID) ([]FaceServerConfig, error) {
+// FaceConfigFilter narrows ListFaceConfig. A nil TenantID means the member's own organization, or
+// every organization for a platform administrator; empty SiteIDs means every site.
+type FaceConfigFilter struct {
+	TenantID *uuid.UUID
+	SiteIDs  []uuid.UUID
+}
+
+// ListFaceConfig reads the running face recognition settings of every server the actor may see
+// (servers.view) in organizations it holds faces.view on, optionally narrowed to some sites. A
+// server that cannot be read is reported, not fatal. CanEdit says whether the actor may change
+// it (faces.manage and servers.config).
+func (s *Service) ListFaceConfig(ctx context.Context, actor authz.Actor, f FaceConfigFilter) ([]FaceServerConfig, error) {
 	var out []FaceServerConfig
 	var rows []db.GetServerRow
+	tenantID := f.TenantID
+	if tenantID == nil {
+		tenantID = actor.TenantID
+	}
 	err := s.tx(ctx, actor, func(q *db.Queries, c *access.Checker) error {
-		if err := c.Require(authz.FacesView, access.Tenant(tenantID)); err != nil {
-			return err
+		if tenantID != nil {
+			if err := c.Require(authz.FacesView, access.Tenant(*tenantID)); err != nil {
+				return err
+			}
 		}
 		ids, err := c.ServerIDs(ctx, authz.ServersView)
 		if err != nil {
@@ -67,13 +82,19 @@ func (s *Service) ListFaceConfig(ctx context.Context, actor authz.Actor, tenantI
 			return err
 		}
 		for _, r := range list {
-			if r.TenantID != tenantID {
+			if tenantID != nil && r.TenantID != *tenantID {
+				continue
+			}
+			if len(f.SiteIDs) > 0 && !slices.Contains(f.SiteIDs, r.SiteID) {
+				continue
+			}
+			if !c.Can(authz.FacesView, access.Tenant(r.TenantID)) {
 				continue
 			}
 			srv := db.GetServerRow(r)
 			rows = append(rows, srv)
 			cfg := FaceServerConfig{ServerID: srv.ID, ServerName: srv.Name, FrigateVersion: srv.FrigateVersion,
-				CanEdit: c.Can(authz.FacesManage, access.Tenant(tenantID)) && c.Can(authz.ServersConfig, access.Server(srv.TenantID, srv.SiteID, srv.ID))}
+				CanEdit: c.Can(authz.FacesManage, access.Tenant(srv.TenantID)) && c.Can(authz.ServersConfig, access.Server(srv.TenantID, srv.SiteID, srv.ID))}
 			if site, err := q.GetSite(ctx, srv.SiteID); err == nil {
 				cfg.SiteName = site.Name
 			}

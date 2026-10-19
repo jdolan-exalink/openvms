@@ -279,13 +279,20 @@ func TestFacesAPIPersonsImagesAndAuthz(t *testing.T) {
 	}
 }
 
-func TestFacesAPIPlatformAdminMustNameTheTenant(t *testing.T) {
+func TestFacesAPIPlatformAdminNeedsNoTenantWhileThereIsOnlyOne(t *testing.T) {
 	f := newFaceAPI(t)
-	if r := f.js(f.env.AdminToken, "GET", "/api/v1/faces/persons", ""); r.code != http.StatusBadRequest {
-		t.Fatalf("admin without tenant_id = %d %s, want 400", r.code, r.raw)
+	for _, path := range []string{
+		"/api/v1/faces/persons", "/api/v1/faces/watchlists", "/api/v1/faces/train", "/api/v1/faces/config", "/api/v1/faces/recognitions",
+	} {
+		if r := f.js(f.env.AdminToken, "GET", path, ""); r.code != http.StatusOK {
+			t.Errorf("admin without tenant_id GET %s = %d %s, want 200", path, r.code, r.raw)
+		}
 	}
-	r := f.js(f.env.AdminToken, "GET", "/api/v1/faces/persons?tenant_id="+f.tenant.String(), "")
-	if r.code != http.StatusOK {
+	if r := f.js(f.env.AdminToken, "POST", "/api/v1/faces/persons", `{"display_name":"Ana"}`); r.code != http.StatusCreated || r.json()["tenant_id"] != f.tenant.String() {
+		t.Fatalf("admin create without tenant_id = %d %s", r.code, r.raw)
+	}
+	// tenant_id stays an optional, backward-compatible parameter.
+	if r := f.js(f.env.AdminToken, "GET", "/api/v1/faces/persons?tenant_id="+f.tenant.String(), ""); r.code != http.StatusOK {
 		t.Fatalf("admin with tenant_id = %d %s", r.code, r.raw)
 	}
 }

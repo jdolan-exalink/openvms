@@ -1918,7 +1918,7 @@ paths:
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/faces/persons:
     parameters:
-      - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "Needed only by platform administrators; members of a tenant always act on their own." }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "Optional. Members act on their own organization; platform administrators may omit it when the object names its organization, or when only one organization exists." }
     get:
       tags: [faces]
       operationId: listFacePersons
@@ -2140,7 +2140,7 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/faces/watchlists:
     parameters:
-      - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "Needed only by platform administrators; members of a tenant always act on their own." }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid }, description: "Optional. Members act on their own organization; platform administrators may omit it when the object names its organization, or when only one organization exists." }
     get:
       tags: [faces]
       operationId: listFaceWatchlists
@@ -2243,7 +2243,8 @@ paths:
         that cannot be read is reported with `error` and does not fail the request. Settings are
         what Frigate is running now; a saved change only shows after Frigate restarts.
       parameters:
-        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+        - { name: tenant_id, in: query, description: "Optional. Platform administrators and members may omit it; it only narrows the list to one organization.", schema: { type: string, format: uuid } }
+        - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
       responses:
         "200":
           description: One entry per server
@@ -2289,11 +2290,16 @@ paths:
       summary: Recognition timeline built from the events index (faces.view)
       description: |
         Events whose sub_labels carry a registered person's name, newest first with keyset
-        pagination, limited to the cameras the caller holds events.view on. An event that
-        recognized several persons yields one row per person. Use the event endpoints for the
+        pagination, limited to the cameras the caller holds events.view on. No organization is
+        needed: rows come from every organization the caller holds faces.view on, filterable by
+        site, server, camera group and camera like the plate search. An event that recognized
+        several persons yields one row per person. Use the event endpoints for the
         thumbnail and the playback link.
       parameters:
-        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+        - { name: tenant_id, in: query, description: "Optional. Omit it to search every organization the caller may see.", schema: { type: string, format: uuid } }
+        - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: camera_group_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: person_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: camera_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
         - { name: from, in: query, schema: { type: string, format: date-time } }
@@ -2314,12 +2320,15 @@ paths:
     get:
       tags: [faces]
       operationId: listFaceTrainAttempts
-      summary: Recent unclassified face attempts of every face-enabled server (faces.view)
+      summary: Recent unclassified face attempts of every face-enabled server in scope (faces.view)
       description: |
-        Reads Frigate's train folder (attempts saved with save_attempts). A server that cannot be
+        Reads Frigate's train folder (attempts saved with save_attempts) of every face-enabled
+        server the caller may see, filterable by site and server. A server that cannot be
         reached is reported in `servers` and does not fail the request.
       parameters:
-        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+        - { name: tenant_id, in: query, description: "Optional. Omit it to list the servers of every organization the caller may see.", schema: { type: string, format: uuid } }
+        - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
       responses:
         "200":
           description: Attempts newest first, and how each server answered

@@ -82,3 +82,12 @@ WHERE tenant_id = @tenant_id GROUP BY person_id, status;
 SELECT * FROM frigate_servers
 WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
 ORDER BY lower(name), id;
+
+-- name: ListFaceCapableServersScoped :many
+-- Face-capable servers across the given tenants, narrowed by optional site and server filters
+-- (an empty array means no restriction).
+SELECT * FROM frigate_servers
+WHERE tenant_id = ANY(@tenant_ids::uuid[]) AND deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
+  AND (cardinality(@site_ids::uuid[]) = 0 OR site_id = ANY(@site_ids::uuid[]))
+  AND (cardinality(@server_ids::uuid[]) = 0 OR id = ANY(@server_ids::uuid[]))
+ORDER BY lower(name), id;
