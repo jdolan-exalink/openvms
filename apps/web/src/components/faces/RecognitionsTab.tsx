@@ -2,11 +2,12 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { History } from "lucide-react";
 import { useState } from "react";
 import { cameraGroupsQuery, camerasQuery, type FaceRecognitionFilter, faceRecognitionsQuery, facePersonsQuery, sitesQuery } from "@/api/queries";
+import { RecognitionCard } from "@/components/faces/RecognitionCard";
 import { type FilterChip, SearchSummary } from "@/components/SearchSummary";
-import { Button, Empty, ErrorNote, Field, LinkButton, Select, TextInput } from "@/components/ui";
+import { Button, Empty, ErrorNote, Field, Select, TextInput } from "@/components/ui";
 import { useT } from "@/i18n";
 import { rangeEnd, todayEventsRange } from "@/lib/eventsSearch";
-import { fmtDateTime, fromLocalInput } from "@/lib/format";
+import { fromLocalInput } from "@/lib/format";
 
 type Form = { person: string; site: string; cameraGroup: string; camera: string; from: string; to: string };
 
@@ -125,27 +126,7 @@ export function RecognitionsTab() {
       {items.length > 0 && (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label={t("faces.recList")}>
           {items.map((r) => (
-            <li key={`${r.event_id}/${r.person_id}`} className="flex gap-3 rounded-m3-xl bg-surface-1 p-3">
-              {r.has_thumbnail ? (
-                <img src={`/api/v1/events/${r.event_id}/thumbnail`} alt={t("faces.recThumbAlt", { camera: r.camera_name })} loading="lazy" className="size-24 shrink-0 rounded-m3-lg bg-surface-2 object-cover" />
-              ) : (
-                <div className="size-24 shrink-0 rounded-m3-lg bg-surface-2" aria-hidden />
-              )}
-              <div className="flex min-w-0 flex-col gap-1 text-sm">
-                <span className="truncate font-bold">{r.person_name}</span>
-                <span className="truncate">{r.camera_name}</span>
-                <span className="truncate text-xs text-muted">{r.site_name} · {fmtDateTime(r.start_time)}</span>
-                <LinkButton
-                  to="/playback"
-                  search={{ camera: r.camera_id, t: Math.floor(new Date(r.start_time).getTime() / 1000) }}
-                  variant="text"
-                  size="sm"
-                  className="w-fit"
-                >
-                  {t("faces.viewPlayback")}
-                </LinkButton>
-              </div>
-            </li>
+            <RecognitionCard key={`${r.event_id}/${r.person_id}`} r={r} />
           ))}
         </ul>
       )}

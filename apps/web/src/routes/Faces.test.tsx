@@ -261,6 +261,68 @@ describe("Faces page", () => {
     await waitFor(() => expect(calls.some((c) => c.method === "DELETE" && c.path === "/api/v1/faces/persons/p1")).toBe(true));
   });
 
+  describe("Detection photos", () => {
+    const seen = { event_id: "e1", start_time: "2026-10-17T12:00:00Z", has_thumbnail: true };
+
+    it("shows the latest recognition on the person card, then the first enrollment photo, then nothing", async () => {
+      install({
+        permissions: ["faces.view", "snapshots.view"],
+        persons: [
+          person("p1", "Ana", { last_recognition: seen, first_image_id: "i1" }),
+          person("p2", "Beto", { first_image_id: "i2" }),
+          person("p3", "Carla"),
+        ],
+      });
+      renderPage(Faces);
+      const list = await screen.findByRole("list", { name: "Personas registradas" });
+      expect(within(list).getByAltText("Última detección de Ana")).toHaveAttribute("src", "/api/v1/events/e1/thumbnail");
+      expect(within(list).getByAltText("Foto de Beto")).toHaveAttribute("src", "/api/v1/faces/persons/p2/images/i2");
+      expect(within(list).queryByAltText(/Carla/)).not.toBeInTheDocument();
+    });
+
+    it("hides detection photos without snapshots.view but keeps the enrollment fallback", async () => {
+      install({ permissions: ["faces.view"], persons: [person("p1", "Ana", { last_recognition: seen, first_image_id: "i1" })] });
+      renderPage(Faces);
+      const list = await screen.findByRole("list", { name: "Personas registradas" });
+      expect(within(list).queryByAltText("Última detección de Ana")).not.toBeInTheDocument();
+      expect(within(list).getByAltText("Foto de Ana")).toHaveAttribute("src", "/api/v1/faces/persons/p1/images/i1");
+    });
+
+    it("lists the person's latest recognitions in the detail, with playback", async () => {
+      const { calls } = install({
+        permissions: ["faces.view", "snapshots.view"],
+        persons: [person("p1", "Ana")],
+        recognitions: [[rec("e1", "Ana", "plaza"), rec("e2", "Ana", "muelle")]],
+      });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
+      const gallery = await screen.findByRole("list", { name: "Reconocimientos recientes" });
+      expect(within(gallery).getByAltText("Captura del evento en plaza")).toHaveAttribute("src", "/api/v1/events/e1/thumbnail");
+      expect(within(gallery).getByText("muelle")).toBeInTheDocument();
+      expect(within(gallery).getAllByRole("link", { name: "Ver grabación" })[0]!.getAttribute("href")).toContain("camera=cam-plaza");
+      const call = calls.filter((c) => c.path === "/api/v1/faces/recognitions").at(-1)!;
+      expect(call.search.getAll("person_id")).toEqual(["p1"]);
+      expect(call.search.get("limit")).toBe("12");
+      expect(call.search.has("from")).toBe(false);
+    });
+
+    it("keeps the rows but drops the pictures without snapshots.view, and says so when there are none", async () => {
+      install({ permissions: ["faces.view"], persons: [person("p1", "Ana")], recognitions: [[rec("e1", "Ana", "plaza")]] });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
+      const gallery = await screen.findByRole("list", { name: "Reconocimientos recientes" });
+      expect(within(gallery).getByText("plaza")).toBeInTheDocument();
+      expect(within(gallery).queryByRole("img")).not.toBeInTheDocument();
+    });
+
+    it("shows an empty note when the person was not recognized yet", async () => {
+      install({ persons: [person("p1", "Ana")], recognitions: [[]] });
+      renderPage(Faces);
+      fireEvent.click(await screen.findByRole("button", { name: /Ana/ }));
+      expect(await screen.findByText("Todavía no hay reconocimientos de esta persona.")).toBeInTheDocument();
+    });
+  });
+
   describe("Entrenar", () => {
     const attempts = {
       items: [

@@ -1,13 +1,17 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ImagePlus, RefreshCw, Trash2 } from "lucide-react";
 import { type FormEvent, useRef, useState } from "react";
 import { api, postForm, type Schemas, unwrap } from "@/api/client";
-import { faceImagesQuery, faceImageUrl, faceSyncQuery } from "@/api/queries";
+import { faceImagesQuery, faceImageUrl, faceRecognitionsQuery, faceSyncQuery, meQuery } from "@/api/queries";
+import { RecognitionCard } from "@/components/faces/RecognitionCard";
 import { SyncBadge } from "@/components/faces/SyncBadge";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button, Card, ErrorNote, Field, IconButton, TextInput, Textarea } from "@/components/ui";
 import { useT } from "@/i18n";
 import { fmtDateTime } from "@/lib/format";
+import { can } from "@/lib/perm";
+
+const RECENT_LIMIT = 12;
 
 /**
  * PersonDetail is one person: editable name and notes, the enrollment photo gallery, and the
@@ -18,6 +22,10 @@ export function PersonDetail({ person, canManage, onBack }: { person: Schemas["F
   const qc = useQueryClient();
   const images = useQuery(faceImagesQuery(person.id));
   const syncStatus = useQuery(faceSyncQuery(person.id));
+  const me = useQuery(meQuery);
+  const recent = useInfiniteQuery(faceRecognitionsQuery({ person_id: [person.id], limit: RECENT_LIMIT }));
+  const recentItems = recent.data?.pages[0]?.items ?? [];
+  const canPictures = can(me.data, "snapshots.view");
   const [name, setName] = useState(person.display_name);
   const [notes, setNotes] = useState(person.notes);
   const [confirmPerson, setConfirmPerson] = useState(false);
@@ -137,6 +145,18 @@ export function PersonDetail({ person, canManage, onBack }: { person: Schemas["F
             <p className="text-xs text-muted">{t("faces.uploadHint")}</p>
             <ErrorNote error={upload.error} />
           </div>
+        )}
+      </Card>
+
+      <Card title={t("faces.personRecent")}>
+        <ErrorNote error={recent.error} />
+        {recent.isSuccess && recentItems.length === 0 && <p className="text-sm text-on-surface-variant">{t("faces.personRecentEmpty")}</p>}
+        {recentItems.length > 0 && (
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label={t("faces.personRecent")}>
+            {recentItems.map((r) => (
+              <RecognitionCard key={r.event_id} r={r} showPerson={false} showImage={canPictures} />
+            ))}
+          </ul>
         )}
       </Card>
 

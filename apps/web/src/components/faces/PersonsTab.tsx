@@ -1,17 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, UserRound } from "lucide-react";
 import { type FormEvent, useState } from "react";
-import { api, unwrap } from "@/api/client";
-import { facePersonsQuery } from "@/api/queries";
+import { api, type Schemas, unwrap } from "@/api/client";
+import { facePersonsQuery, faceImageUrl, meQuery } from "@/api/queries";
 import { PersonDetail } from "@/components/faces/PersonDetail";
 import { Button, Empty, ErrorNote, Field, LinkButton, TextInput, Textarea } from "@/components/ui";
 import { useT } from "@/i18n";
+import { can } from "@/lib/perm";
 
 /** PersonsTab lists the registered people with their sync summary and opens a person's detail. */
 export function PersonsTab({ canManage }: { canManage: boolean }) {
   const t = useT();
   const qc = useQueryClient();
   const persons = useQuery(facePersonsQuery());
+  const me = useQuery(meQuery);
+  const canPictures = can(me.data, "snapshots.view");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
@@ -91,6 +94,7 @@ export function PersonsTab({ canManage }: { canManage: boolean }) {
                 onClick={() => setSelectedId(p.id)}
                 className="m3-press flex w-full flex-col gap-1 rounded-m3-xl bg-surface-1 p-4 text-left hover:bg-on-surface/8 focus-visible:outline-2 focus-visible:outline-primary"
               >
+                <PersonThumb person={p} canPictures={canPictures} />
                 <span className="text-base font-bold">{p.display_name}</span>
                 <span className="text-xs text-muted">{t("faces.images", { count: p.image_count })}</span>
                 <span className="text-xs text-on-surface-variant">
@@ -103,4 +107,18 @@ export function PersonsTab({ canManage }: { canManage: boolean }) {
       )}
     </div>
   );
+}
+
+/** The latest detection (with snapshots.view), else the first enrollment photo, else a placeholder. */
+function PersonThumb({ person, canPictures }: { person: Schemas["FacePerson"]; canPictures: boolean }) {
+  const t = useT();
+  const cls = "mb-1 aspect-video w-full rounded-m3-lg bg-surface-2 object-cover";
+  const seen = person.last_recognition;
+  if (canPictures && seen?.has_thumbnail) {
+    return <img src={`/api/v1/events/${seen.event_id}/thumbnail`} alt={t("faces.personLastAlt", { name: person.display_name })} loading="lazy" className={cls} />;
+  }
+  if (person.first_image_id) {
+    return <img src={faceImageUrl(person.id, person.first_image_id)} alt={t("faces.personPhotoAlt", { name: person.display_name })} loading="lazy" className={cls} />;
+  }
+  return <div className={cls} aria-hidden />;
 }
