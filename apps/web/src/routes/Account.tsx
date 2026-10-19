@@ -64,10 +64,10 @@ function PasswordForm() {
         <TextInput type="password" autoComplete="current-password" value={f.current} onChange={(e) => setF({ ...f, current: e.target.value })} />
       </Field>
       <Field label={t("account.newPassword")} hint={t("account.passwordRules")}>
-        <TextInput type="password" required minLength={10} autoComplete="new-password" value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} />
+        <TextInput type="password" required minLength={8} autoComplete="new-password" value={f.next} onChange={(e) => setF({ ...f, next: e.target.value })} />
       </Field>
       <Field label={t("account.repeatPassword")}>
-        <TextInput type="password" required minLength={10} autoComplete="new-password" value={f.again} onChange={(e) => setF({ ...f, again: e.target.value })} />
+        <TextInput type="password" required minLength={8} autoComplete="new-password" value={f.again} onChange={(e) => setF({ ...f, again: e.target.value })} />
       </Field>
       <ErrorNote error={change.error} />
       {done && <p className="text-sm text-ok">{t("account.passwordUpdated")}</p>}

@@ -59,6 +59,15 @@ describe("Users", () => {
     expect(await screen.findByText("Ningún usuario coincide con el filtro.")).toBeInTheDocument();
   });
 
+  it("asks for 8 characters and nothing else in the password field", async () => {
+    setup(["users.manage"]);
+    fireEvent.click(await screen.findByRole("button", { name: "Nuevo usuario" }));
+    const dialog = await screen.findByRole("dialog", { name: "Nuevo usuario" });
+    expect(within(dialog).getByText(/Mínimo 8 caracteres\./)).toBeInTheDocument();
+    expect(within(dialog).queryByText(/letras y números/)).not.toBeInTheDocument();
+    expect(dialog.querySelector('input[type="password"]')).toHaveAttribute("minlength", "8");
+  });
+
   it("creates a user from a drawer with the same POST payload", async () => {
     const { writes } = setup(["users.manage"]);
     fireEvent.click(await screen.findByRole("button", { name: "Nuevo usuario" }));

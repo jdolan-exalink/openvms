@@ -49,6 +49,13 @@ describe("Account", () => {
     expect(await screen.findByText("Un administrador te pidió que cambies la contraseña.")).toBeInTheDocument();
   });
 
+  it("asks for 8 characters and nothing else in the new password fields", async () => {
+    setup();
+    expect(await screen.findByText("Mínimo 8 caracteres.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Nueva contraseña/)).toHaveAttribute("minlength", "8");
+    expect(screen.getByLabelText("Repetir nueva contraseña")).toHaveAttribute("minlength", "8");
+  });
+
   it("submits password change with matching passwords", async () => {
     const { writes } = setup();
     await screen.findByText("Juan Perez (juan)");
