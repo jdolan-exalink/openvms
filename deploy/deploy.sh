@@ -13,14 +13,14 @@
 #   DEPLOY_ROOT         repository root (default: parent of this script)
 #   DEPLOY_WAIT         seconds to wait for readiness (default: 120)
 #   VERSION             image version label (default: git describe)
-#   WEB_HTTPS_PORT      HTTPS port of the web service (default: 8443)
+#   WEB_HTTPS_PORT      fallback HTTPS port if `docker compose port web 443` fails (default: 8443)
 set -eu
 
+SELF=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
 ROOT=${DEPLOY_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}
 BRANCH=${DEPLOY_BRANCH:-main}
 DRY=${DEPLOY_DRY_RUN:-0}
 WAIT=${DEPLOY_WAIT:-120}
-PORT=${WEB_HTTPS_PORT:-8443}
 IMAGES="api relay worker web"
 TS=$(date -u +%Y%m%dT%H%M%SZ)
 
@@ -47,7 +47,14 @@ info "branch $current, tree clean"
 if [ "${DEPLOY_SKIP_PULL:-0}" = 1 ]; then
   info "pull skipped (DEPLOY_SKIP_PULL=1)"
 else
+  before=$(git rev-parse HEAD)
   run git pull --ff-only || die "git pull --ff-only failed"
+  after=$(git rev-parse HEAD)
+  if [ "$before" != "$after" ]; then
+    # bash reads the script incrementally; run the pulled version from the start.
+    info "pull moved HEAD ($before -> $after); re-executing $(basename "$SELF") with the pulled version"
+    DEPLOY_SKIP_PULL=1 exec bash "$SELF" "$@"
+  fi
 fi
 if [ "$DRY" = 1 ]; then
   info "dry run: docker checks skipped"
@@ -102,13 +109,11 @@ fi
 
 # --- 4. Rollback tags -------------------------------------------------------
 step 4 "rollback tags"
-TAGGED=""
 for svc in $IMAGES; do
   if [ "$DRY" = 1 ]; then
     info "+ docker tag openvms-$svc:latest openvms-$svc:rollback-$TS (if the image exists)"
   elif docker image inspect "openvms-$svc:latest" >/dev/null 2>&1; then
     docker tag "openvms-$svc:latest" "openvms-$svc:rollback-$TS"
-    TAGGED="$TAGGED $svc"
     info "tagged openvms-$svc:rollback-$TS"
   else
     info "openvms-$svc has no image yet, skipped"
@@ -116,8 +121,7 @@ for svc in $IMAGES; do
 done
 
 rollback_help() {
-  echo "Rollback (images only):  make rollback TAG=$TS"
-  echo "  or by hand: for s in$TAGGED; do docker tag openvms-\$s:rollback-$TS openvms-\$s:latest; done; docker compose up -d --no-build"
+  echo "Rollback (images only, no database restore):  make rollback TAG=$TS"
   if [ -n "$DUMP" ]; then
     echo "If new migrations were applied, also restore the database from the dump (destructive, review first):"
     echo "  docker compose exec -T postgres pg_restore -U openvms -d openvms --clean --if-exists < $DUMP"
@@ -134,12 +138,18 @@ run docker compose up -d || { rollback_help; die "docker compose up failed"; }
 
 # --- 7. Health --------------------------------------------------------------
 step 7 health
+# The published port may come from .env or an override, so ask compose.
+PORT=""
+if [ "$DRY" != 1 ]; then
+  PORT=$(docker compose port web 443 2>/dev/null | head -n1 | sed 's/.*://')
+fi
+case $PORT in ''|*[!0-9]*) PORT=${WEB_HTTPS_PORT:-8443} ;; esac
 url="https://localhost:$PORT/health/ready"
 if [ "$DRY" = 1 ]; then
-  info "+ curl -fsk $url (up to ${WAIT}s, expects \"status\":\"ok\")"
+  info "+ curl -fsk $url (--connect-timeout 3 --max-time 5, up to ${WAIT}s, expects \"status\":\"ok\")"
 else
   waited=0
-  until curl -fsk "$url" 2>/dev/null | grep -Eq '"status" *: *"ok"'; do
+  until curl -fsk --connect-timeout 3 --max-time 5 "$url" 2>/dev/null | grep -Eq '"status" *: *"ok"'; do
     if [ "$waited" -ge "$WAIT" ]; then
       docker compose logs --tail 50 api || true
       rollback_help

@@ -30,7 +30,7 @@ func TestParseTrainFile(t *testing.T) {
 }
 
 func TestParseTrainFileRejectsUnknownShapes(t *testing.T) {
-	for _, file := range []string{"face.webp", "a-b-c.webp", "x-y-notatime-label-0.5.webp", "x-y-0-label-0.5.webp"} {
+	for _, file := range []string{"face.webp", "a-b-c.webp", "x-y-notatime-label-0.5.webp", "x-y-0-label-0.5.webp", "x-y-NaN-label-0.5.webp", "x-y-Inf-label-0.5.webp", "x-y-+Inf-label-0.5.webp", "x-y-1e30-label-0.5.webp"} {
 		if seen, _, _ := parseTrainFile(file); seen != nil {
 			t.Errorf("%s: parsed a time from an unknown shape", file)
 		}
