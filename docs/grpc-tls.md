@@ -10,7 +10,7 @@ The API serves its gRPC control channel on `GRPC_ADDR` (default `:9090`). It can
 | `GRPC_TLS_KEY_FILE` | PEM private key for that certificate. |
 
 - Both set: the gRPC server uses TLS 1.2 or newer.
-- Neither set: plaintext, and the API logs a warning at startup.
+- Neither set: plaintext, and the API logs a warning at startup (`gRPC control channel is plaintext; set GRPC_TLS_CERT_FILE and GRPC_TLS_KEY_FILE to enable TLS`). The stock compose stack runs this way until both variables are set on the `api` service.
 - Only one set: the API fails to start.
 - Certificates are read once at startup. Restart the API to pick up a renewed certificate.
 

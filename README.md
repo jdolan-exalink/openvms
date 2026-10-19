@@ -94,7 +94,13 @@ contenedor valida que sean legibles, válidos y que coincidan; no reemplaza esos
 
 `make deploy` actualiza el stack local en un solo paso y se detiene ante cualquier fallo: verifica que el árbol esté limpio y en `main`, hace `git pull --ff-only`, genera un volcado protegido de Postgres en `.atl/deploy/<timestamp>/` (verificado con `pg_restore --list`), etiqueta las imágenes actuales como `rollback-<timestamp>`, construye con `COMMIT`, `BUILD_TIME` y `VERSION`, ejecuta `docker compose up -d` y espera `/health/ready`. Al terminar imprime el commit, la migración antes y después, el volcado y el comando de rollback.
 
-Variables opcionales: `DEPLOY_BRANCH`, `DEPLOY_SKIP_PULL=1`, `DEPLOY_SKIP_BACKUP=1`, `DEPLOY_DRY_RUN=1` (solo imprime los comandos). Para volver atrás: `make rollback TAG=<timestamp>` restaura las imágenes sin tocar la base de datos; si se aplicaron migraciones nuevas, restaura también el volcado con el comando que imprime el despliegue.
+Variables opcionales: `DEPLOY_BRANCH`, `DEPLOY_SKIP_PULL=1`, `DEPLOY_SKIP_BACKUP=1`, `DEPLOY_DRY_RUN=1` (solo imprime los comandos), `DEPLOY_KEEP=<n>` (cuántas etiquetas `rollback-*` por servicio y cuántos volcados de `.atl/deploy/` se conservan tras un despliegue exitoso; por defecto 5, nunca se borra lo recién creado). En el primer despliegue no hay imágenes que etiquetar y no se muestra ningún comando de rollback. Para volver atrás: `make rollback TAG=<timestamp>` valida primero que existan todas las etiquetas, restaura las imágenes sin tocar la base de datos y, si un `docker tag` falla a mitad de camino, devuelve las imágenes anteriores y no reinicia nada; si se aplicaron migraciones nuevas, restaura también el volcado con el comando que imprime el despliegue.
+
+La build web publica `/version.json` con `version`, `commit` y `buildTime` (los mismos `VERSION`, `COMMIT` y `BUILD_TIME` que reciben las imágenes Go). El broker `mosquitto` de desarrollo tiene healthcheck y los Frigate simulados esperan a que esté sano.
+
+### Canal de control gRPC
+
+El canal de control gRPC (`GRPC_ADDR`, por defecto `:9090`) va en texto plano mientras no se definan `GRPC_TLS_CERT_FILE` y `GRPC_TLS_KEY_FILE` (ambas o ninguna): la API lo avisa al arrancar con `gRPC control channel is plaintext`. Para activar TLS, provisionar el certificado y la clave PEM, definir ambas variables en la API y reiniciarla; luego pasar los agentes y clientes a TLS. Detalles y orden de migración en [`docs/grpc-tls.md`](docs/grpc-tls.md).
 
 ## Estructura
 

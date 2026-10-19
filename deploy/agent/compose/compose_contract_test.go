@@ -851,3 +851,54 @@ func TestAutomaticWebTLSBootstrapSerializesConcurrentStartup(t *testing.T) {
 		t.Fatalf("concurrent startup left no current certificate: %v", err)
 	}
 }
+
+func TestMosquittoHasHealthcheckAndMocksWaitForIt(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	services := asMap(t, document["services"])
+	mosquitto := asMap(t, services["mosquitto"])
+	if _, ok := mosquitto["healthcheck"]; !ok {
+		t.Fatal("mosquitto must declare a healthcheck")
+	}
+	for _, name := range []string{"frigate-helvecia", "frigate-cayasta"} {
+		deps := asMap(t, asMap(t, services[name])["depends_on"])
+		dep := asMap(t, deps["mosquitto"])
+		if dep["condition"] != "service_healthy" {
+			t.Fatalf("%s must wait for a healthy mosquitto, got %#v", name, dep)
+		}
+	}
+}
+
+func TestWebBuildReceivesVersionMetadata(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	services := asMap(t, document["services"])
+	build := asMap(t, asMap(t, services["web"])["build"])
+	args := asMap(t, build["args"])
+	for _, key := range []string{"VERSION", "COMMIT", "BUILD_TIME"} {
+		if _, ok := args[key]; !ok {
+			t.Fatalf("web build must pass %s", key)
+		}
+	}
+	dockerfile, err := os.ReadFile(filepath.Join("..", "..", "..", "deploy", "docker", "web.Dockerfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"ARG VERSION", "ARG COMMIT", "ARG BUILD_TIME", "version.json"} {
+		if !strings.Contains(string(dockerfile), want) {
+			t.Fatalf("web.Dockerfile must contain %q", want)
+		}
+	}
+}
