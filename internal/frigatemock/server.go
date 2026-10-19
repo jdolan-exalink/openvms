@@ -43,6 +43,14 @@ type Server struct {
 	// FaceRenameUnsupported makes PUT /api/faces/{old}/rename 404, like a Frigate without it.
 	FaceRenameUnsupported bool
 
+	// ObjectsDelay holds every GET /api/events (tracked objects) request this long before it
+	// answers (or until the client gives up), simulating a slow remote Frigate.
+	ObjectsDelay time.Duration
+	// ObjectsFailAfter, when positive, makes GET /api/events answer 503 from the request after
+	// that many successful ones, to simulate Frigate failing in the middle of a paged pull.
+	ObjectsFailAfter int
+	objectCalls      atomic.Int64
+
 	faceOnce sync.Once
 	faceLib  *faceLibrary
 
