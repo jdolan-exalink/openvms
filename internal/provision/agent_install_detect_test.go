@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -26,6 +27,25 @@ func TestAgentInstallPreflightReportsInstalledAgentVersion(t *testing.T) {
 	hostile := &fakeAgentInstallConn{runErrAt: "openvms_install_preflight", runErr: fakeExitError{27}, runErrOutput: "openvms_install_preflight=agent_present version=1.0;rm -rf /\n"}
 	if err := installWithConn(t, hostile); !errors.As(err, &failure) || failure.InstalledVersion != "" {
 		t.Fatalf("hostile version was accepted: %#v", failure)
+	}
+}
+
+func TestInstalledAgentPreflightKeepsPresenceWhenVersionIsUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		version string
+	}{
+		{name: "missing", version: ""},
+		{name: "unknown", version: "unknown"},
+		{name: "malformed", version: "not-a-version"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			output := "openvms_install_preflight=agent_present version=" + tc.version + " os=ubuntu arch=" + runtime.GOARCH + " user=root\n"
+			version, present := installedAgentPreflight(output)
+			if !present || version != "" {
+				t.Fatalf("installedAgentPreflight(%q) = (%q, %t), want unknown version with presence", output, version, present)
+			}
+		})
 	}
 }
 

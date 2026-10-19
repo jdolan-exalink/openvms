@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+var ErrAgentDiscoveryConnection = errors.New("agent discovery connection failed")
+
 // RemoteAgentState describes discovery independently from the local registration record.
 type RemoteAgentState string
 
@@ -35,7 +37,7 @@ func DiscoverRemoteAgent(ctx context.Context, conn AgentDiscoveryConn, registere
 	}
 	output, err := conn.Run(ctx, agentDiscoveryProbe())
 	if err != nil {
-		return RemoteAgentStatus{State: RemoteAgentUnknown}, errors.New("agent discovery transport failed")
+		return RemoteAgentStatus{State: RemoteAgentUnknown}, ErrAgentDiscoveryConnection
 	}
 	return parseRemoteAgentStatus(output, registeredHere), nil
 }
@@ -50,10 +52,12 @@ func parseRemoteAgentStatus(output string, registeredHere bool) RemoteAgentStatu
 			continue
 		}
 		version := strings.TrimPrefix(fields[1], "version=")
-		if version != "unknown" {
-			if _, ok := parseAgentSemver(version); !ok {
-				continue
-			}
+		if !validAgentDiscoveryVersionToken(version) {
+			continue
+		}
+		if version == "unknown" {
+			version = ""
+		} else if _, ok := parseAgentSemver(version); ok {
 			version = strings.TrimPrefix(version, "v")
 		} else {
 			version = ""
@@ -67,10 +71,27 @@ func parseRemoteAgentStatus(output string, registeredHere bool) RemoteAgentStatu
 	return RemoteAgentStatus{State: RemoteAgentUnknown}
 }
 
+func validAgentDiscoveryVersionToken(version string) bool {
+	if version == "unknown" {
+		return true
+	}
+	for _, r := range version {
+		if (r < '0' || r > '9') && r != 'v' && r != '.' {
+			return false
+		}
+	}
+	return true
+}
+
 func agentDiscoveryProbe() string {
 	return `set -eu
 if ! command -v systemctl >/dev/null 2>&1; then printf 'openvms_agent_discovery=unknown\n'; exit 0; fi
-if ! systemctl cat openvms-agent.service >/dev/null 2>&1; then printf 'openvms_agent_discovery=absent\n'; exit 0; fi
+if ! systemctl cat openvms-agent.service >/dev/null 2>&1; then
+  for target in /usr/local/bin/openvms-agent /etc/openvms/agent.token /etc/openvms/agent.env /etc/systemd/system/openvms-agent.service; do
+    if [ -e "$target" ] || [ -L "$target" ]; then printf 'openvms_agent_discovery=present version=unknown\n'; exit 0; fi
+  done
+  printf 'openvms_agent_discovery=absent\n'; exit 0
+fi
 version=unknown
 out=$(OPENVMS_AGENT_TOKEN_FILE=/nonexistent timeout 5 /usr/local/bin/openvms-agent --version 2>/dev/null </dev/null | head -n 1 | tr -d '\r') || out=
 case "$out" in ''|*[!v0-9.]*) ;; *) version=$out ;; esac

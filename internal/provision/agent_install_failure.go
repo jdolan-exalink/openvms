@@ -172,10 +172,17 @@ func installedAgentPreflight(output string) (string, bool) {
 			continue
 		}
 		version := strings.TrimPrefix(fields[1], "version=")
-		if _, ok := parseAgentSemver(version); !ok || fields[2] != "os=ubuntu" && fields[2] != "os=debian" || fields[3] != "arch="+runtime.GOARCH || fields[4] != "user=root" {
+		if fields[2] != "os=ubuntu" && fields[2] != "os=debian" || fields[3] != "arch="+runtime.GOARCH || fields[4] != "user=root" {
 			continue
 		}
-		return strings.TrimPrefix(version, "v"), true
+		// Service presence and host compatibility are independent of whether
+		// the installed binary can provide a parseable version.
+		if _, ok := parseAgentSemver(version); !ok {
+			version = ""
+		} else {
+			version = strings.TrimPrefix(version, "v")
+		}
+		return version, true
 	}
 	return "", false
 }

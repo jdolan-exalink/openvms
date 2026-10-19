@@ -76,6 +76,37 @@ func TestCredentialInstallHTTPSMiddlewareChecksPeerBeforeForwardedHeaders(t *tes
 	}
 }
 
+func TestAgentDiscoveryCredentialsRequireHTTPS(t *testing.T) {
+	called := false
+	handler := credentialInstallHTTPS([]netip.Prefix{netip.MustParsePrefix("10.20.0.7/32")})(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	for _, tc := range []struct {
+		name, remote, proto string
+		want                int
+	}{
+		{"spoofed proxy", "127.0.0.1:8080", "https", http.StatusForbidden},
+		{"trusted proxy HTTP", "10.20.0.7:8080", "http", http.StatusForbidden},
+		{"trusted proxy HTTPS", "10.20.0.7:8080", "https", http.StatusNoContent},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			called = false
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/servers/11111111-1111-1111-1111-111111111111/agent/discover", strings.NewReader(`{"ssh_password":"secret"}`))
+			r.RemoteAddr = tc.remote
+			r.Header.Set("X-Forwarded-Proto", tc.proto)
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != tc.want || called != (tc.want == http.StatusNoContent) {
+				t.Fatalf("status=%d called=%v body=%s", w.Code, called, w.Body.String())
+			}
+			if tc.want != http.StatusNoContent && strings.Contains(w.Body.String(), "secret") {
+				t.Fatalf("secret echoed: %s", w.Body.String())
+			}
+		})
+	}
+}
+
 func TestAgentInstallBodyRejectsUnknownTrailingAndOversizedJSON(t *testing.T) {
 	for name, body := range map[string]string{
 		"unknown fields":            `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `","binary":"not-allowed"}`,
@@ -94,6 +125,25 @@ func TestAgentInstallBodyRejectsUnknownTrailingAndOversizedJSON(t *testing.T) {
 			}
 			if strings.Contains(w.Body.String(), "secret") {
 				t.Fatalf("error echoed request body: %s", w.Body.String())
+			}
+		})
+	}
+}
+
+func TestAgentDiscoveryBodyIsStrictAndBounded(t *testing.T) {
+	for name, body := range map[string]string{
+		"unknown fields": `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","raw_output":true}`,
+		"trailing JSON":  `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret"} {}`,
+		"oversized":      `{"ssh_password":"` + strings.Repeat("x", agentInstallRequestMaxBytes) + `"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			called := false
+			h := validateAgentInstallBody(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/servers/11111111-1111-1111-1111-111111111111/agent/discover", strings.NewReader(body))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if called || w.Code != http.StatusBadRequest || strings.Contains(w.Body.String(), "secret") {
+				t.Fatalf("called=%v status=%d body=%s", called, w.Code, w.Body.String())
 			}
 		})
 	}

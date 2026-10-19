@@ -121,6 +121,38 @@ func TestServerAgentKeepsProtocolAndBinaryOutdatedSignalsSeparate(t *testing.T) 
 	}
 }
 
+func TestServerAgentDiscoveryProjectionKeepsPresenceVersionAndOwnershipSeparate(t *testing.T) {
+	for _, tc := range []struct {
+		state         provision.RemoteAgentState
+		version       string
+		wantState     gen.ServerAgentDiscoveryResultState
+		wantOwnership gen.ServerAgentDiscoveryResultOwnership
+	}{
+		{state: provision.RemoteAgentRegisteredHere, version: "0.2.1", wantState: gen.ServerAgentDiscoveryResultStatePresent, wantOwnership: gen.ServerAgentDiscoveryResultOwnershipRegisteredHere},
+		{state: provision.RemoteAgentPresentUnregistered, wantState: gen.ServerAgentDiscoveryResultStatePresent, wantOwnership: gen.ServerAgentDiscoveryResultOwnershipUnknown},
+		{state: provision.RemoteAgentAbsent, wantState: gen.ServerAgentDiscoveryResultStateAbsent, wantOwnership: gen.ServerAgentDiscoveryResultOwnershipUnknown},
+		{state: provision.RemoteAgentUnknown, wantState: gen.ServerAgentDiscoveryResultStateUnknown, wantOwnership: gen.ServerAgentDiscoveryResultOwnershipUnknown},
+	} {
+		got := serverAgentDiscovery(provision.RemoteAgentStatus{State: tc.state, Version: tc.version})
+		if got.State != tc.wantState || got.Ownership != tc.wantOwnership {
+			t.Fatalf("serverAgentDiscovery(%#v) = %#v", tc, got)
+		}
+		if tc.version == "" && got.Version != nil || tc.version != "" && (got.Version == nil || *got.Version != tc.version) {
+			t.Fatalf("version projection = %#v, want %q", got.Version, tc.version)
+		}
+	}
+	failed := serverAgentDiscovery(provision.RemoteAgentStatus{State: provision.RemoteAgentUnknown})
+	failure := gen.ServerAgentDiscoveryResultFailure("connection_failed")
+	failed.Failure = &failure
+	encoded, err := json.Marshal(failed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "password") || strings.Contains(string(encoded), "remote") || !strings.Contains(string(encoded), `"failure":"connection_failed"`) {
+		t.Fatalf("discovery response leaked details or lost safe failure: %s", encoded)
+	}
+}
+
 const genServerProvisionRunning = "running"
 
 func TestOnvifDiscoveryProjectionHasNoCredentialFields(t *testing.T) {
