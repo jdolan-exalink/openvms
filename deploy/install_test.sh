@@ -144,5 +144,17 @@ mkroot "$tmp/old"; rm -f "$tmp/old/.env"
 out=$(run "$tmp/old" STUB_COMPOSE_VERSION="docker-compose version 1.29.2, build 5becea4c"); rc=$?
 [ "$rc" -ne 0 ] || fail "compose version 1.29.2: accepted as v2"
 
+# 10. OPENVMS_ADMIN_PASSWORD from the environment lands in a new .env and is never printed;
+# an existing .env is not changed and the operator is told so.
+mkroot "$tmp/adm"; rm -f "$tmp/adm/.env"
+out=$(run "$tmp/adm" OPENVMS_ADMIN_PASSWORD="Adm1n-Secret-2026"); rc=$?
+[ "$rc" -eq 0 ] || fail "admin password: expected exit 0: $out"
+grep -q '^OPENVMS_ADMIN_PASSWORD=Adm1n-Secret-2026$' "$tmp/adm/.env" || fail "admin password: not written to .env"
+printf '%s\n' "$out" | grep -qF 'Adm1n-Secret-2026' && fail "admin password: printed"
+mkroot "$tmp/adm2"; printf 'FOO=mine\n' >"$tmp/adm2/.env"
+out=$(run "$tmp/adm2" OPENVMS_ADMIN_PASSWORD="Adm1n-Secret-2026"); rc=$?
+[ "$(cat "$tmp/adm2/.env")" = "FOO=mine" ] || fail "admin password: existing .env modified"
+printf '%s\n' "$out" | grep -q 'OPENVMS_ADMIN_PASSWORD' || fail "admin password: no notice for an existing .env"
+
 [ "$fails" -eq 0 ] && echo "ok: install tests passed"
 [ "$fails" -eq 0 ]

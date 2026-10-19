@@ -40,8 +40,10 @@ Implementado no equivale a validado en producción: el estado y la evidencia de 
 git clone https://github.com/jdolan-exalink/openvms.git /root/openvms
 cd /root/openvms
 git checkout v0.4.0        # una versión etiquetada, no main
-make install
+OPENVMS_ADMIN_PASSWORD='Una-Clave-Larga-2026' make install
 ```
+
+La contraseña del primer administrador se pasa así, en la misma línea: `make install` la escribe en el `.env` nuevo junto con los secretos generados y nunca la imprime. Sin ella, se genera una al azar (ver [Primer acceso](#primer-acceso)).
 
 `make install` ([`deploy/install.sh`](deploy/install.sh)) hace cinco pasos y nunca pisa un `.env` existente:
 
@@ -58,7 +60,7 @@ make install
 Al arrancar, la API crea sola el administrador de plataforma si la instalación no tiene ningún usuario de plataforma, y una organización con un sitio si no existe ninguna.
 
 - Usuario: `admin` (`OPENVMS_ADMIN_USERNAME`).
-- Contraseña: la de `OPENVMS_ADMIN_PASSWORD` si la definió en `.env` **antes** de levantar (mínimo 10 caracteres, letras y números). Si está vacía se genera una al azar, se registra una sola vez en el log de la API y el sistema obliga a cambiarla en el primer ingreso:
+- Contraseña: la de `OPENVMS_ADMIN_PASSWORD` si la pasó a `make install` o la definió en `.env` **antes** de levantar (mínimo 10 caracteres, letras y números). Si está vacía se genera una al azar, se registra una sola vez en el log de la API y el sistema obliga a cambiarla en el primer ingreso:
 
 ```bash
 docker compose logs api | grep "initial admin"
