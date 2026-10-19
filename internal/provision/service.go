@@ -74,6 +74,7 @@ type Service struct {
 	agentInstallBinary             func() ([]byte, error)
 	agentInstallCredentials        func(string) (string, []byte, []byte, error)
 	agentInstallRun                func(context.Context, AgentInstallRequest, func(string)) error
+	agentDiscoveryDial             AgentInstallDialer
 	agentInstallRegister           func(context.Context, authz.Actor, uuid.UUID, string, uint16, string, []byte) error
 	agentInstallHealthCheck        func(context.Context, string, uint16, string, []byte) error
 	agentInstallEnrollmentCheck    func(context.Context, authz.Actor, uuid.UUID, time.Time) error

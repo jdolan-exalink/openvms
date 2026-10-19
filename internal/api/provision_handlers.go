@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/agent"
@@ -60,6 +61,51 @@ func (h *Handlers) InstallServerAgent(ctx context.Context, r gen.InstallServerAg
 		return nil, err
 	}
 	return gen.InstallServerAgent202JSONResponse(serverAgentInstallJob(job)), nil
+}
+
+func (h *Handlers) InspectServerAgentOverSSH(ctx context.Context, r gen.InspectServerAgentOverSSHRequestObject) (gen.InspectServerAgentOverSSHResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || r.Body.SshPassword == nil {
+		return nil, &provision.ValidationError{Msg: "agent discovery request is required"}
+	}
+	if r.Body.SshPort < 1 || r.Body.SshPort > 65535 {
+		return nil, &provision.ValidationError{Msg: "ssh_port must be between 1 and 65535"}
+	}
+	status, err := h.Provision.InspectServerAgent(ctx, a, r.ServerId, provision.AgentInstallStartRequest{
+		Host: r.Body.SshHost, Port: uint16(r.Body.SshPort), Password: *r.Body.SshPassword,
+	})
+	if errors.Is(err, provision.ErrAgentDiscoveryConnection) {
+		failure := gen.ServerAgentDiscoveryResultFailure("connection_failed")
+		result := serverAgentDiscovery(status)
+		result.Failure = &failure
+		return gen.InspectServerAgentOverSSH200JSONResponse(result), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return gen.InspectServerAgentOverSSH200JSONResponse(serverAgentDiscovery(status)), nil
+}
+
+func serverAgentDiscovery(in provision.RemoteAgentStatus) gen.ServerAgentDiscoveryResult {
+	state := gen.ServerAgentDiscoveryResultStateUnknown
+	ownership := gen.ServerAgentDiscoveryResultOwnershipUnknown
+	switch in.State {
+	case provision.RemoteAgentAbsent:
+		state = gen.ServerAgentDiscoveryResultStateAbsent
+	case provision.RemoteAgentPresentUnregistered, provision.RemoteAgentRegisteredHere:
+		state = gen.ServerAgentDiscoveryResultStatePresent
+		if in.State == provision.RemoteAgentRegisteredHere {
+			ownership = gen.ServerAgentDiscoveryResultOwnershipRegisteredHere
+		}
+	}
+	result := gen.ServerAgentDiscoveryResult{State: state, Ownership: ownership}
+	if in.Version != "" {
+		result.Version = &in.Version
+	}
+	return result
 }
 
 func (h *Handlers) GetServerAgentInstallJob(ctx context.Context, r gen.GetServerAgentInstallJobRequestObject) (gen.GetServerAgentInstallJobResponseObject, error) {

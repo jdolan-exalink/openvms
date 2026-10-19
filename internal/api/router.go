@@ -140,7 +140,7 @@ func credentialInstallHTTPS(trusted []netip.Prefix) func(http.Handler) http.Hand
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-			targeted := r.Method == http.MethodPost && len(parts) == 6 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "servers" && parts[4] == "agent" && (parts[5] == "install" || parts[5] == "update-ssh" || parts[5] == "uninstall")
+			targeted := r.Method == http.MethodPost && len(parts) == 6 && parts[0] == "api" && parts[1] == "v1" && parts[2] == "servers" && parts[4] == "agent" && (parts[5] == "install" || parts[5] == "discover" || parts[5] == "update-ssh" || parts[5] == "uninstall")
 			if targeted && !credentialInstallHTTPSAllowed(r, trusted) {
 				writeError(w, r, http.StatusForbidden, "secure_transport_required", "agent installation requires HTTPS")
 				return
@@ -308,20 +308,24 @@ func validateAgentUpdateBody(next http.Handler) http.Handler {
 func validateAgentInstallBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		if r.Method != http.MethodPost || len(parts) != 6 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "servers" || parts[4] != "agent" || parts[5] != "install" {
+		if r.Method != http.MethodPost || len(parts) != 6 || parts[0] != "api" || parts[1] != "v1" || parts[2] != "servers" || parts[4] != "agent" || (parts[5] != "install" && parts[5] != "discover") {
 			next.ServeHTTP(w, r)
 			return
 		}
 		limited, err := io.ReadAll(io.LimitReader(r.Body, agentInstallRequestMaxBytes+1))
 		if err != nil || len(limited) > agentInstallRequestMaxBytes {
-			writeError(w, r, http.StatusBadRequest, "bad_request", "agent install request exceeds the size limit")
+			writeError(w, r, http.StatusBadRequest, "bad_request", "agent credential request exceeds the size limit")
 			return
 		}
 		dec := json.NewDecoder(bytes.NewReader(limited))
 		dec.DisallowUnknownFields()
-		var body gen.ServerAgentInstallRequest
-		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF {
-			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent install request")
+		var body struct {
+			Password *string `json:"ssh_password"`
+			Host     string  `json:"ssh_host"`
+			Port     int     `json:"ssh_port"`
+		}
+		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF || body.Password == nil || *body.Password == "" || len(*body.Password) > 4096 || body.Port < 1 || body.Port > 65535 || len(body.Host) > 15 {
+			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent credential request")
 			return
 		}
 		r.Body = io.NopCloser(bytes.NewReader(limited))

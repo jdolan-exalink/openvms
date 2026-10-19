@@ -241,6 +241,55 @@ func (s *Service) requireAgentInstall(ctx context.Context, actor authz.Actor, se
 	return s.Inv.RequireServerManageAndConfigSecrets(ctx, actor, serverID)
 }
 
+// InspectServerAgent performs a transient, read-only SSH inspection. It reports
+// remote installation state without enrolling, registering, or modifying the host.
+func (s *Service) InspectServerAgent(ctx context.Context, actor authz.Actor, serverID uuid.UUID, in AgentInstallStartRequest) (RemoteAgentStatus, error) {
+	if serverID == uuid.Nil {
+		return RemoteAgentStatus{State: RemoteAgentUnknown}, &ValidationError{Msg: "server is required"}
+	}
+	if err := validateAgentInstallStartRequest(in); err != nil {
+		return RemoteAgentStatus{State: RemoteAgentUnknown}, err
+	}
+	if err := s.requireAgentInstall(ctx, actor, serverID); err != nil {
+		return RemoteAgentStatus{State: RemoteAgentUnknown}, err
+	}
+	registeredHere := false
+	if s.agentInstallExists != nil {
+		exists, err := s.agentInstallExists(ctx, actor, serverID)
+		if err != nil {
+			return RemoteAgentStatus{State: RemoteAgentUnknown}, errors.New("agent registration status unavailable")
+		}
+		registeredHere = exists
+	} else {
+		_, err := s.agentRow(ctx, actor, serverID)
+		if err == nil {
+			registeredHere = true
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return RemoteAgentStatus{State: RemoteAgentUnknown}, errors.New("agent registration status unavailable")
+		}
+	}
+	request := AgentInstallRequest{Host: in.Host, Port: in.Port, User: "root", Password: in.Password}
+	request.hostKeyTrust = func(ctx context.Context, fingerprint string) error {
+		return s.trustAgentSSHHostKey(ctx, actor, serverID, in.Host, in.Port, fingerprint)
+	}
+	dial := s.agentDiscoveryDial
+	if dial == nil {
+		dial = agentInstallDialer(request)
+	}
+	inspectCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	conn, err := dial(inspectCtx, in.Host, in.Port, "root", in.Password, "")
+	if err != nil {
+		return RemoteAgentStatus{State: RemoteAgentUnknown}, ErrAgentDiscoveryConnection
+	}
+	defer conn.Close()
+	status, err := DiscoverRemoteAgent(inspectCtx, conn, registeredHere)
+	if err != nil {
+		return status, err
+	}
+	return status, nil
+}
+
 func (s *Service) GetServerAgentInstallJob(ctx context.Context, actor authz.Actor, serverID, jobID uuid.UUID) (AgentInstallJob, error) {
 	if err := s.requireAgentInstall(ctx, actor, serverID); err != nil {
 		return AgentInstallJob{}, err

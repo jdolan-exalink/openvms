@@ -93,6 +93,7 @@ describe("Servers", () => {
       pollHandler?: (request: Request) => Promise<Response>,
       httpsPortHandler?: (request: Request) => Promise<Response>,
       agentStatus: () => object = () => ({ installed: false, binary_status: "not_installed", binary_upgrade_available: false }),
+      discoveryHandler?: (request: Request) => Promise<Response>,
     ) => {
       const calls: Request[] = [];
       const fetchMock = vi.fn(async (request: Request) => {
@@ -106,6 +107,7 @@ describe("Servers", () => {
         if (url.pathname === "/api/v1/classify/policy") return json({ servers: [] });
         if (url.pathname === "/api/v1/sync/status") return json({ items: [] });
         if (url.pathname === "/api/v1/servers/a/agent/install" && request.method === "POST" && installHandler) return installHandler(request);
+        if (url.pathname === "/api/v1/servers/a/agent/discover" && request.method === "POST") return discoveryHandler?.(request) ?? json({ state: "unknown", ownership: "unknown" });
         if (url.pathname === "/api/v1/servers/a/agent/install/job-1") return pollHandler?.(request) ?? json({ id: "job-1", status: "succeeded", stage: "complete" });
         if (url.pathname === "/.well-known/openvms-https-port") return httpsPortHandler?.(request) ?? new Response("8443", { status: 200 });
         return json({ code: "not_found", message: "not found" }, 404);
@@ -161,6 +163,31 @@ describe("Servers", () => {
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       expect(within(dialog).queryByLabelText(/Huella SHA-256 SSH verificada/i)).not.toBeInTheDocument();
       expect(within(dialog).getByLabelText("Host SSH IPv4")).toBeInTheDocument();
+    });
+
+    it.each([
+      [{ state: "present", version: "0.2.1", ownership: "registered_here" }, /agente detectado.*0\.2\.1.*registrado aquí/i],
+      [{ state: "present", ownership: "unknown" }, /agente detectado.*versión desconocida.*propietario: sin confirmar/i],
+      [{ state: "absent", ownership: "unknown" }, /no se detectó un servicio del agente/i],
+      [{ state: "unknown", ownership: "unknown", failure: "connection_failed" }, /no se pudo conectar por ssh/i],
+    ])("inspects the remote agent without starting installation: %o", async (result, expected) => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      const { calls } = setupAgentInstall(installGrants, undefined, undefined, undefined, undefined, async (request) => {
+        expect(request.method).toBe("POST");
+        expect(await request.clone().json()).toEqual({ ssh_host: "10.20.30.44", ssh_port: 22, ssh_password: "one-time" });
+        return json(result);
+      });
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "one-time" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: /Inspeccionar agente por SSH/i }));
+      expect(await within(dialog).findByRole("status")).toHaveTextContent(expected);
+      expect(within(dialog).getByLabelText("Contraseña SSH root")).toHaveValue("");
+      expect(calls.some((request) => new URL(request.url).pathname.endsWith("/agent/install"))).toBe(false);
+      const inspect = calls.find((request) => new URL(request.url).pathname.endsWith("/agent/discover"));
+      expect(inspect).toBeDefined();
     });
 
     it("shows no elapsed time while submission is pending and starts after a job is accepted", async () => {

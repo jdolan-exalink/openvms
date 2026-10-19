@@ -978,6 +978,9 @@ function AgentInstallDialog({
   const [dismissedJobId, setDismissedJobId] = useState<string | null>(null);
   const defaultHost = extractServerHost(server.base_url);
   const [form, setForm] = useState({ host: defaultHost, port: "22", confirmed: false });
+  const [discoveryResult, setDiscoveryResult] = useState<Schemas["ServerAgentDiscoveryResult"] | null>(null);
+  const [discoveryPending, setDiscoveryPending] = useState(false);
+  const [discoveryFailed, setDiscoveryFailed] = useState(false);
   const passwordInputRef = useRef<HTMLInputElement>(null);
   const pendingPasswordRef = useRef("");
   const [acceptedAt, setAcceptedAt] = useState<number | null>(null);
@@ -1048,15 +1051,17 @@ function AgentInstallDialog({
           )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("servers.agentInstallHostLabel")} hint={t("servers.agentInstallHostHint")}>
-              <TextInput required aria-label={t("servers.agentInstallHostLabel")} value={form.host} onChange={(event) => setForm({ ...form, host: event.target.value })} autoComplete="off" inputMode="decimal" placeholder="10.20.0.11" />
+              <TextInput required aria-label={t("servers.agentInstallHostLabel")} value={form.host} onChange={(event) => { setForm({ ...form, host: event.target.value }); setDiscoveryResult(null); setDiscoveryFailed(false); }} autoComplete="off" inputMode="decimal" placeholder="10.20.0.11" />
             </Field>
             <Field label={t("servers.agentInstallPortLabel")}>
-              <TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={form.port} onChange={(event) => setForm({ ...form, port: event.target.value })} autoComplete="off" />
+              <TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={form.port} onChange={(event) => { setForm({ ...form, port: event.target.value }); setDiscoveryResult(null); setDiscoveryFailed(false); }} autoComplete="off" />
             </Field>
             <Field label={t("servers.agentInstallPasswordLabel")} hint={t("servers.agentInstallPasswordHint")}>
-              <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad" autoComplete="off" maxLength={4096} />
+              <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad" autoComplete="off" maxLength={4096} onChange={() => { setDiscoveryResult(null); setDiscoveryFailed(false); }} />
             </Field>
           </div>
+          {discoveryResult && <p role="status" className="rounded-m3-lg bg-surface-2 p-3 text-sm">{agentDiscoveryResultText(discoveryResult, t)}</p>}
+          {discoveryFailed && <p role="alert" className="text-sm text-bad">{t("servers.agentDiscoveryError")}</p>}
           <label className="flex items-start gap-3 rounded-m3-lg bg-surface-2 p-3 text-sm">
             <input type="checkbox" checked={form.confirmed} onChange={(event) => setForm({ ...form, confirmed: event.target.checked })} />
             <span>{t("servers.agentInstallConfirmScope")}</span>
@@ -1064,6 +1069,23 @@ function AgentInstallDialog({
           {start.error && <p role="alert" className="text-sm text-bad">{agentInstallStartError(start.error, t)}</p>}
           <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" variant="text" onClick={close}>{t("common.cancel")}</Button>
+            <Button type="button" variant="outlined" disabled={discoveryPending || start.isPending || otherOperationActive || !secureBrowser || !isCanonicalIPv4(form.host.trim()) || !isValidSSHPort(form.port)} onClick={() => {
+              const password = passwordInputRef.current?.value ?? "";
+              if (!password) return;
+              if (passwordInputRef.current) passwordInputRef.current.value = "";
+              pendingPasswordRef.current = "";
+              setDiscoveryResult(null);
+              setDiscoveryFailed(false);
+              setDiscoveryPending(true);
+              const body: Schemas["ServerAgentDiscoveryRequest"] = { ssh_host: form.host.trim(), ssh_port: Number(form.port), ssh_password: password };
+              void api.POST("/api/v1/servers/{serverId}/agent/discover", { params: { path: { serverId: server.id } }, body })
+                .then(unwrap)
+                .then(setDiscoveryResult)
+                .catch(() => { setDiscoveryFailed(true); onFailure(); })
+                .finally(() => setDiscoveryPending(false));
+            }}>
+              {discoveryPending ? t("servers.agentDiscoverySubmitting") : t("servers.agentDiscoveryAction")}
+            </Button>
             <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !form.confirmed || !isCanonicalIPv4(form.host.trim()) || !isValidSSHPort(form.port) || !secureBrowser}>
               {start.isPending ? t("servers.agentInstallSubmitting") : t("servers.agentInstallSubmit")}
             </Button>
@@ -1402,6 +1424,16 @@ function installJobStatusText(status: string | undefined, stage: string | undefi
     return t((stages[stage ?? ""] ?? "servers.agentInstallRunning") as Parameters<typeof t>[0]);
   }
   return t("servers.agentInstallOutcomeUnknown");
+}
+
+function agentDiscoveryResultText(result: Schemas["ServerAgentDiscoveryResult"], t: ReturnType<typeof useT>) {
+  if (result.failure === "connection_failed") return t("servers.agentDiscoveryConnectionFailed");
+  if (result.state === "absent") return t("servers.agentDiscoveryAbsent");
+  if (result.state === "unknown") return t("servers.agentDiscoveryUnknown");
+  const ownership = result.ownership === "registered_here" ? t("servers.agentDiscoveryOwnershipHere") : t("servers.agentDiscoveryOwnershipUnknown");
+  return result.version
+    ? t("servers.agentDiscoveryPresentKnown", { version: result.version, ownership })
+    : t("servers.agentDiscoveryPresentUnknown", { ownership });
 }
 
 function agentInstallStartError(error: unknown, t: ReturnType<typeof useT>) {

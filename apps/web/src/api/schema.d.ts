@@ -567,6 +567,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/servers/{serverId}/agent/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inspect the OpenVMS edge agent over SSH without changing the host
+         * @description Requires servers.manage and servers.config.secrets. The password is transient and never stored or returned. The remote operation only reads service and version state; it does not install, restart, or otherwise modify the host. Requires HTTPS.
+         */
+        post: operations["inspectServerAgentOverSSH"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/servers/{serverId}/agent/install/{jobId}": {
         parameters: {
             query?: never;
@@ -3629,6 +3651,32 @@ export interface components {
             ssh_port: number;
             /** @description Transient root SSH password; never persisted or echoed. */
             ssh_password: string;
+        };
+        ServerAgentDiscoveryRequest: {
+            /**
+             * Format: ipv4
+             * @description Explicit SSH target IPv4 literal.
+             */
+            ssh_host: string;
+            ssh_port: number;
+            /** @description Transient root SSH password; never persisted or echoed. */
+            ssh_password: string;
+        };
+        ServerAgentDiscoveryResult: {
+            /** @enum {string} */
+            state: "present" | "absent" | "unknown";
+            /**
+             * @description Ownership is unknown unless this OpenVMS already has a matching local registration.
+             * @enum {string}
+             */
+            ownership: "registered_here" | "unknown";
+            /** @description Validated version when readable; omitted when present but unknown. */
+            version?: string;
+            /**
+             * @description Safe failure category; raw transport or remote output is never returned.
+             * @enum {string}
+             */
+            failure?: "connection_failed";
         };
         /** @description The first observed SSH host key is stored for this registered server IPv4 and port before password authentication; future changes are rejected. First-use trust-on-first-use does not independently verify server identity. */
         ServerAgentUpdateRequest: {
@@ -7026,6 +7074,36 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    inspectServerAgentOverSSH: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serverId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerAgentDiscoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description Validated agent presence independent of agent health; raw remote output and credentials are never returned. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerAgentDiscoveryResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getServerAgentInstallJob: {
