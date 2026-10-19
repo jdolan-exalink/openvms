@@ -13,8 +13,8 @@ linters:
     - unconvert
   settings:
     misspell:
-      # User-facing strings are in Spanish.
-      ignore-rules: [administrar, inventario]
+      # User-facing strings are in Spanish; mosquitto is the MQTT broker's name.
+      ignore-rules: [administrar, inventario, mosquitto]
     gosec:
       excludes:
         - G104 # unhandled errors are covered by errcheck
