@@ -49,8 +49,15 @@ trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
 umask 077
 
-web_cert=$output_dir/tls.crt
-web_key=$output_dir/tls.key
+web_dir=$output_dir/web
+if [ -L "$web_dir" ] || { [ -e "$web_dir" ] && [ ! -d "$web_dir" ]; }; then
+  echo "web TLS output path must be a real directory" >&2
+  exit 1
+fi
+mkdir -p -- "$web_dir"
+chmod 700 -- "$web_dir"
+web_cert=$web_dir/tls.crt
+web_key=$web_dir/tls.key
 if [ -e "$web_cert" ] || [ -e "$web_key" ]; then
   [ -f "$web_cert" ] && [ ! -L "$web_cert" ] && [ -s "$web_cert" ] &&
     [ -f "$web_key" ] && [ ! -L "$web_key" ] && [ -s "$web_key" ] || {
@@ -88,8 +95,29 @@ grpc_host=$site_ip
 if [ "$site_ip" = 127.0.0.1 ]; then grpc_host=localhost; fi
 sh "$script_dir/bootstrap-agent-grpc-tls.sh" "$grpc_host" "$output_dir/agent-grpc"
 
+# Keep the API's public trust material in its own directory so the API never
+# receives the web or agent private keys through a shared directory mount.
+api_ca_dir=$output_dir/api-ca
+if [ -L "$api_ca_dir" ] || { [ -e "$api_ca_dir" ] && [ ! -d "$api_ca_dir" ]; }; then
+  echo "API CA output path must be a real directory" >&2
+  exit 1
+fi
+mkdir -p -- "$api_ca_dir"
+chmod 700 -- "$api_ca_dir"
+api_ca_cert=$api_ca_dir/cert.pem
+if [ -e "$api_ca_cert" ] || [ -L "$api_ca_cert" ]; then
+  [ -f "$api_ca_cert" ] && [ ! -L "$api_ca_cert" ] && [ -s "$api_ca_cert" ] || {
+    echo "API CA certificate must be a regular, non-empty file" >&2; exit 1;
+  }
+  openssl x509 -in "$api_ca_cert" -noout >/dev/null || { echo "API CA certificate is invalid" >&2; exit 1; }
+else
+  cp "$web_cert" "$api_ca_cert"
+fi
+chmod 644 "$api_ca_cert"
+chmod 755 -- "$api_ca_dir"
+
 claimed=0
 rmdir "$lock"
 trap - EXIT HUP INT TERM
-echo "Validated local HTTPS certificate and private key in $output_dir."
+echo "Validated local HTTPS certificate and private key in $web_dir."
 echo "The browser must explicitly trust this self-signed certificate; do not bypass certificate errors."

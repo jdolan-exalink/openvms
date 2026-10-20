@@ -77,9 +77,8 @@ SITE_ADDRESS=:80
 OPENVMS_HTTPS_SANS=
 # Name used when a client connects without SNI (default: OPENVMS_HTTPS_SITE_IPV4 or localhost).
 OPENVMS_HTTPS_DEFAULT_SNI=
-# Your own certificate and key on the host (PEM). Empty = the self-signed certificate.
-OPENVMS_WEB_TLS_CERT_HOST_FILE=
-OPENVMS_WEB_TLS_KEY_HOST_FILE=
+# To use your own PEM pair, place `tls.crt` and `tls.key` in
+# `deploy/docker/local-tls/web/` before starting Compose.
 # Reverse proxies in front of the web allowed to set X-Forwarded-* (CIDRs, comma separated).
 # Empty = forwarded headers are not trusted.
 HTTPS_INGRESS_PROXY_CIDRS=

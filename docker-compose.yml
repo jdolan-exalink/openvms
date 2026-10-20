@@ -140,20 +140,14 @@ services:
       - /:/hostfs:ro
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports:/mnt/openvms/exports
       - type: bind
-        source: ${OPENVMS_AGENT_GRPC_TLS_CERT_HOST_FILE:-./deploy/docker/local-tls/agent-grpc/tls.crt}
-        target: /etc/openvms/agent-grpc/tls.crt
+        source: ./deploy/docker/local-tls/agent-grpc
+        target: /etc/openvms/agent-grpc
         read_only: true
         bind:
-          create_host_path: false
+          create_host_path: true
       - type: bind
-        source: ${OPENVMS_AGENT_GRPC_TLS_KEY_HOST_FILE:-./deploy/docker/local-tls/agent-grpc/tls.key}
-        target: /etc/openvms/agent-grpc/tls.key
-        read_only: true
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ${OPENVMS_AGENT_API_CA_HOST_FILE:-${OPENVMS_WEB_TLS_CERT_HOST_FILE:-./deploy/docker/local-tls/tls.crt}}
-        target: /etc/openvms/api-ca/cert.pem
+        source: ./deploy/docker/local-tls/api-ca
+        target: /etc/openvms/api-ca
         read_only: true
         bind:
           create_host_path: true
@@ -236,8 +230,8 @@ services:
       HTTPS_SITE_ADDRESS: ${OPENVMS_HTTPS_SITE_IPV4:?Set OPENVMS_HTTPS_SITE_IPV4 to the server LAN IPv4 in .env or use make install for local-only access}
       OPENVMS_HTTPS_SANS: ${OPENVMS_HTTPS_SANS:-${OPENVMS_HTTPS_SITE_IPV4:-localhost,127.0.0.1,::1}}
       OPENVMS_HTTPS_DEFAULT_SNI: ${OPENVMS_HTTPS_DEFAULT_SNI:-${OPENVMS_HTTPS_SITE_IPV4:-localhost}}
-      OPENVMS_WEB_TLS_CERT_FILE: /etc/caddy/tls.crt
-      OPENVMS_WEB_TLS_KEY_FILE: /etc/caddy/tls.key
+      OPENVMS_WEB_TLS_CERT_FILE: /etc/caddy/tls/tls.crt
+      OPENVMS_WEB_TLS_KEY_FILE: /etc/caddy/tls/tls.key
       OPENVMS_WEB_HTTPS_PORT: ${WEB_HTTPS_PORT:-8443}
       API_UPSTREAM: ${OPENVMS_AGENT_API_IPV4:-172.29.240.2}:8080
       # An empty static proxy list denies all forwarded-header trust by default.
@@ -248,14 +242,8 @@ services:
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/caddy:/data
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/web-tls:/var/lib/openvms/tls
       - type: bind
-        source: ${OPENVMS_WEB_TLS_CERT_HOST_FILE:-./deploy/docker/local-tls/tls.crt}
-        target: /etc/caddy/tls.crt
-        read_only: true
-        bind:
-          create_host_path: true
-      - type: bind
-        source: ${OPENVMS_WEB_TLS_KEY_HOST_FILE:-./deploy/docker/local-tls/tls.key}
-        target: /etc/caddy/tls.key
+        source: ./deploy/docker/local-tls/web
+        target: /etc/caddy/tls
         read_only: true
         bind:
           create_host_path: true

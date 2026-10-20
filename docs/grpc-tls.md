@@ -13,7 +13,7 @@ Compose prepares the local HTTPS and dedicated agent gRPC certificates automatic
 docker compose up -d
 ```
 
-The one-shot `tls-bootstrap` service runs the same safe bootstrap scripts inside Docker. Matching, valid certificates are preserved; invalid, incomplete, or mismatched files stop startup with an error. For an externally managed HTTPS certificate, set `OPENVMS_WEB_TLS_CERT_HOST_FILE` and `OPENVMS_WEB_TLS_KEY_HOST_FILE`; the API mounts only the public certificate. If the API certificate is signed by a different CA bundle, set `OPENVMS_AGENT_API_CA_HOST_FILE` to that public CA bundle. Never place private key material in the CA file. For a different advertised gRPC host, create/validate the dedicated certificate explicitly with `bootstrap-agent-grpc-tls.sh` using that host before starting Compose.
+The one-shot `tls-bootstrap` service runs the same safe bootstrap scripts inside Docker. Matching, valid certificates are preserved; invalid, incomplete, or mismatched files stop startup with an error. To provide your own HTTPS pair, place `tls.crt` and `tls.key` in `deploy/docker/local-tls/web/` before starting Compose. The public certificate is copied to `deploy/docker/local-tls/api-ca/cert.pem` as the default API enrollment trust material; if the HTTPS certificate is signed by a different CA, put that public CA certificate at that path. Never place private key material in the CA file. To provide a custom gRPC pair, put `tls.crt` and `tls.key` in `deploy/docker/local-tls/agent-grpc/`; its SAN must match the advertised gRPC host.
 
 The bootstrap scripts remain available for explicit maintenance. They never replace existing key/certificate contents; they validate and retain a complete matching pair. If the advertised gRPC host differs from the HTTPS site IP, regenerate or validate the gRPC pair with `bootstrap-agent-grpc-tls.sh` and configure `OPENVMS_AGENT_GRPC_PUBLIC_ADDR` to match.
 
@@ -25,8 +25,8 @@ The bootstrap scripts remain available for explicit maintenance. They never repl
 | `OPENVMS_AGENT_GRPC_HOST_PORT` | `9443` | Published host port and advertised gRPC port. |
 | `OPENVMS_AGENT_GRPC_PUBLIC_ADDR` | `${OPENVMS_HTTPS_SITE_IPV4:-localhost}:<host-port>` | Host and port agents use for mTLS. Override if the agent network reaches a different address. |
 | `OPENVMS_AGENT_API_PUBLIC_URL` | `https://${OPENVMS_HTTPS_SITE_IPV4:-localhost}:${WEB_HTTPS_PORT:-8443}` | HTTPS base URL agents use for one-time enrollment. |
-| `OPENVMS_AGENT_GRPC_TLS_CERT_HOST_FILE` / `OPENVMS_AGENT_GRPC_TLS_KEY_HOST_FILE` | `deploy/docker/local-tls/agent-grpc/tls.{crt,key}` | Dedicated gRPC server certificate and private key, mounted read-only. The cert SAN must match the advertised public gRPC host. |
-| `OPENVMS_AGENT_API_CA_HOST_FILE` | `OPENVMS_WEB_TLS_CERT_HOST_FILE` or `deploy/docker/local-tls/tls.crt` | Public CA material that verifies the API HTTPS certificate; mounted read-only. |
+| gRPC certificate and key | `deploy/docker/local-tls/agent-grpc/tls.{crt,key}` | Dedicated gRPC server certificate and private key, mounted read-only. The cert SAN must match the advertised public gRPC host. |
+| API HTTPS trust certificate | `deploy/docker/local-tls/api-ca/cert.pem` | Public CA material that verifies the API HTTPS certificate; mounted read-only. |
 
 Compose uses the gRPC certificate for both API gRPC listeners because the API currently shares `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE`; the ordinary control listener also becomes TLS. Existing direct gRPC clients must use TLS verification with the same certificate trust. The agent listener additionally requires an enrolled client certificate. There is no plaintext fallback for either listener once configured.
 

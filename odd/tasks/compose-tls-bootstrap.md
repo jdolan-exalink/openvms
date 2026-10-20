@@ -7,6 +7,7 @@ Make a first `docker compose up -d` create the local HTTPS and agent gRPC TLS fi
 ## Checklist
 
 - [x] Add a one-shot Compose service that creates or validates local TLS material before API starts.
+- [x] Mount TLS directories so Compose can create dependent containers before the bootstrap runs.
 - [x] Make Caddy serve the HTTPS certificate produced by that bootstrap.
 - [x] Remove host-side TLS generation from `make install` and document automatic Compose setup.
 - [x] Update the Compose CI job to exercise automatic TLS generation.
