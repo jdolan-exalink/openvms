@@ -1,0 +1,9 @@
+internal/api/gen/
+internal/store/db/*.sql.go
+apps/web/src/api/schema.d.ts
+gen/
+packages/api-contract/openapi.yaml
+odd/tasks/
+models/*.onnx
+*.mp4
+*.docx
