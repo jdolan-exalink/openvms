@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -26,13 +26,14 @@ const DYNAMIC_MAX_TILES = 16;
 
 function sourceFor(mode: VisionMode, preset: VisionAISource): VisionAISource {
   if (mode === "lpr") return "lpr";
+  if (mode === "faces") return "personas";
   if (mode === "alarm") return "alarmas";
   return preset;
 }
 
 function layoutFor(mode: VisionMode, layoutCount: number): VisionAILayout {
   if (mode === "focus") return "focus";
-  if (mode === "lpr") return LPR_LAYOUT;
+  if (mode === "lpr" || mode === "faces") return LPR_LAYOUT;
   if (mode === "dynamic") return DYNAMIC_LAYOUT;
   return String(layoutCount) as VisionAILayout;
 }
@@ -123,7 +124,7 @@ export function VisionAI() {
   };
 
   // Ranked slots from the server, with the client-side object chips and pins applied. The chips
-  // only narrow the matrix/focus views; LPR and alarm modes already come filtered by source.
+  // only narrow the matrix/focus views; LPR, face and alarm modes already come filtered by source.
   const serverSlots = slotsQuery.data?.slots ?? [];
   const chipsApply = mode === "matrix" || mode === "focus" || mode === "dynamic";
   const slots: VisionAISlot[] = serverSlots.map((sl) => {
@@ -284,6 +285,14 @@ export function VisionAI() {
             </button>
             <button
               type="button"
+              onClick={() => setMode("faces")}
+              className={cn("flex items-center gap-1 px-2 py-1 rounded-m3-sm text-xs font-medium transition-colors", mode === "faces" && "bg-surface text-primary shadow-xs")}
+            >
+              <Scan className="size-3.5" />
+              <span>Rostros</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setMode("alarm")}
               className={cn("flex items-center gap-1 px-2 py-1 rounded-m3-sm text-xs font-medium transition-colors", mode === "alarm" && "bg-surface text-primary shadow-xs")}
             >
@@ -355,6 +364,11 @@ export function VisionAI() {
                 Reintentar
               </Button>
             </div>
+          ) : mode === "faces" ? (
+            <FaceReadingsList
+              slots={slotsQuery.isPlaceholderData ? [] : serverSlots.filter((slot) => slot.object === "face")}
+              snapshots={canViewSnapshots}
+            />
           ) : !hasAnyCamera || (mode === "dynamic" && dynamicTiles.length === 0) ? (
             <div className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
               <Eye className="size-6 opacity-40" />
@@ -404,40 +418,10 @@ export function VisionAI() {
               </div>
             </div>
           ) : mode === "lpr" ? (
-            /* Specialized LPR Mode */
-            lprSlots.length === 0 ? (
-              <div data-testid="vision-lpr-empty" className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
-                <Scan className="size-6 opacity-40" />
-                {slotsQuery.data && !slotsQuery.data.plates_visible ? (
-                  <>
-                    <span>Lecturas de patente no disponibles</span>
-                    <span className="text-xs">No hay patentes visibles para tu usuario (se requiere permiso de LPR).</span>
-                  </>
-                ) : (
-                  <span>Sin lecturas de patente recientes</span>
-                )}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2 p-2 h-full overflow-y-auto">
-                {lprSlots.map((sl) => (
-                  <div key={sl.slot} className="flex flex-col rounded-m3-lg bg-surface border border-line overflow-hidden shadow-xs">
-                    <div className="relative aspect-video bg-black/80">{renderSlot(sl, "main")}</div>
-                    <div data-testid="vision-lpr-hud" className="p-3 bg-surface-2 flex items-center justify-between gap-3 border-t border-line">
-                      <div>
-                        <div className="text-[10px] uppercase font-mono tracking-wider text-muted">Patente Detectada</div>
-                        <div className="text-xl font-bold font-mono text-ink tracking-widest">{sl.plate}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-xs font-semibold text-primary">{sl.camera_name}</div>
-                        {sl.confidence !== undefined && (
-                          <div className="text-[10px] text-muted">Confianza: {Math.round(sl.confidence * 100)}%</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
+            <LprReadingsList
+              slots={slotsQuery.isPlaceholderData ? [] : lprSlots}
+              platesVisible={slotsQuery.data?.plates_visible ?? true}
+            />
           ) : (
             /* Standard Matrix Mode (1, 4, 9, 16) */
             <div
@@ -519,6 +503,225 @@ export function VisionAI() {
   );
 }
 
+type FaceReading = {
+  key: string;
+  slot: VisionAISlot;
+};
+
+const MAX_FACE_READINGS = 30;
+
+function FaceReadingsList({ slots, snapshots }: { slots: VisionAISlot[]; snapshots: boolean }) {
+  const [readings, setReadings] = useState<FaceReading[]>([]);
+
+  useEffect(() => {
+    const incoming = slots.flatMap((slot) => {
+      if (slot.object !== "face" || !slot.event_id || !slot.camera_id) return [];
+      return [{ key: slot.event_id, slot }];
+    });
+    if (incoming.length === 0) return;
+
+    startTransition(() => {
+      setReadings((current) => {
+        const seen = new Set(current.map((reading) => reading.key));
+        const fresh = incoming.filter((reading) => {
+          if (seen.has(reading.key)) return false;
+          seen.add(reading.key);
+          return true;
+        });
+        if (fresh.length === 0) return current;
+        return [...fresh, ...current]
+          .sort((a, b) => lprTimestamp(b.slot.assigned_at) - lprTimestamp(a.slot.assigned_at))
+          .slice(0, MAX_FACE_READINGS);
+      });
+    });
+  }, [slots]);
+
+  if (readings.length === 0) {
+    return (
+      <div data-testid="vision-faces-empty" className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
+        <Scan className="size-6 opacity-40" />
+        <span>Sin rostros detectados recientemente</span>
+        <span className="text-xs">Se muestran eventos de rostro en cámaras con permiso de eventos.</span>
+      </div>
+    );
+  }
+
+  return (
+    <section data-testid="vision-faces-list" aria-label="Rostros detectados en vivo" aria-live="polite" className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-dim p-3 sm:p-5">
+      <header className="mb-3 flex shrink-0 items-center justify-between gap-3 rounded-m3-lg border border-primary/20 bg-surface px-4 py-3 shadow-xs">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
+            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+            Detecciones en vivo
+          </div>
+          <h2 className="mt-1 truncate text-sm font-semibold text-ink">Rostros detectados</h2>
+        </div>
+        <div className="shrink-0 rounded-m3-md bg-primary/10 px-3 py-1.5 text-right">
+          <div className="font-mono text-lg font-bold tabular-nums text-primary">{readings.length.toString().padStart(2, "0")}</div>
+          <div className="text-[9px] font-semibold uppercase tracking-wider text-muted">eventos recientes</div>
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-m3-lg border border-line bg-surface shadow-xs">
+        <div className="grid grid-cols-[minmax(90px,0.65fr)_minmax(100px,1fr)_minmax(72px,0.7fr)] gap-2 border-b border-line bg-surface-2 px-3 py-2 text-[9px] font-bold uppercase tracking-[0.16em] text-muted sm:grid-cols-[minmax(150px,0.7fr)_minmax(140px,1fr)_minmax(120px,0.7fr)_minmax(100px,0.6fr)] sm:gap-3 sm:px-4">
+          <span>Detección</span>
+          <span>Cámara</span>
+          <span className="hidden sm:block">Zona</span>
+          <span className="text-right">Hora</span>
+        </div>
+        <div className="divide-y divide-line/70">
+          {readings.map((reading, index) => (
+            <div key={reading.key} data-testid="vision-face-row" className="grid grid-cols-[minmax(90px,0.65fr)_minmax(100px,1fr)_minmax(72px,0.7fr)] items-center gap-2 px-3 py-3 transition-colors hover:bg-surface-2 sm:grid-cols-[minmax(150px,0.7fr)_minmax(140px,1fr)_minmax(120px,0.7fr)_minmax(100px,0.6fr)] sm:gap-3 sm:px-4">
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="w-5 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted">{(index + 1).toString().padStart(2, "0")}</span>
+                <div className="w-24 shrink-0 sm:w-32">
+                  <EventSnapshot slot={reading.slot} snapshots={snapshots} />
+                </div>
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-xs font-semibold text-ink">{reading.slot.camera_name ?? "Cámara"}</div>
+                {reading.slot.confidence !== undefined && <div className="mt-0.5 text-[10px] text-muted">Confianza: {Math.round(reading.slot.confidence * 100)}%</div>}
+              </div>
+              <div className="hidden min-w-0 truncate text-xs text-muted sm:block">{reading.slot.zone || "—"}</div>
+              <div className="text-right font-mono text-xs tabular-nums text-on-surface-variant">{formatLprTime(reading.slot.assigned_at)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+type LprReading = {
+  key: string;
+  plate: string;
+  cameraName: string;
+  zone?: string;
+  confidence?: number;
+  assignedAt?: string;
+};
+
+const MAX_LPR_READINGS = 30;
+
+function LprReadingsList({ slots, platesVisible }: { slots: VisionAISlot[]; platesVisible: boolean }) {
+  const [readings, setReadings] = useState<LprReading[]>([]);
+
+  useEffect(() => {
+    const incoming = slots.flatMap((slot) => {
+      if (!slot.plate || !slot.camera_id) return [];
+      return [{
+        key: slot.event_id ?? `${slot.camera_id}:${slot.plate}:${slot.assigned_at ?? slot.slot}`,
+        plate: slot.plate,
+        cameraName: slot.camera_name ?? "Cámara",
+        zone: slot.zone,
+        confidence: slot.confidence,
+        assignedAt: slot.assigned_at ?? new Date().toISOString(),
+      }];
+    });
+    if (incoming.length === 0) return;
+
+    startTransition(() => {
+      setReadings((current) => {
+        const seen = new Set(current.map((reading) => reading.key));
+        const fresh = incoming.filter((reading) => {
+          if (seen.has(reading.key)) return false;
+          seen.add(reading.key);
+          return true;
+        });
+        if (fresh.length === 0) return current;
+        return [...fresh, ...current]
+          .sort((a, b) => lprTimestamp(b.assignedAt) - lprTimestamp(a.assignedAt))
+          .slice(0, MAX_LPR_READINGS);
+      });
+    });
+  }, [slots]);
+
+  if (!platesVisible) {
+    return (
+      <div data-testid="vision-lpr-empty" className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
+        <Scan className="size-6 opacity-40" />
+        <span>Lecturas de patente no disponibles</span>
+        <span className="text-xs">No hay patentes visibles para tu usuario (se requiere permiso de LPR).</span>
+      </div>
+    );
+  }
+
+  if (readings.length === 0) {
+    return (
+      <div data-testid="vision-lpr-empty" className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
+        <Scan className="size-6 opacity-40" />
+        <span>Sin lecturas de patente recientes</span>
+      </div>
+    );
+  }
+
+  return (
+    <section data-testid="vision-lpr-list" aria-label="Lecturas LPR en vivo" aria-live="polite" className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-dim p-3 sm:p-5">
+      <header className="mb-3 flex shrink-0 items-center justify-between gap-3 rounded-m3-lg border border-primary/20 bg-surface px-4 py-3 shadow-xs">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em] text-primary">
+            <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+            Lecturas LPR en vivo
+          </div>
+          <h2 className="mt-1 truncate text-sm font-semibold text-ink">Control de ingreso · Argentina</h2>
+        </div>
+        <div className="shrink-0 rounded-m3-md bg-primary/10 px-3 py-1.5 text-right">
+          <div className="font-mono text-lg font-bold tabular-nums text-primary">{readings.length.toString().padStart(2, "0")}</div>
+          <div className="text-[9px] font-semibold uppercase tracking-wider text-muted">lecturas recientes</div>
+        </div>
+      </header>
+
+      <div className="min-h-0 flex-1 overflow-y-auto rounded-m3-lg border border-line bg-surface shadow-xs">
+        <div className="grid grid-cols-[minmax(135px,0.9fr)_minmax(80px,1fr)_minmax(72px,0.7fr)] gap-2 border-b border-line bg-surface-2 px-3 py-2 text-[9px] font-bold uppercase tracking-[0.16em] text-muted sm:grid-cols-[minmax(180px,0.8fr)_minmax(140px,1fr)_minmax(120px,0.7fr)_minmax(100px,0.6fr)] sm:gap-3 sm:px-4">
+          <span>Patente Detectada</span>
+          <span>Cámara</span>
+          <span className="hidden sm:block">Zona</span>
+          <span className="text-right">Hora</span>
+        </div>
+        <div className="divide-y divide-line/70">
+          {readings.map((reading, index) => (
+            <div
+              key={reading.key}
+              data-testid="vision-lpr-hud"
+              className="grid grid-cols-[minmax(135px,0.9fr)_minmax(80px,1fr)_minmax(72px,0.7fr)] items-center gap-2 px-3 py-3 transition-colors hover:bg-surface-2 sm:grid-cols-[minmax(180px,0.8fr)_minmax(140px,1fr)_minmax(120px,0.7fr)_minmax(100px,0.6fr)] sm:gap-3 sm:px-4"
+            >
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="w-5 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted">{(index + 1).toString().padStart(2, "0")}</span>
+                <div className="min-w-0 overflow-hidden rounded-m3-sm border border-slate-300 bg-white shadow-xs">
+                  <div className="flex items-center justify-between bg-sky-800 px-2 py-0.5 text-[8px] font-bold tracking-[0.15em] text-white">
+                    <span>ARGENTINA</span>
+                    <span className="font-mono">ARG</span>
+                  </div>
+                  <div className="truncate px-2 py-1 font-mono text-lg font-black leading-none tracking-[0.12em] text-slate-900">{reading.plate}</div>
+                </div>
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-xs font-semibold text-ink">{reading.cameraName}</div>
+                {reading.confidence !== undefined && <div className="mt-0.5 text-[10px] text-muted">Confianza: {Math.round(reading.confidence * 100)}%</div>}
+              </div>
+              <div className="hidden min-w-0 truncate text-xs text-muted sm:block">{reading.zone || "—"}</div>
+              <div className="text-right font-mono text-xs tabular-nums text-on-surface-variant">{formatLprTime(reading.assignedAt)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function formatLprTime(value?: string): string {
+  if (!value) return "--:--:--";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "--:--:--";
+  return new Intl.DateTimeFormat("es-AR", { hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(date);
+}
+
+function lprTimestamp(value?: string): number {
+  if (!value) return 0;
+  const timestamp = Date.parse(value);
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
 function SlotRenderer({
   slot,
   pinned,
@@ -541,7 +744,17 @@ function SlotRenderer({
     <div className="group relative w-full h-full flex flex-col justify-between">
       {/* Video layer: keyed by camera so a swap re-mounts the player cleanly */}
       <div className="absolute inset-0">
-        <MsePlayer key={cameraId} cameraId={cameraId} quality={quality} objectFit="fill" className="size-full" />
+        <MsePlayer
+          key={cameraId}
+          cameraId={cameraId}
+          quality={quality}
+          persistent={true}
+          surface={true}
+          active={true}
+          suspended={false}
+          objectFit="fill"
+          className="size-full"
+        />
       </div>
 
       {/* Top HUD Controls */}

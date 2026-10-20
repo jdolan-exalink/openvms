@@ -1,6 +1,6 @@
 import type { VisionAISource } from "@/lib/visionAi";
 
-export type VisionMode = "matrix" | "focus" | "lpr" | "alarm" | "dynamic";
+export type VisionMode = "matrix" | "focus" | "lpr" | "faces" | "alarm" | "dynamic";
 
 export interface VisionPrefs {
   mode: VisionMode;
@@ -11,7 +11,7 @@ export interface VisionPrefs {
 
 const STORAGE_PREFIX = "openvms.visionai.view.v1";
 
-const MODES: readonly VisionMode[] = ["matrix", "focus", "lpr", "alarm", "dynamic"];
+const MODES: readonly VisionMode[] = ["matrix", "focus", "lpr", "faces", "alarm", "dynamic"];
 const SOURCES: readonly VisionAISource[] = ["general", "personas", "vehiculos", "lpr", "perimetro", "alarmas"];
 export const VISION_LAYOUT_COUNTS: readonly number[] = [1, 4, 9, 16];
 
