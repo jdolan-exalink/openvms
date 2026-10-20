@@ -168,10 +168,7 @@ func (s *Service) StartServerAgentInstall(ctx context.Context, actor authz.Actor
 		}
 	} else {
 		_, err := s.agentRow(ctx, actor, serverID)
-		if err == nil && !in.ReplaceExisting {
-			return AgentInstallJob{}, ErrAgentAlreadyProvisioned
-		}
-		if !errors.Is(err, store.ErrNotFound) {
+		if err := agentInstallRegistrationFallback(err, in.ReplaceExisting); err != nil {
 			return AgentInstallJob{}, err
 		}
 	}
@@ -199,6 +196,19 @@ func (s *Service) StartServerAgentInstall(ctx context.Context, actor authz.Actor
 	go s.runServerAgentInstall(context.Background(), actor, job, request, token, certificate)
 	reservationOwned = false
 	return job.read(), nil
+}
+
+func agentInstallRegistrationFallback(lookupErr error, replaceExisting bool) error {
+	if lookupErr == nil {
+		if !replaceExisting {
+			return ErrAgentAlreadyProvisioned
+		}
+		return nil
+	}
+	if errors.Is(lookupErr, store.ErrNotFound) {
+		return nil
+	}
+	return lookupErr
 }
 
 func (s *Service) reserveAgentInstallJob(ownerID, serverID uuid.UUID) (*agentInstallJob, error) {

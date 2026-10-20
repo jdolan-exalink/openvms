@@ -107,7 +107,7 @@ describe("Servers", () => {
         if (url.pathname === "/api/v1/classify/policy") return json({ servers: [] });
         if (url.pathname === "/api/v1/sync/status") return json({ items: [] });
         if (url.pathname === "/api/v1/servers/a/agent/install" && request.method === "POST" && installHandler) return installHandler(request);
-        if (url.pathname === "/api/v1/servers/a/agent/discover" && request.method === "POST") return discoveryHandler?.(request) ?? json({ state: "unknown", ownership: "unknown" });
+        if (url.pathname === "/api/v1/servers/a/agent/discover" && request.method === "POST") return discoveryHandler?.(request) ?? json({ state: "absent", ownership: "unknown" });
         if (url.pathname === "/api/v1/servers/a/agent/install/job-1") return pollHandler?.(request) ?? json({ id: "job-1", status: "succeeded", stage: "complete" });
         if (url.pathname === "/.well-known/openvms-https-port") return httpsPortHandler?.(request) ?? new Response("8443", { status: 200 });
         return json({ code: "not_found", message: "not found" }, 404);
@@ -163,6 +163,36 @@ describe("Servers", () => {
       const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
       expect(within(dialog).queryByLabelText(/Huella SHA-256 SSH verificada/i)).not.toBeInTheDocument();
       expect(within(dialog).getByLabelText("Host SSH IPv4")).toBeInTheDocument();
+    });
+
+    it("discovers before install and stops for confirmation when an agent is present", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      const { calls } = setupAgentInstall(installGrants, async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202), undefined, undefined, undefined, async () => json({ state: "present", version: "0.2.1", ownership: "unknown" }));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "one-time" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+      expect(await within(dialog).findByRole("status")).toHaveTextContent(/Agente detectado.*0\.2\.1/i);
+      expect(calls.some((request) => new URL(request.url).pathname.endsWith("/agent/install"))).toBe(false);
+      expect(within(dialog).getByLabelText("Contraseña SSH root")).toHaveValue("");
+    });
+
+    it("fails closed when automatic discovery is unknown", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      const { calls } = setupAgentInstall(installGrants, async () => json({ id: "job-1", status: "queued", stage: "validating" }, 202), undefined, undefined, undefined, async () => json({ state: "unknown", ownership: "unknown" }));
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "one-time" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+      expect(await within(dialog).findByRole("status")).toHaveTextContent(/no se pudo verificar la presencia/i);
+      expect(calls.some((request) => new URL(request.url).pathname.endsWith("/agent/install"))).toBe(false);
+      expect(within(dialog).getByLabelText("Contraseña SSH root")).toHaveValue("");
     });
 
     it.each([
