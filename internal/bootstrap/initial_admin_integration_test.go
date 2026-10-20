@@ -296,3 +296,65 @@ func TestEnsureInitialAdminWarnsOnTenantUserNameCollision(t *testing.T) {
 		t.Fatalf("log = %q", out)
 	}
 }
+
+func TestResetPlatformAdminPasswordForcesChangeAndClearsLockout(t *testing.T) {
+	ctx := context.Background()
+	st := adminFixture(t)
+	log, _ := captureLog()
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "Clave-Inicial-2026", log); err != nil {
+		t.Fatal(err)
+	}
+	var user db.User
+	if err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		var err error
+		user, err = q.GetUserByUsername(ctx, "admin")
+		if err != nil {
+			return err
+		}
+		if err := q.SetPassword(ctx, db.SetPasswordParams{ID: user.ID, PasswordHash: user.PasswordHash}); err != nil {
+			return err
+		}
+		_, err = q.RecordLoginFailure(ctx, db.RecordLoginFailureParams{ID: user.ID, MaxFailures: 1, LockSeconds: 600})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := bootstrap.ResetPlatformAdminPassword(ctx, st, "admin", "New-Strong-Password-2026"); err != nil {
+		t.Fatal(err)
+	}
+	users := listUsers(t, st)
+	if len(users) != 1 {
+		t.Fatalf("users = %d, want 1", len(users))
+	}
+	got := users[0]
+	if !got.MustChangePassword || got.FailedLogins != 0 || got.LockedUntil != nil {
+		t.Fatalf("reset state = must_change:%t failed:%d locked:%v", got.MustChangePassword, got.FailedLogins, got.LockedUntil)
+	}
+	if !identity.VerifyPassword(got.PasswordHash, "New-Strong-Password-2026") || identity.VerifyPassword(got.PasswordHash, "Clave-Inicial-2026") {
+		t.Fatal("reset password hash did not replace the prior password")
+	}
+}
+
+func TestResetPlatformAdminPasswordRejectsTenantUsers(t *testing.T) {
+	ctx := context.Background()
+	st := adminFixture(t)
+	var original db.User
+	if err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		tenant, err := q.CreateTenant(ctx, db.CreateTenantParams{Slug: "tenant-reset", Name: "Tenant Reset"})
+		if err != nil {
+			return err
+		}
+		original, err = q.CreateUser(ctx, db.CreateUserParams{TenantID: &tenant.ID, Username: "tenant-admin", DisplayName: "Tenant Admin"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	err := bootstrap.ResetPlatformAdminPassword(ctx, st, "tenant-admin", "New-Strong-Password-2026")
+	if err == nil || !strings.Contains(err.Error(), "tenant user") {
+		t.Fatalf("ResetPlatformAdminPassword() error = %v, want tenant-user refusal", err)
+	}
+	users := listUsers(t, st)
+	if len(users) != 1 || users[0].ID != original.ID || users[0].PasswordHash != "" {
+		t.Fatalf("tenant user changed during refused reset: %+v", users)
+	}
+}

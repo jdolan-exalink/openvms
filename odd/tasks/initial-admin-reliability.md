@@ -1,0 +1,82 @@
+# Reliable initial admin creation
+
+## Objective
+Make a fresh OpenVMS Compose installation reliably create a usable platform admin and make its first-login credentials easy to find without exposing configured secrets.
+
+## Problem and why
+The user requires an admin to exist on first setup or operators have no access. A configured `OPENVMS_ADMIN_PASSWORD` that fails the existing policy can currently cause bootstrap to skip account creation; generated credentials are available only in API logs, while `deploy/install.sh` still prints obsolete manual-bootstrap instructions.
+
+## Scope and constraints
+- Honor a configured `OPENVMS_ADMIN_PASSWORD` when it satisfies the existing password policy.
+- If the configured value is absent or rejected, create the initial admin with a strong generated password, set forced password change, and make the recovery credential discoverable through the existing safe startup log path.
+- Never log or print a configured password; never overwrite/reset an existing account or create duplicate admins on restart.
+- Preserve the existing policy for new passwords and disclose clearly when a configured initial password is rejected.
+- Add a deliberate, operator-invoked password reset for the existing Compose installation; never reset on boot.
+- The reset must target this Compose project explicitly, prompt without echo, confirm the password, clear failed-login/lock state, fail closed on ambiguity, and never delete volumes/data.
+- The operator host must not require Go or another host-side compiler; perform credential validation and hashing inside the existing API image's supported maintenance CLI.
+- Do not open or print `.env`, `..env.swp`, or `data/`; preserve them locally. Remote operations require explicit target and scope authorization. For IAR-05, the user authorized a destructive fresh deployment only on `root@10.1.1.60`; preserve that host's `.env` and do not touch `10.1.1.24`.
+- Do not print or persist real credentials in source, docs, tests, task artifacts, or memory.
+
+## TDD and route
+- Strict TDD: enabled by the workspace instructions. Runner: `GOCACHE=/tmp/openvms-go-build-cache go test -race ./...`; focused shell test first for IAR-04.
+- Route: delegated direct implementation for IAR-01/02; delegated direct writer for IAR-03/04.
+- Trigger evidence: IAR-04 updates the reset script, vmsctl maintenance command and service-level tests/docs because host Go is absent from the authorized target host.
+- Delivery strategy: `ask-on-risk` (default); one coherent work-unit commit on this feature branch.
+- Forecast: approximately 250 authored changed lines; no PR or push authorized.
+
+## Tasks
+- [x] IAR-01 — Guarantee first admin creation with policy-compliant configured-password use or generated forced-change fallback; add regression tests for configured rejection, generated credential reporting, and idempotency. Route: delegated writer.
+- [x] IAR-02 — Replace stale installer guidance with the actual first-login flow, clearly document configured-password policy and generated fallback/recovery, and update installer contract tests without printing configured secrets. Route: same delegated writer.
+- [x] IAR-03 — Add `tools/reset_admin.sh`, focused shell tests, and operator guidance for explicit safe password reset in the existing Compose project. Route: delegated writer. Strict TDD: RED then GREEN. Acceptance: hidden input + confirmation, no credentials in args/logs, explicit project scoping, reset only platform admin credentials and failed-login lock state, fail closed if target/user is ambiguous, preserve all volumes/data. Rollback boundary: remove the reset script, its tests, and its operator guidance; no runtime or schema change.
+- [x] IAR-04 — Remove host-side Go dependency by invoking a dedicated platform-admin reset command from the existing API image; validate/hash stdin, force password change, clear lockout, reject tenant/ambiguous users, and preserve scoped Compose behavior. Add focused command and shell tests; update docs. Route: delegated writer. Strict TDD: RED then GREEN. Rollback boundary: revert the vmsctl reset command and corresponding script/test/docs updates, restoring the prior IAR-03 implementation.
+- [x] IAR-05 — On the explicitly authorized disposable test host, remove only OpenVMS Compose containers/volumes and app data, preserve `.env`, deploy the current feature snapshot from scratch, then verify initial admin creation and login with the configured password. Route: direct inline operational verification after the user authorized the target and destructive scope. Native review was explicitly declined for this candidate after preflight could not collect the required untracked-path selector. No push, PR, or merge authorized.
+- [x] IAR-06 — Make `tools/reset_admin.sh` use the matching `vmsctl reset-admin-password` binary instead of blindly invoking a stale running API container; prove the script refreshes/validates the CLI without deleting data or exposing the password. Route: delegated direct. Fixed Compose image resolution after `docker compose config --images api` returned an empty result.
+
+## Acceptance criteria and checks
+- A new installation does not silently continue without a platform admin because `OPENVMS_ADMIN_PASSWORD` is missing or rejected by policy.
+- A valid configured initial password is used and never emitted in logs or installer output.
+- A missing/rejected configured password produces a strong generated credential, a forced password change, and one clear retrieval path after successful account creation.
+- Existing accounts are not overwritten and repeated startup remains idempotent.
+- `gofmt -l` is empty; focused bootstrap tests pass; installer tests pass; `go test -race ./...` passes.
+- No secrets appear in the diff or task artifacts.
+- IAR-03: `bash tools/reset_admin_test.sh` and `GOCACHE=/tmp/openvms-go-build-cache go test -race ./...` pass; `git diff --check` passes. Runtime harness: N/A — operator-only script is exercised with stubbed Compose/database commands; no service deployment or live credentials are used. Rollback boundary is limited to `tools/reset_admin.sh`, its focused test, and the operator guidance.
+- IAR-04: `bash tools/reset_admin_test.sh`, `go test ./apps/vmsctl`, `GOCACHE=/tmp/openvms-go-build-cache go test -tags integration ./internal/bootstrap -run '^TestResetPlatformAdminPassword(ForcesChangeAndClearsLockout|RejectsTenantUsers)$' -count=1`, `GOCACHE=/tmp/openvms-go-build-cache go test -race ./...`, and `git diff --check` pass. Runtime harness: N/A — existing API image command is covered by vmsctl logic/integration tests and shell stubs; no live host or credential is used. Rollback boundary is limited to reset command wiring, reset script/docs/tests.
+- IAR-05: Built `api`, `web`, `worker`, and `relay` images on the authorized test host from source snapshot `6fc8be5`; stopped and removed the prior OpenVMS Compose project, its labeled named volumes, and the configured app bind-data paths; preserved `.env`. Fresh `docker compose up -d` completed; Postgres, NATS, SeaweedFS, Valkey, and Mosquitto were healthy and all app services were running. Sanitized startup-log check found `initial admin created` and no bootstrap error. Database readback showed exactly the platform admin `admin` active with zero failed attempts and no forced-change flag. The configured password was present (never printed); one API login using it returned HTTP 200 and verified the returned username. Web root returned HTTP 200; reset script is executable. No credential value was output. User explicitly authorized leaving this candidate without native review; no review receipt exists. Runtime harness: fresh remote Compose deployment on `10.1.1.60`. Rollback boundary: test host only; do not restore removed test data. No other host or deployment data was touched.
+- IAR-06 trigger: user reported that the script's running API container returned `vmsctl: unknown command "reset-admin-password"`. Repository evidence shows the script invokes the existing container via `docker compose exec`, while the feature branch's current source does include the command; the running image may therefore be stale. Do not infer remote image state or connect to a host.
+- IAR-06 acceptance: build only the API image from this checkout before prompting, leave the existing API service running, then invoke a one-off `/vmsctl` container using the refreshed image, the running API's database URL and its Compose default network. Keep the new password stdin-only and out of output/args/env; never read `.env` explicitly or delete data/volumes.
+- IAR-06 RED: `bash tools/reset_admin_test.sh` failed against the previous `docker compose exec api` implementation because the test harness exposes only the refreshed-image/one-off-container path.
+- IAR-06 initial implementation evidence: `bash tools/reset_admin_test.sh` passed after `29dbf53`, verifying `docker compose build api` precedes reset, uses a fresh one-off CLI container, and preserves stdin-only password flow. Subsequent local preflight exposed the filtered image-resolution issue documented below.
+- IAR-06 work-unit commit: `29dbf53` (`fix(admin): refresh reset CLI from checkout`).
+- IAR-06 root cause: this Compose version returns no image for the service-filtered `config --images api` form; the unfiltered `config --images` form returns the service image list. The script now selects exactly one `${project}-api` image from that list and fails closed if absent/ambiguous.
+- IAR-06 RED: after changing the Docker stub to return empty for filtered image resolution and include `openvms-test-api` only in unfiltered output, `bash tools/reset_admin_test.sh` failed with `FAIL: valid reset failed` against the old script.
+- IAR-06 GREEN: after the script fix, `bash tools/reset_admin_test.sh` passed; it verifies unfiltered image resolution, scoped project, stdin-only password flow, matching CLI image, and mismatch rejection before reset.
+- IAR-06 verification: `git diff --check` passed. No Go files or Go behavior changed, so the Go race suite was not applicable. Runtime harness: N/A — only the stubbed shell harness was run; this task explicitly prohibited live reset/deployment. Rollback boundary: revert only `tools/reset_admin.sh`, `tools/reset_admin_test.sh`, `docs/operations/admin-password-reset.md`, and this tracker to the prior service-filtered behavior.
+- IAR-06 rollback boundary: revert the image-resolution changes to `tools/reset_admin.sh`, `tools/reset_admin_test.sh`, `docs/operations/admin-password-reset.md`, and this tracker; this does not affect the deployed API or persistent data. No live reset or deployment was run for this correction.
+
+## Progress and evidence
+- Branch `feat/reliable-admin-bootstrap` created from `main` at `68a7533d6e3fae733990977686e2316bb5b6b0b8`; pre-existing untracked `data/` is out of scope and must remain untouched.
+- Read-only source map confirmed Compose/config already wire the setting, bootstrap skips a configured password rejected by `identity.CheckPolicy`, and `deploy/install.sh` still shows manual `vmsctl bootstrap` guidance. The installer has no existing WAHA credential summary to append to.
+- Initial-admin contract and existing idempotency behavior are recorded in `odd/tasks/initial-admin-bootstrap.md` and Engram observation 1037.
+
+- IAR-01: Policy-rejected configured passwords now trigger a generated strong password, a forced first-login change, and a safe rejection log; the configured value is not logged. Existing account checks and transactional idempotency are unchanged.
+- IAR-02: Installer summary and initial-admin guidance now point operators to `docker compose logs api | grep 'initial admin created'`; valid configured passwords remain unprinted. No WAHA credential summary was added because no such startup output exists.
+- RED: `GOCACHE=/tmp/openvms-go-build-cache go test -race -tags integration ./internal/bootstrap -run TestEnsureInitialAdminWeakPasswordFallsBackToGenerated -count=1` failed as expected before the implementation because the weak configured value left the installation without an admin.
+- GREEN: The same focused integration test passed after the fallback implementation.
+- Verification: `GOCACHE=/tmp/openvms-go-build-cache go test -race ./internal/bootstrap ./internal/identity` passed; `bash deploy/install_test.sh` passed; `GOCACHE=/tmp/openvms-go-build-cache go test -race ./...` passed; `gofmt -l internal/bootstrap/bootstrap.go internal/bootstrap/initial_admin_integration_test.go` returned no output; `git diff --check` passed.
+- Work-unit commit: `b16b6e1` (`fix(bootstrap): guarantee initial admin creation`).
+- Native RDD outcome: high-risk review consent granted; four lenses approved with no findings; exact acknowledgement completed for target `sha256:350bf815dd8d3ffc7b1ca4c9a4d3667ae3f9167db5e79253bb9535a531aff9c7`.
+
+- IAR-03 implementation: added an operator-only script using hidden/confirmed terminal input, the existing Argon2id policy/hash implementation, explicit `openvms` Compose project selection with `/dev/null` as the env file, and a guarded SQL transaction requiring exactly one active platform admin. It updates only password fields, forced-change state, and login-lock counters; it issues no volume/data deletion command.
+- IAR-03 RED: `bash tools/reset_admin_test.sh` failed before the reset script existed (`FAIL: valid reset failed`).
+- IAR-03 GREEN: `bash tools/reset_admin_test.sh` passed with stubbed Compose and hashing commands, checking project scoping, confirmation mismatch rejection, lock-state clearing, forced password change, ambiguous-account guard, no destructive SQL, and absence of the typed password in SQL or process arguments.
+- IAR-03 verification: `GOCACHE=/tmp/openvms-go-build-cache go test -race ./...` passed; `git diff --check` passed. Runtime harness: N/A — the script is an interactive operator utility and tests use stubs; no live service or credential was exercised. Rollback boundary: remove `tools/reset_admin.sh`, `tools/admin-password-hash/`, `tools/reset_admin_test.sh`, and `docs/operations/admin-password-reset.md`.
+- IAR-03 work-unit commit: `16f014b` (`feat(admin): add safe Compose password reset`).
+
+- IAR-04 trigger: parent spot-check verified that the target host does not have Go installed, so the initial script's `go run` helper cannot run there. Existing API image includes `/vmsctl`; it needs an explicit admin-only reset command because existing `passwd` does not set forced password change.
+- IAR-04 RED: shell test failed because the script did not invoke the API image's maintenance command; focused integration test failed to compile because `ResetPlatformAdminPassword` did not yet exist.
+- IAR-04 GREEN: `bash tools/reset_admin_test.sh` passed, verifying the API-image `/vmsctl` path, explicit project and env-file controls, stdin-only password delivery, no host Go dependency, no password in output/args, and mismatch rejection. `go test ./apps/vmsctl` passed; `GOCACHE=/tmp/openvms-go-build-cache go test -tags integration ./internal/bootstrap -run '^TestResetPlatformAdminPassword(ForcesChangeAndClearsLockout|RejectsTenantUsers)$' -count=1` passed, proving password replacement, forced change, lockout reset, and tenant-user refusal. `GOCACHE=/tmp/openvms-go-build-cache go test -race ./...` and `git diff --check` passed.
+- IAR-04 implementation: moved policy validation and Argon2id hashing into the existing `/vmsctl` image command, added a transactional bootstrap operation that rejects non-platform/inactive accounts and revokes sessions, and removed the host-side Go helper. The command connects to the existing database without running migrations; reset remains opt-in and deletes no deployment data.
+- IAR-04 work-unit commit: `6a9c638` (`fix(admin): reset passwords from API image`).
+
+## Next step
+The image-resolution correction is verified locally; any live reset requires separate explicit authorization. The local feature branch has not been pushed, opened as a PR, or merged; wait for explicit user authorization before those delivery operations.

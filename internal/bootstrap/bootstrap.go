@@ -314,3 +314,32 @@ func SetPassword(ctx context.Context, st *store.Store, username, password string
 		return q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: u.ID})
 	})
 }
+
+// ResetPlatformAdminPassword changes an existing platform user's password,
+// requires a password change at next login, clears login lockout state, and
+// revokes web sessions. It never creates or elevates a user.
+func ResetPlatformAdminPassword(ctx context.Context, st *store.Store, username, password string) error {
+	return st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		u, err := q.GetUserByUsername(ctx, username)
+		if err != nil {
+			return fmt.Errorf("platform admin %q: %w", username, store.Classify(err))
+		}
+		if u.TenantID != nil {
+			return fmt.Errorf("user %q is a tenant user, not a platform admin", username)
+		}
+		if u.Status != "active" {
+			return fmt.Errorf("platform admin %q is not active", username)
+		}
+		if err := identity.CheckPolicy(password); err != nil {
+			return err
+		}
+		hash, err := identity.HashPassword(password)
+		if err != nil {
+			return err
+		}
+		if err := q.SetPassword(ctx, db.SetPasswordParams{ID: u.ID, PasswordHash: hash, MustChangePassword: true}); err != nil {
+			return err
+		}
+		return q.RevokeUserSessions(ctx, db.RevokeUserSessionsParams{UserID: u.ID})
+	})
+}
