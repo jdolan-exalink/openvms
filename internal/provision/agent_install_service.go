@@ -22,6 +22,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path"
 	"runtime"
 	"strings"
 	"sync"
@@ -809,19 +810,28 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 	if progress != nil {
 		progress("transferring")
 	}
-	for _, file := range files {
+	stageDir := "/tmp/openvms-agent-install-" + uuid.NewString()
+	for i, file := range files {
 		if installCtx.Err() != nil {
+			_, _ = runAgentInstallStep(installCtx, conn, agentInstallDiscardStage(stageDir))
 			return errors.New("agent install deadline exceeded")
 		}
 		fileCtx, fileCancel := context.WithTimeout(installCtx, 2*time.Minute)
-		err = conn.WriteSFTPFile(fileCtx, file.path, file.mode, file.data)
+		stagePath := path.Join(stageDir, fmt.Sprintf("payload-%d", i))
+		err = conn.WriteSFTPFile(fileCtx, stagePath, file.mode, file.data)
 		fileCancel()
 		if err != nil {
+			_, _ = runAgentInstallStep(installCtx, conn, agentInstallDiscardStage(stageDir))
 			return &AgentInstallFailure{Code: AgentInstallCodeTransferFailed, Stage: agentInstallStageTransferring}
 		}
 	}
 	if progress != nil {
 		progress("activating")
+	}
+	activationScript := agentInstallActivateFiles(stageDir, files)
+	activated, err := runAgentInstallStep(installCtx, conn, activationScript)
+	if err != nil || strings.TrimSpace(activated) != "openvms_agent_files=activated" {
+		return &AgentInstallFailure{Code: AgentInstallCodeActivationFailed, Stage: agentInstallStageActivating}
 	}
 	if existingInstalled {
 		identity, err := runAgentInstallStep(installCtx, conn, agentInstallResetIdentity)
@@ -834,6 +844,30 @@ func runAgentInstallWithProgress(ctx context.Context, request AgentInstallReques
 		return &AgentInstallFailure{Code: AgentInstallCodeActivationFailed, Stage: agentInstallStageActivating}
 	}
 	return nil
+}
+
+func agentInstallDiscardStage(stageDir string) string {
+	return "set -eu\nstage=" + shellWord(stageDir) + "\n[ ! -L \"$stage\" ] || exit 41\ncase \"$stage\" in /tmp/openvms-agent-install-*) rm -rf -- \"$stage\" ;; *) exit 42 ;; esac"
+}
+
+func agentInstallActivateFiles(stageDir string, files []agentInstallFile) string {
+	var script strings.Builder
+	script.WriteString("set -eu\nstage=" + shellWord(stageDir) + "\n[ -d \"$stage\" ] && [ ! -L \"$stage\" ]\nbackup=\"$stage/backup\"\nmkdir -m 700 -- \"$backup\"\nrollback() {\n")
+	for i := len(files) - 1; i >= 0; i-- {
+		target := shellWord(files[i].path)
+		backup := fmt.Sprintf("\"$backup/%d\"", i)
+		payload := fmt.Sprintf("\"$stage/payload-%d\"", i)
+		script.WriteString("  if [ -e " + backup + " ] || [ -L " + backup + " ]; then rm -f -- " + target + "; mv -- " + backup + " " + target + "; elif [ ! -e " + payload + " ] && [ ! -L " + payload + " ]; then rm -f -- " + target + "; fi\n")
+	}
+	script.WriteString("  trap - EXIT HUP INT TERM\n  rm -rf -- \"$stage\"\n")
+	script.WriteString("}\ntrap rollback EXIT HUP INT TERM\n")
+	for i, file := range files {
+		target := shellWord(file.path)
+		script.WriteString("if [ -e " + target + " ] || [ -L " + target + " ]; then [ -f " + target + " ] && [ ! -L " + target + " ] || exit 43; mv -- " + target + fmt.Sprintf(" \"$backup/%d\"; fi\n", i))
+		fmt.Fprintf(&script, "[ -f \"$stage/payload-%d\" ] && [ ! -L \"$stage/payload-%d\" ]\nmv -- \"$stage/payload-%d\" %s\nchmod %o %s\n", i, i, i, target, file.mode.Perm(), target)
+	}
+	script.WriteString("trap - EXIT HUP INT TERM\nprintf 'openvms_agent_files=activated\\n'\nrm -rf -- \"$stage\"\n")
+	return script.String()
 }
 
 func (s *Service) logger() *slog.Logger {
