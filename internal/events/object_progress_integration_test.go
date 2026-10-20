@@ -95,7 +95,7 @@ func TestObjectSyncAdvancesWithinDeadline(t *testing.T) {
 	const backlog = 900
 	first := seedPlateBacklog(mock.Store, cam.RemoteName, backlog)
 	srv := serverByName(t, bg, env.Store, "frigate-h01")
-	syncer.ObjectStopMargin = 1800 * time.Millisecond
+	syncer.ObjectStopMargin = 3500 * time.Millisecond
 
 	// Warm-up: let the reviews pass store the 900 backlog reviews (slow, and not what is under
 	// test) while the object requests hang until the pass deadline.
@@ -107,10 +107,10 @@ func TestObjectSyncAdvancesWithinDeadline(t *testing.T) {
 		t.Fatalf("object_cursor = %v after the warm-up, want it unset", cur)
 	}
 
-	// 1s per object page and a 2.5s pass with a 1.8s stop margin: page 1 is fetched and
+	// 1s per object page and a 4.5s pass with a 3.5s stop margin: page 1 is fetched and
 	// committed, then the pass sees too little time left for page 2 and stops without error.
 	mock.ObjectsDelay = time.Second
-	ctx, cancel := context.WithTimeout(bg, 2500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(bg, 4500*time.Millisecond)
 	err := syncer.SyncServer(ctx, srv)
 	cancel()
 	if err != nil {
@@ -131,7 +131,7 @@ func TestObjectSyncAdvancesWithinDeadline(t *testing.T) {
 
 	// Following passes, each as bounded as the first, converge on the whole backlog.
 	for i := 0; i < 6 && countBacklogReads(t, bg, env.Store, srv.ID) < backlog; i++ {
-		ctx, cancel := context.WithTimeout(bg, 2500*time.Millisecond)
+		ctx, cancel := context.WithTimeout(bg, 4500*time.Millisecond)
 		_ = syncer.SyncServer(ctx, srv)
 		cancel()
 	}

@@ -55,11 +55,17 @@ auth, 1011 otherwise). A 1008 close without a frame is treated as `unauthorized`
 | code | UI | Retry |
 |---|---|---|
 | `camera_offline` | Cámara sin conexión | yes (backoff) |
+| `camera_no_signal` | Cámara sin señal (Frigate) | yes (fixed 30 s) |
 | `upstream_unreachable` | Servidor no disponible | yes (grouped per server) |
 | `server_error` | Error de stream | yes |
 | `unauthorized` | Sesión expirada | no — "Reintentar" button |
 | `forbidden` | Sin permiso | no — "Reintentar" button |
 | `codec_unsupported` | Códec no soportado | no — "Reintentar" button |
+
+`camera_no_signal` comes from Frigate's own stats: the worker's health poller (every
+`HEALTH_INTERVAL`, 30 s) marks a camera `offline` with a reported `camera_fps` of ~0 only
+after it stayed there for `CAMERA_NO_SIGNAL_HOLD` (default 60 s, two polls). The gateway reads
+that persisted verdict and refuses before dialing go2rtc; unknown state never blocks.
 
 ## Gateway (`internal/media`)
 

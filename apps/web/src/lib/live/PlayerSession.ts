@@ -595,7 +595,10 @@ export class PlayerSession implements StreamStatsSource {
       const waiting = this.snapshot.error?.label ?? (this.retry >= 2 ? "Sin conexión con la cámara, reintentando…" : undefined);
       this.move("RECONNECTING", "socket-closed", waiting);
       this.retry = Math.min(this.retry + 1, 6);
-      if (this.resilient && this.backoff) {
+      const fixedDelay = this.resilient ? this.snapshot.error?.retryDelayMs : undefined;
+      if (fixedDelay) {
+        this.timer = setTimeout(() => this.open(), fixedDelay);
+      } else if (this.resilient && this.backoff) {
         this.cancelRetry = this.backoff.schedule(this.serverId, this.retry, () => {
           this.cancelRetry = undefined;
           this.open();

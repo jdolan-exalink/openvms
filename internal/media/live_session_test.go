@@ -1,6 +1,7 @@
 package media
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -65,5 +66,54 @@ func TestUpstreamError(t *testing.T) {
 	}
 	if _, ok := upstreamError([]byte(`{"type":"mse","value":"video/mp4"}`)); ok {
 		t.Fatal("mse frame is not an error")
+	}
+}
+
+func TestUpstreamErrorKeepsRedactedDetailForLogs(t *testing.T) {
+	e, ok := upstreamError([]byte(`{"type":"error","value":"streams: rtsp://admin:s3cret@10.0.0.5:554/profile2 401 Unauthorized"}`))
+	if !ok || e.code != CodeCameraOffline {
+		t.Fatalf("got %+v %v", e, ok)
+	}
+	if strings.Contains(e.detail, "s3cret") || strings.Contains(e.detail, "admin:") {
+		t.Fatalf("detail leaks credentials: %q", e.detail)
+	}
+	if !strings.Contains(e.detail, "rtsp://***@10.0.0.5:554/profile2 401 Unauthorized") {
+		t.Fatalf("detail = %q, want the redacted go2rtc message", e.detail)
+	}
+	if strings.Contains(e.msg, "rtsp") {
+		t.Fatalf("browser message must stay generic, got %q", e.msg)
+	}
+}
+
+func TestRedactURLCredentials(t *testing.T) {
+	cases := map[string]string{
+		"rtsp://u:p@host/a":                  "rtsp://***@host/a",
+		"dial rtsps://user@cam:322/x failed": "dial rtsps://***@cam:322/x failed",
+		"no credentials http://host/x":       "no credentials http://host/x",
+		"two rtsp://a:b@h1/x rtsp://c:d@h2":  "two rtsp://***@h1/x rtsp://***@h2",
+	}
+	for in, want := range cases {
+		if got := redactURLCredentials(in); got != want {
+			t.Errorf("redactURLCredentials(%q) = %q, want %q", in, got, want)
+		}
+	}
+	long := strings.Repeat("x", 2000)
+	if got := redactURLCredentials(long); len(got) > maxUpstreamDetail {
+		t.Errorf("detail not truncated: %d bytes", len(got))
+	}
+}
+
+func TestUpstreamMSECodecs(t *testing.T) {
+	if got, ok := upstreamMSECodecs([]byte(`{"type":"mse","value":"video/mp4; codecs=\"hvc1.1.6.L153.B0\""}`)); !ok || got != `video/mp4; codecs="hvc1.1.6.L153.B0"` {
+		t.Fatalf("got %q %v", got, ok)
+	}
+	if _, ok := upstreamMSECodecs([]byte(`{"type":"error","value":"x"}`)); ok {
+		t.Fatal("error frame is not a codec announcement")
+	}
+	if _, ok := upstreamMSECodecs([]byte("not json")); ok {
+		t.Fatal("garbage is not a codec announcement")
+	}
+	if got, _ := upstreamMSECodecs([]byte(`{"type":"mse","value":"` + strings.Repeat("a", 2000) + `"}`)); len(got) > maxUpstreamDetail {
+		t.Fatalf("codec string not bounded: %d bytes", len(got))
 	}
 }

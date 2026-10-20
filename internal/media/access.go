@@ -54,6 +54,9 @@ type Camera struct {
 	LiveStream string
 	HQStream   string
 	Server     db.FrigateServer
+	// Status and FPS are the health poller's last verdict (cameras.status / cameras.fps).
+	Status string
+	FPS    *float32
 }
 
 func (s *Service) tx(ctx context.Context, actor authz.Actor, fn func(q *db.Queries, c *access.Checker) error) error {
@@ -94,7 +97,7 @@ func (s *Service) Authorize(ctx context.Context, actor authz.Actor, cameraID uui
 			return store.Classify(err)
 		}
 		out = Camera{ID: cam.ID, TenantID: cam.TenantID, SiteID: cam.SiteID, RemoteName: cam.RemoteName,
-			LiveStream: cam.LiveStream, HQStream: cam.HqStream, Server: srv}
+			LiveStream: cam.LiveStream, HQStream: cam.HqStream, Server: srv, Status: cam.Status, FPS: cam.Fps}
 		return nil
 	})
 	if err != nil {

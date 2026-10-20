@@ -65,6 +65,7 @@ func (c LiveConfig) writeTimeout() time.Duration {
 // Error codes of the live error frame, part of the contract with the web player.
 const (
 	CodeCameraOffline       = "camera_offline"
+	CodeCameraNoSignal      = "camera_no_signal"
 	CodeUnauthorized        = "unauthorized"
 	CodeForbidden           = "forbidden"
 	CodeUpstreamUnreachable = "upstream_unreachable"
