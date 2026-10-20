@@ -15,6 +15,7 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,11 +34,60 @@ type fakeAgentInstallConn struct {
 	runErrOutput    string
 	preflightOutput string
 	writeErr        error
+	writeErrAt      int
 	writes          int
 }
 
 func (f *fakeAgentInstallConn) Run(_ context.Context, command string) (string, error) {
 	f.commands = append(f.commands, command)
+	if strings.Contains(command, "case \"$stage\" in /tmp/openvms-agent-install-*") {
+		for path := range f.files {
+			if strings.HasPrefix(path, "/tmp/openvms-agent-install-") {
+				delete(f.files, path)
+			}
+		}
+		return "", nil
+	}
+	if strings.Contains(command, "openvms_agent_files=activated") {
+		for _, line := range strings.Split(command, "\n") {
+			if !strings.HasPrefix(line, "mv -- \"$stage/payload-") {
+				continue
+			}
+			fields := strings.Fields(line)
+			if len(fields) != 4 {
+				continue
+			}
+			indexText := strings.TrimPrefix(strings.TrimSuffix(fields[2], "\""), "\"$stage/payload-")
+			index, err := strconv.Atoi(indexText)
+			if err != nil {
+				continue
+			}
+			var stagedPath string
+			for path := range f.files {
+				if strings.HasSuffix(path, fmt.Sprintf("/payload-%d", index)) {
+					stagedPath = path
+					break
+				}
+			}
+			target := strings.Trim(fields[3], "'")
+			if stagedPath != "" {
+				f.files[target] = f.files[stagedPath]
+				delete(f.files, stagedPath)
+				for _, modeLine := range strings.Split(command, "\n") {
+					modeFields := strings.Fields(modeLine)
+					if len(modeFields) == 3 && modeFields[0] == "chmod" && strings.Trim(modeFields[2], "'") == target {
+						mode, _ := strconv.ParseUint(modeFields[1], 8, 32)
+						if f.modes == nil {
+							f.modes = map[string]os.FileMode{}
+						}
+						f.modes[target] = os.FileMode(mode)
+					}
+				}
+				delete(f.modes, stagedPath)
+			}
+		}
+		return "openvms_agent_files=activated\n", nil
+	}
 	if f.runErrAt != "" && strings.Contains(command, f.runErrAt) {
 		if f.runErrOutput != "" {
 			return f.runErrOutput, f.runErr
@@ -64,11 +114,14 @@ func (f *fakeAgentInstallConn) Run(_ context.Context, command string) (string, e
 
 func (f *fakeAgentInstallConn) WriteSFTPFile(_ context.Context, path string, mode os.FileMode, content []byte) error {
 	f.writes++
-	if f.writeErr != nil {
+	if f.writeErr != nil && (f.writeErrAt == 0 || f.writes == f.writeErrAt) {
 		return f.writeErr
 	}
 	if f.files == nil {
 		f.files = map[string][]byte{}
+		f.modes = map[string]os.FileMode{}
+	}
+	if f.modes == nil {
 		f.modes = map[string]os.FileMode{}
 	}
 	if _, exists := f.files[path]; exists {
@@ -266,6 +319,78 @@ func TestRunAgentInstallReconcilesAnExistingAgentAndClearsOldMTLSIdentity(t *tes
 	}
 }
 
+func TestRunAgentInstallStagesReplacementBeforeReplacingLiveFiles(t *testing.T) {
+	request := validAgentInstallRequest(t)
+	request.MTLS = mtlsInstall()
+	request.ReplaceExisting = true
+	conn := &fakeAgentInstallConn{
+		preflightOutput: "openvms_install_preflight=agent_present version=0.2.1 os=ubuntu arch=" + runtime.GOARCH + " user=root\n",
+		files: map[string][]byte{
+			"/usr/local/bin/openvms-agent":              []byte("old binary"),
+			"/etc/openvms/agent.token":                  []byte("old token"),
+			"/etc/openvms/agent.env":                    []byte("old env"),
+			"/etc/systemd/system/openvms-agent.service": []byte("old unit"),
+			"/etc/openvms/agent.crt":                    []byte("old cert"),
+			"/etc/openvms/agent.key":                    []byte("old key"),
+		},
+	}
+	original := make(map[string][]byte, len(conn.files))
+	for path, payload := range conn.files {
+		original[path] = append([]byte(nil), payload...)
+	}
+	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	})
+	if err != nil {
+		t.Fatalf("confirmed reinstall collided with existing live files instead of staging: %v", err)
+	}
+	if err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	}); err != nil {
+		t.Fatalf("second confirmed reinstall collided with installed files: %v", err)
+	}
+	if string(conn.files["/usr/local/bin/openvms-agent"]) == string(original["/usr/local/bin/openvms-agent"]) {
+		t.Fatal("confirmed reinstall did not replace the live binary")
+	}
+}
+
+func TestRunAgentInstallFailedReplacementStageLeavesLiveFilesUntouched(t *testing.T) {
+	request := validAgentInstallRequest(t)
+	request.MTLS = mtlsInstall()
+	request.ReplaceExisting = true
+	conn := &fakeAgentInstallConn{
+		preflightOutput: "openvms_install_preflight=agent_present version=0.2.1 os=ubuntu arch=" + runtime.GOARCH + " user=root\n",
+		writeErr:        errors.New("private SFTP failure"), writeErrAt: 2,
+		files: map[string][]byte{
+			"/usr/local/bin/openvms-agent":              []byte("old binary"),
+			"/etc/openvms/agent.token":                  []byte("old token"),
+			"/etc/openvms/agent.env":                    []byte("old env"),
+			"/etc/systemd/system/openvms-agent.service": []byte("old unit"),
+			"/etc/openvms/agent.crt":                    []byte("old cert"),
+			"/etc/openvms/agent.key":                    []byte("old key"),
+		},
+	}
+	original := make(map[string]string, len(conn.files))
+	for path, payload := range conn.files {
+		original[path] = string(payload)
+	}
+	err := RunAgentInstall(context.Background(), request, func(context.Context, string, uint16, string, string, string) (AgentInstallConn, error) {
+		return conn, nil
+	})
+	var failure *AgentInstallFailure
+	if !errors.As(err, &failure) || failure.Code != AgentInstallCodeTransferFailed {
+		t.Fatalf("transfer error = %v", err)
+	}
+	for path, expected := range original {
+		if string(conn.files[path]) != expected {
+			t.Errorf("live file %s changed before all payload transfers completed", path)
+		}
+	}
+	if strings.Contains(strings.Join(conn.commands, "\n"), "openvms_agent_files=activated") || strings.Contains(strings.Join(conn.commands, "\n"), "openvms_agent_identity_reset=ok") {
+		t.Fatalf("activation or identity reset ran after staging failure: %q", conn.commands)
+	}
+}
+
 func TestRunAgentInstallRequiresExplicitConfirmationForUnknownExistingAgent(t *testing.T) {
 	request := validAgentInstallRequest(t)
 	request.MTLS = mtlsInstall()
@@ -409,7 +534,7 @@ func TestRunAgentInstallStopsOnUnsupportedHostAndTransferFailure(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), request.Password) || strings.Contains(err.Error(), request.Token) {
 		t.Fatalf("transfer failure was not redacted: %v", err)
 	}
-	if len(failed.commands) != 1 || failed.writes != 1 {
+	if len(failed.commands) != 2 || failed.writes != 1 || strings.Contains(strings.Join(failed.commands, "\n"), "openvms_agent_files=activated") {
 		t.Fatalf("transfer failure ran later commands: commands=%d writes=%d", len(failed.commands), failed.writes)
 	}
 }
