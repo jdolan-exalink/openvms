@@ -621,6 +621,7 @@ func TestLocalTLSBootstrapRepairsLegacyMissingGRPCPairWithoutReplacingHTTPS(t *t
 	if err := run(localScript, "10.1.1.24", output); err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G304 -- output is created under t.TempDir() and cannot reference user-controlled files.
 	webCert, err := os.ReadFile(filepath.Join(output, "tls.crt"))
 	if err != nil {
 		t.Fatal(err)
@@ -642,14 +643,17 @@ func TestLocalTLSBootstrapRepairsLegacyMissingGRPCPairWithoutReplacingHTTPS(t *t
 	if err := run(localScript, "10.1.1.24", output); err != nil {
 		t.Fatalf("legacy bootstrap rerun: %v", err)
 	}
+	// #nosec G304 -- output is created under t.TempDir() and cannot reference user-controlled files.
 	gotWebCert, err := os.ReadFile(filepath.Join(output, "tls.crt"))
 	if err != nil || !bytes.Equal(gotWebCert, webCert) {
 		t.Fatalf("existing HTTPS certificate changed: %v", err)
 	}
+	// #nosec G304 -- grpcCert is derived from output under t.TempDir().
 	firstPair, err := os.ReadFile(grpcCert)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// #nosec G304 -- grpcKey is derived from output under t.TempDir().
 	firstKey, err := os.ReadFile(grpcKey)
 	if err != nil {
 		t.Fatal(err)
@@ -657,10 +661,12 @@ func TestLocalTLSBootstrapRepairsLegacyMissingGRPCPairWithoutReplacingHTTPS(t *t
 	if err := run(localScript, "10.1.1.24", output); err != nil {
 		t.Fatalf("idempotent bootstrap rerun: %v", err)
 	}
+	// #nosec G304 -- grpcCert is derived from output under t.TempDir().
 	secondPair, err := os.ReadFile(grpcCert)
 	if err != nil || !bytes.Equal(firstPair, secondPair) {
 		t.Fatalf("existing gRPC certificate changed: %v", err)
 	}
+	// #nosec G304 -- grpcKey is derived from output under t.TempDir().
 	secondKey, err := os.ReadFile(grpcKey)
 	if err != nil || !bytes.Equal(firstKey, secondKey) {
 		t.Fatalf("existing gRPC private key changed: %v", err)
@@ -684,6 +690,7 @@ func TestLocalTLSBootstrapRepairsLegacyMissingGRPCPairWithoutReplacingHTTPS(t *t
 	if err := run(localScript, "10.1.1.24", badOutput); err == nil {
 		t.Fatal("non-empty directory placeholder must fail closed")
 	}
+	// #nosec G304 -- marker is created beneath output under t.TempDir().
 	if got, err := os.ReadFile(marker); err != nil || string(got) != "preserve" {
 		t.Fatalf("non-empty placeholder changed: %q %v", got, err)
 	}
@@ -745,16 +752,16 @@ func TestTLSBootstrapsRejectLongerIPPrefixWithoutChangingExistingPair(t *testing
 		files  []string
 	}{
 		{
-			name: "local HTTPS and gRPC certificates",
+			name:   "local HTTPS and gRPC certificates",
 			script: filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-local-tls.sh"),
-			args: []string{"10.1.1.24"},
-			files: []string{"tls.crt", "tls.key", "agent-grpc/tls.crt", "agent-grpc/tls.key"},
+			args:   []string{"10.1.1.24"},
+			files:  []string{"tls.crt", "tls.key", "agent-grpc/tls.crt", "agent-grpc/tls.key"},
 		},
 		{
-			name: "agent gRPC certificate",
+			name:   "agent gRPC certificate",
 			script: filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-agent-grpc-tls.sh"),
-			args: []string{"10.1.1.24"},
-			files: []string{"tls.crt", "tls.key"},
+			args:   []string{"10.1.1.24"},
+			files:  []string{"tls.crt", "tls.key"},
 		},
 	}
 	for _, tt := range tests {
@@ -771,6 +778,7 @@ func TestTLSBootstrapsRejectLongerIPPrefixWithoutChangingExistingPair(t *testing
 			}
 			before := make(map[string][]byte, len(tt.files))
 			for _, name := range tt.files {
+				// #nosec G304 -- root is test-owned t.TempDir() and name comes from fixed test cases.
 				contents, err := os.ReadFile(filepath.Join(root, name))
 				if err != nil {
 					t.Fatal(err)
@@ -781,6 +789,7 @@ func TestTLSBootstrapsRejectLongerIPPrefixWithoutChangingExistingPair(t *testing
 				t.Fatalf("accepted longer SAN IP as exact requested IP: %s", output)
 			}
 			for _, name := range tt.files {
+				// #nosec G304 -- root is test-owned t.TempDir() and name comes from fixed test cases.
 				contents, err := os.ReadFile(filepath.Join(root, name))
 				if err != nil || !bytes.Equal(contents, before[name]) {
 					t.Errorf("existing %s changed after SAN mismatch: err=%v", name, err)
