@@ -186,6 +186,7 @@ e imprime además un token de API.
 
 Otros comandos:
 
+    bash tools/reset_admin.sh                                # recuperar acceso del admin de plataforma (ver docs/operations/admin-password-reset.md)
     docker compose exec api /vmsctl passwd -user admin -password 'Otra-Clave-2026'
     docker compose exec api /vmsctl token -user admin        # token para scripts
     docker compose exec api /vmsctl seed-demo                # organización demo con los Frigate simulados

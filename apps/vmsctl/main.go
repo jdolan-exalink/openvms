@@ -5,6 +5,7 @@
 //	vmsctl sync-admin-permissions -user NAME add missing catalog grants without creating a token
 //	vmsctl token -user NAME        issue another token for an existing user
 //	vmsctl passwd -user NAME       set the login password of a user (read from stdin or -password)
+//	vmsctl reset-admin-password   reset an existing platform admin password (stdin only, forces change)
 //	vmsctl seed-demo               create the "demo" tenant against the compose Frigate mocks
 //
 // It reads DATABASE_URL and OPENVMS_MASTER_KEY (or OPENVMS_MASTER_KEY_FILE) like the API.
@@ -39,6 +40,7 @@ commands:
   migrate      apply database migrations
   agent-register  register the local Compose agent with an authenticated operator session
   bootstrap    create the platform administrator and print its API token
+  reset-admin-password  reset an existing platform admin password (stdin only; forces change)
   sync-admin-permissions  add missing catalog permissions to an existing platform user
   token        issue a new API token for an existing user
   passwd       set the login password of a user (stdin, or -password)
@@ -166,6 +168,24 @@ func run(ctx context.Context, cmd string, args []string, out io.Writer) error {
 		}
 		fmt.Fprintf(out, "password of %q updated\n", *user)
 		return nil
+	case "reset-admin-password":
+		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
+		user := fs.String("user", "admin", "existing platform administrator username")
+		_ = fs.Parse(args)
+		password, err := readResetPassword(os.Stdin)
+		if err != nil {
+			return err
+		}
+		st, closeFn, err := openExisting(ctx, dbURL)
+		if err != nil {
+			return err
+		}
+		defer closeFn()
+		if err := bootstrap.ResetPlatformAdminPassword(ctx, st, *user, password); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "platform admin password reset for %q; change it at next login\n", *user)
+		return nil
 	case "seed-demo":
 		fs := flag.NewFlagSet(cmd, flag.ExitOnError)
 		admin := fs.String("admin", "admin", "platform administrator that performs the seed")
@@ -209,6 +229,27 @@ func run(ctx context.Context, cmd string, args []string, out io.Writer) error {
 	default:
 		return fmt.Errorf("unknown command %q\n%s", cmd, strings.TrimSpace(usage))
 	}
+}
+
+func readResetPassword(input io.Reader) (string, error) {
+	line, err := bufio.NewReader(input).ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return "", errors.New("no password given on stdin")
+	}
+	line = strings.TrimSuffix(line, "\n")
+	line = strings.TrimSuffix(line, "\r")
+	if line == "" {
+		return "", errors.New("no password given on stdin")
+	}
+	return line, nil
+}
+
+func openExisting(ctx context.Context, url string) (*store.Store, func(), error) {
+	pool, err := postgres.Connect(ctx, url)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &store.Store{Pool: pool}, pool.Close, nil
 }
 
 func open(ctx context.Context, url string, log *slog.Logger) (*store.Store, func(), error) {
