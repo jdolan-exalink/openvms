@@ -14,9 +14,9 @@ sh deploy/docker/bootstrap-local-tls.sh 10.1.1.24 deploy/docker/local-tls
 docker compose up -d
 ```
 
-The local HTTPS bootstrap also creates the dedicated `agent-grpc` certificate and key in the same operation, using the supplied host for its SAN. This ensures all default Compose file bind mounts exist before Docker starts; it does not overwrite existing TLS material. If you use externally managed HTTPS files or a different advertised gRPC host, create the dedicated certificate explicitly with `bootstrap-agent-grpc-tls.sh` using that host before starting Compose.
+The local HTTPS bootstrap also creates or validates the dedicated `agent-grpc` certificate and key in the same operation, using the supplied host for its SAN. It is safe to rerun when HTTPS files already exist: matching, valid HTTPS material is preserved while missing gRPC files are generated. Existing valid gRPC files are validated and preserved. Only empty directories at the exact gRPC certificate/key file paths are removed (as can be left by an earlier Compose bind mount); non-empty placeholders fail closed. Compose disables host-path auto-creation for these two file mounts, so run this bootstrap before starting the API. If you use externally managed HTTPS files or a different advertised gRPC host, create/validate the dedicated certificate explicitly with `bootstrap-agent-grpc-tls.sh` using that host before starting Compose.
 
-The bootstrap scripts refuse to overwrite existing material. If HTTPS uses an externally managed certificate, set `OPENVMS_WEB_TLS_CERT_HOST_FILE` and `OPENVMS_WEB_TLS_KEY_HOST_FILE`; the API mounts only the public certificate. If the API certificate is signed by a different CA bundle, set `OPENVMS_AGENT_API_CA_HOST_FILE` to that public CA bundle. Never place private key material in the CA file.
+The bootstrap scripts never replace existing key/certificate contents; they validate and retain a complete matching pair. If HTTPS uses an externally managed certificate, set `OPENVMS_WEB_TLS_CERT_HOST_FILE` and `OPENVMS_WEB_TLS_KEY_HOST_FILE`; the API mounts only the public certificate. If the API certificate is signed by a different CA bundle, set `OPENVMS_AGENT_API_CA_HOST_FILE` to that public CA bundle. Never place private key material in the CA file.
 
 | Compose variable | Default | Purpose |
 | --- | --- | --- |

@@ -530,8 +530,13 @@ func TestComposeWebTLSUsesPersistentGeneratedCertificateVolumeAndConfiguredSANs(
 			t.Errorf("compose must preserve automatic TLS/SAN and external certificate support, missing %q", required)
 		}
 	}
-	if strings.Contains(text, "create_host_path: false") && strings.Contains(text, "OPENVMS_WEB_TLS_CERT_HOST_FILE") {
-		t.Fatal("fresh deployment must not fail because optional external certificate files are absent")
+	var document map[string]any
+	if err := yaml.Unmarshal(compose, &document); err != nil {
+		t.Fatal(err)
+	}
+	web := asMap(t, asMap(t, document["services"])["web"])
+	if !hasReadOnlyOptionalBind(t, asList(t, web["volumes"]), "/etc/caddy/tls.crt") {
+		t.Fatal("web certificate must remain an optional host bind")
 	}
 }
 
@@ -561,10 +566,13 @@ func TestComposeAgentMTLSEnrollmentUsesDedicatedTLSAndReachableDefaults(t *testi
 		}
 	}
 	volumes := asList(t, api["volumes"])
-	for _, target := range []string{"/etc/openvms/agent-grpc/tls.crt", "/etc/openvms/agent-grpc/tls.key", "/etc/openvms/api-ca/cert.pem"} {
-		if !hasReadOnlyOptionalBind(t, volumes, target) {
-			t.Errorf("API must mount %s as a read-only configurable bind", target)
+	for _, target := range []string{"/etc/openvms/agent-grpc/tls.crt", "/etc/openvms/agent-grpc/tls.key"} {
+		if !hasReadOnlyBind(t, volumes, target, false) {
+			t.Errorf("API must mount %s read-only without creating missing host paths", target)
 		}
+	}
+	if !hasReadOnlyBind(t, volumes, "/etc/openvms/api-ca/cert.pem", true) {
+		t.Error("API must mount the configurable CA read-only and allow optional host path creation")
 	}
 	ports := asList(t, api["ports"])
 	if len(ports) != 1 || ports[0] != "${OPENVMS_AGENT_GRPC_PUBLISH_ADDR:-0.0.0.0}:${OPENVMS_AGENT_GRPC_HOST_PORT:-9443}:${OPENVMS_AGENT_GRPC_CONTAINER_PORT:-9443}" {
@@ -575,6 +583,113 @@ func TestComposeAgentMTLSEnrollmentUsesDedicatedTLSAndReachableDefaults(t *testi
 		if !strings.Contains(text, required) {
 			t.Errorf("Compose TLS material must be independently configurable with %q", required)
 		}
+	}
+}
+
+func hasReadOnlyBind(t *testing.T, volumes []any, target string, createHostPath bool) bool {
+	t.Helper()
+	for _, raw := range volumes {
+		volume, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if volume["target"] != target || volume["read_only"] != true {
+			continue
+		}
+		bind, ok := volume["bind"].(map[string]any)
+		return ok && bind["create_host_path"] == createHostPath
+	}
+	return false
+}
+
+func TestLocalTLSBootstrapRepairsLegacyMissingGRPCPairWithoutReplacingHTTPS(t *testing.T) {
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("OpenSSL is required for certificate bootstrap integration tests")
+	}
+	root := t.TempDir()
+	output := filepath.Join(root, "tls")
+	localScript := filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-local-tls.sh")
+	grpcScript := filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-agent-grpc-tls.sh")
+	run := func(script string, args ...string) error {
+		// #nosec G204 -- fixed repository scripts and t.TempDir fixture arguments.
+		command := exec.Command("sh", append([]string{script}, args...)...)
+		if result, err := command.CombinedOutput(); err != nil {
+			return fmt.Errorf("%w: %s", err, result)
+		}
+		return nil
+	}
+	if err := run(localScript, "10.1.1.24", output); err != nil {
+		t.Fatal(err)
+	}
+	webCert, err := os.ReadFile(filepath.Join(output, "tls.crt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	grpcCert := filepath.Join(output, "agent-grpc", "tls.crt")
+	grpcKey := filepath.Join(output, "agent-grpc", "tls.key")
+	if err := os.Remove(grpcCert); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(grpcKey); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(grpcCert, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(grpcKey, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(localScript, "10.1.1.24", output); err != nil {
+		t.Fatalf("legacy bootstrap rerun: %v", err)
+	}
+	gotWebCert, err := os.ReadFile(filepath.Join(output, "tls.crt"))
+	if err != nil || !bytes.Equal(gotWebCert, webCert) {
+		t.Fatalf("existing HTTPS certificate changed: %v", err)
+	}
+	firstPair, err := os.ReadFile(grpcCert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstKey, err := os.ReadFile(grpcKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run(localScript, "10.1.1.24", output); err != nil {
+		t.Fatalf("idempotent bootstrap rerun: %v", err)
+	}
+	secondPair, err := os.ReadFile(grpcCert)
+	if err != nil || !bytes.Equal(firstPair, secondPair) {
+		t.Fatalf("existing gRPC certificate changed: %v", err)
+	}
+	secondKey, err := os.ReadFile(grpcKey)
+	if err != nil || !bytes.Equal(firstKey, secondKey) {
+		t.Fatalf("existing gRPC private key changed: %v", err)
+	}
+
+	badOutput := filepath.Join(root, "bad-tls")
+	if err := run(localScript, "10.1.1.24", badOutput); err != nil {
+		t.Fatal(err)
+	}
+	badCert := filepath.Join(badOutput, "agent-grpc", "tls.crt")
+	if err := os.Remove(badCert); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(badCert, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(badCert, "keep")
+	if err := os.WriteFile(marker, []byte("preserve"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(localScript, "10.1.1.24", badOutput); err == nil {
+		t.Fatal("non-empty directory placeholder must fail closed")
+	}
+	if got, err := os.ReadFile(marker); err != nil || string(got) != "preserve" {
+		t.Fatalf("non-empty placeholder changed: %q %v", got, err)
+	}
+
+	if err := run(grpcScript, "10.1.1.24", filepath.Join(output, "agent-grpc")); err != nil {
+		t.Fatalf("existing valid gRPC pair should validate idempotently: %v", err)
 	}
 }
 

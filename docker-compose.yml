@@ -146,13 +146,13 @@ services:
         target: /etc/openvms/agent-grpc/tls.crt
         read_only: true
         bind:
-          create_host_path: true
+          create_host_path: false
       - type: bind
         source: ${OPENVMS_AGENT_GRPC_TLS_KEY_HOST_FILE:-./deploy/docker/local-tls/agent-grpc/tls.key}
         target: /etc/openvms/agent-grpc/tls.key
         read_only: true
         bind:
-          create_host_path: true
+          create_host_path: false
       - type: bind
         source: ${OPENVMS_AGENT_API_CA_HOST_FILE:-${OPENVMS_WEB_TLS_CERT_HOST_FILE:-./deploy/docker/local-tls/tls.crt}}
         target: /etc/openvms/api-ca/cert.pem

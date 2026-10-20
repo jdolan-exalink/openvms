@@ -27,20 +27,52 @@ if [ "$check_kind" = dns ]; then
   }
 fi
 
-# Claim a brand-new private directory before creating any material; never rotate
-# or overwrite credentials an API container may already be using.
+# Existing Docker bind-mount placeholders are recoverable only when empty; rmdir
+# is the proof that no data is being discarded. Never replace non-empty paths.
 parent=$(dirname -- "$output_dir")
 mkdir -p -- "$parent"
-if ! mkdir -m 700 -- "$output_dir"; then
-  echo "output directory already exists; refusing to overwrite" >&2
-  exit 1
+if [ -L "$output_dir" ] || { [ -e "$output_dir" ] && [ ! -d "$output_dir" ]; }; then
+  echo "gRPC TLS output path must be a real directory" >&2; exit 1
+fi
+mkdir -p -m 700 -- "$output_dir"
+chmod 700 -- "$output_dir"
+lock=$output_dir/.bootstrap-lock
+if ! mkdir -- "$lock" 2>/dev/null; then
+  echo "another gRPC TLS bootstrap is active or left a lock at $lock" >&2; exit 1
+fi
+trap 'rmdir "$lock" 2>/dev/null || true' EXIT
+for file in "$output_dir/tls.crt" "$output_dir/tls.key"; do
+  if [ -d "$file" ] && [ ! -L "$file" ]; then
+    rmdir -- "$file" 2>/dev/null || { echo "refusing non-empty directory at file target: $file" >&2; exit 1; }
+  fi
+done
+if [ -e "$output_dir/tls.crt" ] || [ -L "$output_dir/tls.crt" ] || [ -e "$output_dir/tls.key" ] || [ -L "$output_dir/tls.key" ]; then
+  [ -f "$output_dir/tls.crt" ] && [ ! -L "$output_dir/tls.crt" ] && [ -s "$output_dir/tls.crt" ] &&
+    [ -f "$output_dir/tls.key" ] && [ ! -L "$output_dir/tls.key" ] && [ -s "$output_dir/tls.key" ] || {
+      echo "gRPC certificate and key must both be regular, non-empty files" >&2; exit 1;
+    }
+  openssl x509 -in "$output_dir/tls.crt" -noout -checkend 0 >/dev/null
+  if [ "$check_kind" = ip ]; then
+    openssl x509 -in "$output_dir/tls.crt" -noout -ext subjectAltName | grep -F "IP Address:$host" >/dev/null || { echo "gRPC certificate SAN does not match $host" >&2; exit 1; }
+  else
+    openssl x509 -in "$output_dir/tls.crt" -noout -checkhost "$host" >/dev/null
+  fi
+  openssl verify -CAfile "$output_dir/tls.crt" "$output_dir/tls.crt" >/dev/null
+  cert_pub=$(openssl x509 -in "$output_dir/tls.crt" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}')
+  key_pub=$(openssl pkey -in "$output_dir/tls.key" -pubout -outform DER | sha256sum | awk '{print $1}')
+  [ "$cert_pub" = "$key_pub" ] || { echo "Agent gRPC certificate and key do not match." >&2; exit 1; }
+  chmod 600 "$output_dir/tls.key"
+  chmod 644 "$output_dir/tls.crt"
+  echo "Validated existing dedicated agent gRPC TLS pair in $output_dir."
+  exit 0
 fi
 claimed=1
 cleanup() {
   if [ "$claimed" -eq 1 ]; then
     rm -f -- "$output_dir/tls.key" "$output_dir/tls.crt"
-    rmdir -- "$output_dir" 2>/dev/null || true
   fi
+  rmdir "$lock" 2>/dev/null || true
+  [ "$claimed" -eq 1 ] && rmdir -- "$output_dir" 2>/dev/null || true
 }
 trap cleanup EXIT
 trap 'exit 1' HUP INT TERM
@@ -67,6 +99,7 @@ key_pub=$(openssl pkey -in "$output_dir/tls.key" -pubout -outform DER | sha256su
 [ "$cert_pub" = "$key_pub" ] || { echo "Agent gRPC certificate and key do not match." >&2; exit 1; }
 
 claimed=0
+rmdir "$lock"
 trap - EXIT HUP INT TERM
 echo "Created dedicated agent gRPC TLS certificate and private key in $output_dir."
 echo "Trust tls.crt explicitly on agents; do not disable certificate verification."
