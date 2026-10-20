@@ -603,6 +603,7 @@ func TestAgentGRPCTLSBootstrapCreatesIndependentTrustedHostCertificate(t *testin
 	if result, err := command.CombinedOutput(); err == nil {
 		t.Fatalf("bootstrap overwrote existing TLS material: %s", result)
 	}
+	// #nosec G304 -- marker is created under t.TempDir() above.
 	if contents, err := os.ReadFile(marker); err != nil || string(contents) != "keep" {
 		t.Fatalf("existing material changed: contents=%q err=%v", contents, err)
 	}
