@@ -319,12 +319,29 @@ func validateAgentInstallBody(next http.Handler) http.Handler {
 		}
 		dec := json.NewDecoder(bytes.NewReader(limited))
 		dec.DisallowUnknownFields()
-		var body struct {
-			Password *string `json:"ssh_password"`
-			Host     string  `json:"ssh_host"`
-			Port     int     `json:"ssh_port"`
+		var password *string
+		var host string
+		var port int
+		var decodeErr error
+		if parts[5] == "install" {
+			var body struct {
+				Password        *string `json:"ssh_password"`
+				Host            string  `json:"ssh_host"`
+				Port            int     `json:"ssh_port"`
+				ReplaceExisting *bool   `json:"replace_existing"`
+			}
+			decodeErr = dec.Decode(&body)
+			password, host, port = body.Password, body.Host, body.Port
+		} else {
+			var body struct {
+				Password *string `json:"ssh_password"`
+				Host     string  `json:"ssh_host"`
+				Port     int     `json:"ssh_port"`
+			}
+			decodeErr = dec.Decode(&body)
+			password, host, port = body.Password, body.Host, body.Port
 		}
-		if dec.Decode(&body) != nil || dec.Decode(new(any)) != io.EOF || body.Password == nil || *body.Password == "" || len(*body.Password) > 4096 || body.Port < 1 || body.Port > 65535 || len(body.Host) > 15 {
+		if decodeErr != nil || dec.Decode(new(any)) != io.EOF || password == nil || *password == "" || len(*password) > 4096 || port < 1 || port > 65535 || len(host) > 15 {
 			writeError(w, r, http.StatusBadRequest, "bad_request", "invalid agent credential request")
 			return
 		}
