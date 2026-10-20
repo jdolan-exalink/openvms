@@ -734,6 +734,62 @@ func TestAgentGRPCTLSBootstrapCreatesIndependentTrustedHostCertificate(t *testin
 	}
 }
 
+func TestTLSBootstrapsRejectLongerIPPrefixWithoutChangingExistingPair(t *testing.T) {
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("OpenSSL is required for certificate bootstrap integration tests")
+	}
+	tests := []struct {
+		name   string
+		script string
+		args   []string
+		files  []string
+	}{
+		{
+			name: "local HTTPS and gRPC certificates",
+			script: filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-local-tls.sh"),
+			args: []string{"10.1.1.24"},
+			files: []string{"tls.crt", "tls.key", "agent-grpc/tls.crt", "agent-grpc/tls.key"},
+		},
+		{
+			name: "agent gRPC certificate",
+			script: filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-agent-grpc-tls.sh"),
+			args: []string{"10.1.1.24"},
+			files: []string{"tls.crt", "tls.key"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "tls")
+			run := func(ip string) ([]byte, error) {
+				args := append(append([]string(nil), tt.args...), root)
+				args[0] = ip
+				// #nosec G204 -- fixed repository script and test-owned temporary output.
+				return exec.Command("sh", append([]string{tt.script}, args...)...).CombinedOutput()
+			}
+			if output, err := run("10.1.1.24"); err != nil {
+				t.Fatalf("create exact-IP certificate: %v: %s", err, output)
+			}
+			before := make(map[string][]byte, len(tt.files))
+			for _, name := range tt.files {
+				contents, err := os.ReadFile(filepath.Join(root, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				before[name] = contents
+			}
+			if output, err := run("10.1.1.2"); err == nil {
+				t.Fatalf("accepted longer SAN IP as exact requested IP: %s", output)
+			}
+			for _, name := range tt.files {
+				contents, err := os.ReadFile(filepath.Join(root, name))
+				if err != nil || !bytes.Equal(contents, before[name]) {
+					t.Errorf("existing %s changed after SAN mismatch: err=%v", name, err)
+				}
+			}
+		})
+	}
+}
+
 func TestComposePersistentStateUsesConfigurableBindDirectories(t *testing.T) {
 	compose, err := os.ReadFile(filepath.Join("..", "..", "..", "docker-compose.yml"))
 	if err != nil {

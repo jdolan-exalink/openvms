@@ -53,7 +53,7 @@ if [ -e "$output_dir/tls.crt" ] || [ -L "$output_dir/tls.crt" ] || [ -e "$output
     }
   openssl x509 -in "$output_dir/tls.crt" -noout -checkend 0 >/dev/null
   if [ "$check_kind" = ip ]; then
-    openssl x509 -in "$output_dir/tls.crt" -noout -ext subjectAltName | grep -F "IP Address:$host" >/dev/null || { echo "gRPC certificate SAN does not match $host" >&2; exit 1; }
+    openssl x509 -in "$output_dir/tls.crt" -noout -checkip "$host" >/dev/null || { echo "gRPC certificate SAN does not match $host" >&2; exit 1; }
   else
     openssl x509 -in "$output_dir/tls.crt" -noout -checkhost "$host" >/dev/null
   fi
