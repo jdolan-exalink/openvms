@@ -104,4 +104,42 @@ describe("DigitalZoom Enhancement Integration", () => {
     // In auto mode with default adjustments, filter is none
     expect(stage.style.filter).toBe("");
   });
+
+  describe("when the picture lives outside the frame (surface layer)", () => {
+    const dark = {
+      minLuma: 0, maxLuma: 60, avgLuma: 20, p5Luma: 2, p95Luma: 50, avgR: 20, avgG: 20, avgB: 20,
+      isDark: true, isOverexposed: false, isLowContrast: true,
+    };
+
+    it("samples the supplied media element over the visible zoomed region and reports the filter", async () => {
+      const sample = vi.spyOn(analysis, "sampleFrameStats").mockReturnValue(dark);
+      vi.spyOn(performance, "now").mockReturnValue(10_000);
+      const video = document.createElement("video");
+      const filters: string[] = [];
+      render(
+        <ZoomFrame
+          resetKey="surface-cam"
+          scalePicture={false}
+          zoom={{ scale: 2, x: -100, y: -50 }}
+          mediaSource={() => video}
+          onEnhance={(filter) => filters.push(filter)}
+        />,
+      );
+      expect(sample).toHaveBeenCalled();
+      const [source, roi] = sample.mock.calls.at(-1)!;
+      expect(source).toBe(video);
+      expect(roi?.width).toBeCloseTo(0.5);
+      expect(roi?.height).toBeCloseTo(0.5);
+      expect(filters.at(-1)).not.toBe("none");
+    });
+
+    it("clears the reported filter when the frame goes away", () => {
+      vi.spyOn(analysis, "sampleFrameStats").mockReturnValue(dark);
+      vi.spyOn(performance, "now").mockReturnValue(10_000);
+      const filters: string[] = [];
+      const view = render(<ZoomFrame resetKey="surface-cam" scalePicture={false} mediaSource={() => document.createElement("video")} onEnhance={(f) => filters.push(f)} />);
+      view.unmount();
+      expect(filters.at(-1)).toBe("none");
+    });
+  });
 });
