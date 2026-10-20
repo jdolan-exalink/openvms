@@ -60,7 +60,7 @@ type Config struct {
 	// SessionTTL and SessionIdle bound browser sessions (absolute and without activity).
 	SessionTTL  time.Duration
 	SessionIdle time.Duration
-	// LoginMaxFailures failed logins in a row lock the account for LoginLockout.
+	// LoginMaxFailures failed logins in a row lock the account for LoginLockout; zero disables account lockout.
 	LoginMaxFailures int
 	LoginLockout     time.Duration
 
@@ -160,8 +160,8 @@ func Load(service string) (Config, error) {
 		EventBackfill:               duration("EVENT_BACKFILL", 24*time.Hour),
 		SessionTTL:                  duration("SESSION_TTL", 12*time.Hour),
 		SessionIdle:                 duration("SESSION_IDLE", 2*time.Hour),
-		LoginMaxFailures:            integer("LOGIN_MAX_FAILURES", 5),
-		LoginLockout:                duration("LOGIN_LOCKOUT", 15*time.Minute),
+		LoginMaxFailures:            nonNegativeInteger("LOGIN_MAX_FAILURES", 5),
+		LoginLockout:                positiveDuration("LOGIN_LOCKOUT", 15*time.Minute),
 		LiveAuditWindow:             duration("LIVE_AUDIT_WINDOW", 5*time.Minute),
 		LiveRevalidateInterval:      duration("LIVE_REVALIDATE_INTERVAL", 30*time.Second),
 		LivePingInterval:            duration("LIVE_PING_INTERVAL", 20*time.Second),
@@ -230,6 +230,22 @@ func duration(key string, def time.Duration) time.Duration {
 
 func integer(key string, def int) int {
 	v, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || v <= 0 {
+		return def
+	}
+	return v
+}
+
+func nonNegativeInteger(key string, def int) int {
+	v, err := strconv.Atoi(os.Getenv(key))
+	if err != nil || v < 0 || v > int(^uint32(0)>>1) {
+		return def
+	}
+	return v
+}
+
+func positiveDuration(key string, def time.Duration) time.Duration {
+	v, err := time.ParseDuration(os.Getenv(key))
 	if err != nil || v <= 0 {
 		return def
 	}

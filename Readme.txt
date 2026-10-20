@@ -86,13 +86,17 @@ Variables opcionales (con su valor por defecto):
     HEALTH_INTERVAL=30s       chequeo de salud de cada Frigate
     SESSION_TTL=12h           duración máxima de una sesión web
     SESSION_IDLE=2h           cierre de sesión por inactividad
-    LOGIN_MAX_FAILURES=5      intentos fallidos antes de bloquear la cuenta
+    LOGIN_MAX_FAILURES=5      intentos fallidos antes de bloquear la cuenta (0 desactiva el bloqueo)
     LOGIN_LOCKOUT=15m         duración del bloqueo
     OPENVMS_ADMIN_USERNAME=admin        usuario del primer administrador (ver sección 6)
     OPENVMS_ADMIN_PASSWORD=             contraseña inicial; vacía = se genera una al azar (ver sección 6)
     OPENVMS_DEFAULT_TENANT=openvms      organización inicial (ver sección 6)
     OPENVMS_DEFAULT_SITE="Sitio principal"   sitio inicial dentro de esa organización
     OPENVMS_DEFAULT_SITE_TZ=America/Argentina/Cordoba   zona horaria de ese sitio
+
+Desactivar el bloqueo por intentos fallidos reduce la protección contra adivinación de
+contraseñas en línea. Si se configura `LOGIN_MAX_FAILURES=0`, conserve límites de intentos
+en el proxy o la capa de ingreso (rate limiting).
 
 
 5. Levantar

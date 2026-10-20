@@ -147,7 +147,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 			}
 			return err
 		}
-		if u.LockedUntil != nil && u.LockedUntil.After(s.clock()) {
+		if s.MaxFailures > 0 && u.LockedUntil != nil && u.LockedUntil.After(s.clock()) {
 			failure = ErrLocked
 			return audit(ctx, q, &u.ID, u.Username, u.TenantID, ActionLoginFailed, "user", &u.ID, map[string]any{"reason": "locked"})
 		}

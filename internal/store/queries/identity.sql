@@ -74,7 +74,7 @@ UPDATE sessions SET revoked_at = now() WHERE user_id = @user_id AND revoked_at I
 -- name: RecordLoginFailure :one
 UPDATE users SET
     failed_logins = failed_logins + 1,
-    locked_until = CASE WHEN failed_logins + 1 >= @max_failures::int THEN now() + make_interval(secs => @lock_seconds::float8) ELSE locked_until END
+    locked_until = CASE WHEN @max_failures::int > 0 AND failed_logins + 1 >= @max_failures::int THEN now() + make_interval(secs => @lock_seconds::float8) ELSE locked_until END
 WHERE id = @id
 RETURNING failed_logins, locked_until;
 
