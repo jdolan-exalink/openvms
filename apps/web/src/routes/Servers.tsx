@@ -1033,9 +1033,35 @@ function AgentInstallDialog({
           aria-label={t("servers.agentInstallForm")}
           onSubmit={(event: FormEvent) => {
             event.preventDefault();
-            if (!secureBrowser || otherOperationActive) return;
+            if (!secureBrowser || otherOperationActive || discoveryPending || start.isPending) return;
             const password = passwordInputRef.current?.value ?? "";
             if (!password) return;
+            if (discoveryResult?.state !== "absent") {
+              if (discoveryResult?.state === "present" && form.replaceConfirmed && form.confirmed) {
+                if (passwordInputRef.current) passwordInputRef.current.value = "";
+                pendingPasswordRef.current = "";
+                onStart();
+                start.mutate({ host: form.host, port: Number(form.port), password });
+                return;
+              }
+              if (discoveryResult) return;
+              if (passwordInputRef.current) passwordInputRef.current.value = "";
+              setDiscoveryPending(true);
+              setDiscoveryFailed(false);
+              const body: Schemas["ServerAgentDiscoveryRequest"] = { ssh_host: form.host.trim(), ssh_port: Number(form.port), ssh_password: password };
+              void api.POST("/api/v1/servers/{serverId}/agent/discover", { params: { path: { serverId: server.id } }, body })
+                .then(unwrap)
+                .then((result) => {
+                  setDiscoveryResult(result);
+                  if (result.state === "absent") {
+                    onStart();
+                    start.mutate({ host: form.host, port: Number(form.port), password });
+                  }
+                })
+                .catch(() => setDiscoveryFailed(true))
+                .finally(() => setDiscoveryPending(false));
+              return;
+            }
             if (passwordInputRef.current) passwordInputRef.current.value = "";
             pendingPasswordRef.current = "";
             onStart();
@@ -1059,7 +1085,7 @@ function AgentInstallDialog({
               <TextInput required aria-label={t("servers.agentInstallPortLabel")} type="number" min={1} max={65535} step={1} value={form.port} onChange={(event) => { setForm({ ...form, port: event.target.value, replaceConfirmed: false }); setDiscoveryResult(null); setDiscoveryFailed(false); }} autoComplete="off" />
             </Field>
             <Field label={t("servers.agentInstallPasswordLabel")} hint={t("servers.agentInstallPasswordHint")}>
-              <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad" autoComplete="off" maxLength={4096} onChange={() => { setDiscoveryResult(null); setDiscoveryFailed(false); setForm((current) => ({ ...current, replaceConfirmed: false })); }} />
+              <input ref={passwordInputRef} required aria-label={t("servers.agentInstallPasswordLabel")} type="password" className="h-12 w-full rounded-m3-md border border-transparent bg-surface-2 px-3 text-sm focus-visible:outline-2 focus-visible:outline-primary aria-[invalid=true]:border-bad" autoComplete="off" maxLength={4096} onChange={() => setDiscoveryFailed(false)} />
             </Field>
           </div>
           {discoveryResult && <p role="status" className="rounded-m3-lg bg-surface-2 p-3 text-sm">{agentDiscoveryResultText(discoveryResult, t)}</p>}
@@ -1093,8 +1119,8 @@ function AgentInstallDialog({
             }}>
               {discoveryPending ? t("servers.agentDiscoverySubmitting") : t("servers.agentDiscoveryAction")}
             </Button>
-            <Button type="submit" variant="primary" disabled={start.isPending || otherOperationActive || !form.confirmed || (replacementRequired && !form.replaceConfirmed) || !isCanonicalIPv4(form.host.trim()) || !isValidSSHPort(form.port) || !secureBrowser}>
-              {start.isPending ? t("servers.agentInstallSubmitting") : t("servers.agentInstallSubmit")}
+            <Button type="submit" variant="primary" disabled={discoveryPending || start.isPending || otherOperationActive || !form.confirmed || (replacementRequired && !form.replaceConfirmed) || !isCanonicalIPv4(form.host.trim()) || !isValidSSHPort(form.port) || !secureBrowser}>
+              {discoveryPending ? t("servers.agentDiscoverySubmitting") : start.isPending ? t("servers.agentInstallSubmitting") : t("servers.agentInstallSubmit")}
             </Button>
           </div>
         </form>
