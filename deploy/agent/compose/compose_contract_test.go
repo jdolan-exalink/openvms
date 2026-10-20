@@ -742,39 +742,61 @@ func TestAgentGRPCTLSBootstrapCreatesIndependentTrustedHostCertificate(t *testin
 }
 
 func TestTLSBootstrapsRejectLongerIPPrefixWithoutChangingExistingPair(t *testing.T) {
-	if _, err := exec.LookPath("openssl"); err != nil {
+	opensslPath, err := exec.LookPath("openssl")
+	if err != nil {
 		t.Skip("OpenSSL is required for certificate bootstrap integration tests")
 	}
+	fakeBin := filepath.Join(t.TempDir(), "bin")
+	if err := os.Mkdir(fakeBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// OpenSSL 3.0.x (such as Ubuntu 24.04 in CI) prints "does NOT match certificate"
+	// on stdout for x509 -checkip/-checkhost mismatches while still exiting 0.
+	wrapper := "#!/bin/sh\nout=$(\"" + opensslPath + "\" \"$@\")\nrc=$?\nprintf '%s\\n' \"$out\"\ncase \"$*\" in\n  *x509*-checkip*|*x509*-checkhost*)\n    case \"$out\" in\n      *\"does NOT match certificate\"*) exit 0 ;;\n    esac\n    ;;\nesac\nexit $rc\n"
+	// #nosec G306 -- test executable wrapper inside t.TempDir().
+	if err := os.WriteFile(filepath.Join(fakeBin, "openssl"), []byte(wrapper), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
-		name   string
-		script string
-		args   []string
-		files  []string
+		name     string
+		script   string
+		create   string
+		mismatch string
+		files    []string
 	}{
 		{
-			name:   "local HTTPS and gRPC certificates",
-			script: filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-local-tls.sh"),
-			args:   []string{"10.1.1.24"},
-			files:  []string{"tls.crt", "tls.key", "agent-grpc/tls.crt", "agent-grpc/tls.key"},
+			name:     "local HTTPS and gRPC certificates",
+			script:   filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-local-tls.sh"),
+			create:   "10.1.1.24",
+			mismatch: "10.1.1.2",
+			files:    []string{"tls.crt", "tls.key", "agent-grpc/tls.crt", "agent-grpc/tls.key"},
 		},
 		{
-			name:   "agent gRPC certificate",
-			script: filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-agent-grpc-tls.sh"),
-			args:   []string{"10.1.1.24"},
-			files:  []string{"tls.crt", "tls.key"},
+			name:     "agent gRPC IP certificate",
+			script:   filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-agent-grpc-tls.sh"),
+			create:   "10.1.1.24",
+			mismatch: "10.1.1.2",
+			files:    []string{"tls.crt", "tls.key"},
+		},
+		{
+			name:     "agent gRPC DNS certificate",
+			script:   filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-agent-grpc-tls.sh"),
+			create:   "grpc.openvms.internal",
+			mismatch: "grpc.openvms.interna",
+			files:    []string{"tls.crt", "tls.key"},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			root := filepath.Join(t.TempDir(), "tls")
-			run := func(ip string) ([]byte, error) {
-				args := append(append([]string(nil), tt.args...), root)
-				args[0] = ip
+			run := func(host string) ([]byte, error) {
 				// #nosec G204 -- fixed repository script and test-owned temporary output.
-				return exec.Command("sh", append([]string{tt.script}, args...)...).CombinedOutput()
+				cmd := exec.Command("sh", tt.script, host, root)
+				cmd.Env = append(os.Environ(), "PATH="+fakeBin+":"+os.Getenv("PATH"))
+				return cmd.CombinedOutput()
 			}
-			if output, err := run("10.1.1.24"); err != nil {
-				t.Fatalf("create exact-IP certificate: %v: %s", err, output)
+			if output, err := run(tt.create); err != nil {
+				t.Fatalf("create exact certificate: %v: %s", err, output)
 			}
 			before := make(map[string][]byte, len(tt.files))
 			for _, name := range tt.files {
@@ -785,8 +807,8 @@ func TestTLSBootstrapsRejectLongerIPPrefixWithoutChangingExistingPair(t *testing
 				}
 				before[name] = contents
 			}
-			if output, err := run("10.1.1.2"); err == nil {
-				t.Fatalf("accepted longer SAN IP as exact requested IP: %s", output)
+			if output, err := run(tt.mismatch); err == nil {
+				t.Fatalf("accepted longer SAN as exact requested host: %s", output)
 			}
 			for _, name := range tt.files {
 				// #nosec G304 -- root is test-owned t.TempDir() and name comes from fixed test cases.

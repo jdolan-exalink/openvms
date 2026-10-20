@@ -53,9 +53,9 @@ if [ -e "$output_dir/tls.crt" ] || [ -L "$output_dir/tls.crt" ] || [ -e "$output
     }
   openssl x509 -in "$output_dir/tls.crt" -noout -checkend 0 >/dev/null
   if [ "$check_kind" = ip ]; then
-    openssl x509 -in "$output_dir/tls.crt" -noout -checkip "$host" >/dev/null || { echo "gRPC certificate SAN does not match $host" >&2; exit 1; }
+    openssl x509 -in "$output_dir/tls.crt" -noout -checkip "$host" | grep -Fx "IP $host does match certificate" >/dev/null || { echo "gRPC certificate SAN does not match $host" >&2; exit 1; }
   else
-    openssl x509 -in "$output_dir/tls.crt" -noout -checkhost "$host" >/dev/null
+    openssl x509 -in "$output_dir/tls.crt" -noout -checkhost "$host" | grep -Fx "Hostname $host does match certificate" >/dev/null || { echo "gRPC certificate SAN does not match $host" >&2; exit 1; }
   fi
   openssl verify -CAfile "$output_dir/tls.crt" "$output_dir/tls.crt" >/dev/null
   cert_pub=$(openssl x509 -in "$output_dir/tls.crt" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}')
@@ -89,9 +89,9 @@ chmod 600 "$output_dir/tls.key"
 chmod 644 "$output_dir/tls.crt"
 openssl x509 -in "$output_dir/tls.crt" -noout -checkend 0 >/dev/null
 if [ "$check_kind" = ip ]; then
-  openssl x509 -in "$output_dir/tls.crt" -noout -checkip "$host" >/dev/null
+  openssl x509 -in "$output_dir/tls.crt" -noout -checkip "$host" | grep -Fx "IP $host does match certificate" >/dev/null
 else
-  openssl x509 -in "$output_dir/tls.crt" -noout -checkhost "$host" >/dev/null
+  openssl x509 -in "$output_dir/tls.crt" -noout -checkhost "$host" | grep -Fx "Hostname $host does match certificate" >/dev/null
 fi
 openssl verify -CAfile "$output_dir/tls.crt" "$output_dir/tls.crt" >/dev/null
 cert_pub=$(openssl x509 -in "$output_dir/tls.crt" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}')

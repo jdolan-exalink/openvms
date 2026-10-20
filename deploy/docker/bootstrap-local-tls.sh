@@ -57,7 +57,7 @@ if [ -e "$web_cert" ] || [ -e "$web_key" ]; then
       echo "HTTPS certificate and key must both be regular, non-empty files" >&2; exit 1;
     }
   openssl x509 -in "$web_cert" -noout -checkend 0 >/dev/null
-  openssl x509 -in "$web_cert" -noout -checkip "$site_ip" >/dev/null || {
+  openssl x509 -in "$web_cert" -noout -checkip "$site_ip" | grep -Fx "IP $site_ip does match certificate" >/dev/null || {
     echo "Existing HTTPS certificate does not contain IP SAN $site_ip" >&2; exit 1;
   }
   cert_pub=$(openssl x509 -in "$web_cert" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}')

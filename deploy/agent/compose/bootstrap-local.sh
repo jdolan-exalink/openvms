@@ -49,7 +49,7 @@ openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 365 \
 openssl rand -hex 32 > "$output_dir/agent.token"
 chmod 600 "$output_dir/tls.key" "$output_dir/agent.token"
 chmod 644 "$output_dir/tls.crt"
-openssl x509 -in "$output_dir/tls.crt" -noout -checkip "$agent_ip" >/dev/null
+openssl x509 -in "$output_dir/tls.crt" -noout -checkip "$agent_ip" | grep -Fx "IP $agent_ip does match certificate" >/dev/null
 
 claimed=0
 trap - EXIT HUP INT TERM
