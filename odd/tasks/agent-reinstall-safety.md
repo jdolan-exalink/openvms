@@ -23,6 +23,7 @@ The existing SSH preflight can notice the service but reconciliation rejects unk
 - Web checks: `(cd apps/web && pnpm exec vitest run src/routes/Servers.test.tsx)`, `(cd apps/web && pnpm typecheck)`, plus scoped lint for edited paths.
 - Compose/docs checks: `docker compose config --quiet`, focused config contract tests, and `git diff --check`.
 - Delivery strategy: `ask-on-risk`; agent work previously used `stacked-to-main`, retained as the current chain strategy. The user explicitly authorized PR/merge/deployment for this continuation. For ARS-02 only, the user approved `size:exception` because generated OpenAPI output expands the small schema change into an inseparable embedded swagger blob diff.
+- PR #113's cohesive corrected Compose TLS candidate exceeds the 400-line budget; the user explicitly approved `size:exception` on 2026-10-20 to keep the legacy-install fix, regression coverage, and setup guidance together. This approval does not waive review or CI.
 - Forecast: cross-layer implementation likely exceeds 400 authored changed lines; use work-unit commits and honest slices rather than reducing tests/docs.
 - Delivery slices (stacked-to-main, in order): PR1 `b4282ad`–`115af8f` (Compose mTLS foundation); PR2 `744cdf2`–`54f2986` (install request contract); PR3 `b2d12e8`–`91f0a34` (detect and queue confirmed replacement); PR4 `63d2e8e`–`11f1bd3` plus this tracker update (reuse confirmed credentials and stage replacement payloads). Each slice targets `main` after the preceding PR merges; none exceeds the 400-line review budget.
 
@@ -48,6 +49,7 @@ The existing SSH preflight can notice the service but reconciliation rejects unk
   - [x] Add RED coverage for rerunning with existing HTTPS assets and missing gRPC material, repeated runs, existing valid gRPC pair preservation/validation, empty versus non-empty Docker-created placeholders, and Compose host-path behavior. RED observed: `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./deploy/agent/compose` failed at legacy rerun and Compose contract assertions.
   - [x] Make bootstrap safe to rerun for a real existing HTTPS directory, validate and preserve existing HTTPS/gRPC pairs, create only missing gRPC material, remove only empty exact file-target placeholders, and disable Compose creation for the two gRPC sources. Non-empty placeholders fail closed and retain contents.
   - [x] Update setup docs; `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./deploy/agent/compose`, `sh -n deploy/docker/bootstrap-local-tls.sh deploy/docker/bootstrap-agent-grpc-tls.sh`, `docker compose config --quiet`, and `git diff --check` pass. Commit one work unit. No remote/deployment/browser scope.
+  - Implementation commit: `65e0846` (`fix(compose): recover legacy agent TLS bootstrap`). Runtime harness: N/A; this is a local bootstrap/configuration contract with no runtime host mutation.
 
 ## Acceptance criteria
 - An SSH-connected host with a running/installed agent is reported as present even if the agent is offline from OpenVMS or its version cannot be obtained.
