@@ -62,6 +62,9 @@ if [ -e "$output_dir/tls.crt" ] || [ -L "$output_dir/tls.crt" ] || [ -e "$output
   key_pub=$(openssl pkey -in "$output_dir/tls.key" -pubout -outform DER | sha256sum | awk '{print $1}')
   [ "$cert_pub" = "$key_pub" ] || { echo "Agent gRPC certificate and key do not match." >&2; exit 1; }
   chmod 600 "$output_dir/tls.key"
+  if [ "$(id -u)" -eq 0 ]; then
+    chown "${OPENVMS_API_UID:-65532}:${OPENVMS_API_GID:-65532}" "$output_dir/tls.key"
+  fi
   chmod 644 "$output_dir/tls.crt"
   echo "Validated existing dedicated agent gRPC TLS pair in $output_dir."
   exit 0
@@ -86,6 +89,9 @@ openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 365 \
   -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign" \
   -addext "extendedKeyUsage=serverAuth" >/dev/null 2>&1
 chmod 600 "$output_dir/tls.key"
+if [ "$(id -u)" -eq 0 ]; then
+  chown "${OPENVMS_API_UID:-65532}:${OPENVMS_API_GID:-65532}" "$output_dir/tls.key"
+fi
 chmod 644 "$output_dir/tls.crt"
 openssl x509 -in "$output_dir/tls.crt" -noout -checkend 0 >/dev/null
 if [ "$check_kind" = ip ]; then

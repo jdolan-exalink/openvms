@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -432,10 +433,20 @@ func TestWebTLSBootstrapCreatesVerifiedIPCertificateAndRefusesOverwrite(t *testi
 	if info, err := os.Stat(output); err != nil || info.Mode().Perm() != 0o700 {
 		t.Fatalf("TLS output directory must be private: info=%v err=%v", info, err)
 	}
-	for name, mode := range map[string]os.FileMode{"tls.crt": 0o600, "tls.key": 0o600} {
+	for name, mode := range map[string]os.FileMode{"tls.crt": 0o644, "tls.key": 0o600} {
 		info, err := os.Stat(filepath.Join(output, name))
 		if err != nil || info.Mode().Perm() != mode {
-			t.Fatalf("%s must have mode 0600: info=%v err=%v", name, info, err)
+			t.Fatalf("%s must have mode %o: info=%v err=%v", name, mode, info, err)
+		}
+	}
+	if os.Geteuid() == 0 {
+		info, err := os.Stat(filepath.Join(grpcDir, "tls.key"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		stat, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || stat.Uid != 65532 || stat.Gid != 65532 {
+			t.Fatalf("root bootstrap must assign agent gRPC tls.key to nonroot API UID/GID 65532:65532, got stat=%+v", stat)
 		}
 	}
 	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
@@ -579,10 +590,13 @@ func TestComposeAgentMTLSEnrollmentUsesDedicatedTLSAndReachableDefaults(t *testi
 		t.Fatalf("API must publish only its configurable authenticated agent gRPC listener, ports=%v", ports)
 	}
 	text := string(compose)
-	for _, required := range []string{"OPENVMS_AGENT_GRPC_TLS_CERT_HOST_FILE", "OPENVMS_AGENT_GRPC_TLS_KEY_HOST_FILE", "OPENVMS_AGENT_API_CA_HOST_FILE"} {
+	for _, required := range []string{"OPENVMS_AGENT_GRPC_TLS_CERT_HOST_FILE", "OPENVMS_AGENT_GRPC_TLS_KEY_HOST_FILE", "OPENVMS_AGENT_API_CA_HOST_FILE", "OPENVMS_API_UID", "OPENVMS_API_GID"} {
 		if !strings.Contains(text, required) {
 			t.Errorf("Compose TLS material must be independently configurable with %q", required)
 		}
+	}
+	if api["user"] != "${OPENVMS_API_UID:-65532}:${OPENVMS_API_GID:-65532}" {
+		t.Errorf("API must default to distroless nonroot 65532:65532 while allowing host TLS key UID alignment, got %v", api["user"])
 	}
 }
 

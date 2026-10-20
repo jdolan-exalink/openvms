@@ -63,7 +63,8 @@ if [ -e "$web_cert" ] || [ -e "$web_key" ]; then
   cert_pub=$(openssl x509 -in "$web_cert" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | awk '{print $1}')
   key_pub=$(openssl pkey -in "$web_key" -pubout -outform DER | sha256sum | awk '{print $1}')
   [ "$cert_pub" = "$key_pub" ] || { echo "HTTPS certificate and key do not match" >&2; exit 1; }
-  chmod 600 "$web_key" "$web_cert"
+  chmod 600 "$web_key"
+  chmod 644 "$web_cert"
 else
   claimed=1
   # This is a local self-signed IP certificate for explicit browser trust only.
@@ -74,7 +75,8 @@ else
     -addext "basicConstraints=critical,CA:TRUE" \
     -addext "keyUsage=critical,digitalSignature,keyEncipherment,keyCertSign" \
     -addext "extendedKeyUsage=serverAuth" >/dev/null 2>&1
-  chmod 600 "$web_key" "$web_cert"
+  chmod 600 "$web_key"
+  chmod 644 "$web_cert"
   openssl x509 -in "$web_cert" -noout -checkend 0 >/dev/null
 fi
 

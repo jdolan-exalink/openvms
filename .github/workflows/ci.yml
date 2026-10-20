@@ -130,7 +130,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Bootstrap local TLS
-        run: ./deploy/docker/bootstrap-local-tls.sh 10.1.1.24 deploy/docker/local-tls
+        run: sudo ./deploy/docker/bootstrap-local-tls.sh 10.1.1.24 deploy/docker/local-tls
       - name: Start stack
         run: docker compose up -d --build --wait --wait-timeout 180
       - name: Readiness through Caddy
