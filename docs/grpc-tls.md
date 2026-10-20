@@ -6,17 +6,16 @@ The API serves its gRPC control channel on `GRPC_ADDR` (default `:9090`). It can
 
 The Compose API enables the agent mTLS listener on `0.0.0.0:9443` and publishes it on host port `9443`. SSH-installed agents use the HTTPS site host for both the public gRPC address and API URL by default. The listener requires a client certificate; do not expose it through a firewall unless remote agent hosts need access.
 
-Create a dedicated gRPC server certificate before starting Compose. This certificate has its own private key and is separate from the web HTTPS key; `tls.crt` is the trust anchor copied to agents. For a local HTTPS certificate, the same public certificate is mounted read-only as the agent's explicit API trust CA (its private key is never mounted into the API).
+Compose prepares the local HTTPS and dedicated agent gRPC certificates automatically before starting the API. The gRPC certificate has its own private key; `agent-grpc/tls.crt` is the trust anchor copied to agents. The generated HTTPS certificate is mounted read-only into Caddy and as the agent's explicit API trust CA (its private key is never mounted into the API).
 
 ```sh
-# Use the host/IP that agents will use to reach the HTTPS site.
-sh deploy/docker/bootstrap-local-tls.sh 10.1.1.24 deploy/docker/local-tls
+# Set OPENVMS_HTTPS_SITE_IPV4 in .env, then start the stack.
 docker compose up -d
 ```
 
-The local HTTPS bootstrap also creates or validates the dedicated `agent-grpc` certificate and key in the same operation, using the supplied host for its SAN. It is safe to rerun when HTTPS files already exist: matching, valid HTTPS material is preserved while missing gRPC files are generated. Existing valid gRPC files are validated and preserved. Only empty directories at the exact gRPC certificate/key file paths are removed (as can be left by an earlier Compose bind mount); non-empty placeholders fail closed. Compose disables host-path auto-creation for these two file mounts, so run this bootstrap before starting the API. If you use externally managed HTTPS files or a different advertised gRPC host, create/validate the dedicated certificate explicitly with `bootstrap-agent-grpc-tls.sh` using that host before starting Compose.
+The one-shot `tls-bootstrap` service runs the same safe bootstrap scripts inside Docker. Matching, valid certificates are preserved; invalid, incomplete, or mismatched files stop startup with an error. For an externally managed HTTPS certificate, set `OPENVMS_WEB_TLS_CERT_HOST_FILE` and `OPENVMS_WEB_TLS_KEY_HOST_FILE`; the API mounts only the public certificate. If the API certificate is signed by a different CA bundle, set `OPENVMS_AGENT_API_CA_HOST_FILE` to that public CA bundle. Never place private key material in the CA file. For a different advertised gRPC host, create/validate the dedicated certificate explicitly with `bootstrap-agent-grpc-tls.sh` using that host before starting Compose.
 
-The bootstrap scripts never replace existing key/certificate contents; they validate and retain a complete matching pair. If HTTPS uses an externally managed certificate, set `OPENVMS_WEB_TLS_CERT_HOST_FILE` and `OPENVMS_WEB_TLS_KEY_HOST_FILE`; the API mounts only the public certificate. If the API certificate is signed by a different CA bundle, set `OPENVMS_AGENT_API_CA_HOST_FILE` to that public CA bundle. Never place private key material in the CA file.
+The bootstrap scripts remain available for explicit maintenance. They never replace existing key/certificate contents; they validate and retain a complete matching pair. If the advertised gRPC host differs from the HTTPS site IP, regenerate or validate the gRPC pair with `bootstrap-agent-grpc-tls.sh` and configure `OPENVMS_AGENT_GRPC_PUBLIC_ADDR` to match.
 
 | Compose variable | Default | Purpose |
 | --- | --- | --- |

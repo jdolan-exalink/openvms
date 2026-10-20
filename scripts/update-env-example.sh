@@ -21,7 +21,7 @@ cat >"$tmp" <<'TEMPLATE'
 #
 # Easiest first install: run `make install` for local-only use, or
 # `OPENVMS_HTTPS_SITE_IPV4=192.168.1.60 make install` for access from other machines. It creates
-# .env, generates the secrets, prepares the local TLS certificates, builds, and starts the stack.
+# .env, generates the secrets, builds, and starts the stack. Compose prepares local TLS itself.
 # Review the first section below before starting. Other settings have working defaults.
 # Docker Compose v2 is required (`docker compose`, with a space).
 
@@ -30,6 +30,7 @@ cat >"$tmp" <<'TEMPLATE'
 # For access from another machine, set this to the server's LAN IPv4.
 # Example: OPENVMS_HTTPS_SITE_IPV4=192.168.1.60
 # Leave blank only for local-only `make install`; it fills in loopback automatically.
+# Manual `docker compose up` requires this value; TLS certificates are generated automatically.
 OPENVMS_HTTPS_SITE_IPV4=
 
 # Initial administrator password. Choose a unique password of at least 8 characters.
@@ -132,11 +133,8 @@ COMMIT=
 BUILD_TIME=
 
 # --- First install ---------------------------------------------------------------------
-# For manual setup, run the TLS bootstrap before `docker compose up`:
-#   sh deploy/docker/bootstrap-local-tls.sh <OPENVMS_HTTPS_SITE_IPV4> deploy/docker/local-tls
-# `make install` runs this bootstrap automatically.
-# Do not use `docker compose up` as a substitute for `make install` on a new host: it does not
-# generate the required gRPC certificate files.
+# `docker compose up -d` builds the TLS bootstrap image and prepares HTTPS and agent gRPC files.
+# Make sure OPENVMS_HTTPS_SITE_IPV4 is set above before starting Compose manually.
 
 # --- Not set here ----------------------------------------------------------------------
 # The gRPC control channel is plaintext unless GRPC_TLS_CERT_FILE and GRPC_TLS_KEY_FILE are
