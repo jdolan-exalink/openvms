@@ -36,6 +36,13 @@ OPENVMS_MASTER_KEY=
 # changing it later does not re-key an existing database.
 POSTGRES_PASSWORD=
 
+# --- Optional services -----------------------------------------------------------------
+
+# Compose profiles to enable, comma-separated. Leave it commented for the default stack. Use
+# `mqtt` to also run the Mosquitto broker (OpenVMS itself does not need it), `observability`
+# for Prometheus and Grafana, `onvif-agent` for the local edge agent. Example: mqtt,observability
+# COMPOSE_PROFILES=
+
 # --- First administrator ---------------------------------------------------------------
 
 # Platform administrator created on the first start (never resets an existing user).

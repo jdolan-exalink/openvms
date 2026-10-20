@@ -1,5 +1,6 @@
-# Local environment: `docker compose up -d` (or `make up`) starts the whole platform
-# plus two simulated Frigate sites. Credentials here are for development only.
+# `docker compose up -d` (or `make up`, `make install`) starts the whole platform. The simulated
+# Frigate sites live in docker-compose.dev.yml (used by `make dev`). Default credentials here
+# are for development only: change them in .env.
 name: openvms
 
 x-go-env: &go-env
@@ -79,7 +80,10 @@ services:
       retries: 30
     restart: unless-stopped
 
+  # Optional MQTT broker. OpenVMS itself does not use it (it reads Frigate over HTTP); enable it
+  # with COMPOSE_PROFILES=mqtt in .env or `docker compose --profile mqtt up -d`.
   mosquitto:
+    profiles: [mqtt]
     image: eclipse-mosquitto:2
     ports: ["127.0.0.1:1883:1883"]
     volumes: [./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro]
@@ -90,32 +94,6 @@ services:
       retries: 5
       start_period: 5s
     restart: unless-stopped
-
-  frigate-helvecia:
-    profiles: [mock]
-    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: frigate-mock } }
-    environment:
-      MOCK_NAME: frigate-h01
-      MOCK_CAMERAS: acceso_norte+lpr:entrada|salida,plaza:centro,cementerio:porton,tesoreria
-      MOCK_TOPIC_PREFIX: frigate-h01
-      MOCK_MQTT_URL: tcp://mosquitto:1883
-      MOCK_PASSWORD: helvecia-dev
-    ports: ["127.0.0.1:18971:8971"]
-    depends_on:
-      mosquitto: { condition: service_healthy }
-
-  frigate-cayasta:
-    profiles: [mock]
-    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: frigate-mock } }
-    environment:
-      MOCK_NAME: frigate-c01
-      MOCK_CAMERAS: ruta_1+lpr:ingreso,plaza:centro,muelle
-      MOCK_TOPIC_PREFIX: frigate-c01
-      MOCK_MQTT_URL: tcp://mosquitto:1883
-      MOCK_PASSWORD: cayasta-dev
-    ports: ["127.0.0.1:28971:8971"]
-    depends_on:
-      mosquitto: { condition: service_healthy }
 
   api:
     build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: api, VERSION: "${VERSION:-}", COMMIT: "${COMMIT:-unknown}", BUILD_TIME: "${BUILD_TIME:-unknown}", AGENT_VERSION: "${AGENT_VERSION:-}" } }

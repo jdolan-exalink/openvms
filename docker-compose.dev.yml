@@ -1,0 +1,28 @@
+# Development only: simulated Frigate sites that publish reviews over MQTT.
+# Layered on top of the main file and needs the mqtt profile (mosquitto):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile mqtt up -d
+# `make dev` does exactly that. Never use this file on a production server.
+services:
+  frigate-helvecia:
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: frigate-mock } }
+    environment:
+      MOCK_NAME: frigate-h01
+      MOCK_CAMERAS: acceso_norte+lpr:entrada|salida,plaza:centro,cementerio:porton,tesoreria
+      MOCK_TOPIC_PREFIX: frigate-h01
+      MOCK_MQTT_URL: tcp://mosquitto:1883
+      MOCK_PASSWORD: helvecia-dev
+    ports: ["127.0.0.1:18971:8971"]
+    depends_on:
+      mosquitto: { condition: service_healthy }
+
+  frigate-cayasta:
+    build: { context: ., dockerfile: deploy/docker/go.Dockerfile, args: { APP: frigate-mock } }
+    environment:
+      MOCK_NAME: frigate-c01
+      MOCK_CAMERAS: ruta_1+lpr:ingreso,plaza:centro,muelle
+      MOCK_TOPIC_PREFIX: frigate-c01
+      MOCK_MQTT_URL: tcp://mosquitto:1883
+      MOCK_PASSWORD: cayasta-dev
+    ports: ["127.0.0.1:28971:8971"]
+    depends_on:
+      mosquitto: { condition: service_healthy }

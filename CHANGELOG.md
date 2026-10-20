@@ -18,6 +18,14 @@ The version of OpenVMS lives in `VERSION` and the version of the edge agent in
 
 ### Changed
 
+- The simulated Frigates (`frigate-helvecia`, `frigate-cayasta`, with their demo passwords)
+  moved from `docker-compose.yml` to the development-only `docker-compose.dev.yml`, so a
+  production install no longer contains mock data; `make dev` uses the dev file.
+- The Mosquitto MQTT broker is now optional (`mqtt` profile; enable it with
+  `COMPOSE_PROFILES=mqtt`). OpenVMS reads Frigate over HTTP and does not need it. A
+  `mosquitto` container from an earlier deploy keeps running until removed with
+  `docker compose rm -sf mosquitto`.
+
 - README rewritten for 0.4.0: features by module, Compose v2 requirements, `make install`,
   `.env` reference, `make deploy`/`make rollback`, versions, agents and accelerators,
   security and troubleshooting.

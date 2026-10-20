@@ -129,10 +129,13 @@ La primera compilación tarda varios minutos (Go y la web se compilan dentro de 
 el servidor no necesita Go ni Node instalados).
 
 Servicios: postgres, valkey, nats, seaweedfs (almacenamiento S3 de miniaturas),
-mosquitto, api, worker, web (Caddy) y dos Frigate simulados (frigate-helvecia y
-frigate-cayasta) para demo. Los simulados se pueden apagar sin problema:
+api, worker y web (Caddy). No incluye datos de demostración. Mosquitto (MQTT) es
+opcional y OpenVMS no lo necesita: para activarlo agregue COMPOSE_PROFILES=mqtt al .env
+o use `docker compose --profile mqtt up -d`. Si actualiza desde una versión anterior,
+quite el contenedor viejo con `docker compose rm -sf mosquitto`.
 
-    docker compose stop frigate-helvecia frigate-cayasta
+Los Frigate simulados (frigate-helvecia y frigate-cayasta) son solo para desarrollo:
+están en docker-compose.dev.yml y se levantan con `make dev`.
 
 
 6. Primer administrador
