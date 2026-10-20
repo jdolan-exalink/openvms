@@ -104,18 +104,22 @@ días) para la IP del servidor. El contenedor web lo monta y sin él no arranca
 
     sh deploy/docker/bootstrap-local-tls.sh <IP del servidor> deploy/docker/local-tls
 
-El directorio no debe existir (el script no sobreescribe). El navegador pide aceptar el
-certificado la primera vez que se entra por https://IP:8443; por http://IP:8000 no hace
-falta. Para ver cuándo vence:
+Ese comando también crea el certificado dedicado del canal gRPC del agente en
+`deploy/docker/local-tls/agent-grpc`, antes de que Compose monte esos archivos.
+
+El comando se puede repetir en instalaciones existentes: valida y conserva el par HTTPS,
+y crea el par gRPC dedicado si falta. En los destinos de archivo del certificado/clave gRPC
+solo elimina directorios vacíos (posibles restos de un bind mount anterior); si contienen
+archivos, falla sin borrarlos. Compose no crea automáticamente esos destinos de archivo.
+El navegador pide aceptar el certificado la primera vez que se entra por https://IP:8443;
+por http://IP:8000 no hace falta. Para ver cuándo vence:
 
     openssl x509 -enddate -noout -in deploy/docker/local-tls/tls.crt
 
-Para renovarlo (antes de que venza, o si cambia la IP), recrear el contenedor web; un
-`docker compose up -d web` solo no alcanza porque sigue usando los archivos viejos:
-
-    rm -rf deploy/docker/local-tls
-    sh deploy/docker/bootstrap-local-tls.sh <IP del servidor> deploy/docker/local-tls
-    docker compose up -d --force-recreate web
+Para renovar HTTPS (antes de que venza, o si cambia la IP), conserva los archivos actuales,
+genera el nuevo par en otro directorio y actualiza `OPENVMS_WEB_TLS_CERT_HOST_FILE`,
+`OPENVMS_WEB_TLS_KEY_HOST_FILE` y `OPENVMS_AGENT_API_CA_HOST_FILE` antes de recrear web/api.
+El bootstrap nunca reemplaza material existente.
 
     docker compose up -d --build
     docker compose ps          # todos "running" / "healthy"

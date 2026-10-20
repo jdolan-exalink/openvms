@@ -2,6 +2,35 @@
 
 The API serves its gRPC control channel on `GRPC_ADDR` (default `:9090`). It can be served over server-side TLS: the channel is encrypted and clients verify the server certificate. Client certificates are not required on this listener. Edge agents can use a separate mutual-TLS listener instead; see [Agent listener](#agent-listener-mutual-tls).
 
+## Local Compose enrollment setup
+
+The Compose API enables the agent mTLS listener on `0.0.0.0:9443` and publishes it on host port `9443`. SSH-installed agents use the HTTPS site host for both the public gRPC address and API URL by default. The listener requires a client certificate; do not expose it through a firewall unless remote agent hosts need access.
+
+Create a dedicated gRPC server certificate before starting Compose. This certificate has its own private key and is separate from the web HTTPS key; `tls.crt` is the trust anchor copied to agents. For a local HTTPS certificate, the same public certificate is mounted read-only as the agent's explicit API trust CA (its private key is never mounted into the API).
+
+```sh
+# Use the host/IP that agents will use to reach the HTTPS site.
+sh deploy/docker/bootstrap-local-tls.sh 10.1.1.24 deploy/docker/local-tls
+docker compose up -d
+```
+
+The local HTTPS bootstrap also creates or validates the dedicated `agent-grpc` certificate and key in the same operation, using the supplied host for its SAN. It is safe to rerun when HTTPS files already exist: matching, valid HTTPS material is preserved while missing gRPC files are generated. Existing valid gRPC files are validated and preserved. Only empty directories at the exact gRPC certificate/key file paths are removed (as can be left by an earlier Compose bind mount); non-empty placeholders fail closed. Compose disables host-path auto-creation for these two file mounts, so run this bootstrap before starting the API. If you use externally managed HTTPS files or a different advertised gRPC host, create/validate the dedicated certificate explicitly with `bootstrap-agent-grpc-tls.sh` using that host before starting Compose.
+
+The bootstrap scripts never replace existing key/certificate contents; they validate and retain a complete matching pair. If HTTPS uses an externally managed certificate, set `OPENVMS_WEB_TLS_CERT_HOST_FILE` and `OPENVMS_WEB_TLS_KEY_HOST_FILE`; the API mounts only the public certificate. If the API certificate is signed by a different CA bundle, set `OPENVMS_AGENT_API_CA_HOST_FILE` to that public CA bundle. Never place private key material in the CA file.
+
+| Compose variable | Default | Purpose |
+| --- | --- | --- |
+| `OPENVMS_AGENT_GRPC_BIND_HOST` | `0.0.0.0` | Container listener bind host. |
+| `OPENVMS_AGENT_GRPC_CONTAINER_PORT` | `9443` | Container listener port. |
+| `OPENVMS_AGENT_GRPC_PUBLISH_ADDR` | `0.0.0.0` | Host interface for the published mTLS port. |
+| `OPENVMS_AGENT_GRPC_HOST_PORT` | `9443` | Published host port and advertised gRPC port. |
+| `OPENVMS_AGENT_GRPC_PUBLIC_ADDR` | `${OPENVMS_HTTPS_SITE_IPV4:-localhost}:<host-port>` | Host and port agents use for mTLS. Override if the agent network reaches a different address. |
+| `OPENVMS_AGENT_API_PUBLIC_URL` | `https://${OPENVMS_HTTPS_SITE_IPV4:-localhost}:${WEB_HTTPS_PORT:-8443}` | HTTPS base URL agents use for one-time enrollment. |
+| `OPENVMS_AGENT_GRPC_TLS_CERT_HOST_FILE` / `OPENVMS_AGENT_GRPC_TLS_KEY_HOST_FILE` | `deploy/docker/local-tls/agent-grpc/tls.{crt,key}` | Dedicated gRPC server certificate and private key, mounted read-only. The cert SAN must match the advertised public gRPC host. |
+| `OPENVMS_AGENT_API_CA_HOST_FILE` | `OPENVMS_WEB_TLS_CERT_HOST_FILE` or `deploy/docker/local-tls/tls.crt` | Public CA material that verifies the API HTTPS certificate; mounted read-only. |
+
+Compose uses the gRPC certificate for both API gRPC listeners because the API currently shares `GRPC_TLS_CERT_FILE` / `GRPC_TLS_KEY_FILE`; the ordinary control listener also becomes TLS. Existing direct gRPC clients must use TLS verification with the same certificate trust. The agent listener additionally requires an enrolled client certificate. There is no plaintext fallback for either listener once configured.
+
 ## Server (API)
 
 | Variable | Meaning |
