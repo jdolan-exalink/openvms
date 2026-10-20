@@ -21,10 +21,37 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jdolan-exalink/openvms/internal/authz"
+	"github.com/jdolan-exalink/openvms/internal/store"
 )
 
 func validAgentInstallStartRequest() AgentInstallStartRequest {
 	return AgentInstallStartRequest{Host: "192.0.2.44", Port: 2202, Password: "never-persist-ssh-password"}
+}
+
+func TestAgentInstallRegistrationFallbackAllowsExplicitReplacement(t *testing.T) {
+	lookupFailure := errors.New("database unavailable")
+	tests := []struct {
+		name            string
+		lookupErr       error
+		replaceExisting bool
+		wantErr         error
+	}{
+		{name: "registered without confirmation", lookupErr: nil, wantErr: ErrAgentAlreadyProvisioned},
+		{name: "registered with confirmation", lookupErr: nil, replaceExisting: true},
+		{name: "not registered", lookupErr: store.ErrNotFound},
+		{name: "lookup error", lookupErr: lookupFailure, wantErr: lookupFailure},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := agentInstallRegistrationFallback(tc.lookupErr, tc.replaceExisting)
+			if tc.wantErr != nil && !errors.Is(got, tc.wantErr) {
+				t.Fatalf("fallback error = %v, want %v", got, tc.wantErr)
+			}
+			if tc.wantErr == nil && got != nil {
+				t.Fatalf("fallback error = %v, want nil", got)
+			}
+		})
+	}
 }
 
 func TestStartAgentInstallDeniesBeforeRegistrationLookupArtifactOrRunner(t *testing.T) {
