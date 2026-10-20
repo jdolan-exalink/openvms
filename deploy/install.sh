@@ -31,6 +31,13 @@ run() {
 
 cd "$ROOT" || die "cannot enter $ROOT"
 
+# The admin password policy is only a minimum length; reject a short one before anything
+# is created or started (the value is never printed).
+MIN_ADMIN_PASSWORD=8
+if [ -n "${OPENVMS_ADMIN_PASSWORD:-}" ] && [ "${#OPENVMS_ADMIN_PASSWORD}" -lt "$MIN_ADMIN_PASSWORD" ]; then
+  die "OPENVMS_ADMIN_PASSWORD must have at least $MIN_ADMIN_PASSWORD characters (nothing was created or started)"
+fi
+
 # --- 1. Preflight -----------------------------------------------------------
 step 1 preflight
 if [ "$DRY" = 1 ]; then
@@ -150,7 +157,9 @@ step 5 summary
 echo "http:   http://localhost:$HTTP_PORT"
 echo "https:  https://localhost:$PORT (self-signed certificate unless you configured your own)"
 echo
-echo "Next step, create the first admin (choose a long password):"
-echo "  docker compose exec api /vmsctl bootstrap -password '<una-clave-larga>'"
+echo "Log in as ${OPENVMS_ADMIN_USERNAME:-admin} (OPENVMS_ADMIN_USERNAME)."
+echo "If OPENVMS_ADMIN_PASSWORD was not set (or .env already existed), a one-time password was generated;"
+echo "read it once from the API log and change it at first login:"
+echo '  docker compose logs api | grep "initial admin"'
 echo
 echo "For later updates use: make deploy"

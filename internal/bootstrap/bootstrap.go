@@ -91,7 +91,7 @@ func ensurePlatformAdmin(ctx context.Context, q *db.Queries, username string) (d
 const generatedPasswordLen = 20
 
 // GeneratePassword returns a random alphanumeric password with lower, upper and digit
-// characters, so it satisfies identity.CheckPolicy.
+// characters.
 func GeneratePassword() (string, error) {
 	const lower, upper, digits = "abcdefghjkmnpqrstuvwxyz", "ABCDEFGHJKLMNPQRSTUVWXYZ", "23456789"
 	all := lower + upper + digits
@@ -115,10 +115,12 @@ func GeneratePassword() (string, error) {
 // platform user already has a password, so an existing install is never reset. With an empty
 // password it generates a random one, forces a change at first login and logs it once at WARN
 // (the only disclosure); a configured password is used as is. A configured password failing
-// the policy is logged and skipped.
+// the policy takes the same generated path, with an extra WARN naming the rejection, so an
+// install never ends up without an admin.
 func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password string, log *slog.Logger) error {
 	generated := password == ""
 	created := false
+	var rejected error
 	err := st.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		// Existence first: on an existing install the configured password is irrelevant.
 		n, err := q.CountAllPlatformUsers(ctx)
@@ -132,14 +134,16 @@ func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password
 		} else if !errors.Is(store.Classify(err), store.ErrNotFound) {
 			return err
 		}
+		if !generated {
+			if rejected = identity.CheckPolicy(password); rejected != nil {
+				generated = true
+			}
+		}
 		if generated {
 			// The password is logged only after the transaction commits.
 			if password, err = GeneratePassword(); err != nil {
 				return err
 			}
-		} else if err := identity.CheckPolicy(password, username); err != nil {
-			log.Error("initial admin not created: OPENVMS_ADMIN_PASSWORD rejected", "username", username, "error", err)
-			return nil
 		}
 		u, err := ensurePlatformAdmin(ctx, q, username)
 		if err != nil {
@@ -161,6 +165,9 @@ func EnsureInitialAdmin(ctx context.Context, st *store.Store, username, password
 	}
 	if err != nil {
 		return err
+	}
+	if created && rejected != nil {
+		log.Warn("OPENVMS_ADMIN_PASSWORD rejected: a random password was generated instead", "username", username, "reason", rejected.Error())
 	}
 	switch {
 	case created && generated:
@@ -294,7 +301,7 @@ func SetPassword(ctx context.Context, st *store.Store, username, password string
 		if err != nil {
 			return fmt.Errorf("user %q: %w", username, store.Classify(err))
 		}
-		if err := identity.CheckPolicy(password, u.Username); err != nil {
+		if err := identity.CheckPolicy(password); err != nil {
 			return err
 		}
 		hash, err := identity.HashPassword(password)

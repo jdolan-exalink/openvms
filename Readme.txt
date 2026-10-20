@@ -155,13 +155,13 @@ Guardarla enseguida: no se vuelve a registrar.
 
 Para elegir la contraseña en vez de generarla, definir en .env antes de levantar:
 
-    OPENVMS_ADMIN_PASSWORD=<clave de al menos 10 caracteres, con letras y números>
+    OPENVMS_ADMIN_PASSWORD=<clave de al menos 8 caracteres>
 
 Notas:
 - Solo se crea si la instalación no tiene ningún usuario de plataforma (ni siquiera borrado):
   nunca pisa ni reinicia una instalación existente ni agrega un admin al actualizar.
-- Si OPENVMS_ADMIN_PASSWORD no cumple la política de contraseñas, la API lo registra como
-  error y no crea el usuario (sigue funcionando; usar vmsctl).
+- Si OPENVMS_ADMIN_PASSWORD tiene menos de 8 caracteres, la API crea el admin con una clave
+  aleatoria, lo avisa en el log y obliga a cambiarla en el primer ingreso.
 - Después, activar la verificación en dos pasos en "Mi cuenta".
 
 Organización y sitio iniciales: si la instalación no tiene ninguna organización, la API crea
@@ -199,8 +199,8 @@ Otros comandos:
      - "Sin login": http://IP:5000. Solo en redes privadas o VPN: quien llega a ese puerto
        controla Frigate.
    "Probar conexión" muestra versión y cámaras; "Registrar" las importa.
-4. Usuarios y grupos: menú Usuarios / Grupos. Contraseñas con Argon2id (mínimo 10
-   caracteres, letras y números o símbolos). Bloqueo tras 5 intentos fallidos.
+4. Usuarios y grupos: menú Usuarios / Grupos. Contraseñas con Argon2id (mínimo 8
+   caracteres, sin otros requisitos). Bloqueo tras 5 intentos fallidos.
 5. Permisos: menú Permisos. Elegir usuario o grupo, un perfil (Operador, Solo en vivo,
    Investigador, Administrador) o un permiso suelto, y el alcance (organización, sitio,
    servidor, grupo de cámaras o cámara). Denegar siempre gana sobre permitir.

@@ -230,8 +230,8 @@ function UserForm({ user, groups, onDone }: { user?: Schemas["User"]; groups: Sc
         <Field label="Email">
           <TextInput type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
         </Field>
-        <Field label={user ? "Nueva contraseña" : "Contraseña"} hint="Mínimo 10 caracteres, con letras y números o símbolos. Se guarda con Argon2id.">
-          <TextInput type="password" minLength={10} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" />
+        <Field label={user ? "Nueva contraseña" : "Contraseña"} hint="Mínimo 8 caracteres. Se guarda con Argon2id.">
+          <TextInput type="password" minLength={8} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" />
         </Field>
         {f.password && (
           <Checkbox className="self-center" checked={f.must_change_password} onChange={(v) => setF({ ...f, must_change_password: v })} label="Pedir cambio al ingresar" />

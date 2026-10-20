@@ -74,13 +74,13 @@ El cambio de volúmenes nombrados a directorios bind **no migra datos**: Compose
 Al arrancar, la API crea sola el administrador de plataforma si la instalación no tiene ningún usuario de plataforma, y una organización con un sitio si no existe ninguna.
 
 - Usuario: `admin` (`OPENVMS_ADMIN_USERNAME`).
-- Contraseña: la de `OPENVMS_ADMIN_PASSWORD` si la pasó a `make install` o la definió en `.env` **antes** de levantar (mínimo 10 caracteres, letras y números). Si está vacía se genera una al azar, se registra una sola vez en el log de la API y el sistema obliga a cambiarla en el primer ingreso:
+- Contraseña: la de `OPENVMS_ADMIN_PASSWORD` si la pasó a `make install` o la definió en `.env` **antes** de levantar (mínimo 8 caracteres, sin otros requisitos). Si está vacía se genera una al azar, se registra una sola vez en el log de la API y el sistema obliga a cambiarla en el primer ingreso:
 
 ```bash
 docker compose logs api | grep "initial admin"
 ```
 
-Nunca pisa ni reinicia una instalación existente. Si la contraseña configurada no cumple la política, la API lo registra como error y no crea el usuario: use `vmsctl`.
+Nunca pisa ni reinicia una instalación existente. `make install` rechaza de entrada una `OPENVMS_ADMIN_PASSWORD` de menos de 8 caracteres. Si una contraseña configurada de otro modo (por ejemplo, editando `.env`) es demasiado corta, la API crea el administrador con una contraseña aleatoria, avisa en el log y obliga a cambiarla en el primer ingreso.
 
 | URL | Qué es |
 |---|---|

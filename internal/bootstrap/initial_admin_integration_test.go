@@ -65,7 +65,7 @@ func TestEnsureInitialAdminGeneratesRandomPassword(t *testing.T) {
 	if !strings.Contains(buf.String(), "level=WARN") {
 		t.Fatalf("want a WARN, got %q", buf.String())
 	}
-	if err := identity.CheckPolicy(password, "admin"); err != nil {
+	if err := identity.CheckPolicy(password); err != nil {
 		t.Fatalf("generated password fails the policy: %v", err)
 	}
 	users := listUsers(t, st)
@@ -167,18 +167,43 @@ func TestEnsureInitialAdminSkipsWhenAnotherPlatformUserHasPassword(t *testing.T)
 	}
 }
 
-func TestEnsureInitialAdminWeakPasswordSkipped(t *testing.T) {
+func TestEnsureInitialAdminShortPasswordFallsBackToGenerated(t *testing.T) {
 	ctx := context.Background()
 	st := adminFixture(t)
 	log, buf := captureLog()
 	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "corta", log); err != nil {
-		t.Fatalf("weak password must not fail startup: %v", err)
+		t.Fatalf("short password must not fail startup: %v", err)
 	}
-	if users := listUsers(t, st); len(users) != 0 {
-		t.Fatalf("users = %+v, want none", users)
+	users := listUsers(t, st)
+	if len(users) != 1 || users[0].Username != "admin" || !users[0].MustChangePassword {
+		t.Fatalf("users = %+v, want one admin forced to change its password", users)
 	}
-	if !strings.Contains(buf.String(), "level=ERROR") || strings.Contains(buf.String(), "corta") {
-		t.Fatalf("want an ERROR without the password, got %q", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "OPENVMS_ADMIN_PASSWORD rejected") || !strings.Contains(out, "at least 8 characters") {
+		t.Fatalf("want a WARN naming the rejection and the rule, got %q", out)
+	}
+	m := loggedPassword.FindAllStringSubmatch(out, -1)
+	if len(m) != 1 || m[0][1] == "corta" {
+		t.Fatalf("want the generated password logged exactly once, got %q", out)
+	}
+	if !identity.VerifyPassword(users[0].PasswordHash, m[0][1]) || identity.VerifyPassword(users[0].PasswordHash, "corta") {
+		t.Fatal("the stored password must be the generated one")
+	}
+}
+
+func TestEnsureInitialAdminEightCharacterPasswordAccepted(t *testing.T) {
+	ctx := context.Background()
+	st := adminFixture(t)
+	log, buf := captureLog()
+	if err := bootstrap.EnsureInitialAdmin(ctx, st, "admin", "abcd1234", log); err != nil {
+		t.Fatal(err)
+	}
+	users := listUsers(t, st)
+	if len(users) != 1 || users[0].MustChangePassword || !identity.VerifyPassword(users[0].PasswordHash, "abcd1234") {
+		t.Fatalf("users = %+v, want one admin with the configured password", users)
+	}
+	if strings.Contains(buf.String(), "level=WARN") {
+		t.Fatalf("unexpected WARN: %q", buf.String())
 	}
 }
 

@@ -4,7 +4,7 @@ const messages = {
   adminAskedPassword: "Um administrador pediu que você troque a senha.",
   currentPassword: "Senha atual",
   newPassword: "Nova senha",
-  passwordRules: "No mínimo 10 caracteres, com letras e números ou símbolos.",
+  passwordRules: "No mínimo 8 caracteres.",
   repeatPassword: "Repetir a nova senha",
   passwordMismatch: "As novas senhas não coincidem.",
   passwordUpdated: "Senha atualizada. As suas outras sessões foram encerradas.",

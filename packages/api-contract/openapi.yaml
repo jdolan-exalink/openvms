@@ -2549,7 +2549,7 @@ paths:
               required: [current_password, new_password]
               properties:
                 current_password: { type: string, format: password }
-                new_password: { type: string, format: password, minLength: 10 }
+                new_password: { type: string, format: password, minLength: 8 }
       responses:
         "204": { description: Changed }
         "400": { $ref: "#/components/responses/BadRequest" }
@@ -6137,7 +6137,7 @@ components:
         username: { type: string, minLength: 3, maxLength: 64, pattern: "^[A-Za-z0-9._@-]+$" }
         display_name: { type: string, maxLength: 200 }
         email: { type: string, maxLength: 200 }
-        password: { type: string, format: password, minLength: 10, description: Omit for a user that only uses API tokens. }
+        password: { type: string, format: password, minLength: 8, description: Omit for a user that only uses API tokens. }
         must_change_password: { type: boolean, default: false }
         group_ids: { type: array, items: { type: string, format: uuid } }
     UserUpdate:
@@ -6146,7 +6146,7 @@ components:
         display_name: { type: string, minLength: 1, maxLength: 200 }
         email: { type: string, maxLength: 200 }
         status: { type: string, enum: [active, disabled, locked] }
-        password: { type: string, format: password, minLength: 10, description: Resets the password and closes the user's sessions. }
+        password: { type: string, format: password, minLength: 8, description: Resets the password and closes the user's sessions. }
         must_change_password: { type: boolean }
         group_ids: { type: array, items: { type: string, format: uuid } }
         disable_mfa: { type: boolean, description: Removes the second factor (lost phone). }

@@ -47,8 +47,9 @@ POSTGRES_PASSWORD=
 
 # Platform administrator created on the first start (never resets an existing user).
 OPENVMS_ADMIN_USERNAME=admin
-# REQUIRED for a fresh install: its password (12+ characters recommended). Empty = a random
-# password is generated and printed once in the api logs (`docker compose logs api`).
+# REQUIRED for a fresh install: its password (at least 8 characters, no other rules). Empty or
+# too short = a random password is generated and printed once in the api logs
+# (`docker compose logs api`).
 OPENVMS_ADMIN_PASSWORD=
 
 # --- Default organization and site -----------------------------------------------------
