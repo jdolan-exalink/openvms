@@ -104,6 +104,9 @@ días) para la IP del servidor. El contenedor web lo monta y sin él no arranca
 
     sh deploy/docker/bootstrap-local-tls.sh <IP del servidor> deploy/docker/local-tls
 
+Ese comando también crea el certificado dedicado del canal gRPC del agente en
+`deploy/docker/local-tls/agent-grpc`, antes de que Compose monte esos archivos.
+
 El directorio no debe existir (el script no sobreescribe). El navegador pide aceptar el
 certificado la primera vez que se entra por https://IP:8443; por http://IP:8000 no hace
 falta. Para ver cuándo vence:

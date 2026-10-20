@@ -46,6 +46,12 @@ openssl req -x509 -newkey rsa:3072 -nodes -sha256 -days 365 \
 chmod 600 "$output_dir/tls.key" "$output_dir/tls.crt"
 openssl x509 -in "$output_dir/tls.crt" -noout -checkip "$site_ip" >/dev/null
 
+# Compose bind-mounts the dedicated agent gRPC TLS files by default. Create
+# them before the stack starts so Docker cannot silently create directories at
+# the missing file paths. The certificate SAN uses the same advertised host.
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+sh "$script_dir/bootstrap-agent-grpc-tls.sh" "$site_ip" "$output_dir/agent-grpc"
+
 claimed=0
 trap - EXIT HUP INT TERM
 echo "Created local HTTPS certificate and private key in $output_dir."

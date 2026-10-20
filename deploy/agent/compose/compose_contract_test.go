@@ -419,6 +419,16 @@ func TestWebTLSBootstrapCreatesVerifiedIPCertificateAndRefusesOverwrite(t *testi
 	if result, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("web TLS bootstrap failed: %v: %s", err, result)
 	}
+	grpcDir := filepath.Join(output, "agent-grpc")
+	if info, err := os.Stat(grpcDir); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("local bootstrap must create a private dedicated agent gRPC TLS directory: info=%v err=%v", info, err)
+	}
+	for name, mode := range map[string]os.FileMode{"tls.crt": 0o644, "tls.key": 0o600} {
+		info, err := os.Stat(filepath.Join(grpcDir, name))
+		if err != nil || info.Mode().Perm() != mode {
+			t.Fatalf("agent gRPC %s must have mode %o: info=%v err=%v", name, mode, info, err)
+		}
+	}
 	if info, err := os.Stat(output); err != nil || info.Mode().Perm() != 0o700 {
 		t.Fatalf("TLS output directory must be private: info=%v err=%v", info, err)
 	}
