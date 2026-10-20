@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -108,9 +109,12 @@ func TestAgentDiscoveryCredentialsRequireHTTPS(t *testing.T) {
 }
 
 func TestAgentInstallBodyRejectsUnknownTrailingAndOversizedJSON(t *testing.T) {
+	// #nosec G101 -- synthetic JSON fixture keys and test-only dummy values.
 	for name, body := range map[string]string{
 		"unknown fields":            `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `","binary":"not-allowed"}`,
 		"removed fingerprint field": `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","ssh_host_key_fingerprint":"` + ingressTestPin + `"}`,
+		"missing password":          `{"ssh_host":"192.0.2.44","ssh_port":22}`,
+		"invalid port":              `{"ssh_host":"192.0.2.44","ssh_port":0,"ssh_password":"secret"}`,
 		"trailing JSON":             `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret"} {}`,
 		"oversized":                 `{"ssh_password":"` + strings.Repeat("x", agentInstallRequestMaxBytes) + `"}`,
 	} {
@@ -130,11 +134,31 @@ func TestAgentInstallBodyRejectsUnknownTrailingAndOversizedJSON(t *testing.T) {
 	}
 }
 
+func TestAgentInstallBodyAcceptsReplaceExisting(t *testing.T) {
+	for _, replaceExisting := range []bool{false, true} {
+		t.Run(fmt.Sprintf("replace_existing=%t", replaceExisting), func(t *testing.T) {
+			called := false
+			h := validateAgentInstallBody(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				called = true
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			body := fmt.Sprintf(`{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","replace_existing":%t}`, replaceExisting)
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/servers/11111111-1111-1111-1111-111111111111/agent/install", strings.NewReader(body))
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			if !called || w.Code != http.StatusNoContent {
+				t.Fatalf("called=%v status=%d body=%s", called, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestAgentDiscoveryBodyIsStrictAndBounded(t *testing.T) {
 	for name, body := range map[string]string{
-		"unknown fields": `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","raw_output":true}`,
-		"trailing JSON":  `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret"} {}`,
-		"oversized":      `{"ssh_password":"` + strings.Repeat("x", agentInstallRequestMaxBytes) + `"}`,
+		"unknown fields":     `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","raw_output":true}`,
+		"install-only field": `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret","replace_existing":false}`,
+		"trailing JSON":      `{"ssh_host":"192.0.2.44","ssh_port":22,"ssh_password":"secret"} {}`,
+		"oversized":          `{"ssh_password":"` + strings.Repeat("x", agentInstallRequestMaxBytes) + `"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			called := false
