@@ -110,7 +110,8 @@ Equivalente a `make install`, paso a paso (siempre `docker compose`, con espacio
 
 ```bash
 cp .env.example .env && chmod 600 .env
-# Si habrá acceso remoto, configurar OPENVMS_HTTPS_SITE_IPV4 con la IPv4 del servidor.
+# Requerido para Compose manual: guardar la IPv4 LAN del servidor en .env.
+sed -i 's/^OPENVMS_HTTPS_SITE_IPV4=.*/OPENVMS_HTTPS_SITE_IPV4=192.168.1.60/' .env
 # Generar OPENVMS_MASTER_KEY con `openssl rand -base64 32` y definir un POSTGRES_PASSWORD único.
 sh deploy/docker/bootstrap-local-tls.sh 192.168.1.60 deploy/docker/local-tls
 docker compose up -d --build        # o: make up

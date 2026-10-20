@@ -127,6 +127,14 @@ env_value() {
 }
 TLS_SITE_IPV4=${OPENVMS_HTTPS_SITE_IPV4:-$(env_value OPENVMS_HTTPS_SITE_IPV4)}
 TLS_SITE_IPV4=${TLS_SITE_IPV4:-127.0.0.1}
+if [ -f .env ] && [ -z "$(env_value OPENVMS_HTTPS_SITE_IPV4)" ] && [ -z "${OPENVMS_HTTPS_SITE_IPV4:-}" ]; then
+  (umask 077 && set_kv .env OPENVMS_HTTPS_SITE_IPV4 "$TLS_SITE_IPV4") ||
+    die "could not save the local-only HTTPS address to .env"
+  if [ -z "$(env_value OPENVMS_AGENT_GRPC_PUBLIC_ADDR)" ] && [ -z "${OPENVMS_AGENT_GRPC_PUBLIC_ADDR:-}" ]; then
+    (umask 077 && set_kv .env OPENVMS_AGENT_GRPC_PUBLIC_ADDR "localhost:9443") ||
+      die "could not save the local-only agent gRPC address to .env"
+  fi
+fi
 TLS_BOOTSTRAP="$ROOT/deploy/docker/bootstrap-local-tls.sh"
 if [ -f "$TLS_BOOTSTRAP" ]; then
   if [ "$DRY" = 1 ]; then
