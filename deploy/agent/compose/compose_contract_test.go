@@ -334,11 +334,11 @@ func TestWebComposeAddsPinnedHTTPSIngressWithoutBreakingHTTPOrProxyTrust(t *test
 		t.Fatalf("Caddy must receive the effective published HTTPS port for the same-origin redirect hint, got %#v", webEnv["OPENVMS_WEB_HTTPS_PORT"])
 	}
 	webVolumes := asList(t, web["volumes"])
-	for _, suffix := range []string{":/etc/caddy/tls.crt:ro", ":/etc/caddy/tls.key:ro"} {
-		target := strings.TrimSuffix(strings.TrimPrefix(suffix, ":"), ":ro")
-		if !hasReadOnlyOptionalBind(t, webVolumes, target) {
-			t.Errorf("web must preserve optional read-only external TLS overrides at %s", suffix)
-		}
+	if !hasReadOnlyBind(t, webVolumes, "/etc/caddy/tls", true) {
+		t.Error("web must mount the generated TLS directory read-only")
+	}
+	if webEnv["OPENVMS_WEB_TLS_CERT_FILE"] != "/etc/caddy/tls/tls.crt" || webEnv["OPENVMS_WEB_TLS_KEY_FILE"] != "/etc/caddy/tls/tls.key" {
+		t.Errorf("web must use the TLS pair created by the Compose bootstrap, got cert=%v key=%v", webEnv["OPENVMS_WEB_TLS_CERT_FILE"], webEnv["OPENVMS_WEB_TLS_KEY_FILE"])
 	}
 	webNetworks := asMap(t, web["networks"])
 	proxyNetwork := asMap(t, webNetworks["onvif-agent"])
@@ -395,19 +395,6 @@ func TestWebComposeAddsPinnedHTTPSIngressWithoutBreakingHTTPOrProxyTrust(t *test
 	}
 }
 
-func hasReadOnlyOptionalBind(t *testing.T, volumes []any, target string) bool {
-	t.Helper()
-	for _, item := range volumes {
-		mount, ok := item.(map[string]any)
-		if !ok || mount["target"] != target || mount["type"] != "bind" || mount["read_only"] != true {
-			continue
-		}
-		bind, ok := mount["bind"].(map[string]any)
-		return ok && bind["create_host_path"] == true
-	}
-	return false
-}
-
 func TestWebTLSBootstrapCreatesVerifiedIPCertificateAndRefusesOverwrite(t *testing.T) {
 	if _, err := exec.LookPath("openssl"); err != nil {
 		t.Skip("OpenSSL is required for the local certificate bootstrap integration test")
@@ -421,8 +408,8 @@ func TestWebTLSBootstrapCreatesVerifiedIPCertificateAndRefusesOverwrite(t *testi
 		t.Fatalf("web TLS bootstrap failed: %v: %s", err, result)
 	}
 	grpcDir := filepath.Join(output, "agent-grpc")
-	if info, err := os.Stat(grpcDir); err != nil || info.Mode().Perm() != 0o700 {
-		t.Fatalf("local bootstrap must create a private dedicated agent gRPC TLS directory: info=%v err=%v", info, err)
+	if info, err := os.Stat(grpcDir); err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("local bootstrap must create a traversable dedicated agent gRPC TLS directory: info=%v err=%v", info, err)
 	}
 	for name, mode := range map[string]os.FileMode{"tls.crt": 0o644, "tls.key": 0o600} {
 		info, err := os.Stat(filepath.Join(grpcDir, name))
@@ -434,7 +421,7 @@ func TestWebTLSBootstrapCreatesVerifiedIPCertificateAndRefusesOverwrite(t *testi
 		t.Fatalf("TLS output directory must be private: info=%v err=%v", info, err)
 	}
 	for name, mode := range map[string]os.FileMode{"tls.crt": 0o644, "tls.key": 0o600} {
-		info, err := os.Stat(filepath.Join(output, name))
+		info, err := os.Stat(filepath.Join(output, "web", name))
 		if err != nil || info.Mode().Perm() != mode {
 			t.Fatalf("%s must have mode %o: info=%v err=%v", name, mode, info, err)
 		}
@@ -450,7 +437,7 @@ func TestWebTLSBootstrapCreatesVerifiedIPCertificateAndRefusesOverwrite(t *testi
 		}
 	}
 	// #nosec G304 -- test fixture path is derived from t.TempDir or a checked-in repository fixture.
-	certificatePEM, err := os.ReadFile(filepath.Join(output, "tls.crt"))
+	certificatePEM, err := os.ReadFile(filepath.Join(output, "web", "tls.crt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -536,9 +523,9 @@ func TestComposeWebTLSUsesPersistentGeneratedCertificateVolumeAndConfiguredSANs(
 		t.Fatal(err)
 	}
 	text := string(compose)
-	for _, required := range []string{"OPENVMS_HTTPS_SANS", "${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/web-tls:/var/lib/openvms/tls", "OPENVMS_WEB_TLS_CERT_HOST_FILE", "OPENVMS_WEB_TLS_KEY_HOST_FILE"} {
+	for _, required := range []string{"OPENVMS_HTTPS_SANS", "${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/web-tls:/var/lib/openvms/tls", "tls-bootstrap", "./deploy/docker/local-tls/web"} {
 		if !strings.Contains(text, required) {
-			t.Errorf("compose must preserve automatic TLS/SAN and external certificate support, missing %q", required)
+			t.Errorf("compose must preserve automatic TLS bootstrap and SAN configuration, missing %q", required)
 		}
 	}
 	var document map[string]any
@@ -546,8 +533,8 @@ func TestComposeWebTLSUsesPersistentGeneratedCertificateVolumeAndConfiguredSANs(
 		t.Fatal(err)
 	}
 	web := asMap(t, asMap(t, document["services"])["web"])
-	if !hasReadOnlyOptionalBind(t, asList(t, web["volumes"]), "/etc/caddy/tls.crt") {
-		t.Fatal("web certificate must remain an optional host bind")
+	if !hasReadOnlyBind(t, asList(t, web["volumes"]), "/etc/caddy/tls", true) {
+		t.Fatal("web TLS directory must be a read-only host bind")
 	}
 }
 
@@ -577,20 +564,17 @@ func TestComposeAgentMTLSEnrollmentUsesDedicatedTLSAndReachableDefaults(t *testi
 		}
 	}
 	volumes := asList(t, api["volumes"])
-	for _, target := range []string{"/etc/openvms/agent-grpc/tls.crt", "/etc/openvms/agent-grpc/tls.key"} {
-		if !hasReadOnlyBind(t, volumes, target, false) {
-			t.Errorf("API must mount %s read-only without creating missing host paths", target)
+	for _, target := range []string{"/etc/openvms/agent-grpc", "/etc/openvms/api-ca"} {
+		if !hasReadOnlyBind(t, volumes, target, true) {
+			t.Errorf("API must mount TLS directory %s read-only and allow Compose to create it", target)
 		}
-	}
-	if !hasReadOnlyBind(t, volumes, "/etc/openvms/api-ca/cert.pem", true) {
-		t.Error("API must mount the configurable CA read-only and allow optional host path creation")
 	}
 	ports := asList(t, api["ports"])
 	if len(ports) != 1 || ports[0] != "${OPENVMS_AGENT_GRPC_PUBLISH_ADDR:-0.0.0.0}:${OPENVMS_AGENT_GRPC_HOST_PORT:-9443}:${OPENVMS_AGENT_GRPC_CONTAINER_PORT:-9443}" {
 		t.Fatalf("API must publish only its configurable authenticated agent gRPC listener, ports=%v", ports)
 	}
 	text := string(compose)
-	for _, required := range []string{"OPENVMS_AGENT_GRPC_TLS_CERT_HOST_FILE", "OPENVMS_AGENT_GRPC_TLS_KEY_HOST_FILE", "OPENVMS_AGENT_API_CA_HOST_FILE", "OPENVMS_API_UID", "OPENVMS_API_GID"} {
+	for _, required := range []string{"tls-bootstrap", "OPENVMS_API_UID", "OPENVMS_API_GID"} {
 		if !strings.Contains(text, required) {
 			t.Errorf("Compose TLS material must be independently configurable with %q", required)
 		}
@@ -636,7 +620,7 @@ func TestLocalTLSBootstrapRepairsLegacyMissingGRPCPairWithoutReplacingHTTPS(t *t
 		t.Fatal(err)
 	}
 	// #nosec G304 -- output is created under t.TempDir() and cannot reference user-controlled files.
-	webCert, err := os.ReadFile(filepath.Join(output, "tls.crt"))
+	webCert, err := os.ReadFile(filepath.Join(output, "web", "tls.crt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +642,7 @@ func TestLocalTLSBootstrapRepairsLegacyMissingGRPCPairWithoutReplacingHTTPS(t *t
 		t.Fatalf("legacy bootstrap rerun: %v", err)
 	}
 	// #nosec G304 -- output is created under t.TempDir() and cannot reference user-controlled files.
-	gotWebCert, err := os.ReadFile(filepath.Join(output, "tls.crt"))
+	gotWebCert, err := os.ReadFile(filepath.Join(output, "web", "tls.crt"))
 	if err != nil || !bytes.Equal(gotWebCert, webCert) {
 		t.Fatalf("existing HTTPS certificate changed: %v", err)
 	}
@@ -783,7 +767,7 @@ func TestTLSBootstrapsRejectLongerIPPrefixWithoutChangingExistingPair(t *testing
 			script:   filepath.Join("..", "..", "..", "deploy", "docker", "bootstrap-local-tls.sh"),
 			create:   "10.1.1.24",
 			mismatch: "10.1.1.2",
-			files:    []string{"tls.crt", "tls.key", "agent-grpc/tls.crt", "agent-grpc/tls.key"},
+			files:    []string{"web/tls.crt", "web/tls.key", "agent-grpc/tls.crt", "agent-grpc/tls.key"},
 		},
 		{
 			name:     "agent gRPC IP certificate",
