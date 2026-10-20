@@ -109,10 +109,36 @@ else
     (umask 077 && set_kv .env OPENVMS_ADMIN_USERNAME "$OPENVMS_ADMIN_USERNAME") ||
       { rm -f .env; die "could not write the admin username to .env"; }
   fi
+  if [ -n "${OPENVMS_HTTPS_SITE_IPV4:-}" ]; then
+    (umask 077 && set_kv .env OPENVMS_HTTPS_SITE_IPV4 "$OPENVMS_HTTPS_SITE_IPV4") ||
+      { rm -f .env; die "could not write the HTTPS site IPv4 to .env"; }
+  fi
   chmod 600 .env
   info "created .env (mode 0600) with a generated OPENVMS_MASTER_KEY and POSTGRES_PASSWORD (not printed)"
   info "back up OPENVMS_MASTER_KEY: encrypted data cannot be recovered without it"
 fi
+
+# Prepare the bind-mounted HTTPS and agent gRPC certificates before Compose starts the API.
+# The template defaults to loopback for a local-only install; remote installs set the public
+# HTTPS IPv4 in .env so both certificates contain the address agents and browsers will use.
+env_value() {
+  [ -f .env ] || return 0
+  awk -v key="$1" 'index($0, key "=") == 1 { print substr($0, length(key) + 2); exit }' .env
+}
+TLS_SITE_IPV4=${OPENVMS_HTTPS_SITE_IPV4:-$(env_value OPENVMS_HTTPS_SITE_IPV4)}
+TLS_SITE_IPV4=${TLS_SITE_IPV4:-127.0.0.1}
+TLS_BOOTSTRAP="$ROOT/deploy/docker/bootstrap-local-tls.sh"
+if [ -f "$TLS_BOOTSTRAP" ]; then
+  if [ "$DRY" = 1 ]; then
+    info "+ sh $TLS_BOOTSTRAP $TLS_SITE_IPV4 $ROOT/deploy/docker/local-tls"
+  else
+    sh "$TLS_BOOTSTRAP" "$TLS_SITE_IPV4" "$ROOT/deploy/docker/local-tls" ||
+      die "local TLS bootstrap failed; verify OPENVMS_HTTPS_SITE_IPV4 and the existing certificate files"
+  fi
+else
+  warn "local TLS bootstrap script not found at $TLS_BOOTSTRAP; certificates were not prepared"
+fi
+
 POSTGRES_DATA_DIR=${OPENVMS_POSTGRES_DATA_DIR:-./data/postgres}
 if [ -d "$POSTGRES_DATA_DIR" ] && [ -n "$(find "$POSTGRES_DATA_DIR" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
   warn "postgres data already exists in $POSTGRES_DATA_DIR: it keeps the password it was created with, and changing POSTGRES_PASSWORD does not re-key the database"

@@ -40,16 +40,16 @@ Implementado no equivale a validado en producción: el estado y la evidencia de 
 git clone https://github.com/jdolan-exalink/openvms.git /root/openvms
 cd /root/openvms
 git checkout v0.4.0        # una versión etiquetada, no main
-OPENVMS_ADMIN_PASSWORD='Una-Clave-Larga-2026' make install
+OPENVMS_HTTPS_SITE_IPV4='192.168.1.60' OPENVMS_ADMIN_PASSWORD='Una-Clave-Larga-2026' make install
 ```
 
-La contraseña del primer administrador se pasa así, en la misma línea: `make install` la escribe en el `.env` nuevo junto con los secretos generados y nunca la imprime. Sin ella, se genera una al azar (ver [Primer acceso](#primer-acceso)).
+Use la IPv4 del servidor si se conectarán usuarios o agentes desde otra máquina. Para acceso solo local, puede ejecutar `make install` sin variables. `make install` guarda la IPv4 y la contraseña en el `.env` nuevo, genera los secretos y certificados TLS, y nunca imprime las claves. Sin `OPENVMS_ADMIN_PASSWORD`, se genera una contraseña al azar (ver [Primer acceso](#primer-acceso)).
 
 `make install` ([`deploy/install.sh`](deploy/install.sh)) hace cinco pasos y nunca pisa un `.env` existente:
 
 1. Verifica Docker y Compose v2 (con Compose v1 falla con un mensaje claro).
 2. Crea `.env` (modo 0600) desde `.env.example` con `OPENVMS_MASTER_KEY` y `POSTGRES_PASSWORD` aleatorios.
-3. Ejecuta `docker compose up -d --build` (la primera compilación tarda varios minutos; no hacen falta Go ni Node en el servidor).
+3. Genera los certificados HTTPS y gRPC locales si hacen falta, y ejecuta `docker compose up -d --build` (la primera compilación tarda varios minutos; no hacen falta Go ni Node en el servidor).
 4. Espera `/health/ready`.
 5. Imprime las URL y los pasos siguientes.
 
@@ -102,14 +102,17 @@ docker compose exec api /vmsctl migrate
 docker compose exec api /vmsctl seed-demo                                   # organización demo (requiere los Frigate simulados)
 ```
 
+Si la web y los agentes accederán desde otra máquina, pase `OPENVMS_HTTPS_SITE_IPV4` en el comando de instalación o configure ese valor en `.env` antes de ejecutar `make install`. Para un servidor local, puede ejecutar `make install` sin variables.
+
 ### Instalación manual
 
 Equivalente a `make install`, paso a paso (siempre `docker compose`, con espacio):
 
 ```bash
 cp .env.example .env && chmod 600 .env
-openssl rand -base64 32     # copiar el resultado a OPENVMS_MASTER_KEY en .env
-# definir también POSTGRES_PASSWORD y, si desea, OPENVMS_ADMIN_PASSWORD
+# Si habrá acceso remoto, configurar OPENVMS_HTTPS_SITE_IPV4 con la IPv4 del servidor.
+# Generar OPENVMS_MASTER_KEY con `openssl rand -base64 32` y definir un POSTGRES_PASSWORD único.
+sh deploy/docker/bootstrap-local-tls.sh 192.168.1.60 deploy/docker/local-tls
 docker compose up -d --build        # o: make up
 docker compose ps                   # todos "running" / "healthy"
 curl -sk https://localhost:8443/health/ready
