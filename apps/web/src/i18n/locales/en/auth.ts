@@ -11,5 +11,17 @@ const messages = {
   tokenInvalid: "The token is invalid or expired.",
   signInToken: "Sign in with an API token",
   signInPassword: "Sign in with username and password",
+  forgotPassword: "Forgot your password?",
+  recoveryIntro: "For platform administrators: a 6-digit code is written to the server log.",
+  requestCode: "Generate code",
+  recoveryCode: "Recovery code",
+  recoveryCodeHint: "Find it on the server with: docker compose logs api | grep recovery",
+  newPassword: "New password",
+  repeatPassword: "Repeat password",
+  changePassword: "Change password",
+  passwordsDiffer: "The passwords do not match.",
+  passwordRecovered: "Password updated. Sign in with the new one.",
+  backToSignIn: "Back to sign in",
+  sessionNotKept: "You signed in, but the browser did not keep the session. Use the same address the server uses (HTTPS when enabled) and make sure cookies are accepted.",
 } as const;
 export default messages;
