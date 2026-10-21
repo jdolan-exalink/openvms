@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dynamicGridShape } from "./visionAiGrid";
+import { dynamicGridShape, priorityOrder } from "./visionAiGrid";
 
 describe("dynamicGridShape", () => {
   it.each([
@@ -25,5 +25,26 @@ describe("dynamicGridShape", () => {
   it("treats negative or non-finite counts as empty", () => {
     expect(dynamicGridShape(-3)).toEqual({ cols: 0, rows: 0 });
     expect(dynamicGridShape(Number.NaN)).toEqual({ cols: 0, rows: 0 });
+  });
+});
+
+describe("priorityOrder", () => {
+  const slot = (n: number, score?: number, extra: Partial<{ camera_id: string | null; pinned: boolean }> = {}) => ({
+    slot: n, camera_id: `cam-${n}`, pinned: false, score, ...extra,
+  });
+
+  it("ranks filled slots by score, highest first", () => {
+    const order = priorityOrder([slot(0, 10), slot(1, 90), slot(2, 50)]);
+    expect([order.get(1), order.get(2), order.get(0)]).toEqual([0, 1, 2]);
+  });
+
+  it("keeps pinned slots ahead of ranked ones, in slot order", () => {
+    const order = priorityOrder([slot(0, 99), slot(1, 5, { pinned: true }), slot(2, 1, { pinned: true })]);
+    expect([order.get(1), order.get(2), order.get(0)]).toEqual([0, 1, 2]);
+  });
+
+  it("puts empty slots last and breaks score ties by slot index", () => {
+    const order = priorityOrder([slot(0, undefined, { camera_id: null }), slot(1, 40), slot(2, 40)]);
+    expect([order.get(1), order.get(2), order.get(0)]).toEqual([0, 1, 2]);
   });
 });

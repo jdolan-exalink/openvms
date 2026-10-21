@@ -19,7 +19,7 @@ export const DEFAULT_VISION_PREFS: VisionPrefs = {
   mode: "matrix",
   presetSource: "general",
   layoutCount: 4,
-  activeObjects: { person: true, car: true, motorcycle: true, truck: false, license_plate: true, face: false },
+  activeObjects: { person: true, car: true, motorcycle: true, truck: true, license_plate: true, face: true },
 };
 
 export function visionPrefsKey(tenantId: string | null, userId: string): string {

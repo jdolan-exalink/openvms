@@ -28,6 +28,12 @@ describe("visionPrefsKey", () => {
 });
 
 describe("parseVisionPrefs", () => {
+  it("enables every smart detection for a first visit", () => {
+    expect(parseVisionPrefs(null).activeObjects).toEqual({
+      person: true, car: true, motorcycle: true, truck: true, license_plate: true, face: true,
+    });
+  });
+
   it("returns defaults for missing or corrupt input", () => {
     expect(parseVisionPrefs(null)).toEqual(DEFAULT_VISION_PREFS);
     expect(parseVisionPrefs("{not json")).toEqual(DEFAULT_VISION_PREFS);
