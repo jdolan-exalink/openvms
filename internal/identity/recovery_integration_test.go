@@ -9,11 +9,13 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
@@ -27,14 +29,17 @@ type recoveryEnv struct {
 	svc  *Service
 	logs *bytes.Buffer
 	now  time.Time
+	// ownerURL connects as the database owner, for fixtures the app role may not write
+	// (audit_log is append-only for it).
+	ownerURL string
 }
 
 var loggedCode = regexp.MustCompile(`code=([0-9]{6})`)
 
 func newRecoveryEnv(t *testing.T) *recoveryEnv {
 	t.Helper()
-	pool, _ := pgtest.Migrated(t)
-	e := &recoveryEnv{t: t, ctx: context.Background(), st: &store.Store{Pool: pool}, logs: &bytes.Buffer{}, now: time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)}
+	pool, url := pgtest.Migrated(t)
+	e := &recoveryEnv{t: t, ctx: context.Background(), st: &store.Store{Pool: pool}, logs: &bytes.Buffer{}, now: time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC), ownerURL: url}
 	e.svc = &Service{
 		Store: e.st, Log: slog.New(slog.NewTextHandler(e.logs, nil)),
 		SessionTTL: time.Hour, IdleTimeout: time.Hour, MaxFailures: 5, LockFor: 15 * time.Minute,
@@ -297,5 +302,73 @@ func TestPasswordRecoveryConcurrentRequestsLogOneCode(t *testing.T) {
 		if got := len(loggedCode.FindAllString(e.logs.String(), -1)); got != 1 {
 			t.Fatalf("round %d: %d codes logged for concurrent requests, want 1", round, got)
 		}
+	}
+}
+
+// TestPasswordRecoveryDailyFailureCap bounds slow guessing across many codes and IPs: after
+// MaxRecoveryFailuresPerDay wrong codes the account cannot recover for 24 hours, even with the
+// right code; attempts rejected by the cap do not extend it, and the block is visible in the log.
+func TestPasswordRecoveryDailyFailureCap(t *testing.T) {
+	e := newRecoveryEnv(t)
+	admin := e.user("admin", true, "active")
+	failures := 0
+	var lastCode string
+	for failures < MaxRecoveryFailuresPerDay {
+		lastCode = e.request("admin")
+		if lastCode == "" {
+			t.Fatalf("after %d failures a new code was expected", failures)
+		}
+		wrong := "000000"
+		if lastCode == wrong {
+			wrong = "111111"
+		}
+		for range MaxRecoveryAttempts {
+			if failures == MaxRecoveryFailuresPerDay {
+				break
+			}
+			_ = e.svc.ConfirmPasswordRecovery(e.ctx, "admin", wrong, "New-Password-22")
+			failures++
+		}
+		e.now = e.now.Add(RecoveryRequestCooldown + time.Second)
+	}
+
+	if code := e.request("admin"); code != "" {
+		t.Fatal("no code may be logged once the daily failure cap is reached")
+	}
+	if !strings.Contains(e.logs.String(), "password recovery blocked") {
+		t.Fatalf("a blocked request must be visible in the log: %s", e.logs.String())
+	}
+
+	// The right, unexpired, unexhausted code is refused while blocked.
+	if _, err := e.st.Pool.Exec(e.ctx, "UPDATE password_recovery_codes SET attempts = 0, expires_at = $2 WHERE user_id = $1", admin.ID, e.now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	// As many refused attempts as the cap: if they counted, the block would renew itself.
+	for range MaxRecoveryFailuresPerDay {
+		if err := e.svc.ConfirmPasswordRecovery(e.ctx, "admin", lastCode, "New-Password-22"); !errors.Is(err, ErrInvalidRecoveryCode) {
+			t.Fatalf("right code past the cap: %v, want ErrInvalidRecoveryCode", err)
+		}
+	}
+	if _, err := e.svc.Login(e.ctx, LoginInput{Username: "admin", Password: "New-Password-22"}); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("the password must be unchanged while blocked: %v", err)
+	}
+
+	// Once the real wrong guesses age out, recovery reopens: rejections caused by the cap itself
+	// must not have extended it.
+	owner, err := pgx.Connect(e.ctx, e.ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Close(e.ctx)
+	// Simulate the day passing: the append-only trigger is skipped for this fixture session only.
+	if _, err := owner.Exec(e.ctx, "SET session_replication_role = replica"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := owner.Exec(e.ctx, "UPDATE audit_log SET occurred_at = occurred_at - interval '25 hours' WHERE action = $1 AND details->>'reason' = 'wrong_code'", ActionPasswordRecoveryFailed); err != nil {
+		t.Fatal(err)
+	}
+	e.now = e.now.Add(RecoveryRequestCooldown + time.Second)
+	if code := e.request("admin"); code == "" {
+		t.Fatal("recovery must reopen once the wrong guesses are older than 24 hours")
 	}
 }
