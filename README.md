@@ -113,8 +113,7 @@ cp .env.example .env && chmod 600 .env
 # Requerido para Compose manual: guardar la IPv4 LAN del servidor en .env.
 sed -i 's/^OPENVMS_HTTPS_SITE_IPV4=.*/OPENVMS_HTTPS_SITE_IPV4=192.168.1.60/' .env
 # Generar OPENVMS_MASTER_KEY con `openssl rand -base64 32` y definir un POSTGRES_PASSWORD único.
-sh deploy/docker/bootstrap-local-tls.sh 192.168.1.60 deploy/docker/local-tls
-docker compose up -d --build        # o: make up
+docker compose up -d --build        # Compose genera HTTPS y gRPC TLS automáticamente
 docker compose ps                   # todos "running" / "healthy"
 curl -sk https://localhost:8443/health/ready
 ```
@@ -128,7 +127,7 @@ Todas las variables que lee `docker-compose.yml` están documentadas en `.env.ex
 | Secretos (obligatorios) | `OPENVMS_MASTER_KEY`, `POSTGRES_PASSWORD` | La clave maestra son 32 bytes aleatorios en base64 (`openssl rand -base64 32`); no la cambie en una instalación existente. `POSTGRES_PASSWORD` solo se aplica al crear el volumen de la base. |
 | Primer administrador | `OPENVMS_ADMIN_USERNAME`, `OPENVMS_ADMIN_PASSWORD` | Ver [Primer acceso](#primer-acceso). |
 | Organización y sitio iniciales | `OPENVMS_DEFAULT_TENANT`, `OPENVMS_DEFAULT_SITE`, `OPENVMS_DEFAULT_SITE_TZ` | Solo se usan si no existe ninguna organización. Zona horaria predeterminada: `America/Argentina/Cordoba`. |
-| Web y HTTPS | `WEB_PORT` (8000), `WEB_HTTPS_PORT` (8443), `SITE_ADDRESS`, `OPENVMS_HTTPS_SITE_IPV4`, `OPENVMS_HTTPS_SANS`, `OPENVMS_HTTPS_DEFAULT_SNI`, `OPENVMS_WEB_TLS_CERT_HOST_FILE`, `OPENVMS_WEB_TLS_KEY_HOST_FILE`, `HTTPS_INGRESS_PROXY_CIDRS`, `CREDENTIAL_TRUSTED_PROXY_CIDRS` | Con un dominio público, `SITE_ADDRESS=vms.ejemplo.com` y puertos 80/443: Caddy obtiene el certificado solo. |
+| Web y HTTPS | `WEB_PORT` (8000), `WEB_HTTPS_PORT` (8443), `SITE_ADDRESS`, `OPENVMS_HTTPS_SITE_IPV4`, `OPENVMS_HTTPS_SANS`, `OPENVMS_HTTPS_DEFAULT_SNI`, `HTTPS_INGRESS_PROXY_CIDRS`, `CREDENTIAL_TRUSTED_PROXY_CIDRS` | Certificado autofirmado local; puede reemplazar el par en `deploy/docker/local-tls/web/`. |
 | Sesiones y registro | `SESSION_TTL` (12h), `SESSION_IDLE` (2h), `LOG_LEVEL`, `OPENVMS_FEATURES` | `OPENVMS_FEATURES` es una lista separada por comas de feature flags ([`docs/live-view-architecture.md`](docs/live-view-architecture.md)). |
 | Notificaciones | `WAHA_API_KEY` | Clave del gateway interno de WhatsApp; cámbiela en producción. |
 | ONVIF y agente local | `ONVIF_ALLOWED_CIDRS`, `ONVIF_DISCOVERY_INTERFACES`, `OPENVMS_AGENT_*` | Solo para el perfil opcional `onvif-agent` y la red interna del agente. |
@@ -184,7 +183,7 @@ Aceleradores: el agente detecta **NVIDIA**, **Intel OpenVINO**, **Google Coral**
 
 ## Seguridad y red
 
-- **HTTPS web**: en el primer inicio se genera un certificado autofirmado, que se conserva en el volumen `openvms-web-tls`. Defina en `OPENVMS_HTTPS_SANS` todos los nombres e IP con que accederá (separados por comas, sin espacios), por ejemplo `localhost,192.168.1.20,openvms.lan`; `OPENVMS_HTTPS_DEFAULT_SNI` debe ser uno de ellos. El certificado se regenera al cambiar la lista o con menos de 30 días de validez. El navegador no confía solo: hay que instalar el certificado o usar uno propio con `OPENVMS_WEB_TLS_CERT_HOST_FILE` y `OPENVMS_WEB_TLS_KEY_HOST_FILE` (rutas del host; se validan y nunca se reemplazan). Si queda un bloqueo `.generation-lock` en el volumen tras un inicio interrumpido, detenga el contenedor `web`, verifique que nada más use el volumen y quítelo.
+- **HTTPS web**: Compose genera un certificado autofirmado en `deploy/docker/local-tls/web/` en el primer inicio. El navegador no confía solo: hay que instalar el certificado o copiar un par PEM propio a ese directorio antes de iniciar. El certificado HTTPS público también se copia al directorio `api-ca` para inscripción de agentes.
 - **Canal de control gRPC** (`GRPC_ADDR`, `:9090`): va en texto plano mientras no se definan **ambas** `GRPC_TLS_CERT_FILE` y `GRPC_TLS_KEY_FILE`; la API lo avisa al arrancar (`gRPC control channel is plaintext`). El agente puede usar TLS mutuo. Detalles y orden de migración: [`docs/grpc-tls.md`](docs/grpc-tls.md).
 - **Secretos**: las contraseñas de Frigate se guardan cifradas (AES-256-GCM) con `OPENVMS_MASTER_KEY` (también puede pasarse como archivo con `OPENVMS_MASTER_KEY_FILE`). Las contraseñas de usuario usan Argon2id. `.env` debe tener modo 0600.
 - Postgres, Valkey, NATS y SeaweedFS solo escuchan en `127.0.0.1`. La auditoría (menú Auditoría) registra ingresos, cambios, vistas en vivo, reproducciones y descargas, y no se puede modificar desde la aplicación.
@@ -194,7 +193,7 @@ Aceleradores: el agente detecta **NVIDIA**, **Intel OpenVINO**, **Google Coral**
 | Síntoma | Causa y solución |
 |---|---|
 | `Invalid interpolation format` o `'name' does not match any of the regexes` al levantar | Se usó Compose v1 (`docker-compose`). Instale el plugin v2 y use `docker compose`. |
-| `web` no arranca con certificado propio | `OPENVMS_WEB_TLS_CERT_HOST_FILE` y `OPENVMS_WEB_TLS_KEY_HOST_FILE` deben definirse ambas, con archivos legibles, válidos y que coincidan entre sí; si no, el contenedor lo informa y se detiene. |
+| `api` o `web` no arranca por TLS | Revise `docker compose logs tls-bootstrap`; el bootstrap valida los pares en `deploy/docker/local-tls/` y se detiene si están incompletos o no coinciden. |
 | `api` o `worker` reiniciándose | Casi siempre Postgres, NATS o Valkey no están sanos. Revise `docker compose ps` y `docker compose logs postgres`. Con las políticas de reinicio se recuperan solos cuando la dependencia vuelve. |
 | La API arranca pero no se puede entrar con la contraseña de `.env` | Solo se aplica en la primera creación del admin. Para cambiarla: `vmsctl passwd`. |
 | Patentes sin lecturas nuevas tras una caída | La sincronización de objetos continúa por páginas desde el cursor guardado; un backlog grande se drena en varias pasadas. Verifique en Servidores la columna "Eventos". |

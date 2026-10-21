@@ -66,6 +66,7 @@ if [ -e "$output_dir/tls.crt" ] || [ -L "$output_dir/tls.crt" ] || [ -e "$output
     chown "${OPENVMS_API_UID:-65532}:${OPENVMS_API_GID:-65532}" "$output_dir/tls.key"
   fi
   chmod 644 "$output_dir/tls.crt"
+  chmod 755 -- "$output_dir"
   echo "Validated existing dedicated agent gRPC TLS pair in $output_dir."
   exit 0
 fi
@@ -107,5 +108,6 @@ key_pub=$(openssl pkey -in "$output_dir/tls.key" -pubout -outform DER | sha256su
 claimed=0
 rmdir "$lock"
 trap - EXIT HUP INT TERM
+chmod 755 -- "$output_dir"
 echo "Created dedicated agent gRPC TLS certificate and private key in $output_dir."
 echo "Trust tls.crt explicitly on agents; do not disable certificate verification."

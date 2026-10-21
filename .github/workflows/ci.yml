@@ -129,8 +129,6 @@ jobs:
     needs: [images]
     steps:
       - uses: actions/checkout@v7
-      - name: Bootstrap local TLS
-        run: sudo ./deploy/docker/bootstrap-local-tls.sh 10.1.1.24 deploy/docker/local-tls
       - name: Start stack
         env:
           OPENVMS_HTTPS_SITE_IPV4: 10.1.1.24

@@ -118,9 +118,8 @@ else
   info "back up OPENVMS_MASTER_KEY: encrypted data cannot be recovered without it"
 fi
 
-# Prepare the bind-mounted HTTPS and agent gRPC certificates before Compose starts the API.
-# The template defaults to loopback for a local-only install; remote installs set the public
-# HTTPS IPv4 in .env so both certificates contain the address agents and browsers will use.
+# Compose creates the bind-mounted HTTPS and agent gRPC certificates before starting the API.
+# Keep the loopback fallback for a local-only `make install`; manual Compose requires an IP in .env.
 env_value() {
   [ -f .env ] || return 0
   awk -v key="$1" 'index($0, key "=") == 1 { print substr($0, length(key) + 2); exit }' .env
@@ -134,17 +133,6 @@ if [ -f .env ] && [ -z "$(env_value OPENVMS_HTTPS_SITE_IPV4)" ] && [ -z "${OPENV
     (umask 077 && set_kv .env OPENVMS_AGENT_GRPC_PUBLIC_ADDR "localhost:9443") ||
       die "could not save the local-only agent gRPC address to .env"
   fi
-fi
-TLS_BOOTSTRAP="$ROOT/deploy/docker/bootstrap-local-tls.sh"
-if [ -f "$TLS_BOOTSTRAP" ]; then
-  if [ "$DRY" = 1 ]; then
-    info "+ sh $TLS_BOOTSTRAP $TLS_SITE_IPV4 $ROOT/deploy/docker/local-tls"
-  else
-    sh "$TLS_BOOTSTRAP" "$TLS_SITE_IPV4" "$ROOT/deploy/docker/local-tls" ||
-      die "local TLS bootstrap failed; verify OPENVMS_HTTPS_SITE_IPV4 and the existing certificate files"
-  fi
-else
-  warn "local TLS bootstrap script not found at $TLS_BOOTSTRAP; certificates were not prepared"
 fi
 
 POSTGRES_DATA_DIR=${OPENVMS_POSTGRES_DATA_DIR:-./data/postgres}
