@@ -209,8 +209,8 @@ const (
 	// code and a password fit easily).
 	passwordRecoveryMaxBodyBytes = 4 << 10
 
-	passwordRecoveryPath        = "/api/v1/auth/recovery"
-	passwordRecoveryConfirmPath = "/api/v1/auth/recovery/confirm"
+	passwordRecoveryPath        = "/api/v1/auth/recovery"         // #nosec G101 -- route path, not a credential
+	passwordRecoveryConfirmPath = "/api/v1/auth/recovery/confirm" // #nosec G101 -- route path, not a credential
 )
 
 // limitAgentEnroll answers 429 to a client IP that enrolls too often. The IP is the one
