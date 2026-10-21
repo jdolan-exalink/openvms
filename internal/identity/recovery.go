@@ -132,7 +132,7 @@ func (s *Service) RequestPasswordRecovery(ctx context.Context, username string) 
 }
 
 // ConfirmPasswordRecovery sets newPassword when code is the account's active, unexpired code.
-// Every wrong answer is ErrInvalidRecoveryCode; after MaxRecoveryAttempts the code is dropped.
+// Every wrong answer is ErrInvalidRecoveryCode; after MaxRecoveryAttempts the code is unusable.
 // The account's lock and sessions are cleared; MFA is left as it was.
 func (s *Service) ConfirmPasswordRecovery(ctx context.Context, username, code, newPassword string) error {
 	if !s.RecoveryLogCodes {
@@ -170,21 +170,17 @@ func (s *Service) ConfirmPasswordRecovery(ctx context.Context, username, code, n
 		if err != nil {
 			return err
 		}
+		// Expired and exhausted codes stay stored (unusable) so the request cooldown, measured from
+		// the last code, still bounds how fast new codes, and so guesses, can be obtained.
 		if now.After(active.ExpiresAt) {
-			if err := q.DeletePasswordRecoveryCode(ctx, u.ID); err != nil {
-				return err
-			}
 			return fail(&u, "expired")
 		}
+		if active.Attempts >= MaxRecoveryAttempts {
+			return fail(&u, "exhausted")
+		}
 		if !recoveryCodeMatches(code, active.CodeSalt, active.CodeHash) {
-			attempts, err := q.IncrementPasswordRecoveryAttempts(ctx, u.ID)
-			if err != nil {
+			if _, err := q.IncrementPasswordRecoveryAttempts(ctx, u.ID); err != nil {
 				return err
-			}
-			if attempts >= MaxRecoveryAttempts {
-				if err := q.DeletePasswordRecoveryCode(ctx, u.ID); err != nil {
-					return err
-				}
 			}
 			return fail(&u, "wrong_code")
 		}

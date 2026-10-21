@@ -175,8 +175,8 @@ func TestPasswordRecoveryLimitsAttempts(t *testing.T) {
 			t.Fatalf("wrong attempt %d: %v", i+1, err)
 		}
 	}
-	if e.codeRows(admin.ID) != 0 {
-		t.Fatal("an exhausted code must be deleted")
+	if e.codeRows(admin.ID) != 1 {
+		t.Fatal("an exhausted code stays stored (unusable) so the cooldown keeps applying")
 	}
 	if err := e.svc.ConfirmPasswordRecovery(e.ctx, "admin", code, "New-Password-22"); !errors.Is(err, ErrInvalidRecoveryCode) {
 		t.Fatalf("right code after exhaustion: %v, want ErrInvalidRecoveryCode", err)
@@ -246,5 +246,29 @@ func TestPasswordRecoveryDisabled(t *testing.T) {
 	}
 	if loggedCode.MatchString(e.logs.String()) {
 		t.Fatal("no code may be logged while disabled")
+	}
+}
+
+// TestPasswordRecoveryCooldownSurvivesExhaustion closes the brute-force loop: burning a code's
+// attempts must not allow an immediate new code, so guesses stay bounded by the cooldown.
+func TestPasswordRecoveryCooldownSurvivesExhaustion(t *testing.T) {
+	e := newRecoveryEnv(t)
+	e.user("admin", true, "active")
+	code := e.request("admin")
+	wrong := "000000"
+	if code == wrong {
+		wrong = "111111"
+	}
+	for range MaxRecoveryAttempts {
+		_ = e.svc.ConfirmPasswordRecovery(e.ctx, "admin", wrong, "New-Password-22")
+	}
+	e.now = e.now.Add(time.Second)
+	if again := e.request("admin"); again != "" {
+		t.Fatal("exhausting a code must not skip the cooldown")
+	}
+	// An expired code keeps the cooldown too (it is measured from the last code).
+	e.now = e.now.Add(RecoveryRequestCooldown)
+	if next := e.request("admin"); next == "" {
+		t.Fatal("after the cooldown a new code must be issued")
 	}
 }

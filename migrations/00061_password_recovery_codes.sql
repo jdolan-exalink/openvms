@@ -1,6 +1,7 @@
 -- Platform admin password recovery: a short-lived 6-digit code written to the API log. One
 -- active code per user (a new request replaces it); the code is stored salted and hashed, and
--- the row is deleted once used, exhausted or replaced.
+-- the row is deleted once used and replaced by the next request; an expired or exhausted code
+-- stays (unusable) so the per-account request cooldown still applies.
 -- +goose Up
 CREATE TABLE password_recovery_codes (
     user_id      uuid PRIMARY KEY REFERENCES users (id) ON DELETE CASCADE,
