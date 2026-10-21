@@ -2,7 +2,7 @@ module github.com/jdolan-exalink/openvms
 
 go 1.26.0
 
-toolchain go1.26.9
+toolchain go1.26.10
 
 tool (
 	github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen
