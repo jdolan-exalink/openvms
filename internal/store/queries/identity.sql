@@ -156,3 +156,7 @@ UPDATE password_recovery_codes SET attempts = attempts + 1 WHERE user_id = @user
 
 -- name: DeletePasswordRecoveryCode :exec
 DELETE FROM password_recovery_codes WHERE user_id = @user_id;
+
+-- Serializes password recovery requests of one account (the code row may not exist yet).
+-- name: LockUserForRecovery :exec
+SELECT id FROM users WHERE id = @id FOR UPDATE;

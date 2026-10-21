@@ -98,6 +98,11 @@ func (s *Service) RequestPasswordRecovery(ctx context.Context, username string) 
 		if !recoverable(u) {
 			return nil
 		}
+		// Concurrent requests (a double click) must see each other's code: lock the account row,
+		// since the code row may not exist yet for FOR UPDATE to lock.
+		if err := q.LockUserForRecovery(ctx, u.ID); err != nil {
+			return err
+		}
 		active, err := q.GetPasswordRecoveryCode(ctx, u.ID)
 		switch {
 		case err == nil && now.Sub(active.CreatedAt) < RecoveryRequestCooldown:

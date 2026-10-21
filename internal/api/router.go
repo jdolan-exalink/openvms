@@ -40,6 +40,9 @@ type Options struct {
 	// AgentEnrollLimiter limits POST /api/v1/agent/enroll per client IP; nil uses the default
 	// (burst 10, one more every 6 seconds).
 	AgentEnrollLimiter *httpx.RateLimiter
+	// PasswordRecoveryLimiter limits the public /api/v1/auth/recovery endpoints per client IP; nil
+	// uses the default (burst 10, one more every 30 seconds).
+	PasswordRecoveryLimiter *httpx.RateLimiter
 	// Media serves /media/v1 (live, recordings, snapshots, downloads) behind the same
 	// authentication as the API. Nil disables it.
 	Media http.Handler
@@ -53,6 +56,10 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 	if enrollLimiter == nil {
 		enrollLimiter = httpx.NewRateLimiter(agentEnrollBurst, agentEnrollRefill, nil)
 	}
+	recoveryLimiter := opts.PasswordRecoveryLimiter
+	if recoveryLimiter == nil {
+		recoveryLimiter = httpx.NewRateLimiter(passwordRecoveryBurst, passwordRecoveryRefill, nil)
+	}
 	spec, err := gen.GetSpec()
 	if err != nil {
 		return nil, err
@@ -64,7 +71,7 @@ func NewRouter(h *Handlers, log *slog.Logger, opts Options) (http.Handler, error
 
 	r := chi.NewRouter()
 	r.Use(credentialInstallHTTPS(opts.CredentialTrustedProxyCIDRs), httpx.RequestID, httpx.ClientAddr(opts.TrustForwardedFor), httpx.Recover(log), httpx.AccessLog(log), httpx.SecurityHeaders, withRequestInfo)
-	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody, validateAgentUpdateBody, limitAgentEnroll(enrollLimiter), limitAgentEnrollBody)
+	r.Use(validateOnvifDiscoveryBody, validateOnvifProbeBody, validateAgentTLSConfigBody, validateAgentInstallBody, validateAgentUpdateBody, limitAgentEnroll(enrollLimiter), limitAgentEnrollBody, limitPasswordRecovery(recoveryLimiter))
 	if opts.Queries != nil {
 		r.Use(Authenticate(opts.Queries, AuthOptions{IdleTimeout: opts.SessionIdle}))
 	}
@@ -195,6 +202,9 @@ func limitAgentEnrollBody(next http.Handler) http.Handler {
 const (
 	agentEnrollBurst  = 10
 	agentEnrollRefill = 6 * time.Second
+
+	passwordRecoveryBurst  = 10
+	passwordRecoveryRefill = 30 * time.Second
 )
 
 // limitAgentEnroll answers 429 to a client IP that enrolls too often. The IP is the one
@@ -214,6 +224,29 @@ func limitAgentEnroll(l *httpx.RateLimiter) func(http.Handler) http.Handler {
 			if ok, retry := l.Allow(key); !ok {
 				w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
 				writeError(w, r, http.StatusTooManyRequests, "rate_limited", "too many enrollment requests; retry later")
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// limitPasswordRecovery gives both public recovery endpoints one shared budget per client IP, so
+// an anonymous client can neither flood the API log with codes nor the audit log with failures.
+func limitPasswordRecovery(l *httpx.RateLimiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || (r.URL.Path != "/api/v1/auth/recovery" && r.URL.Path != "/api/v1/auth/recovery/confirm") {
+				next.ServeHTTP(w, r)
+				return
+			}
+			key := "unknown"
+			if ip := httpx.ClientIP(r.Context()); ip != nil {
+				key = ip.String()
+			}
+			if ok, retry := l.Allow(key); !ok {
+				w.Header().Set("Retry-After", strconv.Itoa(int(retry.Seconds())+1))
+				writeError(w, r, http.StatusTooManyRequests, "rate_limited", "Demasiados intentos de recuperación. Probá de nuevo en unos minutos.")
 				return
 			}
 			next.ServeHTTP(w, r)
