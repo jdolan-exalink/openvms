@@ -37,7 +37,7 @@ import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/P
 import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import {
-  cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, isVisionTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, placeVisionAt, placeVisionInOpenCell, resizeTiles, resolveDragEnd, reorderTiles, tileIdentityKey,
+  cameraIdOf, cleanFisheyeVirtualViewTiles, duplicateTileIndexes, feviewFromDragId, fillTiles, fitTiles, growLayout, isMapTile, isVisionTile, LIVE_GRID_DROP_ID, liveSelectionKey, mapFromDragId, parseSelection, placeCameraAt, placeCameraUnique, placeInOpenCell, placeMapAt, placeVisionAt, placeVisionInOpenCell, resizeTiles, resolveDragEnd, reorderTiles, tileIdentityKey, tilesToViewCells, viewCellsToTiles,
   serializeSelection, swapTiles, tileDragId, tilesForFisheyeMultiView, visionFromDragId,
   type Quality, type Tile, type LiveVisionRef,
 } from "@/lib/liveGrid";
@@ -519,7 +519,7 @@ function LiveDesktop() {
   const showView = (v: Schemas["View"]) => {
     setViewId(v.id);
     const n = v.layout.columns;
-    const next: Tile[] = v.layout.cells.map((c) => (c.camera_id ? { camera_id: c.camera_id, quality: c.quality ?? "sub" } : null));
+    const next: Tile[] = viewCellsToTiles(v.layout.cells);
     const remembered = recallViewPanes(v.id, n, next.length);
     const nextRows = remembered?.rows ?? (next.length ? Math.ceil(next.length / n) : n);
     const nextPanes = remembered?.panes ?? uniformPanes(n, nextRows);
@@ -535,7 +535,7 @@ function LiveDesktop() {
   };
   const currentLayout = (): Schemas["ViewLayout"] => ({
     columns,
-    cells: tiles.map((t) => (t && "camera_id" in t ? { camera_id: t.camera_id, quality: t.quality } : { quality: "sub" })),
+    cells: tilesToViewCells(tiles),
   });
   const openViewProperties = (id: string) => {
     const view = views.data?.find((item) => item.id === id);
@@ -719,13 +719,13 @@ function LiveDesktop() {
       if (!view) throw new Error(tr("live.viewGone"));
       const n = view.layout.columns;
       const nextRows = view.layout.cells.length ? Math.ceil(view.layout.cells.length / n) : n;
-      const existing = resizeTiles(view.layout.cells.map((c): Tile => (c.camera_id ? { camera_id: c.camera_id, quality: c.quality ?? "sub" } : null)), n, nextRows);
+      const existing = resizeTiles(viewCellsToTiles(view.layout.cells), n, nextRows);
       const res = fillTiles(existing, v.ids.filter((id) => camById.has(id)).map((id) => ({ id, quality: cameraQuality(id, n) })));
       if (res.added === 0) return { view, res, saved: false };
       await unwrap(
         await api.PUT("/api/v1/views/{viewId}", {
           params: { path: { viewId: view.id } },
-          body: { name: view.name, shared: view.shared, tenant_id: view.tenant_id, layout: { columns: n, cells: res.tiles.map((t) => (t && "camera_id" in t ? { camera_id: t.camera_id, quality: t.quality } : { quality: "sub" as const })) } },
+          body: { name: view.name, shared: view.shared, tenant_id: view.tenant_id, layout: { columns: n, cells: tilesToViewCells(res.tiles) } },
         }),
       );
       await qc.invalidateQueries({ queryKey: ["views"] });
