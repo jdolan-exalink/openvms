@@ -338,3 +338,40 @@ func (h *Handlers) ListAudit(ctx context.Context, r gen.ListAuditRequestObject) 
 func actorOf(u db.User) authz.Actor {
 	return authz.Actor{UserID: u.ID, Username: u.Username, TenantID: u.TenantID}
 }
+
+// recoveryAccepted is the one answer to every recovery request, so it never reveals an account.
+const recoveryAccepted = "Si la cuenta puede recuperarse, se generó un código de 6 dígitos en el log del servidor. Vence en 10 minutos."
+
+var recoveryDisabled = gen.NotFoundJSONResponse{Code: "recovery_disabled", Message: "La recuperación por código está deshabilitada en este servidor."}
+
+func (h *Handlers) RequestPasswordRecovery(ctx context.Context, r gen.RequestPasswordRecoveryRequestObject) (gen.RequestPasswordRecoveryResponseObject, error) {
+	if r.Body == nil {
+		return gen.RequestPasswordRecovery400JSONResponse{BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "invalid", Message: "username is required"}}, nil
+	}
+	err := h.Identity.RequestPasswordRecovery(ctx, r.Body.Username)
+	switch {
+	case errors.Is(err, identity.ErrRecoveryDisabled):
+		return gen.RequestPasswordRecovery404JSONResponse{NotFoundJSONResponse: recoveryDisabled}, nil
+	case err != nil:
+		return nil, err
+	}
+	return gen.RequestPasswordRecovery202JSONResponse{Message: recoveryAccepted}, nil
+}
+
+func (h *Handlers) ConfirmPasswordRecovery(ctx context.Context, r gen.ConfirmPasswordRecoveryRequestObject) (gen.ConfirmPasswordRecoveryResponseObject, error) {
+	if r.Body == nil {
+		return gen.ConfirmPasswordRecovery400JSONResponse{BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "invalid", Message: "username, code and new_password are required"}}, nil
+	}
+	err := h.Identity.ConfirmPasswordRecovery(ctx, r.Body.Username, r.Body.Code, r.Body.NewPassword)
+	switch {
+	case errors.Is(err, identity.ErrRecoveryDisabled):
+		return gen.ConfirmPasswordRecovery404JSONResponse{NotFoundJSONResponse: recoveryDisabled}, nil
+	case errors.Is(err, identity.ErrInvalidRecoveryCode):
+		return gen.ConfirmPasswordRecovery401JSONResponse{UnauthorizedJSONResponse: gen.UnauthorizedJSONResponse{Code: "invalid_recovery_code", Message: "El código no es válido o venció. Pedí uno nuevo."}}, nil
+	case errors.Is(err, identity.ErrWeakPassword):
+		return gen.ConfirmPasswordRecovery400JSONResponse{BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "weak_password", Message: err.Error()}}, nil
+	case err != nil:
+		return nil, err
+	}
+	return gen.ConfirmPasswordRecovery204Response{}, nil
+}

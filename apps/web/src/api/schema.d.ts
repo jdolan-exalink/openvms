@@ -2002,6 +2002,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ask for a platform admin recovery code (written to the API log)
+         * @description For an active platform administrator, writes a random 6-digit code to the API log (valid
+         *     10 minutes, one active code per account, at most one new code per minute). The answer is
+         *     the same for any username, so it never reveals whether an account exists or may recover.
+         *     Disabled with PASSWORD_RECOVERY_LOG_CODES=false (404 recovery_disabled).
+         */
+        post: operations["requestPasswordRecovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/recovery/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set a new password with the logged recovery code
+         * @description Sets new_password when code is the account's active, unexpired code. A wrong, expired,
+         *     exhausted (5 attempts) or unknown code or account answers the same 401. On success the
+         *     account's failed-login lock and sessions are cleared; MFA stays as it was.
+         */
+        post: operations["confirmPasswordRecovery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/logout": {
         parameters: {
             query?: never;
@@ -4862,6 +4907,17 @@ export interface components {
             /** Format: password */
             password: string;
             totp_code?: string;
+        };
+        PasswordRecoveryRequest: {
+            username: string;
+        };
+        PasswordRecoveryAccepted: {
+            message: string;
+        };
+        PasswordRecoveryConfirm: {
+            username: string;
+            code: string;
+            new_password: string;
         };
         LoginResponse: {
             /** @description True when the password was right and a TOTP code must be sent too. */
@@ -9489,6 +9545,75 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             /** @description Account temporarily locked */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    requestPasswordRecovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordRecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description Accepted; if the account may recover, a code is in the API log */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordRecoveryAccepted"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            404: components["responses"]["NotFound"];
+            /** @description Too many recovery requests from this client IP (shared with confirm) */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    confirmPasswordRecovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordRecoveryConfirm"];
+            };
+        };
+        responses: {
+            /** @description Password changed; log in with the new password */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            /** @description Too many recovery requests from this client IP (shared with the request) */
             429: {
                 headers: {
                     [name: string]: unknown;

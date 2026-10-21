@@ -548,6 +548,16 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 	return items, nil
 }
 
+const lockUserForRecovery = `-- name: LockUserForRecovery :exec
+SELECT id FROM users WHERE id = $1 FOR UPDATE
+`
+
+// Serializes password recovery requests of one account (the code row may not exist yet).
+func (q *Queries) LockUserForRecovery(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, lockUserForRecovery, id)
+	return err
+}
+
 const recordLoginFailure = `-- name: RecordLoginFailure :one
 UPDATE users SET
     failed_logins = failed_logins + 1,

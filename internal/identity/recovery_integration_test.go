@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"regexp"
+	"sync"
 	"testing"
 	"time"
 
@@ -270,5 +272,30 @@ func TestPasswordRecoveryCooldownSurvivesExhaustion(t *testing.T) {
 	e.now = e.now.Add(RecoveryRequestCooldown)
 	if next := e.request("admin"); next == "" {
 		t.Fatal("after the cooldown a new code must be issued")
+	}
+}
+
+// TestPasswordRecoveryConcurrentRequestsLogOneCode: a double click must not log two codes (the
+// first one already invalid) nor bypass the cooldown.
+func TestPasswordRecoveryConcurrentRequestsLogOneCode(t *testing.T) {
+	e := newRecoveryEnv(t)
+	for round := range 8 {
+		name := fmt.Sprintf("admin%d", round)
+		e.user(name, true, "active")
+		e.logs.Reset()
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := e.svc.RequestPasswordRecovery(e.ctx, name); err != nil {
+					t.Error(err)
+				}
+			}()
+		}
+		wg.Wait()
+		if got := len(loggedCode.FindAllString(e.logs.String(), -1)); got != 1 {
+			t.Fatalf("round %d: %d codes logged for concurrent requests, want 1", round, got)
+		}
 	}
 }
