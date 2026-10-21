@@ -1,7 +1,7 @@
 # Vision AI: birdseye behavior and LPR/face channels
 
 ## Objective and authorization
-User request (2026-10-21): Vision AI should start with every smart detection enabled and keep remembering the operator's selection; cameras should refresh and reorder by priority; show a seconds counter since the detection; drop a camera after a period without detections (Frigate birdseye style); expose LPR and face detections as fixed "channels" that behave like a camera, usable as Live grid tiles (saved views) and as a fullscreen LPR/face totem. Implementation, PRs, merge and local deploy authorized for this feature.
+User request (2026-10-21): Vision AI should start with every smart detection enabled and keep remembering the operator's selection; cameras should refresh and reorder by priority; show a seconds counter since the detection; drop a camera after a period without detections (Frigate birdseye style); expose LPR and face detections as fixed "channels" that behave like a camera, usable as Live grid tiles (saved views) and as a fullscreen LPR/face totem. Implementation and PRs requested; merging and local deploy need explicit user confirmation per slice.
 
 ## Product decisions
 - Channel layout: latest detection large (plate or face crop, camera, time, "hace Ns") with a strip of the previous detections underneath. Same component in the Live tile and the totem.
@@ -12,7 +12,7 @@ User request (2026-10-21): Vision AI should start with every smart detection ena
 ## Tasks
 - [x] V1 Default every object filter (person, car, motorcycle, truck, license_plate, face) to enabled; saved prefs unchanged. Web only.
 - [x] V2 Order matrix and dynamic tiles by score with CSS `order` (highest first) without re-mounting players. Web only.
-- [ ] V3 Backend + contract: `detected_at` (latest detection time of the slot's event) on `VisionAISlot`; release an unpinned slot once its camera has had no detection for the inactivity timeout; timeout configurable per request. Web: live "hace Ns" counter and timeout selector.
+- [x] V3 Backend + contract: `detected_at` (latest detection time of the slot's event) on `VisionAISlot`; release an unpinned slot once its camera has had no detection for the inactivity timeout; timeout configurable per request. Web: live "hace Ns" counter and timeout selector.
 - [ ] V4 LPR and face channels: shared `DetectionChannel` component (latest large + history strip) fed by the plate-read and face-event APIs; LiveExplorer virtual sources `visionai:lpr-channel` / `visionai:faces-channel` placeable in the Live grid and saved views.
 - [ ] V5 Totem routes `/totem/lpr` and `/totem/faces`: fullscreen kiosk rendering of the same channel component.
 
@@ -22,3 +22,4 @@ Strict TDD per slice (RED -> GREEN). Web: `pnpm --dir apps/web test -- --run <pa
 ## Progress
 - Tracker created.
 - V1+V2 (2026-10-21): default filters all enabled (`visionAiPrefs.ts`); `priorityOrder` in `visionAiGrid.ts` drives CSS `order` in matrix and dynamic modes (pinned first, then score, empty last). RED->GREEN in `visionAiPrefs.test.ts`, `visionAiGrid.test.ts`, `VisionAI.test.tsx` (player identity kept across a reorder). Next: V3.
+- V3 (2026-10-21): `VisionConfig.InactivitySeconds` (default 30, `WithInactivity`, 0..600) drops candidates whose last detection (running = now, else end) is older than the timeout and releases camera-less slots after min display; `SlotAssignment.DetectedAt` = latest event start. Contract: `inactivity` query param, `detected_at` slot field. Web: `inactivitySeconds` pref + "Cerrar tras inactividad" selector, `DetectionAge` "hace Ns" counter. Legacy max-display tests pinned to inactivity 0. Note: the 30s default also applies to LPR/alarm/focus sources and Live vision tiles. Next: V4.
