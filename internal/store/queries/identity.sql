@@ -141,3 +141,18 @@ DELETE FROM user_group_members WHERE user_id = @user_id;
 -- Platform users in any state, soft-deleted included: the first-start bootstrap must not
 -- recreate an admin an operator removed.
 SELECT count(*) FROM users WHERE tenant_id IS NULL;
+
+-- name: UpsertPasswordRecoveryCode :exec
+INSERT INTO password_recovery_codes (user_id, code_salt, code_hash, attempts, created_at, expires_at)
+VALUES (@user_id, @code_salt, @code_hash, 0, @created_at, @expires_at)
+ON CONFLICT (user_id) DO UPDATE SET code_salt = excluded.code_salt, code_hash = excluded.code_hash,
+    attempts = 0, created_at = excluded.created_at, expires_at = excluded.expires_at;
+
+-- name: GetPasswordRecoveryCode :one
+SELECT * FROM password_recovery_codes WHERE user_id = @user_id FOR UPDATE;
+
+-- name: IncrementPasswordRecoveryAttempts :one
+UPDATE password_recovery_codes SET attempts = attempts + 1 WHERE user_id = @user_id RETURNING attempts;
+
+-- name: DeletePasswordRecoveryCode :exec
+DELETE FROM password_recovery_codes WHERE user_id = @user_id;

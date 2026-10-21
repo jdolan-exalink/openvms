@@ -59,6 +59,9 @@ type Service struct {
 	MaxFailures int
 	LockFor     time.Duration
 	Issuer      string
+	// RecoveryLogCodes enables platform admin password recovery through a code written to the
+	// API log (PASSWORD_RECOVERY_LOG_CODES).
+	RecoveryLogCodes bool
 
 	now func() time.Time
 }

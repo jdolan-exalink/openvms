@@ -66,6 +66,9 @@ type Config struct {
 	// LoginMaxFailures failed logins in a row lock the account for LoginLockout; zero disables account lockout.
 	LoginMaxFailures int
 	LoginLockout     time.Duration
+	// PasswordRecoveryLogCodes lets a platform admin recover access with a 6-digit code written
+	// to the API log; disable it when logs are shipped to third parties.
+	PasswordRecoveryLogCodes bool
 
 	// Live* tune the live-view websocket gateway (internal/media).
 	LiveAuditWindow        time.Duration
@@ -166,6 +169,7 @@ func Load(service string) (Config, error) {
 		SessionIdle:                 duration("SESSION_IDLE", 2*time.Hour),
 		LoginMaxFailures:            nonNegativeInteger("LOGIN_MAX_FAILURES", 5),
 		LoginLockout:                positiveDuration("LOGIN_LOCKOUT", 15*time.Minute),
+		PasswordRecoveryLogCodes:    boolean("PASSWORD_RECOVERY_LOG_CODES", true),
 		LiveAuditWindow:             duration("LIVE_AUDIT_WINDOW", 5*time.Minute),
 		LiveRevalidateInterval:      duration("LIVE_REVALIDATE_INTERVAL", 30*time.Second),
 		LivePingInterval:            duration("LIVE_PING_INTERVAL", 20*time.Second),

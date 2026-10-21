@@ -714,6 +714,15 @@ type ObjectTrack struct {
 	UpdatedAt      time.Time
 }
 
+type PasswordRecoveryCode struct {
+	UserID    uuid.UUID
+	CodeSalt  []byte
+	CodeHash  []byte
+	Attempts  int32
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
 type PermissionGrant struct {
 	ID          uuid.UUID
 	TenantID    *uuid.UUID
