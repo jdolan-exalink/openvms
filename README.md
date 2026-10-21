@@ -39,11 +39,17 @@ Implementado no equivale a validado en producción: el estado y la evidencia de 
 ```bash
 git clone https://github.com/jdolan-exalink/openvms.git /root/openvms
 cd /root/openvms
-git checkout v0.4.0        # una versión etiquetada, no main
-OPENVMS_HTTPS_SITE_IPV4='192.168.1.60' OPENVMS_ADMIN_PASSWORD='Una-Clave-Larga-2026' make install
+git checkout main        # o una etiqueta que ya incluya la corrección HTTPS del instalador
+# Si se conectarán desde otra máquina, indicar la IPv4 LAN del servidor.
+export OPENVMS_HTTPS_SITE_IPV4=192.168.1.60
+IFS= read -r -s -p 'Contraseña inicial de admin: ' OPENVMS_ADMIN_PASSWORD
+printf '\n'
+export OPENVMS_ADMIN_PASSWORD
+make install
+unset OPENVMS_ADMIN_PASSWORD
 ```
 
-Use la IPv4 del servidor si se conectarán usuarios o agentes desde otra máquina. Para acceso solo local, puede ejecutar `make install` sin variables. `make install` guarda la IPv4 y la contraseña en el `.env` nuevo, genera los secretos y certificados TLS, y nunca imprime las claves. Sin `OPENVMS_ADMIN_PASSWORD`, se genera una contraseña al azar (ver [Primer acceso](#primer-acceso)).
+La contraseña se solicita sin mostrarla ni dejarla en el historial del shell. Use un checkout actualizado que incluya la corrección de instalación HTTPS; puede confirmar el commit con `git rev-parse --short HEAD`. Para acceso solo local, omita `OPENVMS_HTTPS_SITE_IPV4`. `make install` guarda las variables recibidas en un `.env` nuevo, genera los secretos y certificados TLS y no imprime las claves. Si ya existe `.env`, no sobrescribe las variables existentes: una variable exportada solo se usa durante esa ejecución y no se guarda allí. Sin `OPENVMS_ADMIN_PASSWORD`, se genera una contraseña al azar (ver [Primer acceso](#primer-acceso)).
 
 `make install` ([`deploy/install.sh`](deploy/install.sh)) hace cinco pasos y nunca pisa un `.env` existente:
 
@@ -81,6 +87,18 @@ docker compose logs api | grep "initial admin"
 ```
 
 Nunca pisa ni reinicia una instalación existente. `make install` rechaza de entrada una `OPENVMS_ADMIN_PASSWORD` de menos de 8 caracteres. Si una contraseña configurada de otro modo (por ejemplo, editando `.env`) es demasiado corta, la API crea el administrador con una contraseña aleatoria, avisa en el log y obliga a cambiarla en el primer ingreso.
+
+La contraseña inicial solo se aplica cuando la API crea el administrador por primera vez. Cambiar `OPENVMS_ADMIN_PASSWORD` en `.env` o en el entorno no cambia la contraseña de una cuenta ya existente. Para recuperarla, ejecute `./tools/reset_admin.sh` desde el checkout desplegado y siga las indicaciones interactivas; el script no borra volúmenes ni datos. También se puede usar el flujo de recuperación de contraseña de la aplicación.
+
+Si `make install` termina por tiempo agotado esperando `/health/ready`, primero confirme que el checkout incluye la corrección HTTPS actualizada y luego revise el estado y los logs:
+
+```bash
+git rev-parse --short HEAD
+docker compose ps
+docker compose logs --tail=100 web api
+```
+
+El listener HTTPS de Caddy dentro del contenedor debe estar configurado en `:443`; la IPv4 del servidor se usa para publicar el puerto y generar el certificado. Un timeout no implica que la base se haya borrado: si la API alcanzó a inicializarla, la contraseña inicial ya no se vuelve a aplicar en el siguiente arranque.
 
 | URL | Qué es |
 |---|---|

@@ -226,7 +226,7 @@ services:
     build: { context: ., dockerfile: deploy/docker/web.Dockerfile, args: { VERSION: "${VERSION:-}", COMMIT: "${COMMIT:-unknown}", BUILD_TIME: "${BUILD_TIME:-unknown}" } }
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
-      HTTPS_SITE_ADDRESS: ${OPENVMS_HTTPS_SITE_IPV4:?Set OPENVMS_HTTPS_SITE_IPV4 to the server LAN IPv4 in .env or use make install for local-only access}
+      HTTPS_SITE_ADDRESS: ":443"
       OPENVMS_HTTPS_SANS: ${OPENVMS_HTTPS_SANS:-${OPENVMS_HTTPS_SITE_IPV4:-localhost,127.0.0.1,::1}}
       OPENVMS_HTTPS_DEFAULT_SNI: ${OPENVMS_HTTPS_DEFAULT_SNI:-${OPENVMS_HTTPS_SITE_IPV4:-localhost}}
       OPENVMS_WEB_TLS_CERT_FILE: /etc/caddy/tls/tls.crt

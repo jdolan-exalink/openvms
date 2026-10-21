@@ -11,5 +11,17 @@ const messages = {
   tokenInvalid: "El token no es válido o está vencido.",
   signInToken: "Ingresar con un token de API",
   signInPassword: "Ingresar con usuario y contraseña",
+  forgotPassword: "¿Olvidaste la contraseña?",
+  recoveryIntro: "Para administradores de plataforma: se genera un código de 6 dígitos en el log del servidor.",
+  requestCode: "Generar código",
+  recoveryCode: "Código de recuperación",
+  recoveryCodeHint: "Buscalo en el servidor con: docker compose logs api | grep recovery",
+  newPassword: "Nueva contraseña",
+  repeatPassword: "Repetir contraseña",
+  changePassword: "Cambiar contraseña",
+  passwordsDiffer: "Las contraseñas no coinciden.",
+  passwordRecovered: "Contraseña actualizada. Ingresá con la nueva.",
+  backToSignIn: "Volver a ingresar",
+  sessionNotKept: "Ingresaste, pero el navegador no guardó la sesión. Entrá por la misma dirección que usa el servidor (HTTPS si está habilitado) y verificá que se acepten cookies.",
 } as const;
 export default messages;
