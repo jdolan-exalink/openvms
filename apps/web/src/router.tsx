@@ -28,6 +28,7 @@ const Notifications = lazyRouteComponent(() => import("./routes/Notifications"),
 const Permissions = lazyRouteComponent(() => import("./routes/Permissions"), "Permissions");
 const Plates = lazyRouteComponent(() => import("./routes/Plates"), "Plates");
 import { Playback } from "./routes/Playback";
+import { Totem } from "./routes/Totem";
 const Rules = lazyRouteComponent(() => import("./routes/Rules"), "Rules");
 const Channels = lazyRouteComponent(() => import("./routes/Channels"), "Channels");
 const Servers = lazyRouteComponent(() => import("./routes/Servers"), "Servers");
@@ -44,18 +45,23 @@ const loginRoute = createRoute({ getParentRoute: () => rootRoute, path: "/login"
 const shareRoute = createRoute({ getParentRoute: () => rootRoute, path: "/share/$token", component: PublicEvidenceShare });
 
 // Everything else needs a session (or an API token); the API still authorizes each request.
+const requireSession = async ({ context }: { context: RouterContext }) => {
+  try {
+    await context.queryClient.ensureQueryData(meQuery);
+  } catch {
+    throw redirect({ to: "/login" });
+  }
+};
+
 const appRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: "app",
   component: Layout,
-  beforeLoad: async ({ context }) => {
-    try {
-      await context.queryClient.ensureQueryData(meQuery);
-    } catch {
-      throw redirect({ to: "/login" });
-    }
-  },
+  beforeLoad: requireSession,
 });
+
+// Fullscreen kiosk without the app navigation, still behind a session.
+const totemRoute = createRoute({ getParentRoute: () => rootRoute, path: "/totem/$kind", component: Totem, beforeLoad: requireSession });
 
 // Each route is declared on its own so paths stay literal types for typed <Link to>.
 const child = <P extends string>(path: P, component: RouteComponent) => createRoute({ getParentRoute: () => appRoute, path, component });
@@ -179,6 +185,7 @@ const camerasRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/
 const cameraFrigateRoute = createRoute({ getParentRoute: () => settingsRoute, path: "/cameras/$cameraId/frigate", component: FrigateCameraConfig });
 
 export const routeTree = rootRoute.addChildren([
+  totemRoute,
   loginRoute,
   shareRoute,
   appRoute.addChildren([

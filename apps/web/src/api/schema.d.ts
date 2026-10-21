@@ -4975,7 +4975,7 @@ export interface components {
                 [key: string]: unknown;
             };
         };
-        /** @description A tile. Without camera_id it is empty. */
+        /** @description A tile. It shows a camera (camera_id), a virtual source (vision), or nothing when both are absent. */
         ViewCell: {
             /** Format: uuid */
             camera_id?: string;
@@ -4984,6 +4984,13 @@ export interface components {
              * @enum {string}
              */
             quality: "sub" | "main";
+            vision?: components["schemas"]["ViewVisionRef"];
+        };
+        /** @description A virtual Live tile such as a Vision AI source or an LPR/face detection channel. */
+        ViewVisionRef: {
+            /** @example visionai:lpr-channel */
+            id: string;
+            name: string;
         };
         ViewLayout: {
             columns: number;

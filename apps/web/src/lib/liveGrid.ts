@@ -1,3 +1,4 @@
+import type { Schemas } from "@/api/client";
 import { parsePanes, type Pane } from "./presentations";
 
 /**
@@ -479,4 +480,27 @@ export function cleanFisheyeVirtualViewTiles(
     shouldResetGridToSingle: false,
     changed: true,
   };
+}
+
+export type ViewCell = Schemas["ViewCell"];
+
+/**
+ * Saved-view cells for the grid. Cameras and virtual (vision) tiles are kept; map tiles are not
+ * part of the saved-view contract and become empty cells.
+ */
+export function tilesToViewCells(tiles: readonly Tile[]): ViewCell[] {
+  return tiles.map((t): ViewCell => {
+    if (t && "camera_id" in t) return { camera_id: t.camera_id, quality: t.quality };
+    if (isVisionTile(t)) return { vision: { id: t.vision.id, name: t.vision.name }, quality: "sub" };
+    return { quality: "sub" };
+  });
+}
+
+/** Grid tiles for saved-view cells (inverse of tilesToViewCells). */
+export function viewCellsToTiles(cells: readonly ViewCell[]): Tile[] {
+  return cells.map((c): Tile => {
+    if (c.camera_id) return { camera_id: c.camera_id, quality: c.quality ?? "sub" };
+    if (c.vision) return { vision: { id: c.vision.id, name: c.vision.name } };
+    return null;
+  });
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeVisionInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId, tilesForFisheyeMultiView, cleanFisheyeVirtualViewTiles, visionDragId, placeVisionAt, isVisionTile, tileIdentityKey,
+  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeVisionInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId, tilesForFisheyeMultiView, cleanFisheyeVirtualViewTiles, visionDragId, placeVisionAt, isVisionTile, tileIdentityKey, tilesToViewCells, viewCellsToTiles,
 } from "./liveGrid";
 
 describe("resizeTiles", () => {
@@ -382,3 +382,30 @@ describe("cleanFisheyeVirtualViewTiles", () => {
   });
 });
 
+
+describe("view cell conversion", () => {
+  const lpr = { id: "visionai:lpr-channel", name: "Canal LPR" };
+
+  it("keeps camera and vision tiles when saving, and empties the rest", () => {
+    const tiles: Tile[] = [
+      { camera_id: "c1", quality: "main" },
+      { vision: { ...lpr, layout: "channel" } },
+      { map: { site_id: "s1", name: "Plano" } },
+      null,
+    ];
+    expect(tilesToViewCells(tiles)).toEqual([
+      { camera_id: "c1", quality: "main" },
+      { vision: lpr, quality: "sub" },
+      { quality: "sub" },
+      { quality: "sub" },
+    ]);
+  });
+
+  it("restores camera and vision tiles from a saved view", () => {
+    expect(viewCellsToTiles([{ camera_id: "c1", quality: "main" }, { vision: lpr, quality: "sub" }, { quality: "sub" }])).toEqual([
+      { camera_id: "c1", quality: "main" },
+      { vision: lpr },
+      null,
+    ]);
+  });
+});

@@ -59,6 +59,16 @@ beforeEach(() => {
 });
 
 describe("LiveVisionTile", () => {
+  it.each([
+    ["visionai:lpr-channel", "lpr"],
+    ["visionai:faces-channel", "faces"],
+  ])("renders %s as a detection channel instead of a camera slot", async (id, kind) => {
+    renderWithQuery(<LiveVisionTile vision={{ id, name: "Canal" }} />);
+    expect((await screen.findByTestId("detection-channel")).getAttribute("data-channel")).toBe(kind);
+    expect(slotQueries()).toHaveLength(0);
+    expect(screen.queryByTestId("mse-player")).not.toBeInTheDocument();
+  });
+
   it("renders the radar state when the slot has no camera", async () => {
     renderWithQuery(<LiveVisionTile vision={{ id: "visionai:general", name: "Vision AI" }} />);
 

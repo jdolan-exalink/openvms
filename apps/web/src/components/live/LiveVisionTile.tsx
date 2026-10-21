@@ -10,6 +10,8 @@ import { cn } from "@/lib/cn";
 import { ObjectIcon } from "@/lib/visionAiIcons";
 import type { LiveVisionRef } from "@/lib/liveGrid";
 import { useVisionSlots, visionSourceFromId, type VisionAISlot } from "@/lib/visionAi";
+import { channelKindOf } from "@/lib/detectionChannels";
+import { DetectionChannel } from "@/components/visionai/DetectionChannel";
 
 export interface LiveVisionTileProps {
   vision: LiveVisionRef;
@@ -18,7 +20,19 @@ export interface LiveVisionTileProps {
   className?: string;
 }
 
-export function LiveVisionTile({ vision, isFocused = false, className }: LiveVisionTileProps) {
+export function LiveVisionTile(props: LiveVisionTileProps) {
+  const kind = channelKindOf(props.vision.id);
+  if (kind) {
+    return (
+      <div className={cn("relative size-full overflow-hidden", props.className)} data-testid="live-vision-tile" data-vision-id={props.vision.id}>
+        <DetectionChannel kind={kind} />
+      </div>
+    );
+  }
+  return <VisionSlotTile {...props} />;
+}
+
+function VisionSlotTile({ vision, isFocused = false, className }: LiveVisionTileProps) {
   // Pinning freezes the slot's current assignment (client side).
   // The pin belongs to the source it was taken from: changing source clears it, so returning to a
   // previous source starts unpinned (state is reset during render, before children see it).
