@@ -16,6 +16,7 @@ echo "docker $*" >>"$STUB_LOG"
 case "$*" in
   "compose ps"*) echo abc ;;
   "compose port web 443") echo "${STUB_PORT:-0.0.0.0:9443}" ;;
+  "compose exec -T web printenv HTTPS_SITE_ADDRESS") [ -n "${STUB_SITE:-}" ] && echo "$STUB_SITE" ;;
   *"psql"*) echo 5 ;;
   *"pg_dump"*) echo DUMP ;;
   "image inspect --format"*)
@@ -95,6 +96,17 @@ out=$(PATH="$tmp/bin:$PATH" DEPLOY_SKIP_PULL=1 DEPLOY_SKIP_BACKUP=1 STUB_TAGS=""
 grep -q 'curl .*--max-time' "$STUB_LOG" || fail "curl without --max-time"
 grep -q 'curl .*--connect-timeout' "$STUB_LOG" || fail "curl without --connect-timeout"
 grep -q 'https://localhost:9443/health/ready' "$STUB_LOG" || fail "port not taken from 'docker compose port'"
+
+# 4b. A configured HTTPS site address is probed by name (its certificate only
+# covers that address) while the connection still targets the local stack.
+: >"$STUB_LOG"
+out=$(PATH="$tmp/bin:$PATH" DEPLOY_SKIP_PULL=1 DEPLOY_SKIP_BACKUP=1 STUB_TAGS="" STUB_SITE=10.1.1.24 DEPLOY_ROOT="$tmp/ok" bash "$here/deploy.sh" 2>&1); rc=$?
+[ "$rc" -eq 0 ] || fail "site address run: expected exit 0, got $rc: $out"
+grep -qF 'https://10.1.1.24:9443/health/ready' "$STUB_LOG" || fail "health check ignores HTTPS_SITE_ADDRESS: $(grep curl "$STUB_LOG")"
+grep -qF -- '--connect-to 10.1.1.24:9443:127.0.0.1:9443' "$STUB_LOG" || fail "health check does not pin the connection to the local stack"
+: >"$STUB_LOG"
+out=$(PATH="$tmp/bin:$PATH" DEPLOY_SKIP_PULL=1 DEPLOY_SKIP_BACKUP=1 STUB_TAGS="" STUB_SITE='bad host;x' DEPLOY_ROOT="$tmp/ok" bash "$here/deploy.sh" 2>&1)
+grep -qF 'https://localhost:9443/health/ready' "$STUB_LOG" || fail "invalid site address must fall back to localhost"
 
 # 5. Pull that changes HEAD re-executes the script exactly once.
 mkrepo "$tmp/up"
