@@ -644,6 +644,7 @@ These facts explain a local navigation dead end; deployed state remains unverifi
 - [x] M-W15 — Local distinct mode workflows implemented and automated checks observed.
 - [x] M-W16 — Operational docs and stale status reconciled and structurally reviewed.
 - [ ] M-W17 — Final checks, runtime acceptance, and explicitly authorized deployment observed.
+  Status (2026-10-21): still pending external acceptance only: real-account browser/media/events acceptance and explicitly authorized deployment (same open items as M-W27). No automated gap is recorded.
 
 ### Final acceptance scenarios
 
@@ -821,6 +822,7 @@ other placements. Provisional layout is not actual camera geolocation. Preserve 
       visible feedback, aesthetic icon-and-name direct-drag camera cards (no selection prerequisite),
       and deterministic spaced provisional bulk drafts; preserve save/undo/revisions.
 - [ ] M-W20 — Audited provisional placement of the authorized 16 cameras and configuration-preserving
+  Status (2026-10-21): data half is done (authorized compact layout of 26 real cameras, audited writes revisions 27-52, request `maps-compact-layout-e1f1c757-917f-4040-8881-5c116882b2f5`, commit `e1e9c45`; rollback file private under `/tmp`). Left unchecked because the frontend deployment and real interaction acceptance are still open; the unit also targeted 16 cameras while 26 were laid out.
       local deployment with real interaction acceptance and exact rollback evidence.
 
 Route: delegated direct for M-W18/M-W19 (multiple non-trivial files and preparation for writing).
@@ -1024,6 +1026,7 @@ no old lifecycle invocation, receipt or review authority claimed. Parent owns ne
   renderer/editor; normalized independent floor placements, direct camera dragging, explicit
   revision-aware save, permission-scoped hierarchy/image controls and five-second real notices.
 - [ ] M-W27 — Integrated verification and configuration-preserving local deployment acceptance.
+  Status (2026-10-21): still pending. The synthetic map performance result (54/57/74 ms against the unchanged 50 ms threshold) is documented as unresolved and not waived; deployment and real-account acceptance are not done (latest tracker entry says the features are locally verified but unpublished).
 
 Historical M-W23 immediate scope was visibility only. No database preferences reset, coordinate rewrite, floor implementation
 or deployment. Synthetic performance remains unresolved (54/57/74 ms > unchanged 50 ms); do not rerun

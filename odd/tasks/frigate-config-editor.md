@@ -53,6 +53,7 @@ Edit every per-camera parameter Frigate supports from OpenVMS and apply it to Fr
   snapshots retention, objects+filters, motion, review) + revision history with rollback UI.
 - [x] FC-4 — (done, components 2cd5228 merged in 3c1f807, wiring 5618b12) Visual zone & mask editor over the camera snapshot (relative coords; 0.18 dict format).
 - [ ] FC-5 — Advanced YAML editor (validation via Frigate, diff, revision), ONVIF/autotracking/LPR/face/
+  Status (2026-10-21): partially present, still open. Present: server-level raw YAML endpoints (`GET|PUT /servers/{id}/frigate-config/raw`, FC-1) and a `yaml` tab plus revision history in `components/servers/ServerFrigateConfigModal.tsx`; per-camera ONVIF section and LPR section in `routes/FrigateCameraConfig.tsx`. Not found: autotracking, face and GenAI panels, bulk apply to several cameras; diff/validation of the YAML tab against Frigate was not verified. Real Frigate 0.17/0.18 acceptance stays pending.
   GenAI panels, bulk apply to several cameras.
 
 ## Delivery

@@ -25,6 +25,7 @@ Phone Live (`apps/web/src/components/LivePhone.tsx`) is a single-column stack of
 - [x] LP-03 — Pinch-zoom/pan in the single-camera view. Route: delegated direct. Commit `744a5f4`; rollback boundary: revert it (DigitalZoom `touch`/`doubleTapZoom` props, LivePhone SingleCamera, tests).
 - [x] LP-04 — Multi-camera phone layout: snapshots + selector (user decision 2026-10-17). Route: delegated direct. Commit `28aba65`; rollback boundary: revert it (LivePhone split into PhoneGrid/PhoneFocus/PhoneLayoutToggle/PhoneSingleCamera, `lib/phoneLayoutPrefs|phoneSnapshot|useHorizontalSwipe|useVisibleSnapshot`, live i18n, tests).
 - [ ] LP-05 — Review, PR, CI, merge, deploy (deploy only with user confirmation).
+  Status (2026-10-21): review, PR, CI and merge are done: PR #73 merged 2026-10-17 as `a578c6b`, all checks SUCCESS. Left unchecked: deploy needs explicit user confirmation, and the manual device checklist below has not been run (needs real iOS/Android standalone PWAs).
 
 ## Acceptance
 - Standalone PWA on iOS/Android: no content under notch/status bar/home indicator in portrait or landscape.
