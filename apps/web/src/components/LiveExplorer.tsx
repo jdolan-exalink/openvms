@@ -24,6 +24,7 @@ import { useT } from "@/i18n";
 import type { useCameraFolders } from "@/lib/useCameraFolders";
 import { LongPressTracker } from "@/lib/touch";
 import { useTouchDoubleTap } from "@/lib/useTouchDoubleTap";
+import { FACES_CHANNEL_ID, LPR_CHANNEL_ID } from "@/lib/detectionChannels";
 
 type FolderApi = ReturnType<typeof useCameraFolders>;
 
@@ -89,6 +90,8 @@ export const VIRTUAL_VISION_SOURCES: LiveVisionRef[] = [
   { id: "visionai:lpr", name: "Vision AI - LPR", layout: "lpr" },
   { id: "visionai:perimetro", name: "Vision AI - Perímetro", layout: "matrix" },
   { id: "visionai:alarmas", name: "Vision AI - Alarmas", layout: "alarm" },
+  { id: LPR_CHANNEL_ID, name: "Canal LPR", layout: "channel" },
+  { id: FACES_CHANNEL_ID, name: "Canal Rostros", layout: "channel" },
 ];
 
 type DragData =
