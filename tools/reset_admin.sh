@@ -18,7 +18,12 @@ if [[ ! -t 0 ]]; then
   exit 2
 fi
 
-compose=(docker compose --project-name "$project" --env-file /dev/null -f "$root/docker-compose.yml")
+env_file=${RESET_ADMIN_ENV_FILE:-"$root/.env"}
+if [[ ! -f "$env_file" ]]; then
+  printf 'Missing Compose environment file %s. Run this from a deployed checkout with its .env file.\n' "$env_file" >&2
+  exit 1
+fi
+compose=(docker compose --project-name "$project" --env-file "$env_file" -f "$root/docker-compose.yml")
 api_container=$("${compose[@]}" ps -q api) || {
   printf 'Unable to locate the running API service for Compose project %q.\n' "$project" >&2
   exit 1

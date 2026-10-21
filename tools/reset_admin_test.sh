@@ -5,6 +5,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/bin"
+touch "$tmp/.env"
 
 cat >"$tmp/bin/docker" <<'STUB'
 #!/usr/bin/env bash
@@ -27,14 +28,14 @@ esac
 STUB
 chmod +x "$tmp/bin/docker"
 export PATH="$tmp/bin:$PATH" DOCKER_LOG="$tmp/docker.log" PASSWORD_STDIN_LOG="$tmp/password-stdin.log"
-export RESET_ADMIN_PROJECT="openvms-test"
+export RESET_ADMIN_PROJECT="openvms-test" RESET_ADMIN_ENV_FILE="$tmp/.env"
 
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
 
 out=$({ sleep 0.2; printf 'Secret-Password-2026\nSecret-Password-2026\n'; } | script -qec "bash '$root/tools/reset_admin.sh'" /dev/null 2>&1) || fail "valid reset failed"
 [[ "$out" != *"Secret-Password-2026"* ]] || fail "password appeared in terminal output"
 grep -q -- '--project-name openvms-test' "$DOCKER_LOG" || fail "Compose project not explicitly scoped"
-grep -q -- '--env-file /dev/null' "$DOCKER_LOG" || fail "Compose implicit .env loading not disabled"
+grep -Fq -- "--env-file $tmp/.env" "$DOCKER_LOG" || fail "Compose environment file was not explicitly loaded"
 grep -q 'Secret-Password-2026' "$DOCKER_LOG" && fail "password appeared in process arguments"
 grep -q '^Secret-Password-2026$' "$PASSWORD_STDIN_LOG" || fail "password was not passed on stdin to API maintenance command"
 grep -q 'reset-admin-password' "$DOCKER_LOG" || fail "API maintenance reset command was not invoked"
