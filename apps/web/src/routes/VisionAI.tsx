@@ -10,7 +10,7 @@ import { MsePlayer } from "@/components/MsePlayer";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
-import { dynamicGridShape } from "@/lib/visionAiGrid";
+import { dynamicGridShape, priorityOrder } from "@/lib/visionAiGrid";
 import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
 import { DEFAULT_VISION_PREFS, loadVisionPrefs, saveVisionPrefs, visionPrefsKey, type VisionMode } from "@/lib/visionAiPrefs";
 import { useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource } from "@/lib/visionAi";
@@ -140,6 +140,9 @@ export function VisionAI() {
   // occurrence only, and never draw past the 4x4 grid the shape is capped to.
   const dynamicTiles = filled.filter((sl, i) => filled.findIndex((o) => o.camera_id === sl.camera_id) === i).slice(0, DYNAMIC_MAX_TILES);
   const dynamicShape = dynamicGridShape(dynamicTiles.length);
+  // Highest priority first; applied as CSS order so swapping places never re-mounts a player.
+  const matrixOrder = priorityOrder(slots.slice(0, layoutCount));
+  const dynamicOrder = priorityOrder(dynamicTiles);
   const lprSlots = filled.filter((sl) => sl.plate);
   const hasAnyCamera = serverSlots.some((sl) => sl.camera_id) || Object.keys(pins).length > 0;
 
@@ -386,7 +389,12 @@ export function VisionAI() {
               }}
             >
               {dynamicTiles.map((sl) => (
-                <div key={sl.camera_id} className="relative min-h-0 rounded-m3-md overflow-hidden bg-black/70 border border-line/50">
+                <div
+                  key={sl.camera_id}
+                  data-vision-tile
+                  style={{ order: dynamicOrder.get(sl.slot) }}
+                  className="relative min-h-0 rounded-m3-md overflow-hidden bg-black/70 border border-line/50"
+                >
                   {renderSlot(sl, dynamicTiles.length === 1 ? "main" : "sub")}
                 </div>
               ))}
@@ -436,7 +444,12 @@ export function VisionAI() {
               {Array.from({ length: layoutCount }).map((_, i) => {
                 const sl = slots[i];
                 return (
-                  <div key={i} className="relative rounded-m3-md overflow-hidden bg-black/70 border border-line/50">
+                  <div
+                    key={i}
+                    data-vision-tile
+                    style={{ order: sl ? matrixOrder.get(sl.slot) : layoutCount }}
+                    className="relative rounded-m3-md overflow-hidden bg-black/70 border border-line/50"
+                  >
                     {sl?.camera_id ? renderSlot(sl, layoutCount === 1 ? "main" : "sub") : emptySlot}
                   </div>
                 );

@@ -21,3 +21,23 @@ export function dynamicGridShape(n: number): GridShape {
   if (count <= 12) return { cols: 4, rows: 3 };
   return { cols: 4, rows: 4 };
 }
+
+interface RankableSlot {
+  slot: number;
+  camera_id?: string | null;
+  pinned: boolean;
+  score?: number;
+}
+
+/**
+ * Display position of each slot, keyed by slot number: pinned slots first (in slot order), then the
+ * remaining cameras by score (highest first, ties by slot), then empty slots. Applied as CSS `order`
+ * so a camera changes place without its player being re-mounted.
+ */
+export function priorityOrder(slots: readonly RankableSlot[]): Map<number, number> {
+  const tier = (s: RankableSlot) => (!s.camera_id ? 2 : s.pinned ? 0 : 1);
+  const ranked = [...slots].sort((a, b) =>
+    tier(a) - tier(b) || (tier(a) === 1 ? (b.score ?? 0) - (a.score ?? 0) : 0) || a.slot - b.slot,
+  );
+  return new Map(ranked.map((s, i) => [s.slot, i]));
+}

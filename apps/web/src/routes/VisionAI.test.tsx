@@ -89,6 +89,15 @@ describe("VisionAI Page", () => {
   };
   const lastQuery = () => slotRequests.at(-1)?.searchParams;
   const playerCams = () => screen.queryAllByTestId("mse-player").map((p) => p.getAttribute("data-camera-id"));
+  const playerOf = (cam: string) => screen.getAllByTestId("mse-player").find((p) => p.getAttribute("data-camera-id") === cam);
+  const tileOrder = (cam: string) => playerOf(cam)?.closest<HTMLElement>("[data-vision-tile]")?.style.order;
+
+  it("orders matrix tiles by priority, empty cells last", async () => {
+    slotsBody = { slots: [slot(0, "cam-1", { score: 20 }), slot(1, null), slot(2, "cam-3", { score: 90 }), slot(3, null)] };
+    setup();
+    await waitFor(() => expect(tileOrder("cam-3")).toBe("0"));
+    expect(tileOrder("cam-1")).toBe("1");
+  });
 
   it("renders a player per filled slot, sized to fill the slot", async () => {
     setup();
@@ -447,6 +456,26 @@ describe("VisionAI Page", () => {
         expect(gridOf().style.gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
         expect(gridOf().style.gridTemplateRows).toBe("repeat(2, minmax(0, 1fr))");
         expect(screen.getAllByTestId("mse-player")[0]).toBe(firstPlayer);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("moves the highest-priority camera first without re-mounting players", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        slotsBody = { slots: [slot(0, "cam-1", { score: 80 }), slot(1, "cam-2", { score: 40 })] };
+        setup();
+        fireEvent.click(await screen.findByRole("button", { name: "Dinámica" }));
+        await waitFor(() => expect(tileOrder("cam-1")).toBe("0"));
+        expect(tileOrder("cam-2")).toBe("1");
+        const cam2Player = playerOf("cam-2");
+
+        slotsBody = { slots: [slot(0, "cam-1", { score: 80 }), slot(1, "cam-2", { score: 120 })] };
+        await vi.advanceTimersByTimeAsync(2100);
+        await waitFor(() => expect(tileOrder("cam-2")).toBe("0"));
+        expect(tileOrder("cam-1")).toBe("1");
+        expect(playerOf("cam-2")).toBe(cam2Player);
       } finally {
         vi.useRealTimers();
       }
