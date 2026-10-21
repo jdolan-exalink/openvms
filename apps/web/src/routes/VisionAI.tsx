@@ -13,7 +13,7 @@ import { can } from "@/lib/perm";
 import { dynamicGridShape, priorityOrder } from "@/lib/visionAiGrid";
 import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
 import { DEFAULT_VISION_PREFS, loadVisionPrefs, saveVisionPrefs, VISION_INACTIVITY_OPTIONS, visionPrefsKey, type VisionMode } from "@/lib/visionAiPrefs";
-import { detectionAgeSeconds, formatDetectionAge, useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource } from "@/lib/visionAi";
+import { detectionAgeSeconds, formatDetectionAge, useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource, type VisionInactivity } from "@/lib/visionAi";
 
 export type { VisionMode };
 
@@ -45,7 +45,7 @@ export function VisionAI() {
   const [mode, setMode] = useState<VisionMode>(DEFAULT_VISION_PREFS.mode);
   const [presetSource, setPresetSource] = useState<VisionAISource>(DEFAULT_VISION_PREFS.presetSource);
   const [layoutCount, setLayoutCount] = useState<number>(DEFAULT_VISION_PREFS.layoutCount);
-  const [inactivitySeconds, setInactivitySeconds] = useState<number>(DEFAULT_VISION_PREFS.inactivitySeconds);
+  const [inactivitySeconds, setInactivitySeconds] = useState<VisionInactivity>(DEFAULT_VISION_PREFS.inactivitySeconds);
   const [fullscreen, setFullscreen] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -55,6 +55,9 @@ export function VisionAI() {
   const layout = layoutFor(mode, layoutCount);
   const slotsQuery = useVisionSlots(source, layout, inactivitySeconds);
   const me = useQuery(meQuery);
+  // Browser-minus-server clock offset, so "hace Ns" is measured on the server clock.
+  const generatedMs = slotsQuery.data ? Date.parse(slotsQuery.data.generated_at) : Number.NaN;
+  const serverOffsetMs = Number.isNaN(generatedMs) ? 0 : slotsQuery.dataUpdatedAt - generatedMs;
   const canViewSnapshots = can(me.data, "snapshots.view");
 
   // Pins are client side: they freeze the slot's current assignment. Slot numbers only mean the
@@ -172,6 +175,7 @@ export function VisionAI() {
       quality={quality}
       compact={compact}
       onPlayback={openPlayback}
+      serverOffsetMs={serverOffsetMs}
     />
   );
   const emptySlot = (
@@ -328,7 +332,10 @@ export function VisionAI() {
             <select
               aria-label="Cerrar tras inactividad"
               value={inactivitySeconds}
-              onChange={(e) => setInactivitySeconds(Number(e.target.value))}
+              onChange={(e) => {
+                const next = VISION_INACTIVITY_OPTIONS.find((n) => n === Number(e.target.value));
+                if (next !== undefined) setInactivitySeconds(next);
+              }}
               className="h-8 rounded-m3-md border border-line bg-surface-2 px-2 text-xs font-medium text-ink"
             >
               {VISION_INACTIVITY_OPTIONS.map((n) => (
@@ -759,6 +766,7 @@ function SlotRenderer({
   debug,
   quality,
   onPlayback,
+  serverOffsetMs = 0,
 }: {
   slot: VisionAISlot;
   pinned: boolean;
@@ -767,6 +775,7 @@ function SlotRenderer({
   quality: "sub" | "main";
   compact?: boolean;
   onPlayback?: (id: string) => void;
+  serverOffsetMs?: number;
 }) {
   const cameraId = slot.camera_id;
   if (!cameraId) return null;
@@ -863,7 +872,8 @@ function SlotRenderer({
         </div>
 
         {slot.active || slot.last_seen_at ? (
-          <DetectionAge active={Boolean(slot.active)} lastSeenAt={slot.last_seen_at} />
+          // Keyed by state so the ended counter starts from a fresh clock.
+          <DetectionAge key={slot.active ? "live" : "ended"} active={Boolean(slot.active)} lastSeenAt={slot.last_seen_at} serverOffsetMs={serverOffsetMs} />
         ) : slot.display_seconds !== undefined && (
           <div className="font-mono text-[10px] text-white/70">{formatElapsed(slot.display_seconds)}</div>
         )}
@@ -919,7 +929,7 @@ function inactivityLabel(seconds: number): string {
  * EN VIVO while a detection runs, then a live "hace Ns" since the last activity (what drives the
  * inactivity release). Ticks on its own so the page does not re-render every second.
  */
-function DetectionAge({ active, lastSeenAt }: { active: boolean; lastSeenAt?: string }) {
+function DetectionAge({ active, lastSeenAt, serverOffsetMs }: { active: boolean; lastSeenAt?: string; serverOffsetMs: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (active) return;
@@ -934,7 +944,7 @@ function DetectionAge({ active, lastSeenAt }: { active: boolean; lastSeenAt?: st
       </div>
     );
   }
-  const seconds = detectionAgeSeconds(lastSeenAt, now);
+  const seconds = detectionAgeSeconds(lastSeenAt, now - serverOffsetMs);
   if (seconds === null) return null;
   return (
     <div data-detection-age className="font-mono text-[10px] font-semibold tabular-nums text-white/80" title="Tiempo desde la última detección">
