@@ -138,3 +138,20 @@ func TestAllocatorClearsActiveWhenCameraHasNoCandidate(t *testing.T) {
 		t.Fatalf("LastSeenAt = %v, want the last observed activity %v", slots[0].LastSeenAt, now)
 	}
 }
+
+// TestAllocatorDetectedAtFollowsNewestEvent reports the newest detection on the camera even when an
+// older event still wins the slot on score.
+func TestAllocatorDetectedAtFollowsNewestEvent(t *testing.T) {
+	now := time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)
+	cam := uuid.New()
+	a := NewSlotAllocator(inactivityConfig(30))
+	strong := VisionEvent{ID: "strong", CameraID: cam, Object: "person", Confidence: 0.95, AlarmSeverity: "high", StartTime: now.Add(-20 * time.Second), Timestamp: now.Add(-20 * time.Second)}
+	weakNewer := VisionEvent{ID: "weak", CameraID: cam, Object: "car", Confidence: 0.4, StartTime: now.Add(-2 * time.Second), Timestamp: now.Add(-2 * time.Second)}
+	slots := a.Allocate([]VisionEvent{strong, weakNewer}, now)
+	if slots[0].EventID != "strong" {
+		t.Fatalf("fixture: the stronger event must hold the slot, got %q", slots[0].EventID)
+	}
+	if !slots[0].DetectedAt.Equal(weakNewer.StartTime) {
+		t.Fatalf("DetectedAt = %v, want the newest event start %v", slots[0].DetectedAt, weakNewer.StartTime)
+	}
+}

@@ -198,6 +198,9 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 		if last.After(act.lastSeen) {
 			act.lastSeen = last
 		}
+		if start := detectionStart(ev); start.After(act.latestStart) {
+			act.latestStart = start
+		}
 		activity[ev.CameraID] = act
 
 		hist := a.history[ev.CameraID]
@@ -274,7 +277,7 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 			a.slots[slotIdx].Score = cand.score
 			a.slots[slotIdx].EventID = cand.event.ID
 			a.slots[slotIdx].Reason = cand.reason()
-			if start := detectionStart(cand.event); start.After(a.slots[slotIdx].DetectedAt) {
+			if start := activity[camID].latestStart; start.After(a.slots[slotIdx].DetectedAt) {
 				a.slots[slotIdx].DetectedAt = start
 			}
 			a.slots[slotIdx].Active, a.slots[slotIdx].LastSeenAt = activity[camID].active, activity[camID].lastSeen
@@ -331,7 +334,7 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 				Reason:          cand.reason(),
 				Pinned:          false,
 				AssignedAt:      now,
-				DetectedAt:      detectionStart(cand.event),
+				DetectedAt:      activity[camID].latestStart,
 				Active:          activity[camID].active,
 				LastSeenAt:      activity[camID].lastSeen,
 				MinDisplayUntil: now.Add(minDisplay),
@@ -355,8 +358,9 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 
 // cameraActivity aggregates every candidate event of one camera.
 type cameraActivity struct {
-	active   bool
-	lastSeen time.Time
+	active      bool
+	lastSeen    time.Time
+	latestStart time.Time
 }
 
 // lastDetection is when the event was last active: now while it is still running, else its end.
