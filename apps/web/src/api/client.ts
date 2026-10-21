@@ -47,11 +47,24 @@ export class ApiError extends Error {
 
 type Result<T> = { data?: T; error?: unknown; response: Response };
 
+function fallbackApiMessage(status: number, emptySuccess = false): string {
+  if ([502, 503, 504].includes(status)) {
+    return `No se pudo contactar con la API (HTTP ${status}). Revisá docker compose ps y, si el servicio api no está sano, docker compose logs --tail=100 api web.`;
+  }
+  if (emptySuccess) {
+    return `El servidor respondió HTTP ${status}, pero sin los datos esperados. Puede haber una diferencia de versión entre web y API; actualizá con make deploy y recargá la página.`;
+  }
+  return `La API respondió HTTP ${status} sin un mensaje de error legible. Revisá docker compose logs --tail=100 api web.`;
+}
+
 /** unwrap returns data or throws ApiError with the server's message. */
 export function unwrap<T>({ data, error, response }: Result<T>): T {
-  if (response.ok && (data !== undefined || response.status === 204)) return data as T;
+  if (response.ok) {
+    if (data !== undefined || response.status === 204) return data as T;
+    throw new ApiError(response.status, "empty_response", fallbackApiMessage(response.status, true));
+  }
   const body = (error ?? {}) as Partial<Schemas["Error"]>;
-  throw new ApiError(response.status, body.code ?? "error", body.message ?? `La API respondió ${response.status}`);
+  throw new ApiError(response.status, body.code ?? "error", body.message || fallbackApiMessage(response.status));
 }
 
 /**
@@ -70,7 +83,7 @@ export async function postForm<T>(path: string, form: FormData): Promise<T> {
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) {
     const err = (body ?? {}) as Partial<Schemas["Error"]>;
-    throw new ApiError(response.status, err.code ?? "error", err.message ?? `La API respondió ${response.status}`);
+    throw new ApiError(response.status, err.code ?? "error", err.message || fallbackApiMessage(response.status));
   }
   return body as T;
 }
