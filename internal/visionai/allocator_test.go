@@ -178,7 +178,10 @@ func TestSlotAllocator(t *testing.T) {
 	})
 
 	t.Run("releases unpinned slots past max display with no candidate left", func(t *testing.T) {
-		allocator := NewSlotAllocator(cfg)
+		// Max-display release only applies without an inactivity timeout.
+		legacy := cfg
+		legacy.InactivitySeconds = 0
+		allocator := NewSlotAllocator(legacy)
 		allocator.Allocate([]VisionEvent{{ID: "x", CameraID: cam1, Object: "person", Confidence: 0.9, StartTime: now}}, now)
 		allocator.SetPin(1, true)
 

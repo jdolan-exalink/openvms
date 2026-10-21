@@ -1446,6 +1446,8 @@ export interface paths {
          *     layout. Allocation state (minimum display time, cooldown, replacement) is kept in memory per
          *     user, source and layout, so repeated polling yields stable, rotating slots. Plate text is
          *     only present on cameras where the caller holds lpr.view. Empty slots have a null camera_id.
+         *     An unpinned camera leaves the grid once its last detection is older than `inactivity`
+         *     seconds (Frigate birdseye style), after its minimum display time.
          */
         get: operations["getVisionAISlots"];
         put?: never;
@@ -4775,6 +4777,18 @@ export interface components {
             assigned_at?: string;
             /** @description Seconds the camera has been in the slot. */
             display_seconds?: number;
+            /**
+             * Format: date-time
+             * @description Start of the latest detection that holds the camera in the slot.
+             */
+            detected_at?: string;
+            /** @description True while any detection on the camera is still running. */
+            active?: boolean;
+            /**
+             * Format: date-time
+             * @description Latest detection activity on the camera (the request time while active); drives the inactivity release.
+             */
+            last_seen_at?: string;
             /** @description Score contributions by term (object, confidence, zone, alarm, recency, ...). */
             breakdown?: {
                 [key: string]: number;
@@ -8476,6 +8490,8 @@ export interface operations {
             query?: {
                 source?: components["schemas"]["VisionAISource"];
                 layout?: components["schemas"]["VisionAILayout"];
+                /** @description Inactivity timeout in seconds; 0 keeps a camera until its maximum display time. */
+                inactivity?: number;
             };
             header?: never;
             path?: never;

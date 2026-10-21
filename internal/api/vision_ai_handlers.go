@@ -29,7 +29,11 @@ func (h *Handlers) GetVisionAISlots(ctx context.Context, r gen.GetVisionAISlotsR
 	if r.Params.Layout != nil {
 		layout = string(*r.Params.Layout)
 	}
-	res, err := h.VisionAI.Slots(ctx, a, source, layout)
+	var opts []visionai.SlotsOption
+	if r.Params.Inactivity != nil {
+		opts = append(opts, visionai.WithInactivity(*r.Params.Inactivity))
+	}
+	res, err := h.VisionAI.Slots(ctx, a, source, layout, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -51,6 +55,16 @@ func toVisionAISlots(res visionai.Result) gen.GetVisionAISlots200JSONResponse {
 			slot.CameraId, slot.CameraName, slot.EventId = &id, &name, &event
 			slot.Object, slot.Confidence, slot.Score = &object, &conf, &score
 			slot.AssignedAt, slot.DisplaySeconds = &assigned, &seconds
+			if !s.DetectedAt.IsZero() {
+				detected := s.DetectedAt
+				slot.DetectedAt = &detected
+			}
+			active := s.Active
+			slot.Active = &active
+			if !s.LastSeenAt.IsZero() {
+				seen := s.LastSeenAt
+				slot.LastSeenAt = &seen
+			}
 			slot.Zone, slot.Plate, slot.Alarm = optString(s.Reason.Zone), optString(s.Reason.Plate), optString(s.Reason.Alarm)
 			if len(s.Reason.Breakdown) > 0 {
 				b := s.Reason.Breakdown

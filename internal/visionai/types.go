@@ -41,16 +41,21 @@ type SlotReason struct {
 
 // SlotAssignment is the state of a single display slot in the Vision AI grid.
 type SlotAssignment struct {
-	SlotIndex       int        `json:"slot"`
-	CameraID        uuid.UUID  `json:"camera_id"`
-	CameraName      string     `json:"camera_name"`
-	EventID         string     `json:"event_id,omitempty"`
-	Score           float64    `json:"score"`
-	Reason          SlotReason `json:"reason"`
-	Pinned          bool       `json:"pinned"`
-	AssignedAt      time.Time  `json:"assigned_at"`
-	MinDisplayUntil time.Time  `json:"min_display_until"`
-	MaxDisplayUntil time.Time  `json:"max_display_until"`
+	SlotIndex  int        `json:"slot"`
+	CameraID   uuid.UUID  `json:"camera_id"`
+	CameraName string     `json:"camera_name"`
+	EventID    string     `json:"event_id,omitempty"`
+	Score      float64    `json:"score"`
+	Reason     SlotReason `json:"reason"`
+	Pinned     bool       `json:"pinned"`
+	AssignedAt time.Time  `json:"assigned_at"`
+	DetectedAt time.Time  `json:"detected_at"`
+	// Active is true while any event of the camera is still running; LastSeenAt is then now,
+	// otherwise the latest end across its events.
+	Active          bool      `json:"active"`
+	LastSeenAt      time.Time `json:"last_seen_at"`
+	MinDisplayUntil time.Time `json:"min_display_until"`
+	MaxDisplayUntil time.Time `json:"max_display_until"`
 }
 
 // ReplacementMode dictates when an active slot can be superseded.
@@ -82,9 +87,18 @@ type VisionConfig struct {
 	MinDisplaySeconds int             `json:"min_display_seconds"`
 	MaxDisplaySeconds int             `json:"max_display_seconds"`
 	CooldownSeconds   int             `json:"cooldown_seconds"`
-	OverlaysEnabled   bool            `json:"overlays_enabled"`
-	IsDefault         bool            `json:"is_default"`
+	// InactivitySeconds releases an unpinned camera once its last detection is older than this
+	// (Frigate birdseye style); zero keeps the max-display release only.
+	InactivitySeconds int  `json:"inactivity_seconds"`
+	OverlaysEnabled   bool `json:"overlays_enabled"`
+	IsDefault         bool `json:"is_default"`
 }
+
+// DefaultInactivitySeconds matches Frigate birdseye's default inactivity threshold.
+const DefaultInactivitySeconds = 30
+
+// MaxInactivitySeconds bounds the caller-selected inactivity timeout.
+const MaxInactivitySeconds = 600
 
 // DefaultVisionConfig returns sensible operational defaults for Vision AI.
 func DefaultVisionConfig(tenantID uuid.UUID) VisionConfig {
@@ -99,6 +113,7 @@ func DefaultVisionConfig(tenantID uuid.UUID) VisionConfig {
 		MinDisplaySeconds: 5,
 		MaxDisplaySeconds: 30,
 		CooldownSeconds:   10,
+		InactivitySeconds: DefaultInactivitySeconds,
 		OverlaysEnabled:   true,
 		IsDefault:         true,
 	}

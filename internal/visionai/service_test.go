@@ -91,17 +91,17 @@ func TestServiceSlots(t *testing.T) {
 		src := &fakeSource{rows: []EventRow{row(cam1, "A", now, "person")}}
 		svc, clock := newSvc(src)
 		a := tenantActor()
-		if _, err := svc.Slots(ctx, a, "general", "4"); err != nil {
+		// Without an inactivity timeout the slot is protected until max display passes.
+		if _, err := svc.Slots(ctx, a, "general", "4", WithInactivity(0)); err != nil {
 			t.Fatal(err)
 		}
-		// Events vanish, but the slot is protected until max display passes.
 		src.rows = nil
 		*clock = now.Add(10 * time.Second)
-		res, _ := svc.Slots(ctx, a, "general", "4")
+		res, _ := svc.Slots(ctx, a, "general", "4", WithInactivity(0))
 		if res.Slots[0].CameraID != cam1 {
 			t.Fatalf("session state lost between calls")
 		}
-		other, _ := svc.Slots(ctx, tenantActor(), "general", "4")
+		other, _ := svc.Slots(ctx, tenantActor(), "general", "4", WithInactivity(0))
 		if other.Slots[0].CameraID != uuid.Nil {
 			t.Fatalf("session leaked across actors")
 		}
@@ -149,4 +149,35 @@ func TestServiceSlots(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestServiceSlotsInactivityOption(t *testing.T) {
+	now := time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)
+	ctx := context.Background()
+	cam := uuid.New()
+	ended := now.Add(-20 * time.Second)
+	r := row(cam, "A", now.Add(-time.Minute), "person")
+	r.EndTime = &ended
+	svc := NewService(&fakeSource{rows: []EventRow{r}})
+	svc.Clock = func() time.Time { return now }
+	a := tenantActor()
+
+	for _, bad := range []int{-1, MaxInactivitySeconds + 1} {
+		var verr *ValidationError
+		if _, err := svc.Slots(ctx, a, "general", "4", WithInactivity(bad)); !errors.As(err, &verr) {
+			t.Fatalf("inactivity %d: err = %v, want a ValidationError", bad, err)
+		}
+	}
+	// The event ended 20s ago: hidden with the 10s timeout, shown with the 30s default.
+	short, err := svc.Slots(ctx, a, "general", "4", WithInactivity(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if short.Slots[0].CameraID != uuid.Nil {
+		t.Fatal("10s timeout must hide an event inactive for 20s")
+	}
+	def, _ := svc.Slots(ctx, a, "general", "4")
+	if def.Slots[0].CameraID != cam {
+		t.Fatal("the 30s default must still show an event inactive for 20s")
+	}
 }

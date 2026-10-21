@@ -2,7 +2,9 @@ package visionai
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -72,7 +74,8 @@ func (s *Service) session(a authz.Actor, cfg VisionConfig, now time.Time) *SlotA
 			delete(s.sessions, k)
 		}
 	}
-	key := sessionKey(a, cfg.ID, cfg.Layout)
+	// Each inactivity timeout keeps its own allocator so switching it never mixes slot state.
+	key := sessionKey(a, cfg.ID, cfg.Layout) + "|" + strconv.Itoa(cfg.InactivitySeconds)
 	sess, ok := s.sessions[key]
 	if !ok {
 		if !a.IsPlatform() {
@@ -85,11 +88,26 @@ func (s *Service) session(a authz.Actor, cfg VisionConfig, now time.Time) *SlotA
 	return sess.allocator
 }
 
+// SlotsOption adjusts one Slots request.
+type SlotsOption func(*VisionConfig)
+
+// WithInactivity sets the inactivity timeout in seconds (0 disables it). Values outside
+// [0, MaxInactivitySeconds] are rejected by Slots.
+func WithInactivity(seconds int) SlotsOption {
+	return func(c *VisionConfig) { c.InactivitySeconds = seconds }
+}
+
 // Slots loads the actor's recent events, ranks them and returns the current slot grid.
-func (s *Service) Slots(ctx context.Context, actor authz.Actor, source, layout string) (Result, error) {
+func (s *Service) Slots(ctx context.Context, actor authz.Actor, source, layout string, opts ...SlotsOption) (Result, error) {
 	cfg, err := PresetConfig(source, layout)
 	if err != nil {
 		return Result{}, err
+	}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if cfg.InactivitySeconds < 0 || cfg.InactivitySeconds > MaxInactivitySeconds {
+		return Result{}, &ValidationError{Msg: fmt.Sprintf("inactivity must be between 0 and %d seconds", MaxInactivitySeconds)}
 	}
 	now := s.Clock()
 	set, err := s.source.RecentEvents(ctx, actor, EventWindow, now)
