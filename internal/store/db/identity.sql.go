@@ -52,10 +52,12 @@ func (q *Queries) CountAllPlatformUsers(ctx context.Context) (int64, error) {
 
 const countRecentRecoveryFailures = `-- name: CountRecentRecoveryFailures :one
 SELECT count(*)::int FROM audit_log
-WHERE action = 'PASSWORD_RECOVERY_FAILED' AND target_id = $1 AND occurred_at > now() - interval '24 hours'
+WHERE action = 'PASSWORD_RECOVERY_FAILED' AND details->>'reason' = 'wrong_code'
+  AND target_id = $1 AND occurred_at > now() - interval '24 hours'
 `
 
-// Failed recovery confirmations of one account over the last day (audit_log_action_idx).
+// Wrong recovery codes guessed for one account over the last day. Only real guesses count, so
+// attempts rejected by the cap itself never extend it (audit_log_recovery_guesses_idx).
 func (q *Queries) CountRecentRecoveryFailures(ctx context.Context, userID *uuid.UUID) (int32, error) {
 	row := q.db.QueryRow(ctx, countRecentRecoveryFailures, userID)
 	var column_1 int32

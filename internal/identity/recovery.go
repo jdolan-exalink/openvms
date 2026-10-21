@@ -59,7 +59,8 @@ const (
 	RecoveryRequestCooldown = time.Minute
 	// MaxRecoveryAttempts wrong codes invalidate the active code.
 	MaxRecoveryAttempts = 5
-	// MaxRecoveryFailuresPerDay failed confirmations block recovery of an account for 24 hours.
+	// MaxRecoveryFailuresPerDay wrong codes block recovery of an account until they are older than
+	// 24 hours (attempts refused by the block itself do not count).
 	// It bounds slow guessing across codes and source IPs (about 3650 guesses a year against a
 	// 10^6 code space); a blocked admin can still use tools/reset_admin.sh on the host.
 	MaxRecoveryFailuresPerDay = 10
@@ -93,6 +94,7 @@ func (s *Service) RequestPasswordRecovery(ctx context.Context, username string) 
 	now := s.clock()
 	var code string
 	var user db.User
+	var blocked bool
 	err := s.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		u, err := q.GetUserByUsername(ctx, username)
 		if errors.Is(store.Classify(err), store.ErrNotFound) {
@@ -109,8 +111,10 @@ func (s *Service) RequestPasswordRecovery(ctx context.Context, username string) 
 		if err := q.LockUserForRecovery(ctx, u.ID); err != nil {
 			return err
 		}
-		if blocked, err := recoveryBlocked(ctx, q, u.ID); err != nil || blocked {
-			return err
+		var err2 error
+		if blocked, err2 = recoveryBlocked(ctx, q, u.ID); err2 != nil || blocked {
+			user = u
+			return err2
 		}
 		active, err := q.GetPasswordRecoveryCode(ctx, u.ID)
 		switch {
@@ -136,6 +140,11 @@ func (s *Service) RequestPasswordRecovery(ctx context.Context, username string) 
 	})
 	if err != nil {
 		return err
+	}
+	if blocked {
+		// No code, but the operator watching the log must know why nothing arrived.
+		s.logger().Warn("platform admin password recovery blocked: too many wrong codes in 24 hours; use tools/reset_admin.sh",
+			"user", user.Username, "ip", ipString(httpx.ClientIP(ctx)))
 	}
 	if code != "" {
 		// The log is the delivery channel: only whoever can read the API log can use the code.
@@ -238,7 +247,7 @@ func (s *Service) logger() *slog.Logger {
 	return slog.Default()
 }
 
-// recoveryBlocked reports an account that reached MaxRecoveryFailuresPerDay in the last 24 hours.
+// recoveryBlocked reports an account with MaxRecoveryFailuresPerDay wrong codes in the last 24 hours.
 func recoveryBlocked(ctx context.Context, q *db.Queries, userID uuid.UUID) (bool, error) {
 	n, err := q.CountRecentRecoveryFailures(ctx, &userID)
 	return n >= MaxRecoveryFailuresPerDay, err
