@@ -97,8 +97,9 @@ type VisionConfig struct {
 // DefaultInactivitySeconds matches Frigate birdseye's default inactivity threshold.
 const DefaultInactivitySeconds = 30
 
-// MaxInactivitySeconds bounds the caller-selected inactivity timeout.
-const MaxInactivitySeconds = 600
+// InactivityOptions are the accepted inactivity timeouts (0 keeps the max-display release). A
+// closed set bounds the allocator sessions one caller can create.
+var InactivityOptions = []int{0, 10, 30, 60, 120}
 
 // DefaultVisionConfig returns sensible operational defaults for Vision AI.
 func DefaultVisionConfig(tenantID uuid.UUID) VisionConfig {

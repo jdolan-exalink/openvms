@@ -162,7 +162,8 @@ func TestServiceSlotsInactivityOption(t *testing.T) {
 	svc.Clock = func() time.Time { return now }
 	a := tenantActor()
 
-	for _, bad := range []int{-1, MaxInactivitySeconds + 1} {
+	// Only the offered timeouts are accepted, so a caller cannot fan out allocator sessions.
+	for _, bad := range []int{-1, 45, 600, 601} {
 		var verr *ValidationError
 		if _, err := svc.Slots(ctx, a, "general", "4", WithInactivity(bad)); !errors.As(err, &verr) {
 			t.Fatalf("inactivity %d: err = %v, want a ValidationError", bad, err)

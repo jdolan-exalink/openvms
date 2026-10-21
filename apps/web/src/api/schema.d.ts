@@ -8498,7 +8498,7 @@ export interface operations {
                 source?: components["schemas"]["VisionAISource"];
                 layout?: components["schemas"]["VisionAILayout"];
                 /** @description Inactivity timeout in seconds; 0 keeps a camera until its maximum display time. */
-                inactivity?: number;
+                inactivity?: 0 | 10 | 30 | 60 | 120;
             };
             header?: never;
             path?: never;

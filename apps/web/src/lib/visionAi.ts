@@ -1,9 +1,12 @@
 import { keepPreviousData, queryOptions, useQuery } from "@tanstack/react-query";
 import { api, unwrap, type Schemas } from "@/api/client";
+import type { paths } from "@/api/schema";
 
 export type VisionAISource = Schemas["VisionAISource"];
 export type VisionAILayout = Schemas["VisionAILayout"];
 export type VisionAISlot = Schemas["VisionAISlot"];
+/** Accepted inactivity timeouts in seconds, from the API contract. */
+export type VisionInactivity = NonNullable<NonNullable<paths["/api/v1/vision-ai/slots"]["get"]["parameters"]["query"]>["inactivity"]>;
 
 /** The ranked slots are re-computed server side; polling is what makes them rotate. */
 export const VISION_SLOTS_REFETCH_MS = 2000;
@@ -17,7 +20,7 @@ export function visionSourceFromId(id: string): VisionAISource {
 }
 
 /** `inactivity` is the birdseye-style timeout in seconds; undefined uses the server default. */
-export function visionSlotsQuery(source: VisionAISource, layout: VisionAILayout, inactivity?: number) {
+export function visionSlotsQuery(source: VisionAISource, layout: VisionAILayout, inactivity?: VisionInactivity) {
   return queryOptions({
     queryKey: ["vision-ai", "slots", source, layout, inactivity ?? null],
     queryFn: async () =>
@@ -27,7 +30,7 @@ export function visionSlotsQuery(source: VisionAISource, layout: VisionAILayout,
   });
 }
 
-export function useVisionSlots(source: VisionAISource, layout: VisionAILayout, inactivity?: number) {
+export function useVisionSlots(source: VisionAISource, layout: VisionAILayout, inactivity?: VisionInactivity) {
   return useQuery(visionSlotsQuery(source, layout, inactivity));
 }
 

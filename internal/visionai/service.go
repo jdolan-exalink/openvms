@@ -3,6 +3,7 @@ package visionai
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"sync"
@@ -92,7 +93,7 @@ func (s *Service) session(a authz.Actor, cfg VisionConfig, now time.Time) *SlotA
 type SlotsOption func(*VisionConfig)
 
 // WithInactivity sets the inactivity timeout in seconds (0 disables it). Values outside
-// [0, MaxInactivitySeconds] are rejected by Slots.
+// InactivityOptions are rejected by Slots.
 func WithInactivity(seconds int) SlotsOption {
 	return func(c *VisionConfig) { c.InactivitySeconds = seconds }
 }
@@ -106,8 +107,8 @@ func (s *Service) Slots(ctx context.Context, actor authz.Actor, source, layout s
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	if cfg.InactivitySeconds < 0 || cfg.InactivitySeconds > MaxInactivitySeconds {
-		return Result{}, &ValidationError{Msg: fmt.Sprintf("inactivity must be between 0 and %d seconds", MaxInactivitySeconds)}
+	if !slices.Contains(InactivityOptions, cfg.InactivitySeconds) {
+		return Result{}, &ValidationError{Msg: fmt.Sprintf("inactivity must be one of %v seconds", InactivityOptions)}
 	}
 	now := s.Clock()
 	set, err := s.source.RecentEvents(ctx, actor, EventWindow, now)

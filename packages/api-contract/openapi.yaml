@@ -1808,7 +1808,7 @@ paths:
         - name: inactivity
           in: query
           description: Inactivity timeout in seconds; 0 keeps a camera until its maximum display time.
-          schema: { type: integer, minimum: 0, maximum: 600, default: 30 }
+          schema: { type: integer, enum: [0, 10, 30, 60, 120], default: 30 }
       responses:
         "200":
           description: The slot grid
