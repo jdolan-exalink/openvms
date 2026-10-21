@@ -44,7 +44,7 @@ images=$("${compose[@]}" config --images) || {
   printf 'Unable to resolve the API image for Compose project %q.\n' "$project" >&2
   exit 1
 }
-image=$(printf '%s\n' "$images" | awk -v expected="${project}-api" '$0 == expected { count++; image = $0 } END { if (count != 1) exit 1; print image }') || {
+image=$(printf '%s\n' "$images" | awk '$0 == "openvms-api" { count++; image = $0 } END { if (count != 1) exit 1; print image }') || {
   printf 'The current API image is missing or ambiguous; no reset was attempted.\n' >&2
   exit 1
 }

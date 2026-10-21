@@ -14,11 +14,11 @@ case "$*" in
   *"ps -q api") printf 'api-container-id\n' ;;
   *"build api") printf 'build complete\n' ;;
   *"config --images api") exit 0 ;;
-  *"config --images") printf 'openvms-test-postgres\nopenvms-test-api\nopenvms-test-web\n' ;;
-  "image inspect openvms-test-api") ;;
+  *"config --images") printf 'postgres:16\nopenvms-api\nopenvms-web\n' ;;
+  "image inspect openvms-api") ;;
   *"NetworkSettings.Networks"*) printf 'default-network-id\n' ;;
   *".Config.Env"*) printf 'postgres://app:fixture-only@postgres:5432/openvms\n' ;;
-  "run --rm -i --network default-network-id --env DATABASE_URL --entrypoint /vmsctl openvms-test-api reset-admin-password -user admin")
+  "run --rm -i --network default-network-id --env DATABASE_URL --entrypoint /vmsctl openvms-api reset-admin-password -user admin")
     [[ "$DATABASE_URL" == "postgres://app:fixture-only@postgres:5432/openvms" ]] || exit 89
     IFS= read -r password
     printf '%s\n' "$password" >>"$PASSWORD_STDIN_LOG"
@@ -41,7 +41,8 @@ grep -q '^Secret-Password-2026$' "$PASSWORD_STDIN_LOG" || fail "password was not
 grep -q 'reset-admin-password' "$DOCKER_LOG" || fail "API maintenance reset command was not invoked"
 grep -q 'build api' "$DOCKER_LOG" || fail "matching API CLI was not built from the checkout"
 grep -q 'config --images$' "$DOCKER_LOG" || fail "unfiltered Compose image list was not resolved"
-grep -q 'run --rm -i --network default-network-id --env DATABASE_URL --entrypoint /vmsctl openvms-test-api reset-admin-password -user admin' "$DOCKER_LOG" || fail "interactive stdin was not enabled for the one-off API CLI"
+if grep -q 'config --images api$' "$DOCKER_LOG"; then fail "filtered Compose image lookup was used"; fi
+grep -q 'run --rm -i --network default-network-id --env DATABASE_URL --entrypoint /vmsctl openvms-api reset-admin-password -user admin' "$DOCKER_LOG" || fail "interactive stdin was not enabled for the one-off API CLI"
 grep -q 'ps -q api' "$DOCKER_LOG" || fail "running API environment was not selected"
 grep 'inspect --format.*Config.Env' "$DOCKER_LOG" | grep -q 'DATABASE_URL=' || fail "database URL was not selected from the running API environment"
 grep 'inspect --format.*Config.Env' "$DOCKER_LOG" | grep -Fq 'println .}}' && fail "container environment was not filtered to the database URL"
