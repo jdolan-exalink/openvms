@@ -6,7 +6,8 @@ User request (2026-10-21): Vision AI should start with every smart detection ena
 ## Product decisions
 - Channel layout: latest detection large (plate or face crop, camera, time, "hace Ns") with a strip of the previous detections underneath. Same component in the Live tile and the totem.
 - Priority reordering happens client side with CSS `order`, so players are never re-mounted; the backend allocator keeps stable slot indexes.
-- Inactivity timeout default 30 s (Frigate `inactivity_threshold` default), operator-adjustable.
+- Inactivity timeout default 30 s (Frigate `inactivity_threshold` default), operator-adjustable (10 s, 30 s, 1 min, 2 min; no "never" option because 0 still releases at max display).
+- Tile counter: "EN VIVO" while any detection on the camera runs, then "hace Ns" since the last activity (user choice 2026-10-21).
 - Saved user preferences keep winning over the new "all detections on" default.
 
 ## Tasks
@@ -23,3 +24,4 @@ Strict TDD per slice (RED -> GREEN). Web: `pnpm --dir apps/web test -- --run <pa
 - Tracker created.
 - V1+V2 (2026-10-21): default filters all enabled (`visionAiPrefs.ts`); `priorityOrder` in `visionAiGrid.ts` drives CSS `order` in matrix and dynamic modes (pinned first, then score, empty last). RED->GREEN in `visionAiPrefs.test.ts`, `visionAiGrid.test.ts`, `VisionAI.test.tsx` (player identity kept across a reorder). Next: V3.
 - V3 (2026-10-21): `VisionConfig.InactivitySeconds` (default 30, `WithInactivity`, 0..600) drops candidates whose last detection (running = now, else end) is older than the timeout and releases camera-less slots after min display; `SlotAssignment.DetectedAt` = latest event start. Contract: `inactivity` query param, `detected_at` slot field. Web: `inactivitySeconds` pref + "Cerrar tras inactividad" selector, `DetectionAge` "hace Ns" counter. Legacy max-display tests pinned to inactivity 0. Note: the 30s default also applies to LPR/alarm/focus sources and Live vision tiles. Next: V4.
+- V3b (2026-10-21): `SlotAssignment.Active`/`LastSeenAt` aggregated over every candidate event of the camera, cleared when the camera has no candidate (pinned stays, not live); contract `active`, `last_seen_at`; web `DetectionAge` shows EN VIVO or "hace Ns"; "Nunca" option removed. Next: V4.
