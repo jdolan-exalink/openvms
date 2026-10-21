@@ -80,7 +80,7 @@ func TestGetVisionAISlots(t *testing.T) {
 			ID: uuid.New(), CameraID: cam, CameraName: "Gate", Severity: "detection", Labels: []string{"person"},
 			StartTime: now.Add(-time.Minute), EndTime: &ended,
 		}}})}
-		ten := 10
+		ten := gen.GetVisionAISlotsParamsInactivity(10)
 		resp, err := h.GetVisionAISlots(visionCtx(), gen.GetVisionAISlotsRequestObject{Params: gen.GetVisionAISlotsParams{Inactivity: &ten}})
 		if err != nil {
 			t.Fatal(err)
@@ -88,10 +88,10 @@ func TestGetVisionAISlots(t *testing.T) {
 		if resp.(gen.GetVisionAISlots200JSONResponse).Slots[0].CameraId != nil {
 			t.Fatal("inactivity=10 must hide a camera inactive for 20s")
 		}
-		bad := 601
+		bad := gen.GetVisionAISlotsParamsInactivity(45)
 		_, err = h.GetVisionAISlots(visionCtx(), gen.GetVisionAISlotsRequestObject{Params: gen.GetVisionAISlotsParams{Inactivity: &bad}})
 		if status, _, _ := statusFor(err); status != http.StatusBadRequest {
-			t.Fatalf("inactivity=601: status %d (err %v), want 400", status, err)
+			t.Fatalf("inactivity=45: status %d (err %v), want 400", status, err)
 		}
 	})
 

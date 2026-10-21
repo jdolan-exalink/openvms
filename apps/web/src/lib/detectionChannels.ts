@@ -29,13 +29,22 @@ export interface ChannelItem {
   /** Plate text, or the recognized person's name ("Desconocido" when unrecognized). */
   label: string;
   recognized?: boolean;
-  imageUrl: string;
+  /** Absent when the event has no image yet. */
+  imageUrl?: string;
   cameraName: string;
   zone?: string;
   at: string;
 }
 
-const byNewest = (a: ChannelItem, b: ChannelItem) => Date.parse(b.at) - Date.parse(a.at);
+/** Unparseable times sort last so the comparator stays consistent. */
+const timeOf = (at: string) => {
+  const t = Date.parse(at);
+  return Number.isNaN(t) ? Number.NEGATIVE_INFINITY : t;
+};
+const byNewest = (a: ChannelItem, b: ChannelItem) => {
+  const ta = timeOf(a.at), tb = timeOf(b.at);
+  return ta === tb ? 0 : tb > ta ? 1 : -1;
+};
 
 export function lprChannelItems(reads: readonly Schemas["PlateRead"][]): ChannelItem[] {
   return reads
@@ -52,7 +61,7 @@ export function faceChannelItems(events: readonly Schemas["Event"][]): ChannelIt
       const name = e.sub_labels.find((s) => s.trim() !== "");
       return {
         key: e.id, kind: "faces", label: name ?? "Desconocido", recognized: Boolean(name),
-        imageUrl: `/api/v1/events/${encodeURIComponent(e.id)}/thumbnail`,
+        imageUrl: e.has_thumbnail ? `/api/v1/events/${encodeURIComponent(e.id)}/thumbnail` : undefined,
         cameraName: e.camera_name, zone: e.zones[0], at: e.start_time,
       };
     })

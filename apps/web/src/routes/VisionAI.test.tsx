@@ -51,6 +51,8 @@ function slot(n: number, cam: string | null, extra: Slot = {}): Slot {
 }
 
 let slotsBody: { slots: Slot[] };
+/** How far the server clock runs ahead of the browser; generated_at follows it like a real server. */
+let serverAheadMs: number;
 /** When set, /api/v1/me answers only after it resolves (simulates permissions loading late). */
 let meGate: Promise<void> | null = null;
 let slotRequests: URL[];
@@ -64,6 +66,7 @@ beforeEach(() => {
   slotRequests = [];
   slotsStatus = 200;
   platesVisible = true;
+  serverAheadMs = 0;
   slotsBody = { slots: [slot(0, "cam-1"), slot(1, "cam-2", { object: "car", plate: "AB123CD" }), slot(2, null), slot(3, null)] };
 });
 
@@ -73,7 +76,7 @@ describe("VisionAI Page", () => {
       "/api/v1/me": () => json(meResponse),
       "/api/v1/vision-ai/slots": () =>
         slotsStatus === 200
-          ? json({ source: "general", layout: "4", generated_at: "2026-10-15T10:00:00Z", plates_visible: platesVisible, ...slotsBody })
+          ? json({ source: "general", layout: "4", generated_at: new Date(Date.now() + serverAheadMs).toISOString(), plates_visible: platesVisible, ...slotsBody })
           : json({ code: "boom", message: "motor no disponible" }, slotsStatus),
     });
     vi.stubGlobal(
@@ -108,6 +111,19 @@ describe("VisionAI Page", () => {
     fireEvent.change(await screen.findByLabelText("Cerrar tras inactividad"), { target: { value: "60" } });
     await waitFor(() => expect(lastQuery()?.get("inactivity")).toBe("60"));
     expect(loadVisionPrefs(visionPrefsKey("t1", "u1")).inactivitySeconds).toBe(60);
+  });
+
+  it("measures the age against the server clock, not the browser's", async () => {
+    // The browser runs 60s behind the server: generated_at is ahead of Date.now().
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse("2026-10-21T10:00:00Z") });
+    try {
+      serverAheadMs = 60_000;
+      slotsBody = { slots: [slot(0, "cam-1", { active: false, last_seen_at: "2026-10-21T10:00:55Z" }), slot(1, null), slot(2, null), slot(3, null)] };
+      setup();
+      expect(await screen.findByText("hace 5s")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows EN VIVO while the detection is running", async () => {

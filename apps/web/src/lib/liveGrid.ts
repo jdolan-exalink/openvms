@@ -488,10 +488,17 @@ export type ViewCell = Schemas["ViewCell"];
  * Saved-view cells for the grid. Cameras and virtual (vision) tiles are kept; map tiles are not
  * part of the saved-view contract and become empty cells.
  */
+/** Mirrors the server rule for ViewVisionRef ids (internal/media visionIDPattern). */
+export const VISION_TILE_ID = /^visionai:[a-z0-9-]{1,40}$/;
+const VISION_TILE_NAME_MAX = 100;
+
 export function tilesToViewCells(tiles: readonly Tile[]): ViewCell[] {
   return tiles.map((t): ViewCell => {
     if (t && "camera_id" in t) return { camera_id: t.camera_id, quality: t.quality };
-    if (isVisionTile(t)) return { vision: { id: t.vision.id, name: t.vision.name }, quality: "sub" };
+    // A tile the server would reject becomes empty instead of failing the whole save.
+    if (isVisionTile(t) && VISION_TILE_ID.test(t.vision.id)) {
+      return { vision: { id: t.vision.id, name: t.vision.name.slice(0, VISION_TILE_NAME_MAX) }, quality: "sub" };
+    }
     return { quality: "sub" };
   });
 }

@@ -9,10 +9,10 @@ const read = (id: string, plate: string, seen_at: string, extra: Partial<Schemas
   plate, plate_normalized: plate, label: "car", zones: ["entrada"], seen_at, ...extra,
 });
 
-const faceEvent = (id: string, start_time: string, sub_labels: string[] = []): Schemas["Event"] => ({
+const faceEvent = (id: string, start_time: string, sub_labels: string[] = [], has_thumbnail = true): Schemas["Event"] => ({
   id, tenant_id: "t", site_id: "s", site_name: "Sitio", server_id: "sv", server_name: "Srv", camera_id: "c2", camera_name: "Hall",
   remote_id: `r-${id}`, severity: "detection", labels: ["face"], sub_labels, zones: ["recepcion"], plates: [], start_time,
-  reviewed: false, has_thumbnail: true, has_snapshot: false, has_preview: false, tracks: [],
+  reviewed: false, has_thumbnail, has_snapshot: false, has_preview: false, tracks: [],
 } as Schemas["Event"]);
 
 describe("channelKindOf", () => {
@@ -40,5 +40,21 @@ describe("faceChannelItems", () => {
     expect(items[0]).toMatchObject({ key: "e2", kind: "faces", cameraName: "Hall", zone: "recepcion", recognized: true });
     expect(items[1]!.recognized).toBe(false);
     expect(items[0]!.imageUrl).toBe("/api/v1/events/e2/thumbnail");
+  });
+});
+
+describe("channel robustness", () => {
+  it("leaves the image out for a face event without a thumbnail", () => {
+    const [item] = faceChannelItems([faceEvent("e1", "2026-10-21T10:00:00Z", [], false)]);
+    expect(item!.imageUrl).toBeUndefined();
+  });
+
+  it("sorts unparseable times last instead of breaking the order", () => {
+    const items = lprChannelItems([
+      read("bad", "ZZ999ZZ", "not-a-date"),
+      read("old", "AB123CD", "2026-10-21T10:00:00Z"),
+      read("new", "AC456EF", "2026-10-21T10:00:05Z"),
+    ]);
+    expect(items.map((i) => i.key)).toEqual(["new", "old", "bad"]);
   });
 });

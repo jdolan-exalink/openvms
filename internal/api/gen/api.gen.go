@@ -1747,6 +1747,33 @@ func (e UpsertMapPlacementParamsEntityType) Valid() bool {
 	}
 }
 
+// Defines values for GetVisionAISlotsParamsInactivity.
+const (
+	N0   GetVisionAISlotsParamsInactivity = 0
+	N10  GetVisionAISlotsParamsInactivity = 10
+	N120 GetVisionAISlotsParamsInactivity = 120
+	N30  GetVisionAISlotsParamsInactivity = 30
+	N60  GetVisionAISlotsParamsInactivity = 60
+)
+
+// Valid indicates whether the value is a known member of the GetVisionAISlotsParamsInactivity enum.
+func (e GetVisionAISlotsParamsInactivity) Valid() bool {
+	switch e {
+	case N0:
+		return true
+	case N10:
+		return true
+	case N120:
+		return true
+	case N30:
+		return true
+	case N60:
+		return true
+	default:
+		return false
+	}
+}
+
 // AddCameraToFrigateRequest defines model for AddCameraToFrigateRequest.
 type AddCameraToFrigateRequest struct {
 	MainStreamUrl string  `json:"main_stream_url"`
@@ -5139,8 +5166,11 @@ type GetVisionAISlotsParams struct {
 	Layout *VisionAILayout `form:"layout,omitempty" json:"layout,omitempty"`
 
 	// Inactivity Inactivity timeout in seconds; 0 keeps a camera until its maximum display time.
-	Inactivity *int `form:"inactivity,omitempty" json:"inactivity,omitempty"`
+	Inactivity *GetVisionAISlotsParamsInactivity `form:"inactivity,omitempty" json:"inactivity,omitempty"`
 }
+
+// GetVisionAISlotsParamsInactivity defines parameters for GetVisionAISlots.
+type GetVisionAISlotsParamsInactivity int
 
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = AgentEnrollRequest
@@ -37249,13 +37279,14 @@ var swaggerSpec = []string{
 	"Yqy3f5Wl0N4ept4lp3CnZNlXCw284OYwd0Yy1DLG9Y5HLHRsqp6GyLXvl/QGk3hhPxBtnMgi1p5f8bR7",
 	"KY8lKWTOpSybXAhGb3wa/lDzlCiZMGgOC1SRMssS63vBwgUmHuVvXNLE8htuJ79dSsMSJVND9kLVT5/r",
 	"1LAJI8ZOBNvveDQY6DnbsP0td5WfgfyP354D8S8VicUjqYVh5wstPwL+rL1nIxzvnV/7Dn/W0JTybdw+",
-	"2ABVAIn5fTwih3A5Z8r2R4W0XOD+YX/I+v61dK4sD6m5D+R31X6T/1XrN3nY0G/yX2tVH9Wzbsr98cwO",
-	"VLo19rGTzCWvIXM6HeDYDZdMjt/ikkpFEMW+1waI/NID/dDeRA2Rd789PCTjERcoKnKtEmYMYMGgBuiS",
-	"1wF8BrtWBACahLf0R3vHb5hEZIO1nX4Y49xSWzQe/2m5EgobMS+3LryOYKF7ubO4k/Vt1Yymk9Z9hRYq",
-	"xsNn9yl2RvG4lCXe8feH36FDQ+WExH6McWsBbMhpl8YNPmM05eve4ThI+xYfC1GjBt9aOBbpdV58j6zw",
-	"aBOyTjsZC4ZDfTOL6erBFkqIo8whhfrPb18g8NRxYUfubU52J0pdcxY/cSP4YkP3fKHFix9e9F64z/3b",
-	"b4ME9qO4lwQNhfmclU9iTKvymY2ZjrfVBPf6B34OlY/Klj3xowpATfVjtNSqn5RSp/KhyHX1vwOa1OdA",
-	"i5Tb2g+ANyvDCzrxjTvjZ7oQ9bdI5VHpp2dZ/eIgGVEpmTAv/vzXn/8vAAD//w==",
+	"2ABVAIn5fTwih3A5Z8r2R4W0XOD+YX/I+v61dK4sD6m5D+R3h50XTBbZix/+edj55rDz3WHnvw4733x7",
+	"+K+GbpP/WqvyqJ50U+aPZ3Wg0a2xjp1cLjkNWdNpAMdsuGRy/BaXVKqBKPS9LkDclx5oh/YWaoi7++3h",
+	"IRmPuEBBkWuVMGMACQblf5e8DtAz2LMiwM8kvKU72jt+wyTiGqzt9MMY55baovH4T8uVUNiIeZl14XUE",
+	"y9zLncWdrG+rZjSdtO4rNFAxHjy7T7EvikelLNGOvz/8Dt0ZKickdmOMWwtQQ063NG7wGaMpX/cOx0Ha",
+	"t/hYiBo1+MbCsUSv8+J7ZIVHm5B1uslYMBvqm1lM1w62UEIcZQ4p1H9++wJhp44LO3Jvc5I7Ueqas/iJ",
+	"G8GXGrrnCy1e/PCi98J97t9+G+SvH8W9JOgnzOasfBIjWpXPbMxzvK2mt9c/8HOofFQ27IkfVeBpqh+j",
+	"nVb9pJQ6lQ9Frqv/HdCkPgdapNzWfgC8WRle0Ilv2xk/04Wov0Uqj0k/PcvqFwfJiErJhHnx57/+/H8B",
+	"AAD//w==",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

@@ -49,3 +49,34 @@ func TestViewKeepsVisionTiles(t *testing.T) {
 		}
 	}
 }
+
+// Editing a view moves or clears vision tiles like any other tile: a cleared vision tile is not
+// resurrected by the keep-what-you-cannot-see merge, which only protects hidden cameras.
+func TestReplaceViewMovesAndClearsVisionTiles(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+	owner := env.Actor(t, "operador")
+	if _, err := env.Svc.CreateGrant(ctx, env.Admin, inventory.GrantInput{
+		SubjectType: "user", SubjectID: owner.UserID, Permission: authz.ViewsCreatePrivate,
+		Effect: authz.Allow, ScopeType: authz.ScopeTenant, ScopeID: &env.Demo.TenantID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := &media.Service{Store: env.Store, Adapters: inventory.NewAdapters(env.Svc), Log: pgtest.Discard()}
+	lpr := &media.Cell{Vision: &media.VisionRef{ID: "visionai:lpr-channel", Name: "Canal LPR"}}
+	faces := &media.Cell{Vision: &media.VisionRef{ID: "visionai:faces-channel", Name: "Canal Rostros"}}
+	created, err := svc.CreateView(ctx, owner, media.ViewInput{Name: "Mixta", Layout: media.Layout{Columns: 2, Cells: []*media.Cell{lpr, nil}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := svc.ReplaceView(ctx, owner, created.ID, media.ViewInput{Name: "Mixta", Layout: media.Layout{Columns: 2, Cells: []*media.Cell{nil, faces}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Layout.Cells[0] != nil {
+		t.Fatalf("cleared vision tile came back: %+v", got.Layout.Cells[0])
+	}
+	if c := got.Layout.Cells[1]; c == nil || c.Vision == nil || c.Vision.ID != "visionai:faces-channel" {
+		t.Fatalf("moved vision tile = %+v, want the faces channel", c)
+	}
+}

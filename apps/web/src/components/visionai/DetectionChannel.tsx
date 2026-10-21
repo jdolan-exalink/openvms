@@ -61,7 +61,7 @@ export function DetectionChannel({ kind, className }: { kind: ChannelKind; class
         <>
           <div data-testid="channel-latest" className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-4">
             <div className="flex min-h-0 w-full flex-1 items-center justify-center overflow-hidden rounded-m3-lg bg-video">
-              <img src={latest.imageUrl} alt={`${latest.label} en ${latest.cameraName}`} className="max-h-full max-w-full object-contain" />
+              <ChannelImage key={latest.key} item={latest} alt={`${latest.label} en ${latest.cameraName}`} className="max-h-full max-w-full object-contain" />
             </div>
             <ChannelLabel item={latest} large />
             <div className="text-center text-sm text-on-surface-variant">
@@ -75,7 +75,9 @@ export function DetectionChannel({ kind, className }: { kind: ChannelKind; class
             <ol data-testid="channel-history" aria-label="Detecciones anteriores" className="flex shrink-0 gap-2 overflow-x-auto border-t border-line bg-surface p-2">
               {previous.slice(0, CHANNEL_HISTORY).map((item) => (
                 <li key={item.key} data-testid="channel-history-item" className="flex w-28 shrink-0 flex-col gap-1">
-                  <img src={item.imageUrl} alt="" loading="lazy" className="aspect-video w-full rounded-m3-sm bg-video object-cover" />
+                  <div className="aspect-video w-full overflow-hidden rounded-m3-sm bg-video">
+                    <ChannelImage item={item} alt="" className="size-full object-cover" />
+                  </div>
                   <ChannelLabel item={item} />
                   <span className="truncate font-mono text-[10px] tabular-nums text-muted">{formatTime(item.at)}</span>
                 </li>
@@ -86,6 +88,20 @@ export function DetectionChannel({ kind, className }: { kind: ChannelKind; class
       )}
     </section>
   );
+}
+
+/** The detection image, or the channel icon when there is none or it fails to load. */
+function ChannelImage({ item, alt, className }: { item: ChannelItem; alt: string; className?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!item.imageUrl || failed) {
+    const Icon = item.kind === "lpr" ? CarFront : ScanFace;
+    return (
+      <div data-testid="channel-image-placeholder" className="flex size-full items-center justify-center text-muted">
+        <Icon aria-hidden="true" className="size-1/4 max-h-16 max-w-16 opacity-40" />
+      </div>
+    );
+  }
+  return <img src={item.imageUrl} alt={alt} loading="lazy" onError={() => setFailed(true)} className={className} />;
 }
 
 function ChannelLabel({ item, large = false }: { item: ChannelItem; large?: boolean }) {

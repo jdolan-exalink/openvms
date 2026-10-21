@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeVisionInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId, tilesForFisheyeMultiView, cleanFisheyeVirtualViewTiles, visionDragId, placeVisionAt, isVisionTile, tileIdentityKey, tilesToViewCells, viewCellsToTiles,
+  cameraDragId, layoutForCount, LIVE_GRID_DROP_ID, liveSelectionKey, mapDragId, parseSelection, duplicateTileIndexes, placeCameraUnique, placeInOpenCell, placeVisionInOpenCell, placeMapAt, reorderTiles, resizeTiles, resolveDragEnd, serializeSelection, swapTiles, tileDragId, tilesForCameras, type Tile, feviewDragId, feviewFromDragId, tilesForFisheyeMultiView, cleanFisheyeVirtualViewTiles, visionDragId, placeVisionAt, isVisionTile, tileIdentityKey, tilesToViewCells, viewCellsToTiles, VISION_TILE_ID,
 } from "./liveGrid";
+import { VIRTUAL_VISION_SOURCES } from "@/components/LiveExplorer";
 
 describe("resizeTiles", () => {
   it("pads with null up to n*n", () => {
@@ -399,6 +400,18 @@ describe("view cell conversion", () => {
       { quality: "sub" },
       { quality: "sub" },
     ]);
+  });
+
+  it("never sends a vision tile the server would reject", () => {
+    const long = "x".repeat(150);
+    expect(tilesToViewCells([{ vision: { id: "javascript:alert(1)", name: "x" } }, { vision: { id: "visionai:general", name: long } }])).toEqual([
+      { quality: "sub" },
+      { vision: { id: "visionai:general", name: "x".repeat(100) }, quality: "sub" },
+    ]);
+  });
+
+  it("keeps every offered Vision AI source and channel savable", () => {
+    for (const v of VIRTUAL_VISION_SOURCES) expect(VISION_TILE_ID.test(v.id)).toBe(true);
   });
 
   it("restores camera and vision tiles from a saved view", () => {

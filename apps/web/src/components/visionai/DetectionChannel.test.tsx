@@ -10,10 +10,10 @@ const read = (id: string, plate: string, seen_at: string) => ({
   plate, plate_normalized: plate, label: "car", zones: ["entrada"], seen_at,
 });
 
-const faceEvent = (id: string, start_time: string, sub_labels: string[] = []) => ({
+const faceEvent = (id: string, start_time: string, sub_labels: string[] = [], has_thumbnail = true) => ({
   id, tenant_id: "t", site_id: "s", site_name: "Sitio", server_id: "sv", server_name: "Srv", camera_id: "c2", camera_name: "Hall",
   remote_id: `r-${id}`, severity: "detection", labels: ["face"], sub_labels, zones: ["recepcion"], plates: [], start_time,
-  reviewed: false, has_thumbnail: true, has_snapshot: false, has_preview: false, tracks: [],
+  reviewed: false, has_thumbnail, has_snapshot: false, has_preview: false, tracks: [],
 });
 
 let reads: unknown[];
@@ -63,6 +63,14 @@ describe("DetectionChannel", () => {
     expect(within(latest).getByText("Juan Pérez")).toBeInTheDocument();
     expect(within(screen.getByTestId("channel-history")).getByText("Desconocido")).toBeInTheDocument();
     expect(requests.find((u) => u.pathname === "/api/v1/events")?.searchParams.getAll("label")).toEqual(["face"]);
+  });
+
+  it("shows a placeholder instead of a broken image when there is no thumbnail", async () => {
+    events = [faceEvent("e1", "2026-10-21T10:00:08Z", [], false)];
+    renderPage(() => <DetectionChannel kind="faces" />);
+    const latest = await screen.findByTestId("channel-latest");
+    expect(latest.querySelector("img")).toBeNull();
+    expect(within(latest).getByTestId("channel-image-placeholder")).toBeInTheDocument();
   });
 
   it("shows an empty state until the first detection", async () => {
