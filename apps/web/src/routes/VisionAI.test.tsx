@@ -97,6 +97,30 @@ describe("VisionAI Page", () => {
     setup();
     await waitFor(() => expect(tileOrder("cam-3")).toBe("0"));
     expect(tileOrder("cam-1")).toBe("1");
+    const emptyOrders = screen.getAllByText("Sin evento asignado").map((el) => Number(el.closest<HTMLElement>("[data-vision-tile]")?.style.order));
+    expect(emptyOrders).toHaveLength(2);
+    for (const order of emptyOrders) expect(order).toBeGreaterThan(1);
+  });
+
+  it("asks for the 30s inactivity timeout by default and remembers a new choice", async () => {
+    setup();
+    await waitFor(() => expect(lastQuery()?.get("inactivity")).toBe("30"));
+    fireEvent.change(await screen.findByLabelText("Cerrar tras inactividad"), { target: { value: "60" } });
+    await waitFor(() => expect(lastQuery()?.get("inactivity")).toBe("60"));
+    expect(loadVisionPrefs(visionPrefsKey("t1", "u1")).inactivitySeconds).toBe(60);
+  });
+
+  it("counts the seconds since the detection on each tile", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse("2026-10-21T10:00:12Z") });
+    try {
+      slotsBody = { slots: [slot(0, "cam-1", { detected_at: "2026-10-21T10:00:00Z" }), slot(1, null), slot(2, null), slot(3, null)] };
+      setup();
+      expect(await screen.findByText("hace 12s")).toBeInTheDocument();
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(await screen.findByText("hace 15s")).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renders a player per filled slot, sized to fill the slot", async () => {

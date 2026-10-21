@@ -7,6 +7,8 @@ export interface VisionPrefs {
   presetSource: VisionAISource;
   layoutCount: number;
   activeObjects: Record<string, boolean>;
+  /** Seconds without a detection before a camera leaves the grid; 0 keeps it until max display. */
+  inactivitySeconds: number;
 }
 
 const STORAGE_PREFIX = "openvms.visionai.view.v1";
@@ -14,12 +16,14 @@ const STORAGE_PREFIX = "openvms.visionai.view.v1";
 const MODES: readonly VisionMode[] = ["matrix", "focus", "lpr", "faces", "alarm", "dynamic"];
 const SOURCES: readonly VisionAISource[] = ["general", "personas", "vehiculos", "lpr", "perimetro", "alarmas"];
 export const VISION_LAYOUT_COUNTS: readonly number[] = [1, 4, 9, 16];
+export const VISION_INACTIVITY_OPTIONS: readonly number[] = [10, 30, 60, 120, 0];
 
 export const DEFAULT_VISION_PREFS: VisionPrefs = {
   mode: "matrix",
   presetSource: "general",
   layoutCount: 4,
   activeObjects: { person: true, car: true, motorcycle: true, truck: true, license_plate: true, face: true },
+  inactivitySeconds: 30,
 };
 
 export function visionPrefsKey(tenantId: string | null, userId: string): string {
@@ -48,6 +52,7 @@ export function parseVisionPrefs(raw: string | null): VisionPrefs {
     presetSource: SOURCES.find((s) => s === rec.presetSource) ?? defaults.presetSource,
     layoutCount: VISION_LAYOUT_COUNTS.find((n) => n === rec.layoutCount) ?? defaults.layoutCount,
     activeObjects,
+    inactivitySeconds: VISION_INACTIVITY_OPTIONS.find((n) => n === rec.inactivitySeconds) ?? defaults.inactivitySeconds,
   };
 }
 

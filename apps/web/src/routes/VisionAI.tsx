@@ -12,8 +12,8 @@ import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 import { dynamicGridShape, priorityOrder } from "@/lib/visionAiGrid";
 import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
-import { DEFAULT_VISION_PREFS, loadVisionPrefs, saveVisionPrefs, visionPrefsKey, type VisionMode } from "@/lib/visionAiPrefs";
-import { useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource } from "@/lib/visionAi";
+import { DEFAULT_VISION_PREFS, loadVisionPrefs, saveVisionPrefs, VISION_INACTIVITY_OPTIONS, visionPrefsKey, type VisionMode } from "@/lib/visionAiPrefs";
+import { detectionAgeSeconds, formatDetectionAge, useVisionSlots, type VisionAILayout, type VisionAISlot, type VisionAISource } from "@/lib/visionAi";
 
 export type { VisionMode };
 
@@ -45,6 +45,7 @@ export function VisionAI() {
   const [mode, setMode] = useState<VisionMode>(DEFAULT_VISION_PREFS.mode);
   const [presetSource, setPresetSource] = useState<VisionAISource>(DEFAULT_VISION_PREFS.presetSource);
   const [layoutCount, setLayoutCount] = useState<number>(DEFAULT_VISION_PREFS.layoutCount);
+  const [inactivitySeconds, setInactivitySeconds] = useState<number>(DEFAULT_VISION_PREFS.inactivitySeconds);
   const [fullscreen, setFullscreen] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -52,7 +53,7 @@ export function VisionAI() {
 
   const source = sourceFor(mode, presetSource);
   const layout = layoutFor(mode, layoutCount);
-  const slotsQuery = useVisionSlots(source, layout);
+  const slotsQuery = useVisionSlots(source, layout, inactivitySeconds);
   const me = useQuery(meQuery);
   const canViewSnapshots = can(me.data, "snapshots.view");
 
@@ -74,18 +75,19 @@ export function VisionAI() {
     // On the first load, a change made while `me` was still loading wins over the saved view. When
     // the signed-in user or tenant changes later, always load that user's own view.
     const firstLoad = hydratedKey === null;
-    const untouched = JSON.stringify({ mode, presetSource, layoutCount, activeObjects }) === JSON.stringify(DEFAULT_VISION_PREFS);
+    const untouched = JSON.stringify({ mode, presetSource, layoutCount, activeObjects, inactivitySeconds }) === JSON.stringify(DEFAULT_VISION_PREFS);
     if (!firstLoad || untouched) {
       const saved = loadVisionPrefs(prefsKey);
       setMode(saved.mode);
       setPresetSource(saved.presetSource);
       setLayoutCount(saved.layoutCount);
       setActiveObjects(saved.activeObjects);
+      setInactivitySeconds(saved.inactivitySeconds);
     }
   }
   useEffect(() => {
-    if (prefsKey && hydratedKey === prefsKey) saveVisionPrefs(prefsKey, { mode, presetSource, layoutCount, activeObjects });
-  }, [prefsKey, hydratedKey, mode, presetSource, layoutCount, activeObjects]);
+    if (prefsKey && hydratedKey === prefsKey) saveVisionPrefs(prefsKey, { mode, presetSource, layoutCount, activeObjects, inactivitySeconds });
+  }, [prefsKey, hydratedKey, mode, presetSource, layoutCount, activeObjects, inactivitySeconds]);
 
   // Presets
   const applyPreset = (preset: string) => {
@@ -319,6 +321,21 @@ export function VisionAI() {
               ))}
             </div>
           )}
+
+          {/* Birdseye-style inactivity timeout */}
+          <label className="flex items-center gap-1.5 text-xs text-on-surface-variant">
+            <span className="hidden lg:inline">Cerrar tras</span>
+            <select
+              aria-label="Cerrar tras inactividad"
+              value={inactivitySeconds}
+              onChange={(e) => setInactivitySeconds(Number(e.target.value))}
+              className="h-8 rounded-m3-md border border-line bg-surface-2 px-2 text-xs font-medium text-ink"
+            >
+              {VISION_INACTIVITY_OPTIONS.map((n) => (
+                <option key={n} value={n}>{inactivityLabel(n)}</option>
+              ))}
+            </select>
+          </label>
 
           {/* Debug Score toggle */}
           <IconButton
@@ -845,7 +862,9 @@ function SlotRenderer({
           {slot.zone && <span className="text-[11px] text-white/80 truncate">{slot.zone}</span>}
         </div>
 
-        {slot.display_seconds !== undefined && (
+        {slot.detected_at ? (
+          <DetectionAge detectedAt={slot.detected_at} />
+        ) : slot.display_seconds !== undefined && (
           <div className="font-mono text-[10px] text-white/70">{formatElapsed(slot.display_seconds)}</div>
         )}
       </div>
@@ -890,4 +909,25 @@ function EventSnapshotImage({ slot, eventId, snapshots }: { slot: VisionAISlot; 
 function formatElapsed(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function inactivityLabel(seconds: number): string {
+  if (seconds === 0) return "Nunca";
+  return seconds < 60 ? `${seconds} s` : `${seconds / 60} min`;
+}
+
+/** Live "hace Ns" counter; ticks on its own so the page does not re-render every second. */
+function DetectionAge({ detectedAt }: { detectedAt: string }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const seconds = detectionAgeSeconds(detectedAt, now);
+  if (seconds === null) return null;
+  return (
+    <div className="font-mono text-[10px] font-semibold tabular-nums text-white/80" title="Tiempo desde la detección">
+      {formatDetectionAge(seconds)}
+    </div>
+  );
 }

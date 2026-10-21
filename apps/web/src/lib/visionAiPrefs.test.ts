@@ -18,6 +18,7 @@ const custom: VisionPrefs = {
   presetSource: "vehiculos",
   layoutCount: 9,
   activeObjects: { person: false, car: true, motorcycle: true, truck: true, license_plate: true, face: false },
+  inactivitySeconds: 60,
 };
 
 describe("visionPrefsKey", () => {
@@ -32,6 +33,14 @@ describe("parseVisionPrefs", () => {
     expect(parseVisionPrefs(null).activeObjects).toEqual({
       person: true, car: true, motorcycle: true, truck: true, license_plate: true, face: true,
     });
+  });
+
+  it("defaults the inactivity timeout to 30s and only accepts the offered values", () => {
+    expect(parseVisionPrefs(null).inactivitySeconds).toBe(30);
+    expect(parseVisionPrefs(JSON.stringify({ inactivitySeconds: 0 })).inactivitySeconds).toBe(0);
+    expect(parseVisionPrefs(JSON.stringify({ inactivitySeconds: 120 })).inactivitySeconds).toBe(120);
+    expect(parseVisionPrefs(JSON.stringify({ inactivitySeconds: 45 })).inactivitySeconds).toBe(30);
+    expect(parseVisionPrefs(JSON.stringify({ inactivitySeconds: "60" })).inactivitySeconds).toBe(30);
   });
 
   it("returns defaults for missing or corrupt input", () => {
