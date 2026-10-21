@@ -327,6 +327,9 @@ func TestWebComposeAddsPinnedHTTPSIngressWithoutBreakingHTTPOrProxyTrust(t *test
 		t.Fatalf("web must preserve HTTP :8000 and add HTTPS :8443, got %#v", ports)
 	}
 	webEnv := asMap(t, web["environment"])
+	if webEnv["HTTPS_SITE_ADDRESS"] != ":443" {
+		t.Fatalf("Caddy must bind HTTPS inside the container, not to the host LAN IP, got %#v", webEnv["HTTPS_SITE_ADDRESS"])
+	}
 	if webEnv["API_UPSTREAM"] != "${OPENVMS_AGENT_API_IPV4:-172.29.240.2}:8080" {
 		t.Fatalf("Caddy API upstream must use the API's fixed private IPv4, got %#v", webEnv["API_UPSTREAM"])
 	}
