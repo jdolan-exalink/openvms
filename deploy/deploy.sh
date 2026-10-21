@@ -157,12 +157,20 @@ if [ "$DRY" != 1 ]; then
   PORT=$(docker compose port web 443 2>/dev/null | head -n1 | sed 's/.*://')
 fi
 case $PORT in ''|*[!0-9]*) PORT=${WEB_HTTPS_PORT:-8443} ;; esac
-url="https://localhost:$PORT/health/ready"
+# With a configured HTTPS site address Caddy serves only that name, so probe it
+# by that name while pinning the connection to the local stack.
+SITE=""
+if [ "$DRY" != 1 ]; then
+  SITE=$(docker compose exec -T web printenv HTTPS_SITE_ADDRESS 2>/dev/null | tr -d '\r\n')
+fi
+case $SITE in ''|*[!A-Za-z0-9.-]*) SITE=localhost ;; esac
+url="https://$SITE:$PORT/health/ready"
+pin="$SITE:$PORT:127.0.0.1:$PORT"
 if [ "$DRY" = 1 ]; then
-  info "+ curl -fsk $url (--connect-timeout 3 --max-time 5, up to ${WAIT}s, expects \"status\":\"ok\")"
+  info "+ curl -fsk --connect-to $pin $url (--connect-timeout 3 --max-time 5, up to ${WAIT}s, expects \"status\":\"ok\")"
 else
   waited=0
-  until curl -fsk --connect-timeout 3 --max-time 5 "$url" 2>/dev/null | grep -Eq '"status" *: *"ok"'; do
+  until curl -fsk --connect-timeout 3 --max-time 5 --connect-to "$pin" "$url" 2>/dev/null | grep -Eq '"status" *: *"ok"'; do
     if [ "$waited" -ge "$WAIT" ]; then
       docker compose logs --tail 50 api || true
       rollback_help
