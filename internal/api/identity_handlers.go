@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
@@ -345,8 +347,8 @@ const recoveryAccepted = "Si la cuenta puede recuperarse, se generó un código 
 var recoveryDisabled = gen.NotFoundJSONResponse{Code: "recovery_disabled", Message: "La recuperación por código está deshabilitada en este servidor."}
 
 func (h *Handlers) RequestPasswordRecovery(ctx context.Context, r gen.RequestPasswordRecoveryRequestObject) (gen.RequestPasswordRecoveryResponseObject, error) {
-	if r.Body == nil {
-		return gen.RequestPasswordRecovery400JSONResponse{BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "invalid", Message: "username is required"}}, nil
+	if r.Body == nil || !validRecoveryUsername(r.Body.Username) {
+		return gen.RequestPasswordRecovery400JSONResponse{BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "invalid", Message: "username is required (max 200 characters)"}}, nil
 	}
 	err := h.Identity.RequestPasswordRecovery(ctx, r.Body.Username)
 	switch {
@@ -359,8 +361,8 @@ func (h *Handlers) RequestPasswordRecovery(ctx context.Context, r gen.RequestPas
 }
 
 func (h *Handlers) ConfirmPasswordRecovery(ctx context.Context, r gen.ConfirmPasswordRecoveryRequestObject) (gen.ConfirmPasswordRecoveryResponseObject, error) {
-	if r.Body == nil {
-		return gen.ConfirmPasswordRecovery400JSONResponse{BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "invalid", Message: "username, code and new_password are required"}}, nil
+	if r.Body == nil || !validRecoveryUsername(r.Body.Username) || !recoveryCodeFormat.MatchString(r.Body.Code) || len([]rune(r.Body.NewPassword)) > recoveryPasswordMax {
+		return gen.ConfirmPasswordRecovery400JSONResponse{BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "invalid", Message: "username (max 200), a 6-digit code and new_password (max 1024) are required"}}, nil
 	}
 	err := h.Identity.ConfirmPasswordRecovery(ctx, r.Body.Username, r.Body.Code, r.Body.NewPassword)
 	switch {
@@ -374,4 +376,18 @@ func (h *Handlers) ConfirmPasswordRecovery(ctx context.Context, r gen.ConfirmPas
 		return nil, err
 	}
 	return gen.ConfirmPasswordRecovery204Response{}, nil
+}
+
+// The generated strict decoders do not enforce the contract's lengths and pattern, and these
+// endpoints are anonymous, so they are checked here (OpenAPI PasswordRecoveryConfirm).
+var recoveryCodeFormat = regexp.MustCompile(`^[0-9]{6}$`)
+
+const (
+	recoveryUsernameMax = 200
+	recoveryPasswordMax = 1024
+)
+
+func validRecoveryUsername(u string) bool {
+	n := len([]rune(strings.TrimSpace(u)))
+	return n > 0 && n <= recoveryUsernameMax
 }

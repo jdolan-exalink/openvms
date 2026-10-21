@@ -160,3 +160,8 @@ DELETE FROM password_recovery_codes WHERE user_id = @user_id;
 -- Serializes password recovery requests of one account (the code row may not exist yet).
 -- name: LockUserForRecovery :exec
 SELECT id FROM users WHERE id = @id FOR UPDATE;
+
+-- Failed recovery confirmations of one account over the last day (audit_log_action_idx).
+-- name: CountRecentRecoveryFailures :one
+SELECT count(*)::int FROM audit_log
+WHERE action = 'PASSWORD_RECOVERY_FAILED' AND target_id = @user_id AND occurred_at > now() - interval '24 hours';

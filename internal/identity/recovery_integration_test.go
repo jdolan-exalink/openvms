@@ -299,3 +299,40 @@ func TestPasswordRecoveryConcurrentRequestsLogOneCode(t *testing.T) {
 		}
 	}
 }
+
+// TestPasswordRecoveryDailyFailureCap bounds slow guessing across many codes and IPs: after
+// MaxRecoveryFailuresPerDay failed confirmations the account cannot recover for 24 hours, even
+// with the right code, and no new code is logged.
+func TestPasswordRecoveryDailyFailureCap(t *testing.T) {
+	e := newRecoveryEnv(t)
+	e.user("admin", true, "active")
+	failures := 0
+	for failures < MaxRecoveryFailuresPerDay {
+		code := e.request("admin")
+		if code == "" {
+			t.Fatalf("after %d failures a new code was expected", failures)
+		}
+		wrong := "000000"
+		if code == wrong {
+			wrong = "111111"
+		}
+		for range MaxRecoveryAttempts {
+			if failures == MaxRecoveryFailuresPerDay {
+				break
+			}
+			_ = e.svc.ConfirmPasswordRecovery(e.ctx, "admin", wrong, "New-Password-22")
+			failures++
+		}
+		e.now = e.now.Add(RecoveryRequestCooldown + time.Second)
+	}
+	if code := e.request("admin"); code != "" {
+		t.Fatal("no code may be logged once the daily failure cap is reached")
+	}
+	// Even a code issued before the cap stops working.
+	if _, err := e.st.Pool.Exec(e.ctx, "UPDATE password_recovery_codes SET attempts = 0, expires_at = $1", e.now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.ConfirmPasswordRecovery(e.ctx, "admin", "123456", "New-Password-22"); !errors.Is(err, ErrInvalidRecoveryCode) {
+		t.Fatalf("confirm past the cap: %v", err)
+	}
+}

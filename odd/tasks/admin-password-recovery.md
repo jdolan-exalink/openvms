@@ -24,6 +24,7 @@ User request (2026-10-21): `tools/reset_admin.sh` reports success on host helvec
 The full change exceeded the review context budget, so it ships as chained PRs:
 - Part 1 (#137): identity service, storage, config. No public endpoint.
 - Part 2: API contract, handlers, public paths, per-IP rate limit, concurrent-request fix.
+- Part 2b: review follow-ups before deploy: per-account cap of 10 failed confirmations per 24 h (counted from audit_log; blocks new codes and confirmations), 4 KiB body limit and handler checks for username/code/password lengths, shared path constants.
 - Part 3: web Login flow (R2, R3) and docs (R4). Implemented on `feat/admin-password-recovery`, reviewed and merged with part 3.
 
 ## Acceptance and checks
@@ -35,3 +36,4 @@ The full change exceeded the review context budget, so it ships as chained PRs:
 - R2-R4 implemented (2026-10-21, not yet delivered; ships in part 3): Login gains "¿Olvidaste la contraseña?" (`RecoveryForm`: request step, then code + new password twice; success returns to sign-in with the username and a notice); `enter()` fetches `/api/v1/me` before navigating and shows `auth.sessionNotKept` instead of bouncing silently; strings in es/en/pt; docs gain the log-code procedure and `PASSWORD_RECOVERY_LOG_CODES`. Login tests 12/12 (RED first).
 - Part 1 review (4 lenses) required one bounded correction: exhausted/expired codes were deleted, which reset the request cooldown and allowed unlimited guessing; they are now kept unusable (`TestPasswordRecoveryCooldownSurvivesExhaustion`).
 - Part 2 (2026-10-21): review follow-ups: concurrent requests logged one code each (4 for a burst); the request now locks the user row (`TestPasswordRecoveryConcurrentRequestsLogOneCode`). Both public endpoints share a per-IP token bucket (burst 10, 1 per 30 s) answering 429 with Retry-After, bounding log and audit growth from anonymous callers.
+- Part 2b (2026-10-21): the part 2 review showed the per-IP limit does not stop slow guessing across IPs (~7200 guesses/day). `MaxRecoveryFailuresPerDay = 10` bounds it to ~3650/year; trade-off: an attacker can burn the admin's daily recovery budget, and the admin still has `tools/reset_admin.sh` on the host. Tests: `TestPasswordRecoveryDailyFailureCap`, `TestPasswordRecoveryBodyIsBounded`, `TestPasswordRecoveryHandlersRejectOutOfContractInput`.

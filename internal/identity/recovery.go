@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/jdolan-exalink/openvms/internal/platform/httpx"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
@@ -57,6 +59,10 @@ const (
 	RecoveryRequestCooldown = time.Minute
 	// MaxRecoveryAttempts wrong codes invalidate the active code.
 	MaxRecoveryAttempts = 5
+	// MaxRecoveryFailuresPerDay failed confirmations block recovery of an account for 24 hours.
+	// It bounds slow guessing across codes and source IPs (about 3650 guesses a year against a
+	// 10^6 code space); a blocked admin can still use tools/reset_admin.sh on the host.
+	MaxRecoveryFailuresPerDay = 10
 )
 
 // Audit actions for log-code password recovery. Codes never reach the audit log.
@@ -101,6 +107,9 @@ func (s *Service) RequestPasswordRecovery(ctx context.Context, username string) 
 		// Concurrent requests (a double click) must see each other's code: lock the account row,
 		// since the code row may not exist yet for FOR UPDATE to lock.
 		if err := q.LockUserForRecovery(ctx, u.ID); err != nil {
+			return err
+		}
+		if blocked, err := recoveryBlocked(ctx, q, u.ID); err != nil || blocked {
 			return err
 		}
 		active, err := q.GetPasswordRecoveryCode(ctx, u.ID)
@@ -168,6 +177,11 @@ func (s *Service) ConfirmPasswordRecovery(ctx context.Context, username, code, n
 		if !recoverable(u) {
 			return fail(&u, "not_recoverable")
 		}
+		if blocked, err := recoveryBlocked(ctx, q, u.ID); err != nil {
+			return err
+		} else if blocked {
+			return fail(&u, "daily_limit")
+		}
 		active, err := q.GetPasswordRecoveryCode(ctx, u.ID)
 		if errors.Is(store.Classify(err), store.ErrNotFound) {
 			return fail(&u, "no_code")
@@ -222,4 +236,10 @@ func (s *Service) logger() *slog.Logger {
 		return s.Log
 	}
 	return slog.Default()
+}
+
+// recoveryBlocked reports an account that reached MaxRecoveryFailuresPerDay in the last 24 hours.
+func recoveryBlocked(ctx context.Context, q *db.Queries, userID uuid.UUID) (bool, error) {
+	n, err := q.CountRecentRecoveryFailures(ctx, &userID)
+	return n >= MaxRecoveryFailuresPerDay, err
 }

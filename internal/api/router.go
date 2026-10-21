@@ -205,6 +205,12 @@ const (
 
 	passwordRecoveryBurst  = 10
 	passwordRecoveryRefill = 30 * time.Second
+	// passwordRecoveryMaxBodyBytes bounds the anonymous recovery bodies (a username, a 6-digit
+	// code and a password fit easily).
+	passwordRecoveryMaxBodyBytes = 4 << 10
+
+	passwordRecoveryPath        = "/api/v1/auth/recovery"
+	passwordRecoveryConfirmPath = "/api/v1/auth/recovery/confirm"
 )
 
 // limitAgentEnroll answers 429 to a client IP that enrolls too often. The IP is the one
@@ -236,7 +242,7 @@ func limitAgentEnroll(l *httpx.RateLimiter) func(http.Handler) http.Handler {
 func limitPasswordRecovery(l *httpx.RateLimiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != http.MethodPost || (r.URL.Path != "/api/v1/auth/recovery" && r.URL.Path != "/api/v1/auth/recovery/confirm") {
+			if r.Method != http.MethodPost || (r.URL.Path != passwordRecoveryPath && r.URL.Path != passwordRecoveryConfirmPath) {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -249,6 +255,7 @@ func limitPasswordRecovery(l *httpx.RateLimiter) func(http.Handler) http.Handler
 				writeError(w, r, http.StatusTooManyRequests, "rate_limited", "Demasiados intentos de recuperación. Probá de nuevo en unos minutos.")
 				return
 			}
+			r.Body = http.MaxBytesReader(w, r.Body, passwordRecoveryMaxBodyBytes)
 			next.ServeHTTP(w, r)
 		})
 	}

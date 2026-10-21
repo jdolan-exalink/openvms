@@ -50,6 +50,19 @@ func (q *Queries) CountAllPlatformUsers(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const countRecentRecoveryFailures = `-- name: CountRecentRecoveryFailures :one
+SELECT count(*)::int FROM audit_log
+WHERE action = 'PASSWORD_RECOVERY_FAILED' AND target_id = $1 AND occurred_at > now() - interval '24 hours'
+`
+
+// Failed recovery confirmations of one account over the last day (audit_log_action_idx).
+func (q *Queries) CountRecentRecoveryFailures(ctx context.Context, userID *uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countRecentRecoveryFailures, userID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createAPIToken = `-- name: CreateAPIToken :one
 INSERT INTO api_tokens (user_id, name, token_hash, expires_at)
 VALUES ($1, $2, $3, $4)
