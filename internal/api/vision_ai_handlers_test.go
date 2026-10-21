@@ -59,6 +59,38 @@ func TestGetVisionAISlots(t *testing.T) {
 		}
 	})
 
+	t.Run("reports when the detection started", func(t *testing.T) {
+		resp, err := h.GetVisionAISlots(visionCtx(), gen.GetVisionAISlotsRequestObject{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := resp.(gen.GetVisionAISlots200JSONResponse).Slots[0]
+		if s.DetectedAt == nil || !s.DetectedAt.Equal(now.Add(-5*time.Second)) {
+			t.Fatalf("detected_at = %v, want the event start %v", s.DetectedAt, now.Add(-5*time.Second))
+		}
+	})
+
+	t.Run("applies the inactivity timeout and rejects out-of-range values", func(t *testing.T) {
+		ended := now.Add(-20 * time.Second)
+		h := &Handlers{VisionAI: visionai.NewService(fakeVisionSource{rows: []visionai.EventRow{{
+			ID: uuid.New(), CameraID: cam, CameraName: "Gate", Severity: "detection", Labels: []string{"person"},
+			StartTime: now.Add(-time.Minute), EndTime: &ended,
+		}}})}
+		ten := 10
+		resp, err := h.GetVisionAISlots(visionCtx(), gen.GetVisionAISlotsRequestObject{Params: gen.GetVisionAISlotsParams{Inactivity: &ten}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resp.(gen.GetVisionAISlots200JSONResponse).Slots[0].CameraId != nil {
+			t.Fatal("inactivity=10 must hide a camera inactive for 20s")
+		}
+		bad := 601
+		_, err = h.GetVisionAISlots(visionCtx(), gen.GetVisionAISlotsRequestObject{Params: gen.GetVisionAISlotsParams{Inactivity: &bad}})
+		if status, _, _ := statusFor(err); status != http.StatusBadRequest {
+			t.Fatalf("inactivity=601: status %d (err %v), want 400", status, err)
+		}
+	})
+
 	t.Run("invalid source maps to 400", func(t *testing.T) {
 		bad := gen.VisionAISource("nope")
 		_, err := h.GetVisionAISlots(visionCtx(), gen.GetVisionAISlotsRequestObject{Params: gen.GetVisionAISlotsParams{Source: &bad}})

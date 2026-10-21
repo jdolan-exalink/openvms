@@ -182,8 +182,13 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 
 	// 1. Filter and score candidates
 	var candidates []scoredCandidate
+	inactivity := time.Duration(a.config.InactivitySeconds) * time.Second
 	for _, ev := range events {
 		if !a.matchesConfig(ev) {
+			continue
+		}
+		// An event whose last detection is older than the inactivity timeout no longer competes.
+		if inactivity > 0 && now.Sub(lastDetection(ev, now)) > inactivity {
 			continue
 		}
 
@@ -213,10 +218,19 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 	}
 	candidates = best
 
-	// Release unpinned slots that outlived their max display and have no candidate anymore, so the
-	// grid empties when activity stops instead of showing stale cameras forever.
+	// Release unpinned slots that have no candidate anymore once they outlived their max display, so
+	// the grid empties when activity stops instead of showing stale cameras forever.
 	for i, s := range a.slots {
-		if s.CameraID == uuid.Nil || s.Pinned || seenCams[s.CameraID] || !now.After(s.MaxDisplayUntil) {
+		if s.CameraID == uuid.Nil || s.Pinned || seenCams[s.CameraID] {
+			continue
+		}
+		// With an inactivity timeout a camera without an active candidate leaves once its min
+		// display time is over; without one it is kept until its max display time.
+		keep := now.Before(s.MinDisplayUntil)
+		if inactivity <= 0 {
+			keep = !now.After(s.MaxDisplayUntil)
+		}
+		if keep {
 			continue
 		}
 		a.release(i, now)
@@ -247,6 +261,9 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 			a.slots[slotIdx].Score = cand.score
 			a.slots[slotIdx].EventID = cand.event.ID
 			a.slots[slotIdx].Reason = cand.reason()
+			if start := detectionStart(cand.event); start.After(a.slots[slotIdx].DetectedAt) {
+				a.slots[slotIdx].DetectedAt = start
+			}
 			continue
 		}
 
@@ -300,6 +317,7 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 				Reason:          cand.reason(),
 				Pinned:          false,
 				AssignedAt:      now,
+				DetectedAt:      detectionStart(cand.event),
 				MinDisplayUntil: now.Add(minDisplay),
 				MaxDisplayUntil: now.Add(maxDisplay),
 			}
@@ -317,4 +335,20 @@ func (a *SlotAllocator) Allocate(events []VisionEvent, now time.Time) []SlotAssi
 	res := make([]SlotAssignment, len(a.slots))
 	copy(res, a.slots)
 	return res
+}
+
+// lastDetection is when the event was last active: now while it is still running, else its end.
+func lastDetection(ev VisionEvent, now time.Time) time.Time {
+	if ev.EndTime == nil {
+		return now
+	}
+	return *ev.EndTime
+}
+
+// detectionStart is when the event's detection began.
+func detectionStart(ev VisionEvent) time.Time {
+	if !ev.StartTime.IsZero() {
+		return ev.StartTime
+	}
+	return ev.Timestamp
 }
