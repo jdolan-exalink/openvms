@@ -68,6 +68,10 @@ func TestGetVisionAISlots(t *testing.T) {
 		if s.DetectedAt == nil || !s.DetectedAt.Equal(now.Add(-5*time.Second)) {
 			t.Fatalf("detected_at = %v, want the event start %v", s.DetectedAt, now.Add(-5*time.Second))
 		}
+		// The fixture event is still running.
+		if s.Active == nil || !*s.Active || s.LastSeenAt == nil || s.LastSeenAt.Before(now) {
+			t.Fatalf("running event must be active with last_seen_at at request time: active=%v last=%v", s.Active, s.LastSeenAt)
+		}
 	})
 
 	t.Run("applies the inactivity timeout and rejects out-of-range values", func(t *testing.T) {

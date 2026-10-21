@@ -41,17 +41,21 @@ type SlotReason struct {
 
 // SlotAssignment is the state of a single display slot in the Vision AI grid.
 type SlotAssignment struct {
-	SlotIndex       int        `json:"slot"`
-	CameraID        uuid.UUID  `json:"camera_id"`
-	CameraName      string     `json:"camera_name"`
-	EventID         string     `json:"event_id,omitempty"`
-	Score           float64    `json:"score"`
-	Reason          SlotReason `json:"reason"`
-	Pinned          bool       `json:"pinned"`
-	AssignedAt      time.Time  `json:"assigned_at"`
-	DetectedAt      time.Time  `json:"detected_at"`
-	MinDisplayUntil time.Time  `json:"min_display_until"`
-	MaxDisplayUntil time.Time  `json:"max_display_until"`
+	SlotIndex  int        `json:"slot"`
+	CameraID   uuid.UUID  `json:"camera_id"`
+	CameraName string     `json:"camera_name"`
+	EventID    string     `json:"event_id,omitempty"`
+	Score      float64    `json:"score"`
+	Reason     SlotReason `json:"reason"`
+	Pinned     bool       `json:"pinned"`
+	AssignedAt time.Time  `json:"assigned_at"`
+	DetectedAt time.Time  `json:"detected_at"`
+	// Active is true while any event of the camera is still running; LastSeenAt is then now,
+	// otherwise the latest end across its events.
+	Active          bool      `json:"active"`
+	LastSeenAt      time.Time `json:"last_seen_at"`
+	MinDisplayUntil time.Time `json:"min_display_until"`
+	MaxDisplayUntil time.Time `json:"max_display_until"`
 }
 
 // ReplacementMode dictates when an active slot can be superseded.

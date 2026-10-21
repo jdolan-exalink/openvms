@@ -6033,6 +6033,8 @@ components:
         assigned_at: { type: string, format: date-time }
         display_seconds: { type: integer, minimum: 0, description: "Seconds the camera has been in the slot." }
         detected_at: { type: string, format: date-time, description: "Start of the latest detection that holds the camera in the slot." }
+        active: { type: boolean, description: "True while any detection on the camera is still running." }
+        last_seen_at: { type: string, format: date-time, description: "Latest detection activity on the camera (the request time while active); drives the inactivity release." }
         breakdown:
           type: object
           description: Score contributions by term (object, confidence, zone, alarm, recency, ...).

@@ -59,6 +59,12 @@ func toVisionAISlots(res visionai.Result) gen.GetVisionAISlots200JSONResponse {
 				detected := s.DetectedAt
 				slot.DetectedAt = &detected
 			}
+			active := s.Active
+			slot.Active = &active
+			if !s.LastSeenAt.IsZero() {
+				seen := s.LastSeenAt
+				slot.LastSeenAt = &seen
+			}
 			slot.Zone, slot.Plate, slot.Alarm = optString(s.Reason.Zone), optString(s.Reason.Plate), optString(s.Reason.Alarm)
 			if len(s.Reason.Breakdown) > 0 {
 				b := s.Reason.Breakdown

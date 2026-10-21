@@ -4782,6 +4782,13 @@ export interface components {
              * @description Start of the latest detection that holds the camera in the slot.
              */
             detected_at?: string;
+            /** @description True while any detection on the camera is still running. */
+            active?: boolean;
+            /**
+             * Format: date-time
+             * @description Latest detection activity on the camera (the request time while active); drives the inactivity release.
+             */
+            last_seen_at?: string;
             /** @description Score contributions by term (object, confidence, zone, alarm, recency, ...). */
             breakdown?: {
                 [key: string]: number;

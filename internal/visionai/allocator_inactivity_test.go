@@ -101,3 +101,40 @@ func TestAllocatorInactivityHonorsMinDisplay(t *testing.T) {
 		t.Fatal("camera without candidates must leave once its min display time passed")
 	}
 }
+
+// TestAllocatorReportsLiveActivity marks a camera active while any of its events runs, and otherwise
+// reports the latest end across its events.
+func TestAllocatorReportsLiveActivity(t *testing.T) {
+	now := time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)
+	cam := uuid.New()
+	a := NewSlotAllocator(inactivityConfig(30))
+	strong := VisionEvent{ID: "strong", CameraID: cam, Object: "person", Confidence: 0.95, AlarmSeverity: "high",
+		StartTime: now.Add(-20 * time.Second), Timestamp: now.Add(-20 * time.Second), EndTime: endedAt(now.Add(-8 * time.Second))}
+	running := VisionEvent{ID: "running", CameraID: cam, Object: "car", Confidence: 0.5, StartTime: now.Add(-3 * time.Second), Timestamp: now.Add(-3 * time.Second)}
+
+	slots := a.Allocate([]VisionEvent{strong, running}, now)
+	if !slots[0].Active || !slots[0].LastSeenAt.Equal(now) {
+		t.Fatalf("a running event on the camera must mark it active now: active=%v last=%v", slots[0].Active, slots[0].LastSeenAt)
+	}
+
+	running.EndTime = endedAt(now.Add(2 * time.Second))
+	slots = a.Allocate([]VisionEvent{strong, running}, now.Add(5*time.Second))
+	if slots[0].Active || !slots[0].LastSeenAt.Equal(now.Add(2*time.Second)) {
+		t.Fatalf("ended camera must report its latest end: active=%v last=%v", slots[0].Active, slots[0].LastSeenAt)
+	}
+}
+
+func TestAllocatorClearsActiveWhenCameraHasNoCandidate(t *testing.T) {
+	now := time.Date(2026, 10, 21, 10, 0, 0, 0, time.UTC)
+	cam := uuid.New()
+	a := NewSlotAllocator(inactivityConfig(10))
+	a.Allocate([]VisionEvent{{ID: "e1", CameraID: cam, Object: "person", Confidence: 0.9, StartTime: now, Timestamp: now}}, now)
+	a.SetPin(0, true)
+	slots := a.Allocate(nil, now.Add(time.Minute))
+	if slots[0].CameraID != cam || slots[0].Active {
+		t.Fatalf("pinned camera without candidates must stay but not be active: cam=%v active=%v", slots[0].CameraID, slots[0].Active)
+	}
+	if !slots[0].LastSeenAt.Equal(now) {
+		t.Fatalf("LastSeenAt = %v, want the last observed activity %v", slots[0].LastSeenAt, now)
+	}
+}
