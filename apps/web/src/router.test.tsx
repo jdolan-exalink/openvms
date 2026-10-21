@@ -86,3 +86,44 @@ describe("router: faces", () => {
     expect(router.state.location.pathname).toBe("/faces");
   });
 });
+
+describe("router: totem", () => {
+  const mount = (path: string, routes: Record<string, () => Response> = {}) => {
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/lpr/reads": () => json({ items: [] }),
+      "/api/v1/events": () => json({ items: [] }),
+      ...routes,
+    })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: [path] }), context: { queryClient: client } });
+    render(
+      <QueryClientProvider client={client}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>,
+    );
+    return router;
+  };
+
+  it.each([
+    ["/totem/lpr", "lpr"],
+    ["/totem/faces", "faces"],
+  ])("renders %s fullscreen without the app navigation", async (path, kind) => {
+    mount(path);
+    const channel = await screen.findByTestId("detection-channel");
+    expect(channel.getAttribute("data-channel")).toBe(kind);
+    expect(screen.getByTestId("totem")).toBeInTheDocument();
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+  });
+
+  it("explains an unknown totem instead of rendering a channel", async () => {
+    mount("/totem/nope");
+    expect(await screen.findByText("Tótem desconocido")).toBeInTheDocument();
+    expect(screen.queryByTestId("detection-channel")).not.toBeInTheDocument();
+  });
+
+  it("sends a signed-out visitor to the login", async () => {
+    const router = mount("/totem/lpr", { "/api/v1/me": () => json({ code: "unauthorized", message: "no" }, 401) });
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/login"));
+  });
+});
