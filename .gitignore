@@ -33,3 +33,5 @@ docker-compose.override.yml
 /deploy/agent/compose/local/
 # Locally bootstrapped HTTPS certificate and private key for the web listener.
 /deploy/docker/local-tls/
+# Local Compose persistent data (bind-mounted Postgres data directory).
+/data/

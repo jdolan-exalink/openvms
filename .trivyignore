@@ -4,3 +4,5 @@
 CVE-2026-78667
 CVE-2026-78669
 CVE-2026-97031
+# Same upstream Caddy binary (Go 1.26.8); fixed in Go 1.26.10 / 1.27.3.
+CVE-2026-111943

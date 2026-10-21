@@ -1195,8 +1195,8 @@ func loadComposeServices(t *testing.T, name string) map[string]any {
 	return asMap(t, document["services"])
 }
 
-// A production compose never carries the simulated Frigates, and MQTT is an optional profile.
-func TestProductionComposeHasNoMocksAndMQTTIsOptional(t *testing.T) {
+// A production compose never carries the simulated Frigates, and MQTT starts by default.
+func TestProductionComposeHasNoMocksAndMQTTStartsByDefault(t *testing.T) {
 	services := loadComposeServices(t, "docker-compose.yml")
 	for _, name := range []string{"frigate-helvecia", "frigate-cayasta"} {
 		if _, ok := services[name]; ok {
@@ -1210,9 +1210,8 @@ func TestProductionComposeHasNoMocksAndMQTTIsOptional(t *testing.T) {
 	if mosquitto["restart"] != "unless-stopped" {
 		t.Fatalf("mosquitto restart policy = %#v", mosquitto["restart"])
 	}
-	profiles, _ := mosquitto["profiles"].([]any)
-	if len(profiles) != 1 || profiles[0] != "mqtt" {
-		t.Fatalf("mosquitto must be gated by the mqtt profile, got %#v", mosquitto["profiles"])
+	if _, ok := mosquitto["profiles"]; ok {
+		t.Fatal("mosquitto must start by default, not be gated by a profile")
 	}
 	for name, raw := range services {
 		deps, _ := asMap(t, raw)["depends_on"].(map[string]any)

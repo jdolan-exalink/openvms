@@ -128,12 +128,13 @@ Todas las variables que lee `docker-compose.yml` están documentadas en `.env.ex
 | Primer administrador | `OPENVMS_ADMIN_USERNAME`, `OPENVMS_ADMIN_PASSWORD` | Ver [Primer acceso](#primer-acceso). |
 | Organización y sitio iniciales | `OPENVMS_DEFAULT_TENANT`, `OPENVMS_DEFAULT_SITE`, `OPENVMS_DEFAULT_SITE_TZ` | Solo se usan si no existe ninguna organización. Zona horaria predeterminada: `America/Argentina/Cordoba`. |
 | Web y HTTPS | `WEB_PORT` (8000), `WEB_HTTPS_PORT` (8443), `SITE_ADDRESS`, `OPENVMS_HTTPS_SITE_IPV4`, `OPENVMS_HTTPS_SANS`, `OPENVMS_HTTPS_DEFAULT_SNI`, `HTTPS_INGRESS_PROXY_CIDRS`, `CREDENTIAL_TRUSTED_PROXY_CIDRS` | Certificado autofirmado local; puede reemplazar el par en `deploy/docker/local-tls/web/`. |
+| MQTT | `OPENVMS_MQTT_HOST_PORT` (2883), `OPENVMS_MQTT_PUBLISH_ADDR` (127.0.0.1) | Broker sin TLS, iniciado por defecto y local-only; permite clientes anónimos. |
 | Sesiones y registro | `SESSION_TTL` (12h), `SESSION_IDLE` (2h), `LOG_LEVEL`, `OPENVMS_FEATURES` | `OPENVMS_FEATURES` es una lista separada por comas de feature flags ([`docs/live-view-architecture.md`](docs/live-view-architecture.md)). |
 | Notificaciones | `WAHA_API_KEY` | Clave del gateway interno de WhatsApp; cámbiela en producción. |
 | ONVIF y agente local | `ONVIF_ALLOWED_CIDRS`, `ONVIF_DISCOVERY_INTERFACES`, `OPENVMS_AGENT_*` | Solo para el perfil opcional `onvif-agent` y la red interna del agente. |
 | Metadatos de build | `VERSION`, `COMMIT`, `BUILD_TIME`, `AGENT_VERSION` | Déjelos vacíos: `make` y los scripts los completan. |
 
-El compose no incluye datos de demostración. Define perfiles opcionales, que se activan con `--profile <nombre>` o con `COMPOSE_PROFILES=a,b` en `.env`: `--profile mqtt` (broker Mosquitto en `127.0.0.1:1883`; OpenVMS lee Frigate por HTTP y no lo necesita), `--profile observability` (Prometheus en `:9090` y Grafana en `:3000`, ambos solo en `127.0.0.1`) y `--profile onvif-agent` (agente de borde local).
+El broker MQTT se inicia por defecto y publica MQTT sin TLS en `127.0.0.1:2883`. Cambiá `OPENVMS_MQTT_HOST_PORT` para usar otro puerto y `OPENVMS_MQTT_PUBLISH_ADDR` para aceptar conexiones desde otras máquinas (por ejemplo, la IP LAN del servidor). El broker permite clientes anónimos, así que restringí el acceso de red mientras no tenga TLS y autenticación. Los perfiles opcionales son `observability` (Prometheus en `:9090` y Grafana en `:3000`, ambos solo en `127.0.0.1`) y `onvif-agent` (agente de borde local); se activan con `--profile <nombre>` o con `COMPOSE_PROFILES=a,b` en `.env`.
 
 ## Actualizar y volver atrás
 
@@ -211,7 +212,7 @@ make dev
 
 Usa `docker-compose.dev.yml` (solo desarrollo) además del compose principal: levanta Postgres, Valkey, NATS, SeaweedFS, Mosquitto y los Frigate simulados en Docker, y corre la API (`:8080`) y la web con Vite (`:5173`) en la máquina local. `make help` lista el resto: `test`, `test-integration`, `lint`, `generate`, `build`.
 
-`make dev-down` los detiene. Para tener los Frigate simulados con el stack completo: `docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile mqtt up -d`. Escuchan en `127.0.0.1:18971` (Helvecia, `admin` / `helvecia-dev`) y `127.0.0.1:28971` (Cayastá, `admin` / `cayasta-dev`); `vmsctl seed-demo` crea la organización de demostración que los usa y requiere estos Frigate simulados (no existen en una instalación de producción).
+`make dev-down` los detiene. Para tener los Frigate simulados con el stack completo: `docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d`. Escuchan en `127.0.0.1:18971` (Helvecia, `admin` / `helvecia-dev`) y `127.0.0.1:28971` (Cayastá, `admin` / `cayasta-dev`); `vmsctl seed-demo` crea la organización de demostración que los usa y requiere estos Frigate simulados (no existen en una instalación de producción).
 
 ### Estructura
 

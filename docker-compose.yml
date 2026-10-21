@@ -80,12 +80,10 @@ services:
       retries: 30
     restart: unless-stopped
 
-  # Optional MQTT broker. OpenVMS itself does not use it (it reads Frigate over HTTP); enable it
-  # with COMPOSE_PROFILES=mqtt in .env or `docker compose --profile mqtt up -d`.
+  # MQTT broker for integrations. It is available on the host port configured in .env.
   mosquitto:
-    profiles: [mqtt]
     image: eclipse-mosquitto:2
-    ports: ["127.0.0.1:1883:1883"]
+    ports: ["${OPENVMS_MQTT_PUBLISH_ADDR:-127.0.0.1}:${OPENVMS_MQTT_HOST_PORT:-2883}:1883"]
     volumes: [./deploy/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro]
     healthcheck:
       test: ["CMD-SHELL", "mosquitto_sub -h 127.0.0.1 -t '$$SYS/#' -C 1 -W 3 >/dev/null"]
