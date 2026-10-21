@@ -862,8 +862,8 @@ function SlotRenderer({
           {slot.zone && <span className="text-[11px] text-white/80 truncate">{slot.zone}</span>}
         </div>
 
-        {slot.detected_at ? (
-          <DetectionAge detectedAt={slot.detected_at} />
+        {slot.active || slot.last_seen_at ? (
+          <DetectionAge active={Boolean(slot.active)} lastSeenAt={slot.last_seen_at} />
         ) : slot.display_seconds !== undefined && (
           <div className="font-mono text-[10px] text-white/70">{formatElapsed(slot.display_seconds)}</div>
         )}
@@ -912,21 +912,32 @@ function formatElapsed(seconds: number): string {
 }
 
 function inactivityLabel(seconds: number): string {
-  if (seconds === 0) return "Nunca";
   return seconds < 60 ? `${seconds} s` : `${seconds / 60} min`;
 }
 
-/** Live "hace Ns" counter; ticks on its own so the page does not re-render every second. */
-function DetectionAge({ detectedAt }: { detectedAt: string }) {
+/**
+ * EN VIVO while a detection runs, then a live "hace Ns" since the last activity (what drives the
+ * inactivity release). Ticks on its own so the page does not re-render every second.
+ */
+function DetectionAge({ active, lastSeenAt }: { active: boolean; lastSeenAt?: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
+    if (active) return;
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, []);
-  const seconds = detectionAgeSeconds(detectedAt, now);
+  }, [active]);
+  if (active) {
+    return (
+      <div data-detection-age className="inline-flex items-center gap-1 font-mono text-[10px] font-bold uppercase tracking-wider text-emerald-400">
+        <span aria-hidden="true" className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        EN VIVO
+      </div>
+    );
+  }
+  const seconds = detectionAgeSeconds(lastSeenAt, now);
   if (seconds === null) return null;
   return (
-    <div className="font-mono text-[10px] font-semibold tabular-nums text-white/80" title="Tiempo desde la detección">
+    <div data-detection-age className="font-mono text-[10px] font-semibold tabular-nums text-white/80" title="Tiempo desde la última detección">
       {formatDetectionAge(seconds)}
     </div>
   );

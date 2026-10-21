@@ -7,7 +7,7 @@ export interface VisionPrefs {
   presetSource: VisionAISource;
   layoutCount: number;
   activeObjects: Record<string, boolean>;
-  /** Seconds without a detection before a camera leaves the grid; 0 keeps it until max display. */
+  /** Seconds without a detection before a camera leaves the grid (birdseye-style). */
   inactivitySeconds: number;
 }
 
@@ -16,7 +16,7 @@ const STORAGE_PREFIX = "openvms.visionai.view.v1";
 const MODES: readonly VisionMode[] = ["matrix", "focus", "lpr", "faces", "alarm", "dynamic"];
 const SOURCES: readonly VisionAISource[] = ["general", "personas", "vehiculos", "lpr", "perimetro", "alarmas"];
 export const VISION_LAYOUT_COUNTS: readonly number[] = [1, 4, 9, 16];
-export const VISION_INACTIVITY_OPTIONS: readonly number[] = [10, 30, 60, 120, 0];
+export const VISION_INACTIVITY_OPTIONS: readonly number[] = [10, 30, 60, 120];
 
 export const DEFAULT_VISION_PREFS: VisionPrefs = {
   mode: "matrix",

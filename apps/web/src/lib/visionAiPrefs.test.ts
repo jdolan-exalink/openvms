@@ -37,7 +37,8 @@ describe("parseVisionPrefs", () => {
 
   it("defaults the inactivity timeout to 30s and only accepts the offered values", () => {
     expect(parseVisionPrefs(null).inactivitySeconds).toBe(30);
-    expect(parseVisionPrefs(JSON.stringify({ inactivitySeconds: 0 })).inactivitySeconds).toBe(0);
+    // 0 is not offered: it would still release at max display, so "never" would be misleading.
+    expect(parseVisionPrefs(JSON.stringify({ inactivitySeconds: 0 })).inactivitySeconds).toBe(30);
     expect(parseVisionPrefs(JSON.stringify({ inactivitySeconds: 120 })).inactivitySeconds).toBe(120);
     expect(parseVisionPrefs(JSON.stringify({ inactivitySeconds: 45 })).inactivitySeconds).toBe(30);
     expect(parseVisionPrefs(JSON.stringify({ inactivitySeconds: "60" })).inactivitySeconds).toBe(30);

@@ -110,10 +110,17 @@ describe("VisionAI Page", () => {
     expect(loadVisionPrefs(visionPrefsKey("t1", "u1")).inactivitySeconds).toBe(60);
   });
 
-  it("counts the seconds since the detection on each tile", async () => {
+  it("shows EN VIVO while the detection is running", async () => {
+    slotsBody = { slots: [slot(0, "cam-1", { active: true, last_seen_at: "2026-10-21T10:00:00Z" }), slot(1, null), slot(2, null), slot(3, null)] };
+    setup();
+    expect(await screen.findByText("EN VIVO", { selector: "[data-detection-age]" })).toBeInTheDocument();
+    expect(screen.queryByText(/^hace /)).not.toBeInTheDocument();
+  });
+
+  it("counts the seconds since the last activity once the detection ended", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, now: Date.parse("2026-10-21T10:00:12Z") });
     try {
-      slotsBody = { slots: [slot(0, "cam-1", { detected_at: "2026-10-21T10:00:00Z" }), slot(1, null), slot(2, null), slot(3, null)] };
+      slotsBody = { slots: [slot(0, "cam-1", { active: false, detected_at: "2026-10-21T09:59:00Z", last_seen_at: "2026-10-21T10:00:00Z" }), slot(1, null), slot(2, null), slot(3, null)] };
       setup();
       expect(await screen.findByText("hace 12s")).toBeInTheDocument();
       await vi.advanceTimersByTimeAsync(3000);
