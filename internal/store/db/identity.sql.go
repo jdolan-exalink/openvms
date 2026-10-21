@@ -174,6 +174,15 @@ func (q *Queries) CreateUserGroup(ctx context.Context, arg CreateUserGroupParams
 	return i, err
 }
 
+const deletePasswordRecoveryCode = `-- name: DeletePasswordRecoveryCode :exec
+DELETE FROM password_recovery_codes WHERE user_id = $1
+`
+
+func (q *Queries) DeletePasswordRecoveryCode(ctx context.Context, userID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deletePasswordRecoveryCode, userID)
+	return err
+}
+
 const getActorBySessionHash = `-- name: GetActorBySessionHash :one
 SELECT u.id, u.tenant_id, u.username, u.display_name, s.id AS session_id, s.last_seen_at
 FROM sessions s
@@ -242,6 +251,24 @@ func (q *Queries) GetActorByTokenHash(ctx context.Context, tokenHash []byte) (Ge
 		&i.Username,
 		&i.DisplayName,
 		&i.TokenID,
+	)
+	return i, err
+}
+
+const getPasswordRecoveryCode = `-- name: GetPasswordRecoveryCode :one
+SELECT user_id, code_salt, code_hash, attempts, created_at, expires_at FROM password_recovery_codes WHERE user_id = $1 FOR UPDATE
+`
+
+func (q *Queries) GetPasswordRecoveryCode(ctx context.Context, userID uuid.UUID) (PasswordRecoveryCode, error) {
+	row := q.db.QueryRow(ctx, getPasswordRecoveryCode, userID)
+	var i PasswordRecoveryCode
+	err := row.Scan(
+		&i.UserID,
+		&i.CodeSalt,
+		&i.CodeHash,
+		&i.Attempts,
+		&i.CreatedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -350,6 +377,17 @@ func (q *Queries) GetUserGroupByName(ctx context.Context, arg GetUserGroupByName
 		&i.DeletedBy,
 	)
 	return i, err
+}
+
+const incrementPasswordRecoveryAttempts = `-- name: IncrementPasswordRecoveryAttempts :one
+UPDATE password_recovery_codes SET attempts = attempts + 1 WHERE user_id = $1 RETURNING attempts
+`
+
+func (q *Queries) IncrementPasswordRecoveryAttempts(ctx context.Context, userID uuid.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, incrementPasswordRecoveryAttempts, userID)
+	var attempts int32
+	err := row.Scan(&attempts)
+	return attempts, err
 }
 
 const listGroupMembers = `-- name: ListGroupMembers :many
@@ -698,5 +736,31 @@ type UpdateUserGroupParams struct {
 
 func (q *Queries) UpdateUserGroup(ctx context.Context, arg UpdateUserGroupParams) error {
 	_, err := q.db.Exec(ctx, updateUserGroup, arg.Name, arg.Description, arg.ID)
+	return err
+}
+
+const upsertPasswordRecoveryCode = `-- name: UpsertPasswordRecoveryCode :exec
+INSERT INTO password_recovery_codes (user_id, code_salt, code_hash, attempts, created_at, expires_at)
+VALUES ($1, $2, $3, 0, $4, $5)
+ON CONFLICT (user_id) DO UPDATE SET code_salt = excluded.code_salt, code_hash = excluded.code_hash,
+    attempts = 0, created_at = excluded.created_at, expires_at = excluded.expires_at
+`
+
+type UpsertPasswordRecoveryCodeParams struct {
+	UserID    uuid.UUID
+	CodeSalt  []byte
+	CodeHash  []byte
+	CreatedAt time.Time
+	ExpiresAt time.Time
+}
+
+func (q *Queries) UpsertPasswordRecoveryCode(ctx context.Context, arg UpsertPasswordRecoveryCodeParams) error {
+	_, err := q.db.Exec(ctx, upsertPasswordRecoveryCode,
+		arg.UserID,
+		arg.CodeSalt,
+		arg.CodeHash,
+		arg.CreatedAt,
+		arg.ExpiresAt,
+	)
 	return err
 }

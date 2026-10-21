@@ -200,6 +200,7 @@ func run() error {
 			Store: st, Sealer: sealer, Log: log, Issuer: "OpenVMS",
 			SessionTTL: cfg.SessionTTL, IdleTimeout: cfg.SessionIdle,
 			MaxFailures: cfg.LoginMaxFailures, LockFor: cfg.LoginLockout,
+			RecoveryLogCodes: cfg.PasswordRecoveryLogCodes,
 		},
 		Log:          log,
 		WorkerURL:    cfg.WorkerURL,
