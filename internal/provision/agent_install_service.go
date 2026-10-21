@@ -464,10 +464,12 @@ func (s *Service) waitForFreshAgentEnrollment(ctx context.Context, actor authz.A
 
 // failInstallJob publishes the operator-facing reason for a failed install and always
 // logs the underlying error. Only the host, server id, stage, code and exit status are
-// logged: never the password, token, key material or remote output.
+// logged: never the password, token, key material or remote output. The log is written
+// before the job turns terminal, so a failed job always has its log entry.
 func (s *Service) failInstallJob(ctx context.Context, actor authz.Actor, job *agentInstallJob, host string, err error) {
 	var failure *AgentInstallFailure
 	if errors.As(err, &failure) {
+		s.logger().Warn("agent install failed", "host", host, "server_id", job.serverID, "stage", failure.Stage, "code", failure.Code, "exit_status", failure.ExitStatus, "installed_version", failure.InstalledVersion)
 		if failure.Code == AgentInstallCodeAgentInstalled {
 			bundled := s.bundledAgentVersion()
 			registered := s.agentRegisteredHere(ctx, actor, job.serverID)
@@ -477,7 +479,6 @@ func (s *Service) failInstallJob(ctx context.Context, actor authz.Actor, job *ag
 			message, _ := agentInstallFailureMessage(failure, "", false)
 			job.fail(failure.Code, message)
 		}
-		s.logger().Warn("agent install failed", "host", host, "server_id", job.serverID, "stage", failure.Stage, "code", failure.Code, "exit_status", failure.ExitStatus, "installed_version", failure.InstalledVersion)
 		return
 	}
 	errLower := strings.ToLower(err.Error())
@@ -488,10 +489,10 @@ func (s *Service) failInstallJob(ctx context.Context, actor authz.Actor, job *ag
 	case strings.Contains(errLower, "connection"):
 		failure.Code = AgentInstallCodeSSHConnectFailed
 	}
-	message, _ := agentInstallFailureMessage(failure, "", false)
-	job.fail(failure.Code, message)
 	// An untyped error is not guaranteed to be free of secrets, so only its type is logged.
 	s.logger().Warn("agent install failed", "host", host, "server_id", job.serverID, "stage", failure.Stage, "code", failure.Code, "error_type", fmt.Sprintf("%T", err))
+	message, _ := agentInstallFailureMessage(failure, "", false)
+	job.fail(failure.Code, message)
 }
 
 // bundledAgentVersion is the release label of the agent artifact this OpenVMS installs, or ""

@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -110,6 +112,72 @@ func TestRunServerAgentInstallPublishesTypedFailureAndLogsUnderlyingError(t *tes
 	}
 	if strings.Contains(out, password) {
 		t.Fatalf("log leaked the password: %s", out)
+	}
+}
+
+// jobStatusAtLogWriter records the install job status observed at each log write.
+type jobStatusAtLogWriter struct {
+	mu       sync.Mutex
+	statuses []string
+	status   func() string
+}
+
+func (w *jobStatusAtLogWriter) Write(p []byte) (int, error) {
+	status := w.status()
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.statuses = append(w.statuses, status)
+	return len(p), nil
+}
+
+func TestFailInstallJobLogsBeforeJobBecomesTerminal(t *testing.T) {
+	for name, runErr := range map[string]error{
+		"typed":   &AgentInstallFailure{Code: AgentInstallCodeAgentInstalled, Stage: "preflight", ExitStatus: 27, InstalledVersion: "0.2.1"},
+		"untyped": errors.New("ssh: connection refused"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			actor, serverID := authz.Actor{UserID: uuid.New()}, uuid.New()
+			release := make(chan struct{})
+			var jobID atomic.Value
+			svc := &Service{
+				requireAgentInstallPermissions: func(context.Context, authz.Actor, uuid.UUID) error { return nil },
+				agentInstallBinary:             func() ([]byte, error) { return []byte("trusted fake binary"), nil },
+				agentInstallBundledVersion:     func() string { return "0.2.2" },
+				agentInstallExists:             func(context.Context, authz.Actor, uuid.UUID) (bool, error) { return false, nil },
+				agentInstallRun: func(context.Context, AgentInstallRequest, func(string)) error {
+					<-release
+					return runErr
+				},
+			}
+			writer := &jobStatusAtLogWriter{}
+			writer.status = func() string {
+				current, err := svc.GetServerAgentInstallJob(context.Background(), actor, serverID, jobID.Load().(uuid.UUID))
+				if err != nil {
+					return "error: " + err.Error()
+				}
+				return current.Status
+			}
+			svc.Log = slog.New(slog.NewTextHandler(writer, nil))
+			started, err := svc.StartServerAgentInstall(context.Background(), actor, serverID, validAgentInstallStartRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			jobID.Store(started.ID)
+			close(release)
+			if final := waitAgentInstallJob(t, svc, actor, serverID, started); final.Status != "failed" {
+				t.Fatalf("job = %#v", final)
+			}
+			writer.mu.Lock()
+			defer writer.mu.Unlock()
+			if len(writer.statuses) == 0 {
+				t.Fatal("failure was not logged before the job became terminal")
+			}
+			for _, status := range writer.statuses {
+				if status != "running" {
+					t.Fatalf("job status at log time = %q, want running", status)
+				}
+			}
+		})
 	}
 }
 
