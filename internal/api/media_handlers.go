@@ -14,6 +14,10 @@ func toLayout(l media.Layout) gen.ViewLayout {
 			out.Cells = append(out.Cells, gen.ViewCell{})
 			continue
 		}
+		if c.Vision != nil {
+			out.Cells = append(out.Cells, gen.ViewCell{Vision: &gen.ViewVisionRef{Id: c.Vision.ID, Name: c.Vision.Name}})
+			continue
+		}
 		id := c.CameraID
 		cell := gen.ViewCell{CameraId: &id}
 		if c.Quality != "" {
@@ -28,6 +32,15 @@ func toLayout(l media.Layout) gen.ViewLayout {
 func fromLayout(l gen.ViewLayout) media.Layout {
 	out := media.Layout{Columns: l.Columns, Cells: make([]*media.Cell, 0, len(l.Cells))}
 	for _, c := range l.Cells {
+		if c.Vision != nil {
+			// The camera, if any, is kept so validation can reject a tile that claims both.
+			cell := &media.Cell{Vision: &media.VisionRef{ID: c.Vision.Id, Name: c.Vision.Name}}
+			if c.CameraId != nil {
+				cell.CameraID = *c.CameraId
+			}
+			out.Cells = append(out.Cells, cell)
+			continue
+		}
 		if c.CameraId == nil {
 			out.Cells = append(out.Cells, nil)
 			continue

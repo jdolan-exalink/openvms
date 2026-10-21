@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"encoding/json"
+	"regexp"
 	"strings"
 	"time"
 
@@ -46,6 +47,22 @@ func auditView(ctx context.Context, tx pgx.Tx, actor authz.Actor, tenantID uuid.
 type Cell struct {
 	CameraID uuid.UUID `json:"camera_id"`
 	Quality  string    `json:"quality,omitempty"`
+	// Vision makes this a virtual tile (Vision AI source or detection channel) instead of a camera.
+	Vision *VisionRef `json:"vision,omitempty"`
+}
+
+// VisionRef names a virtual Live tile such as visionai:general or visionai:lpr-channel.
+type VisionRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+var visionIDPattern = regexp.MustCompile(`^visionai:[a-z0-9-]{1,40}$`)
+
+// hiddenFrom reports a camera tile the caller cannot watch. Virtual tiles are never hidden: the
+// Vision AI, plate and event APIs already filter their content per caller.
+func (c *Cell) hiddenFrom(visible map[uuid.UUID]bool) bool {
+	return c != nil && c.Vision == nil && !visible[c.CameraID]
 }
 
 type Layout struct {
@@ -94,6 +111,14 @@ func (in *ViewInput) validate() error {
 		if c != nil && c.Quality != "" && c.Quality != "sub" && c.Quality != "main" {
 			return invalid("quality must be sub or main")
 		}
+		if c != nil && c.Vision != nil {
+			if c.CameraID != uuid.Nil {
+				return invalid("a tile is either a camera or a vision source")
+			}
+			if !visionIDPattern.MatchString(c.Vision.ID) || len(c.Vision.Name) > 100 {
+				return invalid("invalid vision tile")
+			}
+		}
 	}
 	return nil
 }
@@ -135,7 +160,7 @@ func canEdit(actor authz.Actor, c *access.Checker, v View) bool {
 // cameras outside the caller's permissions (PRD §31). Their tiles become empty.
 func redact(v *View, visible map[uuid.UUID]bool) {
 	for i, c := range v.Layout.Cells {
-		if c != nil && !visible[c.CameraID] {
+		if c.hiddenFrom(visible) {
 			v.Layout.Cells[i] = nil
 		}
 	}
@@ -225,7 +250,7 @@ func checkCells(ctx context.Context, c *access.Checker, l Layout) error {
 		return err
 	}
 	for _, cell := range l.Cells {
-		if cell != nil && !visible[cell.CameraID] {
+		if cell.hiddenFrom(visible) {
 			return invalid("the view contains a camera you cannot watch")
 		}
 	}
@@ -302,9 +327,9 @@ func (s *Service) ReplaceView(ctx context.Context, actor authz.Actor, id uuid.UU
 		}
 		merged := in.Layout
 		for i := range merged.Cells {
-			if merged.Cells[i] == nil && i < len(v.Layout.Cells) && v.Layout.Cells[i] != nil && !visible[v.Layout.Cells[i].CameraID] {
+			if merged.Cells[i] == nil && i < len(v.Layout.Cells) && v.Layout.Cells[i].hiddenFrom(visible) {
 				merged.Cells[i] = v.Layout.Cells[i]
-			} else if merged.Cells[i] != nil && !visible[merged.Cells[i].CameraID] {
+			} else if merged.Cells[i].hiddenFrom(visible) {
 				return invalid("the view contains a camera you cannot watch")
 			}
 		}

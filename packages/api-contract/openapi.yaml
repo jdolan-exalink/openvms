@@ -6195,10 +6195,18 @@ components:
         details: { type: object, additionalProperties: true }
     ViewCell:
       type: object
-      description: A tile. Without camera_id it is empty.
+      description: A tile. It shows a camera (camera_id), a virtual source (vision), or nothing when both are absent.
       properties:
         camera_id: { type: string, format: uuid }
         quality: { type: string, enum: [sub, main], default: sub }
+        vision: { $ref: "#/components/schemas/ViewVisionRef" }
+    ViewVisionRef:
+      type: object
+      description: A virtual Live tile such as a Vision AI source or an LPR/face detection channel.
+      required: [id, name]
+      properties:
+        id: { type: string, pattern: "^visionai:[a-z0-9-]{1,40}$", example: "visionai:lpr-channel" }
+        name: { type: string, maxLength: 100 }
     ViewLayout:
       type: object
       required: [columns, cells]
