@@ -61,6 +61,16 @@ else
   info "docker ok, compose v$compose_major"
 fi
 
+# Caddy listens on the container's interfaces. A host LAN IP is only for Docker's
+# published address/certificate SANs; binding Caddy to it inside the container fails.
+if [ ! -f docker-compose.yml ]; then
+  die "docker-compose.yml not found in $ROOT"
+fi
+if ! grep -Eq '^[[:space:]]*HTTPS_SITE_ADDRESS:[[:space:]]*":443"[[:space:]]*(#.*)?$' docker-compose.yml; then
+  die "invalid web HTTPS listener in docker-compose.yml: set web.environment.HTTPS_SITE_ADDRESS to ':443' (the container must bind locally); update this checkout before installing"
+fi
+info "web HTTPS listener binds inside the container"
+
 # --- 2. Environment file ----------------------------------------------------
 step 2 ".env"
 
@@ -82,9 +92,9 @@ set_kv() {
 # OPENVMS_ADMIN_PASSWORD (and OPENVMS_ADMIN_USERNAME) given in the environment are written
 # to a new .env, so `OPENVMS_ADMIN_PASSWORD=... make install` sets the first admin password.
 if [ -e .env ]; then
-  info ".env already exists, left untouched"
+  info ".env already exists; existing values preserved"
   [ -z "${OPENVMS_ADMIN_PASSWORD:-}" ] ||
-    warn "OPENVMS_ADMIN_PASSWORD from the environment was not written: edit it in the existing .env"
+    warn "OPENVMS_ADMIN_PASSWORD from the environment is not saved to the existing .env; it only seeds a missing admin. Use tools/reset_admin.sh or password recovery for an existing admin"
   for key in OPENVMS_MASTER_KEY POSTGRES_PASSWORD; do
     grep -q "^$key=" .env ||
       warn "$key is not set in .env: compose falls back to its insecure development default"
@@ -165,6 +175,8 @@ else
   waited=0
   until curl -fsk --connect-timeout 3 --max-time 5 "$url" 2>/dev/null | grep -Eq '"status" *: *"ok"'; do
     if [ "$waited" -ge "$WAIT" ]; then
+      docker compose ps web api || true
+      docker compose logs --tail 50 web || true
       docker compose logs --tail 50 api || true
       die "$url not ready after ${WAIT}s"
     fi
@@ -180,7 +192,7 @@ echo "http:   http://localhost:$HTTP_PORT"
 echo "https:  https://localhost:$PORT (self-signed certificate unless you configured your own)"
 echo
 echo "Log in as ${OPENVMS_ADMIN_USERNAME:-admin} (OPENVMS_ADMIN_USERNAME)."
-echo "If OPENVMS_ADMIN_PASSWORD was not set (or .env already existed), a one-time password was generated;"
+echo "If a new admin was created without OPENVMS_ADMIN_PASSWORD, a one-time password was generated;"
 echo "read it once from the API log and change it at first login:"
 echo '  docker compose logs api | grep "initial admin"'
 echo

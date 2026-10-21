@@ -50,6 +50,12 @@ done
 # Fixture repo root with its own .env.example (never the real one).
 mkroot() {
   mkdir -p "$1"
+  cat >"$1/docker-compose.yml" <<'COMPOSE'
+services:
+  web:
+    environment:
+      HTTPS_SITE_ADDRESS: ":443"
+COMPOSE
   cat >"$1/.env.example" <<'ENV'
 # fixture
 FOO=bar
@@ -83,10 +89,10 @@ printf '%s\n' "$out" | grep -qF "make deploy" || fail "happy path: make deploy m
 printf '%s\n' "$out" | grep -qF "9080" || fail "happy path: http port missing from summary"
 
 # 2. Existing .env is never touched; missing keys only produce a warning.
-mkroot "$tmp/keep"; printf 'FOO=mine\n' >"$tmp/keep/.env"; chmod 640 "$tmp/keep/.env"; : >"$STUB_LOG"
+mkroot "$tmp/keep"; printf 'FOO=mine\nOPENVMS_HTTPS_SITE_IPV4=127.0.0.1\nOPENVMS_AGENT_GRPC_PUBLIC_ADDR=localhost:9443\n' >"$tmp/keep/.env"; chmod 640 "$tmp/keep/.env"; : >"$STUB_LOG"
 out=$(run "$tmp/keep"); rc=$?
 [ "$rc" -eq 0 ] || fail "existing .env: expected exit 0: $out"
-[ "$(cat "$tmp/keep/.env")" = "FOO=mine" ] || fail "existing .env was modified"
+[ "$(grep -c '^FOO=mine$' "$tmp/keep/.env")" -eq 1 ] || fail "existing .env values were modified"
 [ "$(stat -c %a "$tmp/keep/.env")" = 640 ] || fail "existing .env mode changed"
 printf '%s\n' "$out" | grep -q 'OPENVMS_MASTER_KEY' || fail "existing .env: no warning for missing master key"
 grep -q '^openssl' "$STUB_LOG" && fail "existing .env: secrets generated anyway"
@@ -117,7 +123,18 @@ out=$(run "$tmp/down" STUB_DAEMON_DOWN=1); rc=$?
 mkroot "$tmp/to"; : >"$STUB_LOG"
 out=$(run "$tmp/to" STUB_CURL_FAIL=1); rc=$?
 [ "$rc" -ne 0 ] || fail "timeout: expected failure"
+grep -qF 'docker compose ps web api' "$STUB_LOG" || fail "timeout: service status not shown"
+grep -qF 'docker compose logs --tail 50 web' "$STUB_LOG" || fail "timeout: web logs not shown"
 grep -qF 'docker compose logs --tail 50 api' "$STUB_LOG" || fail "timeout: api logs not shown"
+
+# 6b. Refuse the old broken Caddy listener before creating .env or building images.
+mkroot "$tmp/old-listener"; : >"$STUB_LOG"
+sed -i 's/":443"/"192.168.1.60"/' "$tmp/old-listener/docker-compose.yml"
+out=$(run "$tmp/old-listener"); rc=$?
+[ "$rc" -ne 0 ] || fail "old HTTPS listener: expected early failure"
+printf '%s\n' "$out" | grep -q 'bind.*:443\|HTTPS_SITE_ADDRESS' || fail "old HTTPS listener: remediation missing: $out"
+[ ! -e "$tmp/old-listener/.env" ] || fail "old HTTPS listener: created .env"
+grep -q 'compose up' "$STUB_LOG" && fail "old HTTPS listener: ran compose up"
 
 # 7. Existing bind-mounted postgres data warns that changing the password does not re-key it.
 mkroot "$tmp/pgdata"; mkdir -p "$tmp/pgdata/custom"; printf data >"$tmp/pgdata/custom/PG_VERSION"
@@ -150,9 +167,10 @@ out=$(run "$tmp/adm" OPENVMS_ADMIN_PASSWORD="Adm1n-Secret-2026"); rc=$?
 [ "$rc" -eq 0 ] || fail "admin password: expected exit 0: $out"
 grep -q '^OPENVMS_ADMIN_PASSWORD=Adm1n-Secret-2026$' "$tmp/adm/.env" || fail "admin password: not written to .env"
 printf '%s\n' "$out" | grep -qF 'Adm1n-Secret-2026' && fail "admin password: printed"
-mkroot "$tmp/adm2"; printf 'FOO=mine\n' >"$tmp/adm2/.env"
+mkroot "$tmp/adm2"; printf 'FOO=mine\nOPENVMS_HTTPS_SITE_IPV4=127.0.0.1\nOPENVMS_AGENT_GRPC_PUBLIC_ADDR=localhost:9443\n' >"$tmp/adm2/.env"
 out=$(run "$tmp/adm2" OPENVMS_ADMIN_PASSWORD="Adm1n-Secret-2026"); rc=$?
-[ "$(cat "$tmp/adm2/.env")" = "FOO=mine" ] || fail "admin password: existing .env modified"
+grep -q '^FOO=mine$' "$tmp/adm2/.env" || fail "admin password: existing .env values modified"
+grep -q '^OPENVMS_ADMIN_PASSWORD=' "$tmp/adm2/.env" && fail "admin password: persisted to existing .env"
 printf '%s\n' "$out" | grep -q 'OPENVMS_ADMIN_PASSWORD' || fail "admin password: no notice for an existing .env"
 
 # 11. A too short OPENVMS_ADMIN_PASSWORD (< 8 characters) fails up front: no .env, nothing started.
