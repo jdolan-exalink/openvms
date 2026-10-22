@@ -1,4 +1,5 @@
-import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { OVERLAY_FALLBACK_ROWS, OVERLAY_FETCH_LIMIT, OVERLAY_ROW_GAP_PX, OVERLAY_ROW_PX, rowsThatFit } from "@/lib/detectionOverlay";
@@ -49,9 +50,22 @@ describe("DetectionListOverlay", () => {
     expect(items[1]).not.toHaveAttribute("data-latest");
   });
 
-  it("shows a waiting state when there are no reads", async () => {
+  it("renders nothing while the camera has no plate reads", async () => {
     renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
-    expect(await screen.findByText(/Esperando patentes/i)).toBeInTheDocument();
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByTestId("detection-overlay")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Esperando patentes/i)).not.toBeInTheDocument();
+  });
+
+  it("appears once the camera gets its first plate read", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><DetectionListOverlay cameraId="cam-1" /></QueryClientProvider>);
+    await waitFor(() => expect(requests.length).toBeGreaterThan(0));
+    expect(screen.queryByTestId("detection-overlay")).not.toBeInTheDocument();
+    reads = [read("r1", "AB123CD", "2026-10-21T10:00:00Z")];
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: ["plates"] }); });
+    expect(await screen.findByTestId("detection-overlay")).toBeInTheDocument();
   });
 
   it("does not intercept pointer events over the video", async () => {

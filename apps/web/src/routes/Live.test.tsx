@@ -169,23 +169,43 @@ describe("Live", () => {
     expect(first).not.toHaveAttribute("aria-current");
   });
 
-  it("shows the plate list overlay only on LPR cameras", async () => {
+  it("shows the plate list overlay only on LPR cameras that have reads", async () => {
     stubBrowserAPIs();
+    const plateRead = { id: "r1", site_id: "s", site_name: "S", server_id: "sv", server_name: "Srv", camera_id: "cam-lpr", camera_name: "Acceso", plate: "AB123CD", plate_normalized: "AB123CD", label: "car", zones: [], seen_at: "2026-10-21T10:00:00Z" };
     vi.stubGlobal("fetch", vi.fn(stubApi({
       "/api/v1/me": meResponse,
       "/api/v1/cameras": () => json({ items: [camera("cam-lpr", "Acceso", { lpr: true }), camera("cam-plain", "Patio")] }),
-      "/api/v1/lpr/reads": () => json({ items: [] }),
+      "/api/v1/lpr/reads": () => json({ items: [plateRead] }),
       ...emptyCatalogs,
     })));
     renderPage(Live);
     fireEvent.click(await screen.findByRole("button", { name: /Acceso/ }));
     await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("Acceso")).toBeInTheDocument());
-    expect(within(screen.getByLabelText("Cuadro 1")).getByTestId("detection-overlay")).toBeInTheDocument();
+    expect(await within(screen.getByLabelText("Cuadro 1")).findByTestId("detection-overlay")).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Cuadro 2"));
     fireEvent.click(await screen.findByRole("button", { name: /Patio/ }));
     await waitFor(() => expect(within(screen.getByLabelText("Cuadro 2")).getByText("Patio")).toBeInTheDocument());
     expect(within(screen.getByLabelText("Cuadro 2")).queryByTestId("detection-overlay")).not.toBeInTheDocument();
+  });
+
+  it("shows no plate list on an LPR camera that has no reads yet", async () => {
+    stubBrowserAPIs();
+    let asked = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: Request) => {
+      if (new URL(input.url).pathname === "/api/v1/lpr/reads") asked++;
+      return stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-lpr", "Acceso", { lpr: true })] }),
+        "/api/v1/lpr/reads": () => json({ items: [] }),
+        ...emptyCatalogs,
+      })(input);
+    }));
+    renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: /Acceso/ }));
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("Acceso")).toBeInTheDocument());
+    await waitFor(() => expect(asked).toBeGreaterThan(0));
+    expect(within(screen.getByLabelText("Cuadro 1")).queryByTestId("detection-overlay")).not.toBeInTheDocument();
   });
 
   it("keeps video tiles square, selected or not, and marks selection with an outline", async () => {

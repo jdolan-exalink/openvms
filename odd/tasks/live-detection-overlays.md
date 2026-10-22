@@ -15,6 +15,6 @@ Decisions:
 
 ## Slices
 
-- [ ] 1. Overlay renamed to the detections overlay; it renders nothing until the camera has reads.
+- [x] 1. Overlay renamed to the detections overlay; it renders nothing until the camera has reads.
 - [ ] 2. Face detections: shared per-camera face query and face rows.
 - [ ] 3. Tabs when a camera has both; wire faces into Live, Live Vision AI tiles and Vision AI.

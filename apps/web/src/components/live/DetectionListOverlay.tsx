@@ -27,6 +27,8 @@ export function DetectionListOverlay({ cameraId, enabled = true, className }: { 
   const [listRef, rows] = useFittingRows();
   if (!enabled) return null;
   const items = query.data ?? [];
+  // Only cameras that actually have detections get the panel: nothing while loading, on error or empty.
+  if (items.length === 0) return null;
 
   return (
     <div
@@ -67,17 +69,11 @@ export function DetectionListOverlay({ cameraId, enabled = true, className }: { 
             </button>
           </header>
 
-          {items.length === 0 ? (
-            <p className="px-3 py-4 text-center font-mono text-[11px] uppercase tracking-wider text-cyan-200/60">
-              {query.isError ? "Sin conexión LPR" : "Esperando patentes"}
-            </p>
-          ) : (
-            <ol ref={listRef} aria-label="Lecturas de patentes" className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-1.5">
-              {items.slice(0, rows).map((item, index) => (
-                <OverlayRow key={item.key} item={item} latest={index === 0} now={now} />
-              ))}
-            </ol>
-          )}
+          <ol ref={listRef} aria-label="Lecturas de patentes" className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-1.5">
+            {items.slice(0, rows).map((item, index) => (
+              <OverlayRow key={item.key} item={item} latest={index === 0} now={now} />
+            ))}
+          </ol>
         </section>
       )}
     </div>

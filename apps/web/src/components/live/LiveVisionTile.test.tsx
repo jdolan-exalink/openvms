@@ -29,6 +29,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 type Slot = Record<string, unknown>;
 let slotsBody: { slots: Slot[] };
+let readsBody: Slot[];
 
 function filled(cam: string, extra: Slot = {}): Slot {
   return { slot: 0, camera_id: cam, pinned: false, camera_name: `Cam ${cam}`, object: "person", confidence: 0.96, zone: "Perímetro", ...extra };
@@ -50,10 +51,12 @@ const slotQueries = () =>
 beforeEach(() => {
   vi.mocked(api.GET).mockReset();
   slotsBody = { slots: [{ slot: 0, camera_id: null, pinned: false }] };
+  readsBody = [];
   vi.mocked(api.GET).mockImplementation((async (path: string) => {
     if (path === "/api/v1/vision-ai/slots") {
       return { data: { source: "general", layout: "1", generated_at: "2026-10-15T10:00:00Z", ...slotsBody }, response: new Response() };
     }
+    if (path === "/api/v1/lpr/reads") return { data: { items: readsBody }, response: new Response() };
     return { data: undefined, error: { code: "not_found", message: "nope" }, response: new Response(null, { status: 404 }) };
   }) as unknown as typeof api.GET);
 });
@@ -61,6 +64,7 @@ beforeEach(() => {
 describe("LiveVisionTile", () => {
   it("shows the plate list overlay on a slot that carries a plate, and not on other slots", async () => {
     slotsBody = { slots: [{ ...filled("cam-1"), plate: "AB123CD" }] };
+    readsBody = [{ id: "r1", camera_id: "cam-1", camera_name: "Cam cam-1", plate: "AB123CD", plate_normalized: "AB123CD", label: "car", zones: [], seen_at: "2026-10-15T10:00:00Z" }];
     const { unmount } = renderWithQuery(<LiveVisionTile vision={{ id: "visionai:lpr", name: "Vision AI - LPR", layout: "lpr" }} />);
     expect(await screen.findByTestId("detection-overlay")).toBeInTheDocument();
     unmount();
