@@ -105,7 +105,7 @@ func TestHandleSnapshotReturnsOnlyJPEGBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler.onvifTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+	handler.onvifTransport = roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		soapCalls++
 		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(soap))}, nil
 	})

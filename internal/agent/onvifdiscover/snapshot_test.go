@@ -7,6 +7,7 @@ import (
 	"image/jpeg"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +35,7 @@ func TestFetchOnvifSnapshotSecurityPolicy(t *testing.T) {
 		{name: "redirect rejected", uri: "http://192.0.2.10/snapshot.jpg", status: http.StatusFound, contentType: "image/jpeg", wantErr: true},
 		{name: "non image rejected", uri: "http://192.0.2.10/snapshot.jpg", status: http.StatusOK, contentType: "text/html", body: []byte("not a jpeg"), wantErr: true},
 		{name: "malformed jpeg rejected", uri: "http://192.0.2.10/snapshot.jpg", status: http.StatusOK, contentType: "image/jpeg", body: []byte("bad"), wantErr: true},
-		{name: "userinfo rejected", uri: "http://camera:secret@192.0.2.10/snapshot.jpg", status: http.StatusOK, contentType: "image/jpeg", body: jpegBytes, wantErr: true},
+		{name: "userinfo rejected", uri: (&url.URL{Scheme: "http", User: url.UserPassword("camera", "secret"), Host: "192.0.2.10", Path: "/snapshot.jpg"}).String(), status: http.StatusOK, contentType: "image/jpeg", body: jpegBytes, wantErr: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {

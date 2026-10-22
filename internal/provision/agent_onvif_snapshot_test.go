@@ -48,15 +48,15 @@ func TestExecuteOnvifSnapshotReturnsOnlyJPEGBytes(t *testing.T) {
 
 func TestExecuteOnvifSnapshotRejectsInvalidAgentResponseAndAuthorization(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		status int
-		type_  string
-		body   string
-		deny   bool
+		name        string
+		status      int
+		contentType string
+		body        string
+		deny        bool
 	}{
 		{name: "agent unauthorized", status: http.StatusUnauthorized, body: "unauthorized"},
-		{name: "wrong content type", status: http.StatusOK, type_: "text/plain", body: "fake"},
-		{name: "oversized body", status: http.StatusOK, type_: "image/jpeg", body: strings.Repeat("x", maxOnvifSnapshotResponseBytes+1)},
+		{name: "wrong content type", status: http.StatusOK, contentType: "text/plain", body: "fake"},
+		{name: "oversized body", status: http.StatusOK, contentType: "image/jpeg", body: strings.Repeat("x", maxOnvifSnapshotResponseBytes+1)},
 		{name: "manage denied", deny: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,7 +74,7 @@ func TestExecuteOnvifSnapshotRejectsInvalidAgentResponseAndAuthorization(t *test
 				},
 				probeRoundTripper: roundTripFunc(func(*http.Request) (*http.Response, error) {
 					called = true
-					return &http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": []string{tc.type_}}, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+					return &http.Response{StatusCode: tc.status, Header: http.Header{"Content-Type": []string{tc.contentType}}, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
 				}),
 			}
 			_, err := svc.ExecuteOnvifSnapshot(context.Background(), authz.Actor{}, uuid.New(), onvifdiscover.SnapshotRequest{Endpoint: "http://192.0.2.8/device", ProfileToken: "main"})

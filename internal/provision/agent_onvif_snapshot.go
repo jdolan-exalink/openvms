@@ -48,13 +48,13 @@ func (s *Service) ExecuteOnvifSnapshot(ctx context.Context, actor authz.Actor, s
 	if err != nil {
 		return nil, err
 	}
+	// #nosec G117 -- camera credentials are sent only to the authenticated edge agent and are never logged or stored.
 	requestBody, err := json.Marshal(req)
 	if err != nil || len(requestBody) > maxOnvifProbeRequestBytes || token == "" {
 		return nil, ErrAgentProbeFailed
 	}
 	ctx, cancel := context.WithTimeout(ctx, onvifSnapshotTimeout)
 	defer cancel()
-	// #nosec G117 -- camera credentials go only to the authenticated server agent and are never logged or stored.
 	response, err := client.Do(ctx, http.MethodPost, "/v1/onvif/snapshot", http.Header{
 		"Authorization": []string{"Bearer " + token},
 		"Content-Type":  []string{"application/json"},
