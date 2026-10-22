@@ -17,5 +17,5 @@ plate reads the LPR tab uses, so both show the same detections.
 
 - [x] 1. Event popup: larger, wheel zoom (and drag to pan, double click to reset) on the photo.
 - [x] 2. Events toggle and bar on the left; real full screen.
-- [ ] 3. On-video plate list: rows follow the available height.
-- [ ] 4. LPR mode: full list of plate reads; clicking a plate opens the vehicle photo popup.
+- [x] 3. On-video plate list: rows follow the available height.
+- [x] 4. LPR mode: full list of plate reads; clicking a plate opens the vehicle photo popup.

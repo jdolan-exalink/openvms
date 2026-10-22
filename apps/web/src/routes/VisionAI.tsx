@@ -12,7 +12,7 @@ import { Button, IconButton } from "@/components/ui";
 import { EventPopup } from "@/components/visionai/EventPopup";
 import { EventSnapshot } from "@/components/visionai/EventSnapshot";
 import { EventsSidebar } from "@/components/visionai/EventsSidebar";
-import type { VisionEventView } from "@/lib/visionEvents";
+import { usePlateReads, type VisionEventView } from "@/lib/visionEvents";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 import { useImmersive } from "@/lib/useImmersive";
@@ -157,7 +157,6 @@ export function VisionAI() {
   // Highest priority first; applied as CSS order so swapping places never re-mounts a player.
   const matrixOrder = priorityOrder(slots.slice(0, layoutCount));
   const dynamicOrder = priorityOrder(dynamicTiles);
-  const lprSlots = filled.filter((sl) => sl.plate);
   const hasAnyCamera = serverSlots.some((sl) => sl.camera_id) || Object.keys(pins).length > 0;
 
   const togglePin = (slotIndex: number) => {
@@ -476,8 +475,10 @@ export function VisionAI() {
             </div>
           ) : mode === "lpr" ? (
             <LprReadingsList
-              slots={slotsQuery.isPlaceholderData ? [] : lprSlots}
               platesVisible={slotsQuery.data?.plates_visible ?? true}
+              canSnapshots={canViewSnapshots}
+              selectedKey={popup?.key}
+              onSelect={setPopup}
             />
           ) : (
             /* Standard Matrix Mode (1, 4, 9, 16) */
@@ -615,49 +616,18 @@ function FaceReadingsList({ slots, snapshots }: { slots: VisionAISlot[]; snapsho
   );
 }
 
-type LprReading = {
-  key: string;
-  plate: string;
-  cameraName: string;
-  zone?: string;
-  confidence?: number;
-  assignedAt?: string;
-};
-
-const MAX_LPR_READINGS = 30;
-
-function LprReadingsList({ slots, platesVisible }: { slots: VisionAISlot[]; platesVisible: boolean }) {
-  const [readings, setReadings] = useState<LprReading[]>([]);
-
-  useEffect(() => {
-    const incoming = slots.flatMap((slot) => {
-      if (!slot.plate || !slot.camera_id) return [];
-      return [{
-        key: slot.event_id ?? `${slot.camera_id}:${slot.plate}:${slot.assigned_at ?? slot.slot}`,
-        plate: slot.plate,
-        cameraName: slot.camera_name ?? "Cámara",
-        zone: slot.zone,
-        confidence: slot.confidence,
-        assignedAt: slot.assigned_at ?? new Date().toISOString(),
-      }];
-    });
-    if (incoming.length === 0) return;
-
-    startTransition(() => {
-      setReadings((current) => {
-        const seen = new Set(current.map((reading) => reading.key));
-        const fresh = incoming.filter((reading) => {
-          if (seen.has(reading.key)) return false;
-          seen.add(reading.key);
-          return true;
-        });
-        if (fresh.length === 0) return current;
-        return [...fresh, ...current]
-          .sort((a, b) => lprTimestamp(b.assignedAt) - lprTimestamp(a.assignedAt))
-          .slice(0, MAX_LPR_READINGS);
-      });
-    });
-  }, [slots]);
+/**
+ * LPR mode: the plate reads themselves (the same ones as the LPR tab), not the ranked slots, so the
+ * list is complete. Clicking a plate hands its read to the caller, which shows the vehicle photo.
+ */
+function LprReadingsList({ platesVisible, canSnapshots, selectedKey, onSelect }: {
+  platesVisible: boolean;
+  canSnapshots: boolean;
+  selectedKey?: string;
+  onSelect: (view: VisionEventView) => void;
+}) {
+  const reads = usePlateReads(canSnapshots, platesVisible);
+  const readings = reads.views;
 
   if (!platesVisible) {
     return (
@@ -669,6 +639,19 @@ function LprReadingsList({ slots, platesVisible }: { slots: VisionAISlot[]; plat
     );
   }
 
+  if (reads.error && readings.length === 0) {
+    return (
+      <div role="alert" data-testid="vision-lpr-empty" className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
+        <Scan className="size-6 opacity-40" />
+        <span>No se pudieron cargar las lecturas de patente</span>
+      </div>
+    );
+  }
+
+  if (reads.loading) {
+    return <div role="status" data-testid="vision-lpr-empty" className="flex h-full items-center justify-center text-muted text-sm">Cargando lecturas...</div>;
+  }
+
   if (readings.length === 0) {
     return (
       <div data-testid="vision-lpr-empty" className="flex h-full flex-col items-center justify-center gap-1 text-muted text-sm">
@@ -678,6 +661,7 @@ function LprReadingsList({ slots, platesVisible }: { slots: VisionAISlot[]; plat
     );
   }
 
+  const columns = "grid-cols-[minmax(135px,0.9fr)_minmax(80px,1fr)_minmax(72px,0.7fr)] sm:grid-cols-[minmax(180px,0.8fr)_minmax(140px,1fr)_minmax(120px,0.7fr)_minmax(100px,0.6fr)]";
   return (
     <section data-testid="vision-lpr-list" aria-label="Lecturas LPR en vivo" aria-live="polite" className="flex h-full min-h-0 flex-col overflow-hidden bg-surface-dim p-3 sm:p-5">
       <header className="mb-3 flex shrink-0 items-center justify-between gap-3 rounded-m3-lg border border-primary/20 bg-surface px-4 py-3 shadow-xs">
@@ -695,7 +679,7 @@ function LprReadingsList({ slots, platesVisible }: { slots: VisionAISlot[]; plat
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto rounded-m3-lg border border-line bg-surface shadow-xs">
-        <div className="grid grid-cols-[minmax(135px,0.9fr)_minmax(80px,1fr)_minmax(72px,0.7fr)] gap-2 border-b border-line bg-surface-2 px-3 py-2 text-[9px] font-bold uppercase tracking-[0.16em] text-muted sm:grid-cols-[minmax(180px,0.8fr)_minmax(140px,1fr)_minmax(120px,0.7fr)_minmax(100px,0.6fr)] sm:gap-3 sm:px-4">
+        <div className={cn("grid gap-2 border-b border-line bg-surface-2 px-3 py-2 text-[9px] font-bold uppercase tracking-[0.16em] text-muted sm:gap-3 sm:px-4", columns)}>
           <span>Patente Detectada</span>
           <span>Cámara</span>
           <span className="hidden sm:block">Zona</span>
@@ -703,10 +687,18 @@ function LprReadingsList({ slots, platesVisible }: { slots: VisionAISlot[]; plat
         </div>
         <div className="divide-y divide-line/70">
           {readings.map((reading, index) => (
-            <div
+            <button
               key={reading.key}
+              type="button"
               data-testid="vision-lpr-hud"
-              className="grid grid-cols-[minmax(135px,0.9fr)_minmax(80px,1fr)_minmax(72px,0.7fr)] items-center gap-2 px-3 py-3 transition-colors hover:bg-surface-2 sm:grid-cols-[minmax(180px,0.8fr)_minmax(140px,1fr)_minmax(120px,0.7fr)_minmax(100px,0.6fr)] sm:gap-3 sm:px-4"
+              aria-label={`Ver foto de la patente ${reading.plate}`}
+              aria-current={selectedKey === reading.key ? "true" : undefined}
+              onClick={() => onSelect(reading)}
+              className={cn(
+                "grid w-full cursor-pointer items-center gap-2 px-3 py-3 text-left transition-colors hover:bg-surface-2 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary sm:gap-3 sm:px-4",
+                columns,
+                selectedKey === reading.key && "bg-surface-2",
+              )}
             >
               <div className="flex min-w-0 items-center gap-2.5">
                 <span className="w-5 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted">{(index + 1).toString().padStart(2, "0")}</span>
@@ -723,8 +715,8 @@ function LprReadingsList({ slots, platesVisible }: { slots: VisionAISlot[]; plat
                 {reading.confidence !== undefined && <div className="mt-0.5 text-[10px] text-muted">Confianza: {Math.round(reading.confidence * 100)}%</div>}
               </div>
               <div className="hidden min-w-0 truncate text-xs text-muted sm:block">{reading.zone || "—"}</div>
-              <div className="text-right font-mono text-xs tabular-nums text-on-surface-variant">{formatLprTime(reading.assignedAt)}</div>
-            </div>
+              <div className="text-right font-mono text-xs tabular-nums text-on-surface-variant">{formatLprTime(reading.at)}</div>
+            </button>
           ))}
         </div>
       </div>
