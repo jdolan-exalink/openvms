@@ -175,6 +175,18 @@ WHERE f.tenant_id = @tenant_id AND f.person_id = @id AND f.owned
   AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
 ON CONFLICT DO NOTHING;
 
+-- name: RecordFaceForcedRemoteCleanup :exec
+-- An operator may purge a tombstone while a live server is unreachable or face-disabled. Keep a
+-- durable cleanup obligation for every owned face that has not converged, regardless of current
+-- capability; the worker only attempts it after the server reports face recognition enabled.
+INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)
+SELECT f.tenant_id, f.server_id, @name::text
+FROM face_server_sync f
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+WHERE f.tenant_id = @tenant_id AND f.person_id = @id AND f.owned
+  AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
+ON CONFLICT DO NOTHING;
+
 -- name: ListDueFaceRemoteCleanups :many
 SELECT c.* FROM face_remote_cleanup c
 JOIN frigate_servers s ON s.id = c.server_id AND s.deleted_at IS NULL

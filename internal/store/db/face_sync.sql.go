@@ -646,6 +646,30 @@ func (q *Queries) RecordFaceErasedName(ctx context.Context, arg RecordFaceErased
 	return err
 }
 
+const recordFaceForcedRemoteCleanup = `-- name: RecordFaceForcedRemoteCleanup :exec
+INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)
+SELECT f.tenant_id, f.server_id, $1::text
+FROM face_server_sync f
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+WHERE f.tenant_id = $2 AND f.person_id = $3 AND f.owned
+  AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
+ON CONFLICT DO NOTHING
+`
+
+type RecordFaceForcedRemoteCleanupParams struct {
+	Name     string
+	TenantID uuid.UUID
+	ID       uuid.UUID
+}
+
+// An operator may purge a tombstone while a live server is unreachable or face-disabled. Keep a
+// durable cleanup obligation for every owned face that has not converged, regardless of current
+// capability; the worker only attempts it after the server reports face recognition enabled.
+func (q *Queries) RecordFaceForcedRemoteCleanup(ctx context.Context, arg RecordFaceForcedRemoteCleanupParams) error {
+	_, err := q.db.Exec(ctx, recordFaceForcedRemoteCleanup, arg.Name, arg.TenantID, arg.ID)
+	return err
+}
+
 const recordFaceRemoteCleanup = `-- name: RecordFaceRemoteCleanup :exec
 INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)
 SELECT f.tenant_id, f.server_id, $1::text

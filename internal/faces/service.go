@@ -36,12 +36,13 @@ const (
 
 // Audit actions (PRD §66 naming convention).
 const (
-	ActionPersonCreated = "FACE_PERSON_CREATED"
-	ActionPersonUpdated = "FACE_PERSON_UPDATED"
-	ActionPersonDeleted = "FACE_PERSON_DELETED"
-	ActionImageAdded    = "FACE_IMAGE_ADDED"
-	ActionImageRemoved  = "FACE_IMAGE_REMOVED"
-	ActionImageRead     = "FACE_IMAGE_READ"
+	ActionPersonCreated     = "FACE_PERSON_CREATED"
+	ActionPersonUpdated     = "FACE_PERSON_UPDATED"
+	ActionPersonDeleted     = "FACE_PERSON_DELETED"
+	ActionPersonForcePurged = "FACE_PERSON_FORCE_PURGED"
+	ActionImageAdded        = "FACE_IMAGE_ADDED"
+	ActionImageRemoved      = "FACE_IMAGE_REMOVED"
+	ActionImageRead         = "FACE_IMAGE_READ"
 	// ActionSyncRetried records a manual sync retry (FACE-02).
 	ActionSyncRetried = "FACE_SYNC_RETRIED"
 	// ActionPersonRead records a read of person data (list, detail, image list). Details hold
@@ -500,6 +501,55 @@ func (s *Service) ListImages(ctx context.Context, actor authz.Actor, tenantID, p
 			map[string]any{"scope": "images", "person_id": personID, "count": len(out)})
 	})
 	return out, err
+}
+
+// ForcePurgeTombstone removes a deleted person even when an owned face has not converged on a
+// live server. Remote cleanup is persisted for the worker; this request never contacts Frigate.
+func (s *Service) ForcePurgeTombstone(ctx context.Context, actor authz.Actor, tenantID, id uuid.UUID) error {
+	return s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		if err := lockPerson(ctx, q, id); err != nil {
+			return err
+		}
+		p, err := q.GetFacePersonAny(ctx, db.GetFacePersonAnyParams{TenantID: tenantID, ID: id})
+		if err != nil {
+			return store.Classify(err)
+		}
+		if p.DeletedAt == nil {
+			return store.ErrNotFound
+		}
+		// The marker must precede scrubbing so event ingestion cannot reintroduce this name.
+		if err := q.RecordFaceErasedName(ctx, db.RecordFaceErasedNameParams{TenantID: tenantID, Name: p.FrigateName}); err != nil {
+			return err
+		}
+		if err := q.RecordFaceForcedRemoteCleanup(ctx, db.RecordFaceForcedRemoteCleanupParams{TenantID: tenantID, ID: id, Name: p.FrigateName}); err != nil {
+			return err
+		}
+		var scrubbed int64
+		for {
+			n, err := q.ScrubEventSubLabel(ctx, db.ScrubEventSubLabelParams{TenantID: tenantID, Name: p.FrigateName, MaxRows: scrubBatch})
+			if err != nil {
+				return err
+			}
+			scrubbed += n
+			if n < scrubBatch {
+				break
+			}
+		}
+		left, err := q.CountEventsWithSubLabel(ctx, db.CountEventsWithSubLabelParams{TenantID: tenantID, Name: p.FrigateName})
+		if err != nil {
+			return err
+		}
+		if left > 0 {
+			return fmt.Errorf("refusing to purge face tombstone while %d events retain its name", left)
+		}
+		if n, err := q.PurgeFacePerson(ctx, db.PurgeFacePersonParams{TenantID: tenantID, ID: id}); err != nil {
+			return err
+		} else if n == 0 {
+			return store.ErrNotFound
+		}
+		return s.audit(ctx, q, actor, tenantID, ActionPersonForcePurged, "face_person", id,
+			map[string]any{"person_id": id, "events_scrubbed": scrubbed})
+	})
 }
 
 // AddImage validates and stores one enrollment image (faces.manage). Metadata commits first;

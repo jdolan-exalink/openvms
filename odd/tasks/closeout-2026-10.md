@@ -13,7 +13,7 @@ Close every pending item the user chose in the 2026-10-19 survey, so nothing sta
 - Custom live views as defaults: add Export/Import of views in the presentation editor; then promote the exported ones to defaults.
 
 ## Scope / tasks
-- [ ] CL-01 — Forced purge (faces.manage): purge a tombstoned person whose owned face is on servers that stay disabled/unreachable — scrub the name from events now, mark those servers for cleanup when they come back, audited. Route: delegated direct. Waits for the faces site/server PRs (same files).
+- [ ] CL-01 — Forced purge (faces.manage): purge a tombstoned person whose owned face is on servers that stay disabled/unreachable — scrub the name from events now, mark those servers for cleanup when they come back, audited. Route: delegated direct; strategy: auto-chain; chain: stacked-to-main. First service slice handles the authorized transactional forced-purge behavior; API/OpenAPI and UI follow in separate slices. Waits for the faces site/server PRs (same files).
   Status (2026-10-21): still pending, code work. Its blocker is cleared (faces PRs #97 and #99 are merged on `main`), but `internal/faces` only has the automatic `PurgeTombstones`/`purgeOne` (`sync.go`, action `FACE_PERSON_PURGED`); no operator forced-purge service, endpoint or button exists.
 - [x] CL-02 — Rollback & cleanup: atomic `make rollback` (validate every tag before retagging, restore on partial failure), no rollback hint when nothing was tagged, retention of `rollback-*` image tags and `.atl/deploy` dumps (keep the last 5, configurable). Route: delegated direct.
 - [ ] CL-03 — Audit & performance: per-organization audit counts for multi-organization recognitions/train reads (review advisories R3-001/R3-002 of `review-ddd9c44f7a5ddd3a`); skip the per-rule savepoint when the face index is a cache hit. Route: delegated direct. Waits for PR #97.
@@ -28,6 +28,8 @@ Close every pending item the user chose in the 2026-10-19 survey, so nothing sta
 - Never run the real deploy/rollback from a task; dry-run only.
 
 ## Progress
+- CL-01 service slice — route: delegated direct; trigger: 2+ non-trivial files; strategy: auto-chain; chain: stacked-to-main. This is the first service slice. Strict TDD: add the forced-purge regression first, observe RED, then implement and refactor. CL-01 remains unchecked until API/UI slices are complete.
+- CL-01 service slice — RED: the forced-purge regression failed with the tombstone still present when the service was a no-op. GREEN: focused forced-purge integration tests and the complete `internal/faces` integration suite passed; ordinary `internal/faces` tests passed. Cleanup rows now cover every owned, non-converged job on a live server regardless of capability, and the request performs no Frigate calls. API contract/handler and tombstone discovery/action UI remain for follow-up slices.
 - 2026-10-19: branch `feat/closeout-ops` from `main` `928e57c` (CL-02, CL-04, CL-05 first).
 
 - CL-02 done (8faa007): RED = new deploy_test cases failed (no restore after mid-way tag failure, tags validated interleaved, hint on first deploy, no retention); GREEN = `bash deploy/deploy_test.sh` ok. Route: delegated direct.
