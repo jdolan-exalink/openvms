@@ -292,3 +292,73 @@ describe("DetectionListOverlay faces and tabs", () => {
     expect(screen.getByRole("button", { name: /Mostrar lista/i })).toBeInTheDocument();
   });
 });
+
+describe("DetectionListOverlay collapse is per camera", () => {
+  const two = () => (
+    <>
+      <div data-testid="tile-1"><DetectionListOverlay cameraId="cam-1" /></div>
+      <div data-testid="tile-2"><DetectionListOverlay cameraId="cam-2" /></div>
+    </>
+  );
+
+  beforeEach(() => {
+    reads = [read("r1", "AB123CD", "2026-10-21T10:00:00Z")];
+  });
+
+  it("hiding the list of one camera leaves the others open", async () => {
+    renderPage(two);
+    const t1 = within(await screen.findByTestId("tile-1"));
+    const t2 = within(await screen.findByTestId("tile-2"));
+    await t1.findByRole("list", { name: /Lecturas de patentes/i });
+    await t2.findByRole("list", { name: /Lecturas de patentes/i });
+
+    fireEvent.click(t1.getByRole("button", { name: /Ocultar lista de patentes/i }));
+    expect(t1.queryByRole("list", { name: /Lecturas de patentes/i })).not.toBeInTheDocument();
+    expect(t1.getByRole("button", { name: /Mostrar lista de patentes/i })).toBeInTheDocument();
+    expect(t2.getByRole("list", { name: /Lecturas de patentes/i })).toBeInTheDocument();
+  });
+
+  it("showing the list of one camera does not open the others", async () => {
+    renderPage(two);
+    const t1 = within(await screen.findByTestId("tile-1"));
+    const t2 = within(await screen.findByTestId("tile-2"));
+    await t1.findByRole("list", { name: /Lecturas de patentes/i });
+    fireEvent.click(t1.getByRole("button", { name: /Ocultar lista de patentes/i }));
+    fireEvent.click(t2.getByRole("button", { name: /Ocultar lista de patentes/i }));
+
+    fireEvent.click(t1.getByRole("button", { name: /Mostrar lista de patentes/i }));
+    expect(t1.getByRole("list", { name: /Lecturas de patentes/i })).toBeInTheDocument();
+    expect(t2.queryByRole("list", { name: /Lecturas de patentes/i })).not.toBeInTheDocument();
+    expect(t2.getByRole("button", { name: /Mostrar lista de patentes/i })).toBeInTheDocument();
+  });
+
+  it("remembers each camera's choice separately", async () => {
+    const first = renderPage(two);
+    const t1 = within(await screen.findByTestId("tile-1"));
+    await t1.findByRole("list", { name: /Lecturas de patentes/i });
+    fireEvent.click(t1.getByRole("button", { name: /Ocultar lista de patentes/i }));
+    first.unmount();
+
+    renderPage(two);
+    const again1 = within(await screen.findByTestId("tile-1"));
+    const again2 = within(await screen.findByTestId("tile-2"));
+    expect(await again1.findByRole("button", { name: /Mostrar lista de patentes/i })).toBeInTheDocument();
+    expect(await again2.findByRole("list", { name: /Lecturas de patentes/i })).toBeInTheDocument();
+  });
+
+  it("still works when the browser blocks storage", async () => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = () => { throw new Error("blocked"); };
+    try {
+      renderPage(two);
+      const t1 = within(await screen.findByTestId("tile-1"));
+      const t2 = within(await screen.findByTestId("tile-2"));
+      await t1.findByRole("list", { name: /Lecturas de patentes/i });
+      fireEvent.click(t1.getByRole("button", { name: /Ocultar lista de patentes/i }));
+      expect(t1.getByRole("button", { name: /Mostrar lista de patentes/i })).toBeInTheDocument();
+      expect(t2.getByRole("list", { name: /Lecturas de patentes/i })).toBeInTheDocument();
+    } finally {
+      Storage.prototype.setItem = original;
+    }
+  });
+});

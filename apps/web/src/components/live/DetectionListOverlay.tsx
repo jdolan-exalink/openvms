@@ -3,7 +3,7 @@ import { CarFront, ChevronLeft, ChevronRight, ScanFace, type LucideIcon } from "
 import { ArPlate } from "@/components/plates/ArPlate";
 import { cn } from "@/lib/cn";
 import type { ChannelItem, ChannelKind } from "@/lib/detectionChannels";
-import { useCameraFaces, useCameraPlates, useFittingRows, useLprOverlayCollapsed } from "@/lib/detectionOverlay";
+import { useCameraFaces, useCameraPlates, useFittingRows, useOverlayCollapsed } from "@/lib/detectionOverlay";
 import { detectionAgeSeconds, formatDetectionAge } from "@/lib/visionAi";
 
 /** Ticks so "hace Ns" keeps moving without refetching. */
@@ -112,7 +112,7 @@ export function DetectionListOverlay({
 }) {
   const plates = useCameraPlates(cameraId, enabled && lpr);
   const faceList = useCameraFaces(cameraId, enabled && faces);
-  const [collapsed, setCollapsed] = useLprOverlayCollapsed();
+  const [collapsed, setCollapsed] = useOverlayCollapsed(cameraId);
   const [chosen, setChosen] = useState<ChannelKind | null>(null);
   const now = useNow();
   const [listRef, rows] = useFittingRows();
