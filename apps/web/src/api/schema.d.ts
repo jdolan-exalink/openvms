@@ -1135,8 +1135,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Get or set camera imaging settings via ONVIF
-         * @description Queries or modifies imaging settings (brightness, contrast, saturation, sharpness, IR cut filter, WDR). Requires cameras.manage.
+         * Get imaging settings, options, or set values via ONVIF
+         * @description Queries supported imaging controls and their advertised ranges, reads settings, or modifies supported settings with readback verification. Requires cameras.manage.
          */
         post: operations["operateCameraOnvifImaging"];
         delete?: never;
@@ -3974,7 +3974,7 @@ export interface components {
             password?: string;
             video_source_token?: string;
             /** @enum {string} */
-            action: "get" | "set";
+            action: "get" | "options" | "set";
             settings?: {
                 brightness?: number;
                 color_saturation?: number;
@@ -3996,6 +3996,21 @@ export interface components {
                 wdr_mode?: string;
                 wdr_level?: number;
             };
+            options?: {
+                brightness?: components["schemas"]["OnvifFloatRange"];
+                color_saturation?: components["schemas"]["OnvifFloatRange"];
+                contrast?: components["schemas"]["OnvifFloatRange"];
+                sharpness?: components["schemas"]["OnvifFloatRange"];
+                ir_cut_filter_modes?: string[];
+                wide_dynamic_range?: {
+                    modes?: string[];
+                    level?: components["schemas"]["OnvifFloatRange"];
+                };
+            };
+        };
+        OnvifFloatRange: {
+            min: number;
+            max: number;
         };
         OnvifProbeRequest: {
             /** @description HTTP(S) ONVIF device endpoint on an IPv4 literal. */
