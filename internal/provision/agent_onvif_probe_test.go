@@ -132,6 +132,31 @@ func TestProbeOnvifAgentRejectsInvalidOrUnsafeAgentResponse(t *testing.T) {
 	})
 }
 
+func TestProbeOnvifAgentRedactsProfileStreamCredentialsAndKeepsCapabilities(t *testing.T) {
+	body := strings.Replace(validAgentProbeJSON, `"services":[`, `"profiles":[{"token":"main","name":"Main","fixed":true,"media_version":"2.0","source_configuration_token":"src-main","encoder_configuration_token":"enc-main","ptz_configuration_token":"ptz-main","encoding":"H265","width":2560,"height":1440,"fps":25,"frame_rate":25.5,"bitrate":6144,"stream_uri":"rtsp://camera-user:camera-password@192.0.2.8/live?password=camera-password"}],"services":[`, 1)
+	transport := roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	got, err := probeAgent(context.Background(), transport, "192.0.2.10", 9443, nil, true, "agent-token",
+		OnvifProbeRequest{Endpoint: "http://192.0.2.8/device", Username: "camera-user", Password: "camera-password"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Profiles) != 1 {
+		t.Fatalf("profiles = %+v", got.Profiles)
+	}
+	profile := got.Profiles[0]
+	if profile.Token != "main" || !profile.Fixed || profile.MediaVersion != "2.0" || profile.SourceConfigurationToken != "src-main" || profile.EncoderConfigurationToken != "enc-main" || profile.PTZConfigurationToken != "ptz-main" || profile.Encoding != "H265" || profile.Width != 2560 || profile.Height != 1440 || profile.FrameRate != 25.5 {
+		t.Fatalf("profile capabilities = %+v", profile)
+	}
+	if profile.StreamURI != "rtsp://192.0.2.8/live" {
+		t.Fatalf("profile stream URI = %q", profile.StreamURI)
+	}
+	if got := sanitizeOnvifStreamURI("rtsp://192.0.2.8/camera-password/stream", "camera-password"); got != "" {
+		t.Fatalf("URI containing a credential outside userinfo/query was returned: %q", got)
+	}
+}
+
 func TestProbeOnvifAgentRejectsMissingRequiredResponseFields(t *testing.T) {
 	responses := []struct {
 		name string
