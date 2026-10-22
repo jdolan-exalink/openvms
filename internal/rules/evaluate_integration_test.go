@@ -5,6 +5,7 @@ package rules_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/testutil/demofix"
@@ -126,6 +128,25 @@ func TestEvaluateEventNotifiesOnMatchOnly(t *testing.T) {
 	}
 	if n := f.pub.count("notification.created."); n != 1 {
 		t.Fatalf("published %d notification.created messages, want 1", n)
+	}
+}
+
+func TestEvaluateEventTxUsesCallerTransaction(t *testing.T) {
+	f := newFixture(t)
+	id := f.addRule("Personas", rules.TriggerEvent, rules.Conditions{Labels: []string{"person"}}, rules.Actions{NotifyInApp: true}, true)
+	ev := f.eventCtx("person")
+	rollback := errors.New("rollback caller transaction")
+	err := f.env.Store.TxRaw(context.Background(), store.ScopeFor(authz.Actor{TenantID: &ev.TenantID}), func(tx pgx.Tx) error {
+		if _, err := f.svc.EvaluateEventTx(context.Background(), tx, ev); err != nil {
+			return err
+		}
+		return rollback
+	})
+	if !errors.Is(err, rollback) {
+		t.Fatalf("TxRaw error = %v, want caller rollback", err)
+	}
+	if n := f.notifications(id); n != 0 {
+		t.Fatalf("caller rollback left %d notifications, want 0", n)
 	}
 }
 
