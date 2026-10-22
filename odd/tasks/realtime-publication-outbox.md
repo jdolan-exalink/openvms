@@ -34,7 +34,8 @@ Make realtime JetStream announcements follow committed database state. Producers
 - [x] Slice C2: wired the dispatcher into `apps/worker` with startup and bounded shutdown handling. `go test ./apps/worker` and `git diff --check` passed; no deployed worker runtime was exercised.
 - [x] Slice D: event ingestion now enqueues `frigate.event.new`, `alarm.opened`, and `alarm.updated` in the same transaction as event/alarm/cursor writes; worker direct JetStream callbacks were removed, observer callbacks remain postcommit. Alarm announcements use the ordered `alarm/<uuid>` key. Focused event/alarm integration and worker package checks passed; independent review found no actionable defects. 132 authored changed lines. Existing at-least-once publish-before-ack behavior remains.
 - [ ] Slice E: convert rule alarms and `notification.created` transactionally; publish none from inside evaluator transactions.
-- [ ] Slice F: convert user alarm transitions and auto-close transactionally.
+- [ ] Slice F: convert user initiated alarm transitions (acknowledge, assign, investigate, resolve, close, bulk) transactionally.
+- [ ] Slice G: convert alarm auto-close publications transactionally.
 - [ ] Keep each code slice below 400 authored changed lines; split producer families further if required. Include tests with each behavior.
 
 ## Acceptance
@@ -55,4 +56,4 @@ Make realtime JetStream announcements follow committed database state. Producers
 - [ ] Implementation, focused integration coverage, work-unit commits, and independent review for every slice.
 - [ ] Slice B draft exists in the worktree but is not accepted as complete because the current schema cannot preserve per-alarm ordering across replicas. Its focused unit tests passed before the ordering contract was added; rerun after updating claim behavior. Runtime JetStream/PostgreSQL harness remains required where available. At-least-once remains possible after JetStream accepts a message but before the database ack.
 
-P6-01 B4 remains gated until slices D–F are complete and the outbox dispatcher is available.
+P6-01 B4 remains gated until slices D–G are complete and the outbox dispatcher is available.
