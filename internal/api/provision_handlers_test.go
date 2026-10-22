@@ -33,7 +33,7 @@ func TestServerProvisionProjectsProgressWithoutCredentialFields(t *testing.T) {
 
 func TestOnvifProbeResultProjectsProfileIdentityAndCapabilityMetadata(t *testing.T) {
 	got := onvifProbeResult(provision.OnvifProbeResult{
-		Profiles: []provision.OnvifProbeProfile{{
+		Profiles: []provision.OnvifProbeProfile{{ // #nosec G101 -- profile tokens identify stream profiles; they are not authentication credentials.
 			Token: "main", Name: "Main", Fixed: true, MediaVersion: "2.0", SourceConfigurationToken: "source-main", EncoderConfigurationToken: "encoder-main", PTZConfigurationToken: "ptz-main",
 			Encoding: "H265", Width: 2560, Height: 1440, FPS: 25, FrameRate: 25.5, Bitrate: 6144,
 			StreamURI: "rtsp://192.0.2.8/live",
