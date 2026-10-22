@@ -1,8 +1,8 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { json, renderPage, stubApi } from "@/test-utils";
-import { OVERLAY_FALLBACK_ROWS, OVERLAY_FETCH_LIMIT, OVERLAY_ROW_GAP_PX, OVERLAY_ROW_PX, rowsThatFit } from "@/lib/lprOverlay";
-import { LprListOverlay } from "./LprListOverlay";
+import { OVERLAY_FALLBACK_ROWS, OVERLAY_FETCH_LIMIT, OVERLAY_ROW_GAP_PX, OVERLAY_ROW_PX, rowsThatFit } from "@/lib/detectionOverlay";
+import { DetectionListOverlay } from "./DetectionListOverlay";
 
 const read = (id: string, plate: string, seen_at: string, camera_id = "cam-1") => ({
   id, site_id: "s", site_name: "Sitio", server_id: "sv", server_name: "Srv", camera_id, camera_name: "Acceso Norte",
@@ -27,9 +27,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("LprListOverlay", () => {
+describe("DetectionListOverlay", () => {
   it("asks only for the plates of its camera", async () => {
-    renderPage(() => <LprListOverlay cameraId="cam-1" />);
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
     await waitFor(() => expect(requests.length).toBeGreaterThan(0));
     expect(requests[0]?.searchParams.getAll("camera_id")).toEqual(["cam-1"]);
   });
@@ -39,7 +39,7 @@ describe("LprListOverlay", () => {
       read("r1", "AB123CD", "2026-10-21T10:00:00Z"),
       read("r2", "AE526KV", "2026-10-21T10:00:30Z"),
     ];
-    renderPage(() => <LprListOverlay cameraId="cam-1" />);
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
     const list = await screen.findByRole("list", { name: /Lecturas de patentes/i });
     const items = within(list).getAllByRole("listitem");
     expect(items).toHaveLength(2);
@@ -50,38 +50,38 @@ describe("LprListOverlay", () => {
   });
 
   it("shows a waiting state when there are no reads", async () => {
-    renderPage(() => <LprListOverlay cameraId="cam-1" />);
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
     expect(await screen.findByText(/Esperando patentes/i)).toBeInTheDocument();
   });
 
   it("does not intercept pointer events over the video", async () => {
     reads = [read("r1", "AB123CD", "2026-10-21T10:00:00Z")];
-    renderPage(() => <LprListOverlay cameraId="cam-1" />);
-    const overlay = await screen.findByTestId("lpr-list-overlay");
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
+    const overlay = await screen.findByTestId("detection-overlay");
     expect(overlay).toHaveClass("pointer-events-none");
   });
 
   it("can be collapsed with the toggle and remembers the choice", async () => {
     reads = [read("r1", "AB123CD", "2026-10-21T10:00:00Z")];
-    const first = renderPage(() => <LprListOverlay cameraId="cam-1" />);
+    const first = renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
     expect(await screen.findByRole("list", { name: /Lecturas de patentes/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Ocultar lista de patentes/i }));
     expect(screen.queryByRole("list", { name: /Lecturas de patentes/i })).not.toBeInTheDocument();
     first.unmount();
 
-    renderPage(() => <LprListOverlay cameraId="cam-1" />);
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
     expect(await screen.findByRole("button", { name: /Mostrar lista de patentes/i })).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: /Lecturas de patentes/i })).not.toBeInTheDocument();
   });
 
   it("renders nothing when disabled by the caller", () => {
-    renderPage(() => <LprListOverlay cameraId="cam-1" enabled={false} />);
-    expect(screen.queryByTestId("lpr-list-overlay")).not.toBeInTheDocument();
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" enabled={false} />);
+    expect(screen.queryByTestId("detection-overlay")).not.toBeInTheDocument();
     expect(requests).toHaveLength(0);
   });
 });
 
-describe("LprListOverlay rows follow the available height", () => {
+describe("DetectionListOverlay rows follow the available height", () => {
   type Observer = { cb: ResizeObserverCallback };
   let observers: Observer[];
   const resize = (height: number) =>
@@ -109,7 +109,7 @@ describe("LprListOverlay rows follow the available height", () => {
 
   it("shows more plates in a tall list and fewer in a short one", async () => {
     reads = many(20);
-    renderPage(() => <LprListOverlay cameraId="cam-1" />);
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
     const list = await screen.findByRole("list", { name: /Lecturas de patentes/i });
     resize(700);
     await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(rowsThatFit(700)));
@@ -121,14 +121,14 @@ describe("LprListOverlay rows follow the available height", () => {
 
   it("never shows more plates than it has", async () => {
     reads = many(3);
-    renderPage(() => <LprListOverlay cameraId="cam-1" />);
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
     const list = await screen.findByRole("list", { name: /Lecturas de patentes/i });
     resize(2000);
     await waitFor(() => expect(within(list).getAllByRole("listitem")).toHaveLength(3));
   });
 
   it("asks for enough reads to fill a tall list", async () => {
-    renderPage(() => <LprListOverlay cameraId="cam-1" />);
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
     await waitFor(() => expect(requests.length).toBeGreaterThan(0));
     expect(Number(requests[0]?.searchParams.get("limit"))).toBe(OVERLAY_FETCH_LIMIT);
   });
@@ -136,7 +136,7 @@ describe("LprListOverlay rows follow the available height", () => {
   it("keeps the default count when the height cannot be measured", async () => {
     vi.unstubAllGlobals();
     vi.stubGlobal("fetch", vi.fn(async (input: Request) => stubApi({ "/api/v1/lpr/reads": () => json({ items: many(10) }) })(input)));
-    renderPage(() => <LprListOverlay cameraId="cam-1" />);
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" />);
     const list = await screen.findByRole("list", { name: /Lecturas de patentes/i });
     expect(within(list).getAllByRole("listitem")).toHaveLength(OVERLAY_FALLBACK_ROWS);
   });

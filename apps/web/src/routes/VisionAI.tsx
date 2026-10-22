@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { meQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
-import { LprListOverlay } from "@/components/live/LprListOverlay";
+import { DetectionListOverlay } from "@/components/live/DetectionListOverlay";
 import { Button, IconButton } from "@/components/ui";
 import { EventPopup } from "@/components/visionai/EventPopup";
 import { EventSnapshot } from "@/components/visionai/EventSnapshot";
@@ -772,7 +772,7 @@ function SlotRenderer({
           objectFit="fill"
           className="size-full"
         />
-        <LprListOverlay cameraId={cameraId} enabled={Boolean(slot.plate)} />
+        <DetectionListOverlay cameraId={cameraId} enabled={Boolean(slot.plate)} />
       </div>
 
       {/* Top HUD Controls */}

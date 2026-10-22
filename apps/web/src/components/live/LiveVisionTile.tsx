@@ -12,7 +12,7 @@ import type { LiveVisionRef } from "@/lib/liveGrid";
 import { useVisionSlots, visionSourceFromId, type VisionAISlot } from "@/lib/visionAi";
 import { channelKindOf } from "@/lib/detectionChannels";
 import { DetectionChannel } from "@/components/visionai/DetectionChannel";
-import { LprListOverlay } from "@/components/live/LprListOverlay";
+import { DetectionListOverlay } from "@/components/live/DetectionListOverlay";
 
 export interface LiveVisionTileProps {
   vision: LiveVisionRef;
@@ -76,7 +76,7 @@ function VisionSlotTile({ vision, isFocused = false, className }: LiveVisionTile
             className="size-full"
           />
 
-          <LprListOverlay cameraId={cameraId} enabled={Boolean(activeSlot.plate) || vision.layout === "lpr"} />
+          <DetectionListOverlay cameraId={cameraId} enabled={Boolean(activeSlot.plate) || vision.layout === "lpr"} />
 
           {/* Vision AI Top HUD Badge */}
           <div className="absolute top-2 left-2 z-10 flex flex-wrap items-center gap-1.5 pointer-events-none">

@@ -180,12 +180,12 @@ describe("Live", () => {
     renderPage(Live);
     fireEvent.click(await screen.findByRole("button", { name: /Acceso/ }));
     await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("Acceso")).toBeInTheDocument());
-    expect(within(screen.getByLabelText("Cuadro 1")).getByTestId("lpr-list-overlay")).toBeInTheDocument();
+    expect(within(screen.getByLabelText("Cuadro 1")).getByTestId("detection-overlay")).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Cuadro 2"));
     fireEvent.click(await screen.findByRole("button", { name: /Patio/ }));
     await waitFor(() => expect(within(screen.getByLabelText("Cuadro 2")).getByText("Patio")).toBeInTheDocument());
-    expect(within(screen.getByLabelText("Cuadro 2")).queryByTestId("lpr-list-overlay")).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText("Cuadro 2")).queryByTestId("detection-overlay")).not.toBeInTheDocument();
   });
 
   it("keeps video tiles square, selected or not, and marks selection with an outline", async () => {

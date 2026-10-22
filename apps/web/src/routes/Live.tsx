@@ -12,7 +12,7 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import { camerasQuery, meQuery, serversQuery, sitesQuery, viewsQuery } from "@/api/queries";
 import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { LiveVisionTile } from "@/components/live/LiveVisionTile";
-import { LprListOverlay } from "@/components/live/LprListOverlay";
+import { DetectionListOverlay } from "@/components/live/DetectionListOverlay";
 import { MsePlayer } from "@/components/MsePlayer";
 import { QualityBadge } from "@/components/QualityBadge";
 import { TelemetryOverlay } from "@/components/live/TelemetryOverlay";
@@ -1472,7 +1472,7 @@ function GridTile({
         </>
       ) : tile && camera && "camera_id" in tile ? (
         <>
-          <LprListOverlay cameraId={camera.id} enabled={camera.lpr && !isDuplicate && !isHidden} />
+          <DetectionListOverlay cameraId={camera.id} enabled={camera.lpr && !isDuplicate && !isHidden} />
           {(() => {
             const feConfig = getFisheyeConfig(tile.camera_id);
             const isFisheyeCamera = Boolean(

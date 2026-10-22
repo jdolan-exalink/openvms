@@ -3,7 +3,7 @@ import { CarFront, ChevronLeft, ChevronRight } from "lucide-react";
 import { ArPlate } from "@/components/plates/ArPlate";
 import { cn } from "@/lib/cn";
 import type { ChannelItem } from "@/lib/detectionChannels";
-import { useCameraPlates, useFittingRows, useLprOverlayCollapsed } from "@/lib/lprOverlay";
+import { useCameraPlates, useFittingRows, useLprOverlayCollapsed } from "@/lib/detectionOverlay";
 import { detectionAgeSeconds, formatDetectionAge } from "@/lib/visionAi";
 
 /** Ticks so "hace Ns" keeps moving without refetching. */
@@ -20,7 +20,7 @@ function useNow(intervalMs = 5000): number {
  * Plate reads of one camera as a glass list on the left of the video. The wrapper ignores the
  * pointer so the player underneath keeps working; only the collapse button is clickable.
  */
-export function LprListOverlay({ cameraId, enabled = true, className }: { cameraId: string; enabled?: boolean; className?: string }) {
+export function DetectionListOverlay({ cameraId, enabled = true, className }: { cameraId: string; enabled?: boolean; className?: string }) {
   const query = useCameraPlates(cameraId, enabled);
   const [collapsed, setCollapsed] = useLprOverlayCollapsed();
   const now = useNow();
@@ -30,7 +30,7 @@ export function LprListOverlay({ cameraId, enabled = true, className }: { camera
 
   return (
     <div
-      data-testid="lpr-list-overlay"
+      data-testid="detection-overlay"
       className={cn("pointer-events-none absolute inset-y-0 left-0 z-20 flex max-w-[44%] items-stretch py-2 pl-2", className)}
     >
       {collapsed ? (
