@@ -764,6 +764,22 @@ type PersonAttributeJob struct {
 	UpdatedAt  time.Time
 }
 
+type RealtimePublicationOutbox struct {
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	Subject     string
+	Payload     json.RawMessage
+	Status      string
+	Attempts    int32
+	AvailableAt time.Time
+	LeaseUntil  *time.Time
+	LeaseToken  *uuid.UUID
+	LastError   *string
+	CreatedAt   time.Time
+	SentAt      *time.Time
+	UpdatedAt   time.Time
+}
+
 type Rule struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID
