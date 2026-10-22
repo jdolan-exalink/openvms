@@ -42,6 +42,7 @@ import {
   type CameraPriority,
 } from "./storageRetention";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { YamlDiff } from "@/components/frigate/YamlDiff";
 import { Icon } from "@/components/Icon";
 import { Modal } from "@/components/Modal";
 import { Button, ErrorNote, Field, Select, Switch, TextInput } from "@/components/ui";
@@ -1097,6 +1098,12 @@ export function ServerFrigateConfigModal({
                   onChange={(e) => setYamlText(e.target.value)}
                   spellCheck={false}
                 />
+                {isDirty && (
+                  <section aria-label="Vista previa de cambios" className="flex flex-col gap-2">
+                    <h3 className="text-sm font-bold">Vista previa de cambios</h3>
+                    <YamlDiff before={initialYaml} after={yamlText} />
+                  </section>
+                )}
               </div>
             )}
 

@@ -219,6 +219,11 @@ describe("ServerFrigateConfigModal", () => {
     fireEvent.change(editor, { target: { value: updatedYaml } });
     expect(editor).toHaveValue(updatedYaml);
 
+    const preview = screen.getByRole("region", { name: /Vista previa de cambios/i });
+    expect(preview).toHaveTextContent("- host: 192.168.1.50");
+    expect(preview).toHaveTextContent("+ host: 192.168.1.99");
+    expect(calls.some((c) => c.method === "PUT" && new URL(c.url).pathname.endsWith("/frigate-config/raw"))).toBe(false);
+
     // Save changes
     const saveBtn = screen.getByRole("button", { name: /Guardar cambios/i });
     fireEvent.click(saveBtn);
@@ -231,6 +236,7 @@ describe("ServerFrigateConfigModal", () => {
       );
       expect(putCall).toBeDefined();
     });
+    expect(screen.queryByRole("region", { name: /Vista previa de cambios/i })).not.toBeInTheDocument();
   });
 
   it("switches to Historial and displays past revisions", async () => {
