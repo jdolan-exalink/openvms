@@ -14,6 +14,7 @@ Make realtime JetStream announcements follow committed database state. Producers
 ## Scope
 
 - Add tenant-owned realtime outbox rows with stable IDs, subject/payload, lease fencing, bounded retries, terminal failure visibility, and due-time indexes.
+- Add optional per-alarm aggregate ordering metadata so rows for one alarm cannot be claimed out of sequence across dispatcher replicas. Only alarm-related producers need to set this key; unrelated event publications remain unordered.
 - Add a dispatcher worker that publishes with a stable JetStream message ID, then marks the row sent. Keep rows retryable after worker crashes.
 - Convert producers so outbox insertion shares their state/audit transaction: event ingestion and built-in alarms; rule alarm transitions and in-app notification-created events; user alarm transitions and auto-close.
 - Preserve current subjects and payload schemas. Document at-least-once behavior if a crash occurs after JetStream accepts a message and before the row is marked sent.
@@ -28,10 +29,11 @@ Make realtime JetStream announcements follow committed database state. Producers
 ## Work slices
 
 - [x] Slice A (`fc1e0e0`): tenant isolated schema, due index, sqlc enqueue/claim/ack/retry APIs, lease-token fencing, bounded retries, terminal failure, and RLS integration coverage. Focused integration and `go test ./internal/store` passed; `git diff --check` passed. 229 authored lines plus 175 generated. Runtime publisher harness: N/A (no dispatcher in this slice). Rollback boundary: migration 00065 drops the outbox table and its rows. Independent review found no actionable defects in schema, RLS, or lifecycle queries.
-- [ ] Slice B: lease-based dispatcher, JetStream publisher adapter, worker startup/shutdown, retry/dead-letter observability, and tests.
-- [ ] Slice C: convert event ingestion and built-in alarm publications transactionally.
-- [ ] Slice D: convert rule alarms and `notification.created` transactionally; publish none from inside evaluator transactions.
-- [ ] Slice E: convert user alarm transitions and auto-close transactionally.
+- [ ] Slice B: migration 00066 and query changes for optional tenant-scoped alarm aggregate keys and monotonic sequence numbers. Claim only the earliest nonterminal row for an aggregate, even across concurrent dispatchers; a terminally failed row releases later rows. Add integration coverage proving same-alarm rows cannot be claimed out of order while unrelated rows remain claimable.
+- [ ] Slice C: lease-based dispatcher, JetStream publisher adapter, worker startup/shutdown, retry/dead-letter observability, and tests. It may be implemented behind the ordering contract; do not mark complete until serialization across dispatchers is verified.
+- [ ] Slice D: convert event ingestion and built-in alarm publications transactionally.
+- [ ] Slice E: convert rule alarms and `notification.created` transactionally; publish none from inside evaluator transactions.
+- [ ] Slice F: convert user alarm transitions and auto-close transactionally.
 - [ ] Keep each code slice below 400 authored changed lines; split producer families further if required. Include tests with each behavior.
 
 ## Acceptance
@@ -47,5 +49,6 @@ Make realtime JetStream announcements follow committed database state. Producers
 
 - [x] Investigation map: producer transaction boundaries and existing external delivery outbox were reviewed; realtime publications are not currently durable.
 - [ ] Implementation, focused integration coverage, work-unit commits, and independent review for every slice.
+- [ ] Slice B draft exists in the worktree but is not accepted as complete because the current schema cannot preserve per-alarm ordering across replicas. Its focused unit tests passed before the ordering contract was added; rerun after updating claim behavior. Runtime JetStream/PostgreSQL harness remains required where available. At-least-once remains possible after JetStream accepts a message but before the database ack.
 
-P6-01 B4 remains gated until slices C–E are complete and the outbox dispatcher is available.
+P6-01 B4 remains gated until slices D–F are complete and the outbox dispatcher is available.
