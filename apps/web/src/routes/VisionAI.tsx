@@ -12,6 +12,7 @@ import { Button, IconButton } from "@/components/ui";
 import { EventPopup } from "@/components/visionai/EventPopup";
 import { EventSnapshot } from "@/components/visionai/EventSnapshot";
 import { EventsSidebar } from "@/components/visionai/EventsSidebar";
+import { ObjectBadge } from "@/components/visionai/ObjectBadge";
 import { usePlateReads, type VisionEventView } from "@/lib/visionEvents";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
@@ -835,13 +836,7 @@ function SlotRenderer({
       {/* Bottom HUD Information */}
       <div className="relative z-10 flex items-center justify-between p-2 bg-gradient-to-t from-black/85 via-black/40 to-transparent text-white text-xs">
         <div className="flex items-center gap-1.5 min-w-0">
-          {slot.object && (
-            <span className="inline-flex items-center gap-1 font-bold uppercase tracking-wider text-[10px] bg-emerald-500/80 px-1.5 py-0.5 rounded-m3-xs text-black">
-              <ObjectIcon object={slot.object} className="size-3" />
-              {slot.object}
-              {slot.confidence !== undefined && ` ${Math.round(slot.confidence * 100)}%`}
-            </span>
-          )}
+          <ObjectBadge object={slot.object} confidence={slot.confidence} />
           {slot.plate && (
             <span className="font-mono font-bold tracking-widest text-[10px] bg-white/90 px-1.5 py-0.5 rounded-m3-xs text-black">
               {slot.plate}
