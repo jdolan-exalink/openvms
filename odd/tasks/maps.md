@@ -1026,7 +1026,7 @@ no old lifecycle invocation, receipt or review authority claimed. Parent owns ne
   renderer/editor; normalized independent floor placements, direct camera dragging, explicit
   revision-aware save, permission-scoped hierarchy/image controls and five-second real notices.
 - [ ] M-W27 — Integrated verification and configuration-preserving local deployment acceptance.
-  Status (2026-10-21): still pending. The synthetic map performance result (54/57/74 ms against the unchanged 50 ms threshold) is documented as unresolved and not waived; deployment and real-account acceptance are not done (latest tracker entry says the features are locally verified but unpublished).
+  Status (2026-10-22): synthetic performance passes for the CI candidate recorded below; the earlier 54/57/74 ms measurements remain historical and are superseded for that candidate. M-W27 remains open for deployment and real-account acceptance.
 
 Historical M-W23 immediate scope was visibility only. No database preferences reset, coordinate rewrite, floor implementation
 or deployment. Synthetic performance remains unresolved (54/57/74 ms > unchanged 50 ms); do not rerun
@@ -1348,3 +1348,14 @@ Rollback must refuse subsequent user-modified revisions. No frontend deployment 
 New map/plan features and corrected visibility remain locally verified but unpublished; M-W27
 and real-account acceptance remain pending. Browser refresh is required to discard stale client state;
 at distant zoom levels, clusters represent multiple cameras rather than individual markers.
+
+### M-W27 synthetic performance CI evidence (2026-10-22)
+
+The 5,000-camera Maps performance smoke passed on candidate `b0a0997728111aa17c605ec05a6719a761b7f473`.
+GitHub Actions run [39823706672](https://github.com/jdolan-exalink/openvms/actions/runs/39823706672)
+completed successfully on 2026-10-22; its [Maps performance smoke (Playwright) job](https://github.com/jdolan-exalink/openvms/actions/runs/39823706672/job/119987924259)
+ran `pnpm test:perf` and succeeded. The workflow does not set `MAPS_PERF_MIN_FPS`, so the test's default
+50 FPS floor applied; the test also enforces a 50 ms post-settle long-task maximum and first render under
+5 seconds (`packages/test/tests/maps-perf.spec.ts`). This pass supersedes the historical 54/57/74 ms
+failure for this candidate only; it does not establish deployed or real-account performance or acceptance.
+M-W27/M-W17 deployment and real-account browser/media/events acceptance remain open.
