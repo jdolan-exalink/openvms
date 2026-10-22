@@ -4,6 +4,7 @@ package alarms_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
 	"testing"
@@ -62,11 +63,44 @@ func TestAutoCloseClosesOnlyAfterTheWindow(t *testing.T) {
 	if got := c.count(`SELECT count(*) FROM audit_log WHERE action = 'ALARM_CLOSED' AND target_id = $1 AND actor_id IS NULL AND actor_name = 'system'`, a.AlarmID); got != 1 {
 		t.Fatal("system audit entry not recorded")
 	}
-	if len(pub.subjects) != 1 || pub.subjects[0] != "alarm.closed."+c.cam.TenantID.String() {
-		t.Fatalf("published %v, want one alarm.closed.<tenant>", pub.subjects)
+	if len(pub.subjects) != 0 {
+		t.Fatalf("directly published %v, want no direct publisher calls", pub.subjects)
+	}
+	if got := c.count(`SELECT count(*) FROM realtime_publication_outbox WHERE aggregate_key=$1`, "alarm/"+a.AlarmID.String()); got != 1 {
+		t.Fatalf("alarm outbox rows = %d, want exactly one", got)
+	}
+	var eventID uuid.UUID
+	if err := c.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT event_id FROM alarms WHERE id=$1`, a.AlarmID).Scan(&eventID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var subject string
+	var payload []byte
+	var aggregateKey *string
+	if err := c.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT subject, payload, aggregate_key FROM realtime_publication_outbox WHERE aggregate_key=$1`,
+			"alarm/"+a.AlarmID.String()).Scan(&subject, &payload, &aggregateKey)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if subject != "alarm.closed."+c.cam.TenantID.String() || aggregateKey == nil || *aggregateKey != "alarm/"+a.AlarmID.String() {
+		t.Fatalf("outbox subject/key = %q/%v, want alarm.closed.<tenant>/alarm/%s", subject, aggregateKey, a.AlarmID)
+	}
+	var announcement map[string]any
+	if err := json.Unmarshal(payload, &announcement); err != nil {
+		t.Fatal(err)
+	}
+	if announcement["id"] != a.AlarmID.String() || announcement["tenant_id"] != c.cam.TenantID.String() ||
+		announcement["site_id"] != c.cam.SiteID.String() || announcement["camera_id"] != c.cam.ID.String() ||
+		announcement["event_id"] != eventID.String() || announcement["status"] != "closed" || announcement["updated_at"] == "" {
+		t.Fatalf("auto-close announcement payload = %v, want closed alarm fields", announcement)
 	}
 	if n, _ := after.Sweep(ctx); n != 0 {
 		t.Fatalf("second sweep closed %d, want 0 (idempotent)", n)
+	}
+	if got := c.count(`SELECT count(*) FROM realtime_publication_outbox WHERE aggregate_key=$1`, "alarm/"+a.AlarmID.String()); got != 1 {
+		t.Fatalf("outbox rows after repeat sweep = %d, want no duplicate", got)
 	}
 }
 

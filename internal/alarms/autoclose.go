@@ -61,15 +61,14 @@ func (a *AutoCloser) Run(ctx context.Context) {
 	}
 }
 
-// Sweep closes one batch of inactive alarms and returns how many it closed. Realtime updates are
-// published after the transaction commits.
+// Sweep closes one batch of inactive alarms and enqueues realtime updates in the same transaction.
 func (a *AutoCloser) Sweep(ctx context.Context) (int, error) {
 	batch := a.Batch
 	if batch <= 0 {
 		batch = defaultSweepBatch
 	}
 	now := a.now()
-	var closed []ClosedAlarm
+	var closedCount int
 	err := a.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 		q := db.New(tx)
 		settings, err := q.GetAlarmSettings(ctx)
@@ -87,7 +86,13 @@ func (a *AutoCloser) Sweep(ctx context.Context) (int, error) {
 				return err
 			}
 			if ok {
-				closed = append(closed, c)
+				if err := enqueueAlarmPublication(ctx, q, "closed", Alarm{
+					ID: c.ID, TenantID: c.TenantID, SiteID: c.SiteID, CameraID: c.CameraID,
+					EventID: c.EventID, Status: "closed", UpdatedAt: c.UpdatedAt,
+				}); err != nil {
+					return err
+				}
+				closedCount++
 			}
 		}
 		return nil
@@ -95,8 +100,5 @@ func (a *AutoCloser) Sweep(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	for _, c := range closed {
-		PublishAlarm(ctx, a.Pub, a.Log, "closed", "closed", c.TenantID, c.SiteID, c.CameraID, c.EventID, c.ID, c.UpdatedAt)
-	}
-	return len(closed), nil
+	return closedCount, nil
 }
