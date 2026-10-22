@@ -93,7 +93,7 @@ func (d *Dispatcher) ProcessBatch(ctx context.Context) error {
 				return ctx.Err()
 			}
 			delay := retryDelay(row.Attempts, cfg.RetryBase, cfg.RetryMax)
-			if row.Attempts >= int32(positive(cfg.MaxAttempts, 8)) {
+			if row.Attempts >= positiveInt32(cfg.MaxAttempts, 8) {
 				delay = 0
 			}
 			if retryErr := d.Repository.Retry(ctx, row.TenantID, row.ID, *row.LeaseToken, delay, positive(cfg.MaxAttempts, 8), err.Error()); retryErr != nil {
@@ -145,6 +145,16 @@ func positive(v, fallback int) int {
 	return fallback
 }
 
+func positiveInt32(v, fallback int) int32 {
+	if v <= 0 {
+		v = fallback
+	}
+	if v > 1<<31-1 {
+		return 1<<31 - 1
+	}
+	return int32(v)
+}
+
 func positiveDuration(v, fallback time.Duration) time.Duration {
 	if v > 0 {
 		return v
@@ -159,7 +169,7 @@ func (r StoreRepository) Claim(ctx context.Context, maxRows int, lease time.Dura
 	err := r.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		var err error
 		claimed, err = q.ClaimRealtimePublications(ctx, db.ClaimRealtimePublicationsParams{
-			LeaseSeconds: lease.Seconds(), MaxAttempts: int32(maxAttempts), MaxRows: int32(maxRows),
+			LeaseSeconds: lease.Seconds(), MaxAttempts: positiveInt32(maxAttempts, 8), MaxRows: positiveInt32(maxRows, 32),
 		})
 		return err
 	})
@@ -175,7 +185,7 @@ func (r StoreRepository) MarkSent(ctx context.Context, tenantID, id, token uuid.
 func (r StoreRepository) Retry(ctx context.Context, tenantID, id, token uuid.UUID, delay time.Duration, maxAttempts int, message string) error {
 	return r.update(ctx, tenantID, id, func(q *db.Queries) (int64, error) {
 		return q.RetryRealtimePublication(ctx, db.RetryRealtimePublicationParams{
-			ID: id, LeaseToken: &token, MaxAttempts: int32(maxAttempts), RetrySeconds: delay.Seconds(), LastError: &message,
+			ID: id, LeaseToken: &token, MaxAttempts: positiveInt32(maxAttempts, 8), RetrySeconds: delay.Seconds(), LastError: &message,
 		})
 	})
 }

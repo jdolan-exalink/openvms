@@ -45,12 +45,25 @@ type fakePublisher struct {
 	cancel context.CancelFunc
 }
 
-func (p *fakePublisher) Publish(_ context.Context, row db.RealtimePublicationOutbox) error {
+func (p *fakePublisher) Publish(_ context.Context, _ db.RealtimePublicationOutbox) error {
 	p.calls++
 	if p.cancel != nil {
 		p.cancel()
 	}
 	return p.err
+}
+
+func TestPositiveInt32BoundsConfiguration(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	if got := positiveInt32(maxInt, 8); got != 1<<31-1 {
+		t.Fatalf("positiveInt32(maxInt) = %d, want %d", got, int32(1<<31-1))
+	}
+	if got := positiveInt32(0, 8); got != 8 {
+		t.Fatalf("positiveInt32(0) = %d, want 8", got)
+	}
+	if got := positiveInt32(3, 8); got != 3 {
+		t.Fatalf("positiveInt32(3) = %d, want 3", got)
+	}
 }
 
 func TestDispatcherPublishesThenAcknowledges(t *testing.T) {
