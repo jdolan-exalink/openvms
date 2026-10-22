@@ -92,6 +92,58 @@ func TestPickStreamsGo2RTCUnavailable(t *testing.T) {
 	}
 }
 
+// TestPickStreamsIgnoresSeparators reproduces the helvecia "Ingreso_Sur" bug: the camera is
+// named with an underscore but its go2rtc streams were created as "ingresosur_sub/_main", so
+// the live view had no restream and showed the camera offline although events kept arriving.
+func TestPickStreamsIgnoresSeparators(t *testing.T) {
+	available := map[string]bool{"ingresosur_sub": true, "ingresosur_main": true, "birdseye": true, "banco_sub": true}
+	for name, cc := range map[string]cameraConfig{
+		"configured": liveCfg(map[string]string{"Ingreso_Sur": "Ingreso_Sur"}),
+		"no config":  {},
+	} {
+		live, hq := pickStreams("Ingreso_Sur", cc, available)
+		if live != "ingresosur_sub" || hq != "ingresosur_main" {
+			t.Errorf("%s: got live=%q hq=%q", name, live, hq)
+		}
+	}
+}
+
+func TestPickStreamsIgnoresSpacesAndDashes(t *testing.T) {
+	available := map[string]bool{"sala1_sub": true, "sala1_main": true, "patio-norte_sub": true, "patio-norte_main": true}
+	if live, hq := pickStreams("Sala 1", cameraConfig{}, available); live != "sala1_sub" || hq != "sala1_main" {
+		t.Errorf("space: got live=%q hq=%q", live, hq)
+	}
+	if live, hq := pickStreams("Patio_Norte", cameraConfig{}, available); live != "patio-norte_sub" || hq != "patio-norte_main" {
+		t.Errorf("dash: got live=%q hq=%q", live, hq)
+	}
+}
+
+// An exact (or case-insensitive) match always beats a separator-insensitive one.
+func TestPickStreamsExactMatchBeatsLooseMatch(t *testing.T) {
+	available := map[string]bool{"banco_sub": true, "ban_co_sub": true, "banco_main": true, "ban_co_main": true}
+	if live, hq := pickStreams("Banco", cameraConfig{}, available); live != "banco_sub" || hq != "banco_main" {
+		t.Fatalf("got live=%q hq=%q", live, hq)
+	}
+}
+
+// Two streams that only differ in separators are ambiguous: the pick must still be stable.
+func TestPickStreamsLooseMatchIsDeterministic(t *testing.T) {
+	available := map[string]bool{"a.b_sub": true, "a-b_sub": true}
+	for i := 0; i < 20; i++ {
+		if live, _ := pickStreams("Ab", cameraConfig{}, available); live != "a-b_sub" {
+			t.Fatalf("run %d: got %q, want the lexicographically first candidate", i, live)
+		}
+	}
+}
+
+// Dropping separators must not make a different camera's stream match.
+func TestPickStreamsLooseMatchDoesNotOverreach(t *testing.T) {
+	available := map[string]bool{"ingresosur_sub": true, "ingresosur_main": true}
+	if live, hq := pickStreams("Ingreso", cameraConfig{}, available); live != "" || hq != "" {
+		t.Fatalf("camera Ingreso must not take ingresosur's streams, got live=%q hq=%q", live, hq)
+	}
+}
+
 // startMockWithGo2RTC starts a mock Frigate whose /api/go2rtc/streams reports exactly
 // streamNames; nil disables the endpoint (404), simulating an older Frigate or go2rtc off.
 func startMockWithGo2RTC(t *testing.T, spec string, streamNames []string) *httptest.Server {

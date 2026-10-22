@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // v017 implements Adapter for Frigate 0.14 through 0.17 (review-item API).
@@ -197,8 +198,10 @@ func guessStream(name string, available map[string]bool, suffix string) string {
 	return matchStream(name+"_live", available)
 }
 
-// matchStream returns candidate's actual key in available (exact match first, then
-// case-insensitive), or "" if go2rtc has no such stream.
+// matchStream returns candidate's actual key in available: an exact match first, then a
+// case-insensitive one, then one that ignores everything but letters and digits (a camera
+// "Ingreso_Sur" whose go2rtc streams were created as "ingresosur_sub"). "" if go2rtc has no
+// such stream. Among several loose matches the smallest key wins, so the pick is stable.
 func matchStream(candidate string, available map[string]bool) string {
 	if candidate == "" || available == nil {
 		return ""
@@ -212,7 +215,29 @@ func matchStream(candidate string, available map[string]bool) string {
 			return s
 		}
 	}
-	return ""
+	key := streamKey(candidate)
+	if key == "" {
+		return ""
+	}
+	loose := ""
+	for s := range available {
+		if streamKey(s) == key && (loose == "" || s < loose) {
+			loose = s
+		}
+	}
+	return loose
+}
+
+// streamKey lowercases a stream name and drops everything that is not a letter or digit, so
+// names that only differ in separators ("Ingreso_Sur", "ingreso-sur", "Ingreso Sur") compare equal.
+func streamKey(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (a *v017) Reviews(ctx context.Context, q ReviewQuery) ([]Review, error) {
