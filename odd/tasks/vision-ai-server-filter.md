@@ -21,7 +21,7 @@ Decisions:
 
 - [x] 1. Backend: `server_id[]` on the Vision AI slots, filtered before ranking, one allocator per selection.
 - [x] 2. Core: add server selection, preferences, and filtered data queries; keep the old Live helper exports for this intermediate branch.
-- [ ] 3. UI: remove Live's selector, add the Vision AI selector, and connect every list to the selection.
+- [x] 3. UI: remove Live's selector, add the Vision AI selector, and connect every list to the selection. Verification: `pnpm exec vitest run src/routes/VisionAI.test.tsx src/components/visionai/ServerSelector.test.tsx src/routes/Live.test.tsx --reporter=dot` — PASS (3 files, 146 tests); `pnpm typecheck` — PASS. Runtime harness: browser component tests; no external service required. Rollback: revert this slice's UI integration paths.
 
 ## Delivery chain
 

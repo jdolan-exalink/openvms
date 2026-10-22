@@ -36,7 +36,6 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { type ExplorerActions, LiveExplorer } from "@/components/LiveExplorer";
 import { Modal } from "@/components/Modal";
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
-import { ServerSelector } from "@/components/live/ServerSelector";
 import { FullscreenButton, LayoutMenu, PresentationEditor } from "@/components/Presentations";
 import { Button, ErrorNote, IconButton, Switch, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
@@ -47,7 +46,6 @@ import {
 } from "@/lib/liveGrid";
 import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
 import { camerasOfServer as serverCameras, camerasOfSite, loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
-import { removeServerTiles, serverChoices } from "@/lib/serverSelector";
 import { can } from "@/lib/perm";
 import { LivePhone } from "@/components/LivePhone";
 import { useIsPhoneDevice } from "@/lib/useIsPhoneDevice";
@@ -620,12 +618,6 @@ function LiveDesktop() {
   const byCamera = (a: Schemas["Camera"], b: Schemas["Camera"]) => a.sort_order - b.sort_order || a.display_name.localeCompare(b.display_name);
   const camerasOfServer = (serverId: string) => serverCameras(serverId, cameras.data ?? [], folderApi.folders);
   const camerasOfSiteId = (siteId: string) => camerasOfSite(siteId, servers.data ?? [], cameras.data ?? [], folderApi.folders);
-  const serverChoicesNow = serverChoices(servers.data ?? [], sites.data ?? [], cameras.data ?? [], folderApi.folders, tiles);
-  // Checking a server brings its cameras into the grid (growing it when full); unchecking takes them out.
-  const toggleServerInGrid = (serverId: string, checked: boolean) => {
-    if (checked) addToGrid(camerasOfServer(serverId).map((camera) => camera.id));
-    else setTiles(removeServerTiles(tiles, cameras.data ?? [], serverId));
-  };
   const camerasOfFolder = (folderId: string) => (cameras.data ?? []).filter((camera) => camera.enabled && camera.folder_id === folderId).sort(byCamera);
   const showGroup = (list: Schemas["Camera"][], label: string) => {
     if (list.length === 0) {
@@ -955,7 +947,6 @@ function LiveDesktop() {
           <section data-live-stage className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
             <div role="group" aria-label={tr("live.gridLayout")} className="flex shrink-0 flex-wrap items-center gap-1">
               <LayoutMenu catalog={catalog} active={{ columns, panes }} onSelect={applyPresentation} onEdit={() => setEditorOpen(true)} />
-              <ServerSelector choices={serverChoicesNow} onToggle={toggleServerInGrid} />
               <FullscreenButton active={fullscreen} onClick={toggleFullscreen} />
               <IconButton icon={X} title="Cerrar todas las cámaras" aria-label="Cerrar todas las cámaras" className="size-8" onClick={closeAllStreams} />
               {visionTile && (
