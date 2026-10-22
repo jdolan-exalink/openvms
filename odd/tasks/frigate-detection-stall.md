@@ -13,5 +13,5 @@ verdict needs every camera that delivers video to be at 0.
 ## Slices
 
 - [x] 1. `DetectionTracker`: hold/recover state machine over per-server camera stats (pure, unit tested).
-- [x] 2. Health poller: a stalled server becomes `degraded` with a reason in `last_error` and
+- [ ] 2. Health poller: a stalled server becomes `degraded` with a reason in `last_error` and
       `detection_stalled_since` in its stats; recovery clears it.
