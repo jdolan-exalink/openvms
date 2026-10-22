@@ -19,7 +19,7 @@ The LPR/face totem channels stay reachable as sources in the camera list, with c
 - [x] 1. `useCameraPlates` hook + `LprListOverlay` component (futuristic glass list, entry animation, empty state) with tests
 - [x] 2. Live grid tile: render overlay on cameras with `lpr=true`, per-tile toggle persisted in localStorage
 - [x] 3. Vision AI: same overlay on the active slot camera and the LPR layout, same toggle
-- [ ] 4. Explorer: rename channel sources to "Tótem LPR" / "Tótem Rostros", add a TÓTEM badge and icon
+- [x] 4. Explorer: rename channel sources to "Tótem LPR" / "Tótem Rostros", add a TÓTEM badge and icon
 
 ## Verification
 
