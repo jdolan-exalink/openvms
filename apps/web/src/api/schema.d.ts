@@ -4081,6 +4081,10 @@ export interface components {
             display_name: string;
             enabled: boolean;
             zones: string[];
+            /** @description Video codec of the live (sub) go2rtc stream as go2rtc reports it, lowercase (h264, h265); null when unknown. */
+            live_codec?: string | null;
+            /** @description Video codec of the hq (main) go2rtc stream; null when unknown. */
+            hq_codec?: string | null;
             lpr: boolean;
             status: components["schemas"]["HealthStatus"];
             fps?: number | null;

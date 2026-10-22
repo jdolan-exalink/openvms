@@ -400,6 +400,12 @@ func toCamera(c db.GetCameraRow) gen.Camera {
 	if c.Fps != nil {
 		out.Fps = c.Fps
 	}
+	if c.LiveCodec != "" {
+		out.LiveCodec = &c.LiveCodec
+	}
+	if c.HqCodec != "" {
+		out.HqCodec = &c.HqCodec
+	}
 	return out
 }
 

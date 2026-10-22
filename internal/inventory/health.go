@@ -51,6 +51,9 @@ type HealthPoller struct {
 	capMu        sync.Mutex
 	capRefreshed map[uuid.UUID]time.Time
 
+	codecMu        sync.Mutex
+	codecRefreshed map[uuid.UUID]time.Time
+
 	// Adapters is shared with the event syncer; nil creates a private pool.
 	Adapters *Adapters
 
@@ -258,6 +261,7 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 	}
 	if status != "offline" && a != nil {
 		p.refreshCapabilities(ctx, srv, a)
+		p.refreshStreamCodecs(ctx, srv, a)
 	}
 	if status != srv.Status && p.OnChange != nil {
 		p.OnChange(ctx, StatusChange{ServerID: srv.ID, TenantID: srv.TenantID, SiteID: srv.SiteID, From: srv.Status, To: status, Error: errMsg, At: now})
@@ -267,6 +271,64 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 			p.OnCameraChange(ctx, c)
 		}
 	}
+}
+
+// refreshStreamCodecs re-reads the video codec go2rtc reports for each camera's live and hq
+// streams, at most once per CapabilityInterval per server, and stores the ones that changed. A
+// stream with no producer right now keeps its last known codec, and when go2rtc cannot be read
+// nothing changes: "unknown" must never erase what we knew.
+func (p *HealthPoller) refreshStreamCodecs(ctx context.Context, srv db.FrigateServer, a frigate.Adapter) {
+	every := p.CapabilityInterval
+	if every <= 0 {
+		every = DefaultCapabilityInterval
+	}
+	p.codecMu.Lock()
+	if p.codecRefreshed == nil {
+		p.codecRefreshed = map[uuid.UUID]time.Time{}
+	}
+	if last, ok := p.codecRefreshed[srv.ID]; ok && time.Since(last) < every {
+		p.codecMu.Unlock()
+		return
+	}
+	p.codecRefreshed[srv.ID] = time.Now()
+	p.codecMu.Unlock()
+
+	codecs, err := a.StreamCodecs(ctx)
+	if err != nil {
+		p.Svc.Log.DebugContext(ctx, "health: go2rtc stream codecs unavailable", "server_id", srv.ID, "error", err)
+		return
+	}
+	err = p.Svc.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		cams, err := q.ListServerCameras(ctx, srv.ID)
+		if err != nil {
+			return err
+		}
+		for _, cam := range cams {
+			live, hq := keepKnownCodec(cam.LiveStream, cam.LiveCodec, codecs), keepKnownCodec(cam.HqStream, cam.HqCodec, codecs)
+			if live == cam.LiveCodec && hq == cam.HqCodec {
+				continue
+			}
+			if err := q.UpdateCameraCodecs(ctx, db.UpdateCameraCodecsParams{ID: cam.ID, LiveCodec: live, HqCodec: hq}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		p.Svc.Log.WarnContext(ctx, "health: store stream codecs", "server_id", srv.ID, "error", err)
+	}
+}
+
+// keepKnownCodec is the codec to store for a stream: what go2rtc reports now, else the one we
+// already had, and nothing for a camera without that stream.
+func keepKnownCodec(stream, stored string, reported map[string]string) string {
+	if stream == "" {
+		return ""
+	}
+	if codec := reported[stream]; codec != "" {
+		return codec
+	}
+	return stored
 }
 
 // refreshCapabilities re-reads the capability flags of an online server at most once per

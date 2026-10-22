@@ -301,6 +301,7 @@ func upsertCamera(ctx context.Context, q *db.Queries, tenantID, siteID, serverID
 		TenantID: tenantID, SiteID: siteID, ServerID: serverID,
 		RemoteName: cam.Name, DisplayName: displayName(cam.Name), Enabled: cam.Enabled,
 		Zones: cam.Zones, Lpr: cam.LPR, LiveStream: cam.LiveStream, HqStream: cam.HQStream,
+		LiveCodec: cam.LiveCodec, HqCodec: cam.HQCodec,
 	})
 	if err != nil || !inserted {
 		return inserted, err

@@ -2,7 +2,6 @@ package frigate
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -92,7 +91,7 @@ func (a *v017) ListCameras(ctx context.Context) ([]Camera, error) {
 	// go2rtc error. Older Frigate builds (or go2rtc disabled) don't have this endpoint:
 	// streams stays nil and pickStreams falls back to the pre-existing, unchecked
 	// behaviour instead of breaking discovery.
-	streams, err := a.go2rtcStreams(ctx)
+	streams, codecs, err := a.go2rtcStreams(ctx)
 	if err != nil {
 		slog.DebugContext(ctx, "frigate: go2rtc streams unavailable, using legacy stream selection", "error", err)
 		streams = nil
@@ -111,25 +110,62 @@ func (a *v017) ListCameras(ctx context.Context) ([]Camera, error) {
 		}
 		sort.Strings(cam.Zones)
 		cam.LiveStream, cam.HQStream = pickStreams(name, cc, streams)
+		cam.LiveCodec, cam.HQCodec = codecs[cam.LiveStream], codecs[cam.HQStream]
 		out = append(out, cam)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
 }
 
-// go2rtcStreams returns the set of stream names go2rtc actually serves, read from
-// GET /api/go2rtc/streams. It returns an error (nil map) when the endpoint doesn't exist
-// or go2rtc is disabled, which callers treat as "unknown" rather than "empty".
-func (a *v017) go2rtcStreams(ctx context.Context) (map[string]bool, error) {
-	var raw map[string]json.RawMessage
+// go2rtcStreams returns the set of stream names go2rtc actually serves and the video codec of
+// each one that has a producer, read from GET /api/go2rtc/streams. It returns an error (nil
+// maps) when the endpoint doesn't exist or go2rtc is disabled, which callers treat as "unknown"
+// rather than "empty".
+func (a *v017) go2rtcStreams(ctx context.Context) (map[string]bool, map[string]string, error) {
+	var raw map[string]struct {
+		Producers []struct {
+			Medias []string `json:"medias"`
+		} `json:"producers"`
+	}
 	if err := a.c.getJSON(ctx, "/api/go2rtc/streams", nil, &raw); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	out := make(map[string]bool, len(raw))
-	for name := range raw {
-		out[name] = true
+	names := make(map[string]bool, len(raw))
+	codecs := make(map[string]string, len(raw))
+	for name, stream := range raw {
+		names[name] = true
+		for _, p := range stream.Producers {
+			if codec := codecFromMedias(p.Medias); codec != "" {
+				codecs[name] = codec
+				break
+			}
+		}
 	}
-	return out, nil
+	return names, codecs, nil
+}
+
+// StreamCodecs implements Adapter.
+func (a *v017) StreamCodecs(ctx context.Context) (map[string]string, error) {
+	_, codecs, err := a.go2rtcStreams(ctx)
+	return codecs, err
+}
+
+// codecFromMedias reads the video codec out of go2rtc's producer media lines
+// ("video, recvonly, H265"): the first video line wins. H.265 is normalized from either spelling
+// to "h265"; any other codec is kept lowercase; "" when there is no video line.
+func codecFromMedias(medias []string) string {
+	for _, m := range medias {
+		parts := strings.Split(m, ",")
+		if len(parts) < 3 || strings.ToLower(strings.TrimSpace(parts[0])) != "video" {
+			continue
+		}
+		codec := strings.ToLower(strings.TrimSpace(parts[2]))
+		if codec == "hevc" {
+			return "h265"
+		}
+		return codec
+	}
+	return ""
 }
 
 // pickStreams chooses the grid substream and the high-quality stream for a camera.

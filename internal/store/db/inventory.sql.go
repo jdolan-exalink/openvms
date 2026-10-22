@@ -272,7 +272,7 @@ func (q *Queries) DeleteCameraFolder(ctx context.Context, id uuid.UUID) error {
 }
 
 const getCamera = `-- name: GetCamera :one
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities, c.live_codec, c.hq_codec,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -308,6 +308,8 @@ type GetCameraRow struct {
 	OnvifProfile       *string
 	OnvifVersion       *string
 	OnvifCapabilities  json.RawMessage
+	LiveCodec          string
+	HqCodec            string
 	GroupIds           []uuid.UUID
 }
 
@@ -343,6 +345,8 @@ func (q *Queries) GetCamera(ctx context.Context, id uuid.UUID) (GetCameraRow, er
 		&i.OnvifProfile,
 		&i.OnvifVersion,
 		&i.OnvifCapabilities,
+		&i.LiveCodec,
+		&i.HqCodec,
 		&i.GroupIds,
 	)
 	return i, err
@@ -836,7 +840,7 @@ func (q *Queries) ListCameraGroups(ctx context.Context, tenantID *uuid.UUID) ([]
 }
 
 const listCameras = `-- name: ListCameras :many
-SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities,
+SELECT c.id, c.tenant_id, c.site_id, c.server_id, c.remote_name, c.display_name, c.enabled, c.zones, c.lpr, c.live_stream, c.hq_stream, c.status, c.fps, c.missing_since, c.created_at, c.updated_at, c.deleted_at, c.deleted_by, c.default_live_quality, c.description, c.location, c.tags, c.folder_id, c.sort_order, c.onvif_endpoint, c.onvif_profile, c.onvif_version, c.onvif_capabilities, c.live_codec, c.hq_codec,
     coalesce((SELECT array_agg(m.group_id ORDER BY m.group_id) FROM camera_group_members m
               JOIN camera_groups g ON g.id = m.group_id AND g.deleted_at IS NULL
               WHERE m.camera_id = c.id), '{}')::uuid[] AS group_ids
@@ -890,6 +894,8 @@ type ListCamerasRow struct {
 	OnvifProfile       *string
 	OnvifVersion       *string
 	OnvifCapabilities  json.RawMessage
+	LiveCodec          string
+	HqCodec            string
 	GroupIds           []uuid.UUID
 }
 
@@ -937,6 +943,8 @@ func (q *Queries) ListCameras(ctx context.Context, arg ListCamerasParams) ([]Lis
 			&i.OnvifProfile,
 			&i.OnvifVersion,
 			&i.OnvifCapabilities,
+			&i.LiveCodec,
+			&i.HqCodec,
 			&i.GroupIds,
 		); err != nil {
 			return nil, err
@@ -982,7 +990,7 @@ func (q *Queries) ListServerBlobKeys(ctx context.Context, serverID uuid.UUID) ([
 }
 
 const listServerCameras = `-- name: ListServerCameras :many
-SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order, onvif_endpoint, onvif_profile, onvif_version, onvif_capabilities FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
+SELECT id, tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, status, fps, missing_since, created_at, updated_at, deleted_at, deleted_by, default_live_quality, description, location, tags, folder_id, sort_order, onvif_endpoint, onvif_profile, onvif_version, onvif_capabilities, live_codec, hq_codec FROM cameras WHERE server_id = $1 AND deleted_at IS NULL
 `
 
 func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]Camera, error) {
@@ -1023,6 +1031,8 @@ func (q *Queries) ListServerCameras(ctx context.Context, serverID uuid.UUID) ([]
 			&i.OnvifProfile,
 			&i.OnvifVersion,
 			&i.OnvifCapabilities,
+			&i.LiveCodec,
+			&i.HqCodec,
 		); err != nil {
 			return nil, err
 		}
@@ -1654,6 +1664,21 @@ func (q *Queries) UpdateCamera(ctx context.Context, arg UpdateCameraParams) erro
 	return err
 }
 
+const updateCameraCodecs = `-- name: UpdateCameraCodecs :exec
+UPDATE cameras SET live_codec = $1, hq_codec = $2 WHERE id = $3
+`
+
+type UpdateCameraCodecsParams struct {
+	LiveCodec string
+	HqCodec   string
+	ID        uuid.UUID
+}
+
+func (q *Queries) UpdateCameraCodecs(ctx context.Context, arg UpdateCameraCodecsParams) error {
+	_, err := q.db.Exec(ctx, updateCameraCodecs, arg.LiveCodec, arg.HqCodec, arg.ID)
+	return err
+}
+
 const updateCameraGroup = `-- name: UpdateCameraGroup :execrows
 UPDATE camera_groups SET name = $1, description = $2, filter = $3::jsonb,
     version = version + 1, updated_at = now()
@@ -1862,13 +1887,17 @@ func (q *Queries) UpdateSite(ctx context.Context, arg UpdateSiteParams) error {
 }
 
 const upsertCamera = `-- name: UpsertCamera :one
-INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, live_codec, hq_codec)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (server_id, remote_name) WHERE deleted_at IS NULL DO UPDATE SET
     zones = excluded.zones,
     lpr = excluded.lpr,
     live_stream = excluded.live_stream,
     hq_stream = excluded.hq_stream,
+    -- An empty codec means "not reported this time": keep the last known one, unless the camera
+    -- lost its stream altogether.
+    live_codec = CASE WHEN excluded.live_stream = '' THEN '' WHEN excluded.live_codec <> '' THEN excluded.live_codec ELSE cameras.live_codec END,
+    hq_codec = CASE WHEN excluded.hq_stream = '' THEN '' WHEN excluded.hq_codec <> '' THEN excluded.hq_codec ELSE cameras.hq_codec END,
     missing_since = NULL,
     updated_at = now()
 RETURNING (xmax = 0) AS inserted
@@ -1885,6 +1914,8 @@ type UpsertCameraParams struct {
 	Lpr         bool
 	LiveStream  string
 	HqStream    string
+	LiveCodec   string
+	HqCodec     string
 }
 
 func (q *Queries) UpsertCamera(ctx context.Context, arg UpsertCameraParams) (bool, error) {
@@ -1899,6 +1930,8 @@ func (q *Queries) UpsertCamera(ctx context.Context, arg UpsertCameraParams) (boo
 		arg.Lpr,
 		arg.LiveStream,
 		arg.HqStream,
+		arg.LiveCodec,
+		arg.HqCodec,
 	)
 	var inserted bool
 	err := row.Scan(&inserted)

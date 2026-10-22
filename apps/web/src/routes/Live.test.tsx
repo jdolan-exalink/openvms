@@ -261,6 +261,30 @@ describe("Live", () => {
     });
   });
 
+  it("flags a camera that streams H.265 right on its tile", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-hevc", "Cementerio", { live_codec: "h265", hq_codec: "h265" }), camera("cam-avc", "Banco", { live_codec: "h264", hq_codec: "h264" }), camera("cam-unknown", "Patio")] }),
+      ...emptyCatalogs,
+    })));
+    renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: /Cementerio/ }));
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("Cementerio")).toBeInTheDocument());
+    const badge = within(screen.getByLabelText("Cuadro 1")).getByTestId("codec-badge");
+    expect(badge).toHaveTextContent("H.265");
+
+    fireEvent.click(screen.getByLabelText("Cuadro 2"));
+    fireEvent.click(await screen.findByRole("button", { name: /Banco/ }));
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 2")).getByText("Banco")).toBeInTheDocument());
+    expect(within(screen.getByLabelText("Cuadro 2")).queryByTestId("codec-badge")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Cuadro 3"));
+    fireEvent.click(await screen.findByRole("button", { name: /Patio/ }));
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 3")).getByText("Patio")).toBeInTheDocument());
+    expect(within(screen.getByLabelText("Cuadro 3")).queryByTestId("codec-badge")).not.toBeInTheDocument();
+  });
+
   it("keeps video tiles square, selected or not, and marks selection with an outline", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({

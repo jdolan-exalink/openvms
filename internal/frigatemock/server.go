@@ -38,6 +38,9 @@ type Server struct {
 	// zero value) makes the endpoint 404, simulating an older Frigate or go2rtc disabled;
 	// an empty, non-nil slice reports no streams at all.
 	Go2RTCStreams []string
+	// Go2RTCCodecs maps a stream name to the video codec its producer announces (e.g. "H265").
+	// A stream without an entry has no producer, like an idle go2rtc stream.
+	Go2RTCCodecs map[string]string
 
 	// FaceRecognition turns face recognition on: GET /api/config reports face_recognition.enabled
 	// (globally and per camera) and the /api/faces library routes work; when false they answer
@@ -169,7 +172,11 @@ func (s *Server) go2rtcStreams(w http.ResponseWriter, _ *http.Request) {
 	}
 	out := map[string]any{}
 	for _, name := range s.Go2RTCStreams {
-		out[name] = map[string]any{"producers": []any{}, "consumers": []any{}}
+		producers := []any{}
+		if codec, ok := s.Go2RTCCodecs[name]; ok {
+			producers = append(producers, map[string]any{"medias": []string{"video, recvonly, " + codec, "audio, recvonly, PCMA/8000"}})
+		}
+		out[name] = map[string]any{"producers": producers, "consumers": []any{}}
 	}
 	writeJSON(w, out)
 }

@@ -27,6 +27,9 @@ type Adapter interface {
 	// ReviewThumbnail downloads the thumbnail of a review item.
 	ReviewThumbnail(ctx context.Context, r Review) ([]byte, string, error)
 	Stats(ctx context.Context) (Stats, error)
+	// StreamCodecs maps every go2rtc stream that has a producer to its video codec ("h264",
+	// "h265"). It errors when go2rtc is unavailable, so callers keep what they stored.
+	StreamCodecs(ctx context.Context) (map[string]string, error)
 	// Recordings lists recorded segments of a camera between two unix times.
 	Recordings(ctx context.Context, camera string, after, before float64) ([]RecordingSegment, error)
 	StartExport(ctx context.Context, camera string, start, end float64, name string) (string, error)
@@ -126,6 +129,10 @@ type Camera struct {
 	// Both are empty when the camera has no go2rtc restream.
 	LiveStream string
 	HQStream   string
+	// LiveCodec and HQCodec are the video codec go2rtc reports for those streams, lowercase
+	// ("h264", "h265"); empty when unknown (no producer yet, or go2rtc not reachable).
+	LiveCodec string
+	HQCodec   string
 }
 
 type ReviewQuery struct {

@@ -14,6 +14,7 @@ import { LiveMapTile } from "@/components/maps/LiveMapTile";
 import { LiveVisionTile } from "@/components/live/LiveVisionTile";
 import { DetectionListOverlay } from "@/components/live/DetectionListOverlay";
 import { MsePlayer } from "@/components/MsePlayer";
+import { CodecBadge } from "@/components/CodecBadge";
 import { QualityBadge } from "@/components/QualityBadge";
 import { TelemetryOverlay } from "@/components/live/TelemetryOverlay";
 import { telemetryRuntime, useAdaptiveVideoPolicy } from "@/lib/telemetry";
@@ -29,6 +30,7 @@ import { LiveRecDock } from "@/components/LiveRecDock";
 import { RecTile, type RecTileState } from "@/components/RecTile";
 import { LiveModeToggle } from "@/components/LiveModeToggle";
 import { setContextSidebarCollapsed, useTopBarActionsPortalTarget } from "@/components/AppShell";
+import { streamCodec } from "@/lib/cameraCodec";
 import { useT } from "@/i18n";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { type ExplorerActions, LiveExplorer } from "@/components/LiveExplorer";
@@ -1574,6 +1576,7 @@ function GridTile({
                     </span>
                   )}
                   <QualityBadge visible={visibleQuality} pending={pendingQuality} />
+                  <CodecBadge codec={streamCodec(camera, visibleQuality)} />
                   <span className="inline-flex shrink-0 items-center gap-1" aria-label={`Status: ${status ?? "unknown"}`} role="status">
                     <span className={cn("size-2 rounded-full", status === "online" ? "bg-ok" : status === "offline" ? "bg-bad" : "bg-warn")} />
                     <Icon icon={status === "online" ? CircleCheck : status === "offline" ? CircleX : CircleHelp} size={12} className={status === "offline" ? "text-bad" : undefined} />
