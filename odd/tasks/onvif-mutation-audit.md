@@ -15,7 +15,7 @@ Make every existing ONVIF camera mutation auditable before and after crossing th
 ## Work Unit
 
 - [x] ONA-01 — Append an intent audit event before each remote mutation and a correlated terminal event after it. Fail closed if intent cannot be stored. Verify permission checks precede audit and outbound calls; cover success, local denial, device error, timeout/unknown outcome, terminal-audit failure, correlation, and secret/URI redaction. Use unit tests with fake operation/audit callbacks and a disposable PostgreSQL integration test for persisted rows.
-  Status (2026-10-22): implementation slice complete for time sync, PTZ commands, video configuration/encoding writes, and imaging writes. Each lifecycle pair uses a shared operation UUID; immutable `audit_log.occurred_at` values supply event timestamps. Remote errors are reduced to `remote_outcome_unknown`, and callers receive a manual-reconciliation message. No automatic retry is introduced. ONVIF-09 remains broader than this slice because readback/request-result evidence and physical-device acceptance remain separate work.
+  Status (2026-10-22): implementation slice complete for time sync, PTZ commands, video configuration/encoding writes, and imaging writes. Each lifecycle pair uses a shared operation UUID; immutable `audit_log.occurred_at` values supply event timestamps. Remote errors are reduced to `remote_outcome_unknown`, and callers receive a manual-reconciliation message. No automatic retry is introduced. Store layer is commit `ab711da` / PR #171; endpoint wiring and unit tests are commit `98621f3` / PR #172, stacked on #171. CI for both new PRs was pending at this update. ONVIF-09 remains broader than this slice because readback/request-result evidence and physical-device acceptance remain separate work.
 
 ## Verification
 
@@ -32,6 +32,6 @@ Results (2026-10-22): package tests PASS; focused PostgreSQL integration PASS; `
 
 Runtime harness: N/A. The change is verified with fake callbacks and disposable PostgreSQL; no real edge agent or camera is needed or authorized for this unit.
 
-Rollback boundary: revert the ONA-01 stacked commits to remove only the mutation audit API hooks, inventory writer/tests, and corresponding ONVIF/backlog tracker evidence. No schema migration or persisted-data cleanup is required.
+Rollback boundary: revert commits `98621f3` and `ab711da` (PRs #172 and #171) to remove only the mutation audit API hooks, inventory writer/tests, and corresponding ONVIF/backlog tracker evidence. No schema migration or persisted-data cleanup is required.
 
 No camera, remote host, deployment, or real edge agent is part of this work unit. Physical interoperability remains separate acceptance.
