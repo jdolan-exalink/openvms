@@ -772,7 +772,7 @@ function SlotRenderer({
           objectFit="fill"
           className="size-full"
         />
-        <DetectionListOverlay cameraId={cameraId} enabled={Boolean(slot.plate)} />
+        <DetectionListOverlay cameraId={cameraId} lpr={Boolean(slot.plate)} faces={slot.object === "face"} />
       </div>
 
       {/* Top HUD Controls */}

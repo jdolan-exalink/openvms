@@ -169,3 +169,126 @@ describe("rowsThatFit", () => {
     expect(rowsThatFit(Number.NaN)).toBe(OVERLAY_FALLBACK_ROWS);
   });
 });
+
+describe("DetectionListOverlay faces and tabs", () => {
+  const faceEvent = (id: string, name: string, camera_id: string, start_time: string) => ({
+    id, tenant_id: "t1", site_id: "s", site_name: "Sitio", server_id: "sv", server_name: "Srv", camera_id, camera_name: "Hall",
+    remote_id: id, severity: "detection", labels: ["face"], sub_labels: name ? [name] : [], zones: ["recepcion"], plates: [],
+    start_time, reviewed: false, has_thumbnail: true, has_snapshot: false, has_preview: false, tracks: [],
+  });
+  const me = (perms: string[]) => ({
+    id: "u1", username: "op", display_name: "Op", role: "admin", tenant_id: "t1",
+    grants: perms.map((permission) => ({ permission, effect: "allow", scope: { kind: "global" } })),
+  });
+
+  let faceEvents: unknown[];
+  let perms: string[];
+  let eventRequests: URL[];
+
+  beforeEach(() => {
+    faceEvents = [];
+    perms = ["events.view", "lpr.view"];
+    eventRequests = [];
+    const routes = stubApi({
+      "/api/v1/me": () => json(me(perms)),
+      "/api/v1/lpr/reads": () => json({ items: reads }),
+      "/api/v1/events": () => json({ items: faceEvents }),
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: Request) => {
+      const url = new URL(input.url);
+      requests.push(url);
+      if (url.pathname === "/api/v1/events") eventRequests.push(url);
+      return routes(input);
+    }));
+  });
+
+  it("lists the face detections of its own camera with the person's name", async () => {
+    faceEvents = [
+      faceEvent("e1", "Ana Pérez", "cam-1", "2026-10-21T10:00:30Z"),
+      faceEvent("e2", "", "cam-1", "2026-10-21T10:00:00Z"),
+      faceEvent("e3", "Otra Persona", "cam-2", "2026-10-21T10:01:00Z"),
+    ];
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" lpr={false} faces />);
+    const list = await screen.findByRole("list", { name: /Detecciones faciales/i });
+    const items = within(list).getAllByRole("listitem");
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent("Ana Pérez");
+    expect(items[1]).toHaveTextContent("Desconocido");
+    expect(screen.queryByText("Otra Persona")).not.toBeInTheDocument();
+    expect(eventRequests[0]?.searchParams.getAll("label")).toEqual(["face"]);
+  });
+
+  it("renders nothing for a camera without face detections", async () => {
+    faceEvents = [faceEvent("e3", "Otra Persona", "cam-2", "2026-10-21T10:01:00Z")];
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" lpr={false} faces />);
+    await waitFor(() => expect(eventRequests.length).toBeGreaterThan(0));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(screen.queryByTestId("detection-overlay")).not.toBeInTheDocument();
+  });
+
+  it("does not ask for faces without the events permission or when the caller does not want them", async () => {
+    perms = ["lpr.view"];
+    faceEvents = [faceEvent("e1", "Ana Pérez", "cam-1", "2026-10-21T10:00:30Z")];
+    const first = renderPage(() => <DetectionListOverlay cameraId="cam-1" lpr={false} faces />);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(eventRequests).toHaveLength(0);
+    expect(screen.queryByTestId("detection-overlay")).not.toBeInTheDocument();
+    first.unmount();
+
+    perms = ["events.view"];
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" lpr={false} faces={false} />);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(eventRequests).toHaveLength(0);
+  });
+
+  it("asks for the latest faces once for every camera on screen, not once per tile", async () => {
+    faceEvents = [faceEvent("e1", "Ana Pérez", "cam-1", "2026-10-21T10:00:30Z"), faceEvent("e2", "Luis", "cam-2", "2026-10-21T10:00:00Z")];
+    renderPage(() => (
+      <>
+        <DetectionListOverlay cameraId="cam-1" lpr={false} faces />
+        <DetectionListOverlay cameraId="cam-2" lpr={false} faces />
+        <DetectionListOverlay cameraId="cam-3" lpr={false} faces />
+      </>
+    ));
+    await waitFor(() => expect(screen.getAllByTestId("detection-overlay")).toHaveLength(2));
+    expect(eventRequests).toHaveLength(1);
+  });
+
+  it("offers tabs when the camera has plates and faces, plates first", async () => {
+    reads = [read("r1", "AB123CD", "2026-10-21T10:00:00Z")];
+    faceEvents = [faceEvent("e1", "Ana Pérez", "cam-1", "2026-10-21T10:05:00Z")];
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" lpr faces />);
+    const tabs = await screen.findByRole("tablist", { name: /Tipo de detección/i });
+    const [lprTab, faceTab] = within(tabs).getAllByRole("tab");
+    expect(lprTab).toHaveTextContent("LPR");
+    expect(faceTab).toHaveTextContent("Rostros");
+    expect(lprTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("list", { name: /Lecturas de patentes/i })).toHaveTextContent("AB123CD");
+    expect(screen.queryByRole("list", { name: /Detecciones faciales/i })).not.toBeInTheDocument();
+
+    fireEvent.click(faceTab!);
+    expect(faceTab).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("list", { name: /Detecciones faciales/i })).toHaveTextContent("Ana Pérez");
+    expect(screen.queryByRole("list", { name: /Lecturas de patentes/i })).not.toBeInTheDocument();
+
+    fireEvent.click(lprTab!);
+    expect(screen.getByRole("list", { name: /Lecturas de patentes/i })).toBeInTheDocument();
+  });
+
+  it("has no tabs when the camera only has one kind of detection", async () => {
+    reads = [read("r1", "AB123CD", "2026-10-21T10:00:00Z")];
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" lpr faces />);
+    await screen.findByRole("list", { name: /Lecturas de patentes/i });
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+  });
+
+  it("collapses both lists with one toggle", async () => {
+    reads = [read("r1", "AB123CD", "2026-10-21T10:00:00Z")];
+    faceEvents = [faceEvent("e1", "Ana Pérez", "cam-1", "2026-10-21T10:05:00Z")];
+    renderPage(() => <DetectionListOverlay cameraId="cam-1" lpr faces />);
+    await screen.findByRole("tablist");
+    fireEvent.click(screen.getByRole("button", { name: /Ocultar lista/i }));
+    expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Mostrar lista/i })).toBeInTheDocument();
+  });
+});

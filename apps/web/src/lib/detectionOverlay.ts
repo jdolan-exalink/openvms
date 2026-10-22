@@ -1,7 +1,9 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { api, unwrap } from "@/api/client";
-import { CHANNEL_REFETCH_MS, lprChannelItems } from "@/lib/detectionChannels";
+import { meQuery } from "@/api/queries";
+import { CHANNEL_REFETCH_MS, faceChannelItems, lprChannelItems } from "@/lib/detectionChannels";
+import { can } from "@/lib/perm";
 
 /** Most recent reads fetched for the on-video list: the most rows a tall list can show. */
 export const OVERLAY_FETCH_LIMIT = 30;
@@ -50,6 +52,31 @@ export function cameraPlatesQuery(cameraId: string) {
 
 export function useCameraPlates(cameraId: string, enabled = true) {
   return useQuery({ ...cameraPlatesQuery(cameraId), enabled });
+}
+
+/**
+ * Latest face events of every camera, fetched once and split per camera by the tiles: cameras have
+ * an `lpr` flag but no face flag, so which ones have faces is only known from the detections.
+ */
+export const FACE_FETCH_LIMIT = 200;
+
+export function overlayFacesQuery() {
+  return queryOptions({
+    queryKey: ["events", "overlay-faces", FACE_FETCH_LIMIT],
+    queryFn: async () =>
+      faceChannelItems(unwrap(await api.GET("/api/v1/events", { params: { query: { label: ["face"], limit: FACE_FETCH_LIMIT } } })).items),
+    refetchInterval: CHANNEL_REFETCH_MS,
+  });
+}
+
+/** The face detections of one camera; nothing is fetched without the events permission. */
+export function useCameraFaces(cameraId: string, enabled = true) {
+  const me = useQuery(meQuery);
+  return useQuery({
+    ...overlayFacesQuery(),
+    enabled: enabled && can(me.data, "events.view"),
+    select: (items) => items.filter((item) => item.cameraId === cameraId),
+  });
 }
 
 const COLLAPSED_KEY = "openvms.lprOverlay.collapsed";

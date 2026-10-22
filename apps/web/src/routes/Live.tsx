@@ -1472,7 +1472,7 @@ function GridTile({
         </>
       ) : tile && camera && "camera_id" in tile ? (
         <>
-          <DetectionListOverlay cameraId={camera.id} enabled={camera.lpr && !isDuplicate && !isHidden} />
+          <DetectionListOverlay cameraId={camera.id} lpr={camera.lpr} faces enabled={!isDuplicate && !isHidden} />
           {(() => {
             const feConfig = getFisheyeConfig(tile.camera_id);
             const isFisheyeCamera = Boolean(

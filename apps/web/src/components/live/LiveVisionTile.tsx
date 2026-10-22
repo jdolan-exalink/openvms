@@ -76,7 +76,7 @@ function VisionSlotTile({ vision, isFocused = false, className }: LiveVisionTile
             className="size-full"
           />
 
-          <DetectionListOverlay cameraId={cameraId} enabled={Boolean(activeSlot.plate) || vision.layout === "lpr"} />
+          <DetectionListOverlay cameraId={cameraId} lpr={Boolean(activeSlot.plate) || vision.layout === "lpr"} faces={activeSlot.object === "face"} />
 
           {/* Vision AI Top HUD Badge */}
           <div className="absolute top-2 left-2 z-10 flex flex-wrap items-center gap-1.5 pointer-events-none">
