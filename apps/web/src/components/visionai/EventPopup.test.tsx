@@ -57,4 +57,54 @@ describe("EventPopup", () => {
     rerender(<EventPopup event={view({ slot: undefined })} onClose={() => {}} onPin={onPin} />);
     expect(screen.queryByRole("button", { name: /Fijar en foco/i })).not.toBeInTheDocument();
   });
+
+  describe("photo zoom", () => {
+    const scaleOf = () => {
+      const m = /scale\(([\d.]+)\)/.exec(screen.getByTestId("event-popup-zoom").style.transform);
+      return m ? Number(m[1]) : NaN;
+    };
+
+    it("starts at 1x and zooms in and out with the wheel", () => {
+      render(<EventPopup event={view()} onClose={() => {}} />);
+      const photo = screen.getByTestId("event-popup-photo");
+      expect(scaleOf()).toBe(1);
+      fireEvent.wheel(photo, { deltaY: -100 });
+      const zoomed = scaleOf();
+      expect(zoomed).toBeGreaterThan(1);
+      fireEvent.wheel(photo, { deltaY: -100 });
+      expect(scaleOf()).toBeGreaterThan(zoomed);
+      fireEvent.wheel(photo, { deltaY: 100 });
+      fireEvent.wheel(photo, { deltaY: 100 });
+      expect(scaleOf()).toBe(1);
+    });
+
+    it("never zooms out below 1x or in past the limit", () => {
+      render(<EventPopup event={view()} onClose={() => {}} />);
+      const photo = screen.getByTestId("event-popup-photo");
+      fireEvent.wheel(photo, { deltaY: 500 });
+      expect(scaleOf()).toBe(1);
+      for (let i = 0; i < 60; i++) fireEvent.wheel(photo, { deltaY: -100 });
+      expect(scaleOf()).toBeLessThanOrEqual(8);
+      expect(scaleOf()).toBeGreaterThan(4);
+    });
+
+    it("resets with a double click and when another event is shown", () => {
+      const { rerender } = render(<EventPopup event={view()} onClose={() => {}} />);
+      const photo = screen.getByTestId("event-popup-photo");
+      fireEvent.wheel(photo, { deltaY: -100 });
+      expect(scaleOf()).toBeGreaterThan(1);
+      fireEvent.doubleClick(photo);
+      expect(scaleOf()).toBe(1);
+      fireEvent.wheel(photo, { deltaY: -100 });
+      rerender(<EventPopup event={view({ key: "slot:1:ev-2" })} onClose={() => {}} />);
+      expect(scaleOf()).toBe(1);
+    });
+
+    it("does not let the wheel scroll the page behind the photo", () => {
+      render(<EventPopup event={view()} onClose={() => {}} />);
+      const wheel = new WheelEvent("wheel", { deltaY: -100, bubbles: true, cancelable: true });
+      screen.getByTestId("event-popup-photo").dispatchEvent(wheel);
+      expect(wheel.defaultPrevented).toBe(true);
+    });
+  });
 });
