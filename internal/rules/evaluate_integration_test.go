@@ -23,12 +23,14 @@ import (
 type recordingPublisher struct {
 	mu       sync.Mutex
 	subjects []string
+	payloads [][]byte
 }
 
-func (p *recordingPublisher) Publish(_ context.Context, subject string, _ []byte) error {
+func (p *recordingPublisher) Publish(_ context.Context, subject string, payload []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.subjects = append(p.subjects, subject)
+	p.payloads = append(p.payloads, append([]byte(nil), payload...))
 	return nil
 }
 
@@ -42,6 +44,15 @@ func (p *recordingPublisher) count(prefix string) int {
 		}
 	}
 	return n
+}
+
+func (p *recordingPublisher) lastPayload() []byte {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.payloads) == 0 {
+		return nil
+	}
+	return append([]byte(nil), p.payloads[len(p.payloads)-1]...)
 }
 
 type fixture struct {
@@ -147,6 +158,38 @@ func TestEvaluateEventTxUsesCallerTransaction(t *testing.T) {
 	}
 	if n := f.notifications(id); n != 0 {
 		t.Fatalf("caller rollback left %d notifications, want 0", n)
+	}
+}
+
+func TestEvaluateEventAnnouncementsUseBoundEvent(t *testing.T) {
+	f := newFixture(t)
+	f.addRule("Alarma", rules.TriggerEvent, rules.Conditions{Labels: []string{"person"}}, rules.Actions{CreateAlarm: true}, true)
+	ev := f.eventCtx("person")
+	var announcements rules.EventAnnouncements
+	err := f.env.Store.TxRaw(context.Background(), store.ScopeFor(authz.Actor{TenantID: &ev.TenantID}), func(tx pgx.Tx) error {
+		if err := tx.QueryRow(context.Background(), `
+INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, start_time)
+VALUES ($1, $2, $3, $4, $5, 'alert', $6, $7) RETURNING id`,
+			ev.TenantID, ev.SiteID, ev.ServerID, ev.CameraID, "rules-"+uuid.NewString(), ev.Labels, ev.Start).Scan(&ev.ID); err != nil {
+			return err
+		}
+		var err error
+		announcements, err = f.svc.EvaluateEventTx(context.Background(), tx, ev)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.svc.PublishEventAnnouncements(context.Background(), announcements)
+	var payload map[string]any
+	if err := json.Unmarshal(f.pub.lastPayload(), &payload); err != nil {
+		t.Fatalf("decode alarm announcement: %v", err)
+	}
+	if got := payload["event_id"]; got != ev.ID.String() {
+		t.Fatalf("announcement event_id = %v, want bound event %s", got, ev.ID)
+	}
+	if got := payload["camera_id"]; got != ev.CameraID.String() {
+		t.Fatalf("announcement camera_id = %v, want bound camera %s", got, ev.CameraID)
 	}
 }
 

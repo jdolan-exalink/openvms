@@ -692,6 +692,7 @@ func (s *Service) matchesFaces(ctx context.Context, tx pgx.Tx, ev EventContext, 
 // transaction used by EvaluateEventTx commits. Keep its contents private so callers publish
 // the complete result through PublishEventAnnouncements.
 type EventAnnouncements struct {
+	event  EventContext
 	alarms []publishedAlarm
 	closed []alarms.ClosedAlarm
 }
@@ -710,7 +711,7 @@ func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
 	if err != nil {
 		return err
 	}
-	s.PublishEventAnnouncements(ctx, ev, announcements)
+	s.PublishEventAnnouncements(ctx, announcements)
 	return nil
 }
 
@@ -724,7 +725,7 @@ func (s *Service) EvaluateEventTx(ctx context.Context, tx pgx.Tx, ev EventContex
 }
 
 func (s *Service) evaluateEventTx(ctx context.Context, tx pgx.Tx, ev EventContext) (EventAnnouncements, error) {
-	var announcements EventAnnouncements
+	announcements := EventAnnouncements{event: ev}
 	q := db.New(tx)
 	rulesRows, err := q.ListActiveRulesByTrigger(ctx, db.ListActiveRulesByTriggerParams{
 		TenantID:    ev.TenantID,
@@ -812,8 +813,10 @@ func (s *Service) evaluateEventTx(ctx context.Context, tx pgx.Tx, ev EventContex
 }
 
 // PublishEventAnnouncements publishes alarm state changes only after the transaction returned
-// by EvaluateEventTx has committed successfully.
-func (s *Service) PublishEventAnnouncements(ctx context.Context, ev EventContext, announcements EventAnnouncements) {
+// by EvaluateEventTx has committed successfully. The event context is bound to the opaque
+// announcements value, preventing callers from pairing it with another event.
+func (s *Service) PublishEventAnnouncements(ctx context.Context, announcements EventAnnouncements) {
+	ev := announcements.event
 	for _, p := range announcements.alarms {
 		alarms.PublishAlarm(ctx, s.Pub, s.Log, p.action, p.res.Status, ev.TenantID, ev.SiteID, ev.CameraID, ev.ID, p.res.AlarmID, p.res.UpdatedAt)
 	}
