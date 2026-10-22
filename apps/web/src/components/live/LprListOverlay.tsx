@@ -3,7 +3,7 @@ import { CarFront, ChevronLeft, ChevronRight } from "lucide-react";
 import { ArPlate } from "@/components/plates/ArPlate";
 import { cn } from "@/lib/cn";
 import type { ChannelItem } from "@/lib/detectionChannels";
-import { useCameraPlates, useLprOverlayCollapsed } from "@/lib/lprOverlay";
+import { useCameraPlates, useFittingRows, useLprOverlayCollapsed } from "@/lib/lprOverlay";
 import { detectionAgeSeconds, formatDetectionAge } from "@/lib/visionAi";
 
 /** Ticks so "hace Ns" keeps moving without refetching. */
@@ -24,6 +24,7 @@ export function LprListOverlay({ cameraId, enabled = true, className }: { camera
   const query = useCameraPlates(cameraId, enabled);
   const [collapsed, setCollapsed] = useLprOverlayCollapsed();
   const now = useNow();
+  const [listRef, rows] = useFittingRows();
   if (!enabled) return null;
   const items = query.data ?? [];
 
@@ -71,8 +72,8 @@ export function LprListOverlay({ cameraId, enabled = true, className }: { camera
               {query.isError ? "Sin conexión LPR" : "Esperando patentes"}
             </p>
           ) : (
-            <ol aria-label="Lecturas de patentes" className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-1.5">
-              {items.slice(0, 6).map((item, index) => (
+            <ol ref={listRef} aria-label="Lecturas de patentes" className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-1.5">
+              {items.slice(0, rows).map((item, index) => (
                 <OverlayRow key={item.key} item={item} latest={index === 0} now={now} />
               ))}
             </ol>

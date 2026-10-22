@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { focusManager } from "@tanstack/react-query";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { VISION_SLOTS_REFETCH_MS } from "@/lib/visionAi";
@@ -316,17 +316,59 @@ describe("VisionAI Page", () => {
     expect(screen.getAllByText(/object: \+40/)[0]).toBeInTheDocument();
   });
 
-  it("shows plate telemetry in LPR mode only for slots with a plate", async () => {
+  const plateRead = (id: string, plate: string, seen_at: string, extra: Record<string, unknown> = {}) => ({
+    id, site_id: "s", site_name: "Sitio", server_id: "sv", server_name: "Srv", camera_id: `cam-${id}`, camera_name: `Garita ${id}`,
+    plate, plate_normalized: plate, label: "car", zones: ["acceso"], seen_at, score: 0.93, ...extra,
+  });
+
+  it("lists every plate read in LPR mode, not only the ranked slots", async () => {
+    platesBody = [
+      plateRead("p1", "AB123CD", "2026-10-21T10:00:30Z"),
+      plateRead("p2", "AE526KV", "2026-10-21T10:00:00Z"),
+      plateRead("p3", "AA111BB", "2026-10-21T09:59:00Z"),
+    ];
     setup();
     fireEvent.click(await screen.findByRole("button", { name: "Modo LPR" }));
-    const huds = await screen.findAllByTestId("vision-lpr-hud");
-    expect(huds).toHaveLength(1);
-    expect(within(huds[0]!).getByText("AB123CD")).toBeInTheDocument();
+    const rows = await screen.findAllByTestId("vision-lpr-hud");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveTextContent("AB123CD");
+    expect(rows[0]).toHaveTextContent("Garita p1");
+    expect(rows[2]).toHaveTextContent("AA111BB");
     expect(screen.getByText(/Patente Detectada/i)).toBeInTheDocument();
+  });
+
+  it("opens the vehicle photo popup when a plate is clicked", async () => {
+    mePermissions = [...mePermissions, "snapshots.view"];
+    platesBody = [plateRead("p1", "AB123CD", "2026-10-21T10:00:30Z")];
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: "Modo LPR" }));
+    fireEvent.click(await screen.findByTestId("vision-lpr-hud"));
+    const popup = await screen.findByRole("dialog", { name: /Detalle del evento/i });
+    expect(within(popup).getByLabelText("Patente AB123CD")).toBeInTheDocument();
+    expect(popup).toHaveTextContent("Garita p1");
+    expect(within(popup).getByRole("img", { name: /Garita p1/ })).toHaveAttribute("src", "/media/v1/lpr/reads/p1/snapshot.jpg");
+    fireEvent.click(within(popup).getByRole("button", { name: /Cerrar evento/i }));
+    expect(screen.queryByRole("dialog", { name: /Detalle del evento/i })).not.toBeInTheDocument();
+  });
+
+  it("asks for a long history of reads in LPR mode", async () => {
+    const asked: URL[] = [];
+    platesBody = [];
+    setup();
+    const wrapped = globalThis.fetch;
+    vi.stubGlobal("fetch", vi.fn(async (input: Request) => {
+      const url = new URL(input.url);
+      if (url.pathname === "/api/v1/lpr/reads") asked.push(url);
+      return wrapped(input);
+    }));
+    fireEvent.click(await screen.findByRole("button", { name: "Modo LPR" }));
+    await waitFor(() => expect(asked.length).toBeGreaterThan(0));
+    expect(Number(asked[0]!.searchParams.get("limit"))).toBeGreaterThanOrEqual(100);
   });
 
   it("shows the no-permission notice in LPR mode only when plates_visible is false", async () => {
     platesVisible = false;
+    platesBody = [plateRead("p1", "AB123CD", "2026-10-21T10:00:30Z")];
     slotsBody = { slots: [slot(0, "cam-1"), slot(1, "cam-2"), slot(2, null), slot(3, null)] };
     setup();
     fireEvent.click(await screen.findByRole("button", { name: "Modo LPR" }));
@@ -335,8 +377,8 @@ describe("VisionAI Page", () => {
     expect(screen.queryByTestId("vision-lpr-hud")).not.toBeInTheDocument();
   });
 
-  it("shows 'Sin lecturas de patente recientes' when plates are visible but no slot has one", async () => {
-    slotsBody = { slots: [slot(0, "cam-1"), slot(1, "cam-2"), slot(2, null), slot(3, null)] };
+  it("shows 'Sin lecturas de patente recientes' when plates are visible but there are no reads", async () => {
+    platesBody = [];
     setup();
     fireEvent.click(await screen.findByRole("button", { name: "Modo LPR" }));
     expect(await screen.findByText(/sin lecturas de patente recientes/i)).toBeInTheDocument();
@@ -658,5 +700,69 @@ describe("VisionAI Page", () => {
     expect(screen.getByRole("button", { name: "Matriz" })).toBeInTheDocument();
     const person = screen.getByRole("button", { name: "Persona" });
     expect(person).toHaveAttribute("data-active", "true");
+  });
+
+  describe("events bar on the left", () => {
+    it("puts the Eventos toggle first in the header", async () => {
+      setup();
+      const toggle = await screen.findByRole("button", { name: /^Eventos/i });
+      const header = toggle.closest("header")!;
+      const controls = Array.from(header.querySelectorAll("button"));
+      expect(controls[0]).toBe(toggle);
+    });
+
+    it("opens the bar before the grid, on its left", async () => {
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
+      const sidebar = await screen.findByTestId("vision-events-sidebar");
+      const grid = screen.getAllByTestId("mse-player")[0]!.closest("[data-vision-tile]")!.parentElement!;
+      expect(sidebar.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
+  describe("full screen", () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "requestFullscreen");
+    let request: ReturnType<typeof vi.fn>;
+    let left: boolean;
+
+    beforeEach(() => {
+      left = false;
+      request = vi.fn(() => Promise.resolve());
+      Object.defineProperty(HTMLElement.prototype, "requestFullscreen", { configurable: true, writable: true, value: request });
+      // The element that last asked for full screen is the full screen element until the user leaves.
+      Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => (left ? null : (request.mock.contexts.at(-1) ?? null)) });
+    });
+    afterEach(() => {
+      if (original) Object.defineProperty(HTMLElement.prototype, "requestFullscreen", original);
+      else delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+    });
+
+    it("asks the browser for real full screen, like F11", async () => {
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Pantalla completa" }));
+      expect(request).toHaveBeenCalledTimes(1);
+      const root = request.mock.contexts[0] as HTMLElement;
+      expect(root.contains(screen.getByText(/VISION AI/i))).toBe(true);
+      expect(root).toHaveClass("fixed", "inset-0");
+      expect(await screen.findByRole("button", { name: "Salir de pantalla completa" })).toBeInTheDocument();
+    });
+
+    it("leaves full screen when the browser does (Esc)", async () => {
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Pantalla completa" }));
+      await screen.findByRole("button", { name: "Salir de pantalla completa" });
+      left = true;
+      document.dispatchEvent(new Event("fullscreenchange"));
+      expect(await screen.findByRole("button", { name: "Pantalla completa" })).toBeInTheDocument();
+    });
+
+    it("falls back to filling the page when the browser refuses", async () => {
+      request.mockImplementation(() => Promise.reject(new Error("denied")));
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Pantalla completa" }));
+      expect(await screen.findByRole("button", { name: "Salir de pantalla completa" })).toBeInTheDocument();
+      expect((request.mock.contexts[0] as HTMLElement)).toHaveClass("fixed", "inset-0");
+    });
   });
 });

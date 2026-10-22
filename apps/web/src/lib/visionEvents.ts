@@ -100,6 +100,22 @@ const platesQuery = queryOptions({
   refetchInterval: TAB_REFETCH_MS,
 });
 
+/** How many plate reads the LPR mode lists. */
+export const LPR_MODE_LIMIT = 100;
+
+const lprModeQuery = queryOptions({
+  // Under ["plates"] so the realtime event.created invalidation refreshes it at once.
+  queryKey: ["plates", "vision-lpr", LPR_MODE_LIMIT],
+  queryFn: async () => unwrap(await api.GET("/api/v1/lpr/reads", { params: { query: { limit: LPR_MODE_LIMIT } } })).items,
+  refetchInterval: TAB_REFETCH_MS,
+});
+
+/** The plate reads the LPR mode lists, newest first, as event views. Nothing is fetched while disabled. */
+export function usePlateReads(canSnapshots: boolean, enabled: boolean) {
+  const q = useQuery({ ...lprModeQuery, enabled });
+  return { views: (q.data ?? []).map((r) => plateToView(r, canSnapshots)), loading: enabled && q.isPending, error: q.isError };
+}
+
 /** Rows of a tab other than "active"; nothing is fetched until the tab is open. */
 export function useTabEvents(tab: EventsTab, canSnapshots: boolean) {
   const history = useQuery({ ...historyQuery, enabled: tab === "history" });
