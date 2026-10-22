@@ -88,7 +88,7 @@ export function VisionAI() {
     // On the first load, a change made while `me` was still loading wins over the saved view. When
     // the signed-in user or tenant changes later, always load that user's own view.
     const firstLoad = hydratedKey === null;
-    const untouched = JSON.stringify({ mode, presetSource, layoutCount, activeObjects, inactivitySeconds }) === JSON.stringify(DEFAULT_VISION_PREFS);
+    const untouched = JSON.stringify({ mode, presetSource, layoutCount, activeObjects, inactivitySeconds, excludedServerIds: [] }) === JSON.stringify(DEFAULT_VISION_PREFS);
     if (!firstLoad || untouched) {
       const saved = loadVisionPrefs(prefsKey);
       setMode(saved.mode);
@@ -99,7 +99,7 @@ export function VisionAI() {
     }
   }
   useEffect(() => {
-    if (prefsKey && hydratedKey === prefsKey) saveVisionPrefs(prefsKey, { mode, presetSource, layoutCount, activeObjects, inactivitySeconds });
+    if (prefsKey && hydratedKey === prefsKey) saveVisionPrefs(prefsKey, { mode, presetSource, layoutCount, activeObjects, inactivitySeconds, excludedServerIds: [] });
   }, [prefsKey, hydratedKey, mode, presetSource, layoutCount, activeObjects, inactivitySeconds]);
 
   // Presets

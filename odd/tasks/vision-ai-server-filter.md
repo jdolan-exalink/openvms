@@ -20,8 +20,8 @@ Decisions:
 ## Slices
 
 - [x] 1. Backend: `server_id[]` on the Vision AI slots, filtered before ranking, one allocator per selection.
-- [ ] 2. Live: remove the server selector and its grid-based helpers.
-- [ ] 3. Vision AI: server selector, remembered selection, and every list filtered by it.
+- [x] 2. Core: add server selection, preferences, and filtered data queries; keep the old Live helper exports for this intermediate branch.
+- [ ] 3. UI: remove Live's selector, add the Vision AI selector, and connect every list to the selection.
 
 ## Delivery chain
 
@@ -33,3 +33,5 @@ Decisions:
 - PR 3, `feat/vision-ai-server-filter-ui`, depends on PR 2 and ends with Live removal and Vision AI
   selector integration, localization, and route coverage. Keep each authored diff at or below 400
   changed lines; generated contract outputs are excluded from that budget.
+
+PR 2 verification: `pnpm exec vitest run src/lib/serverSelector.test.ts src/lib/visionAiPrefs.test.ts src/lib/visionAi.test.ts src/lib/visionEvents.test.ts --reporter=dot` — PASS (4 files, 41 tests); `pnpm typecheck` — PASS.
