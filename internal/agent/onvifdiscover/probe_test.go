@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -287,6 +289,135 @@ func soapResponse(t *testing.T, request *http.Request) *http.Response {
 	}
 	body := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>` + operation + `</s:Body></s:Envelope>`
 	return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: request}
+}
+
+func TestDeviceProbePrefersMedia2AndFallsBackWhenUnsupported(t *testing.T) {
+	tests := []struct {
+		name            string
+		media2Supported bool
+	}{
+		{name: "Media2 profile", media2Supported: true},
+		{name: "Media1 fallback after unsupported Media2", media2Supported: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var actions []string
+			transport := roundTripFunc(func(r *http.Request) (*http.Response, error) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := string(body)
+				endpoint := r.URL.Path
+				op := "other"
+				for _, candidate := range []string{"GetDeviceInformation", "GetServices", "GetSystemDateAndTime", "GetProfiles", "GetStreamUri"} {
+					if strings.Contains(request, candidate) {
+						op = candidate
+						break
+					}
+				}
+				actions = append(actions, endpoint+":"+op)
+				var operation string
+				switch {
+				case strings.Contains(request, "GetDeviceInformation"):
+					operation = `<tds:GetDeviceInformationResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:Manufacturer>Acme</tds:Manufacturer></tds:GetDeviceInformationResponse>`
+				case strings.Contains(request, "GetServices"):
+					operation = `<tds:GetServicesResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:Service><tds:Namespace>http://www.onvif.org/ver10/media/wsdl</tds:Namespace><tds:XAddr>http://192.0.2.10:8080/onvif/media1</tds:XAddr></tds:Service><tds:Service><tds:Namespace>http://www.onvif.org/ver20/media/wsdl</tds:Namespace><tds:XAddr>http://192.0.2.10:8082/onvif/media2</tds:XAddr></tds:Service></tds:GetServicesResponse>`
+				case strings.Contains(request, "GetSystemDateAndTime"):
+					operation = `<tds:GetSystemDateAndTimeResponse xmlns:tds="http://www.onvif.org/ver10/device/wsdl"><tds:SystemDateAndTime><tt:DateTimeType xmlns:tt="http://www.onvif.org/ver10/schema">NTP</tt:DateTimeType></tds:SystemDateAndTime></tds:GetSystemDateAndTimeResponse>`
+				case strings.Contains(request, "GetProfiles") && endpoint == "/onvif/media2":
+					if !tt.media2Supported {
+						fault := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body><s:Fault><s:Code><s:Value>s:Sender</s:Value><s:Subcode><s:Value>ter:ActionNotSupported</s:Value></s:Subcode></s:Code></s:Fault></s:Body></s:Envelope>`
+						return &http.Response{StatusCode: http.StatusInternalServerError, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(fault)), Request: r}, nil
+					}
+					operation = `<tr2:GetProfilesResponse xmlns:tr2="http://www.onvif.org/ver20/media/wsdl"><tr2:Profiles token="main-profile" fixed="true"><tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">Main</tt:Name><tt:VideoSourceConfiguration xmlns:tt="http://www.onvif.org/ver10/schema" token="source-main"/><tt:VideoEncoderConfiguration xmlns:tt="http://www.onvif.org/ver10/schema" token="encoder-main"><tt:Encoding>H265</tt:Encoding><tt:Resolution><tt:Width>2560</tt:Width><tt:Height>1440</tt:Height></tt:Resolution><tt:RateControl><tt:FrameRateLimit>25</tt:FrameRateLimit><tt:BitrateLimit>6144</tt:BitrateLimit></tt:RateControl></tt:VideoEncoderConfiguration><tt:PTZConfiguration xmlns:tt="http://www.onvif.org/ver10/schema" token="ptz-main"/></tr2:Profiles></tr2:GetProfilesResponse>`
+				case strings.Contains(request, "GetProfiles") && endpoint == "/onvif/media1":
+					operation = `<trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl"><trt:Profiles token="legacy-profile" fixed="true"><tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">Legacy</tt:Name><tt:VideoSourceConfiguration xmlns:tt="http://www.onvif.org/ver10/schema" token="legacy-source"/><tt:VideoEncoderConfiguration xmlns:tt="http://www.onvif.org/ver10/schema" token="legacy-encoder"><tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:Resolution><tt:RateControl><tt:FrameRateLimit>30</tt:FrameRateLimit><tt:BitrateLimit>4096</tt:BitrateLimit></tt:RateControl></tt:VideoEncoderConfiguration><tt:PTZConfiguration xmlns:tt="http://www.onvif.org/ver10/schema" token="legacy-ptz"/></trt:Profiles></trt:GetProfilesResponse>`
+				case strings.Contains(request, "GetStreamUri"):
+					if strings.Contains(request, "tr2:GetStreamUri") {
+						streamURI := "rtsp://" + url.UserPassword("admin", "camera-secret").String() + "@192.0.2.10/main?x=camera-secret"
+						operation = `<tr2:GetStreamUriResponse xmlns:tr2="http://www.onvif.org/ver20/media/wsdl"><tr2:Uri>` + streamURI + `</tr2:Uri></tr2:GetStreamUriResponse>`
+					} else {
+						operation = `<trt:GetStreamUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl"><trt:MediaUri><tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">rtsp://192.0.2.10/legacy</tt:Uri></trt:MediaUri></trt:GetStreamUriResponse>`
+					}
+				default:
+					t.Fatalf("unexpected SOAP request %s at %s", request, endpoint)
+				}
+				response := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope"><s:Body>` + operation + `</s:Body></s:Envelope>`
+				return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(response)), Request: r}, nil
+			})
+
+			prober := NewDeviceProbe(transport)
+			endpoint, err := onvif.ParseEndpoint("http://192.0.2.10/onvif/device_service")
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := prober(context.Background(), endpoint, "admin", "camera-secret")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Profiles) != 1 {
+				t.Fatalf("profiles = %+v", result.Profiles)
+			}
+			profile := result.Profiles[0]
+			wantToken, wantVersion, wantEncoding := "main-profile", "2.0", "H265"
+			if !tt.media2Supported {
+				wantToken, wantVersion, wantEncoding = "legacy-profile", "1.0", "H264"
+			}
+			if profile.Token != wantToken || profile.MediaVersion != wantVersion || profile.Encoding != wantEncoding || !profile.Fixed {
+				t.Fatalf("profile = %+v", profile)
+			}
+			wantWidth, wantEncoder, wantSource, wantPTZ := 2560, "encoder-main", "source-main", "ptz-main"
+			if !tt.media2Supported {
+				wantWidth, wantEncoder, wantSource, wantPTZ = 1920, "legacy-encoder", "legacy-source", "legacy-ptz"
+			}
+			if profile.Width != wantWidth || profile.EncoderConfigurationToken != wantEncoder || profile.SourceConfigurationToken != wantSource || profile.PTZConfigurationToken != wantPTZ {
+				t.Fatalf("profile capability metadata = %+v", profile)
+			}
+			if !strings.Contains(actions[0], "GetDeviceInformation") {
+				t.Fatalf("first action = %q", actions[0])
+			}
+			media2Index, media1Index := -1, -1
+			for i, action := range actions {
+				if action == "/onvif/media2:GetProfiles" {
+					media2Index = i
+				}
+				if action == "/onvif/media1:GetProfiles" {
+					media1Index = i
+				}
+			}
+			if media2Index < 0 || (!tt.media2Supported && media1Index <= media2Index) || (tt.media2Supported && media1Index >= 0) {
+				t.Fatalf("profile request order = %+v", actions)
+			}
+			projected := projectProbeResult(result, []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}, "agent-secret", "admin", "camera-secret")
+			jsonResult, err := json.Marshal(projected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, secret := range []string{"admin", "camera-secret", "?x="} {
+				if strings.Contains(string(jsonResult), secret) {
+					t.Errorf("projected profile leaked %q: %s", secret, jsonResult)
+				}
+			}
+		})
+	}
+}
+
+func TestSanitizeStreamURIRedactsPercentEncodedCredentials(t *testing.T) {
+	tests := []struct {
+		name string
+		uri  string
+	}{
+		{name: "encoded username", uri: "rtsp://192.0.2.10/%61dmin/main"},
+		{name: "encoded password", uri: "rtsp://192.0.2.10/camera%2Dsecret/main"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeStreamURI(tt.uri, "admin", "camera-secret"); got != "" {
+				t.Fatalf("sanitizeStreamURI(%q) = %q, want URI omitted", tt.uri, got)
+			}
+		})
+	}
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
