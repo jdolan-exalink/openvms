@@ -58,6 +58,9 @@ let meGate: Promise<void> | null = null;
 let slotRequests: URL[];
 let slotsStatus: number;
 let platesVisible: boolean;
+let eventsBody: unknown[];
+let platesBody: unknown[];
+let eventRequests: URL[];
 
 beforeEach(() => {
   localStorage.clear();
@@ -66,6 +69,9 @@ beforeEach(() => {
   slotRequests = [];
   slotsStatus = 200;
   platesVisible = true;
+  eventsBody = [];
+  platesBody = [];
+  eventRequests = [];
   serverAheadMs = 0;
   slotsBody = { slots: [slot(0, "cam-1"), slot(1, "cam-2", { object: "car", plate: "AB123CD" }), slot(2, null), slot(3, null)] };
 });
@@ -74,6 +80,8 @@ describe("VisionAI Page", () => {
   const setup = () => {
     const routes = stubApi({
       "/api/v1/me": () => json(meResponse),
+      "/api/v1/events": () => json({ items: eventsBody }),
+      "/api/v1/lpr/reads": () => json({ items: platesBody }),
       "/api/v1/vision-ai/slots": () =>
         slotsStatus === 200
           ? json({ source: "general", layout: "4", generated_at: new Date(Date.now() + serverAheadMs).toISOString(), plates_visible: platesVisible, ...slotsBody })
@@ -84,6 +92,7 @@ describe("VisionAI Page", () => {
       vi.fn(async (input: Request) => {
         const url = new URL(input.url);
         if (url.pathname === "/api/v1/vision-ai/slots") slotRequests.push(url);
+        if (url.pathname === "/api/v1/events") eventRequests.push(url);
         if (url.pathname === "/api/v1/me" && meGate) await meGate;
         return routes(input);
       }),
@@ -336,10 +345,90 @@ describe("VisionAI Page", () => {
 
   it("lists active events in the sidebar", async () => {
     setup();
-    fireEvent.click(await screen.findByRole("button", { name: /Eventos Activos/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
     const sidebar = await screen.findByTestId("vision-events-sidebar");
     expect(within(sidebar).getByText("Cam cam-1")).toBeInTheDocument();
     expect(within(sidebar).getByText("AB123CD")).toBeInTheDocument();
+  });
+
+  it("names the side bar Eventos and offers the four tabs", async () => {
+    mePermissions = [...mePermissions, "lpr.view"];
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
+    const sidebar = within(await screen.findByTestId("vision-events-sidebar"));
+    expect(sidebar.getByText(/^Eventos \(\d+\)$/)).toBeInTheDocument();
+    expect(sidebar.queryByText(/Eventos Activos/)).not.toBeInTheDocument();
+    expect(sidebar.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Activos", "Históricos", "LPR", "Faciales"]);
+    expect(sidebar.getByRole("tab", { name: "Activos" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("hides the tabs the user has no permission for", async () => {
+    mePermissions = ["live.view", "cameras.view"];
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
+    const sidebar = within(await screen.findByTestId("vision-events-sidebar"));
+    expect(sidebar.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Activos"]);
+  });
+
+  it("opens a popup above the grid with the event and its plate, and closes it", async () => {
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
+    const sidebar = within(await screen.findByTestId("vision-events-sidebar"));
+    fireEvent.click(sidebar.getByText("Cam cam-2"));
+    const popup = await screen.findByRole("dialog", { name: /Detalle del evento/i });
+    expect(popup).toHaveTextContent("Cam cam-2");
+    expect(within(popup).getByLabelText("Patente AB123CD")).toBeInTheDocument();
+    // Selecting an event no longer switches to the focus layout on its own.
+    expect(screen.queryByTestId("vision-hero-slot")).not.toBeInTheDocument();
+    fireEvent.click(within(popup).getByRole("button", { name: /Cerrar evento/i }));
+    expect(screen.queryByRole("dialog", { name: /Detalle del evento/i })).not.toBeInTheDocument();
+  });
+
+  it("pins the popup's active event in the focus view", async () => {
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
+    const sidebar = within(await screen.findByTestId("vision-events-sidebar"));
+    fireEvent.click(sidebar.getByText("Cam cam-2"));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: /Detalle del evento/i })).getByRole("button", { name: /Fijar en foco/i }));
+    expect(await screen.findByTestId("vision-hero-slot")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Detalle del evento/i })).not.toBeInTheDocument();
+  });
+
+  it("lists historic events on its tab", async () => {
+    eventsBody = [{
+      id: "h-1", tenant_id: "t1", site_id: "s", site_name: "S", server_id: "sv", server_name: "Srv", camera_id: "c9", camera_name: "Garita Sur",
+      remote_id: "r", severity: "detection", labels: ["car"], sub_labels: [], zones: ["acceso"], plates: [], start_time: "2026-10-21T09:00:00Z",
+      reviewed: false, has_thumbnail: true, has_snapshot: false, has_preview: false, tracks: [],
+    }];
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
+    const sidebar = within(await screen.findByTestId("vision-events-sidebar"));
+    fireEvent.click(sidebar.getByRole("tab", { name: "Históricos" }));
+    expect(await sidebar.findByText("Garita Sur")).toBeInTheDocument();
+    expect(eventRequests.every((u) => !u.searchParams.has("label"))).toBe(true);
+  });
+
+  it("lists plate reads on the LPR tab and face events on the Faciales tab", async () => {
+    mePermissions = [...mePermissions, "lpr.view"];
+    platesBody = [{
+      id: "pr-1", site_id: "s", site_name: "S", server_id: "sv", server_name: "Srv", camera_id: "c7", camera_name: "Ingreso Norte",
+      plate: "AE526KV", plate_normalized: "AE526KV", label: "car", zones: [], seen_at: "2026-10-21T08:00:00Z",
+    }];
+    eventsBody = [{
+      id: "f-1", tenant_id: "t1", site_id: "s", site_name: "S", server_id: "sv", server_name: "Srv", camera_id: "c8", camera_name: "Hall Principal",
+      remote_id: "r", severity: "detection", labels: ["face"], sub_labels: ["Ana"], zones: [], plates: [], start_time: "2026-10-21T09:30:00Z",
+      reviewed: false, has_thumbnail: true, has_snapshot: false, has_preview: false, tracks: [],
+    }];
+    setup();
+    fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
+    const sidebar = within(await screen.findByTestId("vision-events-sidebar"));
+    fireEvent.click(sidebar.getByRole("tab", { name: "LPR" }));
+    expect(await sidebar.findByText("Ingreso Norte")).toBeInTheDocument();
+    expect(sidebar.getByLabelText("Patente AE526KV")).toBeInTheDocument();
+    fireEvent.click(sidebar.getByRole("tab", { name: "Faciales" }));
+    expect(await sidebar.findByText("Hall Principal")).toBeInTheDocument();
+    expect(sidebar.getByText("Ana")).toBeInTheDocument();
+    await waitFor(() => expect(eventRequests.some((u) => u.searchParams.getAll("label").includes("face"))).toBe(true));
   });
 
   it("shows an icon on every preset and object chip", async () => {
@@ -377,7 +466,7 @@ describe("VisionAI Page", () => {
   describe("active events snapshots", () => {
     const openSidebar = async () => {
       setup();
-      fireEvent.click(await screen.findByRole("button", { name: /Eventos Activos/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
       return within(await screen.findByTestId("vision-events-sidebar"));
     };
 
