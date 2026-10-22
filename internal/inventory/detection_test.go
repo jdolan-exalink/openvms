@@ -75,3 +75,18 @@ func TestDetectionTrackerForget(t *testing.T) {
 		t.Fatal("a forgotten server restarts its hold")
 	}
 }
+
+func TestDetectionTrackerIgnoresCamerasWithDetectionDisabled(t *testing.T) {
+	id := uuid.New()
+	now := time.Now()
+	tr := NewDetectionTracker(0)
+	// Recording-only cameras never detect by design: they are not a stall.
+	recordOnly := []frigate.CameraStats{{CameraFPS: 5, DetectionFPS: 0, DetectionDisabled: true}}
+	if st := tr.Observe(id, recordOnly, now); st.Stalled {
+		t.Fatal("detection is off everywhere: nothing to claim")
+	}
+	mixed := append(recordOnly, frigate.CameraStats{CameraFPS: 5, DetectionFPS: 0})
+	if st := tr.Observe(id, mixed, now); !st.Stalled {
+		t.Fatal("the camera that should detect is not detecting")
+	}
+}

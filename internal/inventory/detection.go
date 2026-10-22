@@ -42,14 +42,14 @@ func NewDetectionTracker(hold time.Duration) *DetectionTracker {
 	return &DetectionTracker{hold: hold, idleSince: map[uuid.UUID]time.Time{}}
 }
 
-// Observe records one stats reading of a server at now. Only cameras that deliver video count:
-// one without signal cannot detect and says nothing about the pipeline.
+// Observe records one stats reading of a server at now. Only cameras that deliver video and have
+// detection on count: one without signal, or recording only, says nothing about the pipeline.
 func (t *DetectionTracker) Observe(server uuid.UUID, cameras []frigate.CameraStats, now time.Time) DetectionState {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	live := 0
 	for _, c := range cameras {
-		if c.CameraFPS <= noSignalFPS {
+		if c.CameraFPS <= noSignalFPS || c.DetectionDisabled {
 			continue
 		}
 		if c.DetectionFPS > detectionIdleFPS {
