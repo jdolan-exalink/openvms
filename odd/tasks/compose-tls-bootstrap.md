@@ -11,7 +11,7 @@ Make a first `docker compose up -d` create the local HTTPS and agent gRPC TLS fi
 - [x] Make Caddy serve the HTTPS certificate produced by that bootstrap.
 - [x] Remove host-side TLS generation from `make install` and document automatic Compose setup.
 - [x] Update the Compose CI job to exercise automatic TLS generation.
-- [ ] Commit, open a PR, and merge after CI passes.
+- [x] Commit, open a PR, and merge after CI passes. Evidence: PR #128 merged 2026-10-20 as `5487437`; CI run 39519578386 on `main` succeeded (all 9 jobs incl. Compose smoke test).
 
 ## Acceptance
 

@@ -12,6 +12,7 @@ Delegated direct: UI, OpenAPI/generated bindings, provisioning handler/service/S
 ## Tasks
 - [x] T1 Implement named installation and explicit automatic first-contact SSH trust; retain pinned-key client compatibility and localized warning. Route delegated (multi-file writer/preparation trigger). Structural readback confirmed propagation; tests deferred to user.
 - [ ] T2 Check contract/build consistency; report test limitations and local deployment status. Route delegated (execution trigger). Do not deploy remotely.
+  Status (2026-10-21): partially evidenced. Observed locally on branch `chore/reconcile-task-trackers`: `go build ./...` exit 0 and `cd apps/web && pnpm typecheck` clean, which clears the earlier "Go build NOT VERIFIED". The code is on `main` (`5e177fb`, then `5339915`). Still pending: generated-contract drift check (`go generate`, would rewrite files) and local rebuild/deployment status, which is a deploy action; no remote operation was run.
 
 ## Acceptance and checks
 Fresh-host form requests a nonempty name and no fingerprint/confirmation; supplied name reaches CreateServer. Manual fingerprint API clients continue to validate mismatch before password auth. Missing fingerprint without automatic-trust opt-in remains rejected. First-contact automatic trust is clearly disclosed and secrets never logged. Existing import unaffected.
