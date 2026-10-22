@@ -444,6 +444,12 @@ export const facePersonsQuery = () =>
     queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons")).items,
   });
 
+export const facePendingTombstonesQuery = () =>
+  queryOptions({
+    queryKey: ["faces", "pending-tombstones"],
+    queryFn: async () => unwrap(await api.GET("/api/v1/faces/persons/tombstones")).items,
+  });
+
 export const faceWatchlistsQuery = () =>
   queryOptions({
     queryKey: ["faces", "watchlists"],
