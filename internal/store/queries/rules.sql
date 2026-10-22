@@ -71,3 +71,8 @@ WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND id = ANY(@ids::uuid[]);
 -- name: CountMapZonesByIDs :one
 SELECT count(*) FROM map_zones
 WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND id = ANY(@ids::uuid[]);
+
+-- name: EnqueueRuleEvaluation :exec
+INSERT INTO rule_evaluation_jobs (event_id, evaluation_kind, face_names, payload)
+VALUES (@event_id, @evaluation_kind, @face_names, @payload)
+ON CONFLICT (event_id, evaluation_kind, face_names) DO NOTHING;
