@@ -58,8 +58,34 @@ func HashToken(token string) []byte {
 	return sum[:]
 }
 
-// SessionCookie is the name of the browser session cookie.
+// SessionCookie is the legacy name of the browser session cookie, still accepted so sessions
+// started before the per-scheme names survive an upgrade.
 const SessionCookie = "openvms_session"
+
+// Cookies are not isolated by port, so the HTTP (:8000) and HTTPS (:8443) origins of one host
+// share a jar. A Secure cookie cannot be overwritten from HTTP, which made a login at :8000
+// silently fail once :8443 had set a session. Each scheme therefore has its own name.
+const (
+	SecureSessionCookie = "__Secure-openvms_session"
+	HTTPSessionCookie   = "openvms_session_http"
+)
+
+// sessionCookieName is the cookie a session of this scheme is stored in.
+func sessionCookieName(secure bool) string {
+	if secure {
+		return SecureSessionCookie
+	}
+	return HTTPSessionCookie
+}
+
+// requestSessionCookie returns the session cookie of the request's scheme, falling back to the
+// legacy name.
+func requestSessionCookie(r *http.Request) (*http.Cookie, error) {
+	if c, err := r.Cookie(sessionCookieName(secureRequest(r))); err == nil && c.Value != "" {
+		return c, nil
+	}
+	return r.Cookie(SessionCookie)
+}
 
 // CSRFHeader must accompany every state-changing request authenticated by the session
 // cookie. Browsers only send custom headers from same-origin scripts (or after a CORS
@@ -118,7 +144,7 @@ func Authenticate(q *db.Queries, opts AuthOptions) func(http.Handler) http.Handl
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
-			c, err := r.Cookie(SessionCookie)
+			c, err := requestSessionCookie(r)
 			if err != nil || c.Value == "" {
 				writeError(w, r, http.StatusUnauthorized, "unauthorized", "authentication required")
 				return
@@ -167,7 +193,7 @@ func secureRequest(r *http.Request) bool {
 // #nosec G124 -- Secure intentionally follows HTTPS/TLS detection; forcing it on breaks HTTP deployments.
 func clearSessionCookie(w http.ResponseWriter, r *http.Request) {
 	http.SetCookie(w, &http.Cookie{
-		Name: SessionCookie, Value: "", Path: "/", MaxAge: -1,
+		Name: sessionCookieName(secureRequest(r)), Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: secureRequest(r), SameSite: http.SameSiteStrictMode,
 	})
 }
