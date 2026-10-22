@@ -9,7 +9,7 @@ The user authorized liquidating the actual pending backlog, but prior task track
 ## Scope and constraints
 
 - Authorized outcome: implement all genuinely pending backlog and deliver independent PRs merged in order.
-- Initial authorization was limited to creating this recovery document and locally verifying the then-current branch; that was a historical boundary, not a restriction on later authorized backlog work. The user has since authorized all pending backlog implementation and independent PRs. Local source/documentation changes and work-unit commits are within scope; push, PR creation, merge, and any remote execution remain pending explicit credential/destination/operation confirmation as applicable.
+- Initial authorization was limited to creating this recovery document and locally verifying the then-current branch; that was a historical boundary, not a restriction on later authorized backlog work. The user has since authorized all pending backlog implementation and ordered GitHub PR delivery through the configured session. Remote SSH, device access, deployment, and file transfer remain separately gated until the target, operation, and credentials are explicitly authorized.
 - Future implementation proceeds task-by-task; strict TDD is enabled by the user-provided AGENTS.md. Each source task must observe RED, then GREEN, then REFACTOR with its exact runner.
 - Route: delegated direct for substantial implementation; mapping/preparation and multi-file writers are delegated because those triggers apply. This unit itself is documentation-only; no model delegation in the initial bounded unit.
 - Delivery: `auto-chain`, `stacked-to-main`, based on the user's request for independent PRs merged in order. Make coherent feature boundaries, not artificial tiny slices. Existing mTLS remainder's prior size exception applies only to that remainder.
@@ -37,13 +37,13 @@ The list is an initial inventory; reconcile each tracker and current code before
 - [x] BC-03 — Maps acceptance and performance. Acceptance: resolve M-W27 performance and stale M-W20/alarm S2-3b–d states against current implementation and tests; record any remaining manual/browser acceptance separately.
   Status (2026-10-22): reconciled. M-W27's earlier synthetic readings (54/57/74 ms against 50 ms) remain historical; the dedicated Maps Playwright performance job passed on candidate `b0a0997728111aa17c605ec05a6719a761b7f473` in CI run [39823706672](https://github.com/jdolan-exalink/openvms/actions/runs/39823706672/job/119987924259). `odd/tasks/maps.md` now records that evidence. M-W20's 26-camera layout versus the 16-camera scope and real-account browser/media/deployment acceptance remain explicit manual checks.
 - [ ] BC-04 — ONVIF camera management, work units 02–19. Acceptance: derive cohesive independent PR slices from `odd/tasks/onvif-camera-management.md`, preserve its requirements and per-unit verification; do not assume readiness from roadmap checkboxes.
-  Status (2026-10-21): pending, not reconciled in this pass (`onvif-camera-management.md` units 02-19 were not inspected). Code work.
-- [ ] BC-05 — Frigate configuration editor FC-5. Acceptance: reconcile FC-5 against current code/tests, implement and verify only actual remaining requirements; keep real Frigate/hardware acceptance pending until authorized and available.
-  Status (2026-10-21): FC-5 reconciled (see `frigate-config-editor.md`): server raw YAML endpoints and tab exist; autotracking/face/GenAI panels and bulk apply are missing. Remaining implementation is code work; real Frigate acceptance stays pending.
+  Status (2026-10-22): partially reconciled. ONVIF-02 stable identity merged in #166; ONVIF-03 core merged in #163 with API relay #164 still in CI; ONVIF-04 snapshot URI primitive merged in #167. Secure image retrieval and ONVIF-05–19 implementation remain open. Real-camera interoperability and device acceptance are unverified; no device or remote-host operation was performed.
+- [x] BC-05 — Frigate configuration editor FC-5 code and local verification. Acceptance: reconcile FC-5 against current code/tests and implement the remaining requirements; track real Frigate/hardware acceptance separately.
+  Status (2026-10-22): code complete. FC-5a curated autotracking/face/GenAI panels and same-server bulk apply (#162), plus FC-5c unsaved YAML diff (#165), are merged. The focused UI tests, typecheck, full CI checks, and Compose smoke passed. Acceptance against real Frigate 0.17 and 0.18 remains manual and open (`odd/tasks/frigate-config-editor.md`).
 - [x] BC-06 — Remaining device lifecycle and PWA acceptance. Acceptance: reconcile device/agent trackers and test the outstanding local PWA behavior; report unavailable browser/device/hardware proof honestly.
   Status (2026-10-22): reconciled. LP-05 (#73, `a578c6b8…`) and PLS-03 (#74, `092a3432…`) are reviewed, CI-checked and merged; ARS PR #116 (`16e4925…`) completes the #113–116 chain. Tracker checkboxes now distinguish merged code from outstanding acceptance. The iOS/Android standalone PWA checklist and live `casa01` install/reinstall with enrollment, authenticated health and registration evidence remain manual device/host checks; no physical device or remote SSH action was performed.
 - [ ] BC-07 — Final backlog reconciliation. Acceptance: every source tracker is synchronized with observed outcomes, blocked external acceptance is explicit, and PR slices/dependencies are documented in merge order.
-  Status (2026-10-21): pending until BC-02..BC-06 close; this pass synchronized the trackers listed above only.
+  Status (2026-10-22): pending until ONVIF code work and source-tracker reconciliation finish. BC-05 code is merged; BC-02/03/06 retain the external acceptance items listed above, so their tracker completion does not imply those checks passed.
 
 ## Progress and evidence
 
@@ -55,7 +55,7 @@ The list is an initial inventory; reconcile each tracker and current code before
   - `GOCACHE=/tmp/openvms-go-build-cache go test -count=1 ./internal/agent/... ./internal/agentstatus ./internal/control ./internal/provision ./internal/api ./apps/edge-agent` — PASS (all eight packages; the first sandboxed run failed because loopback sockets and route netlink were denied, then passed on the approved rerun).
   - From `apps/web`: `pnpm typecheck` — PASS (`tsc --noEmit`, exit 0).
   - No integration tests or remote/hardware checks were run.
-- PR order: stacked-to-main; define coherent boundaries after reconciliation. No PR/remote actions authorized in this initial unit.
+- PR order: stacked-to-main, preserving the user's authorization for GitHub delivery; external SSH, device, and deployment actions remain separately gated.
 
 ### Current verification (HEAD `5893d2e`, 2026-10-11)
 
