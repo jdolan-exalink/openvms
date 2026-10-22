@@ -152,7 +152,7 @@ func positiveInt32(v, fallback int) int32 {
 	if v > 1<<31-1 {
 		return 1<<31 - 1
 	}
-	return int32(v)
+	return int32(v) // #nosec G115 -- v is capped to MaxInt32 above.
 }
 
 func positiveDuration(v, fallback time.Duration) time.Duration {
