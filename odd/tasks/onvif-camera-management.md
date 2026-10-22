@@ -34,6 +34,7 @@ Implement in dependency order. Each delegated work unit closes with checks, Conv
 - [x] **ONVIF-01 — Mocked ONVIF foundation and bounded transport.** Establish protocol/client abstractions, device endpoint discovery inputs, bounded connection/read/write timeouts and retries, structured errors, and deterministic mocks. No physical camera access. RED/GREEN/REFACTOR evidence required. Rollback: remove the isolated foundation and its tests.
 - [ ] **ONVIF-02 — Core discovery and device information.** Discover devices/services and read device information through the agent; expose API results without leaking credentials; map discovered devices to stable VMS identity.
   - [x] Credential-free Cameras-route discovery UI slice: managed-server and explicit-interface selection, API relay request, safe endpoint list, pending/empty/error states; devices are clearly not yet added. Focused UI and full web-suite proof recorded below. This does not complete ONVIF-02.
+  - [x] Stable identity guard: auto-match only an exact known ONVIF endpoint scoped to the selected server; host/name resemblance no longer binds a discovered endpoint. Explicit camera UUID selection remains available. Focused regression tests pass; physical camera acceptance remains open.
 - [ ] **ONVIF-03 — Media2 with Media1 fallback and profiles.** Discover Media2 first where supported, fall back to Media1, enumerate streams/profiles and preserve profile identity/capability metadata.
 - [ ] **ONVIF-04 — Snapshot and stream source management.** Retrieve snapshots and represent stream URIs/options safely; redact credential-bearing URIs and avoid persisting derived secrets in logs or browser state.
 - [ ] **ONVIF-05 — Add, edit, delete, manifest, and health.** Implement camera manifest/state reconciliation and CRUD through API/agent; synchronize Frigate additions/edits/removals; retain stable IDs and deletion tombstones to prevent reimport. Health/readiness surfaces device and protocol state. Delete preserves recordings by default; discard requires explicit confirmation and must fail closed if the disposition is missing/invalid. Never factory-reset a device.
@@ -78,7 +79,7 @@ Implement in dependency order. Each delegated work unit closes with checks, Conv
 ## Delivery and progress record
 
 - Delivery is `ask-on-risk` / user-approved `stacked-to-main`; no push/PR/merge authorized.
-- ONVIF-02 remains partial: device reads/WSSE/discovery, TLS, probe relay/UI exist; persistence, stable VMS identity and live validation remain. Parent commits `712b56d`, `daafa0d`; planning `134a319`; review boundary `19315be`; later candidates declined.
+- ONVIF-02 remains partial: device reads/WSSE/discovery, TLS, probe relay/UI exist; persistence and physical camera acceptance remain. Discovery identity now uses only an exact known endpoint or explicit camera UUID selection. Parent commits `712b56d`, `daafa0d`; planning `134a319`; review boundary `19315be`; later candidates declined.
 - Per unit record RED/GREEN/REFACTOR, checks/harness, rollback, commit/lines and review boundary; no behavior/tests omitted to hit advisory 400 lines.
 - Next: register agent with an authenticated actor; probe is not persistence.
 

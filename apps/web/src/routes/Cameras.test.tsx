@@ -714,7 +714,7 @@ describe("Cameras", () => {
     expect(screen.getByText("Sin ONVIF")).toBeInTheDocument();
   });
 
-  it("matches discovered device with an existing camera and allows linking it", async () => {
+  it("does not infer camera identity from the discovered host and allows explicit linking", async () => {
     const fetchMock = vi.fn(
       stubApi({
         ...inventory([
@@ -767,10 +767,10 @@ describe("Cameras", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Buscar dispositivos ONVIF" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Buscar dispositivos ONVIF" }));
 
-    expect(await screen.findByText(/Cámara en inventario: Camara Sodecar 549/i)).toBeInTheDocument();
-    const linkBtn = screen.getByRole("button", { name: "Vincular ONVIF" });
-    expect(linkBtn).toBeInTheDocument();
-    fireEvent.click(linkBtn);
+    expect(await screen.findByText("Dispositivo encontrado · todavía no se agregó")).toBeInTheDocument();
+    expect(screen.queryByText(/Cámara en inventario: Camara Sodecar 549/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Vincular a cámara existente" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirmar vinculación" }));
 
     await waitFor(() => {
       const checkCall = fetchMock.mock.calls
@@ -778,6 +778,50 @@ describe("Cameras", () => {
         .find((r) => r.url.includes("/cameras/cam-sodecar/onvif/check"));
       expect(checkCall).toBeDefined();
     });
+  });
+
+  it("matches a discovered device to a camera only by its exact known ONVIF endpoint", async () => {
+    const endpoint = "http://172.22.148.57:80/onvif/device_service";
+    const fetchMock = vi.fn(
+      stubApi({
+        ...inventory([
+          camera("cam-sodecar", "Camara Sodecar 549", {
+            onvif_endpoint: endpoint,
+            onvif_profile: null,
+          }),
+        ]),
+        "/api/v1/me": () =>
+          json({
+            id: "u",
+            tenant_id: "t",
+            grants: [
+              {
+                id: "g",
+                permission: "servers.manage",
+                effect: "allow",
+                scope_type: "server",
+                scope_id: "srv1",
+              },
+            ],
+          }),
+        "/api/v1/servers": () => json({ items: [{ id: "srv1", name: "frigate-h01", site_id: "s1" }] }),
+        "POST /api/v1/servers/srv1/onvif/discover": () => json({ devices: [{ xaddrs: [endpoint] }] }),
+        "POST /api/v1/cameras/cam-sodecar/onvif/check": () =>
+          json({ id: "cam-sodecar", display_name: "Camara Sodecar 549", onvif_profile: "ONVIF-S", onvif_version: "1.0" }),
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage(Cameras);
+
+    const serverSelect = await screen.findByLabelText("Servidor para descubrir cámaras");
+    await within(serverSelect).findByRole("option", { name: "frigate-h01" });
+    fireEvent.change(serverSelect, { target: { value: "srv1" } });
+    fireEvent.change(screen.getByLabelText("Interfaz de red del agente"), { target: { value: "eth0" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Buscar dispositivos ONVIF" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Buscar dispositivos ONVIF" }));
+
+    expect(await screen.findByText(/Cámara en inventario: Camara Sodecar 549/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vincular ONVIF" })).toBeInTheDocument();
   });
 
 

@@ -174,32 +174,12 @@ export function Cameras() {
     },
   });
 
-  const matchExistingCamera = (deviceHost: string, deviceXaddrs: string[]) => {
-    if (!deviceHost || !cameras.data) return null;
-    const cleanHost = deviceHost.toLowerCase();
-    const normalizedHost = cleanHost.replace(/\./g, "_");
+  const matchExistingCamera = (deviceXaddrs: string[]) => {
+    if (!cameras.data) return null;
 
     return cameras.data.find((c) => {
       if (discoveryServerId && c.server_id !== discoveryServerId) return false;
-
-      if (c.onvif_endpoint) {
-        try {
-          if (new URL(c.onvif_endpoint).hostname.toLowerCase() === cleanHost) return true;
-        } catch {
-          // Ignore malformed URL
-        }
-      }
-
-      const remote = c.remote_name.toLowerCase();
-      const display = c.display_name.toLowerCase();
-      if (remote.includes(cleanHost) || remote.includes(normalizedHost)) return true;
-      if (display.includes(cleanHost) || display.includes(normalizedHost)) return true;
-
-      for (const x of deviceXaddrs) {
-        if (c.onvif_endpoint && c.onvif_endpoint === x) return true;
-      }
-
-      return false;
+      return Boolean(c.onvif_endpoint && deviceXaddrs.includes(c.onvif_endpoint));
     });
   };
 
@@ -424,7 +404,7 @@ export function Cameras() {
               })();
               const isAddingThis = addingDevice?.xaddr === primaryEndpoint;
               const isLinkingThis = linkingCameraFor?.xaddr === primaryEndpoint;
-              const matchedCam = matchExistingCamera(host, device.xaddrs);
+              const matchedCam = matchExistingCamera(device.xaddrs);
 
               return (
                 <li key={`${index}-${device.xaddrs.join("|")}`} className="flex flex-col gap-2 rounded-m3-lg bg-surface-2 p-3">
