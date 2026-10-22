@@ -15,6 +15,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -321,10 +322,16 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 			if !isNew && len(ev.GainedSubLabels) > 0 {
 				recognized = append(recognized, ev)
 				cameraNames[cam.ID] = cam.Name
+				if err := enqueueRuleEvaluation(ctx, tx, ev, cam.Name, true); err != nil {
+					return err
+				}
 			}
 			if isNew {
 				created = append(created, ev)
 				cameraNames[cam.ID] = cam.Name
+				if err := enqueueRuleEvaluation(ctx, tx, ev, cam.Name, false); err != nil {
+					return err
+				}
 				if err := vehicle.Enqueue(ctx, tx, ev.ID, ev.TenantID, ev.Labels); err != nil {
 					return err
 				}
@@ -366,17 +373,7 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	}
 	if s.Rules != nil {
 		evaluate := func(ev NewEvent, faceUpdate bool) {
-			// A face update carries only the names gained since the last pull, so the person
-			// rules that already fired for the earlier names are not evaluated again.
-			subLabels := ev.SubLabels
-			if faceUpdate {
-				subLabels = ev.GainedSubLabels
-			}
-			rc := rules.EventContext{
-				ID: ev.ID, TenantID: ev.TenantID, SiteID: ev.SiteID, ServerID: ev.ServerID, CameraID: ev.CameraID,
-				CameraName: cameraNames[ev.CameraID], Severity: ev.Severity, Labels: ev.Labels, SubLabels: subLabels,
-				FaceUpdate: faceUpdate, Zones: ev.Zones, Start: ev.Start,
-			}
+			rc := ruleContext(ev, cameraNames[ev.CameraID], faceUpdate)
 			if err := s.Rules.EvaluateEvent(ctx, rc); err != nil {
 				s.Log.WarnContext(ctx, "evaluate rules", "error", err, "event_id", ev.ID)
 			}
@@ -387,6 +384,40 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 		for _, ev := range recognized {
 			evaluate(ev, true)
 		}
+	}
+	return nil
+}
+
+func ruleContext(ev NewEvent, cameraName string, faceUpdate bool) rules.EventContext {
+	// A face update carries only the names gained since the last pull, so rules that already
+	// fired for earlier names are not evaluated again.
+	subLabels := ev.SubLabels
+	if faceUpdate {
+		subLabels = ev.GainedSubLabels
+	}
+	return rules.EventContext{
+		ID: ev.ID, TenantID: ev.TenantID, SiteID: ev.SiteID, ServerID: ev.ServerID, CameraID: ev.CameraID,
+		CameraName: cameraName, Severity: ev.Severity, Labels: ev.Labels, SubLabels: subLabels,
+		FaceUpdate: faceUpdate, Zones: ev.Zones, Start: ev.Start,
+	}
+}
+
+func enqueueRuleEvaluation(ctx context.Context, tx pgx.Tx, ev NewEvent, cameraName string, faceUpdate bool) error {
+	payload, err := json.Marshal(ruleContext(ev, cameraName, faceUpdate))
+	if err != nil {
+		return fmt.Errorf("marshal rule evaluation for event %s: %w", ev.ID, err)
+	}
+	kind := "event"
+	faceNames := []string{}
+	if faceUpdate {
+		kind = "face_update"
+		faceNames = append(faceNames, ev.GainedSubLabels...)
+		sort.Strings(faceNames)
+	}
+	if err := db.New(tx).EnqueueRuleEvaluation(ctx, db.EnqueueRuleEvaluationParams{
+		EventID: ev.ID, EvaluationKind: kind, FaceNames: faceNames, Payload: payload,
+	}); err != nil {
+		return fmt.Errorf("enqueue rule evaluation for event %s: %w", ev.ID, err)
 	}
 	return nil
 }

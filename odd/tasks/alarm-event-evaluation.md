@@ -42,5 +42,7 @@ Write failing regression coverage before implementation. Use the existing Postgr
 
 ## Progress
 
+- [x] Slice A: new-event and gained-face-name rule-evaluation payloads are persisted in `rule_evaluation_jobs` inside the event/cursor transaction. Face-update identity includes the canonical gained-name batch, so later recognitions enqueue separately while repeated syncs deduplicate. Focused integration coverage verifies event/face-update payloads, duplicate syncs, and rollback when ingestion fails after enqueue (alarm correlation failure). Verification: `GOCACHE=/tmp/openvms-go-build-cache go test -tags integration ./internal/events -run '^Test(SyncerEnqueuesDurableRuleEvaluation|RuleEvaluationEventAndCursorWritesRollbackTogether)$' -count=1` passed.
+- [ ] Slice B dependency: when durable workers are connected, replace/remove the existing post-commit `s.Rules.EvaluateEvent` consumer in the same delivery so each event is not evaluated both synchronously and from its queued job.
 - [ ] Implementation, focused regression tests, and work-unit commits.
 - [ ] Independent review and delivery.

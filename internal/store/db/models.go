@@ -777,6 +777,15 @@ type Rule struct {
 	Version     int32
 }
 
+type RuleEvaluationJob struct {
+	ID             uuid.UUID
+	EventID        uuid.UUID
+	EvaluationKind string
+	FaceNames      []string
+	Payload        json.RawMessage
+	EnqueuedAt     time.Time
+}
+
 type RuleFiring struct {
 	RuleID     uuid.UUID
 	ResourceID uuid.UUID

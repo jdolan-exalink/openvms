@@ -153,6 +153,29 @@ func (q *Queries) DeleteRule(ctx context.Context, arg DeleteRuleParams) error {
 	return err
 }
 
+const enqueueRuleEvaluation = `-- name: EnqueueRuleEvaluation :exec
+INSERT INTO rule_evaluation_jobs (event_id, evaluation_kind, face_names, payload)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (event_id, evaluation_kind, face_names) DO NOTHING
+`
+
+type EnqueueRuleEvaluationParams struct {
+	EventID        uuid.UUID
+	EvaluationKind string
+	FaceNames      []string
+	Payload        json.RawMessage
+}
+
+func (q *Queries) EnqueueRuleEvaluation(ctx context.Context, arg EnqueueRuleEvaluationParams) error {
+	_, err := q.db.Exec(ctx, enqueueRuleEvaluation,
+		arg.EventID,
+		arg.EvaluationKind,
+		arg.FaceNames,
+		arg.Payload,
+	)
+	return err
+}
+
 const getRule = `-- name: GetRule :one
 SELECT id, tenant_id, name, trigger_type, conditions, actions, enabled, created_at, updated_at, version
 FROM rules
