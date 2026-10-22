@@ -279,6 +279,105 @@ func TestFacesAPIPersonsImagesAndAuthz(t *testing.T) {
 	}
 }
 
+func TestFacesAPIPendingTombstonesAndForcePurge(t *testing.T) {
+	f := newFaceAPI(t)
+	mgr := f.user(f.tenant, "purge-manager", authz.FacesManage, authz.FacesView)
+	viewer := f.user(f.tenant, "purge-viewer", authz.FacesView)
+	blind := f.user(f.tenant, "purge-blind", authz.EventsView)
+	created := f.js(mgr, http.MethodPost, "/api/v1/faces/persons", `{"display_name":"Pending Ana"}`)
+	if created.code != http.StatusCreated {
+		t.Fatalf("create person = %d %s", created.code, created.raw)
+	}
+	person := created.json()
+	personID := person["id"].(string)
+	name := person["frigate_name"].(string)
+	personPath := "/api/v1/faces/persons/" + personID
+	if r := f.js(mgr, http.MethodDelete, personPath, ""); r.code != http.StatusNoContent {
+		t.Fatalf("delete person = %d %s", r.code, r.raw)
+	}
+	cam := f.env.Cameras["frigate-h01/plaza"]
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(context.Background(), `INSERT INTO face_server_sync (server_id, person_id, tenant_id, desired_revision, status, owned)
+			SELECT $1, id, tenant_id, sync_revision, 'failed', true FROM face_persons WHERE id = $2`, cam.ServerID, uuid.MustParse(personID)); err != nil {
+			return err
+		}
+		_, err := tx.Exec(context.Background(), `INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, sub_labels, start_time)
+			VALUES ($1, $2, $3, $4, 'force-purge-api', 'alert', $5, now())`, cam.TenantID, cam.SiteID, cam.ServerID, cam.ID, []string{name})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	const tombstonesPath = "/api/v1/faces/persons/tombstones"
+	if r := f.js(viewer, http.MethodGet, tombstonesPath, ""); r.code != http.StatusForbidden {
+		t.Errorf("faces.view-only tombstone list = %d, want 403", r.code)
+	}
+	if r := f.js(blind, http.MethodGet, tombstonesPath, ""); r.code != http.StatusForbidden {
+		t.Errorf("caller without faces.view tombstone list = %d, want 403", r.code)
+	}
+	listed := f.js(mgr, http.MethodGet, tombstonesPath, "")
+	items, _ := listed.json()["items"].([]any)
+	if listed.code != http.StatusOK || len(items) != 1 {
+		t.Fatalf("pending tombstones = %d %s, want one item", listed.code, listed.raw)
+	}
+	item := items[0].(map[string]any)
+	if item["id"] != personID || item["display_name"] != "Pending Ana" || item["pending_server_count"].(float64) != 1 {
+		t.Fatalf("pending tombstone = %v", item)
+	}
+	if _, ok := item["frigate_name"]; ok {
+		t.Fatalf("pending tombstone exposed Frigate name: %v", item)
+	}
+	if _, ok := item["notes"]; ok {
+		t.Fatalf("pending tombstone exposed notes: %v", item)
+	}
+
+	forcePath := personPath + "/force-purge"
+	if r := f.js(viewer, http.MethodPost, forcePath, ""); r.code != http.StatusForbidden {
+		t.Errorf("faces.view-only force purge = %d, want 403", r.code)
+	}
+	var otherTenant uuid.UUID
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `INSERT INTO tenants (slug, name) VALUES ('purge-other', 'o') RETURNING id`).Scan(&otherTenant)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stranger := f.user(otherTenant, "purge-stranger", authz.FacesManage, authz.FacesView)
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, tombstonesPath + "?tenant_id=" + f.tenant.String()},
+		{http.MethodPost, forcePath + "?tenant_id=" + f.tenant.String()},
+	} {
+		if r := f.js(stranger, route.method, route.path, ""); r.code != http.StatusNotFound {
+			t.Errorf("cross-tenant %s %s = %d, want 404", route.method, route.path, r.code)
+		}
+	}
+
+	if r := f.js(mgr, http.MethodPost, forcePath, ""); r.code != http.StatusNoContent {
+		t.Fatalf("force purge = %d %s, want 204", r.code, r.raw)
+	}
+	if got := f.js(mgr, http.MethodGet, tombstonesPath, ""); got.code != http.StatusOK || len(got.json()["items"].([]any)) != 0 {
+		t.Errorf("pending tombstones after purge = %d %s, want empty", got.code, got.raw)
+	}
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+			return tx.QueryRow(context.Background(), query, args...).Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(`SELECT count(*) FROM events WHERE $1 = ANY(sub_labels)`, name); n != 0 {
+		t.Errorf("events with purged name = %d, want 0", n)
+	}
+	if n := count(`SELECT count(*) FROM face_remote_cleanup WHERE tenant_id = $1 AND server_id = $2`, f.tenant, cam.ServerID); n != 1 {
+		t.Errorf("deferred cleanup obligations = %d, want 1", n)
+	}
+	if n := count(`SELECT count(*) FROM audit_log WHERE tenant_id = $1 AND actor_name LIKE 'purge-manager-%' AND action = $2`, f.tenant, faces.ActionPersonForcePurged); n != 1 {
+		t.Errorf("operator force-purge audit rows = %d, want 1", n)
+	}
+}
+
 func TestFacesAPIPlatformAdminNeedsNoTenantWhileThereIsOnlyOne(t *testing.T) {
 	f := newFaceAPI(t)
 	for _, path := range []string{

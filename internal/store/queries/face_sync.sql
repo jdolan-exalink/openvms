@@ -128,6 +128,17 @@ WHERE p.deleted_at IS NOT NULL
 ORDER BY p.deleted_at, p.id
 LIMIT @max_rows;
 
+-- name: ListPendingFaceTombstones :many
+-- Show managers only deleted persons that still have an owned face on a live server.
+SELECT p.id, p.display_name, p.deleted_at, count(*)::int AS pending_server_count
+FROM face_persons p
+JOIN face_server_sync f ON f.person_id = p.id AND f.tenant_id = p.tenant_id AND f.owned
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NOT NULL
+  AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
+GROUP BY p.id
+ORDER BY p.deleted_at, p.id;
+
 -- name: FaceTombstonePurgeable :one
 SELECT EXISTS (
     SELECT 1 FROM face_persons p

@@ -525,6 +525,50 @@ func (q *Queries) ListFaceSyncStatus(ctx context.Context, arg ListFaceSyncStatus
 	return items, nil
 }
 
+const listPendingFaceTombstones = `-- name: ListPendingFaceTombstones :many
+SELECT p.id, p.display_name, p.deleted_at, count(*)::int AS pending_server_count
+FROM face_persons p
+JOIN face_server_sync f ON f.person_id = p.id AND f.tenant_id = p.tenant_id AND f.owned
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+WHERE p.tenant_id = $1 AND p.deleted_at IS NOT NULL
+  AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
+GROUP BY p.id
+ORDER BY p.deleted_at, p.id
+`
+
+type ListPendingFaceTombstonesRow struct {
+	ID                 uuid.UUID
+	DisplayName        string
+	DeletedAt          *time.Time
+	PendingServerCount int32
+}
+
+// Show managers only deleted persons that still have an owned face on a live server.
+func (q *Queries) ListPendingFaceTombstones(ctx context.Context, tenantID uuid.UUID) ([]ListPendingFaceTombstonesRow, error) {
+	rows, err := q.db.Query(ctx, listPendingFaceTombstones, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingFaceTombstonesRow{}
+	for rows.Next() {
+		var i ListPendingFaceTombstonesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DisplayName,
+			&i.DeletedAt,
+			&i.PendingServerCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPurgeableFaceTombstones = `-- name: ListPurgeableFaceTombstones :many
 SELECT p.id, p.tenant_id, p.display_name, p.frigate_name, p.notes, p.created_by, p.updated_by, p.created_at, p.updated_at, p.deleted_at, p.sync_revision FROM face_persons p
 WHERE p.deleted_at IS NOT NULL

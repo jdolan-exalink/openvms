@@ -1616,6 +1616,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/faces/persons/tombstones": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List deleted persons with owned faces pending remote cleanup (faces.manage)
+         * @description Returns only the person's name and the count of live servers with pending cleanup.
+         */
+        get: operations["listPendingFaceTombstones"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/persons/{personId}/force-purge": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Force-purge a deleted person and queue remaining remote cleanup (faces.manage)
+         * @description Scrubs stored event labels and records cleanup obligations without contacting Frigate.
+         */
+        post: operations["forcePurgeFaceTombstone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/faces/persons/{personId}": {
         parameters: {
             query?: {
@@ -4636,6 +4682,14 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        FaceTombstone: {
+            /** Format: uuid */
+            id: string;
+            display_name: string;
+            /** Format: date-time */
+            deleted_at: string;
+            pending_server_count: number;
         };
         /**
          * @description The person's newest sighting on a camera the caller holds events.view on. Present only in
@@ -8900,6 +8954,60 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
+        };
+    };
+    listPendingFaceTombstones: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending face tombstones */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FaceTombstone"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    forcePurgeFaceTombstone: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tombstone purged; remote cleanup is queued where needed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     getFacePerson: {

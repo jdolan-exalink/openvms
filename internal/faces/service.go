@@ -90,6 +90,15 @@ type Person struct {
 	UpdatedAt    time.Time
 }
 
+// PendingTombstone is the minimal identifying data a manager needs to find a deleted person
+// whose owned face still needs remote cleanup.
+type PendingTombstone struct {
+	ID                 uuid.UUID
+	DisplayName        string
+	DeletedAt          time.Time
+	PendingServerCount int
+}
+
 // LastRecognition points at the event of a person's most recent sighting.
 type LastRecognition struct {
 	EventID      uuid.UUID
@@ -331,6 +340,26 @@ func (s *Service) ListPersons(ctx context.Context, actor authz.Actor, tenantID u
 			out = append(out, p)
 		}
 		return s.audit(ctx, q, actor, tenantID, ActionPersonRead, "face_person", uuid.Nil, map[string]any{"scope": "list", "count": len(out)})
+	})
+	return out, err
+}
+
+// ListPendingTombstones lists deleted persons with an owned, non-converged face on a live
+// server. It is manager-only because tombstones remain sensitive personal data.
+func (s *Service) ListPendingTombstones(ctx context.Context, actor authz.Actor, tenantID uuid.UUID) ([]PendingTombstone, error) {
+	out := []PendingTombstone{}
+	err := s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		rows, err := q.ListPendingFaceTombstones(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			if r.DeletedAt == nil {
+				return fmt.Errorf("pending face tombstone %s has no deletion time", r.ID)
+			}
+			out = append(out, PendingTombstone{ID: r.ID, DisplayName: r.DisplayName, DeletedAt: *r.DeletedAt, PendingServerCount: int(r.PendingServerCount)})
+		}
+		return s.audit(ctx, q, actor, tenantID, ActionPersonRead, "face_person", uuid.Nil, map[string]any{"pending_tombstones": len(out)})
 	})
 	return out, err
 }

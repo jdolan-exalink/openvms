@@ -2025,6 +2025,45 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/persons/tombstones:
+    parameters:
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [faces]
+      operationId: listPendingFaceTombstones
+      summary: List deleted persons with owned faces pending remote cleanup (faces.manage)
+      description: Returns only the person's name and the count of live servers with pending cleanup.
+      responses:
+        "200":
+          description: Pending face tombstones
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/FaceTombstone" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/persons/{personId}/force-purge:
+    parameters:
+      - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    post:
+      tags: [faces]
+      operationId: forcePurgeFaceTombstone
+      summary: Force-purge a deleted person and queue remaining remote cleanup (faces.manage)
+      description: Scrubs stored event labels and records cleanup obligations without contacting Frigate.
+      responses:
+        "204": { description: Tombstone purged; remote cleanup is queued where needed. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/faces/persons/{personId}:
     parameters:
       - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -5923,6 +5962,14 @@ components:
         first_image_id: { type: string, format: uuid, description: "Oldest enrollment image; present only in the person list, to render a card thumbnail without one request per person." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    FaceTombstone:
+      type: object
+      required: [id, display_name, deleted_at, pending_server_count]
+      properties:
+        id: { type: string, format: uuid }
+        display_name: { type: string }
+        deleted_at: { type: string, format: date-time }
+        pending_server_count: { type: integer, minimum: 1 }
     FaceLastRecognition:
       type: object
       description: |

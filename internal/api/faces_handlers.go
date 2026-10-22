@@ -79,6 +79,22 @@ func (h *Handlers) ListFacePersons(ctx context.Context, r gen.ListFacePersonsReq
 	return out, nil
 }
 
+func (h *Handlers) ListPendingFaceTombstones(ctx context.Context, r gen.ListPendingFaceTombstonesRequestObject) (gen.ListPendingFaceTombstonesResponseObject, error) {
+	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	if err != nil {
+		return nil, err
+	}
+	list, err := h.Faces.ListPendingTombstones(ctx, a, tenant)
+	if err != nil {
+		return nil, err
+	}
+	out := gen.ListPendingFaceTombstones200JSONResponse{Items: make([]gen.FaceTombstone, 0, len(list))}
+	for _, p := range list {
+		out.Items = append(out.Items, gen.FaceTombstone{Id: p.ID, DisplayName: p.DisplayName, DeletedAt: p.DeletedAt, PendingServerCount: p.PendingServerCount})
+	}
+	return out, nil
+}
+
 func (h *Handlers) CreateFacePerson(ctx context.Context, r gen.CreateFacePersonRequestObject) (gen.CreateFacePersonResponseObject, error) {
 	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
 	if err != nil {
@@ -135,6 +151,19 @@ func (h *Handlers) DeleteFacePerson(ctx context.Context, r gen.DeleteFacePersonR
 		return nil, err
 	}
 	return gen.DeleteFacePerson204Response{}, nil
+}
+
+func (h *Handlers) ForcePurgeFaceTombstone(ctx context.Context, r gen.ForcePurgeFaceTombstoneRequestObject) (gen.ForcePurgeFaceTombstoneResponseObject, error) {
+	// facePersonCaller intentionally cannot resolve tombstones because ordinary person detail hides
+	// them. Resolve tenant scope first, then let the service return the same 404 for active/missing IDs.
+	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.Faces.ForcePurgeTombstone(ctx, a, tenant, r.PersonId); err != nil {
+		return nil, err
+	}
+	return gen.ForcePurgeFaceTombstone204Response{}, nil
 }
 
 func (h *Handlers) ListFaceImages(ctx context.Context, r gen.ListFaceImagesRequestObject) (gen.ListFaceImagesResponseObject, error) {
