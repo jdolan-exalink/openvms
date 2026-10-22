@@ -303,6 +303,7 @@ func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, 
 		mux.HandleFunc("POST /v1/onvif/sync-time", opsHandler.HandleSyncTime)
 		mux.HandleFunc("POST /v1/onvif/ptz", opsHandler.HandlePTZ)
 		mux.HandleFunc("POST /v1/onvif/video-config", opsHandler.HandleVideoConfig)
+		mux.HandleFunc("POST /v1/onvif/video-encoding", opsHandler.HandleVideoEncoding)
 		mux.HandleFunc("POST /v1/onvif/imaging", opsHandler.HandleImaging)
 	}
 	if lprHandler != nil {
