@@ -79,15 +79,33 @@ export function useCameraFaces(cameraId: string, enabled = true) {
   });
 }
 
-const COLLAPSED_KEY = "openvms.lprOverlay.collapsed";
+const COLLAPSED_KEY = "openvms.detectionOverlay.collapsed";
 const listeners = new Set<() => void>();
+/** Choices the browser refused to store (blocked storage): kept for the session, on top of what is stored. */
+const unsaved = new Map<string, boolean>();
 
-function readCollapsed(): boolean {
+function readStored(): string {
   try {
-    return localStorage.getItem(COLLAPSED_KEY) === "1";
+    return localStorage.getItem(COLLAPSED_KEY) ?? "[]";
   } catch {
-    return false;
+    return "[]";
   }
+}
+
+function collapsedIds(raw: string): Set<string> {
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/** The collapsed camera ids as one string, so useSyncExternalStore can compare snapshots by value. */
+function readRaw(): string {
+  const ids = collapsedIds(readStored());
+  unsaved.forEach((collapsed, id) => (collapsed ? ids.add(id) : ids.delete(id)));
+  return JSON.stringify([...ids].sort());
 }
 
 function subscribe(listener: () => void) {
@@ -97,17 +115,26 @@ function subscribe(listener: () => void) {
   };
 }
 
-function setCollapsed(next: boolean) {
+function setCollapsed(cameraId: string, next: boolean) {
+  const ids = collapsedIds(readRaw());
+  if (next) ids.add(cameraId);
+  else ids.delete(cameraId);
   try {
-    localStorage.setItem(COLLAPSED_KEY, next ? "1" : "0");
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids].sort()));
+    unsaved.clear();
   } catch {
-    // Storage can be blocked; the choice then only lasts until the next render.
+    unsaved.set(cameraId, next);
   }
   listeners.forEach((l) => l());
 }
 
-/** Whether the user collapsed the plate list. Shared by every overlay, persisted in localStorage. */
-export function useLprOverlayCollapsed(): [boolean, (next: boolean) => void] {
-  const collapsed = useSyncExternalStore(subscribe, readCollapsed, () => false);
-  return [collapsed, setCollapsed];
+/**
+ * Whether the user hid this camera's detections list. Each camera keeps its own choice, persisted
+ * in localStorage, so opening one tile's list does not open the rest.
+ */
+export function useOverlayCollapsed(cameraId: string): [boolean, (next: boolean) => void] {
+  const raw = useSyncExternalStore(subscribe, readRaw, () => "[]");
+  const collapsed = collapsedIds(raw).has(cameraId);
+  const set = useCallback((next: boolean) => setCollapsed(cameraId, next), [cameraId]);
+  return [collapsed, set];
 }

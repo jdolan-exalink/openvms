@@ -11,7 +11,7 @@ Decisions:
   latest face events (not one per tile), grouped by camera, enabled only with `events.view`.
 - One overlay component for both kinds. With both, a tab bar picks the list; plates come first and the
   user's choice sticks (a default that follows the newest detection would jump tabs on every refresh).
-  Collapse state stays shared.
+  Hiding the list is remembered per camera (a shared state opened or closed every tile at once).
 - Known limit: faces come from the latest 200 face events across all cameras, so on a busy tenant a
   quiet camera can fall out of that window and lose its panel.
 - The same rule applies in Live, saved Vision AI tiles and the Vision AI page.
