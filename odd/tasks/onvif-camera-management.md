@@ -17,7 +17,7 @@ Deliver capability-driven ONVIF agent/API management, safe Frigate sync and audi
 - **Outcome:** capability-driven ONVIF discovery/configuration and safe Frigate lifecycle across media, imaging, time/network, PTZ/audio and events.
 - **Scope:** agent/API/UI with fakes; SSH/physical operations need separate destination, operation and credential authorization.
 - **Safety:** stable IDs/tombstones; encrypted write-only secrets; bounded audited/read-back mutations; preserve recordings, confirm discard, no factory reset.
-- **Delivery/TDD:** `ask-on-risk`, approved `stacked-to-main`; no push/PR/merge. Conventional commits include tests/docs. Strict RED/GREEN/REFACTOR must be observed; 400 lines advisory only.
+- **Delivery/TDD:** `auto-chain`, `stacked-to-main`. The user authorized local backlog implementation and PR delivery through the configured GitHub session for this closeout; remote device/host operations remain separately gated. Conventional commits include tests/docs. Strict RED/GREEN/REFACTOR must be observed; 400 lines advisory only.
 
 ## Baseline and current state
 
@@ -35,8 +35,7 @@ Implement in dependency order. Each delegated work unit closes with checks, Conv
 - [ ] **ONVIF-02 — Core discovery and device information.** Discover devices/services and read device information through the agent; expose API results without leaking credentials; map discovered devices to stable VMS identity.
   - [x] Credential-free Cameras-route discovery UI slice: managed-server and explicit-interface selection, API relay request, safe endpoint list, pending/empty/error states; devices are clearly not yet added. Focused UI and full web-suite proof recorded below. This does not complete ONVIF-02.
   - [x] Stable identity guard: auto-match only an exact known ONVIF endpoint scoped to the selected server; host/name resemblance no longer binds a discovered endpoint. Explicit camera UUID selection remains available. Focused regression tests pass; physical camera acceptance remains open.
-- [ ] **ONVIF-03 — Media2 with Media1 fallback and profiles.** Discover Media2 first where supported, fall back to Media1, enumerate streams/profiles and preserve profile identity/capability metadata.
-  - [x] Media2-first discovery, Media1 fallback, profile enumeration, and API relay delivered in #163/#164 (`e82ac06`, `6ba0782`). Physical-camera interoperability remains unverified.
+- [x] **ONVIF-03 — Media2 with Media1 fallback and profiles.** Core implementation (`c28715b`, credential-path fix `8d92cdb`) and API relay/schema slice (`43b3cca`) are delivered through PRs #163/#164 (both merged: `e82ac06`, `6ba0782`). Media2 is preferred, unsupported operations fall back to Media1, profile metadata is retained, and credential-bearing URIs including percent-encoded path credentials are omitted. Physical-camera interoperability remains open.
 - [ ] **ONVIF-04 — Snapshot and stream source management.** Retrieve snapshots and represent stream URIs/options safely; redact credential-bearing URIs and avoid persisting derived secrets in logs or browser state.
   - [x] Media1 snapshot-URI lookup primitive for a selected profile delivered in #167 (`9bb1f27`). Authenticated image retrieval, transport policy, and stream-source handling remain open.
 - [ ] **ONVIF-05 — Add, edit, delete, manifest, and health.** Implement camera manifest/state reconciliation and CRUD through API/agent; synchronize Frigate additions/edits/removals; retain stable IDs and deletion tombstones to prevent reimport. Health/readiness surfaces device and protocol state. Delete preserves recordings by default; discard requires explicit confirmation and must fail closed if the disposition is missing/invalid. Never factory-reset a device.

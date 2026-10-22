@@ -4007,6 +4007,28 @@ export interface components {
             device_information: components["schemas"]["OnvifProbeDeviceInformation"];
             services: components["schemas"]["OnvifProbeService"][];
             system_time: components["schemas"]["OnvifProbeClock"];
+            profiles?: components["schemas"]["OnvifProbeProfile"][];
+        };
+        OnvifProbeProfile: {
+            /** @description Camera-assigned stable identity for this stream profile. */
+            token: string;
+            name: string;
+            /** @description Whether the device marks this profile as fixed. */
+            fixed: boolean;
+            /** @enum {string} */
+            media_version: "1.0" | "2.0";
+            source_configuration_token: string;
+            encoder_configuration_token: string;
+            ptz_configuration_token: string;
+            encoding: string;
+            width: number;
+            height: number;
+            /** @description Integer compatibility view of the advertised frame rate. */
+            fps: number;
+            frame_rate: number;
+            bitrate: number;
+            /** @description RTSP URI with user information and query parameters removed. */
+            stream_uri: string;
         };
         OnvifProbeDeviceInformation: {
             manufacturer: string;
