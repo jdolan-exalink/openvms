@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -334,7 +335,8 @@ func TestDeviceProbePrefersMedia2AndFallsBackWhenUnsupported(t *testing.T) {
 					operation = `<trt:GetProfilesResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl"><trt:Profiles token="legacy-profile" fixed="true"><tt:Name xmlns:tt="http://www.onvif.org/ver10/schema">Legacy</tt:Name><tt:VideoSourceConfiguration xmlns:tt="http://www.onvif.org/ver10/schema" token="legacy-source"/><tt:VideoEncoderConfiguration xmlns:tt="http://www.onvif.org/ver10/schema" token="legacy-encoder"><tt:Encoding>H264</tt:Encoding><tt:Resolution><tt:Width>1920</tt:Width><tt:Height>1080</tt:Height></tt:Resolution><tt:RateControl><tt:FrameRateLimit>30</tt:FrameRateLimit><tt:BitrateLimit>4096</tt:BitrateLimit></tt:RateControl></tt:VideoEncoderConfiguration><tt:PTZConfiguration xmlns:tt="http://www.onvif.org/ver10/schema" token="legacy-ptz"/></trt:Profiles></trt:GetProfilesResponse>`
 				case strings.Contains(request, "GetStreamUri"):
 					if strings.Contains(request, "tr2:GetStreamUri") {
-						operation = `<tr2:GetStreamUriResponse xmlns:tr2="http://www.onvif.org/ver20/media/wsdl"><tr2:Uri>rtsp://admin:camera-secret@192.0.2.10/main?password=camera-secret</tr2:Uri></tr2:GetStreamUriResponse>`
+						streamURI := "rtsp://" + url.UserPassword("admin", "camera-secret").String() + "@192.0.2.10/main?x=camera-secret"
+						operation = `<tr2:GetStreamUriResponse xmlns:tr2="http://www.onvif.org/ver20/media/wsdl"><tr2:Uri>` + streamURI + `</tr2:Uri></tr2:GetStreamUriResponse>`
 					} else {
 						operation = `<trt:GetStreamUriResponse xmlns:trt="http://www.onvif.org/ver10/media/wsdl"><trt:MediaUri><tt:Uri xmlns:tt="http://www.onvif.org/ver10/schema">rtsp://192.0.2.10/legacy</tt:Uri></trt:MediaUri></trt:GetStreamUriResponse>`
 					}
@@ -392,7 +394,7 @@ func TestDeviceProbePrefersMedia2AndFallsBackWhenUnsupported(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, secret := range []string{"admin", "camera-secret", "password="} {
+			for _, secret := range []string{"admin", "camera-secret", "?x="} {
 				if strings.Contains(string(jsonResult), secret) {
 					t.Errorf("projected profile leaked %q: %s", secret, jsonResult)
 				}
