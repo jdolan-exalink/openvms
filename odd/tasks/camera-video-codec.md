@@ -25,6 +25,6 @@ Decisions:
 
 - [x] 1. Backend: read stream codecs from go2rtc, store them per camera, refresh them, expose
       `live_codec` / `hq_codec` in the camera API.
-- [ ] 2. Web: "H.265" badge on Live tiles with an explanatory tooltip.
+- [x] 2. Web: "H.265" badge on Live tiles with an explanatory tooltip.
 - [ ] 3. (separate PR) Camera settings: supported encodings over ONVIF (Media1 + Media2) and a
       change-to-H.264 action, enabled only when the camera supports it.
