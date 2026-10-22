@@ -1,5 +1,5 @@
 import { useT } from "@/i18n";
-import { agentInstallFailureText } from "@/lib/agentJobs/failureText";
+import { agentInstallFailureText, safeAgentVersion } from "@/lib/agentJobs/failureText";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, AlertTriangle, ArrowDown, ArrowUp, Camera, Check, Copy, Pencil, Plus, RefreshCw, RotateCcw, Settings, Terminal, Trash2 } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
@@ -1159,8 +1159,31 @@ function AgentInstallDialog({
                   : (snapshot.message || t("servers.agentInstallFailedCheckHost")))}
               </p>
               <div className="flex flex-wrap items-center justify-end gap-2">
+                {snapshot.code === "agent_already_installed" && (
+                  <Button
+                    variant="primary"
+                    onClick={() => {
+                      setDismissedJobId(snapshot.id ?? job?.id ?? "dismissed");
+                      setAcceptedAt(null);
+                      setForm((current) => ({ ...current, replaceConfirmed: false }));
+                      setDiscoveryFailed(false);
+                      setDiscoveryResult({
+                        state: "present",
+                        ownership: snapshot.registered_here ? "registered_here" : "unknown",
+                        ...(safeAgentVersion(snapshot.installed_version) ? { version: safeAgentVersion(snapshot.installed_version) } : {}),
+                      });
+                      onStart();
+                      setTimeout(() => {
+                        passwordInputRef.current?.focus();
+                      }, 50);
+                    }}
+                  >
+                    <Icon icon={RefreshCw} size="xs" />
+                    {t("servers.agentInstallReinstallExisting")}
+                  </Button>
+                )}
                 <Button
-                  variant="primary"
+                  variant={snapshot.code === "agent_already_installed" ? "outlined" : "primary"}
                   onClick={() => {
                     const currentId = snapshot?.id ?? job?.id;
                     if (currentId) {
