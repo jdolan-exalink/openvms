@@ -30,7 +30,7 @@ first real change must be done on one camera, with the owner's explicit go-ahead
 
 ## Slices
 
-- [ ] 1. Media2 client + `PlanEncodingChange` (pure, fixture-tested).
+- [x] 1. Media2 client + `PlanEncodingChange` (pure, fixture-tested).
 - [ ] 2. Agent endpoint (options / set) with service discovery.
 - [ ] 3. Provision service + API + OpenAPI.
 - [ ] 4. Camera settings UI.
