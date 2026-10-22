@@ -2,8 +2,12 @@ package onvifdiscover
 
 import (
 	"bytes"
+	"image"
+	"image/jpeg"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -77,4 +81,50 @@ func TestOpsHandlerAuthAndEndpointValidation(t *testing.T) {
 			t.Errorf("status = %d, want 401", rec.Code)
 		}
 	})
+
+	t.Run("snapshot unauthorized", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/onvif/snapshot", bytes.NewReader([]byte(`{}`)))
+		rec := httptest.NewRecorder()
+		handler.HandleSnapshot(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", rec.Code)
+		}
+	})
+}
+
+func TestHandleSnapshotReturnsOnlyJPEGBytes(t *testing.T) {
+	const snapshotURI = "http://192.168.1.20/private-camera-path/snapshot.jpg?token=hidden"
+	var jpegBody bytes.Buffer
+	if err := jpeg.Encode(&jpegBody, image.NewRGBA(image.Rect(0, 0, 1, 1)), nil); err != nil {
+		t.Fatal(err)
+	}
+	jpeg := jpegBody.Bytes()
+	soap := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema"><s:Body><trt:GetSnapshotUriResponse><trt:MediaUri><tt:Uri>` + snapshotURI + `</tt:Uri></trt:MediaUri></trt:GetSnapshotUriResponse></s:Body></s:Envelope>`
+	soapCalls, snapshotCalls := 0, 0
+	handler, err := NewOpsHandler("secret-agent-token", Config{AllowedCIDRs: []string{"192.168.1.0/24"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler.onvifTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		soapCalls++
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(soap))}, nil
+	})
+	handler.snapshotTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		snapshotCalls++
+		if r.URL.String() != snapshotURI {
+			t.Errorf("snapshot request URL = %q, want camera URI", r.URL.String())
+		}
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"image/jpeg"}}, Body: io.NopCloser(bytes.NewReader(jpeg)), Request: r}, nil
+	})
+	req := httptest.NewRequest(http.MethodPost, "/v1/onvif/snapshot", strings.NewReader(`{"endpoint":"http://192.168.1.20/onvif/device_service","profile_token":"main"}`))
+	req.Header.Set("Authorization", "Bearer secret-agent-token")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.HandleSnapshot(rec, req)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "image/jpeg" || !bytes.Equal(rec.Body.Bytes(), jpeg) {
+		t.Fatalf("response status=%d headers=%v body=%x", rec.Code, rec.Header(), rec.Body.Bytes())
+	}
+	if strings.Contains(rec.Body.String(), snapshotURI) || soapCalls != 1 || snapshotCalls != 1 {
+		t.Fatalf("snapshot URI leaked or unexpected call counts: soap=%d snapshot=%d body=%q", soapCalls, snapshotCalls, rec.Body.String())
+	}
 }

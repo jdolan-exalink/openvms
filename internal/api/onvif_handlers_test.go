@@ -59,6 +59,16 @@ func TestCheckOnvifRoutesAreRegisteredAndRequireActor(t *testing.T) {
 		}
 	})
 
+	t.Run("get_camera_onvif_snapshot", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/cameras/11111111-1111-1111-1111-111111111111/onvif/snapshot", strings.NewReader(`{"profile_token":"main"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rw := httptest.NewRecorder()
+		router.ServeHTTP(rw, req)
+		if rw.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d body=%s; want unauthorized", rw.Code, rw.Body.String())
+		}
+	})
+
 	t.Run("control_camera_onvif_ptz", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/cameras/11111111-1111-1111-1111-111111111111/onvif/ptz", strings.NewReader(`{"action":"stop"}`))
 		req.Header.Set("Content-Type", "application/json")

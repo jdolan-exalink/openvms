@@ -1227,6 +1227,30 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/onvif/snapshot:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: getCameraOnvifSnapshot
+      summary: Retrieve a camera snapshot through its edge agent
+      description: Downloads one JPEG from the selected camera. The camera snapshot URI remains inside the edge agent. Requires cameras.manage and access to camera configuration secrets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraOnvifSnapshotRequest" }
+      responses:
+        "200":
+          description: Camera snapshot JPEG
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/onvif/sync-time:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -5070,6 +5094,15 @@ components:
         camera: { $ref: "#/components/schemas/Camera" }
         revision_id: { type: string, format: uuid }
         restart_required: { type: boolean }
+    CameraOnvifSnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [profile_token]
+      properties:
+        endpoint: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 128 }
+        password: { type: string, maxLength: 256, writeOnly: true }
+        profile_token: { type: string, minLength: 1, maxLength: 128 }
     CameraOnvifSyncTimeRequest:
       type: object
       additionalProperties: false

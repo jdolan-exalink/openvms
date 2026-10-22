@@ -1024,6 +1024,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/onvif/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retrieve a camera snapshot through its edge agent
+         * @description Downloads one JPEG from the selected camera. The camera snapshot URI remains inside the edge agent. Requires cameras.manage and access to camera configuration secrets.
+         */
+        post: operations["getCameraOnvifSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/onvif/sync-time": {
         parameters: {
             query?: never;
@@ -3876,6 +3898,12 @@ export interface components {
             /** Format: uuid */
             revision_id: string;
             restart_required: boolean;
+        };
+        CameraOnvifSnapshotRequest: {
+            endpoint?: string;
+            username?: string;
+            password?: string;
+            profile_token: string;
         };
         CameraOnvifSyncTimeRequest: {
             endpoint?: string;
@@ -7891,6 +7919,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Camera"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getCameraOnvifSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraOnvifSnapshotRequest"];
+            };
+        };
+        responses: {
+            /** @description Camera snapshot JPEG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
                 };
             };
             400: components["responses"]["BadRequest"];
