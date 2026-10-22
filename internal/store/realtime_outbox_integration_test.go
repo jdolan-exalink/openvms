@@ -155,3 +155,206 @@ func TestRealtimePublicationOutboxLifecycle(t *testing.T) {
 }
 
 func outboxStringPtr(v string) *string { return &v }
+
+func TestRealtimePublicationAggregateClaimOrdering(t *testing.T) {
+	ctx := context.Background()
+	env := demofix.Setup(t)
+	tenantID := env.Demo.TenantID
+	aggregateKey := "alarm/" + uuid.NewString()
+	var firstID, secondID, unrelatedID, independentID uuid.UUID
+
+	err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		q := db.New(tx)
+		rows := []struct {
+			id  uuid.UUID
+			key *string
+		}{
+			{firstID, &aggregateKey},
+			{secondID, &aggregateKey},
+			{unrelatedID, outboxStringPtr("alarm/" + uuid.NewString())},
+			{independentID, nil},
+		}
+		for i, row := range rows {
+			created, err := q.EnqueueRealtimePublication(ctx, db.EnqueueRealtimePublicationParams{
+				TenantID: tenantID, Subject: "alarm.opened." + tenantID.String(), Payload: json.RawMessage(`{}`), AggregateKey: row.key,
+			})
+			if err != nil {
+				return err
+			}
+			if i == 0 {
+				firstID = created.ID
+			}
+			if i == 1 {
+				secondID = created.ID
+			}
+			if i == 2 {
+				unrelatedID = created.ID
+			}
+			if i == 3 {
+				independentID = created.ID
+			}
+			if i == 0 && (created.AggregateSequence == nil || *created.AggregateSequence != 1) {
+				t.Fatalf("first aggregate sequence = %v; want 1", created.AggregateSequence)
+			}
+			if i == 1 && (created.AggregateSequence == nil || *created.AggregateSequence != 2) {
+				t.Fatalf("second aggregate sequence = %v; want 2", created.AggregateSequence)
+			}
+			if i == 3 && (created.AggregateKey != nil || created.AggregateSequence != nil) {
+				t.Fatalf("NULL aggregate metadata = %v/%v; want nil/nil", created.AggregateKey, created.AggregateSequence)
+			}
+			if _, err := tx.Exec(ctx, `UPDATE realtime_publication_outbox SET available_at=now() - ((10 - $2) * interval '1 second') WHERE id=$1`, created.ID, i); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Hold the first aggregate row locked in replica one while replica two claims.
+	firstReplica, err := env.Store.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstReplica.Rollback(ctx)
+	if _, err := firstReplica.Exec(ctx, `SELECT set_config('app.all_tenants', 'on', true)`); err != nil {
+		t.Fatal(err)
+	}
+	firstRows, err := db.New(firstReplica).ClaimRealtimePublications(ctx, db.ClaimRealtimePublicationsParams{LeaseSeconds: 30, MaxRows: 1, MaxAttempts: 3})
+	if err != nil || len(firstRows) != 1 || firstRows[0].ID != firstID {
+		t.Fatalf("replica one claim = %+v, %v; first=%s second=%s unrelated=%s independent=%s", firstRows, err, firstID, secondID, unrelatedID, independentID)
+	}
+
+	secondReplica, err := env.Store.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := secondReplica.Exec(ctx, `SELECT set_config('app.all_tenants', 'on', true)`); err != nil {
+		t.Fatal(err)
+	}
+	secondRows, err := db.New(secondReplica).ClaimRealtimePublications(ctx, db.ClaimRealtimePublicationsParams{LeaseSeconds: 30, MaxRows: 10, MaxAttempts: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed := make(map[uuid.UUID]bool, len(secondRows))
+	for _, row := range secondRows {
+		claimed[row.ID] = true
+	}
+	if claimed[secondID] || !claimed[unrelatedID] || !claimed[independentID] {
+		t.Fatalf("replica two claims = %v; want no later aggregate row and unrelated/NULL rows", claimed)
+	}
+	if err := secondReplica.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := firstReplica.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// A terminally failed predecessor is terminal and must release its successor.
+	if err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE realtime_publication_outbox SET status='failed', lease_until=NULL, lease_token=NULL WHERE id=$1`, firstID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		rows, err := db.New(tx).ClaimRealtimePublications(ctx, db.ClaimRealtimePublicationsParams{LeaseSeconds: 30, MaxRows: 1, MaxAttempts: 3})
+		if err != nil {
+			return err
+		}
+		if len(rows) != 1 || rows[0].ID != secondID {
+			t.Fatalf("claim after terminal predecessor = %+v; want successor %s", rows, secondID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRealtimePublicationConcurrentEnqueueSequencesFollowLockOrder(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	env := demofix.Setup(t)
+	tenantID := env.Demo.TenantID
+	key := "alarm/" + uuid.NewString()
+	params := db.EnqueueRealtimePublicationParams{
+		TenantID: tenantID, Subject: "alarm.updated." + tenantID.String(),
+		Payload: json.RawMessage(`{}`), AggregateKey: &key,
+	}
+
+	firstTx, err := env.Store.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstTx.Rollback(ctx)
+	if _, err := firstTx.Exec(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID.String()); err != nil {
+		t.Fatal(err)
+	}
+	first, err := db.New(firstTx).EnqueueRealtimePublication(ctx, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.AggregateSequence == nil || *first.AggregateSequence != 1 {
+		t.Fatalf("first sequence = %v; want 1", first.AggregateSequence)
+	}
+
+	secondTx, err := env.Store.Pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondTx.Rollback(ctx)
+	if _, err := secondTx.Exec(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID.String()); err != nil {
+		t.Fatal(err)
+	}
+	var secondPID int
+	if err := secondTx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&secondPID); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan struct {
+		row db.RealtimePublicationOutbox
+		err error
+	}, 1)
+	go func() {
+		row, err := db.New(secondTx).EnqueueRealtimePublication(ctx, params)
+		result <- struct {
+			row db.RealtimePublicationOutbox
+			err error
+		}{row: row, err: err}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	locked := false
+	for time.Now().Before(deadline) {
+		var hasUngrantedLock bool
+		if err := firstTx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks WHERE pid=$1 AND NOT granted)`, secondPID).Scan(&hasUngrantedLock); err != nil {
+			t.Fatal(err)
+		}
+		if hasUngrantedLock {
+			locked = true
+			break
+		}
+		select {
+		case outcome := <-result:
+			t.Fatalf("second enqueue completed before aggregate lock wait: row=%+v err=%v", outcome.row, outcome.err)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if !locked {
+		t.Fatal("second transaction never waited on the first transaction's aggregate lock")
+	}
+
+	if err := firstTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	outcome := <-result
+	if outcome.err != nil {
+		t.Fatal(outcome.err)
+	}
+	if outcome.row.AggregateSequence == nil || *outcome.row.AggregateSequence != 2 {
+		t.Fatalf("second sequence = %v; want 2 after first transaction acquired the lock", outcome.row.AggregateSequence)
+	}
+	if err := secondTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+}

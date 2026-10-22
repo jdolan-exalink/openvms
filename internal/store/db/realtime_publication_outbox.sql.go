@@ -28,11 +28,18 @@ WHERE publication.id IN (
     WHERE queued.attempts < $2
       AND ((queued.status = 'pending' AND queued.available_at <= now())
         OR (queued.status = 'processing' AND queued.lease_until <= now()))
+      AND (queued.aggregate_key IS NULL OR NOT EXISTS (
+          SELECT 1 FROM realtime_publication_outbox AS prior
+          WHERE prior.tenant_id = queued.tenant_id
+            AND prior.aggregate_key = queued.aggregate_key
+            AND prior.aggregate_sequence < queued.aggregate_sequence
+            AND prior.status IN ('pending', 'processing')
+      ))
     ORDER BY queued.available_at, queued.created_at, queued.id
     LIMIT $3
     FOR UPDATE SKIP LOCKED
 )
-RETURNING publication.id, publication.tenant_id, publication.subject, publication.payload, publication.status, publication.attempts, publication.available_at, publication.lease_until, publication.lease_token, publication.last_error, publication.created_at, publication.sent_at, publication.updated_at
+RETURNING publication.id, publication.tenant_id, publication.subject, publication.payload, publication.status, publication.attempts, publication.available_at, publication.lease_until, publication.lease_token, publication.last_error, publication.created_at, publication.sent_at, publication.updated_at, publication.aggregate_key, publication.aggregate_sequence
 `
 
 type ClaimRealtimePublicationsParams struct {
@@ -64,6 +71,8 @@ func (q *Queries) ClaimRealtimePublications(ctx context.Context, arg ClaimRealti
 			&i.CreatedAt,
 			&i.SentAt,
 			&i.UpdatedAt,
+			&i.AggregateKey,
+			&i.AggregateSequence,
 		); err != nil {
 			return nil, err
 		}
@@ -76,19 +85,34 @@ func (q *Queries) ClaimRealtimePublications(ctx context.Context, arg ClaimRealti
 }
 
 const enqueueRealtimePublication = `-- name: EnqueueRealtimePublication :one
-INSERT INTO realtime_publication_outbox (tenant_id, subject, payload)
-VALUES ($1, $2, $3)
-RETURNING id, tenant_id, subject, payload, status, attempts, available_at, lease_until, lease_token, last_error, created_at, sent_at, updated_at
+WITH aggregate AS (
+    INSERT INTO realtime_publication_aggregate_sequences (tenant_id, aggregate_key, last_sequence)
+    SELECT $1, $4::text, 1
+    WHERE $4::text IS NOT NULL
+    ON CONFLICT (tenant_id, aggregate_key)
+    DO UPDATE SET last_sequence = realtime_publication_aggregate_sequences.last_sequence + 1
+    RETURNING last_sequence
+)
+INSERT INTO realtime_publication_outbox (tenant_id, subject, payload, aggregate_key, aggregate_sequence)
+VALUES ($1, $2, $3, $4::text, (SELECT last_sequence FROM aggregate))
+RETURNING id, tenant_id, subject, payload, status, attempts, available_at, lease_until, lease_token, last_error, created_at, sent_at, updated_at, aggregate_key, aggregate_sequence
 `
 
 type EnqueueRealtimePublicationParams struct {
-	TenantID uuid.UUID
-	Subject  string
-	Payload  json.RawMessage
+	TenantID     uuid.UUID
+	Subject      string
+	Payload      json.RawMessage
+	AggregateKey *string
 }
 
+// Updating the tenant/aggregate counter serializes concurrent enqueues until their transactions commit.
 func (q *Queries) EnqueueRealtimePublication(ctx context.Context, arg EnqueueRealtimePublicationParams) (RealtimePublicationOutbox, error) {
-	row := q.db.QueryRow(ctx, enqueueRealtimePublication, arg.TenantID, arg.Subject, arg.Payload)
+	row := q.db.QueryRow(ctx, enqueueRealtimePublication,
+		arg.TenantID,
+		arg.Subject,
+		arg.Payload,
+		arg.AggregateKey,
+	)
 	var i RealtimePublicationOutbox
 	err := row.Scan(
 		&i.ID,
@@ -104,6 +128,8 @@ func (q *Queries) EnqueueRealtimePublication(ctx context.Context, arg EnqueueRea
 		&i.CreatedAt,
 		&i.SentAt,
 		&i.UpdatedAt,
+		&i.AggregateKey,
+		&i.AggregateSequence,
 	)
 	return i, err
 }

@@ -1,6 +1,15 @@
 -- name: EnqueueRealtimePublication :one
-INSERT INTO realtime_publication_outbox (tenant_id, subject, payload)
-VALUES (@tenant_id, @subject, @payload)
+-- Updating the tenant/aggregate counter serializes concurrent enqueues until their transactions commit.
+WITH aggregate AS (
+    INSERT INTO realtime_publication_aggregate_sequences (tenant_id, aggregate_key, last_sequence)
+    SELECT @tenant_id, sqlc.narg(aggregate_key)::text, 1
+    WHERE sqlc.narg(aggregate_key)::text IS NOT NULL
+    ON CONFLICT (tenant_id, aggregate_key)
+    DO UPDATE SET last_sequence = realtime_publication_aggregate_sequences.last_sequence + 1
+    RETURNING last_sequence
+)
+INSERT INTO realtime_publication_outbox (tenant_id, subject, payload, aggregate_key, aggregate_sequence)
+VALUES (@tenant_id, @subject, @payload, sqlc.narg(aggregate_key)::text, (SELECT last_sequence FROM aggregate))
 RETURNING *;
 
 -- name: ClaimRealtimePublications :many
@@ -19,6 +28,13 @@ WHERE publication.id IN (
     WHERE queued.attempts < @max_attempts
       AND ((queued.status = 'pending' AND queued.available_at <= now())
         OR (queued.status = 'processing' AND queued.lease_until <= now()))
+      AND (queued.aggregate_key IS NULL OR NOT EXISTS (
+          SELECT 1 FROM realtime_publication_outbox AS prior
+          WHERE prior.tenant_id = queued.tenant_id
+            AND prior.aggregate_key = queued.aggregate_key
+            AND prior.aggregate_sequence < queued.aggregate_sequence
+            AND prior.status IN ('pending', 'processing')
+      ))
     ORDER BY queued.available_at, queued.created_at, queued.id
     LIMIT @max_rows
     FOR UPDATE SKIP LOCKED
