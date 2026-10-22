@@ -28,6 +28,9 @@ func TestRuleEvaluationWorkerProcessesEventAndFaceUpdateJobs(t *testing.T) {
 	var eventJobID uuid.UUID
 	var payload []byte
 	err := f.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE rule_evaluation_jobs SET status='completed' WHERE event_id<>$1 AND status='pending'`, eventID); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx, `SELECT id, payload FROM rule_evaluation_jobs WHERE event_id=$1 AND evaluation_kind='event'`, eventID).Scan(&eventJobID, &payload); err != nil {
 			return err
 		}
@@ -111,6 +114,9 @@ func TestRuleEvaluationWorkerRollsBackEffectsAndFailsAfterBoundedRetries(t *test
 	var jobID uuid.UUID
 	var invalidCameraID uuid.UUID
 	err := f.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE rule_evaluation_jobs SET status='completed' WHERE event_id<>$1 AND status='pending'`, eventID); err != nil {
+			return err
+		}
 		var payload []byte
 		if err := tx.QueryRow(ctx, `SELECT id, payload FROM rule_evaluation_jobs WHERE event_id=$1 AND evaluation_kind='event'`, eventID).Scan(&jobID, &payload); err != nil {
 			return err

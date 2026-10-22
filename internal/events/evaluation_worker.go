@@ -23,12 +23,12 @@ const (
 	ruleEvaluationAttempts  = 5
 	ruleEvaluationRetryBase = 2 * time.Second
 	ruleEvaluationRetryMax  = 5 * time.Minute
+	ruleEvaluationPoll      = time.Second
 )
 
 var errRuleEvaluationLeaseLost = errors.New("rule evaluation lease lost")
 
-// RuleEvaluationWorker processes durable rule-evaluation inputs. It is constructed for the
-// worker service, but remains dormant until RunOnce is called.
+// RuleEvaluationWorker processes durable rule-evaluation inputs.
 type RuleEvaluationWorker struct {
 	Store *store.Store
 	Rules *rules.Service
@@ -48,7 +48,7 @@ func NewRuleEvaluationWorker(st *store.Store, evaluator *rules.Service, log *slo
 }
 
 // RunOnce claims a bounded batch and processes each input. Evaluation effects and completion
-// share the tenant transaction; post-commit alarm announcements are published only afterward.
+// share the tenant transaction.
 func (w *RuleEvaluationWorker) RunOnce(ctx context.Context) error {
 	if w == nil || w.Store == nil || w.Rules == nil {
 		return errors.New("rule evaluation worker requires a store and evaluator")
@@ -64,6 +64,28 @@ func (w *RuleEvaluationWorker) RunOnce(ctx context.Context) error {
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// Run processes pending jobs immediately, then polls until ctx is cancelled.
+func (w *RuleEvaluationWorker) Run(ctx context.Context) {
+	if w == nil {
+		return
+	}
+	ticker := time.NewTicker(ruleEvaluationPoll)
+	defer ticker.Stop()
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := w.RunOnce(ctx); err != nil && ctx.Err() == nil {
+			w.Log.WarnContext(ctx, "rule evaluation worker failed", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (w *RuleEvaluationWorker) claim(ctx context.Context) ([]claimedRuleEvaluation, error) {

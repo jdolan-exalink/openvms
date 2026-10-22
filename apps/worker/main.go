@@ -134,9 +134,14 @@ func run() error {
 
 	rulesSvc := rules.NewService(st, &jetstreamPublisher{js: js}, log)
 	rulesSvc.ZoneResolver = rules.NewStoreZoneResolver(st)
+	ruleEvaluationWorker := events.NewRuleEvaluationWorker(st, rulesSvc, log)
+	ruleEvaluationDone := make(chan struct{})
+	go func() {
+		defer close(ruleEvaluationDone)
+		ruleEvaluationWorker.Run(ctx)
+	}()
 	syncer := &events.Syncer{
 		Store: st, Adapters: adapters, Blobs: objects, Log: log,
-		Rules:    rulesSvc,
 		Interval: cfg.EventSyncInterval, Backfill: cfg.EventBackfill, Concurrency: 8,
 	}
 	go syncer.Run(ctx)
@@ -270,17 +275,18 @@ func run() error {
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 	shutdownErr := srv.Shutdown(sctx)
-	select {
-	case <-dispatcherDone:
-		return shutdownErr
-	default:
+	waitFor := func(name string, done <-chan struct{}) error {
+		select {
+		case <-done:
+			return nil
+		case <-sctx.Done():
+			return fmt.Errorf("wait for %s: %w", name, sctx.Err())
+		}
 	}
-	select {
-	case <-dispatcherDone:
-		return shutdownErr
-	case <-sctx.Done():
-		return errors.Join(shutdownErr, fmt.Errorf("wait for realtime outbox dispatcher: %w", sctx.Err()))
-	}
+	return errors.Join(shutdownErr,
+		waitFor("realtime outbox dispatcher", dispatcherDone),
+		waitFor("rule evaluation worker", ruleEvaluationDone),
+	)
 }
 
 func runCameraZoneSync(ctx context.Context, svc *inventory.Service, log *slog.Logger) {

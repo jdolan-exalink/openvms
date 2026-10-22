@@ -138,8 +138,11 @@ func TestRuleEvaluationJobLifecycle(t *testing.T) {
 		if err := tx.QueryRow(ctx, `SELECT status FROM rule_evaluation_jobs WHERE id=$1`, jobID).Scan(&status); err != nil {
 			return err
 		}
-		if status != "completed" {
-			return fmt.Errorf("new synchronous-era job status = %q, want completed", status)
+		if status != "pending" {
+			return fmt.Errorf("new enqueued job status = %q, want pending", status)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE rule_evaluation_jobs SET status='completed' WHERE id<>$1 AND status='pending'`, jobID); err != nil {
+			return err
 		}
 		var legacyID uuid.UUID
 		if err := tx.QueryRow(ctx, `INSERT INTO rule_evaluation_jobs (event_id, evaluation_kind, face_names, payload)
@@ -153,15 +156,6 @@ func TestRuleEvaluationJobLifecycle(t *testing.T) {
 			return fmt.Errorf("legacy insert default status = %q, want completed", status)
 		}
 		claimed, err := queries.ClaimRuleEvaluationJobs(ctx, db.ClaimRuleEvaluationJobsParams{
-			MaxRows: 1, LeaseSeconds: 60, MaxAttempts: 3,
-		})
-		if err != nil || len(claimed) != 0 {
-			return fmt.Errorf("claim completed job = %d rows, err=%v; want none", len(claimed), err)
-		}
-		if _, err := tx.Exec(ctx, `UPDATE rule_evaluation_jobs SET status='pending' WHERE id=$1`, jobID); err != nil {
-			return err
-		}
-		claimed, err = queries.ClaimRuleEvaluationJobs(ctx, db.ClaimRuleEvaluationJobsParams{
 			MaxRows: 1, LeaseSeconds: 60, MaxAttempts: 3,
 		})
 		if err != nil || len(claimed) != 1 || claimed[0].Attempts != 1 || claimed[0].Status != "processing" {

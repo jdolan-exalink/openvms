@@ -63,19 +63,11 @@ type Syncer struct {
 	// OnAlarmUpdated is called after commit with the alarms that absorbed further events of an
 	// ongoing situation (one entry per alarm per pull; optional).
 	OnAlarmUpdated func(ctx context.Context, alarms []OpenedAlarm)
-	// Rules is evaluated for each newly inserted event, after commit (optional). Its errors are
-	// logged and never fail the sync.
-	Rules RuleEvaluator
 	// ObjectStopMargin overrides how much of the per-server deadline must remain for the
 	// tracked-objects pass to fetch another page (default 20s). Mainly for tests.
 	ObjectStopMargin time.Duration
 
 	now func() time.Time
-}
-
-// RuleEvaluator runs the automation rules against a new event (implemented by rules.Service).
-type RuleEvaluator interface {
-	EvaluateEvent(ctx context.Context, ev rules.EventContext) error
 }
 
 // NewEvent is published when an event enters the index.
@@ -305,8 +297,6 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	var created []NewEvent
 	// Events that were already known but gained recognized names: only person rules are
 	// evaluated for them (Frigate usually names a face after it opened the review).
-	var recognized []NewEvent
-	cameraNames := map[uuid.UUID]string{}
 	var opened []OpenedAlarm
 	updated := newAlarmUpdates()
 	err := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
@@ -320,15 +310,12 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 				return err
 			}
 			if !isNew && len(ev.GainedSubLabels) > 0 {
-				recognized = append(recognized, ev)
-				cameraNames[cam.ID] = cam.Name
 				if err := enqueueRuleEvaluation(ctx, tx, ev, cam.Name, true); err != nil {
 					return err
 				}
 			}
 			if isNew {
 				created = append(created, ev)
-				cameraNames[cam.ID] = cam.Name
 				if err := enqueueRuleEvaluation(ctx, tx, ev, cam.Name, false); err != nil {
 					return err
 				}
@@ -387,20 +374,6 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	}
 	if s.OnAlarmUpdated != nil && len(updated.list) > 0 {
 		s.OnAlarmUpdated(ctx, updated.list)
-	}
-	if s.Rules != nil {
-		evaluate := func(ev NewEvent, faceUpdate bool) {
-			rc := ruleContext(ev, cameraNames[ev.CameraID], faceUpdate)
-			if err := s.Rules.EvaluateEvent(ctx, rc); err != nil {
-				s.Log.WarnContext(ctx, "evaluate rules", "error", err, "event_id", ev.ID)
-			}
-		}
-		for _, ev := range created {
-			evaluate(ev, false)
-		}
-		for _, ev := range recognized {
-			evaluate(ev, true)
-		}
 	}
 	return nil
 }
