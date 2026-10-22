@@ -157,3 +157,52 @@ func TestHealthPollerRefreshesCapabilitiesPeriodically(t *testing.T) {
 		t.Fatal("capabilities.face_recognition did not follow Frigate")
 	}
 }
+
+func TestHealthPollerFlagsFrigateThatStoppedDetecting(t *testing.T) {
+	env := demofix.Setup(t)
+	ctx := context.Background()
+
+	serverID := env.Cameras["frigate-h01/plaza"].ServerID
+	mock := env.Mocks["frigate-h01"]
+
+	poller := &inventory.HealthPoller{
+		Svc:                env.Svc,
+		Interval:           time.Second,
+		Concurrency:        2,
+		DetectionStallHold: time.Nanosecond,
+	}
+	status := func() (string, string) {
+		var st, lastErr string
+		err := env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+			return tx.QueryRow(ctx, `SELECT status, last_error FROM frigate_servers WHERE id = $1`, serverID).Scan(&st, &lastErr)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st, lastErr
+	}
+
+	// Cameras stream and detect: no stall reason. (The demo server can be degraded for other
+	// reasons, so the reason, not the status, is what tells a stall apart.)
+	poller.PollOnce(ctx)
+	if _, lastErr := status(); lastErr != "" {
+		t.Fatalf("detecting server: last_error %q, want none", lastErr)
+	}
+
+	// Cameras keep streaming but detection stops: the first idle poll starts the hold, the next confirms it.
+	mock.Server.DetectionIdle.Store(true)
+	poller.PollOnce(ctx)
+	time.Sleep(5 * time.Millisecond)
+	poller.PollOnce(ctx)
+	st, lastErr := status()
+	if st != "degraded" || lastErr != inventory.DetectionStalledMessage {
+		t.Fatalf("stalled server: status %q last_error %q, want degraded with the stall reason", st, lastErr)
+	}
+
+	// Detection resumes: the reason is cleared.
+	mock.Server.DetectionIdle.Store(false)
+	poller.PollOnce(ctx)
+	if _, lastErr := status(); lastErr != "" {
+		t.Fatalf("recovered server: last_error %q, want none", lastErr)
+	}
+}

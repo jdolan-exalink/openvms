@@ -31,6 +31,9 @@ type Server struct {
 	StartedAt   time.Time
 	// Offline makes every request fail with 503, to simulate an unreachable Frigate.
 	Offline atomic.Bool
+	// DetectionIdle makes /api/stats report detection_fps 0 on every camera while the cameras keep
+	// streaming, simulating a Frigate whose detection pipeline is wedged.
+	DetectionIdle atomic.Bool
 	// Go2RTCStreams is the set of stream names GET /api/go2rtc/streams reports. nil (the
 	// zero value) makes the endpoint 404, simulating an older Frigate or go2rtc disabled;
 	// an empty, non-nil slice reports no streams at all.
@@ -173,8 +176,12 @@ func (s *Server) go2rtcStreams(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) stats(w http.ResponseWriter, _ *http.Request) {
 	cams := map[string]any{}
+	detectionFPS := 1.2
+	if s.DetectionIdle.Load() {
+		detectionFPS = 0.0
+	}
 	for _, c := range s.Cameras {
-		cams[c.Name] = map[string]any{"camera_fps": 5.0, "detection_fps": 1.2, "process_fps": 5.0, "skipped_fps": 0.0, "detection_enabled": true}
+		cams[c.Name] = map[string]any{"camera_fps": 5.0, "detection_fps": detectionFPS, "process_fps": 5.0, "skipped_fps": 0.0, "detection_enabled": true}
 	}
 	const gb = 1024.0
 	writeJSON(w, map[string]any{

@@ -17,6 +17,10 @@ const detectionIdleFPS = 0.05
 // so the hold is long enough to ride out a night without activity at a busy site.
 const DefaultDetectionStallHold = 30 * time.Minute
 
+// DetectionStalledMessage is the reason a stalled server carries in last_error and in its
+// status change notification.
+const DetectionStalledMessage = "Frigate is streaming but not detecting: no camera has reported detections"
+
 // DetectionState is the verdict of one observation of a server's detection activity.
 type DetectionState struct {
 	Stalled bool

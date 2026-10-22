@@ -58,8 +58,15 @@ type HealthPoller struct {
 	// is marked offline (no video signal at Frigate); zero uses DefaultNoSignalHold.
 	NoSignalHold time.Duration
 
+	// DetectionStallHold is how long no camera may detect while they deliver video before the
+	// server is marked degraded; zero uses DefaultDetectionStallHold.
+	DetectionStallHold time.Duration
+
 	signalsOnce sync.Once
 	signals     *SignalTracker
+
+	detectionOnce sync.Once
+	detection     *DetectionTracker
 }
 
 // DefaultCapabilityInterval is the capability refresh period of the health poller.
@@ -91,6 +98,17 @@ func (p *HealthPoller) signalTracker() *SignalTracker {
 		p.signals = NewSignalTracker(hold)
 	})
 	return p.signals
+}
+
+func (p *HealthPoller) detectionTracker() *DetectionTracker {
+	p.detectionOnce.Do(func() {
+		hold := p.DetectionStallHold
+		if hold <= 0 {
+			hold = DefaultDetectionStallHold
+		}
+		p.detection = NewDetectionTracker(hold)
+	})
+	return p.detection
 }
 
 func (p *HealthPoller) PollOnce(ctx context.Context) {
@@ -131,6 +149,7 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 	}
 	if err != nil {
 		status, errMsg = "offline", err.Error()
+		p.detectionTracker().Forget(srv.ID)
 		p.Adapters.Forget(srv.ID) // reconnect (and re-detect version) next time
 	}
 
@@ -167,8 +186,12 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 			return err
 		}
 		degraded := false
+		var liveStats []frigate.CameraStats
 		for _, cam := range cams {
 			cs, reported := stats.Cameras[cam.RemoteName]
+			if reported && cam.Enabled {
+				liveStats = append(liveStats, cs)
+			}
 			camStatus := "offline"
 			sig := p.signalTracker().Observe(cam.ID, cs.CameraFPS, reported, now)
 			switch {
@@ -212,12 +235,21 @@ func (p *HealthPoller) check(ctx context.Context, srv db.FrigateServer) {
 		if r := stats.Recordings; r != nil && r.TotalMB > 0 && r.UsedMB/r.TotalMB > storageDegradedRatio {
 			degraded = true
 		}
+		health := HealthStats{UptimeSeconds: stats.UptimeSeconds, Recordings: stats.Recordings}
+		if ds := p.detectionTracker().Observe(srv.ID, liveStats, now); ds.Stalled {
+			degraded = true
+			health.DetectionStalledSince = &ds.Since
+			errMsg = DetectionStalledMessage
+			if srv.Status != "degraded" {
+				p.Svc.Log.WarnContext(ctx, "frigate is streaming but not detecting", "server_id", srv.ID, "since", ds.Since)
+			}
+		}
 		if degraded {
 			status = "degraded"
 		}
-		raw, _ := json.Marshal(HealthStats{UptimeSeconds: stats.UptimeSeconds, Recordings: stats.Recordings})
+		raw, _ := json.Marshal(health)
 		return q.UpdateServerHealth(ctx, db.UpdateServerHealthParams{
-			ID: srv.ID, Status: status, Reachable: true, LastError: "", Stats: raw, FrigateVersion: stats.Version,
+			ID: srv.ID, Status: status, Reachable: true, LastError: errMsg, Stats: raw, FrigateVersion: stats.Version,
 		})
 	})
 	if err != nil {
