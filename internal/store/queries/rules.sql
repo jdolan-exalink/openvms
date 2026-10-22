@@ -74,7 +74,7 @@ WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND id = ANY(@ids::uuid[]);
 
 -- name: EnqueueRuleEvaluation :exec
 INSERT INTO rule_evaluation_jobs (event_id, evaluation_kind, face_names, payload, status)
-VALUES (@event_id, @evaluation_kind, @face_names, @payload, 'completed')
+VALUES (@event_id, @evaluation_kind, @face_names, @payload, 'pending')
 ON CONFLICT (event_id, evaluation_kind, face_names) DO NOTHING;
 
 -- name: ClaimRuleEvaluationJobs :many

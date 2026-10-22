@@ -239,7 +239,7 @@ func (q *Queries) DeleteRule(ctx context.Context, arg DeleteRuleParams) error {
 
 const enqueueRuleEvaluation = `-- name: EnqueueRuleEvaluation :exec
 INSERT INTO rule_evaluation_jobs (event_id, evaluation_kind, face_names, payload, status)
-VALUES ($1, $2, $3, $4, 'completed')
+VALUES ($1, $2, $3, $4, 'pending')
 ON CONFLICT (event_id, evaluation_kind, face_names) DO NOTHING
 `
 
