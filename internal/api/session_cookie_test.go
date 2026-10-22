@@ -21,7 +21,7 @@ func authenticated(t *testing.T, https bool, cookies ...string) bool {
 		req.Header.Set("X-Forwarded-Proto", "https")
 	}
 	for _, name := range cookies {
-		req.AddCookie(&http.Cookie{Name: name, Value: "sess"})
+		req.AddCookie(&http.Cookie{Name: name, Value: "sess", Secure: https, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 	}
 	h.ServeHTTP(httptest.NewRecorder(), req)
 	return passed
