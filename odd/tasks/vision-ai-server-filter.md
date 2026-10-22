@@ -22,3 +22,14 @@ Decisions:
 - [x] 1. Backend: `server_id[]` on the Vision AI slots, filtered before ranking, one allocator per selection.
 - [ ] 2. Live: remove the server selector and its grid-based helpers.
 - [ ] 3. Vision AI: server selector, remembered selection, and every list filtered by it.
+
+## Delivery chain
+
+- Strategy: auto-chain, stacked to `main`; each PR targets the immediately preceding branch.
+- PR 1, `feat/vision-ai-server-filter-backend`, starts at `origin/main` and ends with the
+  server-filtered slots API and per-selection allocator. Commit: `a6b0bcc`.
+- PR 2, `feat/vision-ai-server-filter-core`, depends on PR 1 and ends with the shared server
+  selection, preference, and filtering libraries; retain Live imports/exports for compatibility.
+- PR 3, `feat/vision-ai-server-filter-ui`, depends on PR 2 and ends with Live removal and Vision AI
+  selector integration, localization, and route coverage. Keep each authored diff at or below 400
+  changed lines; generated contract outputs are excluded from that budget.
