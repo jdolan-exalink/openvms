@@ -401,6 +401,23 @@ func TestDeviceProbePrefersMedia2AndFallsBackWhenUnsupported(t *testing.T) {
 	}
 }
 
+func TestSanitizeStreamURIRedactsPercentEncodedCredentials(t *testing.T) {
+	tests := []struct {
+		name string
+		uri  string
+	}{
+		{name: "encoded username", uri: "rtsp://192.0.2.10/%61dmin/main"},
+		{name: "encoded password", uri: "rtsp://192.0.2.10/camera%2Dsecret/main"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeStreamURI(tt.uri, "admin", "camera-secret"); got != "" {
+				t.Fatalf("sanitizeStreamURI(%q) = %q, want URI omitted", tt.uri, got)
+			}
+		})
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }

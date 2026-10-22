@@ -526,7 +526,7 @@ func sanitizeStreamURI(raw string, secrets ...string) string {
 	u.Fragment = ""
 	safe := u.String()
 	for _, secret := range secrets {
-		if secret != "" && strings.Contains(safe, secret) {
+		if secret != "" && (strings.Contains(safe, secret) || strings.Contains(u.Path, secret)) {
 			return ""
 		}
 	}
