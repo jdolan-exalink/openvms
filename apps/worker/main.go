@@ -48,6 +48,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/platform/objectstore"
 	"github.com/jdolan-exalink/openvms/internal/platform/postgres"
 	"github.com/jdolan-exalink/openvms/internal/platform/telemetry"
+	"github.com/jdolan-exalink/openvms/internal/realtime/outbox"
 	"github.com/jdolan-exalink/openvms/internal/rules"
 	"github.com/jdolan-exalink/openvms/internal/secrets"
 	"github.com/jdolan-exalink/openvms/internal/store"
@@ -114,6 +115,17 @@ func run() error {
 	}
 
 	st := &store.Store{Pool: pool}
+	dispatcher := &outbox.Dispatcher{
+		Repository: outbox.StoreRepository{Store: st},
+		Publisher:  outbox.JetStreamPublisher{JS: js},
+		Config:     outbox.Config{PollInterval: time.Second, Lease: 30 * time.Second, RetryBase: time.Second, RetryMax: time.Minute, MaxAttempts: 8, BatchSize: 32},
+		Log:        log,
+	}
+	dispatcherDone := make(chan struct{})
+	go func() {
+		defer close(dispatcherDone)
+		dispatcher.Run(ctx)
+	}()
 	inv := inventory.New(st, sealer, log)
 	adapters := inventory.NewAdapters(inv)
 	go runCameraZoneSync(ctx, inv, log)
@@ -279,7 +291,18 @@ func run() error {
 	log.Info("shutting down")
 	sctx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
-	return srv.Shutdown(sctx)
+	shutdownErr := srv.Shutdown(sctx)
+	select {
+	case <-dispatcherDone:
+		return shutdownErr
+	default:
+	}
+	select {
+	case <-dispatcherDone:
+		return shutdownErr
+	case <-sctx.Done():
+		return errors.Join(shutdownErr, fmt.Errorf("wait for realtime outbox dispatcher: %w", sctx.Err()))
+	}
 }
 
 func runCameraZoneSync(ctx context.Context, svc *inventory.Service, log *slog.Logger) {
