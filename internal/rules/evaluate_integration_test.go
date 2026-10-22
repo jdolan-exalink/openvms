@@ -23,14 +23,12 @@ import (
 type recordingPublisher struct {
 	mu       sync.Mutex
 	subjects []string
-	payloads [][]byte
 }
 
-func (p *recordingPublisher) Publish(_ context.Context, subject string, payload []byte) error {
+func (p *recordingPublisher) Publish(_ context.Context, subject string, _ []byte) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.subjects = append(p.subjects, subject)
-	p.payloads = append(p.payloads, append([]byte(nil), payload...))
 	return nil
 }
 
@@ -44,15 +42,6 @@ func (p *recordingPublisher) count(prefix string) int {
 		}
 	}
 	return n
-}
-
-func (p *recordingPublisher) lastPayload() []byte {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.payloads) == 0 {
-		return nil
-	}
-	return append([]byte(nil), p.payloads[len(p.payloads)-1]...)
 }
 
 type fixture struct {
@@ -112,6 +101,36 @@ func (f *fixture) notifications(ruleID uuid.UUID) int {
 	return n
 }
 
+type publication struct {
+	subject      string
+	payload      []byte
+	aggregateKey *string
+}
+
+func (f *fixture) publications() []publication {
+	f.t.Helper()
+	var rows []publication
+	err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		result, err := tx.Query(context.Background(), `SELECT subject, payload, aggregate_key FROM realtime_publication_outbox ORDER BY created_at, id`)
+		if err != nil {
+			return err
+		}
+		defer result.Close()
+		for result.Next() {
+			var row publication
+			if err := result.Scan(&row.subject, &row.payload, &row.aggregateKey); err != nil {
+				return err
+			}
+			rows = append(rows, row)
+		}
+		return result.Err()
+	})
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return rows
+}
+
 func (f *fixture) eventCtx(labels ...string) rules.EventContext {
 	cam := f.env.Cameras["frigate-h01/acceso_norte"]
 	return rules.EventContext{
@@ -137,8 +156,19 @@ func TestEvaluateEventNotifiesOnMatchOnly(t *testing.T) {
 	if n := f.notifications(id); n != 1 {
 		t.Fatalf("matching event created %d notifications, want 1", n)
 	}
-	if n := f.pub.count("notification.created."); n != 1 {
-		t.Fatalf("published %d notification.created messages, want 1", n)
+	if n := f.pub.count("notification.created."); n != 0 {
+		t.Fatalf("directly published %d notification.created messages, want none", n)
+	}
+	rows := f.publications()
+	if len(rows) != 1 || rows[0].subject != "notification.created."+f.env.Demo.TenantID.String() {
+		t.Fatalf("outbox publications = %+v, want one notification.created row", rows)
+	}
+	var payload rules.NotificationCreatedPayload
+	if err := json.Unmarshal(rows[0].payload, &payload); err != nil {
+		t.Fatalf("decode notification payload: %v", err)
+	}
+	if payload.TenantID != f.env.Demo.TenantID || payload.ID == uuid.Nil || payload.Title != "Personas" {
+		t.Fatalf("notification payload = %+v, want persisted notification", payload)
 	}
 }
 
@@ -148,7 +178,7 @@ func TestEvaluateEventTxUsesCallerTransaction(t *testing.T) {
 	ev := f.eventCtx("person")
 	rollback := errors.New("rollback caller transaction")
 	err := f.env.Store.TxRaw(context.Background(), store.ScopeFor(authz.Actor{TenantID: &ev.TenantID}), func(tx pgx.Tx) error {
-		if _, err := f.svc.EvaluateEventTx(context.Background(), tx, ev); err != nil {
+		if err := f.svc.EvaluateEventTx(context.Background(), tx, ev); err != nil {
 			return err
 		}
 		return rollback
@@ -159,13 +189,15 @@ func TestEvaluateEventTxUsesCallerTransaction(t *testing.T) {
 	if n := f.notifications(id); n != 0 {
 		t.Fatalf("caller rollback left %d notifications, want 0", n)
 	}
+	if rows := f.publications(); len(rows) != 0 {
+		t.Fatalf("caller rollback left %d realtime publications, want 0", len(rows))
+	}
 }
 
-func TestEvaluateEventAnnouncementsUseBoundEvent(t *testing.T) {
+func TestEvaluateEventAlarmOutboxUsesBoundEvent(t *testing.T) {
 	f := newFixture(t)
 	f.addRule("Alarma", rules.TriggerEvent, rules.Conditions{Labels: []string{"person"}}, rules.Actions{CreateAlarm: true}, true)
 	ev := f.eventCtx("person")
-	var announcements rules.EventAnnouncements
 	err := f.env.Store.TxRaw(context.Background(), store.ScopeFor(authz.Actor{TenantID: &ev.TenantID}), func(tx pgx.Tx) error {
 		if err := tx.QueryRow(context.Background(), `
 INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, start_time)
@@ -173,23 +205,97 @@ VALUES ($1, $2, $3, $4, $5, 'alert', $6, $7) RETURNING id`,
 			ev.TenantID, ev.SiteID, ev.ServerID, ev.CameraID, "rules-"+uuid.NewString(), ev.Labels, ev.Start).Scan(&ev.ID); err != nil {
 			return err
 		}
-		var err error
-		announcements, err = f.svc.EvaluateEventTx(context.Background(), tx, ev)
-		return err
+		return f.svc.EvaluateEventTx(context.Background(), tx, ev)
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.svc.PublishEventAnnouncements(context.Background(), announcements)
+	if n := f.pub.count("alarm."); n != 0 {
+		t.Fatalf("directly published %d alarm announcements, want none", n)
+	}
+	rows := f.publications()
+	if len(rows) != 1 || rows[0].subject != "alarm.opened."+ev.TenantID.String() {
+		t.Fatalf("outbox publications = %+v, want one alarm.opened row", rows)
+	}
+	wantAggregate := "alarm/"
 	var payload map[string]any
-	if err := json.Unmarshal(f.pub.lastPayload(), &payload); err != nil {
+	if err := json.Unmarshal(rows[0].payload, &payload); err != nil {
 		t.Fatalf("decode alarm announcement: %v", err)
+	}
+	wantAggregate += payload["id"].(string)
+	if rows[0].aggregateKey == nil || *rows[0].aggregateKey != wantAggregate {
+		t.Fatalf("alarm aggregate key = %v, want %q", rows[0].aggregateKey, wantAggregate)
 	}
 	if got := payload["event_id"]; got != ev.ID.String() {
 		t.Fatalf("announcement event_id = %v, want bound event %s", got, ev.ID)
 	}
 	if got := payload["camera_id"]; got != ev.CameraID.String() {
 		t.Fatalf("announcement camera_id = %v, want bound camera %s", got, ev.CameraID)
+	}
+}
+
+func TestEvaluateEventOutboxPersistsAlarmLifecycle(t *testing.T) {
+	f := newFixture(t)
+	ruleID := f.addRule("Alarma", rules.TriggerEvent, rules.Conditions{Labels: []string{"person"}}, rules.Actions{CreateAlarm: true}, true)
+	ctx := context.Background()
+	run := func(at time.Time) uuid.UUID {
+		t.Helper()
+		ev := f.eventCtx("person")
+		ev.Start = at
+		err := f.env.Store.TxRaw(ctx, store.ScopeFor(authz.Actor{TenantID: &ev.TenantID}), func(tx pgx.Tx) error {
+			if err := tx.QueryRow(ctx, `INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, labels, start_time)
+VALUES ($1, $2, $3, $4, $5, 'alert', $6, $7) RETURNING id`, ev.TenantID, ev.SiteID, ev.ServerID, ev.CameraID,
+				"lifecycle-"+uuid.NewString(), ev.Labels, ev.Start).Scan(&ev.ID); err != nil {
+				return err
+			}
+			return f.svc.EvaluateEventTx(ctx, tx, ev)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.exec(`DELETE FROM rule_firings WHERE rule_id=$1`, ruleID); err != nil {
+			t.Fatal(err)
+		}
+		return ev.ID
+	}
+
+	firstEvent := run(time.Now())
+	run(time.Now().Add(time.Minute))
+	run(time.Now().Add(3 * time.Hour)) // closes the stale alarm and opens a new correlation.
+	if n := f.pub.count("alarm."); n != 0 {
+		t.Fatalf("directly published %d alarm announcements, want none", n)
+	}
+	rows := f.publications()
+	if len(rows) != 4 {
+		t.Fatalf("outbox rows = %d, want opened, updated, closed, opened", len(rows))
+	}
+	counts := map[string]int{}
+	var updated, closed int
+	for _, row := range rows {
+		counts[row.subject]++
+		if row.aggregateKey == nil || len(*row.aggregateKey) < len("alarm/") || (*row.aggregateKey)[:len("alarm/")] != "alarm/" {
+			t.Fatalf("alarm publication aggregate key = %v, want alarm/<id>", row.aggregateKey)
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(row.payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		alarmID := payload["id"].(string)
+		if row.subject == "alarm.updated."+f.env.Demo.TenantID.String() {
+			updated++
+		}
+		if row.subject == "alarm.closed."+f.env.Demo.TenantID.String() {
+			closed++
+			if payload["event_id"] != firstEvent.String() {
+				t.Fatalf("closed alarm event_id = %v, want originating event %s", payload["event_id"], firstEvent)
+			}
+		}
+		if *row.aggregateKey != "alarm/"+alarmID {
+			t.Fatalf("aggregate key %q does not match alarm id %s", *row.aggregateKey, alarmID)
+		}
+	}
+	if counts["alarm.opened."+f.env.Demo.TenantID.String()] != 2 || updated != 1 || closed != 1 {
+		t.Fatalf("alarm subjects = %v, want two opened, one updated, one closed", counts)
 	}
 }
 

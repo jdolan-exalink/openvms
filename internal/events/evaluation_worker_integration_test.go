@@ -132,6 +132,12 @@ func TestRuleEvaluationWorkerRollsBackEffectsAndFailsAfterBoundedRetries(t *test
 		t.Fatal(err)
 	}
 	worker := events.NewRuleEvaluationWorker(f.env.Store, rules.NewService(f.env.Store, nopPublisher{}, pgtest.Discard()), pgtest.Discard())
+	var initialPublications int
+	if err := f.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT count(*) FROM realtime_publication_outbox`).Scan(&initialPublications)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	for attempt := 1; attempt <= 5; attempt++ {
 		if err := worker.RunOnce(ctx); err != nil {
 			t.Fatalf("run %d: %v", attempt, err)
@@ -139,6 +145,7 @@ func TestRuleEvaluationWorkerRollsBackEffectsAndFailsAfterBoundedRetries(t *test
 		var status string
 		var lastError string
 		var firings int
+		var publications int
 		err := f.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
 			if _, err := tx.Exec(ctx, `UPDATE rule_evaluation_jobs SET available_at=now() WHERE id=$1 AND status='pending'`, jobID); err != nil {
 				return err
@@ -146,7 +153,10 @@ func TestRuleEvaluationWorkerRollsBackEffectsAndFailsAfterBoundedRetries(t *test
 			if err := tx.QueryRow(ctx, `SELECT status, coalesce(last_error, '') FROM rule_evaluation_jobs WHERE id=$1`, jobID).Scan(&status, &lastError); err != nil {
 				return err
 			}
-			return tx.QueryRow(ctx, `SELECT count(*) FROM rule_firings WHERE resource_id=$1`, invalidCameraID).Scan(&firings)
+			if err := tx.QueryRow(ctx, `SELECT count(*) FROM rule_firings WHERE resource_id=$1`, invalidCameraID).Scan(&firings); err != nil {
+				return err
+			}
+			return tx.QueryRow(ctx, `SELECT count(*) FROM realtime_publication_outbox`).Scan(&publications)
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -162,6 +172,9 @@ func TestRuleEvaluationWorkerRollsBackEffectsAndFailsAfterBoundedRetries(t *test
 		}
 		if firings != 0 {
 			t.Fatalf("attempt %d left %d rule firings after rollback, want 0", attempt, firings)
+		}
+		if publications != initialPublications {
+			t.Fatalf("attempt %d changed realtime publications from %d to %d after rollback", attempt, initialPublications, publications)
 		}
 	}
 }

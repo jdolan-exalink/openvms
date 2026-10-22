@@ -130,7 +130,6 @@ func (w *RuleEvaluationWorker) evaluateAndComplete(ctx context.Context, item cla
 	if job.LeaseToken == nil {
 		return errors.New("claimed rule evaluation job has no lease token")
 	}
-	var announcements rules.EventAnnouncements
 	actor := authz.Actor{TenantID: &item.tenantID}
 	err := w.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		var eventTenant uuid.UUID
@@ -141,8 +140,7 @@ func (w *RuleEvaluationWorker) evaluateAndComplete(ctx context.Context, item cla
 			return errors.New("evaluation event tenant changed after claim")
 		}
 		var err error
-		announcements, err = w.Rules.EvaluateEventTx(ctx, tx, ev)
-		if err != nil {
+		if err := w.Rules.EvaluateEventTx(ctx, tx, ev); err != nil {
 			return err
 		}
 		rows, err := db.New(tx).CompleteRuleEvaluationJob(ctx, db.CompleteRuleEvaluationJobParams{
@@ -159,7 +157,6 @@ func (w *RuleEvaluationWorker) evaluateAndComplete(ctx context.Context, item cla
 	if err != nil {
 		return err
 	}
-	w.Rules.PublishEventAnnouncements(ctx, announcements)
 	return nil
 }
 
