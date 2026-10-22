@@ -39,7 +39,7 @@ func reqInfo(ctx context.Context) requestInfo {
 // #nosec G124 -- Secure intentionally follows HTTPS/TLS detection; forcing it on breaks HTTP deployments.
 func sessionCookie(ctx context.Context, token string, expires time.Time) string {
 	c := &http.Cookie{
-		Name: SessionCookie, Value: token, Path: "/", Expires: expires,
+		Name: sessionCookieName(reqInfo(ctx).secure), Value: token, Path: "/", Expires: expires,
 		HttpOnly: true, Secure: reqInfo(ctx).secure, SameSite: http.SameSiteStrictMode,
 	}
 	if token == "" {
