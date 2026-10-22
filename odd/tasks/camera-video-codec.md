@@ -14,8 +14,10 @@ Findings:
 
 Decisions:
 - The codec is stored per camera, for the live (sub) and hq (main) streams, refreshed on sync and on
-  the health poller's periodic capability refresh. Values are lowercase `h264` / `h265`; NULL when
-  unknown (go2rtc unreachable, stream not producing yet).
+  the health poller's periodic capability refresh. Values are lowercase `h264` / `h265`; the column is
+  `NOT NULL DEFAULT ''` and the empty string means unknown (go2rtc unreachable, stream not producing
+  yet). The API maps empty to `null`. The "keep the last known codec unless the stream is gone" rule
+  lives twice, in `keepKnownCodec` (Go) and in the `UpsertCamera` SQL `CASE`; keep them in sync.
 - The Live badge shows the codec of the quality the tile is playing (sub in the grid, main when
   expanded) and only for H.265.
 - Changing the codec ships as a second PR: it needs a Media2 client, an options query and
