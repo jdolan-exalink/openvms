@@ -466,7 +466,6 @@ func (s *Service) redactResult(ctx context.Context, actor authz.Actor, a *Alarm)
 
 func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
 	var res Alarm
-	var published bool
 	cText := ""
 	if len(comment) > 0 {
 		cText = comment[0]
@@ -526,12 +525,8 @@ func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UU
 			return store.Classify(err)
 		}
 		res = mapGetAlarmRow(updatedRow)
-		published = true
-		return nil
+		return enqueueAlarmPublication(ctx, q, "acknowledged", res)
 	})
-	if err == nil && published {
-		s.publish(ctx, "acknowledged", res)
-	}
 	if err == nil {
 		s.redactResult(ctx, actor, &res)
 	}
@@ -540,7 +535,6 @@ func (s *Service) Acknowledge(ctx context.Context, actor authz.Actor, id uuid.UU
 
 func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, assigneeID uuid.UUID) (Alarm, error) {
 	var res Alarm
-	var published bool
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		row, err := q.GetAlarm(ctx, id)
 		if err != nil {
@@ -575,6 +569,10 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 		}
 		if !found {
 			return &ValidationError{Msg: "assigned user does not hold alarms.manage on this camera"}
+		}
+		if row.AssignedTo != nil && *row.AssignedTo == assigneeID && row.Status != "open" && row.Status != "acknowledged" {
+			res = mapGetAlarmRow(row)
+			return nil
 		}
 
 		oldStatus := row.Status
@@ -616,12 +614,8 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 		}
 
 		res = mapGetAlarmRow(updatedRow)
-		published = true
-		return nil
+		return enqueueAlarmPublication(ctx, q, "assigned", res)
 	})
-	if err == nil && published {
-		s.publish(ctx, "assigned", res)
-	}
 	if err == nil {
 		s.redactResult(ctx, actor, &res)
 	}
@@ -630,7 +624,6 @@ func (s *Service) Assign(ctx context.Context, actor authz.Actor, id uuid.UUID, a
 
 func (s *Service) Investigate(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
 	var res Alarm
-	var published bool
 	cText := ""
 	if len(comment) > 0 {
 		cText = comment[0]
@@ -690,12 +683,8 @@ func (s *Service) Investigate(ctx context.Context, actor authz.Actor, id uuid.UU
 			return store.Classify(err)
 		}
 		res = mapGetAlarmRow(updatedRow)
-		published = true
-		return nil
+		return enqueueAlarmPublication(ctx, q, "investigating", res)
 	})
-	if err == nil && published {
-		s.publish(ctx, "investigating", res)
-	}
 	if err == nil {
 		s.redactResult(ctx, actor, &res)
 	}
@@ -704,7 +693,6 @@ func (s *Service) Investigate(ctx context.Context, actor authz.Actor, id uuid.UU
 
 func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
 	var res Alarm
-	var published bool
 	cText := ""
 	if len(comment) > 0 {
 		cText = comment[0]
@@ -764,12 +752,8 @@ func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID, 
 			return store.Classify(err)
 		}
 		res = mapGetAlarmRow(updatedRow)
-		published = true
-		return nil
+		return enqueueAlarmPublication(ctx, q, "resolved", res)
 	})
-	if err == nil && published {
-		s.publish(ctx, "resolved", res)
-	}
 	if err == nil {
 		s.redactResult(ctx, actor, &res)
 	}
@@ -778,7 +762,6 @@ func (s *Service) Resolve(ctx context.Context, actor authz.Actor, id uuid.UUID, 
 
 func (s *Service) Close(ctx context.Context, actor authz.Actor, id uuid.UUID, comment ...string) (Alarm, error) {
 	var res Alarm
-	var published bool
 	cText := ""
 	if len(comment) > 0 {
 		cText = comment[0]
@@ -838,12 +821,8 @@ func (s *Service) Close(ctx context.Context, actor authz.Actor, id uuid.UUID, co
 			return store.Classify(err)
 		}
 		res = mapGetAlarmRow(updatedRow)
-		published = true
-		return nil
+		return enqueueAlarmPublication(ctx, q, "closed", res)
 	})
-	if err == nil && published {
-		s.publish(ctx, "closed", res)
-	}
 	if err == nil {
 		s.redactResult(ctx, actor, &res)
 	}
@@ -954,8 +933,6 @@ func (s *Service) Bulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, 
 	}
 
 	var updatedCount int
-	var toPublish []Alarm
-
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		chk, err := access.Load(ctx, q, actor)
 		if err != nil {
@@ -1003,9 +980,14 @@ func (s *Service) Bulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, 
 				}); err != nil {
 					return err
 				}
+				updatedRow, err := q.GetAlarm(ctx, id)
+				if err != nil {
+					return store.Classify(err)
+				}
+				if err := enqueueAlarmPublication(ctx, q, action+"d", mapGetAlarmRow(updatedRow)); err != nil {
+					return err
+				}
 				updatedCount++
-				updatedRow, _ := q.GetAlarm(ctx, id)
-				toPublish = append(toPublish, mapGetAlarmRow(updatedRow))
 			} else if action == "resolve" {
 				fromStatus := row.Status
 				toStatus := "resolved"
@@ -1038,19 +1020,19 @@ func (s *Service) Bulk(ctx context.Context, actor authz.Actor, ids []uuid.UUID, 
 				}); err != nil {
 					return err
 				}
+				updatedRow, err := q.GetAlarm(ctx, id)
+				if err != nil {
+					return store.Classify(err)
+				}
+				if err := enqueueAlarmPublication(ctx, q, action+"d", mapGetAlarmRow(updatedRow)); err != nil {
+					return err
+				}
 				updatedCount++
-				updatedRow, _ := q.GetAlarm(ctx, id)
-				toPublish = append(toPublish, mapGetAlarmRow(updatedRow))
 			}
 		}
 		return nil
 	})
 
-	if err == nil {
-		for _, a := range toPublish {
-			s.publish(ctx, action+"d", a)
-		}
-	}
 	return BulkResult{Updated: updatedCount}, err
 }
 
@@ -1089,10 +1071,7 @@ func (s *Service) AssignableUsers(ctx context.Context, actor authz.Actor, alarmI
 	return res, err
 }
 
-func (s *Service) publish(ctx context.Context, action string, a Alarm) {
-	if s.Pub == nil {
-		return
-	}
+func enqueueAlarmPublication(ctx context.Context, q *db.Queries, action string, a Alarm) error {
 	payload := map[string]any{
 		"id":         a.ID,
 		"tenant_id":  a.TenantID,
@@ -1104,17 +1083,14 @@ func (s *Service) publish(ctx context.Context, action string, a Alarm) {
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
-		if s.Log != nil {
-			s.Log.WarnContext(ctx, "marshal alarm event", "error", err)
-		}
-		return
+		return err
 	}
-	subject := fmt.Sprintf("alarm.%s.%s", action, a.TenantID.String())
-	if err := s.Pub.Publish(ctx, subject, data); err != nil {
-		if s.Log != nil {
-			s.Log.WarnContext(ctx, "publish alarm event", "subject", subject, "error", err)
-		}
-	}
+	aggregateKey := "alarm/" + a.ID.String()
+	_, err = q.EnqueueRealtimePublication(ctx, db.EnqueueRealtimePublicationParams{
+		TenantID: a.TenantID, Subject: fmt.Sprintf("alarm.%s.%s", action, a.TenantID),
+		Payload: data, AggregateKey: &aggregateKey,
+	})
+	return err
 }
 
 func audit(ctx context.Context, q *db.Queries, actor authz.Actor, tenantID *uuid.UUID, action string, alarmID uuid.UUID, details map[string]any) error {
