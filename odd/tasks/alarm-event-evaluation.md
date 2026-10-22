@@ -43,10 +43,13 @@ Write failing regression coverage before implementation. Use the existing Postgr
 ## Progress
 
 - [x] Slice A (`390c635`): new-event and gained-face-name rule-evaluation payloads are persisted in `rule_evaluation_jobs` inside the event/cursor transaction. Face-update identity includes the canonical gained-name batch, so later recognitions enqueue separately while repeated syncs deduplicate. Focused integration coverage verifies event/face-update payloads, duplicate syncs, and rollback when ingestion fails after enqueue (alarm correlation failure). Verification: focused and broader event integration, events/rules/store package checks, and `git diff --check` passed. The slice is 233 authored changed lines plus 32 generated lines; independent review found no defects.
-- [ ] Slice B — add status/attempt/retry/lease state with migration default `completed` so existing Slice A jobs (already synchronously attempted) are not replayed. Updated enqueue code must explicitly insert `pending`; old binaries keep inserting completed rows during rollout. Replace/remove the synchronous evaluator in the production syncer path when the worker becomes authoritative. Claim with `FOR UPDATE SKIP LOCKED`, evaluate rules and acknowledge in the same tenant-scoped transaction, and record bounded retry/backoff after rollback. Expired leases must recover after crashes; terminal failures must remain observable.
-- [ ] Slice B coverage: existing Slice A rows are not processed; explicit pending rows process once; event and later face-update batches evaluate; concurrent workers do not duplicate; rollback leaves rule effects and acknowledgement unchanged; failure schedules retry; expired claims recover.
-- [ ] Slice B dependency: replace/remove the existing post-commit `s.Rules.EvaluateEvent` consumer in the same delivery so no event runs through both synchronous and durable paths.
-- [ ] Implementation, focused regression tests, and work-unit commits.
-- [ ] Independent review and delivery.
+- [ ] Slice B1 — add job lifecycle columns and claim/ack/retry SQL, with old rows defaulting to `completed`. Keep event enqueue explicitly `completed` until consumer cutover. Add schema/query coverage and regenerate sqlc.
+- [ ] Slice B2 — add a transaction-taking rule evaluator while preserving the existing `EvaluateEvent` wrapper. Add focused tests for transaction rollback and compatibility.
+- [ ] Slice B3 — implement and test the durable consumer: lease claim, tenant-scoped evaluation plus acknowledgement in one transaction, bounded retry/backoff after rollback, expired lease recovery, and observable terminal failures. Keep it dormant until cutover.
+- [ ] Slice B4 — switch event enqueue to `pending`, wire the worker in `apps/worker/main.go`, and remove synchronous post-commit evaluation in the same release. Ensure startup/shutdown and configuration follow existing worker conventions.
+- [ ] Each slice stays below 400 authored changed lines; use chained PRs and do not activate pending rows before B3 is deployed.
+- [ ] Focused regression tests, work-unit commits, and independent review for each implementation slice.
+
+Slice B4 is the only point where new work becomes pending, and it includes the active consumer and removal of the old evaluator path. This keeps intermediate releases safe and prevents duplicate or stranded evaluations.
 
 JetStream/realtime publication consistency remains P6-02 and is out of this unit.
