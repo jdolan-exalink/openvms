@@ -244,6 +244,8 @@ type statsResponse struct {
 	Cameras map[string]struct {
 		CameraFPS    float64 `json:"camera_fps"`
 		DetectionFPS float64 `json:"detection_fps"`
+		// A pointer: older Frigate versions omit the flag, and absent means enabled.
+		DetectionEnabled *bool `json:"detection_enabled"`
 	} `json:"cameras"`
 	Service struct {
 		Uptime  int64  `json:"uptime"`
@@ -263,7 +265,10 @@ func (a *v017) Stats(ctx context.Context) (Stats, error) {
 	}
 	s := Stats{Version: r.Service.Version, UptimeSeconds: r.Service.Uptime, Cameras: map[string]CameraStats{}}
 	for name, c := range r.Cameras {
-		s.Cameras[name] = CameraStats{CameraFPS: c.CameraFPS, DetectionFPS: c.DetectionFPS}
+		s.Cameras[name] = CameraStats{
+			CameraFPS: c.CameraFPS, DetectionFPS: c.DetectionFPS,
+			DetectionDisabled: c.DetectionEnabled != nil && !*c.DetectionEnabled,
+		}
 	}
 	if st, ok := r.Service.Storage["/media/frigate/recordings"]; ok {
 		s.Recordings = &Storage{TotalMB: st.Total, UsedMB: st.Used, FreeMB: st.Free}

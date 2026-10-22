@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -156,6 +157,8 @@ func (v ServerView) Caps() frigate.Capabilities {
 type HealthStats struct {
 	UptimeSeconds int64            `json:"uptime_seconds"`
 	Recordings    *frigate.Storage `json:"recordings,omitempty"`
+	// DetectionStalledSince is set while Frigate streams but no camera detects anything.
+	DetectionStalledSince *time.Time `json:"detection_stalled_since,omitempty"`
 }
 
 func (v ServerView) HealthStats() HealthStats {

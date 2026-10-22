@@ -214,6 +214,8 @@ type ExportInfo struct {
 type CameraStats struct {
 	CameraFPS    float64
 	DetectionFPS float64
+	// DetectionDisabled is true when Frigate reports detection off for the camera (recording only).
+	DetectionDisabled bool
 }
 
 type Storage struct {
