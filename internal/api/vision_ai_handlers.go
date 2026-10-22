@@ -33,6 +33,9 @@ func (h *Handlers) GetVisionAISlots(ctx context.Context, r gen.GetVisionAISlotsR
 	if r.Params.Inactivity != nil {
 		opts = append(opts, visionai.WithInactivity(int(*r.Params.Inactivity)))
 	}
+	if servers := uuids(r.Params.ServerId); len(servers) > 0 {
+		opts = append(opts, visionai.WithServers(servers))
+	}
 	res, err := h.VisionAI.Slots(ctx, a, source, layout, opts...)
 	if err != nil {
 		return nil, err

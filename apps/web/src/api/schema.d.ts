@@ -8655,6 +8655,8 @@ export interface operations {
             query?: {
                 source?: components["schemas"]["VisionAISource"];
                 layout?: components["schemas"]["VisionAILayout"];
+                /** @description Only events of these servers fill the slots; omitted or empty means every server. Each selection keeps its own allocation state. */
+                server_id?: string[];
                 /** @description Inactivity timeout in seconds; 0 keeps a camera until its maximum display time. */
                 inactivity?: 0 | 10 | 30 | 60 | 120;
             };
