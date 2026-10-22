@@ -19,7 +19,7 @@ side bar is renamed "Eventos" and gets four tabs: Activos, Históricos, LPR and 
 ## Slices
 
 - [x] 1. `lib/visionEvents.ts`: view model, normalizers for the four sources, tab data hooks, with tests
-- [ ] 2. `EventPopup` component: image fallback chain, plate via `ArPlate`, close (button and Escape), pin-to-focus action
+- [x] 2. `EventPopup` component: image fallback chain, plate via `ArPlate`, close (button and Escape), pin-to-focus action
 - [ ] 3. `EventsSidebar` with tabs, wired into `VisionAI.tsx` (rename to "Eventos", popup above the grid); update existing tests
 
 ## Verification
