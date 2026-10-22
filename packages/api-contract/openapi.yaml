@@ -5238,6 +5238,26 @@ components:
         device_information: { $ref: "#/components/schemas/OnvifProbeDeviceInformation" }
         services: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/OnvifProbeService" } }
         system_time: { $ref: "#/components/schemas/OnvifProbeClock" }
+        profiles: { type: array, maxItems: 32, items: { $ref: "#/components/schemas/OnvifProbeProfile" } }
+    OnvifProbeProfile:
+      type: object
+      additionalProperties: false
+      required: [token, name, fixed, media_version, source_configuration_token, encoder_configuration_token, ptz_configuration_token, encoding, width, height, fps, frame_rate, bitrate, stream_uri]
+      properties:
+        token: { type: string, maxLength: 256, description: Camera-assigned stable identity for this stream profile. }
+        name: { type: string, maxLength: 256 }
+        fixed: { type: boolean, description: Whether the device marks this profile as fixed. }
+        media_version: { type: string, enum: ["1.0", "2.0"] }
+        source_configuration_token: { type: string, maxLength: 256 }
+        encoder_configuration_token: { type: string, maxLength: 256 }
+        ptz_configuration_token: { type: string, maxLength: 256 }
+        encoding: { type: string, maxLength: 256 }
+        width: { type: integer, minimum: 0, maximum: 100000 }
+        height: { type: integer, minimum: 0, maximum: 100000 }
+        fps: { type: integer, minimum: 0, maximum: 10000, description: Integer compatibility view of the advertised frame rate. }
+        frame_rate: { type: number, minimum: 0, maximum: 10000 }
+        bitrate: { type: integer, minimum: 0, maximum: 100000000 }
+        stream_uri: { type: string, maxLength: 2048, description: RTSP URI with user information and query parameters removed. }
     OnvifProbeDeviceInformation:
       type: object
       additionalProperties: false

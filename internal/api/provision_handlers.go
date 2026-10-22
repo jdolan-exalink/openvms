@@ -440,6 +440,22 @@ func onvifProbeResult(in provision.OnvifProbeResult) gen.OnvifProbeResult {
 			Utc:   gen.OnvifProbeDateTime{Time: gen.OnvifProbeTime{Hour: in.Clock.UTC.Time.Hour, Minute: in.Clock.UTC.Time.Minute, Second: in.Clock.UTC.Time.Second}, Date: gen.OnvifProbeDate{Year: in.Clock.UTC.Date.Year, Month: in.Clock.UTC.Date.Month, Day: in.Clock.UTC.Date.Day}},
 			Local: gen.OnvifProbeDateTime{Time: gen.OnvifProbeTime{Hour: in.Clock.Local.Time.Hour, Minute: in.Clock.Local.Time.Minute, Second: in.Clock.Local.Time.Second}, Date: gen.OnvifProbeDate{Year: in.Clock.Local.Date.Year, Month: in.Clock.Local.Date.Month, Day: in.Clock.Local.Date.Day}}},
 	}
+	if len(in.Profiles) > 0 {
+		profiles := make([]gen.OnvifProbeProfile, 0, len(in.Profiles))
+		for _, profile := range in.Profiles {
+			profiles = append(profiles, gen.OnvifProbeProfile{
+				Token: profile.Token, Name: profile.Name, Fixed: profile.Fixed,
+				MediaVersion:              gen.OnvifProbeProfileMediaVersion(profile.MediaVersion),
+				SourceConfigurationToken:  profile.SourceConfigurationToken,
+				EncoderConfigurationToken: profile.EncoderConfigurationToken,
+				PtzConfigurationToken:     profile.PTZConfigurationToken,
+				Encoding:                  profile.Encoding, Width: profile.Width, Height: profile.Height,
+				Fps: profile.FPS, FrameRate: float32(profile.FrameRate), Bitrate: profile.Bitrate,
+				StreamUri: profile.StreamURI,
+			})
+		}
+		out.Profiles = &profiles
+	}
 	for _, service := range in.Services {
 		out.Services = append(out.Services, gen.OnvifProbeService{Namespace: service.Namespace, Xaddrs: service.XAddrs, Version: gen.OnvifProbeVersion{Major: service.Version.Major, Minor: service.Version.Minor}})
 	}
