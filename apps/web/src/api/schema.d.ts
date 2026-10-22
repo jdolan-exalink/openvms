@@ -1090,6 +1090,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/onvif/video-encoding": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read or change the video encoding (H.264 or H.265) of a camera via ONVIF Media2
+         * @description `options` lists the camera's video encoder configurations and the encodings each one can be
+         *     switched to; `set` switches one configuration to H.264 or H.265. Only an encoding the camera
+         *     itself listed is ever written, the rest of the configuration (resolution, frame rate,
+         *     bitrate, profile) is kept where the new encoding allows it, and the result is read back
+         *     before it is reported as applied. The camera restarts that stream for a few seconds.
+         *     Requires servers.manage and servers.config.secrets on the camera's server: the camera
+         *     credentials travel with the request and are never stored or returned.
+         *
+         *     A refused or impossible change is a 200 with `success: false` and a `code`:
+         *     `media2_unsupported` (the camera has no Media2 service, the only one that exposes H.265),
+         *     `encoding_unsupported`, `encoding_unchanged`, `configuration_not_found`. `not_applied`
+         *     (the camera accepted the call but kept the old setting) is a 502.
+         */
+        post: operations["operateCameraOnvifVideoEncoding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/onvif/imaging": {
         parameters: {
             query?: never;
@@ -3899,6 +3932,40 @@ export interface components {
                 height?: number;
                 fps?: number;
                 bitrate?: number;
+            }[];
+        };
+        CameraOnvifVideoEncodingRequest: {
+            endpoint?: string;
+            username?: string;
+            password?: string;
+            /** @enum {string} */
+            action: "options" | "set";
+            /** @description Encoder configuration to change; required for set. */
+            config_token?: string;
+            /**
+             * @description Target encoding; required for set.
+             * @enum {string}
+             */
+            encoding?: "H264" | "H265";
+        };
+        CameraOnvifVideoEncodingResult: {
+            success: boolean;
+            /** @description False when the camera has no Media2 service. */
+            supported: boolean;
+            code?: string;
+            detail?: string;
+            previous_encoding?: string;
+            encoding?: string;
+            configurations?: {
+                token: string;
+                name: string;
+                encoding: string;
+                profile?: string;
+                width: number;
+                height: number;
+                fps: number;
+                bitrate: number;
+                supported_encodings: string[];
             }[];
         };
         CameraOnvifImagingRequest: {
@@ -7895,6 +7962,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CameraOnvifVideoConfigResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    operateCameraOnvifVideoEncoding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraOnvifVideoEncodingRequest"];
+            };
+        };
+        responses: {
+            /** @description Operation result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CameraOnvifVideoEncodingResult"];
                 };
             };
             400: components["responses"]["BadRequest"];

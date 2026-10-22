@@ -1299,6 +1299,42 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/onvif/video-encoding:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: operateCameraOnvifVideoEncoding
+      summary: Read or change the video encoding (H.264 or H.265) of a camera via ONVIF Media2
+      description: |
+        `options` lists the camera's video encoder configurations and the encodings each one can be
+        switched to; `set` switches one configuration to H.264 or H.265. Only an encoding the camera
+        itself listed is ever written, the rest of the configuration (resolution, frame rate,
+        bitrate, profile) is kept where the new encoding allows it, and the result is read back
+        before it is reported as applied. The camera restarts that stream for a few seconds.
+        Requires servers.manage and servers.config.secrets on the camera's server: the camera
+        credentials travel with the request and are never stored or returned.
+
+        A refused or impossible change is a 200 with `success: false` and a `code`:
+        `media2_unsupported` (the camera has no Media2 service, the only one that exposes H.265),
+        `encoding_unsupported`, `encoding_unchanged`, `configuration_not_found`. `not_applied`
+        (the camera accepted the call but kept the old setting) is a 502.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraOnvifVideoEncodingRequest" }
+      responses:
+        "200":
+          description: Operation result
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CameraOnvifVideoEncodingResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/onvif/imaging:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -5111,6 +5147,44 @@ components:
               height: { type: integer }
               fps: { type: number }
               bitrate: { type: integer }
+    CameraOnvifVideoEncodingRequest:
+      type: object
+      additionalProperties: false
+      required: [action]
+      properties:
+        endpoint: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 128 }
+        password: { type: string, maxLength: 256, writeOnly: true }
+        action: { type: string, enum: [options, set] }
+        config_token: { type: string, maxLength: 128, description: "Encoder configuration to change; required for set." }
+        encoding: { type: string, enum: [H264, H265], description: "Target encoding; required for set." }
+    CameraOnvifVideoEncodingResult:
+      type: object
+      additionalProperties: false
+      required: [success, supported]
+      properties:
+        success: { type: boolean }
+        supported: { type: boolean, description: "False when the camera has no Media2 service." }
+        code: { type: string }
+        detail: { type: string }
+        previous_encoding: { type: string }
+        encoding: { type: string }
+        configurations:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [token, name, encoding, width, height, fps, bitrate, supported_encodings]
+            properties:
+              token: { type: string }
+              name: { type: string }
+              encoding: { type: string }
+              profile: { type: string }
+              width: { type: integer }
+              height: { type: integer }
+              fps: { type: number }
+              bitrate: { type: integer }
+              supported_encodings: { type: array, items: { type: string } }
     CameraOnvifImagingRequest:
       type: object
       additionalProperties: false
