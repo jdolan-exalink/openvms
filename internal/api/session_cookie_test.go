@@ -11,6 +11,7 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
+// #nosec G124 -- Secure follows the simulated scheme, as in production (secureRequest).
 // authenticated reports whether Authenticate lets a request carrying only these cookies through.
 func authenticated(t *testing.T, https bool, cookies ...string) bool {
 	t.Helper()
