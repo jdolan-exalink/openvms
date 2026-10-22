@@ -120,7 +120,7 @@ func (w *RuleEvaluationWorker) process(ctx context.Context, item claimedRuleEval
 	w.Log.ErrorContext(ctx, "rule evaluation job failed", "job_id", job.ID, "tenant_id", item.tenantID,
 		"attempt", job.Attempts, "error", err)
 	if retryErr := w.retry(ctx, item, err); retryErr != nil {
-		return fmt.Errorf("retry rule evaluation job %s after %v: %w", job.ID, err, retryErr)
+		return fmt.Errorf("retry rule evaluation job %s after %w: %w", job.ID, err, retryErr)
 	}
 	return nil
 }
