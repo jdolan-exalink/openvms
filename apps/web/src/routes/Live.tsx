@@ -45,7 +45,7 @@ import {
   type Quality, type Tile, type LiveVisionRef,
 } from "@/lib/liveGrid";
 import { DEFAULT_PRESENTATIONS, loadCatalog, presentationForCount, recallViewPanes, rememberViewPanes, saveCatalog, uniformPanes, type Pane, type Presentation } from "@/lib/presentations";
-import { loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
+import { camerasOfServer as serverCameras, camerasOfSite, loadSidebarPinned, saveSidebarPinned } from "@/lib/explorer";
 import { can } from "@/lib/perm";
 import { LivePhone } from "@/components/LivePhone";
 import { useIsPhoneDevice } from "@/lib/useIsPhoneDevice";
@@ -516,6 +516,7 @@ function LiveDesktop() {
     else if (resolution.type === "place-vision") placeVision(resolution.vision, resolution.index);
     else if (resolution.type === "reorder") reorder(resolution.from, resolution.to);
     else if (resolution.type === "fill-server") showGroup(camerasOfServer(resolution.serverId), servers.data?.find((server) => server.id === resolution.serverId)?.name ?? tr("live.theServer"));
+    else if (resolution.type === "fill-site") showGroup(camerasOfSiteId(resolution.siteId), sites.data?.find((site) => site.id === resolution.siteId)?.name ?? tr("live.theSite"));
     else showGroup(camerasOfFolder(resolution.folderId), folderApi.folders.find((folder) => folder.id === resolution.folderId)?.name ?? tr("live.theFolder"));
   };
 
@@ -615,15 +616,8 @@ function LiveDesktop() {
   };
   const cameraQuality = (id: string, cols: number) => (cols === 1 ? "main" : (camById.get(id)?.default_live_quality ?? "sub")) as "main" | "sub";
   const byCamera = (a: Schemas["Camera"], b: Schemas["Camera"]) => a.sort_order - b.sort_order || a.display_name.localeCompare(b.display_name);
-  const camerasOfServer = (serverId: string) => {
-    const all = (cameras.data ?? []).filter((camera) => camera.enabled && camera.server_id === serverId);
-    const folders = folderApi.folders.filter((folder) => folder.server_id === serverId).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-    const folderIds = new Set(folders.map((folder) => folder.id));
-    return [
-      ...folders.flatMap((folder) => all.filter((camera) => camera.folder_id === folder.id).sort(byCamera)),
-      ...all.filter((camera) => camera.folder_id == null || !folderIds.has(camera.folder_id)).sort(byCamera),
-    ];
-  };
+  const camerasOfServer = (serverId: string) => serverCameras(serverId, cameras.data ?? [], folderApi.folders);
+  const camerasOfSiteId = (siteId: string) => camerasOfSite(siteId, servers.data ?? [], cameras.data ?? [], folderApi.folders);
   const camerasOfFolder = (folderId: string) => (cameras.data ?? []).filter((camera) => camera.enabled && camera.folder_id === folderId).sort(byCamera);
   const showGroup = (list: Schemas["Camera"][], label: string) => {
     if (list.length === 0) {
@@ -864,6 +858,8 @@ function LiveDesktop() {
       ? folderApi.folders.find((f) => f.id === activeDrag.slice("tfolder:".length))?.name
         : activeDrag?.startsWith("tserver:")
         ? servers.data?.find((server) => server.id === activeDrag.slice("tserver:".length))?.name
+        : activeDrag?.startsWith("tsite:")
+        ? sites.data?.find((site) => site.id === activeDrag.slice("tsite:".length))?.name
         : activeDrag?.startsWith("tvision:")
           ? visionFromDragId(activeDrag)?.name
           : activeDrag

@@ -122,6 +122,13 @@ describe("resolveDragEnd", () => {
     expect(resolveDragEnd("tfolder:fld-1", LIVE_GRID_DROP_ID)).toEqual({ type: "fill-folder", folderId: "fld-1" });
     expect(resolveDragEnd("tserver:srv-1", "not-a-tile")).toBeNull();
   });
+
+  it("resolves dropping a whole site onto the grid as a fill of the site", () => {
+    expect(resolveDragEnd("tsite:site-1", tileDragId(3))).toEqual({ type: "fill-site", siteId: "site-1" });
+    expect(resolveDragEnd("tsite:site-1", LIVE_GRID_DROP_ID)).toEqual({ type: "fill-site", siteId: "site-1" });
+    expect(resolveDragEnd("tsite:site-1", "not-a-tile")).toBeNull();
+    expect(resolveDragEnd("tsite:site-1", null)).toBeNull();
+  });
 });
 
 describe("layoutForCount", () => {

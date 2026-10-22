@@ -285,6 +285,25 @@ describe("Live", () => {
     expect(within(screen.getByLabelText("Cuadro 3")).queryByTestId("codec-badge")).not.toBeInTheDocument();
   });
 
+  it("lets the whole site be dragged onto the grid, with a hint saying so", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+      "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" }] }),
+      "/api/v1/views": () => json({ items: [] }),
+    })));
+    renderPage(Live);
+    const site = await screen.findByRole("button", { name: /Campus/ });
+    expect(site).toHaveAttribute("aria-roledescription", "draggable");
+    expect(site).toHaveAttribute("title", expect.stringMatching(/Campus.*Arrastrá a la grilla.*todos sus servidores/));
+    // Folding the site still works with a click.
+    const open = site.getAttribute("aria-expanded");
+    fireEvent.click(site);
+    expect(site.getAttribute("aria-expanded")).not.toBe(open);
+  });
+
   it("keeps video tiles square, selected or not, and marks selection with an outline", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({

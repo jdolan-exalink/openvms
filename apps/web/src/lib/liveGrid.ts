@@ -136,13 +136,15 @@ export type DragResolution =
   | { type: "place-vision"; index: number; vision: LiveVisionRef }
   | { type: "reorder"; from: number; to: number }
   | { type: "fill-server"; serverId: string }
+  | { type: "fill-site"; siteId: string }
   | { type: "fill-folder"; folderId: string }
   | null;
 
-/** The whole live grid, so a server or folder can be dropped on the gap between tiles. */
+/** The whole live grid, so a site, server or folder can be dropped on the gap between tiles. */
 export const LIVE_GRID_DROP_ID = "live-grid";
 
 const SERVER_DRAG_PREFIX = "tserver:";
+const SITE_DRAG_PREFIX = "tsite:";
 const FOLDER_DRAG_PREFIX = "tfolder:";
 const MAP_PREFIX = "tmap:";
 const VISION_PREFIX = "tvision:";
@@ -232,6 +234,8 @@ export function resolveDragEnd(activeId: string | number, overId: string | numbe
   if (overGrid) {
     const serverId = stripPrefix(activeId, SERVER_DRAG_PREFIX);
     if (serverId) return { type: "fill-server", serverId };
+    const siteId = stripPrefix(activeId, SITE_DRAG_PREFIX);
+    if (siteId) return { type: "fill-site", siteId };
     const folderId = stripPrefix(activeId, FOLDER_DRAG_PREFIX);
     if (folderId) return { type: "fill-folder", folderId };
   }

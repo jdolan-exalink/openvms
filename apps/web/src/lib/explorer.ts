@@ -25,6 +25,33 @@ const byOrder = (a: { sort_order: number }, b: { sort_order: number }) => a.sort
 const byCamera = (a: Camera, b: Camera) => byOrder(a, b) || a.display_name.localeCompare(b.display_name);
 const byFolder = (a: Folder, b: Folder) => byOrder(a, b) || a.name.localeCompare(b.name);
 
+/**
+ * The enabled cameras of one server in the order the explorer shows them: folders in folder order
+ * with their cameras, then the cameras that sit at the server root (or in a folder that is gone).
+ */
+export function camerasOfServer(serverId: string, cameras: readonly Camera[], folders: readonly Folder[]): Camera[] {
+  const all = cameras.filter((c) => c.enabled && c.server_id === serverId);
+  const own = folders.filter((f) => f.server_id === serverId).sort(byFolder);
+  const folderIds = new Set(own.map((f) => f.id));
+  return [
+    ...own.flatMap((f) => all.filter((c) => c.folder_id === f.id).sort(byCamera)),
+    ...all.filter((c) => c.folder_id == null || !folderIds.has(c.folder_id)).sort(byCamera),
+  ];
+}
+
+/** Every enabled camera of every server of a site, servers by name, each in its explorer order. */
+export function camerasOfSite(
+  siteId: string,
+  servers: readonly { id: string; name: string; site_id: string }[],
+  cameras: readonly Camera[],
+  folders: readonly Folder[],
+): Camera[] {
+  return servers
+    .filter((s) => s.site_id === siteId)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .flatMap((s) => camerasOfServer(s.id, cameras, folders));
+}
+
 const includes = (text: string, q: string) => text.toLowerCase().includes(q);
 
 export function buildTree(input: {
@@ -87,12 +114,14 @@ export function buildTree(input: {
 const TREE_CAMERA = "tcam:";
 const TREE_FOLDER = "tfolder:";
 const TREE_SERVER = "tserver:";
+const TREE_SITE = "tsite:";
 const TREE_ROOT = "troot:";
 const CAMERA = "camera:";
 
 export const treeCameraDropId = (id: string) => `${TREE_CAMERA}${id}`;
 export const treeFolderId = (id: string) => `${TREE_FOLDER}${id}`;
 export const treeServerDragId = (id: string) => `${TREE_SERVER}${id}`;
+export const treeSiteDragId = (id: string) => `${TREE_SITE}${id}`;
 export const treeRootDropId = (serverId: string) => `${TREE_ROOT}${serverId}`;
 
 const strip = (id: string | number, prefix: string) => (String(id).startsWith(prefix) ? String(id).slice(prefix.length) : null);

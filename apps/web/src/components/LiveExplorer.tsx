@@ -13,7 +13,7 @@ import { VideoTelemetryMeter } from "@/components/VideoTelemetryMeter";
 import { ContextMenu, type MenuItem } from "@/components/ContextMenu";
 import { ErrorNote, IconButton, TextInput } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { buildTree, type Camera, type Folder, type FolderNode, loadPrefs, type ServerNode, savePrefs, treeCameraDropId, treeFolderId, treeRootDropId, treeServerDragId } from "@/lib/explorer";
+import { buildTree, type Camera, type Folder, type FolderNode, loadPrefs, type ServerNode, type SiteNode, savePrefs, treeCameraDropId, treeFolderId, treeRootDropId, treeServerDragId, treeSiteDragId } from "@/lib/explorer";
 import { LiveDetectionsPanel, LiveLprPanel, LiveMapsPanel } from "@/components/LiveSidePanels";
 import { cameraDragId, feviewDragId, type LiveMapRef, visionDragId, type LiveVisionRef } from "@/lib/liveGrid";
 import { getEffectiveVirtualViews } from "@/lib/fisheye/storage";
@@ -98,6 +98,7 @@ type DragData =
   | { kind: "camera"; serverId: string }
   | { kind: "folder"; serverId: string }
   | { kind: "server"; serverId: string }
+  | { kind: "site"; siteId: string }
   | { kind: "vision"; vision: LiveVisionRef };
 
 /** Drag state seen from one server's subtree: only same-server, manageable nodes accept a drop. */
@@ -347,13 +348,12 @@ export function LiveExplorer({
             ))}
             {tree.map((site) => (
               <div key={site.id} className="min-w-0">
-                <button
-                  type="button"
-                  onClick={() => toggle(`site:${site.id}`)}
-                  aria-expanded={isOpen(`site:${site.id}`)}
-                  title={site.name}
-                  className="flex w-full min-w-0 items-center gap-1 rounded-m3-sm py-1.5 text-left font-bold hover:bg-on-surface/8"
-                  {...bind(() => [
+                <SiteHeader
+                  site={site}
+                  open={isOpen(`site:${site.id}`)}
+                  onToggle={() => toggle(`site:${site.id}`)}
+                  hint={t("live.siteDragHint", { name: site.name })}
+                  menu={bind(() => [
                     ...saveViewItem(),
                     ...(actions.canConfigureSites ? [{ id: "cfg", label: t("live.configure"), icon: Settings, onSelect: () => void navigate({ to: "/sites" }) } satisfies MenuItem] : []),
                     { id: "map", label: t("live.newMap"), icon: MapIcon, disabled: true, hint: t("live.comingSoon") },
@@ -361,12 +361,7 @@ export function LiveExplorer({
                     { id: "expand", label: t("live.expandAll"), icon: ChevronsDown, onSelect: () => setSiteOpen(site, true) },
                     { id: "collapse", label: t("live.collapseAll"), icon: ChevronsUp, onSelect: () => setSiteOpen(site, false) },
                   ])}
-                >
-                  <Chevron open={isOpen(`site:${site.id}`)} />
-                  <Icon icon={Building2} size="xs" className={nodeIcon} />
-                  <span className="min-w-0 truncate">{site.name}</span>
-                  <Count n={site.count} />
-                </button>
+                />
                 {isOpen(`site:${site.id}`) &&
                   site.servers.map((srv) => (
                     <ServerBranch
@@ -516,6 +511,51 @@ function ViewRow({
         {view.shared && <Icon icon={Cloud} size="xs" label={t("live.shared")} className="ml-auto shrink-0 text-primary" />}
       </button>
     </div>
+  );
+}
+
+/**
+ * A site row: click folds it, dragging it onto the grid shows every camera of all its servers. The
+ * menu props come from the explorer's context menu so right click and the menu key still work.
+ */
+function SiteHeader({
+  site,
+  open,
+  onToggle,
+  hint,
+  menu,
+}: {
+  site: SiteNode;
+  open: boolean;
+  onToggle: () => void;
+  hint: string;
+  menu: ReturnType<ReturnType<typeof useMenuCtx>["bind"]>;
+}) {
+  const { setNodeRef, attributes, listeners, isDragging } = useDraggable({
+    id: treeSiteDragId(site.id),
+    data: { kind: "site", siteId: site.id } satisfies DragData,
+  });
+  return (
+    <button
+      ref={setNodeRef}
+      type="button"
+      onClick={onToggle}
+      aria-expanded={open}
+      title={hint}
+      className={cn("flex w-full min-w-0 cursor-grab items-center gap-1 rounded-m3-sm py-1.5 text-left font-bold hover:bg-on-surface/8", isDragging && "opacity-50")}
+      {...attributes}
+      {...listeners}
+      {...menu}
+      onKeyDown={(event) => {
+        menu.onKeyDown(event);
+        if (!event.defaultPrevented) (listeners?.onKeyDown as ((ev: KeyboardEvent<HTMLElement>) => void) | undefined)?.(event);
+      }}
+    >
+      <Chevron open={open} />
+      <Icon icon={Building2} size="xs" className={nodeIcon} />
+      <span className="min-w-0 truncate">{site.name}</span>
+      <Count n={site.count} />
+    </button>
   );
 }
 
