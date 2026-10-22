@@ -6,8 +6,11 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/jdolan-exalink/openvms/internal/authz"
 )
@@ -76,7 +79,8 @@ func (s *Service) session(a authz.Actor, cfg VisionConfig, now time.Time) *SlotA
 		}
 	}
 	// Each inactivity timeout keeps its own allocator so switching it never mixes slot state.
-	key := sessionKey(a, cfg.ID, cfg.Layout) + "|" + strconv.Itoa(cfg.InactivitySeconds)
+	// A server selection gets its own allocator too, so no camera of an unchecked server lingers.
+	key := sessionKey(a, cfg.ID, cfg.Layout) + "|" + strconv.Itoa(cfg.InactivitySeconds) + "|" + serversKey(cfg.Servers)
 	sess, ok := s.sessions[key]
 	if !ok {
 		if !a.IsPlatform() {
@@ -96,6 +100,25 @@ type SlotsOption func(*VisionConfig)
 // InactivityOptions are rejected by Slots.
 func WithInactivity(seconds int) SlotsOption {
 	return func(c *VisionConfig) { c.InactivitySeconds = seconds }
+}
+
+// WithServers limits the slots to events of these servers; none means every server. The ids are
+// sorted and de-duplicated so the same selection always maps to the same allocator session.
+func WithServers(ids []uuid.UUID) SlotsOption {
+	return func(c *VisionConfig) {
+		out := slices.Clone(ids)
+		slices.SortFunc(out, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
+		c.Servers = slices.Compact(out)
+	}
+}
+
+// serversKey identifies a server selection inside the session key.
+func serversKey(ids []uuid.UUID) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = id.String()
+	}
+	return strings.Join(parts, ",")
 }
 
 // Slots loads the actor's recent events, ranks them and returns the current slot grid.

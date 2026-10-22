@@ -1841,6 +1841,7 @@ paths:
       parameters:
         - { name: source, in: query, schema: { $ref: "#/components/schemas/VisionAISource" } }
         - { name: layout, in: query, schema: { $ref: "#/components/schemas/VisionAILayout" } }
+        - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } }, description: "Only events of these servers fill the slots; omitted or empty means every server. Each selection keeps its own allocation state." }
         - name: inactivity
           in: query
           description: Inactivity timeout in seconds; 0 keeps a camera until its maximum display time.
