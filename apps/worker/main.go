@@ -138,28 +138,6 @@ func run() error {
 		Store: st, Adapters: adapters, Blobs: objects, Log: log,
 		Rules:    rulesSvc,
 		Interval: cfg.EventSyncInterval, Backfill: cfg.EventBackfill, Concurrency: 8,
-		OnNew: func(ctx context.Context, e events.NewEvent) {
-			data, _ := json.Marshal(e)
-			if _, err := js.Publish(ctx, "frigate.event.new."+e.TenantID.String(), data); err != nil {
-				log.WarnContext(ctx, "publish new event", "error", err)
-			}
-		},
-		OnAlarm: func(ctx context.Context, opened []events.OpenedAlarm) {
-			for _, a := range opened {
-				data, _ := json.Marshal(a)
-				if _, err := js.Publish(ctx, "alarm.opened."+a.TenantID.String(), data); err != nil {
-					log.WarnContext(ctx, "publish opened alarm", "error", err, "alarm_id", a.ID)
-				}
-			}
-		},
-		OnAlarmUpdated: func(ctx context.Context, updated []events.OpenedAlarm) {
-			for _, a := range updated {
-				data, _ := json.Marshal(a)
-				if _, err := js.Publish(ctx, "alarm.updated."+a.TenantID.String(), data); err != nil {
-					log.WarnContext(ctx, "publish updated alarm", "error", err, "alarm_id", a.ID)
-				}
-			}
-		},
 	}
 	go syncer.Run(ctx)
 

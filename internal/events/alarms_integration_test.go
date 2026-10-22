@@ -4,6 +4,7 @@ package events_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
@@ -136,6 +137,84 @@ func TestAlertEventOpensOneAlarmAcrossSyncs(t *testing.T) {
 				t.Fatalf("opened alarm payload incomplete: %+v", a)
 			}
 		}
+	}
+}
+
+func TestAlertSyncPersistsRealtimeAnnouncementsExactlyOnce(t *testing.T) {
+	f := newAlarmFixture(t)
+	f.enableAt(time.Now().Add(-2 * time.Hour))
+	f.put("outbox-alert-1", "alert", time.Now().Add(-30*time.Second))
+	f.sync()
+	firstEventID := f.eventID("outbox-alert-1")
+	f.put("outbox-alert-2", "alert", time.Now().Add(-20*time.Second))
+	f.sync()
+	secondEventID := f.eventID("outbox-alert-2")
+	f.sync()
+
+	type announcement struct {
+		id        uuid.UUID
+		subject   string
+		payload   json.RawMessage
+		aggregate *string
+		sequence  *int64
+	}
+	var messages []announcement
+	err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		rows, err := tx.Query(context.Background(), `SELECT id, subject, payload, aggregate_key, aggregate_sequence
+			FROM realtime_publication_outbox
+			WHERE payload->>'id' IN ($1, $2) OR payload->>'event_id' IN ($1, $2)
+			ORDER BY aggregate_key NULLS FIRST, aggregate_sequence NULLS FIRST`, firstEventID.String(), secondEventID.String())
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var row announcement
+			if err := rows.Scan(&row.id, &row.subject, &row.payload, &row.aggregate, &row.sequence); err != nil {
+				return err
+			}
+			messages = append(messages, row)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 4 {
+		t.Fatalf("outbox announcements for both events = %d, want two event, one opened and one updated", len(messages))
+	}
+	eventCount, openedCount, updatedCount := 0, 0, 0
+	var alarmKey string
+	for _, message := range messages {
+		var payload map[string]any
+		if err := json.Unmarshal(message.payload, &payload); err != nil {
+			t.Fatalf("decode %s payload: %v", message.subject, err)
+		}
+		switch message.subject {
+		case "frigate.event.new." + f.env.Demo.TenantID.String():
+			eventID, ok := payload["id"].(string)
+			if !ok || (eventID != firstEventID.String() && eventID != secondEventID.String()) || message.aggregate != nil || message.sequence != nil {
+				t.Fatalf("event announcement metadata/payload = %+v %+v", message, payload)
+			}
+			eventCount++
+		case "alarm.opened." + f.env.Demo.TenantID.String():
+			id, ok := payload["id"].(string)
+			if !ok || payload["event_id"] != firstEventID.String() || message.aggregate == nil || *message.aggregate != "alarm/"+id || message.sequence == nil || *message.sequence != 1 {
+				t.Fatalf("alarm opened metadata/payload = %+v %+v", message, payload)
+			}
+			alarmKey = *message.aggregate
+			openedCount++
+		case "alarm.updated." + f.env.Demo.TenantID.String():
+			if payload["event_id"] != secondEventID.String() || message.aggregate == nil || *message.aggregate != alarmKey || message.sequence == nil || *message.sequence != 2 {
+				t.Fatalf("alarm updated metadata/payload = %+v %+v", message, payload)
+			}
+			updatedCount++
+		default:
+			t.Fatalf("unexpected announcement subject %q", message.subject)
+		}
+	}
+	if eventCount != 2 || openedCount != 1 || updatedCount != 1 {
+		t.Fatalf("outbox announcements: events=%d opened=%d updated=%d", eventCount, openedCount, updatedCount)
 	}
 }
 

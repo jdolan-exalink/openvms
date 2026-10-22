@@ -355,6 +355,23 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 				}
 			}
 		}
+		for _, ev := range created {
+			if err := enqueueRealtimeAnnouncement(ctx, tx, "frigate.event.new."+ev.TenantID.String(), ev.TenantID, nil, ev); err != nil {
+				return err
+			}
+		}
+		for _, alarm := range opened {
+			key := "alarm/" + alarm.ID.String()
+			if err := enqueueRealtimeAnnouncement(ctx, tx, "alarm.opened."+alarm.TenantID.String(), alarm.TenantID, &key, alarm); err != nil {
+				return err
+			}
+		}
+		for _, alarm := range updated.list {
+			key := "alarm/" + alarm.ID.String()
+			if err := enqueueRealtimeAnnouncement(ctx, tx, "alarm.updated."+alarm.TenantID.String(), alarm.TenantID, &key, alarm); err != nil {
+				return err
+			}
+		}
 		return upsertCursor(ctx, tx, srv, "review_cursor", &next)
 	})
 	if err != nil {
@@ -384,6 +401,20 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 		for _, ev := range recognized {
 			evaluate(ev, true)
 		}
+	}
+	return nil
+}
+
+func enqueueRealtimeAnnouncement(ctx context.Context, tx pgx.Tx, subject string, tenantID uuid.UUID, aggregateKey *string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal realtime announcement %s: %w", subject, err)
+	}
+	_, err = db.New(tx).EnqueueRealtimePublication(ctx, db.EnqueueRealtimePublicationParams{
+		TenantID: tenantID, Subject: subject, Payload: data, AggregateKey: aggregateKey,
+	})
+	if err != nil {
+		return fmt.Errorf("enqueue realtime announcement %s: %w", subject, err)
 	}
 	return nil
 }
