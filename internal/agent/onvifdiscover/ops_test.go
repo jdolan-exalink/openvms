@@ -50,6 +50,25 @@ func TestOpsHandlerAuthAndEndpointValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("video-encoding unauthorized", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/onvif/video-encoding", bytes.NewReader([]byte(`{}`)))
+		rec := httptest.NewRecorder()
+		handler.HandleVideoEncoding(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("status = %d, want 401", rec.Code)
+		}
+	})
+
+	t.Run("video-encoding refuses an endpoint outside the allowed networks", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/v1/onvif/video-encoding", bytes.NewReader([]byte(`{"endpoint":"http://10.0.0.1/onvif/device_service","action":"options"}`)))
+		req.Header.Set("Authorization", "Bearer secret-agent-token")
+		rec := httptest.NewRecorder()
+		handler.HandleVideoEncoding(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("status = %d, want 400", rec.Code)
+		}
+	})
+
 	t.Run("imaging unauthorized", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/onvif/imaging", bytes.NewReader([]byte(`{}`)))
 		rec := httptest.NewRecorder()
