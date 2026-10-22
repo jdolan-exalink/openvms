@@ -27,7 +27,7 @@ Make realtime JetStream announcements follow committed database state. Producers
 
 ## Work slices
 
-- [x] Slice A (`fc1e0e0`): tenant isolated schema, due index, sqlc enqueue/claim/ack/retry APIs, lease-token fencing, bounded retries, terminal failure, and RLS integration coverage. Focused integration and `go test ./internal/store` passed; `git diff --check` passed. 229 authored lines plus 175 generated. Runtime publisher harness: N/A (no dispatcher in this slice). Rollback boundary: migration 00065 drops the outbox table and its rows. Independent review pending.
+- [x] Slice A (`fc1e0e0`): tenant isolated schema, due index, sqlc enqueue/claim/ack/retry APIs, lease-token fencing, bounded retries, terminal failure, and RLS integration coverage. Focused integration and `go test ./internal/store` passed; `git diff --check` passed. 229 authored lines plus 175 generated. Runtime publisher harness: N/A (no dispatcher in this slice). Rollback boundary: migration 00065 drops the outbox table and its rows. Independent review found no actionable defects in schema, RLS, or lifecycle queries.
 - [ ] Slice B: lease-based dispatcher, JetStream publisher adapter, worker startup/shutdown, retry/dead-letter observability, and tests.
 - [ ] Slice C: convert event ingestion and built-in alarm publications transactionally.
 - [ ] Slice D: convert rule alarms and `notification.created` transactionally; publish none from inside evaluator transactions.
