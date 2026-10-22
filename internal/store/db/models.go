@@ -168,6 +168,8 @@ type Camera struct {
 	OnvifProfile       *string
 	OnvifVersion       *string
 	OnvifCapabilities  json.RawMessage
+	LiveCodec          string
+	HqCodec            string
 }
 
 type CameraFolder struct {

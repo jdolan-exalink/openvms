@@ -132,16 +132,23 @@ WHERE id = @id;
 UPDATE cameras SET site_id = @site_id, updated_at = now() WHERE server_id = @server_id;
 
 -- name: UpsertCamera :one
-INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream)
-VALUES (@tenant_id, @site_id, @server_id, @remote_name, @display_name, @enabled, @zones, @lpr, @live_stream, @hq_stream)
+INSERT INTO cameras (tenant_id, site_id, server_id, remote_name, display_name, enabled, zones, lpr, live_stream, hq_stream, live_codec, hq_codec)
+VALUES (@tenant_id, @site_id, @server_id, @remote_name, @display_name, @enabled, @zones, @lpr, @live_stream, @hq_stream, @live_codec, @hq_codec)
 ON CONFLICT (server_id, remote_name) WHERE deleted_at IS NULL DO UPDATE SET
     zones = excluded.zones,
     lpr = excluded.lpr,
     live_stream = excluded.live_stream,
     hq_stream = excluded.hq_stream,
+    -- An empty codec means "not reported this time": keep the last known one, unless the camera
+    -- lost its stream altogether.
+    live_codec = CASE WHEN excluded.live_stream = '' THEN '' WHEN excluded.live_codec <> '' THEN excluded.live_codec ELSE cameras.live_codec END,
+    hq_codec = CASE WHEN excluded.hq_stream = '' THEN '' WHEN excluded.hq_codec <> '' THEN excluded.hq_codec ELSE cameras.hq_codec END,
     missing_since = NULL,
     updated_at = now()
 RETURNING (xmax = 0) AS inserted;
+
+-- name: UpdateCameraCodecs :exec
+UPDATE cameras SET live_codec = @live_codec, hq_codec = @hq_codec WHERE id = @id;
 
 -- name: MarkMissingCameras :execrows
 UPDATE cameras SET missing_since = coalesce(missing_since, now()), status = 'offline', updated_at = now()

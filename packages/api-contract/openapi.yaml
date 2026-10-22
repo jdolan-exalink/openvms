@@ -5306,6 +5306,8 @@ components:
         display_name: { type: string }
         enabled: { type: boolean }
         zones: { type: array, items: { type: string } }
+        live_codec: { type: string, nullable: true, description: "Video codec of the live (sub) go2rtc stream as go2rtc reports it, lowercase (h264, h265); null when unknown." }
+        hq_codec: { type: string, nullable: true, description: "Video codec of the hq (main) go2rtc stream; null when unknown." }
         lpr: { type: boolean }
         status: { $ref: "#/components/schemas/HealthStatus" }
         fps: { type: number, nullable: true }
