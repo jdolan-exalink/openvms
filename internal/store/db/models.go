@@ -783,7 +783,15 @@ type RuleEvaluationJob struct {
 	EvaluationKind string
 	FaceNames      []string
 	Payload        json.RawMessage
+	Status         string
+	Attempts       int32
+	AvailableAt    time.Time
+	LeaseUntil     *time.Time
+	LeaseToken     *uuid.UUID
+	LastError      *string
 	EnqueuedAt     time.Time
+	CompletedAt    *time.Time
+	UpdatedAt      time.Time
 }
 
 type RuleFiring struct {

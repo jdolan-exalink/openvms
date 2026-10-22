@@ -73,6 +73,41 @@ SELECT count(*) FROM map_zones
 WHERE tenant_id = @tenant_id AND deleted_at IS NULL AND id = ANY(@ids::uuid[]);
 
 -- name: EnqueueRuleEvaluation :exec
-INSERT INTO rule_evaluation_jobs (event_id, evaluation_kind, face_names, payload)
-VALUES (@event_id, @evaluation_kind, @face_names, @payload)
+INSERT INTO rule_evaluation_jobs (event_id, evaluation_kind, face_names, payload, status)
+VALUES (@event_id, @evaluation_kind, @face_names, @payload, 'completed')
 ON CONFLICT (event_id, evaluation_kind, face_names) DO NOTHING;
+
+-- name: ClaimRuleEvaluationJobs :many
+WITH exhausted AS (
+    UPDATE rule_evaluation_jobs
+    SET status = 'failed', lease_until = NULL,
+        last_error = coalesce(last_error, 'attempt limit reached'), updated_at = now()
+    WHERE status = 'processing' AND lease_until <= now() AND attempts >= @max_attempts
+)
+UPDATE rule_evaluation_jobs AS job
+SET status = 'processing', attempts = job.attempts + 1,
+    lease_until = now() + make_interval(secs => @lease_seconds::float8),
+    lease_token = gen_random_uuid(), updated_at = now()
+WHERE job.id IN (
+    SELECT queued.id FROM rule_evaluation_jobs AS queued
+    WHERE queued.attempts < @max_attempts
+      AND ((queued.status = 'pending' AND queued.available_at <= now())
+        OR (queued.status = 'processing' AND queued.lease_until <= now()))
+    ORDER BY queued.available_at, queued.enqueued_at, queued.id
+    LIMIT @max_rows
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING job.*;
+
+-- name: CompleteRuleEvaluationJob :execrows
+UPDATE rule_evaluation_jobs
+SET status = 'completed', lease_until = NULL, lease_token = NULL, last_error = NULL,
+    completed_at = now(), updated_at = now()
+WHERE id = @id AND status = 'processing' AND lease_token = @lease_token;
+
+-- name: RetryRuleEvaluationJob :execrows
+UPDATE rule_evaluation_jobs
+SET status = CASE WHEN attempts >= @max_attempts THEN 'failed' ELSE 'pending' END,
+    available_at = now() + make_interval(secs => @retry_seconds::float8),
+    lease_until = NULL, lease_token = NULL, last_error = @last_error, updated_at = now()
+WHERE id = @id AND status = 'processing' AND lease_token = @lease_token;
