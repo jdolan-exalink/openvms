@@ -702,6 +702,19 @@ describe("VisionAI Page", () => {
     expect(person).toHaveAttribute("data-active", "true");
   });
 
+  it("shows the face list over a slot that carries a face detection", async () => {
+    slotsBody = { slots: [slot(0, "cam-1", { object: "face" }), slot(1, null), slot(2, null), slot(3, null)] };
+    eventsBody = [{
+      id: "f-1", tenant_id: "t1", site_id: "s", site_name: "S", server_id: "sv", server_name: "Srv", camera_id: "cam-1", camera_name: "Cam cam-1",
+      remote_id: "r", severity: "detection", labels: ["face"], sub_labels: ["Ana Pérez"], zones: [], plates: [], start_time: "2026-10-21T09:00:00Z",
+      reviewed: false, has_thumbnail: false, has_snapshot: false, has_preview: false, tracks: [],
+    }];
+    setup();
+    const overlay = await screen.findByTestId("detection-overlay");
+    expect(overlay).toHaveAttribute("data-kind", "faces");
+    expect(overlay).toHaveTextContent("Ana Pérez");
+  });
+
   describe("events bar on the left", () => {
     it("puts the Eventos toggle first in the header", async () => {
       setup();

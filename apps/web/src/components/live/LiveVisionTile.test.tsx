@@ -29,6 +29,8 @@ vi.mock("@tanstack/react-router", () => ({
 
 type Slot = Record<string, unknown>;
 let slotsBody: { slots: Slot[] };
+let readsBody: Slot[];
+let eventsBody: Slot[];
 
 function filled(cam: string, extra: Slot = {}): Slot {
   return { slot: 0, camera_id: cam, pinned: false, camera_name: `Cam ${cam}`, object: "person", confidence: 0.96, zone: "Perímetro", ...extra };
@@ -50,10 +52,15 @@ const slotQueries = () =>
 beforeEach(() => {
   vi.mocked(api.GET).mockReset();
   slotsBody = { slots: [{ slot: 0, camera_id: null, pinned: false }] };
+  readsBody = [];
+  eventsBody = [];
   vi.mocked(api.GET).mockImplementation((async (path: string) => {
     if (path === "/api/v1/vision-ai/slots") {
       return { data: { source: "general", layout: "1", generated_at: "2026-10-15T10:00:00Z", ...slotsBody }, response: new Response() };
     }
+    if (path === "/api/v1/lpr/reads") return { data: { items: readsBody }, response: new Response() };
+    if (path === "/api/v1/events") return { data: { items: eventsBody }, response: new Response() };
+    if (path === "/api/v1/me") return { data: { id: "u", username: "u", display_name: "U", role: "admin", tenant_id: "t", grants: [{ permission: "events.view", effect: "allow", scope: { kind: "global" } }] }, response: new Response() };
     return { data: undefined, error: { code: "not_found", message: "nope" }, response: new Response(null, { status: 404 }) };
   }) as unknown as typeof api.GET);
 });
@@ -61,14 +68,28 @@ beforeEach(() => {
 describe("LiveVisionTile", () => {
   it("shows the plate list overlay on a slot that carries a plate, and not on other slots", async () => {
     slotsBody = { slots: [{ ...filled("cam-1"), plate: "AB123CD" }] };
+    readsBody = [{ id: "r1", camera_id: "cam-1", camera_name: "Cam cam-1", plate: "AB123CD", plate_normalized: "AB123CD", label: "car", zones: [], seen_at: "2026-10-15T10:00:00Z" }];
     const { unmount } = renderWithQuery(<LiveVisionTile vision={{ id: "visionai:lpr", name: "Vision AI - LPR", layout: "lpr" }} />);
-    expect(await screen.findByTestId("lpr-list-overlay")).toBeInTheDocument();
+    expect(await screen.findByTestId("detection-overlay")).toBeInTheDocument();
     unmount();
 
     slotsBody = { slots: [filled("cam-2")] };
     renderWithQuery(<LiveVisionTile vision={{ id: "visionai:general", name: "Vision AI" }} />);
     await screen.findByTestId("mse-player");
-    expect(screen.queryByTestId("lpr-list-overlay")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("detection-overlay")).not.toBeInTheDocument();
+  });
+
+  it("shows the face list on a slot that carries a face detection", async () => {
+    slotsBody = { slots: [{ ...filled("cam-1"), object: "face" }] };
+    eventsBody = [{
+      id: "e1", tenant_id: "t", site_id: "s", site_name: "S", server_id: "sv", server_name: "Srv", camera_id: "cam-1", camera_name: "Cam cam-1",
+      remote_id: "e1", severity: "detection", labels: ["face"], sub_labels: ["Ana Pérez"], zones: [], plates: [],
+      start_time: "2026-10-15T10:00:00Z", reviewed: false, has_thumbnail: false, has_snapshot: false, has_preview: false, tracks: [],
+    }];
+    renderWithQuery(<LiveVisionTile vision={{ id: "visionai:faces", name: "Vision AI - Rostros" }} />);
+    const overlay = await screen.findByTestId("detection-overlay");
+    expect(overlay).toHaveAttribute("data-kind", "faces");
+    expect(overlay).toHaveTextContent("Ana Pérez");
   });
 
   it.each([

@@ -169,23 +169,96 @@ describe("Live", () => {
     expect(first).not.toHaveAttribute("aria-current");
   });
 
-  it("shows the plate list overlay only on LPR cameras", async () => {
+  it("shows the plate list overlay only on LPR cameras that have reads", async () => {
     stubBrowserAPIs();
+    const plateRead = { id: "r1", site_id: "s", site_name: "S", server_id: "sv", server_name: "Srv", camera_id: "cam-lpr", camera_name: "Acceso", plate: "AB123CD", plate_normalized: "AB123CD", label: "car", zones: [], seen_at: "2026-10-21T10:00:00Z" };
     vi.stubGlobal("fetch", vi.fn(stubApi({
       "/api/v1/me": meResponse,
       "/api/v1/cameras": () => json({ items: [camera("cam-lpr", "Acceso", { lpr: true }), camera("cam-plain", "Patio")] }),
-      "/api/v1/lpr/reads": () => json({ items: [] }),
+      "/api/v1/lpr/reads": () => json({ items: [plateRead] }),
       ...emptyCatalogs,
     })));
     renderPage(Live);
     fireEvent.click(await screen.findByRole("button", { name: /Acceso/ }));
     await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("Acceso")).toBeInTheDocument());
-    expect(within(screen.getByLabelText("Cuadro 1")).getByTestId("lpr-list-overlay")).toBeInTheDocument();
+    expect(await within(screen.getByLabelText("Cuadro 1")).findByTestId("detection-overlay")).toBeInTheDocument();
 
     fireEvent.click(screen.getByLabelText("Cuadro 2"));
     fireEvent.click(await screen.findByRole("button", { name: /Patio/ }));
     await waitFor(() => expect(within(screen.getByLabelText("Cuadro 2")).getByText("Patio")).toBeInTheDocument());
-    expect(within(screen.getByLabelText("Cuadro 2")).queryByTestId("lpr-list-overlay")).not.toBeInTheDocument();
+    expect(within(screen.getByLabelText("Cuadro 2")).queryByTestId("detection-overlay")).not.toBeInTheDocument();
+  });
+
+  it("shows no plate list on an LPR camera that has no reads yet", async () => {
+    stubBrowserAPIs();
+    let asked = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: Request) => {
+      if (new URL(input.url).pathname === "/api/v1/lpr/reads") asked++;
+      return stubApi({
+        "/api/v1/me": meResponse,
+        "/api/v1/cameras": () => json({ items: [camera("cam-lpr", "Acceso", { lpr: true })] }),
+        "/api/v1/lpr/reads": () => json({ items: [] }),
+        ...emptyCatalogs,
+      })(input);
+    }));
+    renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: /Acceso/ }));
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("Acceso")).toBeInTheDocument());
+    await waitFor(() => expect(asked).toBeGreaterThan(0));
+    expect(within(screen.getByLabelText("Cuadro 1")).queryByTestId("detection-overlay")).not.toBeInTheDocument();
+  });
+
+  describe("face detections on the video", () => {
+    const faceEvent = (id: string, name: string, camera_id: string) => ({
+      id, tenant_id: "t1", site_id: "s", site_name: "S", server_id: "sv", server_name: "Srv", camera_id, camera_name: "cam",
+      remote_id: id, severity: "detection", labels: ["face"], sub_labels: name ? [name] : [], zones: [], plates: [],
+      start_time: "2026-10-21T10:05:00Z", reviewed: false, has_thumbnail: false, has_snapshot: false, has_preview: false, tracks: [],
+    });
+    const plateRead = (camera_id: string) => ({ id: "r1", site_id: "s", site_name: "S", server_id: "sv", server_name: "Srv", camera_id, camera_name: "cam", plate: "AB123CD", plate_normalized: "AB123CD", label: "car", zones: [], seen_at: "2026-10-21T10:00:00Z" });
+    const meWithEvents = () => meResponse([
+      { permission: "live.view", effect: "allow", scope_type: "platform" },
+      { permission: "events.view", effect: "allow", scope_type: "platform" },
+    ]);
+
+    it("shows the face list on any camera that has face detections, LPR flag or not", async () => {
+      stubBrowserAPIs();
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/me": meWithEvents,
+        "/api/v1/cameras": () => json({ items: [camera("cam-hall", "Hall"), camera("cam-yard", "Patio")] }),
+        "/api/v1/events": () => json({ items: [faceEvent("e1", "Ana Pérez", "cam-hall")] }),
+        ...emptyCatalogs,
+      })));
+      renderPage(Live);
+      fireEvent.click(await screen.findByRole("button", { name: /Hall/ }));
+      await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("Hall")).toBeInTheDocument());
+      const overlay = await within(screen.getByLabelText("Cuadro 1")).findByTestId("detection-overlay");
+      expect(overlay).toHaveAttribute("data-kind", "faces");
+      expect(overlay).toHaveTextContent("Ana Pérez");
+
+      fireEvent.click(screen.getByLabelText("Cuadro 2"));
+      fireEvent.click(await screen.findByRole("button", { name: /Patio/ }));
+      await waitFor(() => expect(within(screen.getByLabelText("Cuadro 2")).getByText("Patio")).toBeInTheDocument());
+      expect(within(screen.getByLabelText("Cuadro 2")).queryByTestId("detection-overlay")).not.toBeInTheDocument();
+    });
+
+    it("turns the panel into LPR and Rostros tabs on a camera that has both", async () => {
+      stubBrowserAPIs();
+      vi.stubGlobal("fetch", vi.fn(stubApi({
+        "/api/v1/me": meWithEvents,
+        "/api/v1/cameras": () => json({ items: [camera("cam-gate", "Acceso", { lpr: true })] }),
+        "/api/v1/lpr/reads": () => json({ items: [plateRead("cam-gate")] }),
+        "/api/v1/events": () => json({ items: [faceEvent("e1", "Ana Pérez", "cam-gate")] }),
+        ...emptyCatalogs,
+      })));
+      renderPage(Live);
+      fireEvent.click(await screen.findByRole("button", { name: /Acceso/ }));
+      await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("Acceso")).toBeInTheDocument());
+      const cell = screen.getByLabelText("Cuadro 1");
+      const tabs = await within(cell).findByRole("tablist", { name: /Tipo de detección/i });
+      expect(within(tabs).getAllByRole("tab").map((t) => t.textContent)).toEqual(["LPR", "Rostros"]);
+      fireEvent.click(within(tabs).getByRole("tab", { name: /Rostros/ }));
+      expect(within(cell).getByRole("list", { name: /Detecciones faciales/i })).toHaveTextContent("Ana Pérez");
+    });
   });
 
   it("keeps video tiles square, selected or not, and marks selection with an outline", async () => {

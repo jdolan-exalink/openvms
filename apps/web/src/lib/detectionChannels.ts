@@ -32,6 +32,8 @@ export interface ChannelItem {
   /** Absent when the event has no image yet. */
   imageUrl?: string;
   cameraName: string;
+  /** The camera the detection came from, so a list shared by many tiles can be split per camera. */
+  cameraId?: string;
   zone?: string;
   at: string;
 }
@@ -50,7 +52,7 @@ export function lprChannelItems(reads: readonly Schemas["PlateRead"][]): Channel
   return reads
     .map((r): ChannelItem => ({
       key: r.id, kind: "lpr", label: r.plate, imageUrl: plateCropUrl(r.id),
-      cameraName: r.camera_name, zone: r.zones[0], at: r.seen_at,
+      cameraName: r.camera_name, cameraId: r.camera_id, zone: r.zones[0], at: r.seen_at,
     }))
     .sort(byNewest);
 }
@@ -62,7 +64,7 @@ export function faceChannelItems(events: readonly Schemas["Event"][]): ChannelIt
       return {
         key: e.id, kind: "faces", label: name ?? "Desconocido", recognized: Boolean(name),
         imageUrl: e.has_thumbnail ? `/api/v1/events/${encodeURIComponent(e.id)}/thumbnail` : undefined,
-        cameraName: e.camera_name, zone: e.zones[0], at: e.start_time,
+        cameraName: e.camera_name, cameraId: e.camera_id, zone: e.zones[0], at: e.start_time,
       };
     })
     .sort(byNewest);
