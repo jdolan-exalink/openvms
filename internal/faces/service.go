@@ -53,6 +53,8 @@ const (
 	ActionTrainRead = "FACE_TRAIN_READ"
 	// ActionTrainAssigned records an attempt becoming an enrollment image.
 	ActionTrainAssigned = "FACE_TRAIN_ASSIGNED"
+	// ActionSightingIngested records a background Frigate attempt entering the durable review inbox.
+	ActionSightingIngested = "FACE_SIGHTING_INGESTED"
 )
 
 // Blobs stores enrollment image bytes; *objectstore.Store implements it.

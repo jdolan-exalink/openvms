@@ -25,7 +25,7 @@ The design must preserve the identity and sighting links needed for later cross-
 
 ## Work slices
 
-- [ ] FACE-07.1 — Persist and idempotently ingest Frigate unclassified attempts before Frigate retention removes them; resolve event/camera metadata when possible. Define cleanup and unavailable-server recovery.
+- [x] FACE-07.1 — Persist and idempotently ingest Frigate unclassified attempts before Frigate retention removes them; resolve event/camera metadata when possible. Define cleanup and unavailable-server recovery.
 - [ ] FACE-07.2 — Evaluate a self-hosted embedding model and preprocessing on authorized face-attempt crops. Reuse the existing ONNX Runtime path where it fits. Record model checksum, preprocessing, thresholds, latency, and model/weight license evidence before choosing a model.
 - [ ] FACE-07.3 — Store tenant-isolated identity groups and reviewable similarity suggestions. A new unmatched sighting gets a visible stable ID; merging suggestions requires an explicit manager action and audit record.
 - [ ] FACE-07.4 — Refactor the Faces review tab to show identities, groups, similarity suggestions, source sightings, and existing assign/create-person actions. Keep the registered-person page and watchlists backed by the central person ID.
@@ -52,3 +52,4 @@ The design must preserve the identity and sighting links needed for later cross-
 
 - 2026-10-22: current Train tab and backend flow inspected; FACE-07 scope and slice boundaries recorded before implementation.
 - 2026-10-22: initial model research found the existing ONNX Runtime integration and a small OpenVINO face re-identification candidate. The candidate expects a tight aligned crop and outputs a 256-value embedding; validate its weight provenance and accuracy on camera crops before selection.
+- 2026-10-22: FACE-07.1 adds a worker-driven, tenant-RLS-protected `face_sightings` inbox with stable UUIDs, `(tenant, server, source_file)` idempotency, retained crop objects, retryable metadata when object storage fails, and ingestion audit rows. Source event/camera links remain unset because the filename format has not been verified against an authorized Frigate instance.

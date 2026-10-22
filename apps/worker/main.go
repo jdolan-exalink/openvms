@@ -131,6 +131,7 @@ func run() error {
 	go runCameraZoneSync(ctx, inv, log)
 	go runFaceSync(ctx, &faces.Syncer{Store: st, Blobs: objects, Adapters: adapters, Log: log},
 		&faces.Service{Store: st, Blobs: objects, Log: log}, log)
+	go runFaceReviewIngestion(ctx, &faces.ReviewIngestor{Store: st, Blobs: objects, Adapters: adapters, Log: log}, log)
 
 	rulesSvc := rules.NewService(st, &jetstreamPublisher{js: js}, log)
 	rulesSvc.ZoneResolver = rules.NewStoreZoneResolver(st)
@@ -320,6 +321,28 @@ func runFaceSync(ctx context.Context, syncer *faces.Syncer, svc *faces.Service, 
 			if err := svc.PurgeBlobs(ctx, 100); err != nil && ctx.Err() == nil {
 				log.WarnContext(ctx, "purge face image blobs", "error", err)
 			}
+		}
+	}
+}
+
+// runFaceReviewIngestion retains unclassified face attempts before Frigate's train retention removes them.
+func runFaceReviewIngestion(ctx context.Context, ingestor *faces.ReviewIngestor, log *slog.Logger) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	run := func() {
+		passCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		if err := ingestor.RunOnce(passCtx, 250); err != nil && ctx.Err() == nil {
+			log.WarnContext(ctx, "ingest face review sightings", "error", err)
+		}
+	}
+	run()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
 		}
 	}
 }

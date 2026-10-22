@@ -458,6 +458,25 @@ type FaceServerSync struct {
 	UpdatedAt       time.Time
 }
 
+type FaceSighting struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	ServerID        uuid.UUID
+	SourceFile      string
+	SourceSeenAt    *time.Time
+	SourceLabel     string
+	SourceScore     *float64
+	FirstSeenAt     time.Time
+	CropKey         *string
+	CropContentType *string
+	CropSizeBytes   *int32
+	CropSha256      *string
+	IngestError     string
+	ReviewStatus    string
+	PersonID        *uuid.UUID
+	ReviewedAt      *time.Time
+}
+
 type FaceWatchlist struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID

@@ -193,6 +193,41 @@ func (q *Queries) GetFacePersonImage(ctx context.Context, arg GetFacePersonImage
 	return i, err
 }
 
+const getFaceSightingBySource = `-- name: GetFaceSightingBySource :one
+SELECT id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at FROM face_sightings
+WHERE tenant_id = $1 AND server_id = $2 AND source_file = $3
+`
+
+type GetFaceSightingBySourceParams struct {
+	TenantID   uuid.UUID
+	ServerID   uuid.UUID
+	SourceFile string
+}
+
+func (q *Queries) GetFaceSightingBySource(ctx context.Context, arg GetFaceSightingBySourceParams) (FaceSighting, error) {
+	row := q.db.QueryRow(ctx, getFaceSightingBySource, arg.TenantID, arg.ServerID, arg.SourceFile)
+	var i FaceSighting
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ServerID,
+		&i.SourceFile,
+		&i.SourceSeenAt,
+		&i.SourceLabel,
+		&i.SourceScore,
+		&i.FirstSeenAt,
+		&i.CropKey,
+		&i.CropContentType,
+		&i.CropSizeBytes,
+		&i.CropSha256,
+		&i.IngestError,
+		&i.ReviewStatus,
+		&i.PersonID,
+		&i.ReviewedAt,
+	)
+	return i, err
+}
+
 const insertFacePersonImage = `-- name: InsertFacePersonImage :one
 INSERT INTO face_person_images (id, tenant_id, person_id, storage_key, content_type, size_bytes, sha256, width, height, created_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -242,6 +277,53 @@ func (q *Queries) InsertFacePersonImage(ctx context.Context, arg InsertFacePerso
 	return i, err
 }
 
+const insertFaceSighting = `-- name: InsertFaceSighting :one
+INSERT INTO face_sightings (tenant_id, server_id, source_file, source_seen_at, source_label, source_score)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (tenant_id, server_id, source_file) DO NOTHING
+RETURNING id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at
+`
+
+type InsertFaceSightingParams struct {
+	TenantID     uuid.UUID
+	ServerID     uuid.UUID
+	SourceFile   string
+	SourceSeenAt *time.Time
+	SourceLabel  string
+	SourceScore  *float64
+}
+
+func (q *Queries) InsertFaceSighting(ctx context.Context, arg InsertFaceSightingParams) (FaceSighting, error) {
+	row := q.db.QueryRow(ctx, insertFaceSighting,
+		arg.TenantID,
+		arg.ServerID,
+		arg.SourceFile,
+		arg.SourceSeenAt,
+		arg.SourceLabel,
+		arg.SourceScore,
+	)
+	var i FaceSighting
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ServerID,
+		&i.SourceFile,
+		&i.SourceSeenAt,
+		&i.SourceLabel,
+		&i.SourceScore,
+		&i.FirstSeenAt,
+		&i.CropKey,
+		&i.CropContentType,
+		&i.CropSizeBytes,
+		&i.CropSha256,
+		&i.IngestError,
+		&i.ReviewStatus,
+		&i.PersonID,
+		&i.ReviewedAt,
+	)
+	return i, err
+}
+
 const listFaceBlobPurge = `-- name: ListFaceBlobPurge :many
 SELECT storage_key, tenant_id, attempts, created_at FROM face_blob_purge ORDER BY created_at, storage_key LIMIT $1
 `
@@ -279,6 +361,55 @@ ORDER BY lower(name), id
 
 func (q *Queries) ListFaceCapableServers(ctx context.Context, tenantID uuid.UUID) ([]FrigateServer, error) {
 	rows, err := q.db.Query(ctx, listFaceCapableServers, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []FrigateServer{}
+	for rows.Next() {
+		var i FrigateServer
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.SiteID,
+			&i.Name,
+			&i.BaseUrl,
+			&i.Username,
+			&i.PasswordSealed,
+			&i.TlsSkipVerify,
+			&i.FrigateVersion,
+			&i.Capabilities,
+			&i.Status,
+			&i.LastSeenAt,
+			&i.LastCheckedAt,
+			&i.LastError,
+			&i.Stats,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.DeletedBy,
+			&i.AuthMode,
+			&i.EventAlarmMode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFaceCapableServersAny = `-- name: ListFaceCapableServersAny :many
+SELECT id, tenant_id, site_id, name, base_url, username, password_sealed, tls_skip_verify, frigate_version, capabilities, status, last_seen_at, last_checked_at, last_error, stats, created_at, updated_at, deleted_at, deleted_by, auth_mode, event_alarm_mode FROM frigate_servers
+WHERE deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
+ORDER BY tenant_id, lower(name), id
+`
+
+// Worker-only background discovery; RLS is explicitly bypassed through store.AllTenants.
+func (q *Queries) ListFaceCapableServersAny(ctx context.Context) ([]FrigateServer, error) {
+	rows, err := q.db.Query(ctx, listFaceCapableServersAny)
 	if err != nil {
 		return nil, err
 	}
@@ -620,6 +751,48 @@ func (q *Queries) LockFacePersonForUpdate(ctx context.Context, arg LockFacePerso
 		&i.SyncRevision,
 	)
 	return i, err
+}
+
+const setFaceSightingCrop = `-- name: SetFaceSightingCrop :exec
+UPDATE face_sightings
+SET crop_key = $1, crop_content_type = $2,
+    crop_size_bytes = $3, crop_sha256 = $4,
+    ingest_error = ''
+WHERE id = $5 AND review_status = 'pending'
+`
+
+type SetFaceSightingCropParams struct {
+	CropKey         *string
+	CropContentType *string
+	CropSizeBytes   *int32
+	CropSha256      *string
+	ID              uuid.UUID
+}
+
+func (q *Queries) SetFaceSightingCrop(ctx context.Context, arg SetFaceSightingCropParams) error {
+	_, err := q.db.Exec(ctx, setFaceSightingCrop,
+		arg.CropKey,
+		arg.CropContentType,
+		arg.CropSizeBytes,
+		arg.CropSha256,
+		arg.ID,
+	)
+	return err
+}
+
+const setFaceSightingRetry = `-- name: SetFaceSightingRetry :exec
+UPDATE face_sightings SET ingest_error = $1
+WHERE id = $2 AND review_status = 'pending' AND crop_key IS NULL
+`
+
+type SetFaceSightingRetryParams struct {
+	IngestError string
+	ID          uuid.UUID
+}
+
+func (q *Queries) SetFaceSightingRetry(ctx context.Context, arg SetFaceSightingRetryParams) error {
+	_, err := q.db.Exec(ctx, setFaceSightingRetry, arg.IngestError, arg.ID)
+	return err
 }
 
 const softDeleteFacePerson = `-- name: SoftDeleteFacePerson :one
