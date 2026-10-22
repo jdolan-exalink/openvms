@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import type { Camera, Folder } from "./explorer";
-import type { Tile } from "./liveGrid";
-import { removeServerTiles, serverChoices } from "./serverSelector";
+import type { Camera } from "./explorer";
+import { cameraIdsOfServers, serverFilter, serverOptions, toggleServer } from "./serverSelector";
 
 const cam = (id: string, server_id: string, extra: Partial<Camera> = {}): Camera =>
   ({ id, server_id, site_id: "site-1", display_name: id, enabled: true, sort_order: 0, folder_id: null, ...extra }) as Camera;
@@ -16,56 +15,67 @@ const servers = [
   { id: "srv-x", name: "Anexo uno", site_id: "site-2" },
   { id: "srv-empty", name: "Sin camaras", site_id: "site-1" },
 ] as Schemas["Server"][];
-const folders: Folder[] = [];
-const tile = (camera_id: string): Tile => ({ camera_id, quality: "sub" });
+const cameras = [cam("a1", "srv-a"), cam("a2", "srv-a"), cam("b1", "srv-b"), cam("x1", "srv-x"), cam("off", "srv-a", { enabled: false })];
 
-describe("serverChoices", () => {
-  const cameras = [cam("a1", "srv-a"), cam("a2", "srv-a"), cam("b1", "srv-b"), cam("x1", "srv-x", { site_id: "site-2" }), cam("off", "srv-a", { enabled: false })];
-
+describe("serverOptions", () => {
   it("lists the servers that have cameras, by site name and then server name", () => {
-    expect(serverChoices(servers, sites, cameras, folders, []).map((c) => c.id)).toEqual(["srv-x", "srv-a", "srv-b"]);
+    expect(serverOptions(servers, sites, cameras, []).map((o) => o.id)).toEqual(["srv-x", "srv-a", "srv-b"]);
   });
 
-  it("counts how many cameras of each server are in the grid out of how many it has", () => {
-    const choices = serverChoices(servers, sites, cameras, folders, [tile("a1"), null, tile("b1"), tile("a2")]);
-    const by = Object.fromEntries(choices.map((c) => [c.id, [c.inGrid, c.total, c.checked]]));
-    expect(by).toEqual({ "srv-a": [2, 2, true], "srv-b": [1, 1, true], "srv-x": [0, 1, false] });
+  it("is checked unless the server was left out, and counts its enabled cameras", () => {
+    const by = Object.fromEntries(serverOptions(servers, sites, cameras, ["srv-b"]).map((o) => [o.id, [o.checked, o.cameras]]));
+    expect(by).toEqual({ "srv-a": [true, 2], "srv-b": [false, 1], "srv-x": [true, 1] });
   });
 
-  it("does not offer a server without enabled cameras, and carries the site name", () => {
-    const choices = serverChoices(servers, sites, cameras, folders, []);
-    expect(choices.some((c) => c.id === "srv-empty")).toBe(false);
-    expect(choices.find((c) => c.id === "srv-x")?.siteName).toBe("Anexo");
+  it("carries the site name and skips servers without enabled cameras", () => {
+    const options = serverOptions(servers, sites, cameras, []);
+    expect(options.find((o) => o.id === "srv-x")?.siteName).toBe("Anexo");
+    expect(options.some((o) => o.id === "srv-empty")).toBe(false);
   });
 
-  it("ignores non-camera tiles when counting", () => {
-    const tiles: Tile[] = [{ map: { site_id: "site-1", name: "Planta" } }, { vision: { id: "v", name: "Vision" } }, tile("a1")];
-    expect(serverChoices(servers, sites, cameras, folders, tiles).find((c) => c.id === "srv-a")?.inGrid).toBe(1);
+  it("ignores exclusions of servers that no longer exist", () => {
+    expect(serverOptions(servers, sites, cameras, ["gone"]).every((o) => o.checked)).toBe(true);
   });
 });
 
-describe("removeServerTiles", () => {
-  const cameras = [cam("a1", "srv-a"), cam("b1", "srv-b")];
-
-  it("empties the cells of that server's cameras and keeps the rest where they are", () => {
-    const tiles: Tile[] = [tile("a1"), tile("b1"), null, tile("a1")];
-    expect(removeServerTiles(tiles, cameras, "srv-a")).toEqual([null, tile("b1"), null, null]);
+describe("serverFilter", () => {
+  it("is undefined while every server is checked, so nothing is filtered", () => {
+    expect(serverFilter(serverOptions(servers, sites, cameras, []))).toBeUndefined();
   });
 
-  it("empties the virtual fisheye views of those cameras too", () => {
-    const tiles: Tile[] = [{ camera_id: "a1", quality: "sub", fisheye_view_id: "v1" }, tile("b1")];
-    expect(removeServerTiles(tiles, cameras, "srv-a")).toEqual([null, tile("b1")]);
+  it("lists the checked servers once some are left out", () => {
+    expect(serverFilter(serverOptions(servers, sites, cameras, ["srv-b"]))).toEqual(["srv-x", "srv-a"]);
   });
 
-  it("leaves maps, vision tiles and unknown cameras alone", () => {
-    const map: Tile = { map: { site_id: "site-1", name: "Planta" } };
-    const tiles: Tile[] = [map, tile("ghost"), tile("a1")];
-    expect(removeServerTiles(tiles, cameras, "srv-a")).toEqual([map, tile("ghost"), null]);
+  it("is undefined when there are no servers to choose from", () => {
+    expect(serverFilter([])).toBeUndefined();
+  });
+});
+
+describe("toggleServer", () => {
+  const options = serverOptions(servers, sites, cameras, []);
+
+  it("unchecking adds the server to the exclusions and checking removes it", () => {
+    expect(toggleServer([], options, "srv-a", false)).toEqual(["srv-a"]);
+    expect(toggleServer(["srv-a", "srv-b"], serverOptions(servers, sites, cameras, ["srv-a", "srv-b"]), "srv-a", true)).toEqual(["srv-b"]);
   });
 
-  it("does not modify its input", () => {
-    const tiles: Tile[] = [tile("a1")];
-    removeServerTiles(tiles, cameras, "srv-a");
-    expect(tiles).toEqual([tile("a1")]);
+  it("never leaves nothing checked: unchecking the last server is ignored", () => {
+    const onlyX = serverOptions(servers, sites, cameras, ["srv-a", "srv-b"]);
+    expect(toggleServer(["srv-a", "srv-b"], onlyX, "srv-x", false)).toEqual(["srv-a", "srv-b"]);
+  });
+
+  it("keeps exclusions that do not match any option and does not repeat ids", () => {
+    expect(toggleServer(["gone"], options, "srv-a", false)).toEqual(["gone", "srv-a"]);
+    expect(toggleServer(["srv-a"], serverOptions(servers, sites, cameras, ["srv-a"]), "srv-a", false)).toEqual(["srv-a"]);
+  });
+});
+
+describe("cameraIdsOfServers", () => {
+  it("returns the enabled cameras of those servers", () => {
+    expect(cameraIdsOfServers(cameras, ["srv-b", "srv-x"]).sort()).toEqual(["b1", "x1"]);
+  });
+  it("is empty for no servers", () => {
+    expect(cameraIdsOfServers(cameras, [])).toEqual([]);
   });
 });

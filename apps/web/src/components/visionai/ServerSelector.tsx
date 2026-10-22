@@ -3,15 +3,15 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/cn";
-import type { ServerChoice } from "@/lib/serverSelector";
+import type { ServerOption } from "@/lib/serverSelector";
 
 /**
- * Drop-down with a check per server to choose which servers' cameras the Live grid shows. A server
- * is checked while any of its cameras is in the grid; the caller adds or removes its cameras when a
- * check changes. The list stays open so several servers can be changed in one go, and it closes with
- * Escape or a click outside. With a single server there is nothing to choose, so it draws nothing.
+ * Drop-down with a check per server to choose which servers' events Vision AI shows. The list stays
+ * open so several servers can be changed in one go, and it closes with Escape or a click outside.
+ * The last selected server cannot be unchecked (nothing would be left to show). With a single
+ * server there is nothing to choose, so it draws nothing.
  */
-export function ServerSelector({ choices, onToggle }: { choices: ServerChoice[]; onToggle: (serverId: string, checked: boolean) => void }) {
+export function ServerSelector({ options, onToggle }: { options: ServerOption[]; onToggle: (serverId: string, checked: boolean) => void }) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [box, setBox] = useState<{ top: number; left: number } | null>(null);
@@ -37,7 +37,7 @@ export function ServerSelector({ choices, onToggle }: { choices: ServerChoice[];
     };
   }, [open]);
 
-  if (choices.length < 2) return null;
+  if (options.length < 2) return null;
 
   const toggleMenu = () => {
     if (open) {
@@ -49,8 +49,9 @@ export function ServerSelector({ choices, onToggle }: { choices: ServerChoice[];
     setOpen(true);
   };
 
-  const checkedCount = choices.filter((c) => c.checked).length;
-  const sites = [...new Set(choices.map((c) => c.siteName))];
+  const checkedCount = options.filter((o) => o.checked).length;
+  const lastChecked = checkedCount === 1;
+  const sites = [...new Set(options.map((o) => o.siteName))];
 
   return (
     <div ref={rootRef} className="relative">
@@ -67,27 +68,37 @@ export function ServerSelector({ choices, onToggle }: { choices: ServerChoice[];
       >
         <Server aria-hidden="true" className="size-3.5" />
         <span>{t("live.serverSelector")}</span>
-        <span className="font-mono tabular-nums text-on-surface-variant">{checkedCount}/{choices.length}</span>
+        <span className="font-mono tabular-nums text-on-surface-variant">{checkedCount}/{options.length}</span>
       </button>
       {open && box && createPortal(
         <div
           ref={menuRef}
           id={menuId}
           role="group"
-          aria-label={t("live.serversInView")}
+          aria-label={t("live.serversSelected")}
           className="fixed z-[70] max-h-80 w-64 overflow-auto rounded border border-line bg-surface py-1 shadow-lg"
           style={{ top: box.top, left: box.left }}
         >
           {sites.map((site) => (
             <div key={site}>
               {sites.length > 1 && <div className="px-2 pb-0.5 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-on-surface-variant">{site}</div>}
-              {choices
-                .filter((c) => c.siteName === site)
-                .map((c) => (
-                  <label key={c.id} className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-sm hover:bg-raised">
-                    <input type="checkbox" checked={c.checked} onChange={(event) => onToggle(c.id, event.target.checked)} className="size-4 shrink-0 accent-primary" />
-                    <span className="min-w-0 flex-1 truncate">{c.name}</span>
-                    <span className="shrink-0 font-mono text-[11px] tabular-nums text-on-surface-variant">{c.inGrid}/{c.total}</span>
+              {options
+                .filter((o) => o.siteName === site)
+                .map((o) => (
+                  <label key={o.id} className={cn("flex items-center gap-2 px-2 py-1.5 text-sm hover:bg-raised", o.checked && lastChecked ? "cursor-not-allowed opacity-70" : "cursor-pointer")}>
+                    <input
+                      type="checkbox"
+                      checked={o.checked}
+                      disabled={o.checked && lastChecked}
+                      onChange={(event) => {
+                        // Disabled already blocks a real click; this keeps the rule if the event arrives anyway.
+                        if (o.checked && lastChecked) return;
+                        onToggle(o.id, event.target.checked);
+                      }}
+                      className="size-4 shrink-0 accent-primary"
+                    />
+                    <span className="min-w-0 flex-1 truncate">{o.name}</span>
+                    <span title={t("live.serverCameras")} className="shrink-0 font-mono text-[11px] tabular-nums text-on-surface-variant">{o.cameras}</span>
                   </label>
                 ))}
             </div>

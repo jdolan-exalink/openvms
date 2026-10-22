@@ -19,6 +19,7 @@ const custom: VisionPrefs = {
   layoutCount: 9,
   activeObjects: { person: false, car: true, motorcycle: true, truck: true, license_plate: true, face: false },
   inactivitySeconds: 60,
+  excludedServerIds: ["srv-b"],
 };
 
 describe("visionPrefsKey", () => {
@@ -84,5 +85,36 @@ describe("load/save", () => {
     });
     expect(loadVisionPrefs("k")).toEqual(DEFAULT_VISION_PREFS);
     expect(() => saveVisionPrefs("k", custom)).not.toThrow();
+  });
+});
+
+describe("excluded servers", () => {
+  it("starts with no server excluded, so every server is shown", () => {
+    expect(DEFAULT_VISION_PREFS.excludedServerIds).toEqual([]);
+    expect(parseVisionPrefs(null).excludedServerIds).toEqual([]);
+    expect(parseVisionPrefs("{}").excludedServerIds).toEqual([]);
+  });
+
+  it("remembers the servers left unchecked", () => {
+    expect(parseVisionPrefs(JSON.stringify({ excludedServerIds: ["srv-b", "srv-c"] })).excludedServerIds).toEqual(["srv-b", "srv-c"]);
+  });
+
+  it("keeps only well-formed, unique ids and ignores a stale shape without dropping the rest of the view", () => {
+    const parsed = parseVisionPrefs(JSON.stringify({ mode: "lpr", excludedServerIds: ["srv-b", "srv-b", "", 7, null, "srv-c"] }));
+    expect(parsed.excludedServerIds).toEqual(["srv-b", "srv-c"]);
+    expect(parsed.mode).toBe("lpr");
+    const notAList = parseVisionPrefs(JSON.stringify({ mode: "lpr", excludedServerIds: "srv-b" }));
+    expect(notAList.excludedServerIds).toEqual([]);
+    expect(notAList.mode).toBe("lpr");
+  });
+
+  it("caps the list so a corrupted value cannot grow without bound", () => {
+    const many = Array.from({ length: 500 }, (_, i) => `srv-${i}`);
+    expect(parseVisionPrefs(JSON.stringify({ excludedServerIds: many })).excludedServerIds.length).toBeLessThanOrEqual(100);
+  });
+
+  it("round-trips through storage", () => {
+    saveVisionPrefs("k", custom);
+    expect(loadVisionPrefs("k").excludedServerIds).toEqual(["srv-b"]);
   });
 });
