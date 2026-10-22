@@ -53,8 +53,9 @@ Edit every per-camera parameter Frigate supports from OpenVMS and apply it to Fr
   snapshots retention, objects+filters, motion, review) + revision history with rollback UI.
 - [x] FC-4 — (done, components 2cd5228 merged in 3c1f807, wiring 5618b12) Visual zone & mask editor over the camera snapshot (relative coords; 0.18 dict format).
 - [ ] FC-5 — Advanced YAML editor (validation via Frigate, diff, revision), ONVIF/autotracking/LPR/face/
-  Status (2026-10-21): partially present, still open. Present: server-level raw YAML endpoints (`GET|PUT /servers/{id}/frigate-config/raw`, FC-1) and a `yaml` tab plus revision history in `components/servers/ServerFrigateConfigModal.tsx`; per-camera ONVIF section and LPR section in `routes/FrigateCameraConfig.tsx`. Not found: autotracking, face and GenAI panels, bulk apply to several cameras; diff/validation of the YAML tab against Frigate was not verified. Real Frigate 0.17/0.18 acceptance stays pending.
   GenAI panels, bulk apply to several cameras.
+  Status (2026-10-22): partially present, still open. Server-level raw YAML endpoints validate through Frigate and save revisions; the YAML tab and revision history are present. Per-camera ONVIF and LPR editing remain available. FC-5a adds schema-driven curated settings for autotracking, face recognition, and GenAI; each panel shows fields supplied by that server's schema and uses the existing camera patch flow. Still open: multi-camera bulk apply, an unsaved YAML diff preview, and real Frigate 0.17/0.18 acceptance.
+  - [x] FC-5a — Add schema-driven curated panels for autotracking, face recognition, and GenAI; cover field rendering and camera PATCH application in focused UI tests. Verified with `vitest run src/routes/FrigateCameraConfig.test.tsx` (15 passed) and `tsc --noEmit`.
 
 ## Delivery
 Strategy ask-on-risk; push/PR are PO decisions.
