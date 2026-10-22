@@ -2,6 +2,7 @@ package onvif
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -115,6 +116,63 @@ func TestMediaClientGetProfilesAndStreamUri(t *testing.T) {
 	if subURI != "rtsp://192.168.1.100:554/live/ch1" {
 		t.Errorf("subURI = %q, want rtsp://192.168.1.100:554/live/ch1", subURI)
 	}
+}
+
+func TestMediaClientGetSnapshotURI(t *testing.T) {
+	endpoint, err := ParseEndpoint("http://192.168.1.100/onvif/media_service")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("reads URI with escaped profile token", func(t *testing.T) {
+		var requestBody string
+		var requestContentType string
+		transport := mediaRoundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			requestBody = string(body)
+			requestContentType = r.Header.Get("Content-Type")
+			xmlResp := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:trt="http://www.onvif.org/ver10/media/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
+				<s:Body>
+					<trt:GetSnapshotUriResponse>
+						<trt:MediaUri><tt:Uri>http://192.168.1.100/snapshot.jpg</tt:Uri></trt:MediaUri>
+					</trt:GetSnapshotUriResponse>
+				</s:Body>
+			</s:Envelope>`
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(xmlResp))}, nil
+		})
+		mediaClient := NewMediaClient(NewClient(transport, Config{}), endpoint)
+
+		got, err := mediaClient.GetSnapshotURI(context.Background(), "main<&>")
+		if err != nil {
+			t.Fatalf("GetSnapshotURI failed: %v", err)
+		}
+		if got != "http://192.168.1.100/snapshot.jpg" {
+			t.Fatalf("snapshot URI = %q", got)
+		}
+		if !strings.Contains(requestBody, "<trt:GetSnapshotUri") || !strings.Contains(requestBody, "<trt:ProfileToken>main&lt;&amp;&gt;</trt:ProfileToken>") {
+			t.Fatalf("GetSnapshotUri request missing action or escaped profile token: %s", requestBody)
+		}
+		if !strings.Contains(requestContentType, `action="http://www.onvif.org/ver10/media/wsdl/GetSnapshotUri"`) {
+			t.Fatalf("SOAP action = %q", requestContentType)
+		}
+	})
+
+	t.Run("rejects malformed SOAP response", func(t *testing.T) {
+		transport := mediaRoundTripperFunc(func(*http.Request) (*http.Response, error) {
+			xmlResp := `<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:trt="http://www.onvif.org/ver10/media/wsdl"><s:Body><trt:GetStreamUriResponse/></s:Body></s:Envelope>`
+			return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(xmlResp))}, nil
+		})
+		mediaClient := NewMediaClient(NewClient(transport, Config{}), endpoint)
+
+		_, err := mediaClient.GetSnapshotURI(context.Background(), "main")
+		var callErr *CallError
+		if !errors.As(err, &callErr) || callErr.Code != "invalid_snapshot_uri" {
+			t.Fatalf("GetSnapshotURI error = %v, want invalid_snapshot_uri CallError", err)
+		}
+	})
 }
 
 func TestMediaClientVideoEncoderConfiguration(t *testing.T) {

@@ -102,6 +102,24 @@ func (m *MediaClient) GetStreamURI(ctx context.Context, profileToken string) (st
 	return response.MediaURI.URI, nil
 }
 
+// GetSnapshotURI returns the camera-provided snapshot URI for a media profile.
+// Callers must treat the URI as untrusted device data and must not follow it without
+// applying their own destination and credential-safety policy.
+func (m *MediaClient) GetSnapshotURI(ctx context.Context, profileToken string) (string, error) {
+	content := `<trt:ProfileToken>` + escapeXML(profileToken) + `</trt:ProfileToken>`
+	data, err := m.call(ctx, "GetSnapshotUri", content, ReadOnly)
+	if err != nil {
+		return "", err
+	}
+	var response struct {
+		MediaURI MediaURI `xml:"http://www.onvif.org/ver10/media/wsdl MediaUri"`
+	}
+	if err := decodeMediaOperation(data, "GetSnapshotUriResponse", &response); err != nil {
+		return "", &CallError{Status: StatusFailed, Code: "invalid_snapshot_uri"}
+	}
+	return response.MediaURI.URI, nil
+}
+
 func (m *MediaClient) GetVideoEncoderConfigurations(ctx context.Context) ([]VideoEncoderConfiguration, error) {
 	data, err := m.call(ctx, "GetVideoEncoderConfigurations", "", ReadOnly)
 	if err != nil {
