@@ -285,6 +285,65 @@ describe("Live", () => {
     expect(within(screen.getByLabelText("Cuadro 3")).queryByTestId("codec-badge")).not.toBeInTheDocument();
   });
 
+  it("lets the whole site be dragged onto the grid, with a hint saying so", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-1", "Puerta norte")] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+      "/api/v1/servers": () => json({ items: [{ id: "srv1", tenant_id: "t1", site_id: "s1", name: "Frigate A", status: "online" }] }),
+      "/api/v1/views": () => json({ items: [] }),
+    })));
+    renderPage(Live);
+    const site = await screen.findByRole("button", { name: /Campus/ });
+    expect(site).toHaveAttribute("aria-roledescription", "draggable");
+    expect(site).toHaveAttribute("title", expect.stringMatching(/Campus.*Arrastrá a la grilla.*todos sus servidores/));
+    // Folding the site still works with a click.
+    const open = site.getAttribute("aria-expanded");
+    fireEvent.click(site);
+    expect(site.getAttribute("aria-expanded")).not.toBe(open);
+  });
+
+  it("picks which servers the grid shows from a drop-down with a check per server", async () => {
+    stubBrowserAPIs();
+    vi.stubGlobal("fetch", vi.fn(stubApi({
+      "/api/v1/me": meResponse,
+      "/api/v1/cameras": () => json({ items: [camera("cam-a", "Puerta A", { server_id: "srv1" }), camera("cam-b", "Puerta B", { server_id: "srv2" })] }),
+      "/api/v1/sites": () => json({ items: [{ id: "s1", tenant_id: "t1", name: "Campus" }] }),
+      "/api/v1/servers": () => json({ items: [
+        { id: "srv1", tenant_id: "t1", site_id: "s1", name: "Alfa", status: "online" },
+        { id: "srv2", tenant_id: "t1", site_id: "s1", name: "Beta", status: "online" },
+      ] }),
+      "/api/v1/views": () => json({ items: [] }),
+    })));
+    renderPage(Live);
+    fireEvent.click(await screen.findByRole("button", { name: /Puerta A/ }));
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).getByText("Puerta A")).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText("Cuadro 2"));
+    fireEvent.click(await screen.findByRole("button", { name: /Puerta B/ }));
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 2")).getByText("Puerta B")).toBeInTheDocument());
+
+    const selector = screen.getByRole("button", { name: /^Servidores/ });
+    expect(selector).toHaveTextContent("2/2");
+    fireEvent.click(selector);
+    const alfa = screen.getByRole("checkbox", { name: /Alfa/ });
+    const beta = screen.getByRole("checkbox", { name: /Beta/ });
+    expect(alfa).toBeChecked();
+    expect(beta).toBeChecked();
+
+    // Unchecking a server takes its cameras out of the grid and leaves the others where they are.
+    fireEvent.click(alfa);
+    await waitFor(() => expect(within(screen.getByLabelText("Cuadro 1")).queryByText("Puerta A")).not.toBeInTheDocument());
+    expect(within(screen.getByLabelText("Cuadro 2")).getByText("Puerta B")).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: /Alfa/ })).not.toBeChecked();
+    expect(screen.getByRole("button", { name: /^Servidores/ })).toHaveTextContent("1/2");
+
+    // Checking it again brings its cameras back.
+    fireEvent.click(screen.getByRole("checkbox", { name: /Alfa/ }));
+    await waitFor(() => expect(screen.getAllByText("Puerta A").length).toBeGreaterThan(0));
+    expect(screen.getByRole("checkbox", { name: /Alfa/ })).toBeChecked();
+  });
+
   it("keeps video tiles square, selected or not, and marks selection with an outline", async () => {
     stubBrowserAPIs();
     vi.stubGlobal("fetch", vi.fn(stubApi({

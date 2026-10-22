@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { applyReorder, buildTree, moveCamera, moveFolder, resolveTreeDrop, treeCameraDropId, treeFolderId, treeRootDropId, type Camera, type Folder } from "./explorer";
+import type { Schemas } from "@/api/client";
+import { applyReorder, buildTree, camerasOfServer, camerasOfSite, moveCamera, moveFolder, resolveTreeDrop, treeCameraDropId, treeFolderId, treeRootDropId, type Camera, type Folder } from "./explorer";
 
 const cam = (id: string, server: string, folder: string | null, order: number, name = id): Camera =>
   ({ id, server_id: server, site_id: "s1", folder_id: folder, sort_order: order, display_name: name, enabled: true, status: "online" }) as Camera;
@@ -93,5 +94,41 @@ describe("buildTree", () => {
     expect(byCam[0]!.servers.flatMap((s) => s.folders.flatMap((f) => f.cameras.map((c) => c.id)))).toEqual(["c"]);
     const byFolder = buildTree({ ...base, manageable: new Set(), query: "f1" });
     expect(byFolder[0]!.count).toBe(2);
+  });
+});
+
+describe("camerasOfServer and camerasOfSite", () => {
+  const cam = (id: string, server_id: string, extra: Partial<Camera> = {}): Camera =>
+    ({ id, server_id, site_id: "site-1", display_name: id, enabled: true, sort_order: 0, folder_id: null, ...extra }) as Camera;
+  const folder = (id: string, server_id: string, sort_order = 0): Folder => ({ id, server_id, name: id, sort_order }) as Folder;
+  const servers = [
+    { id: "srv-b", name: "Beta", site_id: "site-1" },
+    { id: "srv-a", name: "Alfa", site_id: "site-1" },
+    { id: "srv-z", name: "Otro sitio", site_id: "site-2" },
+  ] as Schemas["Server"][];
+
+  it("puts a server's folders first, in folder order, then its loose cameras", () => {
+    const cams = [cam("loose", "srv-a"), cam("in-f2", "srv-a", { folder_id: "f2" }), cam("in-f1", "srv-a", { folder_id: "f1" })];
+    const folders = [folder("f2", "srv-a", 2), folder("f1", "srv-a", 1)];
+    expect(camerasOfServer("srv-a", cams, folders).map((c) => c.id)).toEqual(["in-f1", "in-f2", "loose"]);
+  });
+
+  it("skips disabled cameras and cameras of other servers", () => {
+    const cams = [cam("on", "srv-a"), cam("off", "srv-a", { enabled: false }), cam("elsewhere", "srv-b")];
+    expect(camerasOfServer("srv-a", cams, []).map((c) => c.id)).toEqual(["on"]);
+  });
+
+  it("a camera in a folder that no longer exists is shown with the loose ones", () => {
+    expect(camerasOfServer("srv-a", [cam("orphan", "srv-a", { folder_id: "gone" })], []).map((c) => c.id)).toEqual(["orphan"]);
+  });
+
+  it("gathers every camera of every server of the site, servers by name", () => {
+    const cams = [cam("b1", "srv-b"), cam("a1", "srv-a"), cam("a2", "srv-a", { sort_order: 1 }), cam("z1", "srv-z")];
+    expect(camerasOfSite("site-1", servers, cams, []).map((c) => c.id)).toEqual(["a1", "a2", "b1"]);
+  });
+
+  it("returns nothing for a site without cameras or an unknown site", () => {
+    expect(camerasOfSite("site-2", servers, [cam("a1", "srv-a")], [])).toEqual([]);
+    expect(camerasOfSite("nope", servers, [cam("a1", "srv-a")], [])).toEqual([]);
   });
 });

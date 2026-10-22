@@ -133,8 +133,11 @@ describe("LiveVisionTile", () => {
     expect(player).toHaveAttribute("data-quality", "sub");
     expect(screen.getByText("Vision AI - Personas")).toBeInTheDocument();
     expect(screen.getByText("Acceso Principal")).toBeInTheDocument();
-    expect(screen.getByText("person")).toBeInTheDocument();
-    expect(screen.getByText(/96%/)).toBeInTheDocument();
+    const badge = screen.getByRole("img", { name: /^person 96%/ });
+    expect(badge.textContent).toBe("");
+    expect(badge).toHaveAttribute("title", badge.getAttribute("aria-label"));
+    expect(screen.queryByText("person")).not.toBeInTheDocument();
+    expect(screen.queryByText(/96%/)).not.toBeInTheDocument();
   });
 
   it("uses the main stream when focused", async () => {
@@ -219,7 +222,8 @@ describe("LiveVisionTile", () => {
     slotsBody = { slots: [filled("cam-1", { object: "motorcycle" })] };
     renderWithQuery(<LiveVisionTile vision={{ id: "visionai:general", name: "Vision AI" }} />);
     await screen.findByTestId("mse-player");
-    const badge = screen.getByText("motorcycle").parentElement!;
+    const badge = screen.getByRole("img", { name: /^motorcycle/ });
+    expect(badge.textContent).toBe("");
     expect(badge.querySelector("svg")).toHaveClass("lucide-bike");
     expect(badge.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });

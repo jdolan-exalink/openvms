@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
-  Eye, Pin, PinOff, ExternalLink, ShieldAlert,
+  Eye, Pin, PinOff, ExternalLink,
   Radio,
 } from "lucide-react";
 import { MsePlayer } from "@/components/MsePlayer";
 import { IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
-import { ObjectIcon } from "@/lib/visionAiIcons";
+import { ObjectBadge } from "@/components/visionai/ObjectBadge";
 import type { LiveVisionRef } from "@/lib/liveGrid";
 import { useVisionSlots, visionSourceFromId, type VisionAISlot } from "@/lib/visionAi";
 import { channelKindOf } from "@/lib/detectionChannels";
@@ -87,24 +87,8 @@ function VisionSlotTile({ vision, isFocused = false, className }: LiveVisionTile
               <span className="font-bold tracking-tight text-on-surface">{vision.name}</span>
             </div>
 
-            {/* Active Detection pill */}
-            {object && (
-              <div
-                className={cn(
-                  "flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold backdrop-blur shadow-sm",
-                  activeSlot.alarm
-                    ? "bg-bad/20 text-bad border border-bad/40"
-                    : "bg-primary/20 text-primary border border-primary/30",
-                )}
-              >
-                <ObjectIcon object={object} className="size-3" />
-                {activeSlot.alarm && <ShieldAlert aria-hidden="true" className="size-3" />}
-                <span className="uppercase">{object}</span>
-                {activeSlot.confidence !== undefined && (
-                  <span className="opacity-75">· {Math.round(activeSlot.confidence * 100)}%</span>
-                )}
-              </div>
-            )}
+            {/* What was detected: icon only, the name and confidence live in its tooltip */}
+            <ObjectBadge object={object} confidence={activeSlot.confidence} alarm={Boolean(activeSlot.alarm)} />
 
             {/* Camera display name */}
             <div className="rounded-full bg-surface-1/80 backdrop-blur px-2 py-0.5 text-[11px] text-on-surface-variant font-mono">

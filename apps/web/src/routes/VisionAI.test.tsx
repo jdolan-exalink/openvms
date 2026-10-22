@@ -500,7 +500,9 @@ describe("VisionAI Page", () => {
   it("shows the object icon in the slot badge", async () => {
     setup();
     await screen.findByText("Cam cam-1");
-    const badge = screen.getByText(/^person 90%$/i);
+    const badge = screen.getByRole("img", { name: "person 90%" });
+    expect(badge.textContent).toBe("");
+    expect(badge).toHaveAttribute("title", "person 90%");
     expect(badge.querySelector("svg")).toHaveClass("lucide-user");
     expect(badge.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
