@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jdolan-exalink/openvms/internal/access"
@@ -164,9 +163,6 @@ func videoEncodingMessage(res onvifdiscover.VideoEncodingResult) string {
 	}[res.Code]
 	if msg == "" {
 		msg = "The video encoding operation failed"
-	}
-	if res.Detail != "" {
-		msg += " (" + strings.ReplaceAll(res.Detail, "_", " ") + ")"
 	}
 	return msg
 }

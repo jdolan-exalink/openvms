@@ -12,6 +12,8 @@ import (
 
 const ActionOnvifMutation = "ONVIF_MUTATION"
 
+const onvifMutationErrorCategoryRemoteOutcomeUnknown = "remote_outcome_unknown"
+
 // AuditCameraOnvifMutation records a sanitized lifecycle event for a camera mutation.
 func (s *Service) AuditCameraOnvifMutation(ctx context.Context, actor authz.Actor, cameraID, operationID uuid.UUID, operation, status, errorCategory string) error {
 	if operation != "sync_time" && operation != "ptz" && operation != "video_config" && operation != "video_encoding" && operation != "imaging" {
@@ -23,7 +25,7 @@ func (s *Service) AuditCameraOnvifMutation(ctx context.Context, actor authz.Acto
 	if status != "started" && status != "succeeded" && status != "failed" && status != "outcome_unknown" {
 		return invalid("unsupported ONVIF mutation status")
 	}
-	if status == "outcome_unknown" && errorCategory != "remote_outcome_unknown" {
+	if status == "outcome_unknown" && !supportedOnvifMutationErrorCategory(errorCategory) {
 		return invalid("unknown ONVIF outcome requires a sanitized error category")
 	}
 	if status != "outcome_unknown" && errorCategory != "" {
@@ -45,4 +47,13 @@ func (s *Service) AuditCameraOnvifMutation(ctx context.Context, actor authz.Acto
 			"error_category": errorCategory,
 		})
 	})
+}
+
+func supportedOnvifMutationErrorCategory(category string) bool {
+	switch category {
+	case onvifMutationErrorCategoryRemoteOutcomeUnknown:
+		return true
+	default:
+		return false
+	}
 }
