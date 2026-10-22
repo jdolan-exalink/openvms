@@ -3,12 +3,16 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
   Eye, Pin, PinOff, Maximize2, Minimize2, History, LayoutGrid, Sparkles,
-  CarFront, Bell, Check, X, Bug, Layers, RefreshCw, Scan, LayoutDashboard,
+  CarFront, Bell, Check, Bug, RefreshCw, Scan, LayoutDashboard,
 } from "lucide-react";
 import { meQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
 import { LprListOverlay } from "@/components/live/LprListOverlay";
 import { Button, IconButton } from "@/components/ui";
+import { EventPopup } from "@/components/visionai/EventPopup";
+import { EventSnapshot } from "@/components/visionai/EventSnapshot";
+import { EventsSidebar } from "@/components/visionai/EventsSidebar";
+import type { VisionEventView } from "@/lib/visionEvents";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
 import { dynamicGridShape, priorityOrder } from "@/lib/visionAiGrid";
@@ -50,6 +54,7 @@ export function VisionAI() {
   const [fullscreen, setFullscreen] = useState(false);
   const [debugMode, setDebugMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [popup, setPopup] = useState<VisionEventView | null>(null);
   const [focusHeroIndex, setFocusHeroIndex] = useState<number>(0);
 
   const source = sourceFor(mode, presetSource);
@@ -361,7 +366,7 @@ export function VisionAI() {
             onClick={() => setSidebarOpen(!sidebarOpen)}
             className="flex items-center gap-1.5"
           >
-            <span>Eventos Activos</span>
+            <span>Eventos</span>
             <span className="flex items-center justify-center size-4 rounded-full bg-primary text-on-primary text-[10px] font-bold">
               {filled.length}
             </span>
@@ -481,60 +486,34 @@ export function VisionAI() {
               })}
             </div>
           )}
+          {popup && (
+            <EventPopup
+              event={popup}
+              onClose={() => setPopup(null)}
+              onPin={() => {
+                const sl = popup.slot;
+                if (!sl) return;
+                // Freeze this event as the hero of the focus view.
+                setPinState({ key: `${sourceFor("focus", presetSource)}:focus`, pins: { 0: sl } });
+                setFocusHeroIndex(0);
+                setMode("focus");
+                setPopup(null);
+              }}
+            />
+          )}
         </div>
 
-        {/* Collapsible Active Events Sidebar */}
+        {/* Collapsible events side bar: active, historic, LPR and face tabs */}
         {sidebarOpen && (
-          <aside
-            data-testid="vision-events-sidebar"
-            className="w-80 shrink-0 border border-line bg-surface rounded-m3-lg flex flex-col min-h-0 overflow-hidden"
-          >
-            <div className="p-3 border-b border-line flex items-center justify-between">
-              <div className="font-semibold text-sm text-ink flex items-center gap-2">
-                <Layers className="size-4 text-primary" />
-                <span>Eventos Activos ({filled.length})</span>
-              </div>
-              <IconButton icon={X} title="Cerrar panel" aria-label="Cerrar panel" size="sm" onClick={() => setSidebarOpen(false)} />
-            </div>
-
-            <div className="flex-1 overflow-y-auto divide-y divide-line/40">
-              {filled.map((sl) => (
-                <div
-                  key={sl.slot}
-                  onClick={() => {
-                    // Freeze this event as the hero of the focus view.
-                    setPinState({ key: `${sourceFor("focus", presetSource)}:focus`, pins: { 0: sl } });
-                    setFocusHeroIndex(0);
-                    setMode("focus");
-                  }}
-                  className="p-3 hover:bg-surface-2 transition-colors cursor-pointer flex flex-col gap-1.5"
-                >
-                  <EventSnapshot slot={sl} snapshots={canViewSnapshots} />
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold text-xs text-ink truncate">{sl.camera_name}</span>
-                    {sl.score !== undefined && (
-                      <span className="font-mono text-xs font-bold text-primary bg-primary/10 px-1.5 py-0.5 rounded-m3-sm">
-                        Score {Math.round(sl.score)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center justify-between text-[11px] text-muted">
-                    <span className="inline-flex items-center gap-1 uppercase font-medium text-emerald-600">
-                      <ObjectIcon object={sl.object} className="size-3" />
-                      {sl.object}
-                      {sl.confidence !== undefined && ` (${Math.round(sl.confidence * 100)}%)`}
-                    </span>
-                    <span>{sl.zone}</span>
-                  </div>
-                  {sl.plate && (
-                    <div className="font-mono text-xs font-bold tracking-widest text-ink bg-surface-3 px-2 py-0.5 rounded-m3-sm self-start">
-                      {sl.plate}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </aside>
+          <EventsSidebar
+            activeSlots={filled}
+            canSnapshots={canViewSnapshots}
+            canEvents={can(me.data, "events.view")}
+            canLpr={can(me.data, "lpr.view")}
+            selectedKey={popup?.key}
+            onSelect={setPopup}
+            onClose={() => setSidebarOpen(false)}
+          />
         )}
       </div>
     </div>
@@ -880,40 +859,6 @@ function SlotRenderer({
           <div className="font-mono text-[10px] text-white/70">{formatElapsed(slot.display_seconds)}</div>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Detection image of an active event: snapshot when allowed, else thumbnail, else the object icon. */
-function EventSnapshot({ slot, snapshots }: { slot: VisionAISlot; snapshots: boolean }) {
-  const eventId = slot.event_id;
-  if (!eventId) return null;
-  // Keyed by permission too: if the thumbnail failed before permissions loaded, the snapshot still gets
-  // its chance once snapshots.view is known.
-  return <EventSnapshotImage key={`${eventId}:${snapshots}`} slot={slot} eventId={eventId} snapshots={snapshots} />;
-}
-
-function EventSnapshotImage({ slot, eventId, snapshots }: { slot: VisionAISlot; eventId: string; snapshots: boolean }) {
-  const thumbnail = `/api/v1/events/${eventId}/thumbnail`;
-  // Snapshot first (when allowed), the thumbnail once on error, then the icon placeholder.
-  const [stage, setStage] = useState<"primary" | "thumbnail" | "none">("primary");
-  const useSnapshot = snapshots && stage === "primary";
-  const src = stage === "none" ? null : useSnapshot ? `/media/v1/events/${eventId}/snapshot.jpg` : thumbnail;
-  return (
-    <div className="aspect-video w-full overflow-hidden rounded-m3-sm bg-surface-3">
-      {src ? (
-        <img
-          src={src}
-          alt={`Detección: ${slot.object ?? "evento"} en ${slot.camera_name ?? "cámara"}`}
-          loading="lazy"
-          className="size-full object-cover"
-          onError={() => setStage(useSnapshot ? "thumbnail" : "none")}
-        />
-      ) : (
-        <div data-testid={`vision-event-placeholder-${eventId}`} className="flex size-full items-center justify-center text-muted">
-          <ObjectIcon object={slot.object} className="size-6 opacity-50" />
-        </div>
-      )}
     </div>
   );
 }
