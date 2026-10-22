@@ -101,6 +101,57 @@ describe("FrigateCameraConfig", () => {
     expect(await patch.clone().json()).toEqual({ sections: { detect: { fps: 12 } } });
   });
 
+  it("applies the reviewed camera sections to the selected cameras on the same server", async () => {
+    const fetchMock = mount({}, {
+      "/api/v1/cameras": () => json({ items: [
+        { id: "c1", display_name: "acceso", server_id: "s1" },
+        { id: "c2", display_name: "patio", server_id: "s1" },
+      ] }),
+      "/api/v1/cameras/c2/frigate-config": () => json({ camera_id: "c2", camera_name: "patio", server_id: "s1", frigate_version: "0.17.0", editable: true, config: { detect: { enabled: true, fps: 3 } }, sections: [] }),
+    });
+    fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar a varias cámaras" }));
+    const dialog = await screen.findByRole("dialog", { name: "Aplicar a varias cámaras" });
+    await waitFor(() => expect(fetchMock.mock.calls.some(([r]) => new URL((r as Request).url).searchParams.get("server_id") === "s1")).toBe(true));
+    expect(within(dialog).getByRole("checkbox", { name: "acceso (actual)" })).toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: "acceso (actual)" })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "patio" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Aplicar cambios" }));
+
+    await waitFor(() => {
+      const patches = fetchMock.mock.calls.map(([r]) => r as Request).filter((r) => r.method === "PATCH");
+      expect(patches.map((r) => new URL(r.url).pathname)).toEqual(expect.arrayContaining([
+        "/api/v1/cameras/c1/frigate-config",
+        "/api/v1/cameras/c2/frigate-config",
+      ]));
+    });
+    const patches = fetchMock.mock.calls.map(([r]) => r as Request).filter((r) => r.method === "PATCH");
+    expect(await Promise.all(patches.map((r) => r.clone().json()))).toEqual([
+      { sections: { detect: { fps: 12 } } },
+      { sections: { detect: { fps: 12 } } },
+    ]);
+  });
+
+  it("reports partial bulk failures without hiding successful camera updates", async () => {
+    const fetchMock = mount({}, {
+      "/api/v1/cameras": () => json({ items: [
+        { id: "c1", display_name: "acceso", server_id: "s1" },
+        { id: "c2", display_name: "patio", server_id: "s1" },
+      ] }),
+      "PATCH /api/v1/cameras/c2/frigate-config": () => json({ code: "forbidden", message: "permission denied" }, 403),
+    });
+    fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "12" } });
+    fireEvent.click(screen.getByRole("button", { name: "Aplicar a varias cámaras" }));
+    const dialog = await screen.findByRole("dialog", { name: "Aplicar a varias cámaras" });
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "patio" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Aplicar cambios" }));
+
+    expect(await within(dialog).findByText("acceso: aplicada")).toBeInTheDocument();
+    expect(await within(dialog).findByText(/patio: no aplicada/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Fps")).toHaveValue(12);
+    expect(fetchMock.mock.calls.map(([r]) => r as Request).filter((r) => r.method === "PATCH")).toHaveLength(2);
+  });
+
   it("blocks review on invalid values and locks credentials without the secrets permission", async () => {
     mount({});
     fireEvent.change(await screen.findByLabelText("Fps"), { target: { value: "99" } });
