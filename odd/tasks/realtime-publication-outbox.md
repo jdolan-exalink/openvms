@@ -29,7 +29,7 @@ Make realtime JetStream announcements follow committed database state. Producers
 ## Work slices
 
 - [x] Slice A (`fc1e0e0`): tenant isolated schema, due index, sqlc enqueue/claim/ack/retry APIs, lease-token fencing, bounded retries, terminal failure, and RLS integration coverage. Focused integration and `go test ./internal/store` passed; `git diff --check` passed. 229 authored lines plus 175 generated. Runtime publisher harness: N/A (no dispatcher in this slice). Rollback boundary: migration 00065 drops the outbox table and its rows. Independent review found no actionable defects in schema, RLS, or lifecycle queries.
-- [ ] Slice B: migration 00066 and query changes for optional tenant-scoped alarm aggregate keys and monotonic sequence numbers. Claim only the earliest nonterminal row for an aggregate, even across concurrent dispatchers; a terminally failed row releases later rows. Add integration coverage proving same-alarm rows cannot be claimed out of order while unrelated rows remain claimable.
+- [x] Slice B: migration 00066 and query changes for optional tenant-scoped alarm aggregate keys and transaction-serialized sequence numbers. Claims block later rows while an earlier aggregate row is pending/processing; sent or terminal failed predecessors release the next row. Integration coverage verifies concurrent claims, independent keys/NULL keys, terminal release, and concurrent enqueue lock order. Focused integration and `go test ./internal/store` passed; `go generate ./internal/store` and `git diff --check` passed. Independent review found no actionable defects. 263 authored lines plus generated sqlc output. Runtime dispatcher harness is deferred to Slice C.
 - [ ] Slice C: lease-based dispatcher, JetStream publisher adapter, worker startup/shutdown, retry/dead-letter observability, and tests. It may be implemented behind the ordering contract; do not mark complete until serialization across dispatchers is verified.
 - [ ] Slice D: convert event ingestion and built-in alarm publications transactionally.
 - [ ] Slice E: convert rule alarms and `notification.created` transactionally; publish none from inside evaluator transactions.
@@ -48,6 +48,7 @@ Make realtime JetStream announcements follow committed database state. Producers
 ## Progress
 
 - [x] Investigation map: producer transaction boundaries and existing external delivery outbox were reviewed; realtime publications are not currently durable.
+- [x] Slice B tests: `GOCACHE=/tmp/openvms-go-build-cache go test -tags integration ./internal/store -run '^TestRealtimePublication(OutboxLifecycle|AggregateClaimOrdering|ConcurrentEnqueueSequencesFollowLockOrder)$' -count=1`; `GOCACHE=/tmp/openvms-go-build-cache go test ./internal/store`; `git diff --check`.
 - [ ] Implementation, focused integration coverage, work-unit commits, and independent review for every slice.
 - [ ] Slice B draft exists in the worktree but is not accepted as complete because the current schema cannot preserve per-alarm ordering across replicas. Its focused unit tests passed before the ordering contract was added; rerun after updating claim behavior. Runtime JetStream/PostgreSQL harness remains required where available. At-least-once remains possible after JetStream accepts a message but before the database ack.
 

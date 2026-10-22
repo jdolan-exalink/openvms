@@ -764,20 +764,28 @@ type PersonAttributeJob struct {
 	UpdatedAt  time.Time
 }
 
+type RealtimePublicationAggregateSequence struct {
+	TenantID     uuid.UUID
+	AggregateKey string
+	LastSequence int64
+}
+
 type RealtimePublicationOutbox struct {
-	ID          uuid.UUID
-	TenantID    uuid.UUID
-	Subject     string
-	Payload     json.RawMessage
-	Status      string
-	Attempts    int32
-	AvailableAt time.Time
-	LeaseUntil  *time.Time
-	LeaseToken  *uuid.UUID
-	LastError   *string
-	CreatedAt   time.Time
-	SentAt      *time.Time
-	UpdatedAt   time.Time
+	ID                uuid.UUID
+	TenantID          uuid.UUID
+	Subject           string
+	Payload           json.RawMessage
+	Status            string
+	Attempts          int32
+	AvailableAt       time.Time
+	LeaseUntil        *time.Time
+	LeaseToken        *uuid.UUID
+	LastError         *string
+	CreatedAt         time.Time
+	SentAt            *time.Time
+	UpdatedAt         time.Time
+	AggregateKey      *string
+	AggregateSequence *int64
 }
 
 type Rule struct {
