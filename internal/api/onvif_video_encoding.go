@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
@@ -46,7 +46,37 @@ func (h *Handlers) OperateCameraOnvifVideoEncoding(ctx context.Context, r gen.Op
 		req.Encoding = string(*r.Body.Encoding)
 	}
 
+	var operationID uuid.UUID
+	if req.Action == "set" {
+		operationID, err = h.beginOnvifMutation(ctx, a, cam.ID, cam.ServerID, "video_encoding")
+		if err != nil {
+			if isOnvifAuthorizationError(err) {
+				return nil, err
+			}
+			return gen.OperateCameraOnvifVideoEncoding502JSONResponse{
+				FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "video_encoding_failed", Message: "The mutation could not be audited before it started"},
+			}, nil
+		}
+	}
+
 	res, status, err := h.Provision.ExecuteOnvifVideoEncoding(ctx, a, cam.ServerID, req)
+	if req.Action == "set" {
+		terminalStatus := "succeeded"
+		errorCategory := ""
+		if err != nil && (errors.Is(err, access.ErrForbidden) || errors.Is(err, store.ErrNotFound)) {
+			terminalStatus = "failed"
+		} else if err != nil || status == http.StatusBadGateway {
+			terminalStatus = "outcome_unknown"
+			errorCategory = "remote_outcome_unknown"
+		} else if status != http.StatusOK || !res.Success {
+			terminalStatus = "failed"
+		}
+		if auditErr := h.finishOnvifMutation(ctx, a, cam.ID, operationID, "video_encoding", terminalStatus, errorCategory); auditErr != nil {
+			return gen.OperateCameraOnvifVideoEncoding502JSONResponse{
+				FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "video_encoding_failed", Message: "Mutation outcome is unknown; manual reconciliation is required"},
+			}, nil
+		}
+	}
 	if err != nil {
 		if errors.Is(err, access.ErrForbidden) || errors.Is(err, store.ErrNotFound) {
 			return nil, err
@@ -133,9 +163,6 @@ func videoEncodingMessage(res onvifdiscover.VideoEncodingResult) string {
 	}[res.Code]
 	if msg == "" {
 		msg = "The video encoding operation failed"
-	}
-	if res.Detail != "" {
-		msg += " (" + strings.ReplaceAll(res.Detail, "_", " ") + ")"
 	}
 	return msg
 }

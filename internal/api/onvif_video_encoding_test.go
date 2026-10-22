@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
@@ -68,10 +69,14 @@ func TestVideoEncodingResponseMapsTheAgentsAnswer(t *testing.T) {
 		}
 	})
 
-	t.Run("camera errors expose the ONVIF reason without credentials", func(t *testing.T) {
-		bad := videoEncodingResponse(onvifdiscover.VideoEncodingResult{Code: "camera_error", Detail: "authentication_failed"}, http.StatusBadGateway).(gen.OperateCameraOnvifVideoEncoding502JSONResponse)
-		if bad.Code != "camera_error" || bad.Message == "" {
+	t.Run("camera errors use a stable message without remote detail", func(t *testing.T) {
+		const remoteDetail = "authorization_denied: secret-token"
+		bad := videoEncodingResponse(onvifdiscover.VideoEncodingResult{Code: "camera_error", Detail: remoteDetail}, http.StatusBadGateway).(gen.OperateCameraOnvifVideoEncoding502JSONResponse)
+		if bad.Code != "camera_error" || bad.Message != "The camera did not answer the ONVIF request" {
 			t.Fatalf("got %#v", bad)
+		}
+		if strings.Contains(bad.Message, remoteDetail) || strings.Contains(bad.Message, "secret-token") {
+			t.Fatalf("502 message exposed remote detail: %q", bad.Message)
 		}
 	})
 }

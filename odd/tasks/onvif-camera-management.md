@@ -38,14 +38,17 @@ Implement in dependency order. Each delegated work unit closes with checks, Conv
 - [x] **ONVIF-03 — Media2 with Media1 fallback and profiles.** Core implementation (`c28715b`, credential-path fix `8d92cdb`) and API relay/schema slice (`43b3cca`) are delivered through PRs #163/#164 (both merged: `e82ac06`, `6ba0782`). Media2 is preferred, unsupported operations fall back to Media1, profile metadata is retained, and credential-bearing URIs including percent-encoded path credentials are omitted. Physical-camera interoperability remains open.
 - [ ] **ONVIF-04 — Snapshot and stream source management.** Retrieve snapshots and represent stream URIs/options safely; redact credential-bearing URIs and avoid persisting derived secrets in logs or browser state.
   - [x] Media1 snapshot-URI lookup primitive for a selected profile delivered in #167 (`9bb1f27`). Authenticated image retrieval, transport policy, and stream-source handling remain open.
+  - [x] Authenticated snapshot image retrieval through the edge agent is implemented in #170 (`b871ae4`); CI is green. PR merge is waiting on the explicitly requested size exception. Stream-source handling and physical-camera acceptance remain open.
 - [ ] **ONVIF-05 — Add, edit, delete, manifest, and health.** Implement camera manifest/state reconciliation and CRUD through API/agent; synchronize Frigate additions/edits/removals; retain stable IDs and deletion tombstones to prevent reimport. Health/readiness surfaces device and protocol state. Delete preserves recordings by default; discard requires explicit confirmation and must fail closed if the disposition is missing/invalid. Never factory-reset a device.
 
 ### Phase 2 — Physical imaging, video, time, network, and audit
 
 - [ ] **ONVIF-06 — Capability-driven imaging/video reads and writes.** Enumerate operations/options per device, expose only supported settings, validate ranges, and read back every write before reporting success.
+  - [x] Imaging options, range validation, and matching readback are implemented in #169 (`43f965f`); CI is green. PR merge is waiting on the explicitly requested size exception. Broader video configuration and physical-camera acceptance remain open.
 - [ ] **ONVIF-07 — Time configuration and verification.** Read/set supported time/NTP/timezone settings through explicit operations; verify by readback and audit before/after state without storing secrets.
 - [ ] **ONVIF-08 — Network configuration and safety.** Enumerate supported network controls, validate operation-specific input, require bounded confirmation where connectivity may be disrupted, and never assume the device remains reachable.
 - [ ] **ONVIF-09 — Mutation audit and failure recovery.** Persist actor, target stable ID, operation, redacted request/result, readback, timestamps, and outcome; retry only within bounded policy and avoid blind replay of non-idempotent operations.
+  - [x] Current time sync, PTZ, video configuration/encoding, and imaging writes record an append-only intent and correlated terminal event with camera/server IDs, operation ID, timestamp, status, and sanitized unknown-outcome category. No automatic retry; callers are directed to manual reconciliation. Store layer is in #171 and API wiring is in stacked #172; CI was pending at the tracker update. See `odd/tasks/onvif-mutation-audit.md`. Broader request/result/readback evidence and physical-device acceptance remain open.
 
 ### Phase 3 — PTZ, presets, tours, focus, and fisheye/dewarp
 

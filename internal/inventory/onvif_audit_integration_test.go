@@ -27,6 +27,18 @@ func TestAuditCameraOnvifMutation(t *testing.T) {
 	if err := env.Svc.AuditCameraOnvifMutation(ctx, env.Admin, cameraID, operationID, "ptz", "succeeded", ""); err != nil {
 		t.Fatalf("record succeeded event: %v", err)
 	}
+	unsupportedCategoryOperationID := uuid.New()
+	err := env.Svc.AuditCameraOnvifMutation(ctx, env.Admin, cameraID, unsupportedCategoryOperationID, "ptz", "outcome_unknown", "raw remote error")
+	if err == nil {
+		t.Fatal("accepted an unsupported ONVIF mutation error category")
+	}
+	var unsupportedCategoryRows int
+	if err := env.Pool.QueryRow(ctx, `SELECT count(*) FROM audit_log WHERE action = 'ONVIF_MUTATION' AND details->>'operation_id' = $1`, unsupportedCategoryOperationID.String()).Scan(&unsupportedCategoryRows); err != nil {
+		t.Fatal(err)
+	}
+	if unsupportedCategoryRows != 0 {
+		t.Fatalf("unsupported error category created %d audit records", unsupportedCategoryRows)
+	}
 
 	rows, err := env.Pool.Query(ctx, `SELECT action, details, occurred_at FROM audit_log WHERE action = 'ONVIF_MUTATION' AND target_id = $1 AND details->>'operation_id' = $2 ORDER BY id`, cameraID, operationID.String())
 	if err != nil {
