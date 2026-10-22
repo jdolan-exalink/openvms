@@ -20,5 +20,5 @@ Decisions:
 ## Slices
 
 - [x] 1. Backend: `server_id[]` on the Vision AI slots, filtered before ranking, one allocator per selection.
-- [ ] 2. Live: remove the server selector and its grid-based helpers.
+- [x] 2. Live: remove the server selector and its grid-based helpers.
 - [ ] 3. Vision AI: server selector, remembered selection, and every list filtered by it.
