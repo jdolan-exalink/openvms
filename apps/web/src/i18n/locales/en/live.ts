@@ -109,6 +109,8 @@ const messages = {
   cannotMove: "Cannot move between servers",
   serverDragHint: "{name}. Drag onto the grid to see all of its cameras.",
   siteDragHint: "{name}. Drag onto the grid to see every camera of all of its servers.",
+  serverSelector: "Servers",
+  serversInView: "Servers in the view",
   newFolderIn: "New folder in {name}",
   newFolder: "New folder",
   newFolderName: "Name of the new folder in {name}",

@@ -21,4 +21,4 @@ Decisions:
 
 - [x] 1. Detection labels over video are icon-only (tooltip and accessible name keep the text).
 - [x] 2. Dragging a site fills the grid with every camera of its servers.
-- [ ] 3. Server selector with checks in the Live toolbar.
+- [x] 3. Server selector with checks in the Live toolbar.

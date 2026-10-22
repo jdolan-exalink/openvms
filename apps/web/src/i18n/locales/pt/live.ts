@@ -109,6 +109,8 @@ const messages = {
   cannotMove: "Não é possível mover entre servidores",
   serverDragHint: "{name}. Arraste para a grade para ver todas as câmeras.",
   siteDragHint: "{name}. Arraste para a grade para ver todas as câmeras de todos os seus servidores.",
+  serverSelector: "Servidores",
+  serversInView: "Servidores na visualização",
   newFolderIn: "Nova pasta em {name}",
   newFolder: "Nova pasta",
   newFolderName: "Nome da nova pasta em {name}",
