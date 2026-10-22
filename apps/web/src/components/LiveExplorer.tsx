@@ -90,8 +90,8 @@ export const VIRTUAL_VISION_SOURCES: LiveVisionRef[] = [
   { id: "visionai:lpr", name: "Vision AI - LPR", layout: "lpr" },
   { id: "visionai:perimetro", name: "Vision AI - Perímetro", layout: "matrix" },
   { id: "visionai:alarmas", name: "Vision AI - Alarmas", layout: "alarm" },
-  { id: LPR_CHANNEL_ID, name: "Canal LPR", layout: "channel" },
-  { id: FACES_CHANNEL_ID, name: "Canal Rostros", layout: "channel" },
+  { id: LPR_CHANNEL_ID, name: "Tótem LPR", layout: "tótem" },
+  { id: FACES_CHANNEL_ID, name: "Tótem Rostros", layout: "tótem" },
 ];
 
 type DragData =

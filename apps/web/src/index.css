@@ -250,3 +250,26 @@ html[data-live-fullscreen] [data-shell-region="main-workspace"] {
     scroll-behavior: auto !important;
   }
 }
+
+/* LPR list overlay: new reads slide in from the left, a faint scan line sweeps the glass panel. */
+@keyframes lpr-feed-in {
+  0% { opacity: 0; transform: translateX(-28px); filter: blur(4px); }
+  60% { opacity: 1; transform: translateX(4px); filter: blur(0); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+@keyframes lpr-scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+.lpr-feed-in {
+  animation: lpr-feed-in 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lpr-scan {
+  animation: lpr-scan 5s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lpr-feed-in,
+  .lpr-scan {
+    animation: none;
+  }
+}

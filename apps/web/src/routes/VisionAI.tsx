@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { meQuery } from "@/api/queries";
 import { MsePlayer } from "@/components/MsePlayer";
+import { LprListOverlay } from "@/components/live/LprListOverlay";
 import { Button, IconButton } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
@@ -794,6 +795,7 @@ function SlotRenderer({
           objectFit="fill"
           className="size-full"
         />
+        <LprListOverlay cameraId={cameraId} enabled={Boolean(slot.plate)} />
       </div>
 
       {/* Top HUD Controls */}

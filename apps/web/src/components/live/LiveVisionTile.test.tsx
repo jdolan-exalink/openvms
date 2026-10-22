@@ -59,6 +59,18 @@ beforeEach(() => {
 });
 
 describe("LiveVisionTile", () => {
+  it("shows the plate list overlay on a slot that carries a plate, and not on other slots", async () => {
+    slotsBody = { slots: [{ ...filled("cam-1"), plate: "AB123CD" }] };
+    const { unmount } = renderWithQuery(<LiveVisionTile vision={{ id: "visionai:lpr", name: "Vision AI - LPR", layout: "lpr" }} />);
+    expect(await screen.findByTestId("lpr-list-overlay")).toBeInTheDocument();
+    unmount();
+
+    slotsBody = { slots: [filled("cam-2")] };
+    renderWithQuery(<LiveVisionTile vision={{ id: "visionai:general", name: "Vision AI" }} />);
+    await screen.findByTestId("mse-player");
+    expect(screen.queryByTestId("lpr-list-overlay")).not.toBeInTheDocument();
+  });
+
   it.each([
     ["visionai:lpr-channel", "lpr"],
     ["visionai:faces-channel", "faces"],
