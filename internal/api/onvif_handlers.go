@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -10,12 +11,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/agent/onvifdiscover"
 	"github.com/jdolan-exalink/openvms/internal/api/gen"
 	"github.com/jdolan-exalink/openvms/internal/authz"
 	"github.com/jdolan-exalink/openvms/internal/inventory"
 	"github.com/jdolan-exalink/openvms/internal/onvif"
 	"github.com/jdolan-exalink/openvms/internal/provision"
+	"github.com/jdolan-exalink/openvms/internal/store"
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
@@ -114,6 +117,67 @@ func parseOnvifProbeCapabilities(res provision.OnvifProbeResult) (string, string
 	}
 
 	return profile, version, caps
+}
+
+var errOnvifMutationOutcomeUnknown = errors.New("ONVIF mutation outcome unknown; manual reconciliation required")
+
+func (h *Handlers) beginOnvifMutation(ctx context.Context, actor authz.Actor, cameraID, serverID uuid.UUID, operation string) (uuid.UUID, error) {
+	if h.Provision == nil || h.Provision.Inv == nil {
+		return uuid.Nil, errors.New("ONVIF provisioning service unavailable")
+	}
+	if err := h.Provision.Inv.RequireServerManageAndConfigSecrets(ctx, actor, serverID); err != nil {
+		return uuid.Nil, err
+	}
+	operationID := uuid.New()
+	if err := h.Inv.AuditCameraOnvifMutation(ctx, actor, cameraID, operationID, operation, "started", ""); err != nil {
+		return uuid.Nil, err
+	}
+	return operationID, nil
+}
+
+func (h *Handlers) finishOnvifMutation(ctx context.Context, actor authz.Actor, cameraID, operationID uuid.UUID, operation, status, errorCategory string) error {
+	if err := h.Inv.AuditCameraOnvifMutation(ctx, actor, cameraID, operationID, operation, status, errorCategory); err != nil {
+		return errOnvifMutationOutcomeUnknown
+	}
+	return nil
+}
+
+func isOnvifAuthorizationError(err error) bool {
+	return errors.Is(err, access.ErrForbidden) || errors.Is(err, store.ErrNotFound)
+}
+
+func (h *Handlers) executeOnvifMutation(ctx context.Context, actor authz.Actor, cameraID, serverID uuid.UUID, operation string, execute func() error) error {
+	return executeAuditedOnvifMutation(operation, func() error {
+		if h.Provision == nil || h.Provision.Inv == nil {
+			return errors.New("ONVIF provisioning service unavailable")
+		}
+		return h.Provision.Inv.RequireServerManageAndConfigSecrets(ctx, actor, serverID)
+	},
+		func(operationID uuid.UUID, eventOperation, status, errorCategory string) error {
+			return h.Inv.AuditCameraOnvifMutation(ctx, actor, cameraID, operationID, eventOperation, status, errorCategory)
+		}, execute)
+}
+
+func executeAuditedOnvifMutation(operation string, authorize func() error, auditEvent func(uuid.UUID, string, string, string) error, execute func() error) error {
+	if err := authorize(); err != nil {
+		return err
+	}
+	operationID := uuid.New()
+	if err := auditEvent(operationID, operation, "started", ""); err != nil {
+		return err
+	}
+	operationErr := execute()
+	status, errorCategory := "succeeded", ""
+	if operationErr != nil {
+		status, errorCategory = "outcome_unknown", "remote_outcome_unknown"
+	}
+	if err := auditEvent(operationID, operation, status, errorCategory); err != nil {
+		return errOnvifMutationOutcomeUnknown
+	}
+	if operationErr != nil {
+		return errOnvifMutationOutcomeUnknown
+	}
+	return nil
 }
 
 func containsString(list []string, item string) bool {
@@ -598,12 +662,20 @@ func (h *Handlers) SyncCameraOnvifTime(ctx context.Context, r gen.SyncCameraOnvi
 		}, nil
 	}
 
-	out, err := h.Provision.ExecuteOnvifSyncTime(ctx, a, cam.ServerID, onvifdiscover.SyncTimeRequest{
-		Endpoint: ep,
-		Username: user,
-		Password: pass,
+	var out map[string]any
+	err = h.executeOnvifMutation(ctx, a, cam.ID, cam.ServerID, "sync_time", func() error {
+		var callErr error
+		out, callErr = h.Provision.ExecuteOnvifSyncTime(ctx, a, cam.ServerID, onvifdiscover.SyncTimeRequest{
+			Endpoint: ep,
+			Username: user,
+			Password: pass,
+		})
+		return callErr
 	})
 	if err != nil {
+		if isOnvifAuthorizationError(err) {
+			return nil, err
+		}
 		return gen.SyncCameraOnvifTime502JSONResponse{
 			FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "sync_time_failed", Message: err.Error()},
 		}, nil
@@ -665,8 +737,20 @@ func (h *Handlers) ControlCameraOnvifPTZ(ctx context.Context, r gen.ControlCamer
 		ptzReq.PresetToken = *r.Body.PresetToken
 	}
 
-	out, err := h.Provision.ExecuteOnvifPTZ(ctx, a, cam.ServerID, ptzReq)
+	var out map[string]any
+	if ptzReq.Action == "get_presets" {
+		out, err = h.Provision.ExecuteOnvifPTZ(ctx, a, cam.ServerID, ptzReq)
+	} else {
+		err = h.executeOnvifMutation(ctx, a, cam.ID, cam.ServerID, "ptz", func() error {
+			var callErr error
+			out, callErr = h.Provision.ExecuteOnvifPTZ(ctx, a, cam.ServerID, ptzReq)
+			return callErr
+		})
+	}
 	if err != nil {
+		if isOnvifAuthorizationError(err) {
+			return nil, err
+		}
 		return gen.ControlCameraOnvifPTZ502JSONResponse{
 			FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "ptz_failed", Message: err.Error()},
 		}, nil
@@ -756,8 +840,20 @@ func (h *Handlers) OperateCameraOnvifVideoConfig(ctx context.Context, r gen.Oper
 		vReq.Configuration = cfg
 	}
 
-	out, err := h.Provision.ExecuteOnvifVideoConfig(ctx, a, cam.ServerID, vReq)
+	var out map[string]any
+	if vReq.Action == "set" {
+		err = h.executeOnvifMutation(ctx, a, cam.ID, cam.ServerID, "video_config", func() error {
+			var callErr error
+			out, callErr = h.Provision.ExecuteOnvifVideoConfig(ctx, a, cam.ServerID, vReq)
+			return callErr
+		})
+	} else {
+		out, err = h.Provision.ExecuteOnvifVideoConfig(ctx, a, cam.ServerID, vReq)
+	}
 	if err != nil {
+		if isOnvifAuthorizationError(err) {
+			return nil, err
+		}
 		return gen.OperateCameraOnvifVideoConfig502JSONResponse{
 			FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "video_config_failed", Message: err.Error()},
 		}, nil
@@ -901,8 +997,20 @@ func (h *Handlers) OperateCameraOnvifImaging(ctx context.Context, r gen.OperateC
 		imgReq.Settings = settings
 	}
 
-	out, err := h.Provision.ExecuteOnvifImaging(ctx, a, cam.ServerID, imgReq)
+	var out map[string]any
+	if imgReq.Action == "set" {
+		err = h.executeOnvifMutation(ctx, a, cam.ID, cam.ServerID, "imaging", func() error {
+			var callErr error
+			out, callErr = h.Provision.ExecuteOnvifImaging(ctx, a, cam.ServerID, imgReq)
+			return callErr
+		})
+	} else {
+		out, err = h.Provision.ExecuteOnvifImaging(ctx, a, cam.ServerID, imgReq)
+	}
 	if err != nil {
+		if isOnvifAuthorizationError(err) {
+			return nil, err
+		}
 		return gen.OperateCameraOnvifImaging502JSONResponse{
 			FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "imaging_failed", Message: err.Error()},
 		}, nil
