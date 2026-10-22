@@ -80,6 +80,11 @@ func (v videoEncodingOps) run(ctx context.Context, device onvif.Endpoint, req Vi
 		return cameraError(err), http.StatusBadGateway
 	}
 	if !found {
+		// Reading the options of a camera without Media2 is a valid answer ("nothing to offer"),
+		// but a change that was never attempted must not read as a success.
+		if req.Action == "set" {
+			return VideoEncodingResult{Code: "media2_unsupported"}, http.StatusUnprocessableEntity
+		}
 		return VideoEncodingResult{Success: true, Code: "media2_unsupported"}, http.StatusOK
 	}
 	media2 := onvif.NewMedia2Client(v.client, media)

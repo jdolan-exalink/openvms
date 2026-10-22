@@ -126,11 +126,26 @@ func TestVideoEncodingIgnoresAMedia2EndpointOutsideTheAllowedNetworks(t *testing
 	cam.media2URL = "http://10.9.9.9/onvif/media2" // a camera pointing the agent at another host
 	ops, device := newEncodingOps(cam)
 	res, status := ops.run(context.Background(), device, VideoEncodingRequest{Action: "set", ConfigToken: "enc_main", Encoding: "H264"})
-	if status != 200 || res.Supported || res.Code != "media2_unsupported" {
+	if status != 422 || res.Success || res.Supported || res.Code != "media2_unsupported" {
 		t.Fatalf("status %d, result %+v", status, res)
 	}
 	if cam.did("Set") || cam.did("Get") {
 		t.Fatalf("nothing may be sent to a host outside the allowed networks: %v", cam.calls)
+	}
+}
+
+// A change that was never attempted must never read as a success: a caller that only looks at
+// success or at a 2xx would believe the codec switched.
+func TestVideoEncodingSetWithoutMedia2NeverReportsSuccess(t *testing.T) {
+	cam := hevcCamera()
+	cam.media2URL = ""
+	ops, device := newEncodingOps(cam)
+	res, status := ops.run(context.Background(), device, VideoEncodingRequest{Action: "set", ConfigToken: "enc_main", Encoding: "H264"})
+	if res.Success || status < 400 || res.Code != "media2_unsupported" {
+		t.Fatalf("status %d, result %+v", status, res)
+	}
+	if cam.did("Set") {
+		t.Fatal("nothing must be written")
 	}
 }
 
