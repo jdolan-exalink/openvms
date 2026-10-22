@@ -193,22 +193,18 @@ LIMIT $%d`, len(args)), args...)
 		if len(f.PersonIDs) == 1 {
 			target = f.PersonIDs[0]
 		}
-		// One audit row per organization whose names were shown; a read that returned nothing is
-		// still audited, against the first organization searched.
-		counts := map[uuid.UUID]int{}
+		// Audit every organization in the authorized search set, including tenants with no matches.
+		counts := make(map[uuid.UUID]int, len(tenants))
+		for _, t := range tenants {
+			counts[t] = 0
+		}
 		for i, t := range rowTenants {
 			if i < limit {
 				counts[t]++
 			}
 		}
-		if len(counts) == 0 && len(tenants) > 0 {
-			counts[tenants[0]] = 0
-		}
 		for _, t := range tenants {
-			n, ok := counts[t]
-			if !ok {
-				continue
-			}
+			n := counts[t]
 			if err := s.audit(ctx, q, actor, t, ActionRecognitionsRead, "face_person", target,
 				map[string]any{"count": n, "persons": len(f.PersonIDs), "cameras": len(f.CameraIDs),
 					"sites": len(f.SiteIDs), "servers": len(f.ServerIDs), "camera_groups": len(f.CameraGroupIDs)}); err != nil {
