@@ -1,13 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { frigateRevisionsQuery } from "@/api/queries";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Modal } from "@/components/Modal";
 import { Button, Empty, ErrorNote } from "@/components/ui";
-import { cn } from "@/lib/cn";
 import { fmtDateTime } from "@/lib/format";
-import { type DiffLine, lineDiff, sectionLabel } from "@/lib/frigateSchema";
+import { sectionLabel } from "@/lib/frigateSchema";
+import { YamlDiff } from "@/components/frigate/YamlDiff";
 
 type Revision = Schemas["FrigateConfigRevision"];
 
@@ -17,47 +17,6 @@ export const kindLabel: Record<Revision["kind"], string> = {
   raw_save: "Edición del YAML",
   rollback: "Restauración",
 };
-
-/** collapse keeps changed lines with a little context and folds the long unchanged runs. */
-function collapse(lines: DiffLine[], context = 2): (DiffLine | { kind: "gap"; count: number })[] {
-  const keep = new Set<number>();
-  lines.forEach((l, i) => {
-    if (l.kind === "same") return;
-    for (let k = Math.max(0, i - context); k <= Math.min(lines.length - 1, i + context); k++) keep.add(k);
-  });
-  const out: (DiffLine | { kind: "gap"; count: number })[] = [];
-  let gap = 0;
-  lines.forEach((l, i) => {
-    if (keep.has(i)) {
-      if (gap) out.push({ kind: "gap", count: gap });
-      gap = 0;
-      out.push(l);
-    } else {
-      gap++;
-    }
-  });
-  if (gap) out.push({ kind: "gap", count: gap });
-  return out;
-}
-
-function YamlDiff({ before, after }: { before: string; after: string }) {
-  const rows = useMemo(() => collapse(lineDiff(before, after)), [before, after]);
-  if (!rows.some((r) => r.kind !== "gap")) return <p className="text-sm text-muted">El archivo no cambió.</p>;
-  return (
-    <pre aria-label="Diferencias del YAML" className="max-h-96 overflow-auto rounded-m3-md bg-surface-2 p-3 font-mono text-xs">
-      {rows.map((r, i) =>
-        r.kind === "gap" ? (
-          <div key={i} className="text-muted">… {r.count} líneas sin cambios …</div>
-        ) : (
-          <div key={i} className={cn("whitespace-pre-wrap", r.kind === "add" && "bg-ok/15 text-ok", r.kind === "del" && "bg-bad/15 text-bad")}>
-            {r.kind === "add" ? "+ " : r.kind === "del" ? "- " : "  "}
-            {r.text}
-          </div>
-        ),
-      )}
-    </pre>
-  );
-}
 
 function RevisionDetail({ rev, onClose }: { rev: Revision; onClose: () => void }) {
   return (

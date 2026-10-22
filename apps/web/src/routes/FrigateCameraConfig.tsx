@@ -10,7 +10,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "@tanstack/react-router";
 import { type FormEvent, useMemo, useState } from "react";
 import { api, type Schemas, unwrap } from "@/api/client";
-import { cameraFrigateDocQuery, cameraQuery, cameraZonesQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
+import { cameraFrigateDocQuery, cameraQuery, cameraZonesQuery, camerasQuery, classifyPolicyQuery, frigateSchemaQuery, meQuery } from "@/api/queries";
 import { BodyClassifySwitch } from "@/components/BodyClassifySwitch";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FrigateHistory } from "@/components/frigate/FrigateHistory";
@@ -92,9 +92,13 @@ export function FrigateCameraConfig() {
   const camera = useQuery(cameraQuery(cameraId));
   const serverId = doc.data?.server_id;
   const schema = useQuery(frigateSchemaQuery(serverId));
+  const serverCameras = useQuery({ ...camerasQuery({ server_id: serverId }), enabled: !!serverId && !!doc.data?.editable });
   const [active, setActive] = useState<string>();
   const [edits, setEdits] = useState<Record<string, unknown>>({});
   const [reviewing, setReviewing] = useState(false);
+  const [bulkReviewing, setBulkReviewing] = useState(false);
+  const [bulkTargets, setBulkTargets] = useState<string[]>([]);
+  const [bulkResults, setBulkResults] = useState<Array<{ id: string; name: string; error?: string }>>([]);
   const [results, setResults] = useState<SectionResult[]>([]);
   const [zoneEditor, setZoneEditor] = useState(false);
   const canManageCameras = can(me.data, "cameras.manage");
@@ -156,6 +160,42 @@ export function FrigateCameraConfig() {
       await qc.invalidateQueries({ queryKey: ["cameras", cameraId] });
     },
   });
+
+  const bulkApply = useMutation({
+    mutationFn: async (targets: Array<{ id: string; name: string }>) => {
+      const patch = { sections: buildSections() };
+      const outcomes: Array<{ id: string; name: string; error?: string; result?: { restart_required: boolean; sections: SectionResult[] } }> = [];
+      for (const target of targets) {
+        try {
+          const result = unwrap(await api.PATCH("/api/v1/cameras/{cameraId}/frigate-config", { params: { path: { cameraId: target.id } }, body: patch }));
+          outcomes.push({ ...target, result });
+        } catch (error) {
+          outcomes.push({ ...target, error: error instanceof Error ? error.message : "No se pudo aplicar." });
+        }
+      }
+      return outcomes;
+    },
+    onSuccess: async (outcomes) => {
+      setBulkResults(outcomes);
+      const current = outcomes.find((item) => item.id === cameraId);
+      if (current?.result) setResults(current.result.sections);
+      if (outcomes.some((item) => item.result?.restart_required)) setNeedsRestart(true);
+      for (const target of outcomes) {
+        await qc.invalidateQueries({ queryKey: ["cameras", target.id] });
+      }
+      await qc.invalidateQueries({ queryKey: ["servers", serverId, "frigate-revisions"] });
+      if (outcomes.every((item) => !item.error)) {
+        setEdits({});
+        setBulkReviewing(false);
+      }
+    },
+  });
+
+  const otherServerCameras = (serverCameras.data ?? []).filter((item) => item.id !== cameraId);
+  const bulkTargetRows = [
+    { id: cameraId, display_name: doc.data?.camera_name ?? cameraId },
+    ...otherServerCameras.map(({ id, display_name }) => ({ id, display_name })),
+  ];
 
   const activeSection = active ?? sections[0] ?? GENERAL;
 
@@ -708,6 +748,13 @@ export function FrigateCameraConfig() {
           </span>
           <div className="flex gap-2">
             <Button variant="text" disabled={!dirty.length} onClick={() => { setEdits({}); apply.reset(); }}>Descartar</Button>
+            <Button
+              variant="secondary"
+              disabled={!dirty.length || errorCount > 0 || !serverId}
+              onClick={() => { setBulkTargets([cameraId]); setBulkResults([]); bulkApply.reset(); setBulkReviewing(true); }}
+            >
+              Aplicar a varias cámaras
+            </Button>
             <Button variant="primary" disabled={!dirty.length || errorCount > 0} onClick={() => setReviewing(true)}>Revisar cambios</Button>
           </div>
         </div>
@@ -741,6 +788,49 @@ export function FrigateCameraConfig() {
             <Button variant="text" onClick={() => setReviewing(false)}>Volver</Button>
             <Button variant="primary" disabled={apply.isPending} onClick={() => apply.mutate()}>
               {apply.isPending ? "Aplicando…" : "Aplicar"}
+            </Button>
+          </div>
+        </Modal>
+      )}
+
+      {bulkReviewing && (
+        <Modal title="Aplicar a varias cámaras" onClose={() => setBulkReviewing(false)}>
+          <p className="text-sm text-muted">Se aplicarán las mismas secciones a cámaras visibles de este servidor. La cámara actual está incluida. Cada cambio respeta los permisos del servidor.</p>
+          <fieldset className="flex max-h-64 flex-col gap-2 overflow-y-auto rounded-m3-lg bg-surface-2 p-3" disabled={bulkApply.isPending}>
+            <legend className="px-1 text-sm font-medium">Cámaras de este servidor</legend>
+            {bulkTargetRows.map((target) => (
+              <label key={target.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={bulkTargets.includes(target.id)}
+                  disabled={target.id === cameraId}
+                  onChange={(event) => setBulkTargets((selected) => event.target.checked
+                    ? [...selected, target.id]
+                    : selected.filter((id) => id !== target.id))}
+                />
+                <span>{target.display_name}{target.id === cameraId ? " (actual)" : ""}</span>
+              </label>
+            ))}
+            {serverCameras.isLoading && <p className="text-xs text-muted">Cargando cámaras…</p>}
+            {serverCameras.error && <ErrorNote error={serverCameras.error} />}
+          </fieldset>
+          {bulkResults.length > 0 && (
+            <ul aria-label="Resultado de aplicación múltiple" className="flex flex-col gap-1 text-sm">
+              {bulkResults.map((item) => (
+                <li key={item.id} role={item.error ? "alert" : "status"}>
+                  {item.name}: {item.error ? `no aplicada — ${item.error}` : "aplicada"}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="text" onClick={() => setBulkReviewing(false)}>Cerrar</Button>
+            <Button
+              variant="primary"
+              disabled={bulkApply.isPending || bulkTargets.length === 0 || serverCameras.isLoading || !!serverCameras.error}
+              onClick={() => bulkApply.mutate(bulkTargetRows.filter((item) => bulkTargets.includes(item.id)).map(({ id, display_name }) => ({ id, name: display_name })))}
+            >
+              {bulkApply.isPending ? "Aplicando…" : "Aplicar cambios"}
             </Button>
           </div>
         </Modal>
