@@ -5315,6 +5315,9 @@ type GetVisionAISlotsParams struct {
 	Source *VisionAISource `form:"source,omitempty" json:"source,omitempty"`
 	Layout *VisionAILayout `form:"layout,omitempty" json:"layout,omitempty"`
 
+	// ServerId Only events of these servers fill the slots; omitted or empty means every server. Each selection keeps its own allocation state.
+	ServerId *[]openapi_types.UUID `form:"server_id,omitempty" json:"server_id,omitempty"`
+
 	// Inactivity Inactivity timeout in seconds; 0 keeps a camera until its maximum display time.
 	Inactivity *GetVisionAISlotsParamsInactivity `form:"inactivity,omitempty" json:"inactivity,omitempty"`
 }
@@ -14538,6 +14541,19 @@ func (siw *ServerInterfaceWrapper) GetVisionAISlots(w http.ResponseWriter, r *ht
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "layout"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "layout", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "server_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "server_id", r.URL.Query(), &params.ServerId, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "server_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "server_id", Err: err})
 		}
 		return
 	}
@@ -37885,15 +37901,16 @@ var swaggerSpec = []string{
 	"kJ6hJzUjex5SzymkuaATYnnGOiRRSqRqLDsB9yhj0u7H0AaXHr+d5ExfSKeedgjmtsA0cThoB6xZjovK",
 	"FbbFnWC4xViv/ypLAd4ept4lJxBTsuybBQAviBzmTkmGWsa43vGIBcSm6mmIXHu8pLeYxAv7gd3GiSxi",
 	"7fklT7sX8kiSQuZcyhLkQjB67dPwh5qnRMmEATgsUEXKLEusx4KFACYe5VcuaWL5NbeTrxfSsETJ1JC9",
-	"UPXT5zo1bMKIsRPB9ju+GwxgzjZsf0us8guQ/9G7MyD+pTyxeCQ1N+x8oeVHwJ+1YzbC8d76te/xZw2g",
-	"lO/i9sEGqAJIzO/ja3IIwTlTwh8V0nKB+4f4kPX9a0GuLA+pGQfy+8POMyaL7Nmrfxx2vjvsfH/Y+cth",
-	"57sXh/9sQJv851ovj+pJN2X+eFYHGt0Z7djJ5ZLTkDXdDeCYDZdMjt7hksprIAp9fxdg35ce3A7tEGrY",
-	"d/fF4SEZj7hAQZFrlTBjoBMMyv8ueRNazyBmRWg/k/AWdLT3/JpJ7GuwttMPY5xZaovG4z8pV0JhI+Zl",
-	"1oXXESxzL3cWd7K+rZrRdNK6rwCgYnzz7D5FXBTflbLsdvzD4fdozlA5IRGNMW4ttBpyd0vjBp8ymvJ1",
-	"73AcpH2Lj4SoUYMHFo4lep1nPyArbGxC1t1NxoLaUN/MYrp2sIUS4ihzSKH+85tn2HbqqLAj9zYnuROl",
-	"rjiLn7gRfKmhe77Q4tmrZ71n7nP/9psgf/0o7iXhfsJszson0aNV+czGPMebanp7/QM/h8pHJWBP/KjS",
-	"nqb6Mepp1U9KqVP5UOS6+t8BTepzoEXKbe0HwJuV4QWdeNjO+JkuRP0tUvme9NOzrH5xkIyolEyYZ3/8",
-	"84//GwAA//8=",
+	"UPXT5zo1bMKIsRPB9ju+GwxgzjZsf0us8guQ/9G7MyD+pTyxeCQ1N+x8oeVHwJ+1YzbC8d76te/xZ22g",
+	"lJ5bkHhNqJUyZMB9a3w4zNcxbud4Fw45Y1Qa39LXF8yRtzQZEcOEP64rxnIDG67GktApLnD2DfuWC5Wy",
+	"cLk17ia8e9qvHU2VBbfgtJ3SeQbU8OwV/PDZ7Ka8izQFVKEK4DtPXK/JoV9UxIQqpOUCiQpBM+tE1QLn",
+	"WVJuMzjm94edZ0wW2bNX/zjsfHfY+f6w85fDzncvDv/ZAMH5z7XeqFXyb0qH8iQCjLszJoO7rErxg/LK",
+	"XYuO4HHJ5OgdLqm8G+NN6C9IbIbTgyuzHVcOmxG/ODwk4xEXKD1zrRJmDLTHwUuxS96EfjwI5BF68iS8",
+	"BTLuPb9mEps9rO30wxhnltqi8fhPypVQ2Ih56YbhdQRr/8udxZ2sb6tmNJ207iugygTx06cIFuNbdZYt",
+	"oH84/B5tPConJEJUxq2F/kvuwm3c4FNGU77uHY6DtG/xkRA1avBoy7FusfPsB2SFjU3IugvbWNCl6ptZ",
+	"TBdUtlBCHGUOKdR/fvMMe3EdFXbk3uYkd6LUFWfxEzeCr790zxdaPHv1rPfMfe7ffhPkrx/FvSRcM5ji",
+	"Wvkkuvkqn9mY/HlTzfmvf+DnUPmoRDGKH1V69lQ/xuu4+kkpdSofilxX/zugSX0OtEi5rf0AeLMyvKAT",
+	"j2UaP9OFqL9FKt+of3qW1S8OkhGVkgnz7I9//vF/AwAA//8=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

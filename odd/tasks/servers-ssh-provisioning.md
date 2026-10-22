@@ -5,7 +5,7 @@ Complete SSH installation, server agent monitoring and remote updates without co
 
 ## Scope and constraints
 Reuse deploy/agent installer; OpenAPI-first API; explicit site selection; password memory-only. User-confirmed fresh-host layout: Frigate compose `/opt/frigate/docker-compose.yml`, Frigate config `/opt/frigate/config`, recordings `/mnt/cctv`; preserve agent bundle at `/opt/openvms/agent`. Production requires `/mnt/cctv` mounted; user explicitly authorized opt-in system-disk directory fallback for this temporary demo only. Never format, clear, or replace the existing directory. Strict TDD enabled by AGENTS.md. Runners: GOCACHE=/tmp/openvms-go-build-cache go test ./internal/provision ./internal/api ./internal/agent; pnpm exec vitest run src/routes/Servers.test.tsx src/i18n/i18n.test.ts.
-Estimated authored changes: 700–1000 lines, coherent API/installer/UI units; line heuristic is advisory. No PR/commit authorized.
+Estimated authored changes: 700–1000 lines, coherent API/installer/UI units; line heuristic is advisory. The user later authorized local backlog commits and PR delivery through the configured GitHub session; that authorization does not include additional remote host access.
 
 ## Tasks
 - [x] T1 Wire existing provisioning API and fix runner compilation/security. Route delegated: multiple non-trivial files and preparation reads.
@@ -17,7 +17,7 @@ Estimated authored changes: 700–1000 lines, coherent API/installer/UI units; l
   - NTP in containers: chronyd exits on LXC (`adjtimex: Operation not permitted`). Installer adds `-x` to `/etc/default/chrony` only when `systemd-detect-virt --container`. RED/GREEN `TestNTPStepServesTimeWithoutClockControlInContainers`.
   - MQTT was never deployed (Frigate had `mqtt.enabled: false`). Each compose variant now runs `eclipse-mosquitto:2` published on 127.0.0.1:1883 only (anonymous broker), Frigate configs point at `mosquitto:1883`, installer copies `/opt/frigate/mosquitto/mosquitto.conf`. RED/GREEN `TestFrigateInstallDeploysLocalMQTTBroker`.
   - Earlier in session: worker image failed to build because its stage lacked `COPY deploy/agent`; added to `deploy/docker/go.Dockerfile`.
-- Earlier T3 note: Parent live install pending. Parent reports a read-only SSH check confirmed Debian 13 x86_64 and no `/mnt/cctv` mount; no installation or writes were performed. User authorized the demo-only system-disk fallback; parent must still run the authenticated install. Local Go, shell/compose, UI, and typecheck pass. A separate MapShell investigation-navigation test failed as recorded below and was not changed in this narrow type-fix task.
+- Earlier T3 note (superseded by the live-verification evidence below): installation was pending after the initial read-only host check. The later authorized install succeeded. The currently selected T2 build has not been separately deployed, and no real-host `update-ssh` run is recorded.
 
 ## Acceptance and rollback
 Installation must expose progress and CPU/system-disk warnings, preserve explicit site choice, never expose SSH password, and enforce verified host identity. Metrics only poll while Servers is mounted. Installer uses the confirmed layout and refuses existing Frigate paths. System-disk mode defaults off, requires explicit UI/API opt-in, warns in the wizard and progress only when fallback is active, and still refuses symlinks/non-directories; production without mounted storage remains refused. It never formats, clears, or replaces CCTV data. Rollback boundary: provisioning wiring, Servers SSH/metrics additions and new servers catalogs, preserving unrelated edits.
@@ -53,5 +53,5 @@ Safe parent live-test procedure: the user confirmed the trusted host key matches
 - Partial install from the failed NTP run was removed (`/opt/frigate`, `/opt/openvms`, Frigate container) before the rerun; `/mnt/cctv` kept.
 - Not done: commits (not authorized), web UI tests (no web change in T4).
 
-## Next step
-User decides on commits. Production hosts still require a mounted `/mnt/cctv`; the system-disk opt-in remains demo-only.
+## Current acceptance boundary
+The user authorized local backlog commits and PR delivery through the configured GitHub session. No additional remote host operation is included in this closeout. Deployment of the current T2 build and a real-host `update-ssh` run remain unverified; production hosts require a mounted `/mnt/cctv`, and the system-disk opt-in remains demo-only.

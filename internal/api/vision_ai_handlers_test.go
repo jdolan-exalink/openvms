@@ -131,3 +131,35 @@ func TestGetVisionAISlots(t *testing.T) {
 		}
 	})
 }
+
+func TestGetVisionAISlotsFiltersByServer(t *testing.T) {
+	srvA, srvB := uuid.New(), uuid.New()
+	camA, camB := uuid.New(), uuid.New()
+	now := time.Now()
+	h := &Handlers{VisionAI: visionai.NewService(fakeVisionSource{rows: []visionai.EventRow{
+		{ID: uuid.New(), ServerID: srvA, CameraID: camA, CameraName: "A", Severity: "detection", Labels: []string{"person"}, StartTime: now.Add(-5 * time.Second)},
+		{ID: uuid.New(), ServerID: srvB, CameraID: camB, CameraName: "B", Severity: "detection", Labels: []string{"person"}, StartTime: now.Add(-6 * time.Second)},
+	}})}
+	cameras := func(servers *[]uuid.UUID) map[uuid.UUID]bool {
+		resp, err := h.GetVisionAISlots(visionCtx(), gen.GetVisionAISlotsRequestObject{Params: gen.GetVisionAISlotsParams{ServerId: servers}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[uuid.UUID]bool{}
+		for _, s := range resp.(gen.GetVisionAISlots200JSONResponse).Slots {
+			if s.CameraId != nil {
+				out[*s.CameraId] = true
+			}
+		}
+		return out
+	}
+	if got := cameras(nil); !got[camA] || !got[camB] {
+		t.Fatalf("no filter: %v", got)
+	}
+	if got := cameras(&[]uuid.UUID{srvA}); !got[camA] || got[camB] {
+		t.Fatalf("server A only: %v", got)
+	}
+	if got := cameras(&[]uuid.UUID{}); !got[camA] || !got[camB] {
+		t.Fatalf("an empty list means every server: %v", got)
+	}
+}

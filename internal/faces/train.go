@@ -185,8 +185,11 @@ func (s *Service) ListTrainAttempts(ctx context.Context, actor authz.Actor, f Tr
 	sortAttempts(out.Attempts)
 	out.Attempts = out.Attempts[:min(len(out.Attempts), maxTrainTotal)]
 
-	// One audit row per organization whose servers were read; an empty read is still audited.
-	perTenant := map[uuid.UUID][2]int{} // servers, attempts
+	// One audit row per authorized organization searched, including organizations with no servers.
+	perTenant := make(map[uuid.UUID][2]int, len(tenants)) // servers, attempts
+	for _, t := range tenants {
+		perTenant[t] = [2]int{}
+	}
 	tenantOf := make(map[uuid.UUID]uuid.UUID, len(servers))
 	for _, srv := range servers {
 		tenantOf[srv.ID] = srv.TenantID
@@ -199,15 +202,9 @@ func (s *Service) ListTrainAttempts(ctx context.Context, actor authz.Actor, f Tr
 		n[1]++
 		perTenant[tenantOf[a.ServerID]] = n
 	}
-	if len(perTenant) == 0 && len(tenants) > 0 {
-		perTenant[tenants[0]] = [2]int{}
-	}
 	err := s.Store.Tx(ctx, store.ScopeFor(actor), func(q *db.Queries) error {
 		for _, t := range tenants {
-			n, ok := perTenant[t]
-			if !ok {
-				continue
-			}
+			n := perTenant[t]
 			if err := s.audit(ctx, q, actor, t, ActionTrainRead, "face_train", uuid.Nil,
 				map[string]any{"scope": "list", "servers": n[0], "attempts": n[1]}); err != nil {
 				return err

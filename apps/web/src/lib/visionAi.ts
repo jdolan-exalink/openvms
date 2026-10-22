@@ -20,18 +20,24 @@ export function visionSourceFromId(id: string): VisionAISource {
 }
 
 /** `inactivity` is the birdseye-style timeout in seconds; undefined uses the server default. */
-export function visionSlotsQuery(source: VisionAISource, layout: VisionAILayout, inactivity?: VisionInactivity) {
+export function visionSlotsQuery(source: VisionAISource, layout: VisionAILayout, inactivity?: VisionInactivity, serverIds?: readonly string[]) {
+  const servers = serverIds && serverIds.length > 0 ? [...serverIds].sort() : undefined;
   return queryOptions({
-    queryKey: ["vision-ai", "slots", source, layout, inactivity ?? null],
+    // The selection is part of the key: each one is its own cached (and server-side allocated) grid.
+    queryKey: ["vision-ai", "slots", source, layout, inactivity ?? null, servers ?? null],
     queryFn: async () =>
-      unwrap(await api.GET("/api/v1/vision-ai/slots", { params: { query: { source, layout, inactivity } } })),
+      unwrap(await api.GET("/api/v1/vision-ai/slots", { params: { query: { source, layout, inactivity, server_id: servers } } })),
     refetchInterval: VISION_SLOTS_REFETCH_MS,
     placeholderData: keepPreviousData,
   });
 }
 
-export function useVisionSlots(source: VisionAISource, layout: VisionAILayout, inactivity?: VisionInactivity) {
-  return useQuery(visionSlotsQuery(source, layout, inactivity));
+/**
+ * `serverIds` limits the grid to those servers; undefined (or empty) shows every server. `enabled`
+ * lets the caller hold the request until the selection can be resolved to servers.
+ */
+export function useVisionSlots(source: VisionAISource, layout: VisionAILayout, inactivity?: VisionInactivity, serverIds?: readonly string[], enabled = true) {
+  return useQuery({ ...visionSlotsQuery(source, layout, inactivity, serverIds), enabled });
 }
 
 /** Whole seconds since `detectedAt` (never negative), or null when the time is missing or invalid. */

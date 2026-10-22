@@ -145,16 +145,13 @@ Status as of 2026-09-29 (branch `fix/playback-purity-lint`, 33 commits ahead of 
 - ODD-9 Playback regression tests (`7eecd8b`, reviewed).
 
 ### Pending
-- S2-3b alarms service + API (list/get/ack/assign/resolve/bulk, assignable users, audit, OpenAPI). Blocks S2-3c and S2-3d.
-- S2-3c realtime `alarm.*` route. S2-3d web alarms inbox ("Alarmas").
-- S2-4 global search + omnibox. S2-6 rules + notifications (phase 11 UI depends on it). S2-7 Frigate config write. S2-8 synchronized multi-camera playback.
-- UI phases 12 (Users/RBAC), 13 (System), 14 (polish, performance, responsive): not started, not yet authorized.
+- UI phases 12 (Users/RBAC), 13 (System), and 14 (polish, performance, responsive) are not included in the 2026-10 backlog closure scope; their status remains unstarted.
 - Review: range `84f895f..a8f2069` (S2-2c + S2-3a) was declined by the user for that candidate; next assessment base is `a8f2069`.
 - Advisory follow-ups (non-blocking): `/ws` nil `Session` fails open and revalidation has no per-call timeout; authorizer load lacks backoff/single-flight; per-tenant buffer fills before permission filtering; byte-based length limits in `internal/inventory/cameras.go`; VMS `reviewed` is OR-sticky in the events syncer.
-- Delivery: strategy `stacked-to-main`; push and PR creation remain unauthorized.
+- Delivery: strategy `stacked-to-main`; PR delivery for the selected backlog is authorized by the 2026-10-22 closeout request.
 
 ### Next step
-Waiting for the user to choose between UI phases 12–14 and the alarms inbox (which first needs S2-3b).
+Continue the selected backlog closure; keep UI phases 12–14 as a separate, unstarted scope.
 
 ## Phase 5 evidence (UIUX-10)
 - Route: delegated direct; strict TDD; chain strategy is `stacked-to-main`. Since the complete phase measured 459 authored changed lines, split into two cohesive stacked slices instead of requesting a size exception; each eventual PR targets `main`, and PR creation remains unauthorized.

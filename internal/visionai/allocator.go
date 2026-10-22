@@ -1,6 +1,7 @@
 package visionai
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -108,6 +109,11 @@ func (a *SlotAllocator) matchesConfig(ev VisionEvent) bool {
 		if !matched {
 			return false
 		}
+	}
+
+	// Servers filter
+	if len(a.config.Servers) > 0 && !slices.Contains(a.config.Servers, ev.ServerID) {
+		return false
 	}
 
 	if a.config.RequirePlate && ev.Plate == "" {

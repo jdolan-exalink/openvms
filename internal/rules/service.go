@@ -646,8 +646,17 @@ func (s *Service) faceNames(ctx context.Context, q *db.Queries, tenantID uuid.UU
 	return s.Faces.FaceNames(ctx, q, tenantID, c.FacePersonIDs, c.FaceWatchlistIDs)
 }
 
-// faceNamesIsolated is faceNames on a savepoint of tx: released on success, rolled back on error.
+// faceNamesIsolated uses a valid in-memory snapshot directly. Database reads run in a savepoint,
+// released on success and rolled back on error so failures cannot poison the evaluation transaction.
 func (s *Service) faceNamesIsolated(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, c Conditions) (map[string]struct{}, error) {
+	if s.Faces == nil || !c.HasFaceConditions() {
+		return map[string]struct{}{}, nil
+	}
+	if cached, ok := s.Faces.(cachedFaceResolver); ok {
+		if names, hit := cached.faceNamesFromCache(tenantID, c.FacePersonIDs, c.FaceWatchlistIDs); hit {
+			return names, nil
+		}
+	}
 	sp, err := tx.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -665,8 +674,8 @@ func (s *Service) faceNamesIsolated(ctx context.Context, tx pgx.Tx, tenantID uui
 
 // matchesFaces is the person part of an event rule, resolved on the evaluation transaction tx. A
 // resolver failure does not match (and is logged without names): missing an alarm for one event is
-// safer than alarming on the wrong one. The resolver runs in a savepoint, so a failing query rolls
-// back only itself instead of aborting the transaction the remaining rules still need.
+// safer than alarming on the wrong one. Uncached resolver reads run in a savepoint, so a failing
+// query rolls back only itself instead of aborting the transaction the remaining rules still need.
 func (s *Service) matchesFaces(ctx context.Context, tx pgx.Tx, ev EventContext, rule Rule) bool {
 	if len(ev.SubLabels) == 0 {
 		return false

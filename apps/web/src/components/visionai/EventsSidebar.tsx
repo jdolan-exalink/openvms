@@ -7,7 +7,7 @@ import { cn } from "@/lib/cn";
 import { fmtTime } from "@/lib/format";
 import type { VisionAISlot } from "@/lib/visionAi";
 import { ObjectIcon } from "@/lib/visionAiIcons";
-import { slotToView, useTabEvents, type EventsTab, type VisionEventView } from "@/lib/visionEvents";
+import { slotToView, useTabEvents, type EventsTab, type ListScope, type VisionEventView } from "@/lib/visionEvents";
 
 const TAB_LABELS: Record<EventsTab, string> = { active: "Activos", history: "Históricos", lpr: "LPR", faces: "Faciales" };
 const EMPTY: Record<EventsTab, string> = {
@@ -26,6 +26,7 @@ export function EventsSidebar({
   canSnapshots,
   canEvents,
   canLpr,
+  scope,
   selectedKey,
   onSelect,
   onClose,
@@ -34,6 +35,8 @@ export function EventsSidebar({
   canSnapshots: boolean;
   canEvents: boolean;
   canLpr: boolean;
+  /** Servers the tabs are limited to; omitted shows every server. */
+  scope?: ListScope;
   selectedKey?: string;
   onSelect: (view: VisionEventView) => void;
   onClose: () => void;
@@ -41,7 +44,7 @@ export function EventsSidebar({
   const tabs: EventsTab[] = ["active", ...(canEvents ? (["history"] as const) : []), ...(canLpr ? (["lpr"] as const) : []), ...(canEvents ? (["faces"] as const) : [])];
   const [chosen, setChosen] = useState<EventsTab>("active");
   const tab = tabs.includes(chosen) ? chosen : "active";
-  const other = useTabEvents(tab, canSnapshots);
+  const other = useTabEvents(tab, canSnapshots, scope);
 
   return (
     <aside

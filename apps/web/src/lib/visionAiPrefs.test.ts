@@ -19,6 +19,7 @@ const custom: VisionPrefs = {
   layoutCount: 9,
   activeObjects: { person: false, car: true, motorcycle: true, truck: true, license_plate: true, face: false },
   inactivitySeconds: 60,
+  excludedServerIds: ["srv-b"],
 };
 
 describe("visionPrefsKey", () => {
@@ -84,5 +85,26 @@ describe("load/save", () => {
     });
     expect(loadVisionPrefs("k")).toEqual(DEFAULT_VISION_PREFS);
     expect(() => saveVisionPrefs("k", custom)).not.toThrow();
+  });
+});
+
+describe("excluded servers", () => {
+  it("starts with no server excluded and remembers servers left unchecked", () => {
+    expect(DEFAULT_VISION_PREFS.excludedServerIds).toEqual([]);
+    expect(parseVisionPrefs(null).excludedServerIds).toEqual([]);
+    expect(parseVisionPrefs("{}").excludedServerIds).toEqual([]);
+    expect(parseVisionPrefs(JSON.stringify({ excludedServerIds: ["srv-b", "srv-c"] })).excludedServerIds).toEqual(["srv-b", "srv-c"]);
+  });
+
+  it("keeps unique nonempty string ids and caps corrupt values", () => {
+    expect(parseVisionPrefs(JSON.stringify({ excludedServerIds: ["srv-b", "srv-b", "", 7, null, "srv-c"] })).excludedServerIds).toEqual(["srv-b", "srv-c"]);
+    expect(parseVisionPrefs(JSON.stringify({ excludedServerIds: "srv-b" })).excludedServerIds).toEqual([]);
+    const many = Array.from({ length: 500 }, (_, i) => `srv-${i}`);
+    expect(parseVisionPrefs(JSON.stringify({ excludedServerIds: many })).excludedServerIds.length).toBeLessThanOrEqual(100);
+  });
+
+  it("round-trips the exclusions through storage", () => {
+    saveVisionPrefs("k", custom);
+    expect(loadVisionPrefs("k").excludedServerIds).toEqual(["srv-b"]);
   });
 });
