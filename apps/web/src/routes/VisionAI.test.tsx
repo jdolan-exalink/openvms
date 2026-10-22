@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { focusManager } from "@tanstack/react-query";
 import { json, renderPage, stubApi } from "@/test-utils";
 import { VISION_SLOTS_REFETCH_MS } from "@/lib/visionAi";
@@ -658,5 +658,71 @@ describe("VisionAI Page", () => {
     expect(screen.getByRole("button", { name: "Matriz" })).toBeInTheDocument();
     const person = screen.getByRole("button", { name: "Persona" });
     expect(person).toHaveAttribute("data-active", "true");
+  });
+
+  describe("events bar on the left", () => {
+    it("puts the Eventos toggle first in the header", async () => {
+      setup();
+      const toggle = await screen.findByRole("button", { name: /^Eventos/i });
+      const header = toggle.closest("header")!;
+      const controls = Array.from(header.querySelectorAll("button"));
+      expect(controls[0]).toBe(toggle);
+    });
+
+    it("opens the bar before the grid, on its left", async () => {
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: /^Eventos/i }));
+      const sidebar = await screen.findByTestId("vision-events-sidebar");
+      const grid = screen.getAllByTestId("mse-player")[0]!.closest("[data-vision-tile]")!.parentElement!;
+      expect(sidebar.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
+
+  describe("full screen", () => {
+    const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "requestFullscreen");
+    let request: ReturnType<typeof vi.fn>;
+    let current: Element | null;
+
+    beforeEach(() => {
+      current = null;
+      request = vi.fn(function (this: Element) {
+        current = this;
+        return Promise.resolve();
+      });
+      Object.defineProperty(HTMLElement.prototype, "requestFullscreen", { configurable: true, writable: true, value: request });
+      Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => current });
+    });
+    afterEach(() => {
+      if (original) Object.defineProperty(HTMLElement.prototype, "requestFullscreen", original);
+      else delete (HTMLElement.prototype as { requestFullscreen?: unknown }).requestFullscreen;
+      delete (document as { fullscreenElement?: unknown }).fullscreenElement;
+    });
+
+    it("asks the browser for real full screen, like F11", async () => {
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Pantalla completa" }));
+      expect(request).toHaveBeenCalledTimes(1);
+      const root = request.mock.contexts[0] as HTMLElement;
+      expect(root.contains(screen.getByText(/VISION AI/i))).toBe(true);
+      expect(root).toHaveClass("fixed", "inset-0");
+      expect(await screen.findByRole("button", { name: "Salir de pantalla completa" })).toBeInTheDocument();
+    });
+
+    it("leaves full screen when the browser does (Esc)", async () => {
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Pantalla completa" }));
+      await screen.findByRole("button", { name: "Salir de pantalla completa" });
+      current = null;
+      document.dispatchEvent(new Event("fullscreenchange"));
+      expect(await screen.findByRole("button", { name: "Pantalla completa" })).toBeInTheDocument();
+    });
+
+    it("falls back to filling the page when the browser refuses", async () => {
+      request.mockImplementation(() => Promise.reject(new Error("denied")));
+      setup();
+      fireEvent.click(await screen.findByRole("button", { name: "Pantalla completa" }));
+      expect(await screen.findByRole("button", { name: "Salir de pantalla completa" })).toBeInTheDocument();
+      expect((request.mock.contexts[0] as HTMLElement)).toHaveClass("fixed", "inset-0");
+    });
   });
 });

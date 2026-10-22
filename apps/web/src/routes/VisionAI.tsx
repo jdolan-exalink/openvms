@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import {
@@ -15,6 +15,7 @@ import { EventsSidebar } from "@/components/visionai/EventsSidebar";
 import type { VisionEventView } from "@/lib/visionEvents";
 import { cn } from "@/lib/cn";
 import { can } from "@/lib/perm";
+import { useImmersive } from "@/lib/useImmersive";
 import { dynamicGridShape, priorityOrder } from "@/lib/visionAiGrid";
 import { ObjectIcon, PresetIcon } from "@/lib/visionAiIcons";
 import { DEFAULT_VISION_PREFS, loadVisionPrefs, saveVisionPrefs, VISION_INACTIVITY_OPTIONS, visionPrefsKey, type VisionMode } from "@/lib/visionAiPrefs";
@@ -51,7 +52,9 @@ export function VisionAI() {
   const [presetSource, setPresetSource] = useState<VisionAISource>(DEFAULT_VISION_PREFS.presetSource);
   const [layoutCount, setLayoutCount] = useState<number>(DEFAULT_VISION_PREFS.layoutCount);
   const [inactivitySeconds, setInactivitySeconds] = useState<VisionInactivity>(DEFAULT_VISION_PREFS.inactivitySeconds);
-  const [fullscreen, setFullscreen] = useState(false);
+  // Real full screen (like F11) on the whole page; the page-filling mode is the fallback.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const { immersive: fullscreen, toggle: toggleFullscreen } = useImmersive(rootRef, true);
   const [debugMode, setDebugMode] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [popup, setPopup] = useState<VisionEventView | null>(null);
@@ -192,10 +195,26 @@ export function VisionAI() {
   );
 
   return (
-    <div className={cn("flex flex-col h-full min-h-0 bg-surface-dim", fullscreen && "fixed inset-0 z-50 p-2 bg-black")}>
+    <div ref={rootRef} className={cn("flex flex-col h-full min-h-0 bg-surface-dim", fullscreen && "fixed inset-0 z-50 p-2 bg-black")}>
       {/* Top Navigation & Controls Bar */}
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line bg-surface px-4 py-2.5 rounded-m3-lg mb-2 shrink-0">
         <div className="flex flex-wrap items-center gap-3">
+          {/* Events bar toggle: first control, on the same side the bar opens */}
+          <Button
+            size="sm"
+            variant="tonal"
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            aria-expanded={sidebarOpen}
+            className="flex items-center gap-1.5"
+          >
+            <span>Eventos</span>
+            <span className="flex items-center justify-center size-4 rounded-full bg-primary text-on-primary text-[10px] font-bold">
+              {filled.length}
+            </span>
+          </Button>
+
+          <div className="h-4 w-px bg-line" />
+
           {/* Logo & Status */}
           <div className="flex items-center gap-2">
             <span className="flex size-7 items-center justify-center rounded-m3-sm bg-primary/10 text-primary">
@@ -359,25 +378,12 @@ export function VisionAI() {
             className={cn("size-8", debugMode && "text-primary bg-primary/10")}
           />
 
-          {/* Active Events Drawer toggle */}
-          <Button
-            size="sm"
-            variant="tonal"
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="flex items-center gap-1.5"
-          >
-            <span>Eventos</span>
-            <span className="flex items-center justify-center size-4 rounded-full bg-primary text-on-primary text-[10px] font-bold">
-              {filled.length}
-            </span>
-          </Button>
-
           {/* Fullscreen */}
           <IconButton
             icon={fullscreen ? Minimize2 : Maximize2}
             title={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
-            aria-label="Pantalla completa"
-            onClick={() => setFullscreen(!fullscreen)}
+            aria-label={fullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+            onClick={toggleFullscreen}
             className="size-8"
           />
         </div>
@@ -385,6 +391,19 @@ export function VisionAI() {
 
       {/* Main Workspace Body */}
       <div className="flex flex-1 min-h-0 gap-2 overflow-hidden">
+        {/* Collapsible events side bar (left, next to its toggle): active, historic, LPR and face tabs */}
+        {sidebarOpen && (
+          <EventsSidebar
+            activeSlots={filled}
+            canSnapshots={canViewSnapshots}
+            canEvents={can(me.data, "events.view")}
+            canLpr={can(me.data, "lpr.view")}
+            selectedKey={popup?.key}
+            onSelect={setPopup}
+            onClose={() => setSidebarOpen(false)}
+          />
+        )}
+
         {/* Visual Slots View */}
         <div className="flex flex-col flex-1 min-h-0 min-w-0 bg-video rounded-m3-lg overflow-hidden border border-line relative">
           {slotsQuery.isPending ? (
@@ -502,19 +521,6 @@ export function VisionAI() {
             />
           )}
         </div>
-
-        {/* Collapsible events side bar: active, historic, LPR and face tabs */}
-        {sidebarOpen && (
-          <EventsSidebar
-            activeSlots={filled}
-            canSnapshots={canViewSnapshots}
-            canEvents={can(me.data, "events.view")}
-            canLpr={can(me.data, "lpr.view")}
-            selectedKey={popup?.key}
-            onSelect={setPopup}
-            onClose={() => setSidebarOpen(false)}
-          />
-        )}
       </div>
     </div>
   );
