@@ -102,6 +102,7 @@ export default {
   agentInstallPasswordHint: "Se usa solo para esta instalación y se borra al enviar o cerrar.",
   agentInstallConfirmScope: "Confirmo que quiero instalar únicamente el agente OpenVMS en este servidor existente.",
   agentInstallReplaceConfirm: "Reescribir y reinstalar el servicio del agente detectado y registrarlo con este OpenVMS. Esto elimina su identidad actual y detiene la sincronización con el OpenVMS anterior.",
+  agentInstallReinstallExisting: "Reinstalar agente existente",
   agentInstallHttpsRequired: "Se requiere abrir OpenVMS por HTTPS antes de enviar credenciales. Si usás un proxy, configurá un CIDR de proxy confiable para la ruta de instalación.",
   agentHttpsRedirectAction: "Abrir OpenVMS por HTTPS",
   agentHttpsRedirectChecking: "Consultando el puerto HTTPS configurado…",

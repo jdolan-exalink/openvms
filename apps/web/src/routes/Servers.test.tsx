@@ -483,6 +483,41 @@ describe("Servers", () => {
       expect(calls.filter((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/agent/install"))).toHaveLength(1);
     });
 
+    it("offers to reinstall an agent that is already present and resends with replace_existing", async () => {
+      vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
+      const bodies: unknown[] = [];
+      let jobCount = 0;
+      const { calls } = setupAgentInstall(
+        installGrants,
+        async (request) => {
+          bodies.push(await request.clone().json());
+          jobCount += 1;
+          return json({ id: "job-1", status: "queued", stage: "validating" }, 202);
+        },
+        async () => (jobCount === 1
+          ? json({ id: "job-1", status: "failed", stage: "failed", code: "agent_already_installed", installed_version: "0.3.0", bundled_version: "0.3.0", version_state: "up_to_date", registered_here: false })
+          : json({ id: "job-1", status: "succeeded", stage: "complete" })),
+      );
+      renderPage(Servers);
+      fireEvent.click(await screen.findByRole("button", { name: /Instalar agente vía SSH/i }));
+      const dialog = await screen.findByRole("dialog", { name: /Instalar agente OpenVMS/ });
+      fireEvent.change(within(dialog).getByLabelText("Host SSH IPv4"), { target: { value: "10.20.30.44" } });
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "first-password" } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Confirmo que quiero instalar únicamente el agente OpenVMS/i }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+
+      fireEvent.click(await within(dialog).findByRole("button", { name: /Reinstalar agente existente/i }, { timeout: 5000 }));
+      expect(within(dialog).getByLabelText("Host SSH IPv4")).toHaveValue("10.20.30.44");
+      fireEvent.change(within(dialog).getByLabelText("Contraseña SSH root"), { target: { value: "second-password" } });
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: /Reescribir y reinstalar el servicio del agente detectado/i }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Instalar agente" }));
+
+      await waitFor(() => expect(bodies).toHaveLength(2));
+      expect(bodies[0]).toMatchObject({ replace_existing: false });
+      expect(bodies[1]).toEqual({ ssh_host: "10.20.30.44", ssh_port: 22, ssh_password: "second-password", replace_existing: true });
+      expect(calls.filter((request) => request.method === "POST" && new URL(request.url).pathname.endsWith("/agent/discover"))).toHaveLength(1);
+    }, 20000);
+
     it("clears the password on a start error and hides hostile API details", async () => {
       vi.stubGlobal("location", { protocol: "https:", origin: "https://localhost" });
       let respond: ((response: Response) => void) | undefined;
