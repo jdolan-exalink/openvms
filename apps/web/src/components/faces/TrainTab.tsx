@@ -4,13 +4,13 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import { faceReviewInboxQuery, faceReviewSightingImageUrl, facePersonsQuery } from "@/api/queries";
 import { emptyScope, type Scope, ScopeFilters } from "@/components/faces/ScopeFilters";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { Button, Empty, ErrorNote, Field, LinkButton, Select, TextInput } from "@/components/ui";
+import { Button, Checkbox, Empty, ErrorNote, Field, LinkButton, Select, TextInput } from "@/components/ui";
 import { useT } from "@/i18n";
 import { fmtDateTime } from "@/lib/format";
 
 const NEW_PERSON = "__new__";
 
-function AttemptCard({ attempt, persons, canManage }: { attempt: Schemas["FaceReviewSighting"]; persons: Schemas["FacePerson"][]; canManage: boolean }) {
+function AttemptCard({ attempt, persons, canManage, selected, onSelect }: { attempt: Schemas["FaceReviewSighting"]; persons: Schemas["FacePerson"][]; canManage: boolean; selected: boolean; onSelect: (id: string, selected: boolean) => void }) {
   const t = useT();
   const qc = useQueryClient();
   const [target, setTarget] = useState("");
@@ -59,6 +59,7 @@ function AttemptCard({ attempt, persons, canManage }: { attempt: Schemas["FaceRe
         </div>
       )}
       <p className="break-all font-mono text-xs text-on-surface-variant">{t("faces.unclassifiedId", { id: attempt.id })}</p>
+      {attempt.group_id && <p className="break-all font-mono text-xs font-medium text-primary">{t("faces.identityGroupId", { id: attempt.identity_id })}</p>}
       <div className="flex flex-wrap items-center justify-between gap-1 text-xs text-muted">
         <span>{attempt.server_name}</span>
         {attempt.seen_at && <span>{fmtDateTime(attempt.seen_at)}</span>}
@@ -66,6 +67,11 @@ function AttemptCard({ attempt, persons, canManage }: { attempt: Schemas["FaceRe
       </div>
       {canManage && attempt.crop_available && (
         <div className="flex flex-col gap-2">
+          <Checkbox
+            checked={selected}
+            onChange={(checked) => onSelect(attempt.id, checked)}
+            label={t("faces.groupSelectSighting", { id: attempt.id })}
+          />
           <Field label={t("faces.assignTo")}>
             <Select value={target} onChange={(e) => setTarget(e.target.value)}>
               <option value="">{t("faces.choosePerson")}</option>
@@ -113,10 +119,19 @@ function AttemptCard({ attempt, persons, canManage }: { attempt: Schemas["FaceRe
 /** TrainTab shows the durable inbox of unclassified sightings and their stable identities. */
 export function TrainTab({ canManage }: { canManage: boolean }) {
   const t = useT();
+  const qc = useQueryClient();
   const [scope, setScope] = useState<Scope>(emptyScope);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const train = useQuery(faceReviewInboxQuery({ site_id: scope.site ? [scope.site] : undefined, server_id: scope.server ? [scope.server] : undefined }));
   const persons = useQuery(facePersonsQuery());
   const data = train.data;
+  const group = useMutation({
+    mutationFn: async () => unwrap(await api.POST("/api/v1/faces/review-inbox/groups", { body: { sighting_ids: Array.from(selected) } })),
+    onSuccess: async () => {
+      setSelected(new Set());
+      await qc.invalidateQueries({ queryKey: ["faces", "review-inbox"] });
+    },
+  });
 
   return (
     <div className="flex flex-col gap-4">
@@ -130,11 +145,32 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
         </div>
       )}
       {data && data.items.length > 0 && (
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label={t("faces.trainList")}>
-          {data.items.map((a) => (
-            <AttemptCard key={a.id} attempt={a} persons={persons.data ?? []} canManage={canManage} />
-          ))}
-        </ul>
+        <>
+          {canManage && <div className="flex flex-col gap-2 rounded-m3-xl bg-surface-1 p-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm text-on-surface-variant">{t("faces.groupSelectionCount", { count: selected.size })}</span>
+            <Button variant="tonal" disabled={selected.size < 2 || group.isPending} onClick={() => group.mutate()}>
+              {group.isPending ? t("faces.grouping") : t("faces.groupSelected")}
+            </Button>
+            <ErrorNote error={group.error} />
+          </div>}
+          <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label={t("faces.trainList")}>
+            {data.items.map((a) => (
+              <AttemptCard
+                key={a.id}
+                attempt={a}
+                persons={persons.data ?? []}
+                canManage={canManage}
+                selected={selected.has(a.id)}
+                onSelect={(id, checked) => setSelected((current) => {
+                  const next = new Set(current);
+                  if (checked) next.add(id);
+                  else next.delete(id);
+                  return next;
+                })}
+              />
+            ))}
+          </ul>
+        </>
       )}
     </div>
   );

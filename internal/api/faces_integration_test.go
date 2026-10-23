@@ -550,6 +550,63 @@ func TestFacesAPIReviewInboxStableIDsAssignmentAndRejection(t *testing.T) {
 	}
 }
 
+func TestFacesAPIExplicitReviewIdentityGrouping(t *testing.T) {
+	f := newFaceAPI(t)
+	mgr := f.user(f.tenant, "identity-group-manager", authz.FacesManage, authz.FacesView)
+	viewer := f.user(f.tenant, "identity-group-viewer", authz.FacesView)
+	cam := f.env.Cameras["frigate-h01/acceso_norte"]
+	h01 := f.env.Mocks["frigate-h01"].Server
+	h01.FaceRecognition = true
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `UPDATE frigate_servers SET capabilities = capabilities || '{"face_recognition": true}'::jsonb WHERE id = $1`, cam.ServerID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	files := []string{
+		"1700000000.21-aaaa-1700000100-unknown-0.41.webp",
+		"1700000000.22-bbbb-1700000200-unknown-0.42.webp",
+	}
+	for _, file := range files {
+		h01.AddFaceTrainImage(file, testPNG(t))
+	}
+	ingestor := &faces.ReviewIngestor{
+		Store: f.env.Store, Blobs: f.blobs, Adapters: inventory.NewAdapters(f.env.Svc), Log: pgtest.Discard(),
+	}
+	if err := ingestor.RunOnce(context.Background(), 25); err != nil {
+		t.Fatal(err)
+	}
+	list := f.js(mgr, http.MethodGet, "/api/v1/faces/review-inbox", "")
+	items, _ := list.json()["items"].([]any)
+	if list.code != http.StatusOK || len(items) != 2 {
+		t.Fatalf("review inbox = %d %s", list.code, list.raw)
+	}
+	ids := make([]string, 0, len(items))
+	for _, raw := range items {
+		ids = append(ids, raw.(map[string]any)["id"].(string))
+	}
+	body := `{"sighting_ids":["` + ids[0] + `","` + ids[1] + `"]}`
+	if r := f.js(viewer, http.MethodPost, "/api/v1/faces/review-inbox/groups", body); r.code != http.StatusForbidden {
+		t.Fatalf("group without faces.manage = %d, want 403", r.code)
+	}
+	if r := f.js(mgr, http.MethodPost, "/api/v1/faces/review-inbox/groups", `{"sighting_ids":["`+ids[0]+`"]}`); r.code != http.StatusBadRequest {
+		t.Fatalf("group one sighting = %d, want 400", r.code)
+	}
+	group := f.js(mgr, http.MethodPost, "/api/v1/faces/review-inbox/groups", body)
+	if group.code != http.StatusOK || group.json()["member_count"] != float64(2) {
+		t.Fatalf("group sightings = %d %s", group.code, group.raw)
+	}
+	groupID := group.json()["group_id"].(string)
+	list = f.js(mgr, http.MethodGet, "/api/v1/faces/review-inbox", "")
+	items, _ = list.json()["items"].([]any)
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		if item["identity_id"] != groupID || item["group_id"] != groupID {
+			t.Errorf("grouped item identity = %v, want %s", item, groupID)
+		}
+	}
+}
+
 func TestFaceConfigAPI(t *testing.T) {
 	f := newFaceAPI(t)
 	cam := f.env.Cameras["frigate-h01/acceso_norte"]

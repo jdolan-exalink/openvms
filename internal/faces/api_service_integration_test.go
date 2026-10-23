@@ -400,6 +400,90 @@ func TestReviewSightingsAssignAndRejectByStableID(t *testing.T) {
 	}
 }
 
+func TestReviewSightingsExplicitIdentityGroupsAndMerge(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	files := []string{
+		"1700000000.11-aa-1700000100-unknown-0.41.webp",
+		"1700000000.12-bb-1700000200-unknown-0.42.webp",
+		"1700000000.13-cc-1700000300-unknown-0.43.webp",
+		"1700000000.14-dd-1700000400-unknown-0.44.webp",
+		"1700000000.15-ee-1700000500-unknown-0.45.webp",
+	}
+	for i, file := range files {
+		sf.h01.AddFaceTrainImage(file, pngOf(t, byte(61+i)))
+	}
+	if err := (&faces.ReviewIngestor{Store: sf.env.Store, Blobs: sf.blobs, Adapters: sf.svc.Adapters, Log: sf.svc.Log}).RunOnce(context.Background(), 25); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	page, err := sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil || len(page.Items) != 5 {
+		t.Fatalf("pending sightings = %d, %v", len(page.Items), err)
+	}
+	ids := []uuid.UUID{page.Items[0].ID, page.Items[1].ID, page.Items[2].ID, page.Items[3].ID, page.Items[4].ID}
+
+	first, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, ids[:2])
+	if err != nil || first.ID == uuid.Nil || first.MemberCount != 2 {
+		t.Fatalf("first group = %+v, %v", first, err)
+	}
+	second, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, ids[1:3])
+	if err != nil || second.ID != first.ID || second.MemberCount != 3 {
+		t.Fatalf("merge group = %+v, %v; want stable survivor %s with 3 members", second, err, first.ID)
+	}
+	page, err = sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupedIDs := map[uuid.UUID]bool{ids[0]: true, ids[1]: true, ids[2]: true}
+	for _, sighting := range page.Items {
+		if groupedIDs[sighting.ID] && (sighting.GroupID == nil || *sighting.GroupID != first.ID || sighting.IdentityID != first.ID) {
+			t.Errorf("merged sighting identity = %+v, want group %s", sighting, first.ID)
+		}
+		if !groupedIDs[sighting.ID] && (sighting.GroupID != nil || sighting.IdentityID != sighting.ID) {
+			t.Errorf("ungrouped sighting identity = %+v, want its own ID", sighting)
+		}
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM face_identity_groups WHERE tenant_id = $1`, sf.tenant); n != 1 {
+		t.Fatalf("groups after merge = %d, want one", n)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM audit_log WHERE action = $1`, faces.ActionIdentityGrouped); n != 2 {
+		t.Fatalf("group decision audits = %d, want 2", n)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM audit_log WHERE action = $1 AND (details::text LIKE '%crop%' OR details::text LIKE '%sha256%')`, faces.ActionIdentityGrouped); n != 0 {
+		t.Fatal("group audit contains crop metadata")
+	}
+	var validationErr *faces.ValidationError
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, ids[:1]); !errors.As(err, &validationErr) {
+		t.Errorf("single-sighting group error = %v, want invalid input", err)
+	}
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, []uuid.UUID{ids[0], ids[0]}); !errors.As(err, &validationErr) {
+		t.Errorf("duplicate-sighting group error = %v, want invalid input", err)
+	}
+	if err := sf.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE face_sightings SET crop_key = NULL, crop_content_type = NULL, crop_size_bytes = NULL, crop_sha256 = NULL WHERE id = $1`, ids[3])
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, []uuid.UUID{ids[0], ids[3]}); !errors.Is(err, store.ErrConflict) {
+		t.Errorf("group without crop error = %v, want conflict", err)
+	}
+	if err := sf.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE face_sightings SET review_status = 'rejected', reviewed_at = now() WHERE id = $1`, ids[4])
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, []uuid.UUID{ids[0], ids[4]}); !errors.Is(err, store.ErrConflict) {
+		t.Errorf("group non-pending error = %v, want conflict", err)
+	}
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, []uuid.UUID{ids[0], uuid.New()}); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("cross-tenant/missing sighting error = %v, want not found", err)
+	}
+}
+
 type failingSource struct {
 	inner faces.AdapterSource
 	fail  uuid.UUID

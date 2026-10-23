@@ -409,7 +409,8 @@ func (h *Handlers) ListFaceReviewInbox(ctx context.Context, r gen.ListFaceReview
 	out := gen.ListFaceReviewInbox200JSONResponse{Items: make([]gen.FaceReviewSighting, 0, len(page.Items))}
 	for _, sighting := range page.Items {
 		item := gen.FaceReviewSighting{
-			Id: sighting.ID, ServerId: sighting.ServerID, ServerName: sighting.ServerName, SiteId: sighting.SiteID,
+			Id: sighting.ID, IdentityId: sighting.IdentityID, GroupId: sighting.GroupID,
+			ServerId: sighting.ServerID, ServerName: sighting.ServerName, SiteId: sighting.SiteID,
 			FirstSeenAt: sighting.FirstSeenAt, SeenAt: sighting.SeenAt, Score: sighting.Score, CropAvailable: sighting.CropAvailable,
 		}
 		if sighting.Label != "" {
@@ -423,6 +424,23 @@ func (h *Handlers) ListFaceReviewInbox(ctx context.Context, r gen.ListFaceReview
 		out.Items = append(out.Items, item)
 	}
 	return out, nil
+}
+
+func (h *Handlers) GroupFaceReviewSightings(ctx context.Context, r gen.GroupFaceReviewSightingsRequestObject) (gen.GroupFaceReviewSightingsResponseObject, error) {
+	if r.Body == nil {
+		return nil, &faces.ValidationError{Msg: "a request body is required"}
+	}
+	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	if err != nil {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, len(r.Body.SightingIds))
+	copy(ids, r.Body.SightingIds)
+	group, err := h.Faces.GroupReviewSightings(ctx, a, tenant, ids)
+	if err != nil {
+		return nil, err
+	}
+	return gen.GroupFaceReviewSightings200JSONResponse{GroupId: group.ID, MemberCount: int(group.MemberCount)}, nil
 }
 
 func (h *Handlers) GetFaceReviewSightingImage(ctx context.Context, r gen.GetFaceReviewSightingImageRequestObject) (gen.GetFaceReviewSightingImageResponseObject, error) {
