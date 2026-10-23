@@ -17,13 +17,15 @@ import (
 type fakeEmbedder struct {
 	profile faces.EmbeddingProfile
 	calls   int
+	sizes   []image.Point // dimensions of every image the runtime was given
 }
 
 func (f *fakeEmbedder) Profile() faces.EmbeddingProfile { return f.profile }
 func (f *fakeEmbedder) Smoke(context.Context) error     { return nil }
 func (f *fakeEmbedder) Close() error                    { return nil }
-func (f *fakeEmbedder) Embed(context.Context, image.Image) ([]float32, error) {
+func (f *fakeEmbedder) Embed(_ context.Context, img image.Image) ([]float32, error) {
 	f.calls++
+	f.sizes = append(f.sizes, img.Bounds().Size())
 	v := make([]float32, 512)
 	v[0] = 1
 	return v, nil
@@ -116,18 +118,22 @@ func TestReviewSightingsSuggestSimilarIdentitiesWithoutGrouping(t *testing.T) {
 
 // fakeDetector judges a crop by its first gray pixel so tests control the verdict through pngOf.
 type fakeDetector struct {
-	noFace, broken map[uint8]bool
-	calls          int
+	noFace, broken, degenerate map[uint8]bool
+	calls                      int
 }
 
 func (f *fakeDetector) Close() error { return nil }
-func (f *fakeDetector) HasFace(_ context.Context, img image.Image) (bool, error) {
+func (f *fakeDetector) Detect(_ context.Context, img image.Image) (faces.Detection, error) {
 	f.calls++
 	seed := img.(*image.Gray).Pix[0]
 	if f.broken[seed] {
-		return false, errors.New("detector failed")
+		return faces.Detection{}, errors.New("detector failed")
 	}
-	return !f.noFace[seed], nil
+	if f.degenerate[seed] { // a "face" whose landmarks collapsed onto one point cannot be aligned
+		return faces.Detection{Found: true, Score: 0.9, Landmarks: [5][2]float64{{8, 8}, {8, 8}, {8, 8}, {8, 8}, {8, 8}}}, nil
+	}
+	// Landmarks laid out like a face inside the 16x16 test crop.
+	return faces.Detection{Found: !f.noFace[seed], Score: 0.9, Landmarks: [5][2]float64{{5, 6}, {10, 6}, {8, 9}, {6, 12}, {10, 12}}}, nil
 }
 
 func seedFaceSightings(t *testing.T, sf *syncFixture, seeds ...uint8) {
@@ -152,21 +158,30 @@ func TestEmbedderDropsCropsTheDetectorRejectsButKeepsThemInTheInbox(t *testing.T
 		t.Fatalf("embedding before the gate = %d, %v; want 3", n, err)
 	}
 
-	// Turning the gate on judges the already embedded crops: the rejected one loses its vector, the
-	// other two keep theirs without a second inference.
+	// Turning the gate on judges every crop and re-embeds the accepted ones: the aligned input has its
+	// own model version, so the stretched vectors are stale. The rejected crop loses its vector.
 	det := &fakeDetector{noFace: map[uint8]bool{62: true}}
 	emb.Detector = det
-	if n, err := emb.RunOnce(ctx, 10); err != nil || n != 0 {
-		t.Fatalf("gated pass stored %d, %v; want 0 new vectors", n, err)
+	if n, err := emb.RunOnce(ctx, 10); err != nil || n != 2 {
+		t.Fatalf("gated pass stored %d, %v; want 2 aligned vectors", n, err)
 	}
-	if rt.calls != 3 || det.calls != 3 {
-		t.Fatalf("inference calls = %d embed / %d detect, want 3 / 3", rt.calls, det.calls)
+	if rt.calls != 5 || det.calls != 3 {
+		t.Fatalf("inference calls = %d embed / %d detect, want 5 / 3", rt.calls, det.calls)
+	}
+	for i, size := range rt.sizes {
+		want := image.Pt(16, 16) // the crop as stored, stretched later by the runtime
+		if i >= 3 {
+			want = image.Pt(112, 112) // aligned input
+		}
+		if size != want {
+			t.Fatalf("embed call %d got a %v image, want %v", i, size, want)
+		}
 	}
 	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND face_detected = false AND embedding IS NULL AND embedding_model IS NULL AND embedded_at IS NULL`, sf.tenant); got != 1 {
 		t.Fatalf("rejected sightings without a vector = %d, want 1", got)
 	}
-	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND face_detected = true AND cardinality(embedding) = 512`, sf.tenant); got != 2 {
-		t.Fatalf("accepted sightings with a vector = %d, want 2", got)
+	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND face_detected = true AND embedding_model = 'm1+in3a' AND cardinality(embedding) = 512`, sf.tenant); got != 2 {
+		t.Fatalf("accepted sightings with an aligned vector = %d, want 2", got)
 	}
 	if n, err := emb.RunOnce(ctx, 10); err != nil || n != 0 || det.calls != 3 {
 		t.Fatalf("second gated pass = %d, %v (detector calls %d); want nothing left to judge", n, err, det.calls)
@@ -177,10 +192,11 @@ func TestEmbedderDropsCropsTheDetectorRejectsButKeepsThemInTheInbox(t *testing.T
 		t.Fatalf("inbox sightings = %d, %v; a rejected crop must stay reviewable", len(page.Items), err)
 	}
 
-	// A model change recomputes accepted crops only; the rejected one is never listed again.
+	// A model change recomputes accepted crops only (they are detected again to be aligned); the
+	// rejected one is never listed again.
 	emb.ModelID = "m2"
-	if n, err := emb.RunOnce(ctx, 10); err != nil || n != 2 || det.calls != 3 {
-		t.Fatalf("pass after model change = %d, %v (detector calls %d); want 2 re-embedded without re-detection", n, err, det.calls)
+	if n, err := emb.RunOnce(ctx, 10); err != nil || n != 2 || det.calls != 5 {
+		t.Fatalf("pass after model change = %d, %v (detector calls %d); want 2 re-embedded", n, err, det.calls)
 	}
 }
 
@@ -197,6 +213,22 @@ func TestEmbedderRetriesACropWhenTheDetectorFails(t *testing.T) {
 	}
 	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND face_detected IS NULL AND embedding IS NULL AND embed_failures = 1`, sf.tenant); got != 1 {
 		t.Fatalf("crops left unjudged with one failure = %d, want 1", got)
+	}
+}
+
+func TestEmbedderCountsACropThatCannotBeAlignedAsAFailureAndKeepsGoing(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	seedFaceSightings(t, sf, 74, 75, 76)
+	ctx := context.Background()
+	det := &fakeDetector{degenerate: map[uint8]bool{75: true}}
+	emb := &faces.Embedder{Store: sf.env.Store, Blobs: sf.blobs, Runtime: &fakeEmbedder{profile: faces.EmbeddingProfileCPU}, ModelID: "m1", Detector: det, Log: sf.svc.Log}
+	if n, err := emb.RunOnce(ctx, 10); err == nil || n != 2 {
+		t.Fatalf("pass = %d, %v; want 2 embedded and an error for the crop that cannot be aligned", n, err)
+	}
+	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND embedding IS NULL AND face_detected IS NULL AND embed_failures = 1`, sf.tenant); got != 1 {
+		t.Fatalf("crops left without a vector and one failure = %d, want 1 (no fallback to the stretched input)", got)
 	}
 }
 

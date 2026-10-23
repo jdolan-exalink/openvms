@@ -32,12 +32,21 @@ type Embedder struct {
 	Log      *slog.Logger
 }
 
-// embeddingInputVersion names the preprocessing applied before inference. It is part of the stored
-// model id, so changing how crops are fed to the model recomputes every vector instead of mixing
-// vectors that are not comparable. in2 is raw 0-255 RGB; in1 (never released as correct) fed [-1, 1].
-const embeddingInputVersion = "in2"
+// Preprocessing versions. The version is part of the stored model id, so changing how crops are fed
+// to the model recomputes every vector instead of mixing vectors that are not comparable. in1 (never
+// released as correct) fed [-1, 1]; in2 is raw 0-255 RGB with the crop stretched to 112x112; in3a is
+// raw 0-255 RGB with the face aligned on its landmarks, which needs the detector.
+const (
+	embeddingInputStretched = "in2"
+	embeddingInputAligned   = "in3a"
+)
 
-func (e *Embedder) storedModel() string { return e.ModelID + "+" + embeddingInputVersion }
+func (e *Embedder) storedModel() string {
+	if e.Detector != nil {
+		return e.ModelID + "+" + embeddingInputAligned
+	}
+	return e.ModelID + "+" + embeddingInputStretched
+}
 
 // RunOnce embeds up to limit pending sightings and returns how many vectors were stored. A crop that
 // cannot be read, judged or embedded is skipped and reported through the returned error after the pass.
@@ -98,9 +107,10 @@ const (
 	outcomeRejected                   // the detector said it is not a face
 )
 
-// processRow runs one pending sighting through the detector gate (when configured) and the
-// embedder. A false ok means a step failed; the failure is logged and, where retrying makes sense,
-// counted against the crop's retry budget.
+// processRow runs one pending sighting through the detector (when configured) and the embedder.
+// With a detector, every crop that is listed is judged again, because aligning needs its landmarks.
+// A false ok means a step failed; the failure is logged and, where retrying makes sense, counted
+// against the crop's retry budget.
 func (e *Embedder) processRow(ctx context.Context, row db.ListFaceSightingsToEmbedRow, profile string) (outcome rowOutcome, ok bool) {
 	img, err := e.loadCrop(ctx, *row.CropKey)
 	if err != nil {
@@ -108,28 +118,34 @@ func (e *Embedder) processRow(ctx context.Context, row db.ListFaceSightingsToEmb
 		return outcomeNone, false
 	}
 	var detected *bool
-	if e.Detector != nil && row.FaceDetected == nil {
-		has, err := e.Detector.HasFace(ctx, img)
+	input := img
+	if e.Detector != nil {
+		det, err := e.Detector.Detect(ctx, img)
 		if err != nil {
 			e.fail(ctx, "detect face in sighting", row, err)
 			return outcomeNone, false
 		}
-		if !has {
+		if !det.Found {
 			return outcomeRejected, e.store(ctx, "store face detection", row, func(q *db.Queries) error {
 				_, err := q.MarkFaceSightingNotFace(ctx, row.ID)
 				return err
 			})
 		}
 		if row.EmbeddedCurrent {
-			// The vector predates the gate but is current: only the verdict is new.
+			// The vector is current: only the verdict is new.
 			return outcomeNone, e.store(ctx, "store face detection", row, func(q *db.Queries) error {
 				_, err := q.MarkFaceSightingFace(ctx, row.ID)
 				return err
 			})
 		}
-		detected = &has
+		if input, err = alignFace112(img, det.Landmarks); err != nil {
+			e.fail(ctx, "align face in sighting", row, err)
+			return outcomeNone, false
+		}
+		yes := true
+		detected = &yes
 	}
-	vector, err := e.embed(ctx, img)
+	vector, err := e.embed(ctx, input)
 	if err != nil {
 		e.fail(ctx, "embed face sighting", row, err)
 		return outcomeNone, false

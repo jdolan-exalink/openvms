@@ -23,11 +23,11 @@ type YuNetConfig struct {
 }
 
 type yunetDetector struct {
-	mu       sync.Mutex
-	minScore float64
-	session  *ort.AdvancedSession
-	input    *ort.Tensor[float32]
-	cls, obj [3]*ort.Tensor[float32]
+	mu            sync.Mutex
+	minScore      float64
+	session       *ort.AdvancedSession
+	input         *ort.Tensor[float32]
+	cls, obj, kps [3]*ort.Tensor[float32]
 }
 
 // OpenYuNet loads the detector and proves it runs once before returning.
@@ -55,7 +55,7 @@ func OpenYuNet(cfg YuNetConfig) (FaceDetector, error) {
 		_ = d.Close()
 		return nil, err
 	}
-	if _, err := d.HasFace(context.Background(), image.NewRGBA(image.Rect(0, 0, 32, 32))); err != nil {
+	if _, err := d.Detect(context.Background(), image.NewRGBA(image.Rect(0, 0, 32, 32))); err != nil {
 		_ = d.Close()
 		return nil, fmt.Errorf("face detector smoke inference: %w", err)
 	}
@@ -77,8 +77,11 @@ func (d *yunetDetector) open(modelPath string) error {
 		if d.obj[s], err = ort.NewEmptyTensor[float32](shape); err != nil {
 			return err
 		}
-		names = append(names, fmt.Sprintf("cls_%d", stride), fmt.Sprintf("obj_%d", stride))
-		values = append(values, d.cls[s], d.obj[s])
+		if d.kps[s], err = ort.NewEmptyTensor[float32](ort.NewShape(1, int64(yunetAnchors(stride)), 10)); err != nil {
+			return err
+		}
+		names = append(names, fmt.Sprintf("cls_%d", stride), fmt.Sprintf("obj_%d", stride), fmt.Sprintf("kps_%d", stride))
+		values = append(values, d.cls[s], d.obj[s], d.kps[s])
 	}
 	opts, err := ort.NewSessionOptions()
 	if err != nil {
@@ -93,29 +96,36 @@ func (d *yunetDetector) open(modelPath string) error {
 	return errors.Join(err, opts.Destroy())
 }
 
-func (d *yunetDetector) HasFace(ctx context.Context, img image.Image) (bool, error) {
+func (d *yunetDetector) Detect(ctx context.Context, img image.Image) (Detection, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return Detection{}, err
 	}
 	data, err := preprocessYuNet(img)
 	if err != nil {
-		return false, err
+		return Detection{}, err
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.session == nil {
-		return false, errors.New("face detector is not ready")
+		return Detection{}, errors.New("face detector is not ready")
 	}
 	copy(d.input.GetData(), data)
 	if err := d.session.Run(); err != nil {
-		return false, err
+		return Detection{}, err
 	}
-	var cls, obj [3][]float32
+	var cls, obj, kps [3][]float32
 	for s := range yunetStrides {
-		cls[s], obj[s] = d.cls[s].GetData(), d.obj[s].GetData()
+		cls[s], obj[s], kps[s] = d.cls[s].GetData(), d.obj[s].GetData(), d.kps[s].GetData()
 	}
-	score, err := bestYuNetScore(cls, obj)
-	return score >= d.minScore, err
+	score, canvas, err := bestYuNetDetection(cls, obj, kps)
+	if err != nil {
+		return Detection{}, err
+	}
+	det := Detection{Found: score >= d.minScore, Score: score}
+	if det.Found {
+		det.Landmarks = toCropCoords(img.Bounds(), canvas)
+	}
+	return det, nil
 }
 
 func (d *yunetDetector) Close() error {
@@ -127,12 +137,12 @@ func (d *yunetDetector) Close() error {
 		d.session = nil
 	}
 	for s := range yunetStrides {
-		for _, t := range []*ort.Tensor[float32]{d.cls[s], d.obj[s]} {
+		for _, t := range []*ort.Tensor[float32]{d.cls[s], d.obj[s], d.kps[s]} {
 			if t != nil {
 				err = errors.Join(err, t.Destroy())
 			}
 		}
-		d.cls[s], d.obj[s] = nil, nil
+		d.cls[s], d.obj[s], d.kps[s] = nil, nil, nil
 	}
 	if d.input != nil {
 		err = errors.Join(err, d.input.Destroy())

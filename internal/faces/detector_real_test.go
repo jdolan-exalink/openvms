@@ -44,9 +44,9 @@ func TestYuNetRealModelRejectsImagesWithoutFaces(t *testing.T) {
 	}
 	start := time.Now()
 	for name, img := range cases {
-		has, err := det.HasFace(context.Background(), img)
-		if err != nil || has {
-			t.Fatalf("%s: HasFace = %v, %v; want false", name, has, err)
+		got, err := det.Detect(context.Background(), img)
+		if err != nil || got.Found {
+			t.Fatalf("%s: Detect = %+v, %v; want no face", name, got, err)
 		}
 	}
 	t.Logf("latency=%s per crop", time.Since(start)/time.Duration(len(cases)))
