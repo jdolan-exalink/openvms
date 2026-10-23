@@ -11,12 +11,13 @@ import { fmtDateTime } from "@/lib/format";
 const NEW_PERSON = "__new__";
 
 type SuggestionTarget = { identityId: string; similarity: number; sightingIds: string[] };
-type Verdict = { identityId: string; otherId: string; similarity: number };
+/** A verdict names one sighting on each side: sighting IDs survive group merges, identity IDs do not. */
+type Verdict = { sightingId: string; otherSightingId: string; similarity: number };
 
 /** recordVerdict keeps the operator's decision on a suggested pair; it is also the calibration data. */
 async function recordVerdict(decision: "same" | "different", v: Verdict) {
   unwrap(await api.POST("/api/v1/faces/review-inbox/suggestion-decisions", {
-    body: { identity_id: v.identityId, other_identity_id: v.otherId, decision, similarity: v.similarity },
+    body: { sighting_id: v.sightingId, other_sighting_id: v.otherSightingId, decision, similarity: v.similarity },
   }));
 }
 
@@ -30,8 +31,14 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggesti
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const visibleSuggestions = suggestions.filter((sug) => !dismissed.has(sug.identityId));
   const dismiss = useMutation({
-    mutationFn: (v: Verdict) => recordVerdict("different", v),
+    mutationFn: ({ verdict }: { identityId: string; verdict: Verdict }) => recordVerdict("different", verdict),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["faces", "review-inbox"] }),
+    // A verdict that was not stored must not leave the suggestion hidden as if it had been.
+    onError: (_err, { identityId }) => setDismissed((current) => {
+      const next = new Set(current);
+      next.delete(identityId);
+      return next;
+    }),
   });
   const assign = useMutation({
     mutationFn: async () => {
@@ -86,12 +93,12 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggesti
           <p className="break-all">{t("faces.suggestionMatch", { id: sug.identityId, percent: Math.round(sug.similarity * 100) })}</p>
           {canManage && (
             <div className="flex flex-wrap gap-1">
-              <Button variant="tonal" disabled={groupingSuggestion} onClick={() => onGroupSuggestion([attempt.id, ...sug.sightingIds], { identityId: attempt.identity_id, otherId: sug.identityId, similarity: sug.similarity })}>
+              <Button variant="tonal" disabled={groupingSuggestion} onClick={() => onGroupSuggestion([attempt.id, ...sug.sightingIds], { sightingId: attempt.id, otherSightingId: sug.sightingIds[0] ?? "", similarity: sug.similarity })}>
                 {t("faces.groupSuggestion")}
               </Button>
               <Button variant="text" onClick={() => {
                 setDismissed((current) => new Set(current).add(sug.identityId));
-                dismiss.mutate({ identityId: attempt.identity_id, otherId: sug.identityId, similarity: sug.similarity });
+                dismiss.mutate({ identityId: sug.identityId, verdict: { sightingId: attempt.id, otherSightingId: sug.sightingIds[0] ?? "", similarity: sug.similarity } });
               }}>
                 {t("faces.dismissSuggestion")}
               </Button>
@@ -133,6 +140,7 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggesti
             {t("faces.rejectSighting")}
           </Button>
           <ErrorNote error={reject.error} />
+          <ErrorNote error={dismiss.error} />
           {confirmReject && (
             <ConfirmDialog
               title={t("faces.rejectTitle")}
@@ -169,10 +177,10 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
   const [confirmRejectSelected, setConfirmRejectSelected] = useState(false);
   const group = useMutation({
     mutationFn: async ({ ids, verdict }: { ids: string[]; verdict?: Verdict }) => {
-      const res = unwrap(await api.POST("/api/v1/faces/review-inbox/groups", { body: { sighting_ids: ids } }));
-      // The label is calibration data; failing to store it must not undo the grouping.
-      if (verdict) await recordVerdict("same", verdict).catch(() => undefined);
-      return res;
+      // The verdict is calibration data, so it is stored first and a failure stops here, visibly,
+      // instead of being lost after the grouping went through.
+      if (verdict) await recordVerdict("same", verdict);
+      return unwrap(await api.POST("/api/v1/faces/review-inbox/groups", { body: { sighting_ids: ids } }));
     },
     onSuccess: async () => {
       setSelected(new Set());

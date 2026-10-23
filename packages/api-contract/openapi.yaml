@@ -2566,10 +2566,11 @@ paths:
     post:
       tags: [faces]
       operationId: recordFaceSuggestionDecision
-      summary: Record whether two suggested identities are the same person (faces.manage)
+      summary: Record whether two suggested faces are the same person (faces.manage)
       description: |
-        Stores the operator's verdict on a suggested pair of pending identities. A "different"
-        verdict hides the pair from future suggestions. Both verdicts keep the similarity the
+        Stores the operator's verdict on a suggested pair, named by one pending sighting from each
+        side (sighting IDs stay valid when groups merge). A "different" verdict hides the two
+        identities those sightings belong to from each other's suggestions. Both verdicts keep the similarity the
         operator saw so the suggestion threshold can be calibrated on real decisions. A later
         verdict for the same pair replaces the earlier one. Grouping is a separate action.
       parameters:
@@ -6405,10 +6406,10 @@ components:
         items: { type: array, items: { $ref: "#/components/schemas/FaceReviewSighting" } }
     FaceSuggestionDecisionCreate:
       type: object
-      required: [identity_id, other_identity_id, decision, similarity]
+      required: [sighting_id, other_sighting_id, decision, similarity]
       properties:
-        identity_id: { type: string, format: uuid }
-        other_identity_id: { type: string, format: uuid }
+        sighting_id: { type: string, format: uuid }
+        other_sighting_id: { type: string, format: uuid }
         decision: { type: string, enum: [same, different] }
         similarity: { type: number, minimum: 0, maximum: 1 }
     FaceReviewIdentityGroupCreate:

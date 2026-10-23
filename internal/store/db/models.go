@@ -492,8 +492,8 @@ type FaceSighting struct {
 
 type FaceSuggestionDecision struct {
 	TenantID   uuid.UUID
-	IdentityLo uuid.UUID
-	IdentityHi uuid.UUID
+	SightingLo uuid.UUID
+	SightingHi uuid.UUID
 	Decision   string
 	Similarity float32
 	DecidedBy  *uuid.UUID

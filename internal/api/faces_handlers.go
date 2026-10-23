@@ -458,7 +458,7 @@ func (h *Handlers) RecordFaceSuggestionDecision(ctx context.Context, r gen.Recor
 	if err != nil {
 		return nil, err
 	}
-	if err := h.Faces.RecordSuggestionDecision(ctx, a, tenant, r.Body.IdentityId, r.Body.OtherIdentityId, string(r.Body.Decision), float64(r.Body.Similarity)); err != nil {
+	if err := h.Faces.RecordSuggestionDecision(ctx, a, tenant, r.Body.SightingId, r.Body.OtherSightingId, string(r.Body.Decision), float64(r.Body.Similarity)); err != nil {
 		return nil, err
 	}
 	return gen.RecordFaceSuggestionDecision204Response{}, nil

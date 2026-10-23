@@ -87,14 +87,24 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 		if err != nil {
 			return err
 		}
-		identityIDs := make([]uuid.UUID, 0, len(rows))
-		for _, row := range rows {
-			identityIDs = append(identityIDs, row.IdentityID)
+		sightingIDs := ids
+		pairs, err := q.ListFaceDifferentSightingPairs(ctx, db.ListFaceDifferentSightingPairsParams{TenantIds: nonNil(tenants), SightingIds: sightingIDs})
+		if err != nil {
+			return err
 		}
-		pairs, err := q.ListFaceDifferentIdentityPairs(ctx, db.ListFaceDifferentIdentityPairsParams{TenantIds: nonNil(tenants), IdentityIds: identityIDs})
+		// A verdict names one sighting on each side; it rules out the two identities those sightings
+		// belong to now, however the groups have been merged since.
+		identityOf := make(map[uuid.UUID]uuid.UUID, len(rows))
+		for _, row := range rows {
+			identityOf[row.ID] = row.IdentityID
+		}
 		ruledOut = make(pairSet, len(pairs))
 		for _, p := range pairs {
-			ruledOut[identityPair(p.IdentityLo, p.IdentityHi)] = struct{}{}
+			lo, okLo := identityOf[p.SightingLo]
+			hi, okHi := identityOf[p.SightingHi]
+			if okLo && okHi && lo != hi {
+				ruledOut[identityPair(lo, hi)] = struct{}{}
+			}
 		}
 		return err
 	}); err != nil {
@@ -242,12 +252,14 @@ const (
 	SuggestionDifferent = "different"
 )
 
-// RecordSuggestionDecision stores an operator verdict on a suggested pair of identities, replacing an
-// earlier verdict for the same pair. A "different" verdict hides the pair from future suggestions;
-// the similarity the operator saw is kept so the threshold can be calibrated on real decisions.
-func (s *Service) RecordSuggestionDecision(ctx context.Context, actor authz.Actor, tenantID, identityID, otherID uuid.UUID, decision string, similarity float64) error {
-	if identityID == uuid.Nil || otherID == uuid.Nil || identityID == otherID {
-		return invalid("two different identity IDs are required")
+// RecordSuggestionDecision stores an operator verdict on a suggested pair, named by one pending
+// sighting from each side (sighting IDs outlive group merges; identity IDs do not). It replaces an
+// earlier verdict for the same pair. A "different" verdict hides the two identities those
+// sightings belong to from each other's suggestions; the similarity the operator saw is kept so the
+// threshold can be calibrated on real decisions.
+func (s *Service) RecordSuggestionDecision(ctx context.Context, actor authz.Actor, tenantID, sightingID, otherID uuid.UUID, decision string, similarity float64) error {
+	if sightingID == uuid.Nil || otherID == uuid.Nil || sightingID == otherID {
+		return invalid("two different sighting IDs are required")
 	}
 	if decision != SuggestionSame && decision != SuggestionDifferent {
 		return invalid("decision must be %q or %q", SuggestionSame, SuggestionDifferent)
@@ -255,10 +267,10 @@ func (s *Service) RecordSuggestionDecision(ctx context.Context, actor authz.Acto
 	if math.IsNaN(similarity) || similarity < 0 || similarity > 1 {
 		return invalid("similarity must be between 0 and 1")
 	}
-	pair := identityPair(identityID, otherID)
+	pair := identityPair(sightingID, otherID)
 	return s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
 		for _, id := range pair {
-			pending, err := q.FaceIdentityIsPending(ctx, db.FaceIdentityIsPendingParams{TenantID: tenantID, IdentityID: id})
+			pending, err := q.FaceSightingIsPending(ctx, db.FaceSightingIsPendingParams{TenantID: tenantID, SightingID: id})
 			if err != nil {
 				return err
 			}
@@ -267,13 +279,13 @@ func (s *Service) RecordSuggestionDecision(ctx context.Context, actor authz.Acto
 			}
 		}
 		if err := q.UpsertFaceSuggestionDecision(ctx, db.UpsertFaceSuggestionDecisionParams{
-			TenantID: tenantID, IdentityLo: pair[0], IdentityHi: pair[1], Decision: decision,
+			TenantID: tenantID, SightingLo: pair[0], SightingHi: pair[1], Decision: decision,
 			Similarity: float32(similarity), DecidedBy: &actor.UserID,
 		}); err != nil {
 			return err
 		}
-		return s.audit(ctx, q, actor, tenantID, ActionSuggestionDecided, "face_identity", pair[0], map[string]any{
-			"identity_ids": []uuid.UUID{pair[0], pair[1]}, "decision": decision, "similarity": similarity,
+		return s.audit(ctx, q, actor, tenantID, ActionSuggestionDecided, "face_sighting", pair[0], map[string]any{
+			"sighting_ids": []uuid.UUID{pair[0], pair[1]}, "decision": decision, "similarity": similarity,
 		})
 	})
 }

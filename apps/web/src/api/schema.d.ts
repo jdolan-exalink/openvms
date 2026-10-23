@@ -2047,9 +2047,10 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Record whether two suggested identities are the same person (faces.manage)
-         * @description Stores the operator's verdict on a suggested pair of pending identities. A "different"
-         *     verdict hides the pair from future suggestions. Both verdicts keep the similarity the
+         * Record whether two suggested faces are the same person (faces.manage)
+         * @description Stores the operator's verdict on a suggested pair, named by one pending sighting from each
+         *     side (sighting IDs stay valid when groups merge). A "different" verdict hides the two
+         *     identities those sightings belong to from each other's suggestions. Both verdicts keep the similarity the
          *     operator saw so the suggestion threshold can be calibrated on real decisions. A later
          *     verdict for the same pair replaces the earlier one. Grouping is a separate action.
          */
@@ -5137,9 +5138,9 @@ export interface components {
         };
         FaceSuggestionDecisionCreate: {
             /** Format: uuid */
-            identity_id: string;
+            sighting_id: string;
             /** Format: uuid */
-            other_identity_id: string;
+            other_sighting_id: string;
             /** @enum {string} */
             decision: "same" | "different";
             similarity: number;

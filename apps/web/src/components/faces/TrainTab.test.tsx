@@ -127,6 +127,29 @@ describe("Faces review inbox", () => {
     await waitFor(() => expect(screen.queryByRole("checkbox", { name: new RegExp(sightingID) })).toBeNull());
   });
 
+  it("does not group, and says so, when the same-person verdict cannot be stored", async () => {
+    const calls: { method: string; path: string }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (raw: Request) => {
+      const url = new URL(raw.url);
+      if (raw.method !== "GET") calls.push({ method: raw.method, path: url.pathname });
+      if (url.pathname === "/api/v1/me") return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1", grants: ["faces.view", "faces.manage"].map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
+      if (url.pathname === "/api/v1/faces/persons") return json({ items: [] });
+      if (url.pathname === "/api/v1/faces/review-inbox") return json({ items: [
+        { ...sighting, suggestions: [{ identity_id: sightingID2, similarity: 0.874 }] },
+        { ...secondSighting, identity_id: sightingID2 },
+      ] });
+      if (url.pathname === "/api/v1/faces/review-inbox/suggestion-decisions") return json({ code: "conflict", message: "verdict refused" }, 409);
+      if (url.pathname.startsWith("/api/v1/faces/review-inbox/")) return new Response(new Uint8Array(), { status: 200, headers: { "Content-Type": "image/png" } });
+      return json({ code: "not_found", message: "not found" }, 404);
+    }));
+
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Agrupar juntos" }));
+    expect(await screen.findByText(/verdict refused/)).toBeInTheDocument();
+    expect(calls.map((c) => c.path)).not.toContain("/api/v1/faces/review-inbox/groups");
+  });
+
   it("offers a similarity suggestion that groups only when the manager accepts it", async () => {
     const calls: { method: string; path: string; body?: unknown }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (raw: Request) => {
@@ -142,6 +165,7 @@ describe("Faces review inbox", () => {
         { ...secondSighting, identity_id: sightingID2, suggestions: [{ identity_id: sightingID, similarity: 0.874 }] },
       ] });
       if (url.pathname === "/api/v1/faces/review-inbox/groups" && raw.method === "POST") return json({ group_id: groupID, member_count: 2 });
+      if (url.pathname === "/api/v1/faces/review-inbox/suggestion-decisions" && raw.method === "POST") return new Response(null, { status: 204 });
       if (url.pathname.startsWith("/api/v1/faces/review-inbox/")) return new Response(new Uint8Array(), { status: 200, headers: { "Content-Type": "image/png" } });
       return json({ code: "not_found", message: "not found" }, 404);
     }));
@@ -157,16 +181,19 @@ describe("Faces review inbox", () => {
     expect(screen.getAllByText(/Posible coincidencia/)).toHaveLength(1);
     await waitFor(() => expect(calls).toContainEqual({
       method: "POST", path: "/api/v1/faces/review-inbox/suggestion-decisions",
-      body: { identity_id: sightingID2, other_identity_id: sightingID, decision: "different", similarity: 0.874 },
+      body: { sighting_id: sightingID2, other_sighting_id: sightingID, decision: "different", similarity: 0.874 },
     }));
 
     fireEvent.click(screen.getByRole("button", { name: "Agrupar juntos" }));
     await waitFor(() => expect(calls).toContainEqual({
       method: "POST", path: "/api/v1/faces/review-inbox/groups", body: { sighting_ids: [sightingID, sightingID2] },
     }));
+    const paths = calls.map((c) => c.path);
+    expect(paths.indexOf("/api/v1/faces/review-inbox/suggestion-decisions", paths.indexOf("/api/v1/faces/review-inbox/suggestion-decisions") + 1))
+      .toBeLessThan(paths.indexOf("/api/v1/faces/review-inbox/groups"));
     await waitFor(() => expect(calls).toContainEqual({
       method: "POST", path: "/api/v1/faces/review-inbox/suggestion-decisions",
-      body: { identity_id: sightingID, other_identity_id: sightingID2, decision: "same", similarity: 0.874 },
+      body: { sighting_id: sightingID, other_sighting_id: sightingID2, decision: "same", similarity: 0.874 },
     }));
   });
 });

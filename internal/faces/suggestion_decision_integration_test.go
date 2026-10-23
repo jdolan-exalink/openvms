@@ -73,23 +73,35 @@ func TestSuggestionDecisionsHideDifferentPairsAndKeepTheLabel(t *testing.T) {
 		t.Fatalf("stored decision = %q %v by %v", decision, similarity, by)
 	}
 
-	// A later verdict replaces the earlier one, and "same" does not hide anything.
+	// Grouping a with c changes a's identity ID, but the verdict names sightings, so it still rules
+	// out b against the merged group.
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, []uuid.UUID{a, c}); err != nil {
+		t.Fatal(err)
+	}
+	if got := suggestionTargets(t, sf, b); len(got) != 0 {
+		t.Fatalf("suggestions for b after a was grouped = %v, want none (the group holds the sighting ruled out)", got)
+	}
+
+	// A later verdict replaces the earlier one, and it can name a sighting that is now in a group.
+	if err := sf.svc.RecordSuggestionDecision(ctx, sf.manager, sf.tenant, c, b, faces.SuggestionSame, 0.88); err != nil {
+		t.Fatalf("same verdict for a grouped sighting: %v", err)
+	}
 	if err := sf.svc.RecordSuggestionDecision(ctx, sf.manager, sf.tenant, a, b, faces.SuggestionSame, 0.91); err != nil {
 		t.Fatal(err)
 	}
-	if got := suggestionTargets(t, sf, a); len(got) != 2 {
-		t.Fatalf("suggestions for a after a same verdict = %v, want b and c", got)
+	if got := suggestionTargets(t, sf, b); len(got) != 1 {
+		t.Fatalf("suggestions for b after the same verdict = %v, want the merged group", got)
 	}
-	if n := sf.scanInt(`SELECT count(*) FROM face_suggestion_decisions WHERE tenant_id = $1`, sf.tenant); n != 1 {
-		t.Fatalf("decision rows = %d, want 1 (the pair is upserted)", n)
+	if n := sf.scanInt(`SELECT count(*) FROM face_suggestion_decisions WHERE tenant_id = $1`, sf.tenant); n != 2 {
+		t.Fatalf("decision rows = %d, want 2 (a-b was upserted, c-b is a second pair)", n)
 	}
 
 	// The label outlives the crops it refers to.
 	if err := sf.svc.RejectReviewSighting(ctx, sf.manager, sf.tenant, a); err != nil {
 		t.Fatal(err)
 	}
-	if n := sf.scanInt(`SELECT count(*) FROM face_suggestion_decisions WHERE tenant_id = $1`, sf.tenant); n != 1 {
-		t.Fatalf("decision rows after rejecting a sighting = %d, want 1", n)
+	if n := sf.scanInt(`SELECT count(*) FROM face_suggestion_decisions WHERE tenant_id = $1`, sf.tenant); n != 2 {
+		t.Fatalf("decision rows after rejecting a sighting = %d, want 2", n)
 	}
 }
 
@@ -105,10 +117,10 @@ func TestSuggestionDecisionsValidateAndAuthorize(t *testing.T) {
 
 	var bad *faces.ValidationError
 	for name, call := range map[string]func() error{
-		"same identity": func() error {
+		"same sighting": func() error {
 			return sf.svc.RecordSuggestionDecision(ctx, sf.manager, sf.tenant, a, a, faces.SuggestionSame, 0.6)
 		},
-		"nil identity": func() error {
+		"nil sighting": func() error {
 			return sf.svc.RecordSuggestionDecision(ctx, sf.manager, sf.tenant, uuid.Nil, b, faces.SuggestionSame, 0.6)
 		},
 		"unknown verdict": func() error { return sf.svc.RecordSuggestionDecision(ctx, sf.manager, sf.tenant, a, b, "maybe", 0.6) },
@@ -124,7 +136,7 @@ func TestSuggestionDecisionsValidateAndAuthorize(t *testing.T) {
 		}
 	}
 	if err := sf.svc.RecordSuggestionDecision(ctx, sf.manager, sf.tenant, a, uuid.New(), faces.SuggestionDifferent, 0.6); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("unknown identity: err = %v, want not found", err)
+		t.Fatalf("unknown sighting: err = %v, want not found", err)
 	}
 	viewer := sf.user(sf.tenant, "viewer", "faces.view")
 	if err := sf.svc.RecordSuggestionDecision(ctx, viewer, sf.tenant, a, b, faces.SuggestionDifferent, 0.6); !errors.Is(err, access.ErrForbidden) {

@@ -203,20 +203,19 @@ func (q *Queries) EnqueueFaceBlobPurge(ctx context.Context, arg EnqueueFaceBlobP
 	return err
 }
 
-const faceIdentityIsPending = `-- name: FaceIdentityIsPending :one
+const faceSightingIsPending = `-- name: FaceSightingIsPending :one
 SELECT EXISTS (
-  SELECT 1 FROM face_sightings
-  WHERE tenant_id = $1 AND review_status = 'pending' AND (id = $2 OR identity_group_id = $2)
+  SELECT 1 FROM face_sightings WHERE tenant_id = $1 AND id = $2 AND review_status = 'pending'
 )
 `
 
-type FaceIdentityIsPendingParams struct {
+type FaceSightingIsPendingParams struct {
 	TenantID   uuid.UUID
-	IdentityID uuid.UUID
+	SightingID uuid.UUID
 }
 
-func (q *Queries) FaceIdentityIsPending(ctx context.Context, arg FaceIdentityIsPendingParams) (bool, error) {
-	row := q.db.QueryRow(ctx, faceIdentityIsPending, arg.TenantID, arg.IdentityID)
+func (q *Queries) FaceSightingIsPending(ctx context.Context, arg FaceSightingIsPendingParams) (bool, error) {
+	row := q.db.QueryRow(ctx, faceSightingIsPending, arg.TenantID, arg.SightingID)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
@@ -771,32 +770,32 @@ func (q *Queries) ListFaceCapableServersScoped(ctx context.Context, arg ListFace
 	return items, nil
 }
 
-const listFaceDifferentIdentityPairs = `-- name: ListFaceDifferentIdentityPairs :many
-SELECT identity_lo, identity_hi FROM face_suggestion_decisions
+const listFaceDifferentSightingPairs = `-- name: ListFaceDifferentSightingPairs :many
+SELECT sighting_lo, sighting_hi FROM face_suggestion_decisions
 WHERE decision = 'different' AND tenant_id = ANY($1::uuid[])
-  AND (identity_lo = ANY($2::uuid[]) OR identity_hi = ANY($2::uuid[]))
+  AND (sighting_lo = ANY($2::uuid[]) OR sighting_hi = ANY($2::uuid[]))
 `
 
-type ListFaceDifferentIdentityPairsParams struct {
+type ListFaceDifferentSightingPairsParams struct {
 	TenantIds   []uuid.UUID
-	IdentityIds []uuid.UUID
+	SightingIds []uuid.UUID
 }
 
-type ListFaceDifferentIdentityPairsRow struct {
-	IdentityLo uuid.UUID
-	IdentityHi uuid.UUID
+type ListFaceDifferentSightingPairsRow struct {
+	SightingLo uuid.UUID
+	SightingHi uuid.UUID
 }
 
-func (q *Queries) ListFaceDifferentIdentityPairs(ctx context.Context, arg ListFaceDifferentIdentityPairsParams) ([]ListFaceDifferentIdentityPairsRow, error) {
-	rows, err := q.db.Query(ctx, listFaceDifferentIdentityPairs, arg.TenantIds, arg.IdentityIds)
+func (q *Queries) ListFaceDifferentSightingPairs(ctx context.Context, arg ListFaceDifferentSightingPairsParams) ([]ListFaceDifferentSightingPairsRow, error) {
+	rows, err := q.db.Query(ctx, listFaceDifferentSightingPairs, arg.TenantIds, arg.SightingIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListFaceDifferentIdentityPairsRow{}
+	items := []ListFaceDifferentSightingPairsRow{}
 	for rows.Next() {
-		var i ListFaceDifferentIdentityPairsRow
-		if err := rows.Scan(&i.IdentityLo, &i.IdentityHi); err != nil {
+		var i ListFaceDifferentSightingPairsRow
+		if err := rows.Scan(&i.SightingLo, &i.SightingHi); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1490,16 +1489,16 @@ func (q *Queries) UpdateFacePerson(ctx context.Context, arg UpdateFacePersonPara
 }
 
 const upsertFaceSuggestionDecision = `-- name: UpsertFaceSuggestionDecision :exec
-INSERT INTO face_suggestion_decisions (tenant_id, identity_lo, identity_hi, decision, similarity, decided_by)
+INSERT INTO face_suggestion_decisions (tenant_id, sighting_lo, sighting_hi, decision, similarity, decided_by)
 VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (tenant_id, identity_lo, identity_hi) DO UPDATE
+ON CONFLICT (tenant_id, sighting_lo, sighting_hi) DO UPDATE
 SET decision = EXCLUDED.decision, similarity = EXCLUDED.similarity, decided_by = EXCLUDED.decided_by, decided_at = now()
 `
 
 type UpsertFaceSuggestionDecisionParams struct {
 	TenantID   uuid.UUID
-	IdentityLo uuid.UUID
-	IdentityHi uuid.UUID
+	SightingLo uuid.UUID
+	SightingHi uuid.UUID
 	Decision   string
 	Similarity float32
 	DecidedBy  *uuid.UUID
@@ -1508,8 +1507,8 @@ type UpsertFaceSuggestionDecisionParams struct {
 func (q *Queries) UpsertFaceSuggestionDecision(ctx context.Context, arg UpsertFaceSuggestionDecisionParams) error {
 	_, err := q.db.Exec(ctx, upsertFaceSuggestionDecision,
 		arg.TenantID,
-		arg.IdentityLo,
-		arg.IdentityHi,
+		arg.SightingLo,
+		arg.SightingHi,
 		arg.Decision,
 		arg.Similarity,
 		arg.DecidedBy,
