@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -693,6 +694,53 @@ func (h *Handlers) SyncCameraOnvifTime(ctx context.Context, r gen.SyncCameraOnvi
 	}, nil
 }
 
+func (h *Handlers) GetCameraOnvifSnapshot(ctx context.Context, r gen.GetCameraOnvifSnapshotRequestObject) (gen.GetCameraOnvifSnapshotResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cam, err := h.Inv.GetCamera(ctx, a, r.CameraId)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || strings.TrimSpace(r.Body.ProfileToken) == "" || len(r.Body.ProfileToken) > 128 {
+		return gen.GetCameraOnvifSnapshot400JSONResponse{
+			BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "invalid_request", Message: "A valid media profile token is required"},
+		}, nil
+	}
+	profileToken := strings.TrimSpace(r.Body.ProfileToken)
+	var endpoint, username, password *string
+	if r.Body.Endpoint != nil {
+		endpoint = r.Body.Endpoint
+	}
+	if r.Body.Username != nil {
+		username = r.Body.Username
+	}
+	if r.Body.Password != nil {
+		password = r.Body.Password
+	}
+	ep, user, pass := h.resolveCameraOnvifCredentials(ctx, a, cam, endpoint, username, password)
+	if ep == "" {
+		return gen.GetCameraOnvifSnapshot400JSONResponse{
+			BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "endpoint_required", Message: "Camera ONVIF endpoint could not be determined"},
+		}, nil
+	}
+	if h.Provision == nil {
+		return gen.GetCameraOnvifSnapshot502JSONResponse{
+			FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "snapshot_failed", Message: "Camera snapshot could not be retrieved"},
+		}, nil
+	}
+	data, err := h.Provision.ExecuteOnvifSnapshot(ctx, a, cam.ServerID, onvifdiscover.SnapshotRequest{
+		Endpoint: ep, Username: user, Password: pass, ProfileToken: profileToken,
+	})
+	if err != nil {
+		return gen.GetCameraOnvifSnapshot502JSONResponse{
+			FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "snapshot_failed", Message: "Camera snapshot could not be retrieved"},
+		}, nil
+	}
+	return gen.GetCameraOnvifSnapshot200ImagejpegResponse{Body: bytes.NewReader(data), ContentLength: int64(len(data))}, nil
+}
+
 func (h *Handlers) ControlCameraOnvifPTZ(ctx context.Context, r gen.ControlCameraOnvifPTZRequestObject) (gen.ControlCameraOnvifPTZResponseObject, error) {
 	a, err := actor(ctx)
 	if err != nil {
@@ -961,29 +1009,36 @@ func (h *Handlers) OperateCameraOnvifImaging(ctx context.Context, r gen.OperateC
 	}
 	if r.Body.Settings != nil {
 		s := r.Body.Settings
-		settings := &onvif.ImagingSettings{}
+		settings := &onvif.ImagingSettingsUpdate{}
 		if s.Brightness != nil {
-			settings.Brightness = float64(*s.Brightness)
+			v := float64(*s.Brightness)
+			settings.Brightness = &v
 		}
 		if s.ColorSaturation != nil {
-			settings.ColorSaturation = float64(*s.ColorSaturation)
+			v := float64(*s.ColorSaturation)
+			settings.ColorSaturation = &v
 		}
 		if s.Contrast != nil {
-			settings.Contrast = float64(*s.Contrast)
+			v := float64(*s.Contrast)
+			settings.Contrast = &v
 		}
 		if s.Sharpness != nil {
-			settings.Sharpness = float64(*s.Sharpness)
+			v := float64(*s.Sharpness)
+			settings.Sharpness = &v
 		}
 		if s.IrCutFilter != nil {
-			settings.IrCutFilter = *s.IrCutFilter
+			v := *s.IrCutFilter
+			settings.IrCutFilter = &v
 		}
 		if s.WdrMode != nil || s.WdrLevel != nil {
-			wdr := &onvif.WideDynamicRange{}
+			wdr := &onvif.WideDynamicRangeUpdate{}
 			if s.WdrMode != nil {
-				wdr.Mode = *s.WdrMode
+				v := *s.WdrMode
+				wdr.Mode = &v
 			}
 			if s.WdrLevel != nil {
-				wdr.Level = float64(*s.WdrLevel)
+				v := float64(*s.WdrLevel)
+				wdr.Level = &v
 			}
 			settings.WideDynamicRange = wdr
 		}
@@ -1011,6 +1066,14 @@ func (h *Handlers) OperateCameraOnvifImaging(ctx context.Context, r gen.OperateC
 
 	resp := gen.OperateCameraOnvifImaging200JSONResponse{
 		Success: true,
+	}
+	if options, ok := out["options"].(map[string]any); ok {
+		encoded, _ := json.Marshal(options)
+		var result gen.CameraOnvifImagingResult
+		if err := json.Unmarshal(encoded, &result.Options); err != nil {
+			return nil, fmt.Errorf("decode ONVIF imaging options: %w", err)
+		}
+		resp.Options = result.Options
 	}
 	if sMap, ok := out["settings"].(map[string]any); ok {
 		var brightness, colorSat, contrast, sharpness, wdrLevel float32

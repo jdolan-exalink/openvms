@@ -1227,6 +1227,30 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/onvif/snapshot:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: getCameraOnvifSnapshot
+      summary: Retrieve a camera snapshot through its edge agent
+      description: Downloads one JPEG from the selected camera. The camera snapshot URI remains inside the edge agent. Requires cameras.manage and access to camera configuration secrets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraOnvifSnapshotRequest" }
+      responses:
+        "200":
+          description: Camera snapshot JPEG
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/onvif/sync-time:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1341,8 +1365,8 @@ paths:
     post:
       tags: [cameras]
       operationId: operateCameraOnvifImaging
-      summary: Get or set camera imaging settings via ONVIF
-      description: Queries or modifies imaging settings (brightness, contrast, saturation, sharpness, IR cut filter, WDR). Requires cameras.manage.
+      summary: Get imaging settings, options, or set values via ONVIF
+      description: Queries supported imaging controls and their advertised ranges, reads settings, or modifies supported settings with readback verification. Requires cameras.manage.
       requestBody:
         required: true
         content:
@@ -5210,6 +5234,15 @@ components:
         camera: { $ref: "#/components/schemas/Camera" }
         revision_id: { type: string, format: uuid }
         restart_required: { type: boolean }
+    CameraOnvifSnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [profile_token]
+      properties:
+        endpoint: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 128 }
+        password: { type: string, maxLength: 256, writeOnly: true }
+        profile_token: { type: string, minLength: 1, maxLength: 128 }
     CameraOnvifSyncTimeRequest:
       type: object
       additionalProperties: false
@@ -5335,7 +5368,7 @@ components:
         username: { type: string, maxLength: 128 }
         password: { type: string, maxLength: 256, writeOnly: true }
         video_source_token: { type: string, maxLength: 128 }
-        action: { type: string, enum: [get, set] }
+        action: { type: string, enum: [get, options, set] }
         settings:
           type: object
           properties:
@@ -5362,6 +5395,28 @@ components:
             ir_cut_filter: { type: string }
             wdr_mode: { type: string }
             wdr_level: { type: number }
+        options:
+          type: object
+          additionalProperties: false
+          properties:
+            brightness: { $ref: "#/components/schemas/OnvifFloatRange" }
+            color_saturation: { $ref: "#/components/schemas/OnvifFloatRange" }
+            contrast: { $ref: "#/components/schemas/OnvifFloatRange" }
+            sharpness: { $ref: "#/components/schemas/OnvifFloatRange" }
+            ir_cut_filter_modes: { type: array, items: { type: string } }
+            wide_dynamic_range:
+              type: object
+              additionalProperties: false
+              properties:
+                modes: { type: array, items: { type: string } }
+                level: { $ref: "#/components/schemas/OnvifFloatRange" }
+    OnvifFloatRange:
+      type: object
+      additionalProperties: false
+      required: [min, max]
+      properties:
+        min: { type: number }
+        max: { type: number }
     OnvifProbeRequest:
       type: object
       additionalProperties: false

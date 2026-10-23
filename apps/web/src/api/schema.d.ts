@@ -1024,6 +1024,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/cameras/{cameraId}/onvif/snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retrieve a camera snapshot through its edge agent
+         * @description Downloads one JPEG from the selected camera. The camera snapshot URI remains inside the edge agent. Requires cameras.manage and access to camera configuration secrets.
+         */
+        post: operations["getCameraOnvifSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/cameras/{cameraId}/onvif/sync-time": {
         parameters: {
             query?: never;
@@ -1135,8 +1157,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Get or set camera imaging settings via ONVIF
-         * @description Queries or modifies imaging settings (brightness, contrast, saturation, sharpness, IR cut filter, WDR). Requires cameras.manage.
+         * Get imaging settings, options, or set values via ONVIF
+         * @description Queries supported imaging controls and their advertised ranges, reads settings, or modifies supported settings with readback verification. Requires cameras.manage.
          */
         post: operations["operateCameraOnvifImaging"];
         delete?: never;
@@ -4019,6 +4041,12 @@ export interface components {
             revision_id: string;
             restart_required: boolean;
         };
+        CameraOnvifSnapshotRequest: {
+            endpoint?: string;
+            username?: string;
+            password?: string;
+            profile_token: string;
+        };
         CameraOnvifSyncTimeRequest: {
             endpoint?: string;
             username?: string;
@@ -4116,7 +4144,7 @@ export interface components {
             password?: string;
             video_source_token?: string;
             /** @enum {string} */
-            action: "get" | "set";
+            action: "get" | "options" | "set";
             settings?: {
                 brightness?: number;
                 color_saturation?: number;
@@ -4138,6 +4166,21 @@ export interface components {
                 wdr_mode?: string;
                 wdr_level?: number;
             };
+            options?: {
+                brightness?: components["schemas"]["OnvifFloatRange"];
+                color_saturation?: components["schemas"]["OnvifFloatRange"];
+                contrast?: components["schemas"]["OnvifFloatRange"];
+                sharpness?: components["schemas"]["OnvifFloatRange"];
+                ir_cut_filter_modes?: string[];
+                wide_dynamic_range?: {
+                    modes?: string[];
+                    level?: components["schemas"]["OnvifFloatRange"];
+                };
+            };
+        };
+        OnvifFloatRange: {
+            min: number;
+            max: number;
         };
         OnvifProbeRequest: {
             /** @description HTTP(S) ONVIF device endpoint on an IPv4 literal. */
@@ -8117,6 +8160,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Camera"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    getCameraOnvifSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                cameraId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CameraOnvifSnapshotRequest"];
+            };
+        };
+        responses: {
+            /** @description Camera snapshot JPEG */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/jpeg": string;
                 };
             };
             400: components["responses"]["BadRequest"];
