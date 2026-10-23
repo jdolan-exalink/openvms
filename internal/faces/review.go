@@ -87,8 +87,7 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 		if err != nil {
 			return err
 		}
-		sightingIDs := ids
-		pairs, err := q.ListFaceDifferentSightingPairs(ctx, db.ListFaceDifferentSightingPairsParams{TenantIds: nonNil(tenants), SightingIds: sightingIDs})
+		pairs, err := q.ListFaceDifferentSightingPairs(ctx, db.ListFaceDifferentSightingPairsParams{TenantIds: nonNil(tenants), SightingIds: ids})
 		if err != nil {
 			return err
 		}
@@ -103,10 +102,10 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 			lo, okLo := identityOf[p.SightingLo]
 			hi, okHi := identityOf[p.SightingHi]
 			if okLo && okHi && lo != hi {
-				ruledOut[identityPair(lo, hi)] = struct{}{}
+				ruledOut[orderedUUIDPair(lo, hi)] = struct{}{}
 			}
 		}
-		return err
+		return nil
 	}); err != nil {
 		return ReviewSightingsPage{}, err
 	}
@@ -267,7 +266,7 @@ func (s *Service) RecordSuggestionDecision(ctx context.Context, actor authz.Acto
 	if math.IsNaN(similarity) || similarity < 0 || similarity > 1 {
 		return invalid("similarity must be between 0 and 1")
 	}
-	pair := identityPair(sightingID, otherID)
+	pair := orderedUUIDPair(sightingID, otherID)
 	return s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
 		for _, id := range pair {
 			pending, err := q.FaceSightingIsPending(ctx, db.FaceSightingIsPendingParams{TenantID: tenantID, SightingID: id})

@@ -93,7 +93,7 @@ func TestSuggestIdentitiesSkipsRuledOutPairsBeforeTheCap(t *testing.T) {
 		{ID: b, IdentityID: b, Profile: "cpu", Model: "m1", Vector: vec(0.95, 0.31)},
 		{ID: c, IdentityID: c, Profile: "cpu", Model: "m1", Vector: vec(0.8, 0.6)},
 	}
-	ruledOut := pairSet{identityPair(b, a): {}} // the order the pair is named in does not matter
+	ruledOut := pairSet{orderedUUIDPair(b, a): {}} // the order the pair is named in does not matter
 	got := suggestIdentities(items, 0.5, 1, ruledOut)
 	if len(got[a]) != 1 || got[a][0].IdentityID != c {
 		t.Fatalf("suggestions for a = %+v, want c once b is ruled out (the cap must not be spent on b)", got[a])

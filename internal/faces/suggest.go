@@ -32,11 +32,12 @@ type embeddedSighting struct {
 	Vector     []float32
 }
 
-// pairSet holds unordered pairs of identities, normalized with identityPair.
+// pairSet holds unordered pairs of IDs, normalized with orderedUUIDPair.
 type pairSet map[[2]uuid.UUID]struct{}
 
-// identityPair orders two identity IDs so (a, b) and (b, a) are the same key.
-func identityPair(a, b uuid.UUID) [2]uuid.UUID {
+// orderedUUIDPair orders two UUIDs byte-wise so (a, b) and (b, a) are the same key. Stored pairs rely
+// on it matching the lo < hi CHECK of face_suggestion_decisions.
+func orderedUUIDPair(a, b uuid.UUID) [2]uuid.UUID {
 	if bytes.Compare(a[:], b[:]) > 0 {
 		a, b = b, a
 	}
@@ -77,7 +78,7 @@ func suggestIdentities(items []embeddedSighting, threshold float64, perIdentity 
 				len(a.Vector) != len(b.Vector) {
 				continue
 			}
-			if _, ruledOut := excluded[identityPair(a.IdentityID, b.IdentityID)]; ruledOut {
+			if _, ruledOut := excluded[orderedUUIDPair(a.IdentityID, b.IdentityID)]; ruledOut {
 				continue
 			}
 			var dot float64

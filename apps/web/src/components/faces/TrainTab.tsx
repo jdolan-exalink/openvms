@@ -10,7 +10,7 @@ import { fmtDateTime } from "@/lib/format";
 
 const NEW_PERSON = "__new__";
 
-type SuggestionTarget = { identityId: string; similarity: number; sightingIds: string[] };
+type SuggestionTarget = { identityId: string; similarity: number; sightingIds: string[]; representativeId: string };
 /** A verdict names one sighting on each side: sighting IDs survive group merges, identity IDs do not. */
 type Verdict = { sightingId: string; otherSightingId: string; similarity: number };
 
@@ -88,24 +88,27 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggesti
         {attempt.seen_at && <span>{fmtDateTime(attempt.seen_at)}</span>}
         {attempt.score != null && <span>{t("faces.attemptScore", { score: attempt.score })}</span>}
       </div>
-      {visibleSuggestions.map((sug) => (
-        <div key={sug.identityId} className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-2 text-xs">
-          <p className="break-all">{t("faces.suggestionMatch", { id: sug.identityId, percent: Math.round(sug.similarity * 100) })}</p>
-          {canManage && (
-            <div className="flex flex-wrap gap-1">
-              <Button variant="tonal" disabled={groupingSuggestion} onClick={() => onGroupSuggestion([attempt.id, ...sug.sightingIds], { sightingId: attempt.id, otherSightingId: sug.sightingIds[0] ?? "", similarity: sug.similarity })}>
-                {t("faces.groupSuggestion")}
-              </Button>
-              <Button variant="text" onClick={() => {
-                setDismissed((current) => new Set(current).add(sug.identityId));
-                dismiss.mutate({ identityId: sug.identityId, verdict: { sightingId: attempt.id, otherSightingId: sug.sightingIds[0] ?? "", similarity: sug.similarity } });
-              }}>
-                {t("faces.dismissSuggestion")}
-              </Button>
-            </div>
-          )}
-        </div>
-      ))}
+      {visibleSuggestions.map((sug) => {
+        const verdict: Verdict = { sightingId: attempt.id, otherSightingId: sug.representativeId, similarity: sug.similarity };
+        return (
+          <div key={sug.identityId} className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-2 text-xs">
+            <p className="break-all">{t("faces.suggestionMatch", { id: sug.identityId, percent: Math.round(sug.similarity * 100) })}</p>
+            {canManage && (
+              <div className="flex flex-wrap gap-1">
+                <Button variant="tonal" disabled={groupingSuggestion} onClick={() => onGroupSuggestion([attempt.id, ...sug.sightingIds], verdict)}>
+                  {t("faces.groupSuggestion")}
+                </Button>
+                <Button variant="text" onClick={() => {
+                  setDismissed((current) => new Set(current).add(sug.identityId));
+                  dismiss.mutate({ identityId: sug.identityId, verdict });
+                }}>
+                  {t("faces.dismissSuggestion")}
+                </Button>
+              </div>
+            )}
+          </div>
+        );
+      })}
       {canManage && attempt.crop_available && (
         <div className="flex flex-col gap-2">
           <Checkbox
@@ -161,7 +164,8 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggesti
 function suggestionTargets(attempt: Schemas["FaceReviewSighting"], items: Schemas["FaceReviewSighting"][]): SuggestionTarget[] {
   return (attempt.suggestions ?? []).flatMap((sug) => {
     const sightingIds = items.filter((item) => item.identity_id === sug.identity_id).map((item) => item.id);
-    return sightingIds.length > 0 ? [{ identityId: sug.identity_id, similarity: sug.similarity, sightingIds }] : [];
+    const [representativeId] = sightingIds; // the sighting a verdict names on that side
+    return representativeId === undefined ? [] : [{ identityId: sug.identity_id, similarity: sug.similarity, sightingIds, representativeId }];
   });
 }
 
