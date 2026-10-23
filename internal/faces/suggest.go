@@ -9,7 +9,7 @@ import (
 
 // DefaultSuggestionThreshold is the cosine similarity at which two ArcFace embeddings are offered
 // to the operator as a possible match. It is deliberately conservative; the operator always decides.
-const DefaultSuggestionThreshold = 0.5
+const DefaultSuggestionThreshold = 0.55
 
 const (
 	maxSuggestionPerIdentity = 3
