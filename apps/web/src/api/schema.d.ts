@@ -1638,6 +1638,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/faces/persons/tombstones": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List deleted persons with owned faces pending remote cleanup (faces.manage)
+         * @description Returns only the person's name and the count of live servers with pending cleanup.
+         */
+        get: operations["listPendingFaceTombstones"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/persons/{personId}/force-purge": {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Force-purge a deleted person and queue remaining remote cleanup (faces.manage)
+         * @description Scrubs stored event labels and records cleanup obligations without contacting Frigate.
+         */
+        post: operations["forcePurgeFaceTombstone"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/faces/persons/{personId}": {
         parameters: {
             query?: {
@@ -1944,6 +1990,102 @@ export interface paths {
          */
         post: operations["assignFaceTrainAttempt"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/review-inbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List durable unclassified face sightings (faces.view)
+         * @description Returns every persisted pending sighting in scope, including items whose crop is waiting for retry.
+         */
+        get: operations["listFaceReviewInbox"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/review-inbox/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly group pending face sightings as one identity (faces.manage)
+         * @description Groups at least two pending sightings with retained crops. Existing groups are merged
+         *     atomically; the oldest group ID is kept so the identity ID remains stable. This action
+         *     records an audit entry and never uses automated similarity suggestions.
+         */
+        post: operations["groupFaceReviewSightings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/review-inbox/{sightingId}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a retained sighting crop (faces.view)
+         * @description Sensitive biometric data. Authenticated, audited, and never cached by shared clients.
+         */
+        get: operations["getFaceReviewSightingImage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/review-inbox/{sightingId}/assign": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Assign a sighting to a registered or new person (faces.manage) */
+        post: operations["assignFaceReviewSighting"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/faces/review-inbox/{sightingId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Reject a sighting and queue its crop for deletion (faces.manage) */
+        delete: operations["rejectFaceReviewSighting"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4687,6 +4829,14 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        FaceTombstone: {
+            /** Format: uuid */
+            id: string;
+            display_name: string;
+            /** Format: date-time */
+            deleted_at: string;
+            pending_server_count: number;
+        };
         /**
          * @description The person's newest sighting on a camera the caller holds events.view on. Present only in
          *     the person list, and absent when the person was never recognized there. Use the event
@@ -4892,6 +5042,68 @@ export interface components {
             person: components["schemas"]["FacePerson"];
             image: components["schemas"]["FaceImage"];
             /** @description Whether the attempt was also deleted from Frigate. */
+            attempt_removed: boolean;
+        };
+        FaceReviewSighting: {
+            /**
+             * Format: uuid
+             * @description Stable opaque identity for this sighting.
+             */
+            id: string;
+            /**
+             * Format: uuid
+             * @description Group ID when grouped
+             */
+            identity_id: string;
+            /**
+             * Format: uuid
+             * @description Confirmed manager-created identity group
+             */
+            group_id?: string | null;
+            /** Format: uuid */
+            server_id: string;
+            server_name: string;
+            /** Format: uuid */
+            site_id: string;
+            /** Format: date-time */
+            first_seen_at: string;
+            /**
+             * Format: date-time
+             * @description Best-effort time parsed from Frigate's source file name.
+             */
+            seen_at?: string;
+            /** @description Best-effort label parsed from Frigate's source file name. */
+            label?: string;
+            /** Format: double */
+            score?: number;
+            crop_available: boolean;
+            /** @description Sanitized retry reason; never contains source URLs or image data. */
+            ingest_error?: string;
+        };
+        FaceReviewInbox: {
+            items: components["schemas"]["FaceReviewSighting"][];
+        };
+        FaceReviewIdentityGroupCreate: {
+            sighting_ids: string[];
+        };
+        FaceReviewIdentityGroup: {
+            /**
+             * Format: uuid
+             * @description Stable identity ID retained by the group.
+             */
+            group_id: string;
+            member_count: number;
+        };
+        /** @description Exactly one of person_id and new_person_display_name. */
+        FaceReviewSightingAssign: {
+            /** Format: uuid */
+            person_id?: string;
+            new_person_display_name?: string;
+        };
+        FaceReviewSightingAssignResult: {
+            person: components["schemas"]["FacePerson"];
+            image: components["schemas"]["FaceImage"];
+            /** @description Whether Frigate's source attempt was also removed. */
             attempt_removed: boolean;
         };
         /**
@@ -8985,6 +9197,60 @@ export interface operations {
             409: components["responses"]["Conflict"];
         };
     };
+    listPendingFaceTombstones: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending face tombstones */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FaceTombstone"][];
+                    };
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    forcePurgeFaceTombstone: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                personId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tombstone purged; remote cleanup is queued where needed. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
     getFacePerson: {
         parameters: {
             query?: {
@@ -9587,6 +9853,150 @@ export interface operations {
             404: components["responses"]["NotFound"];
             409: components["responses"]["Conflict"];
             502: components["responses"]["FrigateUnreachable"];
+        };
+    };
+    listFaceReviewInbox: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+                site_id?: string[];
+                server_id?: string[];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Pending sightings newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceReviewInbox"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    groupFaceReviewSightings: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceReviewIdentityGroupCreate"];
+            };
+        };
+        responses: {
+            /** @description Group created or merged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceReviewIdentityGroup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    getFaceReviewSightingImage: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                sightingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The retained image */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    assignFaceReviewSighting: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                sightingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceReviewSightingAssign"];
+            };
+        };
+        responses: {
+            /** @description Sighting assigned and its crop transferred to the person's face library */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceReviewSightingAssignResult"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
+        };
+    };
+    rejectFaceReviewSighting: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path: {
+                sightingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sighting rejected and crop deletion queued */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     listPlateReads: {

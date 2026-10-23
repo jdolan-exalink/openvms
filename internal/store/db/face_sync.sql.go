@@ -525,6 +525,50 @@ func (q *Queries) ListFaceSyncStatus(ctx context.Context, arg ListFaceSyncStatus
 	return items, nil
 }
 
+const listPendingFaceTombstones = `-- name: ListPendingFaceTombstones :many
+SELECT p.id, p.display_name, p.deleted_at, count(*)::int AS pending_server_count
+FROM face_persons p
+JOIN face_server_sync f ON f.person_id = p.id AND f.tenant_id = p.tenant_id AND f.owned
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+WHERE p.tenant_id = $1 AND p.deleted_at IS NOT NULL
+  AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
+GROUP BY p.id
+ORDER BY p.deleted_at, p.id
+`
+
+type ListPendingFaceTombstonesRow struct {
+	ID                 uuid.UUID
+	DisplayName        string
+	DeletedAt          *time.Time
+	PendingServerCount int32
+}
+
+// Show managers only deleted persons that still have an owned face on a live server.
+func (q *Queries) ListPendingFaceTombstones(ctx context.Context, tenantID uuid.UUID) ([]ListPendingFaceTombstonesRow, error) {
+	rows, err := q.db.Query(ctx, listPendingFaceTombstones, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPendingFaceTombstonesRow{}
+	for rows.Next() {
+		var i ListPendingFaceTombstonesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DisplayName,
+			&i.DeletedAt,
+			&i.PendingServerCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPurgeableFaceTombstones = `-- name: ListPurgeableFaceTombstones :many
 SELECT p.id, p.tenant_id, p.display_name, p.frigate_name, p.notes, p.created_by, p.updated_by, p.created_at, p.updated_at, p.deleted_at, p.sync_revision FROM face_persons p
 WHERE p.deleted_at IS NOT NULL
@@ -646,6 +690,32 @@ func (q *Queries) RecordFaceErasedName(ctx context.Context, arg RecordFaceErased
 	return err
 }
 
+const recordFaceForcedRemoteCleanup = `-- name: RecordFaceForcedRemoteCleanup :exec
+INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)
+SELECT f.tenant_id, f.server_id, $1::text
+FROM face_server_sync f
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+WHERE f.tenant_id = $2 AND f.person_id = $3 AND f.owned
+  AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
+ON CONFLICT DO NOTHING
+`
+
+type RecordFaceForcedRemoteCleanupParams struct {
+	Name     string
+	TenantID uuid.UUID
+	ID       uuid.UUID
+}
+
+// Operator force purge (Service.ForcePurgeTombstone). The only difference from
+// RecordFaceRemoteCleanup is that it drops the "server lacks face recognition" condition: an
+// operator may purge while a live server is unreachable or face-disabled, so keep a durable
+// cleanup obligation for every owned face that has not converged, regardless of current
+// capability; the worker only attempts it after the server reports face recognition enabled.
+func (q *Queries) RecordFaceForcedRemoteCleanup(ctx context.Context, arg RecordFaceForcedRemoteCleanupParams) error {
+	_, err := q.db.Exec(ctx, recordFaceForcedRemoteCleanup, arg.Name, arg.TenantID, arg.ID)
+	return err
+}
+
 const recordFaceRemoteCleanup = `-- name: RecordFaceRemoteCleanup :exec
 INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)
 SELECT f.tenant_id, f.server_id, $1::text
@@ -663,6 +733,10 @@ type RecordFaceRemoteCleanupParams struct {
 	ID       uuid.UUID
 }
 
+// Automatic tombstone purge (Syncer.purgeOne): record cleanup only for owned, non-converged
+// faces on servers that currently lack face recognition. A face-capable server is deleted
+// from by the normal sync before the purge, so it never needs a deferred obligation.
+// RecordFaceForcedRemoteCleanup is the operator variant without the capability condition.
 func (q *Queries) RecordFaceRemoteCleanup(ctx context.Context, arg RecordFaceRemoteCleanupParams) error {
 	_, err := q.db.Exec(ctx, recordFaceRemoteCleanup, arg.Name, arg.TenantID, arg.ID)
 	return err

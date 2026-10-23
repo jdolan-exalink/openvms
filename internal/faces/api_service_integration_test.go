@@ -3,13 +3,16 @@
 package faces_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/jdolan-exalink/openvms/internal/access"
 	"github.com/jdolan-exalink/openvms/internal/authz"
@@ -260,6 +263,224 @@ func TestTrainAttemptsListImageAndAssign(t *testing.T) {
 	// Exactly one target is required.
 	if _, err := sf.svc.AssignTrainAttempt(ctx, sf.manager, sf.tenant, faces.AssignInput{ServerID: sf.h01ID, File: "bad.webp"}); err == nil {
 		t.Fatal("assign without a target accepted")
+	}
+}
+
+func TestReviewIngestorKeepsStableSightingAndCropAfterFrigateRemoval(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.h01.AddFaceTrainImage(trainFile, pngOf(t, 42))
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	ingestor := &faces.ReviewIngestor{
+		Store: sf.env.Store, Blobs: sf.blobs, Adapters: inventory.NewAdapters(sf.env.Svc), Log: sf.svc.Log,
+	}
+	ctx := context.Background()
+
+	sf.blobs.failPut = true
+	if err := ingestor.RunOnce(ctx, 25); err == nil {
+		t.Fatal("first ingest succeeded while the object store was unavailable")
+	}
+	var firstID uuid.UUID
+	var cropKey string
+	sf.queryRow(`SELECT id FROM face_sightings WHERE tenant_id = $1 AND server_id = $2 AND source_file = $3`,
+		&firstID, sf.tenant, sf.h01ID, trainFile)
+	sf.queryRow(`SELECT COALESCE(crop_key, '') FROM face_sightings WHERE id = $1`, &cropKey, firstID)
+	if cropKey != "" {
+		t.Fatal("sighting references a crop that was not stored")
+	}
+	sf.blobs.failPut = false
+	if err := ingestor.RunOnce(ctx, 25); err != nil {
+		t.Fatalf("retry after object store recovery: %v", err)
+	}
+	sf.queryRow(`SELECT crop_key FROM face_sightings WHERE id = $1`, &cropKey, firstID)
+	if cropKey == "" {
+		t.Fatal("sighting has no retained crop key")
+	}
+	got, contentType, err := sf.blobs.Get(ctx, cropKey)
+	if err != nil || contentType != "image/png" || !bytes.Equal(got, pngOf(t, 42)) {
+		t.Fatalf("retained crop = %d bytes, %q, %v; want original PNG", len(got), contentType, err)
+	}
+
+	if err := ingestor.RunOnce(ctx, 25); err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+	var secondID uuid.UUID
+	if n := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND server_id = $2 AND source_file = $3`, sf.tenant, sf.h01ID, trainFile); n != 1 {
+		t.Fatalf("sighting rows = %d, want 1 after repeated ingest", n)
+	}
+	sf.queryRow(`SELECT id FROM face_sightings WHERE tenant_id = $1 AND server_id = $2 AND source_file = $3`,
+		&secondID, sf.tenant, sf.h01ID, trainFile)
+	if secondID != firstID {
+		t.Fatalf("sighting ID changed from %s to %s after repeated ingest", firstID, secondID)
+	}
+
+	if _, err := sf.svc.AssignTrainAttempt(ctx, sf.manager, sf.tenant, faces.AssignInput{
+		ServerID: sf.h01ID, File: trainFile, NewPersonName: "Unknown 1",
+	}); err != nil {
+		t.Fatalf("assign and remove source attempt: %v", err)
+	}
+	if err := ingestor.RunOnce(ctx, 25); err != nil {
+		t.Fatalf("ingest after source removal: %v", err)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND id = $2`, sf.tenant, firstID); n != 1 {
+		t.Fatalf("durable sighting rows after Frigate removal = %d, want 1", n)
+	}
+	otherTenant := sf.otherTenant()
+	err = sf.env.Store.Tx(ctx, store.TenantScope{TenantID: otherTenant}, func(q *db.Queries) error {
+		_, err := q.GetFaceSightingBySource(ctx, db.GetFaceSightingBySourceParams{
+			TenantID: sf.tenant, ServerID: sf.h01ID, SourceFile: trainFile,
+		})
+		return err
+	})
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("sighting visible under another tenant's RLS scope: %v", err)
+	}
+}
+
+func TestReviewSightingsAssignAndRejectByStableID(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	firstFile := trainFile
+	secondFile := "1700000000.3-def456-1700000200-unknown-0.52.webp"
+	firstCrop, secondCrop := pngOf(t, 51), pngOf(t, 52)
+	sf.h01.AddFaceTrainImage(firstFile, firstCrop)
+	sf.h01.AddFaceTrainImage(secondFile, secondCrop)
+	ingestor := &faces.ReviewIngestor{
+		Store: sf.env.Store, Blobs: sf.blobs, Adapters: sf.svc.Adapters, Log: sf.svc.Log,
+	}
+	ctx := context.Background()
+	if err := ingestor.RunOnce(ctx, 25); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil || len(page.Items) != 2 {
+		t.Fatalf("pending sightings = %d, %v", len(page.Items), err)
+	}
+	first, second := page.Items[0], page.Items[1]
+	if first.Score != nil && *first.Score > 0.5 {
+		first, second = second, first
+	}
+	if first.ID == uuid.Nil || second.ID == uuid.Nil || first.ID == second.ID || !first.CropAvailable || !second.CropAvailable {
+		t.Fatalf("unstable IDs or unavailable crops: %+v", page.Items)
+	}
+	image, contentType, err := sf.svc.ReviewSightingImage(ctx, sf.manager, sf.tenant, first.ID)
+	if err != nil || contentType != "image/png" || !bytes.Equal(image, firstCrop) {
+		t.Fatalf("sighting image = %d bytes, %q, %v", len(image), contentType, err)
+	}
+
+	person := sf.person("Review target")
+	assigned, err := sf.svc.AssignReviewSighting(ctx, sf.manager, sf.tenant, first.ID, faces.ReviewAssignInput{PersonID: &person.ID})
+	if err != nil || assigned.Person.ID != person.ID {
+		t.Fatalf("assign sighting = %+v, %v", assigned, err)
+	}
+	if imgs, err := sf.svc.ListImages(ctx, sf.manager, sf.tenant, person.ID); err != nil || len(imgs) != 1 {
+		t.Fatalf("assigned person's images = %d, %v", len(imgs), err)
+	}
+	if rows := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE id = $1 AND review_status = 'assigned' AND person_id = $2 AND crop_key IS NULL`, first.ID, person.ID); rows != 1 {
+		t.Fatalf("assigned sighting state rows = %d, want one linked to person and no longer owning crop", rows)
+	}
+
+	if err := sf.svc.RejectReviewSighting(ctx, sf.manager, sf.tenant, second.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := sf.svc.PurgeBlobs(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := sf.blobs.Get(ctx, fmt.Sprintf("tenant/%s/faces/review/%s", sf.tenant, second.ID)); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("rejected crop remains stored: %v", err)
+	}
+	remaining, err := sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil || len(remaining.Items) != 0 {
+		t.Fatalf("pending sightings after review = %d, %v", len(remaining.Items), err)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM audit_log WHERE action IN ($1, $2)`, faces.ActionSightingAssigned, faces.ActionSightingRejected); n != 2 {
+		t.Fatalf("sighting decision audit rows = %d, want 2", n)
+	}
+}
+
+func TestReviewSightingsExplicitIdentityGroupsAndMerge(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	files := []string{
+		"1700000000.11-aa-1700000100-unknown-0.41.webp",
+		"1700000000.12-bb-1700000200-unknown-0.42.webp",
+		"1700000000.13-cc-1700000300-unknown-0.43.webp",
+		"1700000000.14-dd-1700000400-unknown-0.44.webp",
+		"1700000000.15-ee-1700000500-unknown-0.45.webp",
+	}
+	for i, file := range files {
+		sf.h01.AddFaceTrainImage(file, pngOf(t, byte(61+i)))
+	}
+	if err := (&faces.ReviewIngestor{Store: sf.env.Store, Blobs: sf.blobs, Adapters: sf.svc.Adapters, Log: sf.svc.Log}).RunOnce(context.Background(), 25); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	page, err := sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil || len(page.Items) != 5 {
+		t.Fatalf("pending sightings = %d, %v", len(page.Items), err)
+	}
+	ids := []uuid.UUID{page.Items[0].ID, page.Items[1].ID, page.Items[2].ID, page.Items[3].ID, page.Items[4].ID}
+
+	first, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, ids[:2])
+	if err != nil || first.ID == uuid.Nil || first.MemberCount != 2 {
+		t.Fatalf("first group = %+v, %v", first, err)
+	}
+	second, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, ids[1:3])
+	if err != nil || second.ID != first.ID || second.MemberCount != 3 {
+		t.Fatalf("merge group = %+v, %v; want stable survivor %s with 3 members", second, err, first.ID)
+	}
+	page, err = sf.svc.ListReviewSightings(ctx, sf.manager, faces.TrainFilter{TenantID: &sf.tenant})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groupedIDs := map[uuid.UUID]bool{ids[0]: true, ids[1]: true, ids[2]: true}
+	for _, sighting := range page.Items {
+		if groupedIDs[sighting.ID] && (sighting.GroupID == nil || *sighting.GroupID != first.ID || sighting.IdentityID != first.ID) {
+			t.Errorf("merged sighting identity = %+v, want group %s", sighting, first.ID)
+		}
+		if !groupedIDs[sighting.ID] && (sighting.GroupID != nil || sighting.IdentityID != sighting.ID) {
+			t.Errorf("ungrouped sighting identity = %+v, want its own ID", sighting)
+		}
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM face_identity_groups WHERE tenant_id = $1`, sf.tenant); n != 1 {
+		t.Fatalf("groups after merge = %d, want one", n)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM audit_log WHERE action = $1`, faces.ActionIdentityGrouped); n != 2 {
+		t.Fatalf("group decision audits = %d, want 2", n)
+	}
+	if n := sf.scanInt(`SELECT count(*) FROM audit_log WHERE action = $1 AND (details::text LIKE '%crop%' OR details::text LIKE '%sha256%')`, faces.ActionIdentityGrouped); n != 0 {
+		t.Fatal("group audit contains crop metadata")
+	}
+	var validationErr *faces.ValidationError
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, ids[:1]); !errors.As(err, &validationErr) {
+		t.Errorf("single-sighting group error = %v, want invalid input", err)
+	}
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, []uuid.UUID{ids[0], ids[0]}); !errors.As(err, &validationErr) {
+		t.Errorf("duplicate-sighting group error = %v, want invalid input", err)
+	}
+	if err := sf.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE face_sightings SET crop_key = NULL, crop_content_type = NULL, crop_size_bytes = NULL, crop_sha256 = NULL WHERE id = $1`, ids[3])
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, []uuid.UUID{ids[0], ids[3]}); !errors.Is(err, store.ErrConflict) {
+		t.Errorf("group without crop error = %v, want conflict", err)
+	}
+	if err := sf.env.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE face_sightings SET review_status = 'rejected', reviewed_at = now() WHERE id = $1`, ids[4])
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, []uuid.UUID{ids[0], ids[4]}); !errors.Is(err, store.ErrConflict) {
+		t.Errorf("group non-pending error = %v, want conflict", err)
+	}
+	if _, err := sf.svc.GroupReviewSightings(ctx, sf.manager, sf.tenant, []uuid.UUID{ids[0], uuid.New()}); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("cross-tenant/missing sighting error = %v, want not found", err)
 	}
 }
 

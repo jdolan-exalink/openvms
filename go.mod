@@ -36,6 +36,8 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 )
 
+require github.com/zhooravell/go-hailort v0.0.1 // indirect
+
 require (
 	cel.dev/expr v0.25.2 // indirect
 	dario.cat/mergo v1.0.2 // indirect

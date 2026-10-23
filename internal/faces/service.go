@@ -36,12 +36,13 @@ const (
 
 // Audit actions (PRD §66 naming convention).
 const (
-	ActionPersonCreated = "FACE_PERSON_CREATED"
-	ActionPersonUpdated = "FACE_PERSON_UPDATED"
-	ActionPersonDeleted = "FACE_PERSON_DELETED"
-	ActionImageAdded    = "FACE_IMAGE_ADDED"
-	ActionImageRemoved  = "FACE_IMAGE_REMOVED"
-	ActionImageRead     = "FACE_IMAGE_READ"
+	ActionPersonCreated     = "FACE_PERSON_CREATED"
+	ActionPersonUpdated     = "FACE_PERSON_UPDATED"
+	ActionPersonDeleted     = "FACE_PERSON_DELETED"
+	ActionPersonForcePurged = "FACE_PERSON_FORCE_PURGED"
+	ActionImageAdded        = "FACE_IMAGE_ADDED"
+	ActionImageRemoved      = "FACE_IMAGE_REMOVED"
+	ActionImageRead         = "FACE_IMAGE_READ"
 	// ActionSyncRetried records a manual sync retry (FACE-02).
 	ActionSyncRetried = "FACE_SYNC_RETRIED"
 	// ActionPersonRead records a read of person data (list, detail, image list). Details hold
@@ -53,6 +54,8 @@ const (
 	ActionTrainRead = "FACE_TRAIN_READ"
 	// ActionTrainAssigned records an attempt becoming an enrollment image.
 	ActionTrainAssigned = "FACE_TRAIN_ASSIGNED"
+	// ActionSightingIngested records a background Frigate attempt entering the durable review inbox.
+	ActionSightingIngested = "FACE_SIGHTING_INGESTED"
 )
 
 // Blobs stores enrollment image bytes; *objectstore.Store implements it.
@@ -87,6 +90,15 @@ type Person struct {
 	FirstImageID *uuid.UUID
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+}
+
+// PendingTombstone is the minimal identifying data a manager needs to find a deleted person
+// whose owned face still needs remote cleanup.
+type PendingTombstone struct {
+	ID                 uuid.UUID
+	DisplayName        string
+	DeletedAt          time.Time
+	PendingServerCount int
 }
 
 // LastRecognition points at the event of a person's most recent sighting.
@@ -334,6 +346,26 @@ func (s *Service) ListPersons(ctx context.Context, actor authz.Actor, tenantID u
 	return out, err
 }
 
+// ListPendingTombstones lists deleted persons with an owned, non-converged face on a live
+// server. It is manager-only because tombstones remain sensitive personal data.
+func (s *Service) ListPendingTombstones(ctx context.Context, actor authz.Actor, tenantID uuid.UUID) ([]PendingTombstone, error) {
+	out := []PendingTombstone{}
+	err := s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		rows, err := q.ListPendingFaceTombstones(ctx, tenantID)
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			if r.DeletedAt == nil {
+				return fmt.Errorf("pending face tombstone %s has no deletion time", r.ID)
+			}
+			out = append(out, PendingTombstone{ID: r.ID, DisplayName: r.DisplayName, DeletedAt: *r.DeletedAt, PendingServerCount: int(r.PendingServerCount)})
+		}
+		return s.audit(ctx, q, actor, tenantID, ActionPersonRead, "face_person", uuid.Nil, map[string]any{"pending_tombstones": len(out)})
+	})
+	return out, err
+}
+
 // GetPerson reads one person (faces.view).
 func (s *Service) GetPerson(ctx context.Context, actor authz.Actor, tenantID, id uuid.UUID) (Person, error) {
 	var out Person
@@ -500,6 +532,63 @@ func (s *Service) ListImages(ctx context.Context, actor authz.Actor, tenantID, p
 			map[string]any{"scope": "images", "person_id": personID, "count": len(out)})
 	})
 	return out, err
+}
+
+// ForcePurgeTombstone removes a deleted person even when an owned face has not converged on a
+// live server. Remote cleanup is persisted for the worker; this request never contacts Frigate.
+//
+// It deliberately does not share code with Syncer.purgeOne (sync.go). The worker purges in
+// several short transactions (scrub batches, then the final delete) and resumes on the next
+// pass when events still carry the name; an operator request instead runs in one transaction
+// and refuses to purge while any event keeps the name. Both must keep the same invariants:
+// record the erased name before scrubbing, scrub in bounded batches, never delete the person
+// while a stored event still carries the name, record the remote cleanup obligation before the
+// delete, and audit the purge. Change them together.
+func (s *Service) ForcePurgeTombstone(ctx context.Context, actor authz.Actor, tenantID, id uuid.UUID) error {
+	return s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		if err := lockPerson(ctx, q, id); err != nil {
+			return err
+		}
+		p, err := q.GetFacePersonAny(ctx, db.GetFacePersonAnyParams{TenantID: tenantID, ID: id})
+		if err != nil {
+			return store.Classify(err)
+		}
+		if p.DeletedAt == nil {
+			return store.ErrNotFound
+		}
+		// The marker must precede scrubbing so event ingestion cannot reintroduce this name.
+		if err := q.RecordFaceErasedName(ctx, db.RecordFaceErasedNameParams{TenantID: tenantID, Name: p.FrigateName}); err != nil {
+			return err
+		}
+		if err := q.RecordFaceForcedRemoteCleanup(ctx, db.RecordFaceForcedRemoteCleanupParams{TenantID: tenantID, ID: id, Name: p.FrigateName}); err != nil {
+			return err
+		}
+		var scrubbed int64
+		for {
+			n, err := q.ScrubEventSubLabel(ctx, db.ScrubEventSubLabelParams{TenantID: tenantID, Name: p.FrigateName, MaxRows: scrubBatch})
+			if err != nil {
+				return err
+			}
+			scrubbed += n
+			if n < scrubBatch {
+				break
+			}
+		}
+		left, err := q.CountEventsWithSubLabel(ctx, db.CountEventsWithSubLabelParams{TenantID: tenantID, Name: p.FrigateName})
+		if err != nil {
+			return err
+		}
+		if left > 0 {
+			return fmt.Errorf("refusing to purge face tombstone while %d events retain its name", left)
+		}
+		if n, err := q.PurgeFacePerson(ctx, db.PurgeFacePersonParams{TenantID: tenantID, ID: id}); err != nil {
+			return err
+		} else if n == 0 {
+			return store.ErrNotFound
+		}
+		return s.audit(ctx, q, actor, tenantID, ActionPersonForcePurged, "face_person", id,
+			map[string]any{"person_id": id, "events_scrubbed": scrubbed})
+	})
 }
 
 // AddImage validates and stores one enrollment image (faces.manage). Metadata commits first;

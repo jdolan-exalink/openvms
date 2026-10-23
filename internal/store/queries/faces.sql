@@ -94,6 +94,104 @@ WHERE tenant_id = ANY(@tenant_ids::uuid[]) AND deleted_at IS NULL AND capabiliti
   AND (cardinality(@server_ids::uuid[]) = 0 OR id = ANY(@server_ids::uuid[]))
 ORDER BY lower(name), id;
 
+-- name: ListFaceCapableServersAny :many
+-- Worker-only background discovery; RLS is explicitly bypassed through store.AllTenants.
+SELECT * FROM frigate_servers
+WHERE deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
+ORDER BY tenant_id, lower(name), id;
+
+-- name: InsertFaceSighting :one
+INSERT INTO face_sightings (tenant_id, server_id, source_file, source_seen_at, source_label, source_score)
+VALUES (@tenant_id, @server_id, @source_file, @source_seen_at, @source_label, @source_score)
+ON CONFLICT (tenant_id, server_id, source_file) DO NOTHING
+RETURNING *;
+
+-- name: GetFaceSightingBySource :one
+SELECT * FROM face_sightings
+WHERE tenant_id = @tenant_id AND server_id = @server_id AND source_file = @source_file;
+
+-- name: SetFaceSightingCrop :exec
+UPDATE face_sightings
+SET crop_key = @crop_key, crop_content_type = @crop_content_type,
+    crop_size_bytes = @crop_size_bytes, crop_sha256 = @crop_sha256,
+    ingest_error = ''
+WHERE id = @id AND review_status = 'pending';
+
+-- name: SetFaceSightingRetry :exec
+UPDATE face_sightings SET ingest_error = @ingest_error
+WHERE id = @id AND review_status = 'pending' AND crop_key IS NULL;
+
+-- name: ListFaceReviewSightings :many
+SELECT fs.id, fs.tenant_id, fs.server_id, fs.source_file, fs.source_seen_at, fs.source_label,
+       fs.source_score, fs.first_seen_at, fs.crop_key, fs.crop_content_type, fs.crop_size_bytes,
+       fs.crop_sha256, fs.ingest_error, fs.review_status, fs.person_id, fs.reviewed_at,
+       fs.identity_group_id, COALESCE(fs.identity_group_id, fs.id) AS identity_id,
+       s.name AS server_name, s.site_id,
+       (fs.crop_key IS NOT NULL)::boolean AS crop_available
+FROM face_sightings fs
+JOIN frigate_servers s ON s.id = fs.server_id AND s.tenant_id = fs.tenant_id
+WHERE fs.tenant_id = ANY(@tenant_ids::uuid[])
+  AND fs.review_status = 'pending'
+  AND (cardinality(@site_ids::uuid[]) = 0 OR s.site_id = ANY(@site_ids::uuid[]))
+  AND (cardinality(@server_ids::uuid[]) = 0 OR fs.server_id = ANY(@server_ids::uuid[]))
+ORDER BY fs.source_seen_at DESC NULLS LAST, fs.first_seen_at DESC, fs.id DESC;
+
+-- name: LockFaceIdentityGroups :exec
+SELECT pg_advisory_xact_lock(hashtextextended(@tenant_id::text, 65065));
+
+-- name: GetFaceSightingsForGrouping :many
+SELECT id, review_status, crop_key, identity_group_id
+FROM face_sightings
+WHERE tenant_id = @tenant_id AND id = ANY(@sighting_ids::uuid[])
+ORDER BY id
+FOR UPDATE;
+
+-- name: GetFaceIdentityGroupsForMerge :many
+SELECT id, created_at
+FROM face_identity_groups
+WHERE tenant_id = @tenant_id AND id = ANY(@group_ids::uuid[])
+ORDER BY created_at, id
+FOR UPDATE;
+
+-- name: CreateFaceIdentityGroup :exec
+INSERT INTO face_identity_groups (id, tenant_id) VALUES (@id, @tenant_id);
+
+-- name: MoveFaceIdentityGroupMembers :exec
+UPDATE face_sightings
+SET identity_group_id = @survivor_id
+WHERE tenant_id = @tenant_id AND identity_group_id = ANY(@group_ids::uuid[]);
+
+-- name: SetFaceSightingsIdentityGroup :exec
+UPDATE face_sightings
+SET identity_group_id = @group_id
+WHERE tenant_id = @tenant_id AND id = ANY(@sighting_ids::uuid[]) AND identity_group_id IS NULL;
+
+-- name: DeleteFaceIdentityGroups :exec
+DELETE FROM face_identity_groups
+WHERE tenant_id = @tenant_id AND id = ANY(@group_ids::uuid[]);
+
+-- name: CountFaceIdentityGroupMembers :one
+SELECT count(*)::int FROM face_sightings
+WHERE tenant_id = @tenant_id AND identity_group_id = @group_id;
+
+-- name: GetFaceSighting :one
+SELECT * FROM face_sightings WHERE tenant_id = @tenant_id AND id = @id;
+
+-- name: GetFaceSightingForUpdate :one
+SELECT * FROM face_sightings WHERE tenant_id = @tenant_id AND id = @id FOR UPDATE;
+
+-- name: AssignFaceSighting :execrows
+UPDATE face_sightings
+SET review_status = 'assigned', person_id = @person_id, reviewed_at = now(),
+    crop_key = NULL, crop_content_type = NULL, crop_size_bytes = NULL, crop_sha256 = NULL, ingest_error = ''
+WHERE tenant_id = @tenant_id AND id = @id AND review_status = 'pending' AND crop_key IS NOT NULL;
+
+-- name: RejectFaceSighting :execrows
+UPDATE face_sightings
+SET review_status = 'rejected', reviewed_at = now(),
+    crop_key = NULL, crop_content_type = NULL, crop_size_bytes = NULL, crop_sha256 = NULL, ingest_error = ''
+WHERE tenant_id = @tenant_id AND id = @id AND review_status = 'pending';
+
 -- name: ListFacePersonLastRecognitions :many
 -- The newest event per live person on the given cameras (the caller's events.view set). The
 -- lateral join stops at the first match per person, so the cost is one index probe each.
