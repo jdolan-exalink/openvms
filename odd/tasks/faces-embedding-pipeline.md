@@ -14,7 +14,7 @@ Branch: feat/faces-embedding-pipeline. Delivery: ask-on-risk, stacked-to-main. R
 ## Tasks
 - [x] E1 — S2,S3,S5: migration + queries + `Embedder` + worker loop + config. inline
 - [x] E2 — S3,S4,S6: similarity suggestion service + API (openapi, regenerate). inline
-- [ ] E3 — S4,S6: Train tab shows suggestions with confirm (reuses grouping) / dismiss. inline
+- [x] E3 — S4,S6: Train tab shows suggestions with confirm (reuses grouping) / dismiss. inline
 - [ ] E4 — S7: compose env, docs, deploy check with real model if available. inline
 
 ## Log

@@ -93,4 +93,38 @@ describe("Faces review inbox", () => {
     }));
     expect(await screen.findAllByText(new RegExp(groupID))).toHaveLength(2);
   });
+  it("offers a similarity suggestion that groups only when the manager accepts it", async () => {
+    const calls: { method: string; path: string; body?: unknown }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (raw: Request) => {
+      const url = new URL(raw.url);
+      if (raw.method !== "GET") {
+        const body = await raw.clone().text();
+        calls.push({ method: raw.method, path: url.pathname, body: body ? JSON.parse(body) : undefined });
+      }
+      if (url.pathname === "/api/v1/me") return json({ id: "u1", username: "u1", display_name: "u1", mfa_enabled: false, must_change_password: false, auth_method: "session", tenant_id: "t1", grants: ["faces.view", "faces.manage"].map((permission) => ({ permission, effect: "allow", scope_type: "platform" })) });
+      if (url.pathname === "/api/v1/faces/persons") return json({ items: [] });
+      if (url.pathname === "/api/v1/faces/review-inbox") return json({ items: [
+        { ...sighting, suggestions: [{ identity_id: sightingID2, similarity: 0.874 }] },
+        { ...secondSighting, identity_id: sightingID2, suggestions: [{ identity_id: sightingID, similarity: 0.874 }] },
+      ] });
+      if (url.pathname === "/api/v1/faces/review-inbox/groups" && raw.method === "POST") return json({ group_id: groupID, member_count: 2 });
+      if (url.pathname.startsWith("/api/v1/faces/review-inbox/")) return new Response(new Uint8Array(), { status: 200, headers: { "Content-Type": "image/png" } });
+      return json({ code: "not_found", message: "not found" }, 404);
+    }));
+
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
+    const matches = await screen.findAllByText(/Posible coincidencia/);
+    expect(matches).toHaveLength(2);
+    expect(matches[0]).toHaveTextContent("87%");
+    expect(calls).toEqual([]);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "No es la misma persona" })[1] as HTMLElement);
+    expect(screen.getAllByText(/Posible coincidencia/)).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Agrupar juntos" }));
+    await waitFor(() => expect(calls).toContainEqual({
+      method: "POST", path: "/api/v1/faces/review-inbox/groups", body: { sighting_ids: [sightingID, sightingID2] },
+    }));
+  });
 });
