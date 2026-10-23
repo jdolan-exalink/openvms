@@ -118,8 +118,8 @@ func TestReviewSightingsSuggestSimilarIdentitiesWithoutGrouping(t *testing.T) {
 
 // fakeDetector judges a crop by its first gray pixel so tests control the verdict through pngOf.
 type fakeDetector struct {
-	noFace, broken map[uint8]bool
-	calls          int
+	noFace, broken, degenerate map[uint8]bool
+	calls                      int
 }
 
 func (f *fakeDetector) Close() error { return nil }
@@ -128,6 +128,9 @@ func (f *fakeDetector) Detect(_ context.Context, img image.Image) (faces.Detecti
 	seed := img.(*image.Gray).Pix[0]
 	if f.broken[seed] {
 		return faces.Detection{}, errors.New("detector failed")
+	}
+	if f.degenerate[seed] { // a "face" whose landmarks collapsed onto one point cannot be aligned
+		return faces.Detection{Found: true, Score: 0.9, Landmarks: [5][2]float64{{8, 8}, {8, 8}, {8, 8}, {8, 8}, {8, 8}}}, nil
 	}
 	// Landmarks laid out like a face inside the 16x16 test crop.
 	return faces.Detection{Found: !f.noFace[seed], Score: 0.9, Landmarks: [5][2]float64{{5, 6}, {10, 6}, {8, 9}, {6, 12}, {10, 12}}}, nil
@@ -210,6 +213,22 @@ func TestEmbedderRetriesACropWhenTheDetectorFails(t *testing.T) {
 	}
 	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND face_detected IS NULL AND embedding IS NULL AND embed_failures = 1`, sf.tenant); got != 1 {
 		t.Fatalf("crops left unjudged with one failure = %d, want 1", got)
+	}
+}
+
+func TestEmbedderCountsACropThatCannotBeAlignedAsAFailureAndKeepsGoing(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	seedFaceSightings(t, sf, 74, 75, 76)
+	ctx := context.Background()
+	det := &fakeDetector{degenerate: map[uint8]bool{75: true}}
+	emb := &faces.Embedder{Store: sf.env.Store, Blobs: sf.blobs, Runtime: &fakeEmbedder{profile: faces.EmbeddingProfileCPU}, ModelID: "m1", Detector: det, Log: sf.svc.Log}
+	if n, err := emb.RunOnce(ctx, 10); err == nil || n != 2 {
+		t.Fatalf("pass = %d, %v; want 2 embedded and an error for the crop that cannot be aligned", n, err)
+	}
+	if got := sf.scanInt(`SELECT count(*) FROM face_sightings WHERE tenant_id = $1 AND embedding IS NULL AND face_detected IS NULL AND embed_failures = 1`, sf.tenant); got != 1 {
+		t.Fatalf("crops left without a vector and one failure = %d, want 1 (no fallback to the stretched input)", got)
 	}
 }
 

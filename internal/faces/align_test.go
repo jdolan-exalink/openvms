@@ -111,3 +111,27 @@ func TestAlignFace112RejectsBadInput(t *testing.T) {
 		t.Fatal("implausible landmark scale was accepted")
 	}
 }
+
+func TestAlignFace112HonoursCropsThatDoNotStartAtTheOrigin(t *testing.T) {
+	// The same shifted-and-scaled face as above, inside an image whose bounds start at (50, 40): the
+	// landmarks are given in the image's own coordinates, as the detector reports them.
+	src := image.NewRGBA(image.Rect(50, 40, 350, 340))
+	lm := transformPoints(0, 2, 80, 60)
+	for _, p := range lm {
+		for dy := -3; dy <= 3; dy++ {
+			for dx := -3; dx <= 3; dx++ {
+				src.Set(int(p[0])+dx, int(p[1])+dy, color.RGBA{R: 255, A: 255})
+			}
+		}
+	}
+	got, err := alignFace112(src, lm)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, p := range arcFaceTemplate {
+		r, _, _, _ := got.At(int(math.Round(p[0])), int(math.Round(p[1]))).RGBA()
+		if r>>8 < 200 {
+			t.Fatalf("landmark %d is not at the template position %v after aligning (red=%d)", i, p, r>>8)
+		}
+	}
+}

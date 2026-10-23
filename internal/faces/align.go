@@ -49,7 +49,8 @@ func estimateSimilarity(src, dst [5][2]float64) (similarity, error) {
 }
 
 // alignFace112 warps the crop so its landmarks land on arcFaceTemplate, producing the 112x112 input
-// ArcFace expects. Pixels outside the crop repeat its border. Landmarks are in crop pixel coordinates.
+// ArcFace expects. Pixels outside the crop repeat its border. Landmarks are in the image's own
+// coordinates (the same ones At uses), so a crop whose bounds do not start at (0, 0) works too.
 func alignFace112(src image.Image, landmarks [5][2]float64) (image.Image, error) {
 	if src == nil || src.Bounds().Empty() {
 		return nil, errors.New("face crop is empty")
@@ -75,7 +76,7 @@ func alignFace112(src image.Image, landmarks [5][2]float64) (image.Image, error)
 	for v := 0; v < faceModelInputSize; v++ {
 		for u := 0; u < faceModelInputSize; u++ {
 			du, dv := float64(u)-m[2], float64(v)-m[5]
-			sx, sy := i00*du+i01*dv+float64(b.Min.X), i10*du+i11*dv+float64(b.Min.Y)
+			sx, sy := i00*du+i01*dv, i10*du+i11*dv // landmarks are in the image's own coordinates, Bounds().Min included
 			x0, y0 := int(math.Floor(sx)), int(math.Floor(sy))
 			fx, fy := sx-float64(x0), sy-float64(y0)
 			var rgb [3]float64
