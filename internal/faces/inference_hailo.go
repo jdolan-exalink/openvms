@@ -120,16 +120,3 @@ func (r *hailo8EmbeddingRuntime) Close() error {
 	}
 	return nil
 }
-
-func validateHailoContract(inputSizes []int, outputNames []string, requestedOutput string) (string, error) {
-	if len(inputSizes) != 1 || inputSizes[0] != faceModelInputSize*faceModelInputSize*3 {
-		return "", fmt.Errorf("Hailo-8 HEF must have one 112x112 RGB input (%d bytes); got %v", faceModelInputSize*faceModelInputSize*3, inputSizes)
-	}
-	if len(outputNames) != 1 {
-		return "", fmt.Errorf("Hailo-8 HEF must have one embedding output; got %d outputs", len(outputNames))
-	}
-	if requestedOutput != "" && requestedOutput != outputNames[0] {
-		return "", fmt.Errorf("Hailo-8 HEF has output %q, requested %q", outputNames[0], requestedOutput)
-	}
-	return outputNames[0], nil
-}
