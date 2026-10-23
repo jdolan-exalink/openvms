@@ -406,9 +406,7 @@ func (h *Handlers) GroupFaceReviewSightings(ctx context.Context, r gen.GroupFace
 		return nil, err
 	}
 	ids := make([]uuid.UUID, len(r.Body.SightingIds))
-	for i, id := range r.Body.SightingIds {
-		ids[i] = uuid.UUID(id)
-	}
+	copy(ids, r.Body.SightingIds)
 	group, err := h.Faces.GroupReviewSightings(ctx, a, tenant, ids)
 	if err != nil {
 		return nil, err
