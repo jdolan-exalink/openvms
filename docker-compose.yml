@@ -206,6 +206,7 @@ services:
       # ${OPENVMS_DATA_DIR}/models/faces. The worker stays idle when the file is missing.
       FACE_EMBEDDING_MODEL_PATH: ${FACE_EMBEDDING_MODEL_PATH:-/opt/openvms/face-models/arcfaceresnet100-8-spatial1.onnx}
       FACE_EMBEDDING_MODEL_ID: ${FACE_EMBEDDING_MODEL_ID:-omz-arcfaceresnet100-8-spatial1}
+      FACE_DETECTOR_MODEL_PATH: ${FACE_DETECTOR_MODEL_PATH-/opt/openvms/face-models/face_detection_yunet_2023mar.onnx}
     volumes:
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/exports:/mnt/openvms/exports
       - ${OPENVMS_DATA_DIR:-/mnt/cctv/openvms}/models/faces:/opt/openvms/face-models:ro

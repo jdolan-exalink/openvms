@@ -376,8 +376,21 @@ func runFaceEmbedding(ctx context.Context, st *store.Store, blobs faces.Blobs, l
 		return
 	}
 	defer func() { _ = selection.Runtime.Close() }()
-	log.Info("face embedding ready", "profile", selection.Profile, "model_id", modelID)
-	embedder := &faces.Embedder{Store: st, Blobs: blobs, Runtime: selection.Runtime, ModelID: modelID, Log: log}
+	var detector faces.FaceDetector
+	if detectorPath := os.Getenv("FACE_DETECTOR_MODEL_PATH"); detectorPath != "" {
+		// A configured detector that cannot start pauses embedding: running without it would quietly
+		// embed crops that are not faces again.
+		detector, err = faces.OpenYuNet(faces.YuNetConfig{ModelPath: detectorPath, LibraryPath: libraryPath})
+		if err != nil {
+			log.Error("face embedding paused: face detector unavailable", "error", err)
+			return
+		}
+		defer func() { _ = detector.Close() }()
+	} else {
+		log.Info("face detector gate disabled: set FACE_DETECTOR_MODEL_PATH to keep crops that are not faces out of the suggestions")
+	}
+	log.Info("face embedding ready", "profile", selection.Profile, "model_id", modelID, "detector", detector != nil)
+	embedder := &faces.Embedder{Store: st, Blobs: blobs, Runtime: selection.Runtime, ModelID: modelID, Detector: detector, Log: log}
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
