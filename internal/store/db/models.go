@@ -487,6 +487,7 @@ type FaceSighting struct {
 	EmbeddingModel   *string
 	EmbeddedAt       *time.Time
 	EmbedFailures    int16
+	FaceDetected     *bool
 }
 
 type FaceWatchlist struct {

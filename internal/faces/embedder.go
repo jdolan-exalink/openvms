@@ -26,7 +26,10 @@ type Embedder struct {
 	Blobs   Blobs
 	Runtime EmbeddingRuntime
 	ModelID string
-	Log     *slog.Logger
+	// Detector, when set, judges every crop before it is embedded. Crops it rejects keep no vector
+	// and never become suggestions, but stay in the review inbox. Nil disables the gate.
+	Detector FaceDetector
+	Log      *slog.Logger
 }
 
 // embeddingInputVersion names the preprocessing applied before inference. It is part of the stored
@@ -36,8 +39,8 @@ const embeddingInputVersion = "in2"
 
 func (e *Embedder) storedModel() string { return e.ModelID + "+" + embeddingInputVersion }
 
-// RunOnce embeds up to limit pending sightings and returns how many were stored. A crop that
-// cannot be read or embedded is skipped and reported through the returned error after the pass.
+// RunOnce embeds up to limit pending sightings and returns how many vectors were stored. A crop that
+// cannot be read, judged or embedded is skipped and reported through the returned error after the pass.
 func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
 	if e.Store == nil || e.Blobs == nil || e.Runtime == nil || e.ModelID == "" {
 		return 0, errors.New("face embedding is not configured")
@@ -53,15 +56,14 @@ func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
 	if err := e.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		var err error
 		rows, err = q.ListFaceSightingsToEmbed(ctx, db.ListFaceSightingsToEmbedParams{
-			Profile: profile, Model: e.storedModel(), MaxFailures: maxEmbedFailures, RowLimit: int32(limit), //nolint:gosec // bounded above.
+			Profile: profile, Model: e.storedModel(), MaxFailures: maxEmbedFailures, Detect: e.Detector != nil, RowLimit: int32(limit), //nolint:gosec // bounded above.
 		})
 		return err
 	}); err != nil {
 		return 0, err
 	}
 
-	done := 0
-	failed := 0
+	done, failed, rejected := 0, 0, 0
 	for _, row := range rows {
 		if err := ctx.Err(); err != nil {
 			return done, err
@@ -69,34 +71,99 @@ func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
 		if row.CropKey == nil {
 			continue
 		}
-		vector, err := e.embedCrop(ctx, *row.CropKey)
-		if err != nil {
+		outcome, ok := e.processRow(ctx, row, profile)
+		switch {
+		case !ok:
 			failed++
-			e.warn(ctx, "embed face sighting", row, err)
-			e.recordFailure(ctx, row)
-			continue
+		case outcome == outcomeEmbedded:
+			done++
+		case outcome == outcomeRejected:
+			rejected++
 		}
-		var stored int64
-		if err := e.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
-			var err error
-			stored, err = q.SetFaceSightingEmbedding(ctx, db.SetFaceSightingEmbeddingParams{
-				ID: row.ID, Embedding: vector, Profile: profile, Model: e.storedModel(),
-			})
-			return err
-		}); err != nil {
-			failed++
-			e.warn(ctx, "store face embedding", row, err)
-			continue
-		}
-		done += int(stored)
+	}
+	if rejected > 0 && e.Log != nil {
+		e.Log.InfoContext(ctx, "face crops rejected as non-faces", "count", rejected)
 	}
 	if failed > 0 {
-		return done, fmt.Errorf("%d of %d face sightings could not be embedded", failed, len(rows))
+		return done, fmt.Errorf("%d of %d face sightings could not be processed", failed, len(rows))
 	}
 	return done, nil
 }
 
-func (e *Embedder) embedCrop(ctx context.Context, key string) ([]float32, error) {
+type rowOutcome int
+
+const (
+	outcomeNone     rowOutcome = iota // already judged, nothing to store
+	outcomeEmbedded                   // a vector was stored
+	outcomeRejected                   // the detector said it is not a face
+)
+
+// processRow runs one pending sighting through the detector gate (when configured) and the
+// embedder. A false ok means a step failed; the failure is logged and, where retrying makes sense,
+// counted against the crop's retry budget.
+func (e *Embedder) processRow(ctx context.Context, row db.ListFaceSightingsToEmbedRow, profile string) (outcome rowOutcome, ok bool) {
+	img, err := e.loadCrop(ctx, *row.CropKey)
+	if err != nil {
+		e.fail(ctx, "embed face sighting", row, err)
+		return outcomeNone, false
+	}
+	var detected *bool
+	if e.Detector != nil && row.FaceDetected == nil {
+		has, err := e.Detector.HasFace(ctx, img)
+		if err != nil {
+			e.fail(ctx, "detect face in sighting", row, err)
+			return outcomeNone, false
+		}
+		if !has {
+			return outcomeRejected, e.store(ctx, "store face detection", row, func(q *db.Queries) error {
+				_, err := q.MarkFaceSightingNotFace(ctx, row.ID)
+				return err
+			})
+		}
+		if row.EmbeddedCurrent {
+			// The vector predates the gate but is current: only the verdict is new.
+			return outcomeNone, e.store(ctx, "store face detection", row, func(q *db.Queries) error {
+				_, err := q.MarkFaceSightingFace(ctx, row.ID)
+				return err
+			})
+		}
+		detected = &has
+	}
+	vector, err := e.embed(ctx, img)
+	if err != nil {
+		e.fail(ctx, "embed face sighting", row, err)
+		return outcomeNone, false
+	}
+	stored := false
+	ok = e.store(ctx, "store face embedding", row, func(q *db.Queries) error {
+		n, err := q.SetFaceSightingEmbedding(ctx, db.SetFaceSightingEmbeddingParams{
+			ID: row.ID, Embedding: vector, Profile: profile, Model: e.storedModel(), FaceDetected: detected,
+		})
+		stored = n > 0
+		return err
+	})
+	if ok && stored {
+		return outcomeEmbedded, true
+	}
+	return outcomeNone, ok
+}
+
+// fail logs a step that failed on the crop itself and spends one retry of its budget.
+func (e *Embedder) fail(ctx context.Context, message string, row db.ListFaceSightingsToEmbedRow, err error) {
+	e.warn(ctx, message, row, err)
+	e.recordFailure(ctx, row)
+}
+
+// store persists a result and reports whether the write succeeded.
+func (e *Embedder) store(ctx context.Context, message string, row db.ListFaceSightingsToEmbedRow, write func(*db.Queries) error) bool {
+	if err := e.Store.Tx(ctx, store.AllTenants, write); err != nil {
+		e.warn(ctx, message, row, err)
+		return false
+	}
+	return true
+}
+
+func (e *Embedder) loadCrop(ctx context.Context, key string) (image.Image, error) {
 	data, _, err := e.Blobs.Get(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("read crop: %w", err)
@@ -105,6 +172,10 @@ func (e *Embedder) embedCrop(ctx context.Context, key string) ([]float32, error)
 	if err != nil {
 		return nil, fmt.Errorf("decode crop: %w", err)
 	}
+	return img, nil
+}
+
+func (e *Embedder) embed(ctx context.Context, img image.Image) ([]float32, error) {
 	vector, err := e.Runtime.Embed(ctx, img)
 	if err != nil {
 		return nil, err

@@ -208,10 +208,16 @@ CROSS JOIN LATERAL (
 WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NULL;
 
 -- name: ListFaceSightingsToEmbed :many
-SELECT id, tenant_id, crop_key FROM face_sightings
+-- A crop the detector rejected (face_detected = false) is never listed. With @detect on, unchecked
+-- crops are listed even when their vector is current so the detector can still judge them.
+SELECT id, tenant_id, crop_key, face_detected,
+       (embedding IS NOT NULL AND embedding_profile IS NOT DISTINCT FROM @profile::text AND embedding_model IS NOT DISTINCT FROM @model::text)::boolean AS embedded_current
+FROM face_sightings
 WHERE review_status = 'pending' AND crop_key IS NOT NULL
+  AND face_detected IS DISTINCT FROM false
   AND embed_failures < @max_failures::smallint
-  AND (embedding IS NULL OR embedding_profile IS DISTINCT FROM @profile::text OR embedding_model IS DISTINCT FROM @model::text)
+  AND (embedding IS NULL OR embedding_profile IS DISTINCT FROM @profile::text OR embedding_model IS DISTINCT FROM @model::text
+       OR (@detect::boolean AND face_detected IS NULL))
 ORDER BY embed_failures, first_seen_at, id
 LIMIT @row_limit;
 
@@ -222,8 +228,19 @@ WHERE id = @id AND review_status = 'pending';
 -- name: SetFaceSightingEmbedding :execrows
 UPDATE face_sightings
 SET embedding = @embedding::real[], embedding_profile = @profile::text, embedding_model = @model::text,
-    embedded_at = now(), embed_failures = 0
+    embedded_at = now(), embed_failures = 0,
+    face_detected = COALESCE(sqlc.narg('face_detected')::boolean, face_detected)
 WHERE id = @id AND review_status = 'pending' AND crop_key IS NOT NULL;
+
+-- name: MarkFaceSightingFace :execrows
+UPDATE face_sightings SET face_detected = true, embed_failures = 0
+WHERE id = @id AND review_status = 'pending';
+
+-- name: MarkFaceSightingNotFace :execrows
+UPDATE face_sightings
+SET face_detected = false, embedding = NULL, embedding_profile = NULL, embedding_model = NULL,
+    embedded_at = NULL, embed_failures = 0
+WHERE id = @id AND review_status = 'pending';
 
 -- name: ListFaceSightingEmbeddings :many
 SELECT id, COALESCE(identity_group_id, id) AS identity_id, embedding_profile, embedding_model, embedding
