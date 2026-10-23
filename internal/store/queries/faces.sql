@@ -206,3 +206,22 @@ CROSS JOIN LATERAL (
   LIMIT 1
 ) r
 WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NULL;
+
+-- name: ListFaceSightingsToEmbed :many
+SELECT id, tenant_id, crop_key FROM face_sightings
+WHERE review_status = 'pending' AND crop_key IS NOT NULL
+  AND (embedding IS NULL OR embedding_profile IS DISTINCT FROM @profile::text OR embedding_model IS DISTINCT FROM @model::text)
+ORDER BY first_seen_at, id
+LIMIT @row_limit;
+
+-- name: SetFaceSightingEmbedding :execrows
+UPDATE face_sightings
+SET embedding = @embedding::real[], embedding_profile = @profile::text, embedding_model = @model::text,
+    embedded_at = now()
+WHERE id = @id AND review_status = 'pending' AND crop_key IS NOT NULL;
+
+-- name: ListFaceSightingEmbeddings :many
+SELECT id, identity_group_id, COALESCE(identity_group_id, id) AS identity_id, embedding
+FROM face_sightings
+WHERE tenant_id = @tenant_id AND review_status = 'pending' AND embedding IS NOT NULL
+  AND embedding_profile = @profile::text AND embedding_model = @model::text;

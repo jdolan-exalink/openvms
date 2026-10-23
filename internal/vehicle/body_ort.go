@@ -35,8 +35,11 @@ func OpenBodyClassifier(modelPath, libraryPath string) (_ *BodyClassifier, retEr
 		return nil, fmt.Errorf("onnxruntime: %w", err)
 	}
 	ort.SetSharedLibraryPath(libraryPath)
-	if err := ort.InitializeEnvironment(); err != nil {
-		return nil, err
+	// The faces embedder may have initialized the process-wide environment already.
+	if !ort.IsInitialized() {
+		if err := ort.InitializeEnvironment(); err != nil {
+			return nil, err
+		}
 	}
 	input, err := ort.NewEmptyTensor[float32](ort.NewShape(1, 3, bodySize, bodySize))
 	if err != nil {
