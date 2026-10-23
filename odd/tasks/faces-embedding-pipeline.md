@@ -13,6 +13,7 @@ Branches (all merged to main): feat/faces-embedding-pipeline (#209), fix/faces-e
 - S8: "hacé el filtro de \"parece una cara\" antes de embeber" (L5). A crop the detector rejects gets no vector and no suggestions but stays in the inbox (S6).
 - S9: "quiero que podamos borrar selecciones porque no son caras o porque no nos interesan ya que veo detecciones que no tienen caras" (L8).
 - S10: "dale, calibrá el umbral" (L6). Assumption: calibration needs labelled pairs; the operator chose to collect them from their own decisions.
+- S11: Landmark alignment before embedding (pending item from L11). Assumption: worth shipping only if it separates real pairs better.
 
 ## Tasks
 - [x] E1 — S2,S3,S5: migration + queries + `Embedder` + worker loop + config. inline
@@ -24,6 +25,7 @@ Branches (all merged to main): feat/faces-embedding-pipeline (#209), fix/faces-e
 - [x] E7 — S4: suggestion threshold 0.5 -> 0.55 from reviewed real pairs. inline. #212
 - [x] E8 — S8,S6: YuNet detector gate (migration 00071, `face_detected`, worker `FACE_DETECTOR_MODEL_PATH`). inline. #213, commits 0aa1fa4, 86cf8de, 887ec91
 - [x] E9 — S10: persisted suggestion verdicts (migration 00072, keyed by sighting pair), UI records `same`/`different`. inline. #214, commits 587c120, 127f9bf, 53b48cd, d269c6f
+- [x] E11 — S11: align faces on YuNet landmarks before embedding (`+in3a` model version, detector `Detect` API). inline. Branch feat/faces-landmark-alignment.
 - [ ] E10 — S10: calibrate the threshold from `face_suggestion_decisions` once enough operator verdicts exist (query in docs/operations/face-embeddings.md). Blocked on data.
 
 ## Log
@@ -45,3 +47,4 @@ Branches (all merged to main): feat/faces-embedding-pipeline (#209), fix/faces-e
   - Labels recorded only above the threshold can justify raising it, never lowering it.
   - Operating notes: the first `make deploy` failed once in `git pull --ff-only` ("Cannot fast-forward to multiple branches") with nothing changed, and passed on retry. The host needs `/mnt/cctv/openvms/models/faces/face_detection_yunet_2023mar.onnx` (the prepare script downloads it); without it the worker keeps embedding without the gate, with a warning, and needs a restart.
 - L11 (2026-10-23): follow-ups, none started: calibrate the threshold on operator verdicts (E10); landmark alignment before embedding; real Hailo-8 inference (FACE-07.2c); OpenVINO provider decision (FACE-07.2e, branch feat/faces-openvino-runtime, unpushed); infrared profile faces are rejected by the detector (score about 0.08); native-review leftovers: dismiss state split between handler and mutation (TrainTab), nested indexOf in the ordering assertion.
+- L12 (2026-10-23): user: "terminemos los pendientes". Done: TrainTab dismiss tidy (chore/faces-train-tab-tidy), landmark alignment (E11). Experiment first, on 76 real crops: aligned same-person pairs [0.92 0.59 0.67 0.58] -> [0.81 0.68 0.77 0.86]; unrelated median 0.16 -> 0.06; the 12 highest unlabelled aligned pairs (0.58-0.78) were all the same person by eye. Not doable here: Hailo-8 real inference (no /dev/hailo* on this host), threshold calibration (needs operator verdicts), OpenVINO (a deployment decision). TDD note: tests were written with the code; the experiment came first.
