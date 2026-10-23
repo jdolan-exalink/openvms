@@ -24,6 +24,12 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/testutil/pgtest"
 )
 
+type testAlarmsEnv struct {
+	*demofix.Env
+	server *httptest.Server
+	pub    *testPublisher
+}
+
 type testPublisher struct {
 	mu        sync.Mutex
 	published []string
@@ -45,12 +51,6 @@ func (p *testPublisher) has(subject string) bool {
 		}
 	}
 	return false
-}
-
-type testAlarmsEnv struct {
-	*demofix.Env
-	server *httptest.Server
-	pub    *testPublisher
 }
 
 func setupAlarmsTest(t *testing.T) *testAlarmsEnv {
@@ -81,6 +81,18 @@ func setupAlarmsTest(t *testing.T) *testAlarmsEnv {
 		server: ts,
 		pub:    pub,
 	}
+}
+
+func (te *testAlarmsEnv) hasQueuedPublication(t *testing.T, subject string) bool {
+	t.Helper()
+	ctx := context.Background()
+	var exists bool
+	if err := te.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM realtime_publication_outbox WHERE subject = $1)`, subject).Scan(&exists)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return exists
 }
 
 func seedAlarm(t *testing.T, env *testAlarmsEnv, cam db.GetCameraRow, remoteID string) (uuid.UUID, uuid.UUID) {
@@ -246,8 +258,8 @@ func TestAlarmsLifecycle(t *testing.T) {
 	if acked.Status != "acknowledged" || acked.AcknowledgedBy == nil {
 		t.Fatalf("alarm not acknowledged properly: %+v", acked)
 	}
-	if !te.pub.has("alarm.acknowledged." + tenantID) {
-		t.Fatalf("expected alarm.acknowledged.%s to be published", tenantID)
+	if !te.hasQueuedPublication(t, "alarm.acknowledged."+tenantID) {
+		t.Fatalf("expected alarm.acknowledged.%s to be queued for publication", tenantID)
 	}
 
 	// Re-acknowledge is idempotent (200)
@@ -288,8 +300,8 @@ func TestAlarmsLifecycle(t *testing.T) {
 	if assigned.AssignedTo == nil || *assigned.AssignedTo != operadorID {
 		t.Fatalf("expected assigned_to to be %s, got %+v", operadorID, assigned.AssignedTo)
 	}
-	if !te.pub.has("alarm.assigned." + tenantID) {
-		t.Fatalf("expected alarm.assigned.%s to be published", tenantID)
+	if !te.hasQueuedPublication(t, "alarm.assigned."+tenantID) {
+		t.Fatalf("expected alarm.assigned.%s to be queued for publication", tenantID)
 	}
 
 	// Assign to invalid user (non-existent or lacking permissions) -> 400
@@ -310,8 +322,8 @@ func TestAlarmsLifecycle(t *testing.T) {
 	if resolved.Status != "resolved" || resolved.ResolvedBy == nil {
 		t.Fatalf("expected resolved alarm, got %+v", resolved)
 	}
-	if !te.pub.has("alarm.resolved." + tenantID) {
-		t.Fatalf("expected alarm.resolved.%s to be published", tenantID)
+	if !te.hasQueuedPublication(t, "alarm.resolved."+tenantID) {
+		t.Fatalf("expected alarm.resolved.%s to be queued for publication", tenantID)
 	}
 
 	// Re-resolve is idempotent (200)
