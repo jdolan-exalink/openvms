@@ -44,6 +44,7 @@ type faceAPI struct {
 	env    *demofix.Env
 	ts     *httptest.Server
 	tenant uuid.UUID
+	blobs  delBlobs
 }
 
 func newFaceAPI(t *testing.T) *faceAPI {
@@ -63,7 +64,7 @@ func newFaceAPI(t *testing.T) *faceAPI {
 	}
 	ts := httptest.NewServer(router)
 	t.Cleanup(ts.Close)
-	return &faceAPI{t: t, env: env, ts: ts, tenant: env.Demo.TenantID}
+	return &faceAPI{t: t, env: env, ts: ts, tenant: env.Demo.TenantID, blobs: blobs}
 }
 
 // user returns a bearer token of a tenant user holding the permissions at tenant scope.
@@ -379,6 +380,74 @@ func TestFacesAPIRecognitionsTrainAndRedaction(t *testing.T) {
 	}
 	if r := f.js(mgr, "POST", "/api/v1/faces/train/assign", assign); r.code != http.StatusNotFound {
 		t.Errorf("assign of a consumed attempt = %d, want 404", r.code)
+	}
+}
+
+func TestFacesAPIReviewInboxStableIDsAssignmentAndRejection(t *testing.T) {
+	f := newFaceAPI(t)
+	mgr := f.user(f.tenant, "review-mgr", authz.FacesManage, authz.FacesView)
+	viewer := f.user(f.tenant, "review-viewer", authz.FacesView)
+	var otherTenant uuid.UUID
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `INSERT INTO tenants (slug, name) VALUES ('review-other', 'Review other') RETURNING id`).Scan(&otherTenant)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	other := f.user(otherTenant, "review-other", authz.FacesView, authz.FacesManage)
+	cam := f.env.Cameras["frigate-h01/acceso_norte"]
+	h01 := f.env.Mocks["frigate-h01"].Server
+	h01.FaceRecognition = true
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `UPDATE frigate_servers SET capabilities = capabilities || '{"face_recognition": true}'::jsonb WHERE id = $1`, cam.ServerID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstFile := "1700000000.1-abcd-1700000100-unknown-0.41.webp"
+	secondFile := "1700000000.2-efgh-1700000200-unknown-0.52.webp"
+	firstCrop, secondCrop := testPNG(t), testPNG(t)
+	h01.AddFaceTrainImage(firstFile, firstCrop)
+	h01.AddFaceTrainImage(secondFile, secondCrop)
+	ingestor := &faces.ReviewIngestor{
+		Store: f.env.Store, Blobs: f.blobs, Adapters: inventory.NewAdapters(f.env.Svc), Log: pgtest.Discard(),
+	}
+	if err := ingestor.RunOnce(context.Background(), 25); err != nil {
+		t.Fatal(err)
+	}
+
+	list := f.js(mgr, http.MethodGet, "/api/v1/faces/review-inbox", "")
+	items, _ := list.json()["items"].([]any)
+	if list.code != http.StatusOK || len(items) != 2 {
+		t.Fatalf("review inbox = %d %s", list.code, list.raw)
+	}
+	sightingID := items[0].(map[string]any)["id"].(string)
+	if _, err := uuid.Parse(sightingID); err != nil {
+		t.Fatalf("sighting ID = %q, not UUID", sightingID)
+	}
+	imagePath := "/api/v1/faces/review-inbox/" + sightingID + "/image"
+	image := f.js(mgr, http.MethodGet, imagePath, "")
+	if image.code != http.StatusOK || image.header.Get("Cache-Control") != "private, no-store" || image.header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("private sighting image = %d, cache=%q", image.code, image.header.Get("Cache-Control"))
+	}
+	if r := f.js(viewer, http.MethodDelete, "/api/v1/faces/review-inbox/"+items[1].(map[string]any)["id"].(string), ""); r.code != http.StatusForbidden {
+		t.Fatalf("reject without faces.manage = %d, want 403", r.code)
+	}
+	if r := f.js(other, http.MethodGet, imagePath, ""); r.code != http.StatusNotFound {
+		t.Fatalf("cross-tenant image = %d, want 404", r.code)
+	}
+
+	person := f.js(mgr, http.MethodPost, "/api/v1/faces/persons", `{"display_name":"Reviewed person"}`)
+	personID := person.json()["id"].(string)
+	assigned := f.js(mgr, http.MethodPost, "/api/v1/faces/review-inbox/"+sightingID+"/assign", `{"person_id":"`+personID+`"}`)
+	if assigned.code != http.StatusCreated || assigned.json()["attempt_removed"] != true {
+		t.Fatalf("assign sighting = %d %s", assigned.code, assigned.raw)
+	}
+	rejectedID := items[1].(map[string]any)["id"].(string)
+	if r := f.js(mgr, http.MethodDelete, "/api/v1/faces/review-inbox/"+rejectedID, ""); r.code != http.StatusNoContent {
+		t.Fatalf("reject sighting = %d %s", r.code, r.raw)
+	}
+	if remaining := f.js(mgr, http.MethodGet, "/api/v1/faces/review-inbox", ""); len(remaining.json()["items"].([]any)) != 0 {
+		t.Fatalf("reviewed sightings remain in inbox: %s", remaining.raw)
 	}
 }
 

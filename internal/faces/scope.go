@@ -58,6 +58,10 @@ func (s *Service) ServerTenant(ctx context.Context, actor authz.Actor, serverID 
 	return s.objectTenant(ctx, actor, `SELECT tenant_id FROM frigate_servers WHERE id = $1 AND deleted_at IS NULL`, serverID)
 }
 
+func (s *Service) ReviewSightingTenant(ctx context.Context, actor authz.Actor, sightingID uuid.UUID) (uuid.UUID, error) {
+	return s.objectTenant(ctx, actor, `SELECT tenant_id FROM face_sightings WHERE id = $1`, sightingID)
+}
+
 func (s *Service) objectTenant(ctx context.Context, actor authz.Actor, query string, id uuid.UUID) (uuid.UUID, error) {
 	var tenant uuid.UUID
 	err := s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
