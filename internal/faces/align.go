@@ -7,6 +7,10 @@ import (
 	"math"
 )
 
+// faceModelInputSize is the side of the square image ArcFace models take. It lives here, not with
+// the cgo-only runtime, because aligning does not need cgo.
+const faceModelInputSize = 112
+
 // arcFaceTemplate is the standard 112x112 landmark layout ArcFace models are trained on: the eye
 // nearest the image's left edge, the other eye, the nose tip, and the left and right mouth corners.
 var arcFaceTemplate = [5][2]float64{
