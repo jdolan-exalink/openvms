@@ -490,6 +490,16 @@ type FaceSighting struct {
 	FaceDetected     *bool
 }
 
+type FaceSuggestionDecision struct {
+	TenantID   uuid.UUID
+	SightingLo uuid.UUID
+	SightingHi uuid.UUID
+	Decision   string
+	Similarity float32
+	DecidedBy  *uuid.UUID
+	DecidedAt  time.Time
+}
+
 type FaceWatchlist struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID

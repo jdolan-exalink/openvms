@@ -22,7 +22,7 @@ func TestSuggestIdentitiesRanksByBestMemberPairAndRespectsThreshold(t *testing.T
 		{ID: c, IdentityID: groupID, Profile: "cpu", Model: "m1", Vector: vec(0, 1)},
 		{ID: d, IdentityID: groupID, Profile: "cpu", Model: "m1", Vector: vec(0.8, 0.2)},
 	}
-	got := suggestIdentities(items, 0.8, 3)
+	got := suggestIdentities(items, 0.8, 3, nil)
 	if len(got[a]) != 2 || got[a][0].IdentityID != b || got[a][1].IdentityID != groupID {
 		t.Fatalf("suggestions for a = %+v, want b then the group (best member d)", got[a])
 	}
@@ -48,7 +48,7 @@ func TestSuggestIdentitiesNeverComparesAcrossProfileOrModel(t *testing.T) {
 		{ID: b, IdentityID: b, Profile: "hailo8", Model: "m1", Vector: vec(1, 0)},
 		{ID: c, IdentityID: c, Profile: "cpu", Model: "m2", Vector: vec(1, 0)},
 	}
-	if got := suggestIdentities(items, 0.1, 3); len(got) != 0 {
+	if got := suggestIdentities(items, 0.1, 3, nil); len(got) != 0 {
 		t.Fatalf("suggestions across profile/model = %+v, want none", got)
 	}
 }
@@ -61,7 +61,7 @@ func TestSuggestIdentitiesLimitsPerIdentityAndIgnoresZeroVectors(t *testing.T) {
 	}
 	zero := uuid.New()
 	items = append(items, embeddedSighting{ID: zero, IdentityID: zero, Profile: "cpu", Model: "m1", Vector: vec(0, 0)})
-	got := suggestIdentities(items, 0.5, 2)
+	got := suggestIdentities(items, 0.5, 2, nil)
 	if len(got[ids[0]]) != 2 {
 		t.Fatalf("suggestions = %d, want capped at 2", len(got[ids[0]]))
 	}
@@ -80,8 +80,25 @@ func TestDefaultSuggestionThresholdDropsPairsBelow055(t *testing.T) {
 		{ID: below, IdentityID: below, Profile: "cpu", Model: "m1", Vector: at(0.52)},
 		{ID: above, IdentityID: above, Profile: "cpu", Model: "m1", Vector: at(0.58)},
 	}
-	got := suggestIdentities(items, DefaultSuggestionThreshold, maxSuggestionPerIdentity)
+	got := suggestIdentities(items, DefaultSuggestionThreshold, maxSuggestionPerIdentity, nil)
 	if len(got[base]) != 1 || got[base][0].IdentityID != above {
 		t.Fatalf("suggestions for base = %+v, want only the 0.58 match", got[base])
+	}
+}
+
+func TestSuggestIdentitiesSkipsRuledOutPairsBeforeTheCap(t *testing.T) {
+	a, b, c := uuid.New(), uuid.New(), uuid.New()
+	items := []embeddedSighting{
+		{ID: a, IdentityID: a, Profile: "cpu", Model: "m1", Vector: vec(1, 0)},
+		{ID: b, IdentityID: b, Profile: "cpu", Model: "m1", Vector: vec(0.95, 0.31)},
+		{ID: c, IdentityID: c, Profile: "cpu", Model: "m1", Vector: vec(0.8, 0.6)},
+	}
+	ruledOut := pairSet{orderedUUIDPair(b, a): {}} // the order the pair is named in does not matter
+	got := suggestIdentities(items, 0.5, 1, ruledOut)
+	if len(got[a]) != 1 || got[a][0].IdentityID != c {
+		t.Fatalf("suggestions for a = %+v, want c once b is ruled out (the cap must not be spent on b)", got[a])
+	}
+	if len(got[b]) != 1 || got[b][0].IdentityID != c {
+		t.Fatalf("suggestions for b = %+v, want c", got[b])
 	}
 }

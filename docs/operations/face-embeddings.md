@@ -36,7 +36,7 @@ by themselves: a manager confirms each grouping.
   calibration on consented data; treat suggestions as hints. Crops that are not faces (black frames,
   pavement) match each other at any threshold, which is why the detector gate exists.
 - Crops are resized to 112x112 without landmark alignment, which lowers accuracy for tilted faces.
-- Dismissing a suggestion in the UI lasts for the browser session only.
+- "Not the same person" is stored (`face_suggestion_decisions`) and hides that pair from future suggestions, in both directions. "Group together" on a suggestion stores a `same` verdict. A verdict names one sighting on each side, so it keeps ruling out the two identities when groups merge later. Rows hold sighting IDs and the similarity the operator saw, never biometric data, and survive the crops they refer to. If a verdict cannot be stored the UI shows the error and does not group.
 - Crops and vectors are biometric data: logs carry IDs and counts only.
 - The OMZ ArcFace graph normalizes pixels itself and expects raw 0-255 RGB. Feeding it [-1, 1] (the first release, `in1`) made every crop embed almost identically (median cosine 0.986 across 76 real crops, so every suggestion read as a match). With raw bytes the same crops have median 0.18 and p90 0.37. The `+in2` suffix makes the worker recompute the old vectors on the next pass.
 - Detector gate: each crop is checked once with YuNet before it is embedded. A rejected crop gets
@@ -48,3 +48,18 @@ by themselves: a manager confirms each grouping.
   profile faces score about 0.08 and are rejected, as are heavily cropped faces. That sample is not
   consented data. About 13 ms per crop. A verdict is final until `face_detected` is reset to NULL in
   the database; a detector failure is retried like an embedding failure.
+
+## Calibrating the threshold
+
+Operator verdicts are the calibration data. After a few weeks of use:
+
+```sql
+SELECT decision, count(*), round(min(similarity)::numeric, 3) AS min,
+       round((percentile_cont(0.5) WITHIN GROUP (ORDER BY similarity))::numeric, 3) AS median,
+       round(max(similarity)::numeric, 3) AS max
+FROM face_suggestion_decisions GROUP BY decision;
+```
+
+Verdicts only exist for pairs at or above the current threshold, so they can justify raising it
+(`different` verdicts piling up near the threshold) but cannot show same-person pairs that were never
+suggested, so they cannot justify lowering it.

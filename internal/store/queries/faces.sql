@@ -247,3 +247,19 @@ SELECT id, COALESCE(identity_group_id, id) AS identity_id, embedding_profile, em
 FROM face_sightings
 WHERE id = ANY(@ids::uuid[]) AND review_status = 'pending' AND embedding IS NOT NULL
 ORDER BY first_seen_at DESC, id DESC;
+
+-- name: UpsertFaceSuggestionDecision :exec
+INSERT INTO face_suggestion_decisions (tenant_id, sighting_lo, sighting_hi, decision, similarity, decided_by)
+VALUES (@tenant_id, @sighting_lo, @sighting_hi, @decision, @similarity, @decided_by)
+ON CONFLICT (tenant_id, sighting_lo, sighting_hi) DO UPDATE
+SET decision = EXCLUDED.decision, similarity = EXCLUDED.similarity, decided_by = EXCLUDED.decided_by, decided_at = now();
+
+-- name: ListFaceDifferentSightingPairs :many
+SELECT sighting_lo, sighting_hi FROM face_suggestion_decisions
+WHERE decision = 'different' AND tenant_id = ANY(@tenant_ids::uuid[])
+  AND (sighting_lo = ANY(@sighting_ids::uuid[]) OR sighting_hi = ANY(@sighting_ids::uuid[]));
+
+-- name: FaceSightingIsPending :one
+SELECT EXISTS (
+  SELECT 1 FROM face_sightings WHERE tenant_id = @tenant_id AND id = @sighting_id AND review_status = 'pending'
+);

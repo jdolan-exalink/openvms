@@ -2,6 +2,7 @@ package faces
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -15,10 +16,11 @@ import (
 )
 
 const (
-	ActionSightingRead     = "FACE_SIGHTING_READ"
-	ActionSightingAssigned = "FACE_SIGHTING_ASSIGNED"
-	ActionSightingRejected = "FACE_SIGHTING_REJECTED"
-	ActionIdentityGrouped  = "FACE_IDENTITY_GROUPED"
+	ActionSightingRead      = "FACE_SIGHTING_READ"
+	ActionSightingAssigned  = "FACE_SIGHTING_ASSIGNED"
+	ActionSightingRejected  = "FACE_SIGHTING_REJECTED"
+	ActionIdentityGrouped   = "FACE_IDENTITY_GROUPED"
+	ActionSuggestionDecided = "FACE_SUGGESTION_DECIDED"
 )
 
 // ReviewSighting is one persisted, still-unclassified face attempt. Source filenames remain
@@ -61,6 +63,7 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 	var tenants []uuid.UUID
 	var rows []db.ListFaceReviewSightingsRow
 	var embeddings []db.ListFaceSightingEmbeddingsRow
+	var ruledOut pairSet
 	if err := s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		q := db.New(tx)
 		c, err := access.Load(ctx, q, actor)
@@ -81,7 +84,28 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 			ids = append(ids, row.ID)
 		}
 		embeddings, err = q.ListFaceSightingEmbeddings(ctx, ids)
-		return err
+		if err != nil {
+			return err
+		}
+		pairs, err := q.ListFaceDifferentSightingPairs(ctx, db.ListFaceDifferentSightingPairsParams{TenantIds: nonNil(tenants), SightingIds: ids})
+		if err != nil {
+			return err
+		}
+		// A verdict names one sighting on each side; it rules out the two identities those sightings
+		// belong to now, however the groups have been merged since.
+		identityOf := make(map[uuid.UUID]uuid.UUID, len(rows))
+		for _, row := range rows {
+			identityOf[row.ID] = row.IdentityID
+		}
+		ruledOut = make(pairSet, len(pairs))
+		for _, p := range pairs {
+			lo, okLo := identityOf[p.SightingLo]
+			hi, okHi := identityOf[p.SightingHi]
+			if okLo && okHi && lo != hi {
+				ruledOut[orderedUUIDPair(lo, hi)] = struct{}{}
+			}
+		}
+		return nil
 	}); err != nil {
 		return ReviewSightingsPage{}, err
 	}
@@ -95,7 +119,7 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 			ID: e.ID, IdentityID: e.IdentityID, Profile: *e.EmbeddingProfile, Model: *e.EmbeddingModel, Vector: e.Embedding,
 		})
 	}
-	suggestions := suggestIdentities(candidates, DefaultSuggestionThreshold, maxSuggestionPerIdentity)
+	suggestions := suggestIdentities(candidates, DefaultSuggestionThreshold, maxSuggestionPerIdentity, ruledOut)
 	out := ReviewSightingsPage{Items: make([]ReviewSighting, 0, len(rows))}
 	counts := make(map[uuid.UUID]int, len(tenants))
 	for _, tenantID := range tenants {
@@ -219,6 +243,50 @@ func (s *Service) GroupReviewSightings(ctx context.Context, actor authz.Actor, t
 		})
 	})
 	return result, err
+}
+
+// Suggestion verdicts an operator can record for a pair of identities.
+const (
+	SuggestionSame      = "same"
+	SuggestionDifferent = "different"
+)
+
+// RecordSuggestionDecision stores an operator verdict on a suggested pair, named by one pending
+// sighting from each side (sighting IDs outlive group merges; identity IDs do not). It replaces an
+// earlier verdict for the same pair. A "different" verdict hides the two identities those
+// sightings belong to from each other's suggestions; the similarity the operator saw is kept so the
+// threshold can be calibrated on real decisions.
+func (s *Service) RecordSuggestionDecision(ctx context.Context, actor authz.Actor, tenantID, sightingID, otherID uuid.UUID, decision string, similarity float64) error {
+	if sightingID == uuid.Nil || otherID == uuid.Nil || sightingID == otherID {
+		return invalid("two different sighting IDs are required")
+	}
+	if decision != SuggestionSame && decision != SuggestionDifferent {
+		return invalid("decision must be %q or %q", SuggestionSame, SuggestionDifferent)
+	}
+	if math.IsNaN(similarity) || similarity < 0 || similarity > 1 {
+		return invalid("similarity must be between 0 and 1")
+	}
+	pair := orderedUUIDPair(sightingID, otherID)
+	return s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
+		for _, id := range pair {
+			pending, err := q.FaceSightingIsPending(ctx, db.FaceSightingIsPendingParams{TenantID: tenantID, SightingID: id})
+			if err != nil {
+				return err
+			}
+			if !pending {
+				return store.ErrNotFound
+			}
+		}
+		if err := q.UpsertFaceSuggestionDecision(ctx, db.UpsertFaceSuggestionDecisionParams{
+			TenantID: tenantID, SightingLo: pair[0], SightingHi: pair[1], Decision: decision,
+			Similarity: float32(similarity), DecidedBy: &actor.UserID,
+		}); err != nil {
+			return err
+		}
+		return s.audit(ctx, q, actor, tenantID, ActionSuggestionDecided, "face_sighting", pair[0], map[string]any{
+			"sighting_ids": []uuid.UUID{pair[0], pair[1]}, "decision": decision, "similarity": similarity,
+		})
+	})
 }
 
 // ReviewSightingImage serves a retained crop only while its sighting is pending review.

@@ -450,6 +450,20 @@ func (h *Handlers) GroupFaceReviewSightings(ctx context.Context, r gen.GroupFace
 	return gen.GroupFaceReviewSightings200JSONResponse{GroupId: group.ID, MemberCount: int(group.MemberCount)}, nil
 }
 
+func (h *Handlers) RecordFaceSuggestionDecision(ctx context.Context, r gen.RecordFaceSuggestionDecisionRequestObject) (gen.RecordFaceSuggestionDecisionResponseObject, error) {
+	if r.Body == nil {
+		return nil, &faces.ValidationError{Msg: "a request body is required"}
+	}
+	a, tenant, err := h.faceCaller(ctx, r.Params.TenantId)
+	if err != nil {
+		return nil, err
+	}
+	if err := h.Faces.RecordSuggestionDecision(ctx, a, tenant, r.Body.SightingId, r.Body.OtherSightingId, string(r.Body.Decision), float64(r.Body.Similarity)); err != nil {
+		return nil, err
+	}
+	return gen.RecordFaceSuggestionDecision204Response{}, nil
+}
+
 func (h *Handlers) GetFaceReviewSightingImage(ctx context.Context, r gen.GetFaceReviewSightingImageRequestObject) (gen.GetFaceReviewSightingImageResponseObject, error) {
 	a, tenant, err := h.faceObjectCaller(ctx, r.Params.TenantId, func(ctx context.Context, a authz.Actor) (uuid.UUID, error) {
 		return h.Faces.ReviewSightingTenant(ctx, a, r.SightingId)
