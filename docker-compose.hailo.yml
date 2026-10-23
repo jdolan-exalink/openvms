@@ -1,0 +1,12 @@
+# Apply on a Hailo-8 host using:
+# docker compose -f docker-compose.yml -f docker-compose.hailo.yml up -d --build worker
+# HailoRT user-space is built into the worker image. Set
+# OPENVMS_HAILORT_VERSION to match the host's installed PCIe driver version.
+services:
+  worker:
+    build:
+      target: runtime-hailo
+      args:
+        HAILORT_VERSION: ${OPENVMS_HAILORT_VERSION:?Set this to match the host PCIe driver version}
+    devices:
+      - /dev/hailo0:/dev/hailo0
