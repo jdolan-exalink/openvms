@@ -10,13 +10,17 @@ import { fmtDateTime } from "@/lib/format";
 
 const NEW_PERSON = "__new__";
 
-function AttemptCard({ attempt, persons, canManage, selected, onSelect }: { attempt: Schemas["FaceReviewSighting"]; persons: Schemas["FacePerson"][]; canManage: boolean; selected: boolean; onSelect: (id: string, selected: boolean) => void }) {
+type SuggestionTarget = { identityId: string; similarity: number; sightingIds: string[] };
+
+function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggestions, onGroupSuggestion, groupingSuggestion }: { attempt: Schemas["FaceReviewSighting"]; persons: Schemas["FacePerson"][]; canManage: boolean; selected: boolean; onSelect: (id: string, selected: boolean) => void; suggestions: SuggestionTarget[]; onGroupSuggestion: (ids: string[]) => void; groupingSuggestion: boolean }) {
   const t = useT();
   const qc = useQueryClient();
   const [target, setTarget] = useState("");
   const [newName, setNewName] = useState("");
   const [hint, setHint] = useState<string | null>(null);
   const [confirmReject, setConfirmReject] = useState(false);
+  const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const visibleSuggestions = suggestions.filter((sug) => !dismissed.has(sug.identityId));
   const assign = useMutation({
     mutationFn: async () => {
       const body = target === NEW_PERSON ? { new_person_display_name: newName.trim() } : { person_id: target };
@@ -65,6 +69,21 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect }: { atte
         {attempt.seen_at && <span>{fmtDateTime(attempt.seen_at)}</span>}
         {attempt.score != null && <span>{t("faces.attemptScore", { score: attempt.score })}</span>}
       </div>
+      {visibleSuggestions.map((sug) => (
+        <div key={sug.identityId} className="flex flex-col gap-1 rounded-m3-lg bg-surface-2 p-2 text-xs">
+          <p className="break-all">{t("faces.suggestionMatch", { id: sug.identityId, percent: Math.round(sug.similarity * 100) })}</p>
+          {canManage && (
+            <div className="flex flex-wrap gap-1">
+              <Button variant="tonal" disabled={groupingSuggestion} onClick={() => onGroupSuggestion([attempt.id, ...sug.sightingIds])}>
+                {t("faces.groupSuggestion")}
+              </Button>
+              <Button variant="text" onClick={() => setDismissed((current) => new Set(current).add(sug.identityId))}>
+                {t("faces.dismissSuggestion")}
+              </Button>
+            </div>
+          )}
+        </div>
+      ))}
       {canManage && attempt.crop_available && (
         <div className="flex flex-col gap-2">
           <Checkbox
@@ -116,6 +135,13 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect }: { atte
   );
 }
 
+function suggestionTargets(attempt: Schemas["FaceReviewSighting"], items: Schemas["FaceReviewSighting"][]): SuggestionTarget[] {
+  return (attempt.suggestions ?? []).flatMap((sug) => {
+    const sightingIds = items.filter((item) => item.identity_id === sug.identity_id).map((item) => item.id);
+    return sightingIds.length > 0 ? [{ identityId: sug.identity_id, similarity: sug.similarity, sightingIds }] : [];
+  });
+}
+
 /** TrainTab shows the durable inbox of unclassified sightings and their stable identities. */
 export function TrainTab({ canManage }: { canManage: boolean }) {
   const t = useT();
@@ -126,7 +152,7 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
   const persons = useQuery(facePersonsQuery());
   const data = train.data;
   const group = useMutation({
-    mutationFn: async () => unwrap(await api.POST("/api/v1/faces/review-inbox/groups", { body: { sighting_ids: Array.from(selected) } })),
+    mutationFn: async (ids: string[]) => unwrap(await api.POST("/api/v1/faces/review-inbox/groups", { body: { sighting_ids: ids } })),
     onSuccess: async () => {
       setSelected(new Set());
       await qc.invalidateQueries({ queryKey: ["faces", "review-inbox"] });
@@ -148,7 +174,7 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
         <>
           {canManage && <div className="flex flex-col gap-2 rounded-m3-xl bg-surface-1 p-3 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-sm text-on-surface-variant">{t("faces.groupSelectionCount", { count: selected.size })}</span>
-            <Button variant="tonal" disabled={selected.size < 2 || group.isPending} onClick={() => group.mutate()}>
+            <Button variant="tonal" disabled={selected.size < 2 || group.isPending} onClick={() => group.mutate(Array.from(selected))}>
               {group.isPending ? t("faces.grouping") : t("faces.groupSelected")}
             </Button>
             <ErrorNote error={group.error} />
@@ -161,6 +187,9 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
                 persons={persons.data ?? []}
                 canManage={canManage}
                 selected={selected.has(a.id)}
+                suggestions={suggestionTargets(a, data.items)}
+                onGroupSuggestion={(ids) => group.mutate(ids)}
+                groupingSuggestion={group.isPending}
                 onSelect={(id, checked) => setSelected((current) => {
                   const next = new Set(current);
                   if (checked) next.add(id);

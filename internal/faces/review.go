@@ -36,6 +36,9 @@ type ReviewSighting struct {
 	FirstSeenAt   time.Time
 	CropAvailable bool
 	IngestError   string
+	// Suggestions lists other pending identities that may be the same person. They never change
+	// an identity or name by themselves.
+	Suggestions []Suggestion
 }
 
 type ReviewIdentityGroup struct {
@@ -57,6 +60,7 @@ type ReviewAssignInput struct {
 func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f TrainFilter) (ReviewSightingsPage, error) {
 	var tenants []uuid.UUID
 	var rows []db.ListFaceReviewSightingsRow
+	var embeddings []db.ListFaceSightingEmbeddingsRow
 	if err := s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
 		q := db.New(tx)
 		c, err := access.Load(ctx, q, actor)
@@ -69,10 +73,29 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 		rows, err = q.ListFaceReviewSightings(ctx, db.ListFaceReviewSightingsParams{
 			TenantIds: nonNil(tenants), SiteIds: nonNil(f.SiteIDs), ServerIds: nonNil(f.ServerIDs),
 		})
+		if err != nil {
+			return err
+		}
+		ids := make([]uuid.UUID, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+		}
+		embeddings, err = q.ListFaceSightingEmbeddings(ctx, ids)
 		return err
 	}); err != nil {
 		return ReviewSightingsPage{}, err
 	}
+	// Suggestions only compare sightings already visible to this actor, never other scopes.
+	candidates := make([]embeddedSighting, 0, len(embeddings))
+	for _, e := range embeddings {
+		if e.EmbeddingProfile == nil || e.EmbeddingModel == nil {
+			continue
+		}
+		candidates = append(candidates, embeddedSighting{
+			ID: e.ID, IdentityID: e.IdentityID, Profile: *e.EmbeddingProfile, Model: *e.EmbeddingModel, Vector: e.Embedding,
+		})
+	}
+	suggestions := suggestIdentities(candidates, DefaultSuggestionThreshold, maxSuggestionPerIdentity)
 	out := ReviewSightingsPage{Items: make([]ReviewSighting, 0, len(rows))}
 	counts := make(map[uuid.UUID]int, len(tenants))
 	for _, tenantID := range tenants {
@@ -84,6 +107,7 @@ func (s *Service) ListReviewSightings(ctx context.Context, actor authz.Actor, f 
 			ServerID: row.ServerID, ServerName: row.ServerName, SiteID: row.SiteID,
 			SeenAt: row.SourceSeenAt, Label: row.SourceLabel, Score: row.SourceScore,
 			FirstSeenAt: row.FirstSeenAt, CropAvailable: row.CropAvailable, IngestError: row.IngestError,
+			Suggestions: suggestions[row.IdentityID],
 		})
 		counts[row.TenantID]++
 	}

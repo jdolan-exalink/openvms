@@ -132,6 +132,7 @@ func run() error {
 	go runFaceSync(ctx, &faces.Syncer{Store: st, Blobs: objects, Adapters: adapters, Log: log},
 		&faces.Service{Store: st, Blobs: objects, Log: log}, log)
 	go runFaceReviewIngestion(ctx, &faces.ReviewIngestor{Store: st, Blobs: objects, Adapters: adapters, Log: log}, log)
+	go runFaceEmbedding(ctx, st, objects, log)
 
 	rulesSvc := rules.NewService(st, &jetstreamPublisher{js: js}, log)
 	rulesSvc.ZoneResolver = rules.NewStoreZoneResolver(st)
@@ -343,6 +344,56 @@ func runFaceReviewIngestion(ctx context.Context, ingestor *faces.ReviewIngestor,
 			return
 		case <-ticker.C:
 			run()
+		}
+	}
+}
+
+// runFaceEmbedding embeds retained face crops centrally (FACE-07.2). It stays off until a model
+// artifact is configured, because no weights ship with the image. The profile is the first usable
+// one of Hailo-8, then CPU; a device that is visible but fails initialization or smoke falls back.
+func runFaceEmbedding(ctx context.Context, st *store.Store, blobs faces.Blobs, log *slog.Logger) {
+	modelPath := os.Getenv("FACE_EMBEDDING_MODEL_PATH")
+	hefPath := os.Getenv("FACE_EMBEDDING_HEF_PATH")
+	modelID := os.Getenv("FACE_EMBEDDING_MODEL_ID")
+	if (modelPath == "" && hefPath == "") || modelID == "" {
+		log.Info("face embedding disabled: set FACE_EMBEDDING_MODEL_PATH (or FACE_EMBEDDING_HEF_PATH) and FACE_EMBEDDING_MODEL_ID")
+		return
+	}
+	libraryPath := os.Getenv("ONNXRUNTIME_SHARED_LIBRARY")
+	if libraryPath == "" {
+		libraryPath = "/opt/openvms/libonnxruntime.so.1.29.0"
+	}
+	var factories []faces.EmbeddingRuntimeFactory
+	if hefPath != "" {
+		factories = append(factories, faces.Hailo8EmbeddingFactory{Config: faces.Hailo8EmbeddingConfig{HEFPath: hefPath}})
+	}
+	if modelPath != "" {
+		factories = append(factories, faces.CPUEmbeddingFactory{Config: faces.CPUEmbeddingConfig{ModelPath: modelPath, LibraryPath: libraryPath}})
+	}
+	selection, err := faces.SelectEmbeddingRuntime(ctx, factories)
+	if err != nil {
+		log.Warn("face embedding disabled: no usable runtime", "error", err)
+		return
+	}
+	defer func() { _ = selection.Runtime.Close() }()
+	log.Info("face embedding ready", "profile", selection.Profile, "model_id", modelID)
+	embedder := &faces.Embedder{Store: st, Blobs: blobs, Runtime: selection.Runtime, ModelID: modelID, Log: log}
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		passCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		n, err := embedder.RunOnce(passCtx, 100)
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			log.WarnContext(ctx, "embed face sightings", "error", err)
+		}
+		if n > 0 {
+			log.InfoContext(ctx, "face sightings embedded", "count", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }
