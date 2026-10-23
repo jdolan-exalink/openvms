@@ -1947,6 +1947,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/faces/review-inbox/groups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly group pending face sightings as one identity (faces.manage)
+         * @description Groups at least two pending sightings with retained crops. Existing groups are merged
+         *     atomically; the oldest group ID is kept so the identity ID remains stable. This action
+         *     records an audit entry and never uses automated similarity suggestions.
+         */
+        post: operations["groupFaceReviewSightings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/faces/review-inbox/{sightingId}/image": {
         parameters: {
             query?: never;
@@ -4946,6 +4968,16 @@ export interface components {
              * @description Stable opaque identity for this sighting.
              */
             id: string;
+            /**
+             * Format: uuid
+             * @description Group ID when grouped
+             */
+            identity_id: string;
+            /**
+             * Format: uuid
+             * @description Confirmed manager-created identity group
+             */
+            group_id?: string | null;
             /** Format: uuid */
             server_id: string;
             server_name: string;
@@ -4968,6 +5000,17 @@ export interface components {
         };
         FaceReviewInbox: {
             items: components["schemas"]["FaceReviewSighting"][];
+        };
+        FaceReviewIdentityGroupCreate: {
+            sighting_ids: string[];
+        };
+        FaceReviewIdentityGroup: {
+            /**
+             * Format: uuid
+             * @description Stable identity ID retained by the group.
+             */
+            group_id: string;
+            member_count: number;
         };
         /** @description Exactly one of person_id and new_person_display_name. */
         FaceReviewSightingAssign: {
@@ -9670,6 +9713,37 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+        };
+    };
+    groupFaceReviewSightings: {
+        parameters: {
+            query?: {
+                tenant_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FaceReviewIdentityGroupCreate"];
+            };
+        };
+        responses: {
+            /** @description Group created or merged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FaceReviewIdentityGroup"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            409: components["responses"]["Conflict"];
         };
     };
     getFaceReviewSightingImage: {

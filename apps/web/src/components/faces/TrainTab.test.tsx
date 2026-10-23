@@ -8,7 +8,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 const sightingID = "4b03f6ef-e00e-4a17-8d33-7f2d583a4ccd";
 const sighting: Schemas["FaceReviewSighting"] = {
-  id: sightingID, server_id: "s1", server_name: "Frigate 1", site_id: "site1",
+  id: sightingID, identity_id: "identity-1", server_id: "s1", server_name: "Frigate 1", site_id: "site1",
   first_seen_at: "2026-10-22T10:00:00Z", seen_at: "2026-10-22T09:59:00Z", score: 0.41,
   crop_available: true,
 };
