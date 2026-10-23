@@ -15,6 +15,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -62,19 +63,11 @@ type Syncer struct {
 	// OnAlarmUpdated is called after commit with the alarms that absorbed further events of an
 	// ongoing situation (one entry per alarm per pull; optional).
 	OnAlarmUpdated func(ctx context.Context, alarms []OpenedAlarm)
-	// Rules is evaluated for each newly inserted event, after commit (optional). Its errors are
-	// logged and never fail the sync.
-	Rules RuleEvaluator
 	// ObjectStopMargin overrides how much of the per-server deadline must remain for the
 	// tracked-objects pass to fetch another page (default 20s). Mainly for tests.
 	ObjectStopMargin time.Duration
 
 	now func() time.Time
-}
-
-// RuleEvaluator runs the automation rules against a new event (implemented by rules.Service).
-type RuleEvaluator interface {
-	EvaluateEvent(ctx context.Context, ev rules.EventContext) error
 }
 
 // NewEvent is published when an event enters the index.
@@ -304,8 +297,6 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	var created []NewEvent
 	// Events that were already known but gained recognized names: only person rules are
 	// evaluated for them (Frigate usually names a face after it opened the review).
-	var recognized []NewEvent
-	cameraNames := map[uuid.UUID]string{}
 	var opened []OpenedAlarm
 	updated := newAlarmUpdates()
 	err := s.Store.TxRaw(ctx, store.AllTenants, func(tx pgx.Tx) error {
@@ -319,12 +310,15 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 				return err
 			}
 			if !isNew && len(ev.GainedSubLabels) > 0 {
-				recognized = append(recognized, ev)
-				cameraNames[cam.ID] = cam.Name
+				if err := enqueueRuleEvaluation(ctx, tx, ev, cam.Name, true); err != nil {
+					return err
+				}
 			}
 			if isNew {
 				created = append(created, ev)
-				cameraNames[cam.ID] = cam.Name
+				if err := enqueueRuleEvaluation(ctx, tx, ev, cam.Name, false); err != nil {
+					return err
+				}
 				if err := vehicle.Enqueue(ctx, tx, ev.ID, ev.TenantID, ev.Labels); err != nil {
 					return err
 				}
@@ -348,6 +342,23 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 				}
 			}
 		}
+		for _, ev := range created {
+			if err := enqueueRealtimeAnnouncement(ctx, tx, "frigate.event.new."+ev.TenantID.String(), ev.TenantID, nil, ev); err != nil {
+				return err
+			}
+		}
+		for _, alarm := range opened {
+			key := "alarm/" + alarm.ID.String()
+			if err := enqueueRealtimeAnnouncement(ctx, tx, "alarm.opened."+alarm.TenantID.String(), alarm.TenantID, &key, alarm); err != nil {
+				return err
+			}
+		}
+		for _, alarm := range updated.list {
+			key := "alarm/" + alarm.ID.String()
+			if err := enqueueRealtimeAnnouncement(ctx, tx, "alarm.updated."+alarm.TenantID.String(), alarm.TenantID, &key, alarm); err != nil {
+				return err
+			}
+		}
 		return upsertCursor(ctx, tx, srv, "review_cursor", &next)
 	})
 	if err != nil {
@@ -364,29 +375,53 @@ func (s *Syncer) syncReviews(ctx context.Context, srv db.FrigateServer, a frigat
 	if s.OnAlarmUpdated != nil && len(updated.list) > 0 {
 		s.OnAlarmUpdated(ctx, updated.list)
 	}
-	if s.Rules != nil {
-		evaluate := func(ev NewEvent, faceUpdate bool) {
-			// A face update carries only the names gained since the last pull, so the person
-			// rules that already fired for the earlier names are not evaluated again.
-			subLabels := ev.SubLabels
-			if faceUpdate {
-				subLabels = ev.GainedSubLabels
-			}
-			rc := rules.EventContext{
-				ID: ev.ID, TenantID: ev.TenantID, SiteID: ev.SiteID, ServerID: ev.ServerID, CameraID: ev.CameraID,
-				CameraName: cameraNames[ev.CameraID], Severity: ev.Severity, Labels: ev.Labels, SubLabels: subLabels,
-				FaceUpdate: faceUpdate, Zones: ev.Zones, Start: ev.Start,
-			}
-			if err := s.Rules.EvaluateEvent(ctx, rc); err != nil {
-				s.Log.WarnContext(ctx, "evaluate rules", "error", err, "event_id", ev.ID)
-			}
-		}
-		for _, ev := range created {
-			evaluate(ev, false)
-		}
-		for _, ev := range recognized {
-			evaluate(ev, true)
-		}
+	return nil
+}
+
+func enqueueRealtimeAnnouncement(ctx context.Context, tx pgx.Tx, subject string, tenantID uuid.UUID, aggregateKey *string, payload any) error {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal realtime announcement %s: %w", subject, err)
+	}
+	_, err = db.New(tx).EnqueueRealtimePublication(ctx, db.EnqueueRealtimePublicationParams{
+		TenantID: tenantID, Subject: subject, Payload: data, AggregateKey: aggregateKey,
+	})
+	if err != nil {
+		return fmt.Errorf("enqueue realtime announcement %s: %w", subject, err)
+	}
+	return nil
+}
+
+func ruleContext(ev NewEvent, cameraName string, faceUpdate bool) rules.EventContext {
+	// A face update carries only the names gained since the last pull, so rules that already
+	// fired for earlier names are not evaluated again.
+	subLabels := ev.SubLabels
+	if faceUpdate {
+		subLabels = ev.GainedSubLabels
+	}
+	return rules.EventContext{
+		ID: ev.ID, TenantID: ev.TenantID, SiteID: ev.SiteID, ServerID: ev.ServerID, CameraID: ev.CameraID,
+		CameraName: cameraName, Severity: ev.Severity, Labels: ev.Labels, SubLabels: subLabels,
+		FaceUpdate: faceUpdate, Zones: ev.Zones, Start: ev.Start,
+	}
+}
+
+func enqueueRuleEvaluation(ctx context.Context, tx pgx.Tx, ev NewEvent, cameraName string, faceUpdate bool) error {
+	payload, err := json.Marshal(ruleContext(ev, cameraName, faceUpdate))
+	if err != nil {
+		return fmt.Errorf("marshal rule evaluation for event %s: %w", ev.ID, err)
+	}
+	kind := "event"
+	faceNames := []string{}
+	if faceUpdate {
+		kind = "face_update"
+		faceNames = append(faceNames, ev.GainedSubLabels...)
+		sort.Strings(faceNames)
+	}
+	if err := db.New(tx).EnqueueRuleEvaluation(ctx, db.EnqueueRuleEvaluationParams{
+		EventID: ev.ID, EvaluationKind: kind, FaceNames: faceNames, Payload: payload,
+	}); err != nil {
+		return fmt.Errorf("enqueue rule evaluation for event %s: %w", ev.ID, err)
 	}
 	return nil
 }

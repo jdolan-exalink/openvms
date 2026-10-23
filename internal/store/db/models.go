@@ -396,6 +396,12 @@ type FaceErasedName struct {
 	ErasedAt    time.Time
 }
 
+type FaceIdentityGroup struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	CreatedAt time.Time
+}
+
 type FacePerson struct {
 	ID           uuid.UUID
 	TenantID     uuid.UUID
@@ -456,6 +462,26 @@ type FaceServerSync struct {
 	LastSyncedAt    *time.Time
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+}
+
+type FaceSighting struct {
+	ID              uuid.UUID
+	TenantID        uuid.UUID
+	ServerID        uuid.UUID
+	SourceFile      string
+	SourceSeenAt    *time.Time
+	SourceLabel     string
+	SourceScore     *float64
+	FirstSeenAt     time.Time
+	CropKey         *string
+	CropContentType *string
+	CropSizeBytes   *int32
+	CropSha256      *string
+	IngestError     string
+	ReviewStatus    string
+	PersonID        *uuid.UUID
+	ReviewedAt      *time.Time
+	IdentityGroupID *uuid.UUID
 }
 
 type FaceWatchlist struct {
@@ -764,6 +790,30 @@ type PersonAttributeJob struct {
 	UpdatedAt  time.Time
 }
 
+type RealtimePublicationAggregateSequence struct {
+	TenantID     uuid.UUID
+	AggregateKey string
+	LastSequence int64
+}
+
+type RealtimePublicationOutbox struct {
+	ID                uuid.UUID
+	TenantID          uuid.UUID
+	Subject           string
+	Payload           json.RawMessage
+	Status            string
+	Attempts          int32
+	AvailableAt       time.Time
+	LeaseUntil        *time.Time
+	LeaseToken        *uuid.UUID
+	LastError         *string
+	CreatedAt         time.Time
+	SentAt            *time.Time
+	UpdatedAt         time.Time
+	AggregateKey      *string
+	AggregateSequence *int64
+}
+
 type Rule struct {
 	ID          uuid.UUID
 	TenantID    uuid.UUID
@@ -775,6 +825,23 @@ type Rule struct {
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	Version     int32
+}
+
+type RuleEvaluationJob struct {
+	ID             uuid.UUID
+	EventID        uuid.UUID
+	EvaluationKind string
+	FaceNames      []string
+	Payload        json.RawMessage
+	Status         string
+	Attempts       int32
+	AvailableAt    time.Time
+	LeaseUntil     *time.Time
+	LeaseToken     *uuid.UUID
+	LastError      *string
+	EnqueuedAt     time.Time
+	CompletedAt    *time.Time
+	UpdatedAt      time.Time
 }
 
 type RuleFiring struct {

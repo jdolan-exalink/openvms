@@ -128,6 +128,17 @@ WHERE p.deleted_at IS NOT NULL
 ORDER BY p.deleted_at, p.id
 LIMIT @max_rows;
 
+-- name: ListPendingFaceTombstones :many
+-- Show managers only deleted persons that still have an owned face on a live server.
+SELECT p.id, p.display_name, p.deleted_at, count(*)::int AS pending_server_count
+FROM face_persons p
+JOIN face_server_sync f ON f.person_id = p.id AND f.tenant_id = p.tenant_id AND f.owned
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NOT NULL
+  AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
+GROUP BY p.id
+ORDER BY p.deleted_at, p.id;
+
 -- name: FaceTombstonePurgeable :one
 SELECT EXISTS (
     SELECT 1 FROM face_persons p
@@ -166,12 +177,30 @@ DELETE FROM face_erased_names WHERE tenant_id = @tenant_id AND frigate_name = @n
 DELETE FROM face_erased_names WHERE erased_at < now() - make_interval(secs => @retention_seconds::float8);
 
 -- name: RecordFaceRemoteCleanup :exec
+-- Automatic tombstone purge (Syncer.purgeOne): record cleanup only for owned, non-converged
+-- faces on servers that currently lack face recognition. A face-capable server is deleted
+-- from by the normal sync before the purge, so it never needs a deferred obligation.
+-- RecordFaceForcedRemoteCleanup is the operator variant without the capability condition.
 INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)
 SELECT f.tenant_id, f.server_id, @name::text
 FROM face_server_sync f
 JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
 WHERE f.tenant_id = @tenant_id AND f.person_id = @id AND f.owned
   AND NOT (s.capabilities @> '{"face_recognition": true}'::jsonb)
+  AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
+ON CONFLICT DO NOTHING;
+
+-- name: RecordFaceForcedRemoteCleanup :exec
+-- Operator force purge (Service.ForcePurgeTombstone). The only difference from
+-- RecordFaceRemoteCleanup is that it drops the "server lacks face recognition" condition: an
+-- operator may purge while a live server is unreachable or face-disabled, so keep a durable
+-- cleanup obligation for every owned face that has not converged, regardless of current
+-- capability; the worker only attempts it after the server reports face recognition enabled.
+INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)
+SELECT f.tenant_id, f.server_id, @name::text
+FROM face_server_sync f
+JOIN frigate_servers s ON s.id = f.server_id AND s.deleted_at IS NULL
+WHERE f.tenant_id = @tenant_id AND f.person_id = @id AND f.owned
   AND NOT (f.status = 'synced' AND f.synced_revision = f.desired_revision)
 ON CONFLICT DO NOTHING;
 

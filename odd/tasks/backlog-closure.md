@@ -33,17 +33,17 @@ The list is an initial inventory; reconcile each tracker and current code before
 
 - [x] BC-01 — Verify current mTLS/provisioning branch; capture baseline checks. Acceptance: outcomes recorded. Evidence: current branch verification at 5893d2e is recorded below; the initial baseline remains historical evidence.
 - [x] BC-02 — Reconcile stale backlog trackers and SSH provisioning/install/update checks. Local evidence and tracker reconciliation are complete; current T2 deployment and a real-host update-ssh run remain manual acceptance.
-  Status (2026-10-22): local Go build, web typecheck, T2 tests, and generated-output convergence are recorded PASS (CI-01/CI-03 evidence). The demo SSH install on `10.1.1.144` is recorded PASS in `servers-ssh-provisioning.md`; stale pending notes there are corrected. Deployment of the current T2 UI/control-plane build and a real-host `update-ssh` run remain unverified. No remote action is included in this closure; keep those acceptance checks open until the destination, operation, and credentials are explicitly authorized.
+  Status (2026-10-22): local Go build, web typecheck, T2 tests, and generated-output convergence are recorded PASS (CI-01/CI-03 evidence). The demo SSH install on `10.1.1.144` is recorded PASS in `servers-ssh-provisioning.md`; stale pending notes there are corrected. Update (2026-10-23): `main` at `bfed389` (version 0.4.0, including the T2 UI/control plane) was deployed locally on the OpenVMS host and `/health/ready` reports `ok`; UI behavior was not exercised with a real user, so UI acceptance stays open. A real-host `update-ssh` run remains unverified. No remote action is included in this closure; keep those acceptance checks open until the destination, operation, and credentials are explicitly authorized.
 - [x] BC-03 — Maps acceptance and performance. Acceptance: resolve M-W27 performance and stale M-W20/alarm S2-3b–d states against current implementation and tests; record any remaining manual/browser acceptance separately.
   Status (2026-10-22): reconciled. M-W27's earlier synthetic readings (54/57/74 ms against 50 ms) remain historical; the dedicated Maps Playwright performance job passed on candidate `b0a0997728111aa17c605ec05a6719a761b7f473` in CI run [39823706672](https://github.com/jdolan-exalink/openvms/actions/runs/39823706672/job/119987924259). `odd/tasks/maps.md` now records that evidence. M-W20's 26-camera layout versus the 16-camera scope and real-account browser/media/deployment acceptance remain explicit manual checks.
 - [ ] BC-04 — ONVIF camera management, work units 02–19. Acceptance: derive cohesive independent PR slices from `odd/tasks/onvif-camera-management.md`, preserve its requirements and per-unit verification; do not assume readiness from roadmap checkboxes.
-  Status (2026-10-22): partially reconciled. ONVIF-02 stable identity merged in #166; ONVIF-03 core/API relay merged in #163/#164; ONVIF-04 snapshot-URI primitive merged in #167. Secure image retrieval (#170) and ONVIF-06 imaging (#169) have green CI and await the requested PR-size exception before merge. ONVIF-09 audit storage (#171) and API wiring (#172) are merged as `9913115` and `d7f7c8c`; all checks passed on the reviewed fix in #172. Broader ONVIF-05–19 work remains open. Real-camera interoperability and device acceptance are unverified; no device or remote-host operation was performed.
+  Status (2026-10-22): partially reconciled. ONVIF-02 stable identity merged in #166; ONVIF-03 core/API relay merged in #163/#164; ONVIF-04 snapshot-URI primitive merged in #167. Secure image retrieval (#170) and ONVIF-06 imaging (#169) were closed without merging (2026-10-23 check) and are not in `main`; their branches `feat/onvif-04-snapshot-download` and `feat/onvif-imaging-options-readback` hold the work. Decision (2026-10-23): discarded from this closeout and moved to explicit backlog; reopen as new PRs against `main` if needed. ONVIF-09 audit storage (#171) and API wiring (#172) are merged as `9913115` and `d7f7c8c`; all checks passed on the reviewed fix in #172. Broader ONVIF-05–19 work remains open. Real-camera interoperability and device acceptance are unverified; no device or remote-host operation was performed.
 - [x] BC-05 — Frigate configuration editor FC-5 code and local verification. Acceptance: reconcile FC-5 against current code/tests and implement the remaining requirements; track real Frigate/hardware acceptance separately.
   Status (2026-10-22): code complete. FC-5a curated autotracking/face/GenAI panels and same-server bulk apply (#162), plus FC-5c unsaved YAML diff (#165), are merged. The focused UI tests, typecheck, full CI checks, and Compose smoke passed. Acceptance against real Frigate 0.17 and 0.18 remains manual and open (`odd/tasks/frigate-config-editor.md`).
 - [x] BC-06 — Remaining device lifecycle and PWA acceptance. Acceptance: reconcile device/agent trackers and test the outstanding local PWA behavior; report unavailable browser/device/hardware proof honestly.
   Status (2026-10-22): reconciled. LP-05 (#73, `a578c6b8…`) and PLS-03 (#74, `092a3432…`) are reviewed, CI-checked and merged; ARS PR #116 (`16e4925…`) completes the #113–116 chain. Tracker checkboxes now distinguish merged code from outstanding acceptance. The iOS/Android standalone PWA checklist and live `casa01` install/reinstall with enrollment, authenticated health and registration evidence remain manual device/host checks; no physical device or remote SSH action was performed.
-- [ ] BC-07 — Final backlog reconciliation. Acceptance: every source tracker is synchronized with observed outcomes, blocked external acceptance is explicit, and PR slices/dependencies are documented in merge order.
-  Status (2026-10-22): pending until ONVIF code work and source-tracker reconciliation finish. BC-05 code is merged; BC-02/03/06 retain the external acceptance items listed above, so their tracker completion does not imply those checks passed.
+- [x] BC-07 — Final backlog reconciliation. Acceptance: every source tracker is synchronized with observed outcomes, blocked external acceptance is explicit, and PR slices/dependencies are documented in merge order.
+  Status (2026-10-23): complete. Trackers were reconciled against GitHub and `main` (#168, #174, #200); the merge order, the external acceptance that stays open, and the work explicitly moved to backlog are recorded in "Final reconciliation (BC-07)" below. Completion of a tracker does not imply that its manual acceptance passed.
 
 ## Progress and evidence
 
@@ -131,3 +131,46 @@ Root cause: web CI lint exposed untyped API/manifest data, mutable ref access du
 - `git diff --check` — PASS. No database, remote host, Docker, browser/Playwright, GitHub CI, or deployment check was run in this unit; those remain CI-04 through CI-06 as applicable.
 
 Rollback boundary: revert the CI-03 web source, generated TypeScript schema, focused pinned-window test, and this evidence entry while retaining the committed Go CI-02 work. No commit, push, PR operation, review invocation, or merge was performed by the CI-03 writer.
+
+## Final reconciliation (BC-07, 2026-10-23)
+
+Checked against GitHub PR state and `origin/main`; no remote host, device or deployment action was performed.
+
+### Delivered PR slices, in merge order
+1. Platform and CI: #21 (mTLS, provisioning, CI closure; `6ac8204`).
+2. Device lifecycle and PWA: #73, #74, then ARS #113–#116.
+3. ONVIF video codec: #152, #153, #154 (the backend PR #151 was closed in favor of this chain).
+4. Frigate config editor FC-5: #162, #165; reconciliation #160, #168.
+5. Closeout CL-03: #161.
+6. ONVIF camera management: #163, #164 (media profiles), #166 (stable identity), #167 (snapshot URI), #171, #172 (mutation audit), #173 (audit reconciliation).
+7. Durable alarms and realtime outbox: #174 reconciliation, then #175–#189 in order.
+8. Faces review inbox: #190 (persistence), #191 (inbox actions), #194 (runtime policy), #195 (CPU runtime), #196 (Hailo provider), #197 (Hailo Compose), #198 (HailoRT image).
+9. Closeout and trackers: #199 (outbox integration tests), #200 (faces and ONVIF reconciliation).
+
+### Merged at the end of the closure (2026-10-23)
+- #201 re-delivered identity grouping (FACE-07.3a manual grouping and its UI). The earlier #192 was closed and #193 merged into a non-`main` base, so grouping had not reached `main` until this PR.
+- #202 delivered CL-01 forced purge. Native Review approved it (lineage `review-9457fa385c4d73bb`); the queued cleanups are drained by the existing `Syncer.RunRemoteCleanups`. `odd/tasks/closeout-2026-10.md` now marks CL-01 complete.
+Merge order was #201, then #202, because both touch the same OpenAPI and generated files.
+
+### Moved to backlog by decision (not part of this closure)
+- ONVIF #169 (imaging options and verified writes) and #170 (snapshot retrieval through the edge agent) were closed unmerged; their work remains on `feat/onvif-imaging-options-readback` and `feat/onvif-04-snapshot-download`. Open new PRs against `main` if they are wanted.
+- Broader ONVIF-05–19 work units.
+- Faces: automatic similarity suggestions (rest of FACE-07.3/07.4), model evaluation on consented crops (FACE-07.2), Hailo-8 inference on a real host (FACE-07.2c), the OpenVINO placement decision (FACE-07.2e) and identity-to-sighting validation for maps (FACE-07.5).
+
+### External acceptance that stays open (needs an authorized destination, operation and credentials)
+- Manual UI acceptance of the current T2 build and a real-host `update-ssh` run. The build itself was deployed locally on 2026-10-23 (see "Local deploy" below).
+- Live `casa01` install or reinstall with enrollment, authenticated health and registration evidence.
+- iOS and Android standalone PWA checklist.
+- Frigate 0.17 and 0.18 acceptance for FC-5 (`odd/tasks/frigate-config-editor.md`).
+- Maps M-W20: 26-camera layout against the 16-camera scope, plus real-account browser, media and deployment checks.
+- Hailo-8 inference on a host that exposes `/dev/hailo0`.
+
+### Waiting on the user
+- CL-05: the exported live-presentation JSON, to promote those views to `DEFAULT_PRESENTATIONS`.
+
+### Local deploy (2026-10-23)
+- Deployed `main` at `bfed389` (version 0.4.0) on the OpenVMS host, local only, no remote host. `/health/ready` reported `ok` for postgres, valkey, nats and object storage; `api`, `worker`, `relay` and `web` ran with 0 restarts.
+- The host was at migration 63. Migrations 00064–00068 applied in one go: rule evaluation jobs, realtime publication outbox and its aggregate order, face sightings, and face identity groups. This was the first deploy of the durable alarms and realtime outbox chain (#175–#189).
+- `make deploy` failed three times at `docker compose up`: (1) a local, gitignored `docker-compose.override.yml` bind-mounted the API CA from `web-tls/current/tls.crt`, a path that never exists because the web container uses its own certificate (`OPENVMS_WEB_TLS_CERT_FILE`); the mount duplicated `local-tls/api-ca` (same certificate fingerprint) and was removed, with the original saved outside the repo; (2)–(3) Docker Compose 2.26.1 left temp-named containers and hit name conflicts while recreating `api` and `relay` together.
+- Completed by recreating `api`, `worker`, `relay` and `web` one at a time with `docker compose up -d --no-build --no-deps --wait <service>`, then the same readiness probe as `deploy/deploy.sh`. Rollback tag `20261023T094356Z` and a Postgres dump in `.atl/deploy/20261023T094356Z/` exist.
+- Not verified: Faces grouping, forced purge and alarms behavior in the UI with a real account. `make deploy` may fail again on this Compose version until the recreate conflict is addressed.

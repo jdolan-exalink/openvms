@@ -13,6 +13,90 @@ import (
 	"github.com/google/uuid"
 )
 
+const claimRuleEvaluationJobs = `-- name: ClaimRuleEvaluationJobs :many
+WITH exhausted AS (
+    UPDATE rule_evaluation_jobs
+    SET status = 'failed', lease_until = NULL,
+        last_error = coalesce(last_error, 'attempt limit reached'), updated_at = now()
+    WHERE status = 'processing' AND lease_until <= now() AND attempts >= $2
+)
+UPDATE rule_evaluation_jobs AS job
+SET status = 'processing', attempts = job.attempts + 1,
+    lease_until = now() + make_interval(secs => $1::float8),
+    lease_token = gen_random_uuid(), updated_at = now()
+WHERE job.id IN (
+    SELECT queued.id FROM rule_evaluation_jobs AS queued
+    WHERE queued.attempts < $2
+      AND ((queued.status = 'pending' AND queued.available_at <= now())
+        OR (queued.status = 'processing' AND queued.lease_until <= now()))
+    ORDER BY queued.available_at, queued.enqueued_at, queued.id
+    LIMIT $3
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING job.id, job.event_id, job.evaluation_kind, job.face_names, job.payload, job.status, job.attempts, job.available_at, job.lease_until, job.lease_token, job.last_error, job.enqueued_at, job.completed_at, job.updated_at
+`
+
+type ClaimRuleEvaluationJobsParams struct {
+	LeaseSeconds float64
+	MaxAttempts  int32
+	MaxRows      int32
+}
+
+func (q *Queries) ClaimRuleEvaluationJobs(ctx context.Context, arg ClaimRuleEvaluationJobsParams) ([]RuleEvaluationJob, error) {
+	rows, err := q.db.Query(ctx, claimRuleEvaluationJobs, arg.LeaseSeconds, arg.MaxAttempts, arg.MaxRows)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RuleEvaluationJob{}
+	for rows.Next() {
+		var i RuleEvaluationJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.EvaluationKind,
+			&i.FaceNames,
+			&i.Payload,
+			&i.Status,
+			&i.Attempts,
+			&i.AvailableAt,
+			&i.LeaseUntil,
+			&i.LeaseToken,
+			&i.LastError,
+			&i.EnqueuedAt,
+			&i.CompletedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const completeRuleEvaluationJob = `-- name: CompleteRuleEvaluationJob :execrows
+UPDATE rule_evaluation_jobs
+SET status = 'completed', lease_until = NULL, lease_token = NULL, last_error = NULL,
+    completed_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'processing' AND lease_token = $2
+`
+
+type CompleteRuleEvaluationJobParams struct {
+	ID         uuid.UUID
+	LeaseToken *uuid.UUID
+}
+
+func (q *Queries) CompleteRuleEvaluationJob(ctx context.Context, arg CompleteRuleEvaluationJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, completeRuleEvaluationJob, arg.ID, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countCameraGroupsByIDs = `-- name: CountCameraGroupsByIDs :one
 SELECT count(*) FROM camera_groups
 WHERE tenant_id = $1 AND deleted_at IS NULL AND id = ANY($2::uuid[])
@@ -150,6 +234,29 @@ type DeleteRuleParams struct {
 
 func (q *Queries) DeleteRule(ctx context.Context, arg DeleteRuleParams) error {
 	_, err := q.db.Exec(ctx, deleteRule, arg.ID, arg.TenantID)
+	return err
+}
+
+const enqueueRuleEvaluation = `-- name: EnqueueRuleEvaluation :exec
+INSERT INTO rule_evaluation_jobs (event_id, evaluation_kind, face_names, payload, status)
+VALUES ($1, $2, $3, $4, 'pending')
+ON CONFLICT (event_id, evaluation_kind, face_names) DO NOTHING
+`
+
+type EnqueueRuleEvaluationParams struct {
+	EventID        uuid.UUID
+	EvaluationKind string
+	FaceNames      []string
+	Payload        json.RawMessage
+}
+
+func (q *Queries) EnqueueRuleEvaluation(ctx context.Context, arg EnqueueRuleEvaluationParams) error {
+	_, err := q.db.Exec(ctx, enqueueRuleEvaluation,
+		arg.EventID,
+		arg.EvaluationKind,
+		arg.FaceNames,
+		arg.Payload,
+	)
 	return err
 }
 
@@ -360,6 +467,36 @@ func (q *Queries) ListRules(ctx context.Context, tenantID uuid.UUID) ([]Rule, er
 		return nil, err
 	}
 	return items, nil
+}
+
+const retryRuleEvaluationJob = `-- name: RetryRuleEvaluationJob :execrows
+UPDATE rule_evaluation_jobs
+SET status = CASE WHEN attempts >= $1 THEN 'failed' ELSE 'pending' END,
+    available_at = now() + make_interval(secs => $2::float8),
+    lease_until = NULL, lease_token = NULL, last_error = $3, updated_at = now()
+WHERE id = $4 AND status = 'processing' AND lease_token = $5
+`
+
+type RetryRuleEvaluationJobParams struct {
+	MaxAttempts  int32
+	RetrySeconds float64
+	LastError    *string
+	ID           uuid.UUID
+	LeaseToken   *uuid.UUID
+}
+
+func (q *Queries) RetryRuleEvaluationJob(ctx context.Context, arg RetryRuleEvaluationJobParams) (int64, error) {
+	result, err := q.db.Exec(ctx, retryRuleEvaluationJob,
+		arg.MaxAttempts,
+		arg.RetrySeconds,
+		arg.LastError,
+		arg.ID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateRule = `-- name: UpdateRule :one

@@ -147,6 +147,28 @@ run docker compose build --pull=false || { rollback_help; die "build failed (run
 
 # --- 6. Up ------------------------------------------------------------------
 step 6 up
+# Docker Compose 2.26 can fail with "container name ... is already in use" when it
+# recreates several services at once, and an interrupted recreate leaves <id>_<name>
+# containers in state "created" that break the next run. So: remove those leftovers,
+# start whatever is missing without recreating anything, recreate the app services one
+# at a time (api first, it applies the migrations), then converge the rest.
+if [ "$DRY" = 1 ]; then
+  info "+ remove stale temporary containers (<id>_<name> in state created)"
+else
+  stale=$(docker compose ps -a --status created --format '{{.ID}} {{.Name}}' 2>/dev/null |
+    while read -r id name; do
+      printf '%s\n' "$name" | grep -Eq '^[0-9a-f]{12}_' && printf '%s\n' "$id"
+    done || true)
+  for id in $stale; do
+    info "removing stale temporary container $id"
+    docker rm "$id" >/dev/null || info "could not remove $id"
+  done
+fi
+run docker compose up -d --no-recreate || { rollback_help; die "docker compose up failed"; }
+for svc in $IMAGES; do
+  run docker compose up -d --no-build --no-deps --wait "$svc" ||
+    { rollback_help; die "recreating $svc failed; services before it were already updated"; }
+done
 run docker compose up -d || { rollback_help; die "docker compose up failed"; }
 
 # --- 7. Health --------------------------------------------------------------

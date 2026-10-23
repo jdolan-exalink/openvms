@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -691,6 +692,53 @@ func (h *Handlers) SyncCameraOnvifTime(ctx context.Context, r gen.SyncCameraOnvi
 		Success:  true,
 		SyncedAt: syncedAt,
 	}, nil
+}
+
+func (h *Handlers) GetCameraOnvifSnapshot(ctx context.Context, r gen.GetCameraOnvifSnapshotRequestObject) (gen.GetCameraOnvifSnapshotResponseObject, error) {
+	a, err := actor(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cam, err := h.Inv.GetCamera(ctx, a, r.CameraId)
+	if err != nil {
+		return nil, err
+	}
+	if r.Body == nil || strings.TrimSpace(r.Body.ProfileToken) == "" || len(r.Body.ProfileToken) > 128 {
+		return gen.GetCameraOnvifSnapshot400JSONResponse{
+			BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "invalid_request", Message: "A valid media profile token is required"},
+		}, nil
+	}
+	profileToken := strings.TrimSpace(r.Body.ProfileToken)
+	var endpoint, username, password *string
+	if r.Body.Endpoint != nil {
+		endpoint = r.Body.Endpoint
+	}
+	if r.Body.Username != nil {
+		username = r.Body.Username
+	}
+	if r.Body.Password != nil {
+		password = r.Body.Password
+	}
+	ep, user, pass := h.resolveCameraOnvifCredentials(ctx, a, cam, endpoint, username, password)
+	if ep == "" {
+		return gen.GetCameraOnvifSnapshot400JSONResponse{
+			BadRequestJSONResponse: gen.BadRequestJSONResponse{Code: "endpoint_required", Message: "Camera ONVIF endpoint could not be determined"},
+		}, nil
+	}
+	if h.Provision == nil {
+		return gen.GetCameraOnvifSnapshot502JSONResponse{
+			FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "snapshot_failed", Message: "Camera snapshot could not be retrieved"},
+		}, nil
+	}
+	data, err := h.Provision.ExecuteOnvifSnapshot(ctx, a, cam.ServerID, onvifdiscover.SnapshotRequest{
+		Endpoint: ep, Username: user, Password: pass, ProfileToken: profileToken,
+	})
+	if err != nil {
+		return gen.GetCameraOnvifSnapshot502JSONResponse{
+			FrigateUnreachableJSONResponse: gen.FrigateUnreachableJSONResponse{Code: "snapshot_failed", Message: "Camera snapshot could not be retrieved"},
+		}, nil
+	}
+	return gen.GetCameraOnvifSnapshot200ImagejpegResponse{Body: bytes.NewReader(data), ContentLength: int64(len(data))}, nil
 }
 
 func (h *Handlers) ControlCameraOnvifPTZ(ctx context.Context, r gen.ControlCameraOnvifPTZRequestObject) (gen.ControlCameraOnvifPTZResponseObject, error) {

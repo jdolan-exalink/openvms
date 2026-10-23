@@ -1227,6 +1227,30 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/cameras/{cameraId}/onvif/snapshot:
+    parameters:
+      - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [cameras]
+      operationId: getCameraOnvifSnapshot
+      summary: Retrieve a camera snapshot through its edge agent
+      description: Downloads one JPEG from the selected camera. The camera snapshot URI remains inside the edge agent. Requires cameras.manage and access to camera configuration secrets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CameraOnvifSnapshotRequest" }
+      responses:
+        "200":
+          description: Camera snapshot JPEG
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502": { $ref: "#/components/responses/FrigateUnreachable" }
   /api/v1/cameras/{cameraId}/onvif/sync-time:
     parameters:
       - { name: cameraId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2026,6 +2050,45 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/persons/tombstones:
+    parameters:
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    get:
+      tags: [faces]
+      operationId: listPendingFaceTombstones
+      summary: List deleted persons with owned faces pending remote cleanup (faces.manage)
+      description: Returns only the person's name and the count of live servers with pending cleanup.
+      responses:
+        "200":
+          description: Pending face tombstones
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/FaceTombstone" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/persons/{personId}/force-purge:
+    parameters:
+      - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+    post:
+      tags: [faces]
+      operationId: forcePurgeFaceTombstone
+      summary: Force-purge a deleted person and queue remaining remote cleanup (faces.manage)
+      description: Scrubs stored event labels and records cleanup obligations without contacting Frigate.
+      responses:
+        "204": { description: Tombstone purged; remote cleanup is queued where needed. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /api/v1/faces/persons/{personId}:
     parameters:
       - { name: personId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2453,6 +2516,107 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
         "502": { $ref: "#/components/responses/FrigateUnreachable" }
+  /api/v1/faces/review-inbox:
+    get:
+      tags: [faces]
+      operationId: listFaceReviewInbox
+      summary: List durable unclassified face sightings (faces.view)
+      description: Returns every persisted pending sighting in scope, including items whose crop is waiting for retry.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+        - { name: site_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+        - { name: server_id, in: query, style: form, explode: true, schema: { type: array, items: { type: string, format: uuid } } }
+      responses:
+        "200":
+          description: Pending sightings newest first
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceReviewInbox" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/review-inbox/groups:
+    post:
+      tags: [faces]
+      operationId: groupFaceReviewSightings
+      summary: Explicitly group pending face sightings as one identity (faces.manage)
+      description: |
+        Groups at least two pending sightings with retained crops. Existing groups are merged
+        atomically; the oldest group ID is kept so the identity ID remains stable. This action
+        records an audit entry and never uses automated similarity suggestions.
+      parameters:
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceReviewIdentityGroupCreate" }
+      responses:
+        "200":
+          description: Group created or merged
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceReviewIdentityGroup" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/review-inbox/{sightingId}/image:
+    get:
+      tags: [faces]
+      operationId: getFaceReviewSightingImage
+      summary: Read a retained sighting crop (faces.view)
+      description: "Sensitive biometric data. Authenticated, audited, and never cached by shared clients."
+      parameters:
+        - { name: sightingId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The retained image
+          content:
+            image/*: { schema: { type: string, format: binary } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /api/v1/faces/review-inbox/{sightingId}/assign:
+    post:
+      tags: [faces]
+      operationId: assignFaceReviewSighting
+      summary: Assign a sighting to a registered or new person (faces.manage)
+      parameters:
+        - { name: sightingId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FaceReviewSightingAssign" }
+      responses:
+        "201":
+          description: Sighting assigned and its crop transferred to the person's face library
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FaceReviewSightingAssignResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /api/v1/faces/review-inbox/{sightingId}:
+    delete:
+      tags: [faces]
+      operationId: rejectFaceReviewSighting
+      summary: Reject a sighting and queue its crop for deletion (faces.manage)
+      parameters:
+        - { name: sightingId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: tenant_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Sighting rejected and crop deletion queued }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
   /api/v1/lpr/reads:
     get:
       tags: [lpr]
@@ -5070,6 +5234,15 @@ components:
         camera: { $ref: "#/components/schemas/Camera" }
         revision_id: { type: string, format: uuid }
         restart_required: { type: boolean }
+    CameraOnvifSnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [profile_token]
+      properties:
+        endpoint: { type: string, maxLength: 2048 }
+        username: { type: string, maxLength: 128 }
+        password: { type: string, maxLength: 256, writeOnly: true }
+        profile_token: { type: string, minLength: 1, maxLength: 128 }
     CameraOnvifSyncTimeRequest:
       type: object
       additionalProperties: false
@@ -5966,6 +6139,14 @@ components:
         first_image_id: { type: string, format: uuid, description: "Oldest enrollment image; present only in the person list, to render a card thumbnail without one request per person." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    FaceTombstone:
+      type: object
+      required: [id, display_name, deleted_at, pending_server_count]
+      properties:
+        id: { type: string, format: uuid }
+        display_name: { type: string }
+        deleted_at: { type: string, format: date-time }
+        pending_server_count: { type: integer, minimum: 1 }
     FaceLastRecognition:
       type: object
       description: |
@@ -6168,6 +6349,56 @@ components:
         person: { $ref: "#/components/schemas/FacePerson" }
         image: { $ref: "#/components/schemas/FaceImage" }
         attempt_removed: { type: boolean, description: "Whether the attempt was also deleted from Frigate." }
+    FaceReviewSighting:
+      type: object
+      required: [id, identity_id, server_id, server_name, site_id, first_seen_at, crop_available]
+      properties:
+        id: { type: string, format: uuid, description: Stable opaque identity for this sighting. }
+        identity_id: { type: string, format: uuid, description: Group ID when grouped, otherwise this sighting ID. }
+        group_id: { type: string, format: uuid, nullable: true, description: Confirmed manager-created identity group, if any. }
+        server_id: { type: string, format: uuid }
+        server_name: { type: string }
+        site_id: { type: string, format: uuid }
+        first_seen_at: { type: string, format: date-time }
+        seen_at: { type: string, format: date-time, description: Best-effort time parsed from Frigate's source file name. }
+        label: { type: string, description: Best-effort label parsed from Frigate's source file name. }
+        score: { type: number, format: double }
+        crop_available: { type: boolean }
+        ingest_error: { type: string, description: Sanitized retry reason; never contains source URLs or image data. }
+    FaceReviewInbox:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/FaceReviewSighting" } }
+    FaceReviewIdentityGroupCreate:
+      type: object
+      required: [sighting_ids]
+      properties:
+        sighting_ids:
+          type: array
+          minItems: 2
+          maxItems: 100
+          uniqueItems: true
+          items: { type: string, format: uuid }
+    FaceReviewIdentityGroup:
+      type: object
+      required: [group_id, member_count]
+      properties:
+        group_id: { type: string, format: uuid, description: Stable identity ID retained by the group. }
+        member_count: { type: integer, minimum: 2 }
+    FaceReviewSightingAssign:
+      type: object
+      description: Exactly one of person_id and new_person_display_name.
+      properties:
+        person_id: { type: string, format: uuid }
+        new_person_display_name: { type: string, maxLength: 120 }
+    FaceReviewSightingAssignResult:
+      type: object
+      required: [person, image, attempt_removed]
+      properties:
+        person: { $ref: "#/components/schemas/FacePerson" }
+        image: { $ref: "#/components/schemas/FaceImage" }
+        attempt_removed: { type: boolean, description: Whether Frigate's source attempt was also removed. }
     VisionAISource:
       type: string
       enum: [general, personas, vehiculos, lpr, perimetro, alarmas]

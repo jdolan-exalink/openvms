@@ -689,118 +689,140 @@ func (s *Service) matchesFaces(ctx context.Context, tx pgx.Tx, ev EventContext, 
 }
 
 // EvaluateEvent runs every enabled event rule of the tenant against a newly indexed event.
+// Alarm and notification announcements are enqueued with the evaluation state changes.
 func (s *Service) EvaluateEvent(ctx context.Context, ev EventContext) error {
+	ev = s.resolveEventZones(ctx, ev)
+	actor := authz.Actor{TenantID: &ev.TenantID}
+	return s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
+		return s.evaluateEventTx(ctx, tx, ev)
+	})
+}
+
+// EvaluateEventTx evaluates an event using the caller's tenant-scoped transaction. Alarm and
+// notification announcements are enqueued in tx with their corresponding state changes.
+func (s *Service) EvaluateEventTx(ctx context.Context, tx pgx.Tx, ev EventContext) error {
+	ev = s.resolveEventZones(ctx, ev)
+	return s.evaluateEventTx(ctx, tx, ev)
+}
+
+func (s *Service) evaluateEventTx(ctx context.Context, tx pgx.Tx, ev EventContext) error {
+	q := db.New(tx)
+	rulesRows, err := q.ListActiveRulesByTrigger(ctx, db.ListActiveRulesByTriggerParams{
+		TenantID:    ev.TenantID,
+		TriggerType: string(TriggerEvent),
+	})
+	if err != nil {
+		return store.Classify(err)
+	}
+	if len(rulesRows) == 0 {
+		return nil
+	}
+	if len(ev.CameraGroupIDs) == 0 && ev.CameraID != uuid.Nil {
+		groupIDs, err := loadCameraGroupIDs(ctx, tx, ev.TenantID, ev.CameraID)
+		if err != nil {
+			return store.Classify(err)
+		}
+		ev.CameraGroupIDs = groupIDs
+	}
+	if ev.SiteTimezone == "" {
+		ev.SiteTimezone = loadSiteTimezone(ctx, tx, ev.TenantID, ev.SiteID, ev.CameraID)
+	}
+
+	for _, rRow := range rulesRows {
+		rule, err := ruleFromRow(rRow)
+		if err != nil {
+			continue
+		}
+		hasFaces := rule.Conditions.HasFaceConditions()
+		if ev.FaceUpdate && !hasFaces {
+			continue
+		}
+		if !rule.Conditions.MatchesEvent(ev) {
+			continue
+		}
+		if hasFaces && !s.matchesFaces(ctx, tx, ev, rule) {
+			continue
+		}
+
+		ok, err := claim(ctx, tx, ev.TenantID, rule.ID, ev.CameraID, time.Now().Add(-s.debounceFor(rule)))
+		if err != nil {
+			return store.Classify(err)
+		}
+		if !ok {
+			continue // fired for this camera inside the debounce window
+		}
+
+		// Matched! Execute actions.
+		var alarmID *uuid.UUID
+		if rule.Actions.CreateAlarm {
+			// One alarm per ongoing situation of this rule on this camera and label.
+			res, err := alarms.Correlate(ctx, tx, alarms.CorrelateInput{
+				TenantID: ev.TenantID, SiteID: ev.SiteID, CameraID: ev.CameraID, EventID: ev.ID,
+				Source: "rule", RuleID: &rule.ID, Labels: ev.Labels, At: ev.Start,
+			})
+			if err != nil {
+				return fmt.Errorf("correlate alarm for rule %s: %w", rule.ID, err)
+			}
+			if res.Outcome != alarms.Skipped {
+				id := res.AlarmID
+				alarmID = &id
+				action := "updated"
+				if res.Outcome == alarms.Created {
+					action = "opened"
+				}
+				if err := enqueueRuleAlarm(ctx, q, action, res.Status, ev.TenantID, ev.SiteID, ev.CameraID, ev.ID, res.AlarmID, res.UpdatedAt); err != nil {
+					return fmt.Errorf("enqueue alarm %s announcement: %w", action, err)
+				}
+			}
+			for _, closed := range res.Closed {
+				if err := enqueueRuleAlarm(ctx, q, "closed", "closed", closed.TenantID, closed.SiteID, closed.CameraID, closed.EventID, closed.ID, closed.UpdatedAt); err != nil {
+					return fmt.Errorf("enqueue closed alarm announcement: %w", err)
+				}
+			}
+		}
+
+		severity := rule.Actions.Severity
+		if severity == "" {
+			severity = "warning"
+		}
+		body := fmt.Sprintf("Evento detectado en cámara %s: %s", ev.CameraName, strings.Join(ev.Labels, ", "))
+		if len(ev.Labels) == 0 {
+			body = fmt.Sprintf("Evento detectado en cámara %s (%s)", ev.CameraName, ev.Severity)
+		}
+		link := fmt.Sprintf("/events?selected=%s", ev.ID)
+		if alarmID != nil {
+			link = "/alarms"
+		}
+		if err := s.deliver(ctx, tx, q, rule, ev.TenantID, resourceRef{Server: ev.ServerID, Camera: ev.CameraID}, rule.Name, body, link, severity); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func enqueueRuleAlarm(ctx context.Context, q *db.Queries, action, status string, tenantID, siteID, cameraID, eventID, alarmID uuid.UUID, updatedAt time.Time) error {
+	payload, err := json.Marshal(map[string]any{
+		"id": alarmID, "tenant_id": tenantID, "site_id": siteID, "camera_id": cameraID,
+		"event_id": eventID, "status": status, "updated_at": updatedAt,
+	})
+	if err != nil {
+		return err
+	}
+	aggregateKey := "alarm/" + alarmID.String()
+	_, err = q.EnqueueRealtimePublication(ctx, db.EnqueueRealtimePublicationParams{
+		TenantID: tenantID, Subject: fmt.Sprintf("alarm.%s.%s", action, tenantID),
+		Payload: payload, AggregateKey: &aggregateKey,
+	})
+	return err
+}
+
+func (s *Service) resolveEventZones(ctx context.Context, ev EventContext) EventContext {
 	if s.ZoneResolver != nil && len(ev.MapZoneIDs) == 0 {
 		if zids, err := s.ZoneResolver.ZonesForEvent(ctx, ev.CameraID, ev.Zones); err == nil {
 			ev.MapZoneIDs = zids
 		}
 	}
-	actor := authz.Actor{TenantID: &ev.TenantID}
-	// Alarm announcements wait for the commit: a rolled-back transaction must not publish.
-	var published []publishedAlarm
-	var closed []alarms.ClosedAlarm
-	err := s.Store.TxRaw(ctx, store.ScopeFor(actor), func(tx pgx.Tx) error {
-		q := db.New(tx)
-		rulesRows, err := q.ListActiveRulesByTrigger(ctx, db.ListActiveRulesByTriggerParams{
-			TenantID:    ev.TenantID,
-			TriggerType: string(TriggerEvent),
-		})
-		if err != nil {
-			return store.Classify(err)
-		}
-		if len(rulesRows) == 0 {
-			return nil
-		}
-		if len(ev.CameraGroupIDs) == 0 && ev.CameraID != uuid.Nil {
-			groupIDs, err := loadCameraGroupIDs(ctx, tx, ev.TenantID, ev.CameraID)
-			if err != nil {
-				return store.Classify(err)
-			}
-			ev.CameraGroupIDs = groupIDs
-		}
-		if ev.SiteTimezone == "" {
-			ev.SiteTimezone = loadSiteTimezone(ctx, tx, ev.TenantID, ev.SiteID, ev.CameraID)
-		}
-
-		for _, rRow := range rulesRows {
-			rule, err := ruleFromRow(rRow)
-			if err != nil {
-				continue
-			}
-			hasFaces := rule.Conditions.HasFaceConditions()
-			if ev.FaceUpdate && !hasFaces {
-				continue
-			}
-			if !rule.Conditions.MatchesEvent(ev) {
-				continue
-			}
-			if hasFaces && !s.matchesFaces(ctx, tx, ev, rule) {
-				continue
-			}
-
-			ok, err := claim(ctx, tx, ev.TenantID, rule.ID, ev.CameraID, time.Now().Add(-s.debounceFor(rule)))
-			if err != nil {
-				return store.Classify(err)
-			}
-			if !ok {
-				continue // fired for this camera inside the debounce window
-			}
-
-			// Matched! Execute actions
-			var alarmID *uuid.UUID
-			if rule.Actions.CreateAlarm {
-				// One alarm per ongoing situation of this rule on this camera and label.
-				res, err := alarms.Correlate(ctx, tx, alarms.CorrelateInput{
-					TenantID: ev.TenantID, SiteID: ev.SiteID, CameraID: ev.CameraID, EventID: ev.ID,
-					Source: "rule", RuleID: &rule.ID, Labels: ev.Labels, At: ev.Start,
-				})
-				if err != nil {
-					return fmt.Errorf("correlate alarm for rule %s: %w", rule.ID, err)
-				}
-				if res.Outcome != alarms.Skipped {
-					id := res.AlarmID
-					alarmID = &id
-					action := "updated"
-					if res.Outcome == alarms.Created {
-						action = "opened"
-					}
-					published = append(published, publishedAlarm{action: action, res: res})
-				}
-				closed = append(closed, res.Closed...)
-			}
-
-			severity := rule.Actions.Severity
-			if severity == "" {
-				severity = "warning"
-			}
-			body := fmt.Sprintf("Evento detectado en cámara %s: %s", ev.CameraName, strings.Join(ev.Labels, ", "))
-			if len(ev.Labels) == 0 {
-				body = fmt.Sprintf("Evento detectado en cámara %s (%s)", ev.CameraName, ev.Severity)
-			}
-			link := fmt.Sprintf("/events?selected=%s", ev.ID)
-			if alarmID != nil {
-				link = "/alarms"
-			}
-			s.deliver(ctx, tx, q, rule, ev.TenantID, resourceRef{Server: ev.ServerID, Camera: ev.CameraID}, rule.Name, body, link, severity)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	for _, p := range published {
-		alarms.PublishAlarm(ctx, s.Pub, s.Log, p.action, p.res.Status, ev.TenantID, ev.SiteID, ev.CameraID, ev.ID, p.res.AlarmID, p.res.UpdatedAt)
-	}
-	for _, c := range closed {
-		alarms.PublishAlarm(ctx, s.Pub, s.Log, "closed", "closed", c.TenantID, c.SiteID, c.CameraID, c.EventID, c.ID, c.UpdatedAt)
-	}
-	return nil
-}
-
-// publishedAlarm is an alarm announcement held back until the transaction commits.
-type publishedAlarm struct {
-	action string
-	res    alarms.CorrelateResult
+	return ev
 }
 
 // Outage describes a camera or server that is currently down. Since is the outage start and
@@ -870,7 +892,9 @@ func (s *Service) EvaluateOffline(ctx context.Context, triggerType TriggerType, 
 				ref = resourceRef{Server: resourceID}
 			}
 			body := fmt.Sprintf("%s '%s' está desconectado.", kind, resourceName)
-			s.deliver(ctx, tx, q, rule, tenantID, ref, rule.Name, body, link, severity)
+			if err := s.deliver(ctx, tx, q, rule, tenantID, ref, rule.Name, body, link, severity); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -887,10 +911,9 @@ func idPtr(id uuid.UUID) *uuid.UUID {
 	return &id
 }
 
-// deliver runs the notification actions of a fired rule: the in-app notification (published on
-// the bus) and the external channel deliveries. The deliveries are enqueued in the caller's
-// transaction, atomically with the firing claim; sending happens later in the worker.
-func (s *Service) deliver(ctx context.Context, tx pgx.Tx, q *db.Queries, rule Rule, tenantID uuid.UUID, ref resourceRef, title, body, link, severity string) {
+// deliver runs the notification actions of a fired rule. In-app announcements and external
+// channel deliveries are enqueued in the caller's transaction with the firing claim.
+func (s *Service) deliver(ctx context.Context, tx pgx.Tx, q *db.Queries, rule Rule, tenantID uuid.UUID, ref resourceRef, title, body, link, severity string) error {
 	var notifID *uuid.UUID
 	if rule.Actions.NotifyInApp {
 		notifRow, err := q.CreateNotification(ctx, db.CreateNotificationParams{
@@ -908,18 +931,23 @@ func (s *Service) deliver(ctx context.Context, tx pgx.Tx, q *db.Queries, rule Ru
 			s.Log.WarnContext(ctx, "failed to create notification", "error", err, "rule_id", rule.ID)
 		} else {
 			notifID = &notifRow.ID
-			if s.Pub != nil {
-				payload, _ := json.Marshal(NotificationCreatedPayload{
-					ID:        notifRow.ID,
-					TenantID:  notifRow.TenantID,
-					RuleID:    notifRow.RuleID,
-					Title:     notifRow.Title,
-					Body:      notifRow.Body,
-					Link:      notifRow.Link,
-					Severity:  notifRow.Severity,
-					CreatedAt: notifRow.CreatedAt,
-				})
-				_ = s.Pub.Publish(ctx, "notification.created."+tenantID.String(), payload)
+			payload, err := json.Marshal(NotificationCreatedPayload{
+				ID:        notifRow.ID,
+				TenantID:  notifRow.TenantID,
+				RuleID:    notifRow.RuleID,
+				Title:     notifRow.Title,
+				Body:      notifRow.Body,
+				Link:      notifRow.Link,
+				Severity:  notifRow.Severity,
+				CreatedAt: notifRow.CreatedAt,
+			})
+			if err != nil {
+				return err
+			}
+			if _, err := q.EnqueueRealtimePublication(ctx, db.EnqueueRealtimePublicationParams{
+				TenantID: tenantID, Subject: "notification.created." + tenantID.String(), Payload: payload,
+			}); err != nil {
+				return fmt.Errorf("enqueue notification.created: %w", err)
 			}
 		}
 	}
@@ -929,6 +957,7 @@ func (s *Service) deliver(ctx context.Context, tx pgx.Tx, q *db.Queries, rule Ru
 			Title: title, Body: body, Link: link, Severity: severity, OccurredAt: time.Now(),
 		})
 	}
+	return nil
 }
 
 // checkChannels rejects channel ids that do not belong to the tenant.

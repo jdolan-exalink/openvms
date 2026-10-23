@@ -44,6 +44,7 @@ type faceAPI struct {
 	env    *demofix.Env
 	ts     *httptest.Server
 	tenant uuid.UUID
+	blobs  delBlobs
 }
 
 func newFaceAPI(t *testing.T) *faceAPI {
@@ -63,7 +64,7 @@ func newFaceAPI(t *testing.T) *faceAPI {
 	}
 	ts := httptest.NewServer(router)
 	t.Cleanup(ts.Close)
-	return &faceAPI{t: t, env: env, ts: ts, tenant: env.Demo.TenantID}
+	return &faceAPI{t: t, env: env, ts: ts, tenant: env.Demo.TenantID, blobs: blobs}
 }
 
 // user returns a bearer token of a tenant user holding the permissions at tenant scope.
@@ -279,6 +280,105 @@ func TestFacesAPIPersonsImagesAndAuthz(t *testing.T) {
 	}
 }
 
+func TestFacesAPIPendingTombstonesAndForcePurge(t *testing.T) {
+	f := newFaceAPI(t)
+	mgr := f.user(f.tenant, "purge-manager", authz.FacesManage, authz.FacesView)
+	viewer := f.user(f.tenant, "purge-viewer", authz.FacesView)
+	blind := f.user(f.tenant, "purge-blind", authz.EventsView)
+	created := f.js(mgr, http.MethodPost, "/api/v1/faces/persons", `{"display_name":"Pending Ana"}`)
+	if created.code != http.StatusCreated {
+		t.Fatalf("create person = %d %s", created.code, created.raw)
+	}
+	person := created.json()
+	personID := person["id"].(string)
+	name := person["frigate_name"].(string)
+	personPath := "/api/v1/faces/persons/" + personID
+	if r := f.js(mgr, http.MethodDelete, personPath, ""); r.code != http.StatusNoContent {
+		t.Fatalf("delete person = %d %s", r.code, r.raw)
+	}
+	cam := f.env.Cameras["frigate-h01/plaza"]
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(context.Background(), `INSERT INTO face_server_sync (server_id, person_id, tenant_id, desired_revision, status, owned)
+			SELECT $1, id, tenant_id, sync_revision, 'failed', true FROM face_persons WHERE id = $2`, cam.ServerID, uuid.MustParse(personID)); err != nil {
+			return err
+		}
+		_, err := tx.Exec(context.Background(), `INSERT INTO events (tenant_id, site_id, server_id, camera_id, remote_id, severity, sub_labels, start_time)
+			VALUES ($1, $2, $3, $4, 'force-purge-api', 'alert', $5, now())`, cam.TenantID, cam.SiteID, cam.ServerID, cam.ID, []string{name})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	const tombstonesPath = "/api/v1/faces/persons/tombstones"
+	if r := f.js(viewer, http.MethodGet, tombstonesPath, ""); r.code != http.StatusForbidden {
+		t.Errorf("faces.view-only tombstone list = %d, want 403", r.code)
+	}
+	if r := f.js(blind, http.MethodGet, tombstonesPath, ""); r.code != http.StatusForbidden {
+		t.Errorf("caller without faces.view tombstone list = %d, want 403", r.code)
+	}
+	listed := f.js(mgr, http.MethodGet, tombstonesPath, "")
+	items, _ := listed.json()["items"].([]any)
+	if listed.code != http.StatusOK || len(items) != 1 {
+		t.Fatalf("pending tombstones = %d %s, want one item", listed.code, listed.raw)
+	}
+	item := items[0].(map[string]any)
+	if item["id"] != personID || item["display_name"] != "Pending Ana" || item["pending_server_count"].(float64) != 1 {
+		t.Fatalf("pending tombstone = %v", item)
+	}
+	if _, ok := item["frigate_name"]; ok {
+		t.Fatalf("pending tombstone exposed Frigate name: %v", item)
+	}
+	if _, ok := item["notes"]; ok {
+		t.Fatalf("pending tombstone exposed notes: %v", item)
+	}
+
+	forcePath := personPath + "/force-purge"
+	if r := f.js(viewer, http.MethodPost, forcePath, ""); r.code != http.StatusForbidden {
+		t.Errorf("faces.view-only force purge = %d, want 403", r.code)
+	}
+	var otherTenant uuid.UUID
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `INSERT INTO tenants (slug, name) VALUES ('purge-other', 'o') RETURNING id`).Scan(&otherTenant)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stranger := f.user(otherTenant, "purge-stranger", authz.FacesManage, authz.FacesView)
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, tombstonesPath + "?tenant_id=" + f.tenant.String()},
+		{http.MethodPost, forcePath + "?tenant_id=" + f.tenant.String()},
+	} {
+		if r := f.js(stranger, route.method, route.path, ""); r.code != http.StatusNotFound {
+			t.Errorf("cross-tenant %s %s = %d, want 404", route.method, route.path, r.code)
+		}
+	}
+
+	if r := f.js(mgr, http.MethodPost, forcePath, ""); r.code != http.StatusNoContent {
+		t.Fatalf("force purge = %d %s, want 204", r.code, r.raw)
+	}
+	if got := f.js(mgr, http.MethodGet, tombstonesPath, ""); got.code != http.StatusOK || len(got.json()["items"].([]any)) != 0 {
+		t.Errorf("pending tombstones after purge = %d %s, want empty", got.code, got.raw)
+	}
+	count := func(query string, args ...any) int {
+		t.Helper()
+		var n int
+		if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+			return tx.QueryRow(context.Background(), query, args...).Scan(&n)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(`SELECT count(*) FROM events WHERE $1 = ANY(sub_labels)`, name); n != 0 {
+		t.Errorf("events with purged name = %d, want 0", n)
+	}
+	if n := count(`SELECT count(*) FROM face_remote_cleanup WHERE tenant_id = $1 AND server_id = $2`, f.tenant, cam.ServerID); n != 1 {
+		t.Errorf("deferred cleanup obligations = %d, want 1", n)
+	}
+	if n := count(`SELECT count(*) FROM audit_log WHERE tenant_id = $1 AND actor_name LIKE 'purge-manager-%' AND action = $2`, f.tenant, faces.ActionPersonForcePurged); n != 1 {
+		t.Errorf("operator force-purge audit rows = %d, want 1", n)
+	}
+}
+
 func TestFacesAPIPlatformAdminNeedsNoTenantWhileThereIsOnlyOne(t *testing.T) {
 	f := newFaceAPI(t)
 	for _, path := range []string{
@@ -379,6 +479,131 @@ func TestFacesAPIRecognitionsTrainAndRedaction(t *testing.T) {
 	}
 	if r := f.js(mgr, "POST", "/api/v1/faces/train/assign", assign); r.code != http.StatusNotFound {
 		t.Errorf("assign of a consumed attempt = %d, want 404", r.code)
+	}
+}
+
+func TestFacesAPIReviewInboxStableIDsAssignmentAndRejection(t *testing.T) {
+	f := newFaceAPI(t)
+	mgr := f.user(f.tenant, "review-mgr", authz.FacesManage, authz.FacesView)
+	viewer := f.user(f.tenant, "review-viewer", authz.FacesView)
+	var otherTenant uuid.UUID
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		return tx.QueryRow(context.Background(), `INSERT INTO tenants (slug, name) VALUES ('review-other', 'Review other') RETURNING id`).Scan(&otherTenant)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	other := f.user(otherTenant, "review-other", authz.FacesView, authz.FacesManage)
+	cam := f.env.Cameras["frigate-h01/acceso_norte"]
+	h01 := f.env.Mocks["frigate-h01"].Server
+	h01.FaceRecognition = true
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `UPDATE frigate_servers SET capabilities = capabilities || '{"face_recognition": true}'::jsonb WHERE id = $1`, cam.ServerID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstFile := "1700000000.1-abcd-1700000100-unknown-0.41.webp"
+	secondFile := "1700000000.2-efgh-1700000200-unknown-0.52.webp"
+	firstCrop, secondCrop := testPNG(t), testPNG(t)
+	h01.AddFaceTrainImage(firstFile, firstCrop)
+	h01.AddFaceTrainImage(secondFile, secondCrop)
+	ingestor := &faces.ReviewIngestor{
+		Store: f.env.Store, Blobs: f.blobs, Adapters: inventory.NewAdapters(f.env.Svc), Log: pgtest.Discard(),
+	}
+	if err := ingestor.RunOnce(context.Background(), 25); err != nil {
+		t.Fatal(err)
+	}
+
+	list := f.js(mgr, http.MethodGet, "/api/v1/faces/review-inbox", "")
+	items, _ := list.json()["items"].([]any)
+	if list.code != http.StatusOK || len(items) != 2 {
+		t.Fatalf("review inbox = %d %s", list.code, list.raw)
+	}
+	sightingID := items[0].(map[string]any)["id"].(string)
+	if _, err := uuid.Parse(sightingID); err != nil {
+		t.Fatalf("sighting ID = %q, not UUID", sightingID)
+	}
+	imagePath := "/api/v1/faces/review-inbox/" + sightingID + "/image"
+	image := f.js(mgr, http.MethodGet, imagePath, "")
+	if image.code != http.StatusOK || image.header.Get("Cache-Control") != "private, no-store" || image.header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("private sighting image = %d, cache=%q", image.code, image.header.Get("Cache-Control"))
+	}
+	if r := f.js(viewer, http.MethodDelete, "/api/v1/faces/review-inbox/"+items[1].(map[string]any)["id"].(string), ""); r.code != http.StatusForbidden {
+		t.Fatalf("reject without faces.manage = %d, want 403", r.code)
+	}
+	if r := f.js(other, http.MethodGet, imagePath, ""); r.code != http.StatusNotFound {
+		t.Fatalf("cross-tenant image = %d, want 404", r.code)
+	}
+
+	person := f.js(mgr, http.MethodPost, "/api/v1/faces/persons", `{"display_name":"Reviewed person"}`)
+	personID := person.json()["id"].(string)
+	assigned := f.js(mgr, http.MethodPost, "/api/v1/faces/review-inbox/"+sightingID+"/assign", `{"person_id":"`+personID+`"}`)
+	if assigned.code != http.StatusCreated || assigned.json()["attempt_removed"] != true {
+		t.Fatalf("assign sighting = %d %s", assigned.code, assigned.raw)
+	}
+	rejectedID := items[1].(map[string]any)["id"].(string)
+	if r := f.js(mgr, http.MethodDelete, "/api/v1/faces/review-inbox/"+rejectedID, ""); r.code != http.StatusNoContent {
+		t.Fatalf("reject sighting = %d %s", r.code, r.raw)
+	}
+	if remaining := f.js(mgr, http.MethodGet, "/api/v1/faces/review-inbox", ""); len(remaining.json()["items"].([]any)) != 0 {
+		t.Fatalf("reviewed sightings remain in inbox: %s", remaining.raw)
+	}
+}
+
+func TestFacesAPIExplicitReviewIdentityGrouping(t *testing.T) {
+	f := newFaceAPI(t)
+	mgr := f.user(f.tenant, "identity-group-manager", authz.FacesManage, authz.FacesView)
+	viewer := f.user(f.tenant, "identity-group-viewer", authz.FacesView)
+	cam := f.env.Cameras["frigate-h01/acceso_norte"]
+	h01 := f.env.Mocks["frigate-h01"].Server
+	h01.FaceRecognition = true
+	if err := f.env.Store.TxRaw(context.Background(), store.AllTenants, func(tx pgx.Tx) error {
+		_, err := tx.Exec(context.Background(), `UPDATE frigate_servers SET capabilities = capabilities || '{"face_recognition": true}'::jsonb WHERE id = $1`, cam.ServerID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	files := []string{
+		"1700000000.21-aaaa-1700000100-unknown-0.41.webp",
+		"1700000000.22-bbbb-1700000200-unknown-0.42.webp",
+	}
+	for _, file := range files {
+		h01.AddFaceTrainImage(file, testPNG(t))
+	}
+	ingestor := &faces.ReviewIngestor{
+		Store: f.env.Store, Blobs: f.blobs, Adapters: inventory.NewAdapters(f.env.Svc), Log: pgtest.Discard(),
+	}
+	if err := ingestor.RunOnce(context.Background(), 25); err != nil {
+		t.Fatal(err)
+	}
+	list := f.js(mgr, http.MethodGet, "/api/v1/faces/review-inbox", "")
+	items, _ := list.json()["items"].([]any)
+	if list.code != http.StatusOK || len(items) != 2 {
+		t.Fatalf("review inbox = %d %s", list.code, list.raw)
+	}
+	ids := make([]string, 0, len(items))
+	for _, raw := range items {
+		ids = append(ids, raw.(map[string]any)["id"].(string))
+	}
+	body := `{"sighting_ids":["` + ids[0] + `","` + ids[1] + `"]}`
+	if r := f.js(viewer, http.MethodPost, "/api/v1/faces/review-inbox/groups", body); r.code != http.StatusForbidden {
+		t.Fatalf("group without faces.manage = %d, want 403", r.code)
+	}
+	if r := f.js(mgr, http.MethodPost, "/api/v1/faces/review-inbox/groups", `{"sighting_ids":["`+ids[0]+`"]}`); r.code != http.StatusBadRequest {
+		t.Fatalf("group one sighting = %d, want 400", r.code)
+	}
+	group := f.js(mgr, http.MethodPost, "/api/v1/faces/review-inbox/groups", body)
+	if group.code != http.StatusOK || group.json()["member_count"] != float64(2) {
+		t.Fatalf("group sightings = %d %s", group.code, group.raw)
+	}
+	groupID := group.json()["group_id"].(string)
+	list = f.js(mgr, http.MethodGet, "/api/v1/faces/review-inbox", "")
+	items, _ = list.json()["items"].([]any)
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		if item["identity_id"] != groupID || item["group_id"] != groupID {
+			t.Errorf("grouped item identity = %v, want %s", item, groupID)
+		}
 	}
 }
 

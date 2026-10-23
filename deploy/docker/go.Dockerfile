@@ -81,6 +81,43 @@ RUN VERSION="${VERSION}"; \
     -o /out/app ./apps/worker \
  && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/vmsctl ./apps/vmsctl
 
+# Build the optional HailoRT user-space SDK independently so worker source
+# changes do not invalidate this comparatively expensive native build.
+FROM golang:1.26-bookworm AS build-hailort-sdk
+ARG HAILORT_VERSION
+RUN test -n "${HAILORT_VERSION}" \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends build-essential cmake git libusb-1.0-0-dev \
+ && rm -rf /var/lib/apt/lists/* \
+ && git clone --depth 1 --branch "v${HAILORT_VERSION}" https://github.com/hailo-ai/hailort.git /tmp/hailort \
+ && cmake -S /tmp/hailort -B /tmp/hailort/build \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DHAILO_BUILD_GSTREAMER=OFF \
+    -DHAILO_BUILD_EXAMPLES=OFF \
+    -DHAILO_BUILD_UT=OFF \
+ && cmake --build /tmp/hailort/build --parallel 2 \
+ && cmake --install /tmp/hailort/build \
+ && rm -rf /tmp/hailort
+
+# Optional Hailo worker variant; the ordinary worker target stays Hailo-free.
+FROM build-worker AS build-worker-hailo
+ARG VERSION=
+ARG COMMIT=unknown
+ARG BUILD_TIME=unknown
+COPY --from=build-hailort-sdk /usr/include/hailo /usr/include/hailo
+COPY --from=build-hailort-sdk /usr/lib/libhailort.so* /usr/lib/
+RUN VERSION="${VERSION}"; \
+    if [ -z "$VERSION" ] || [ "$VERSION" = "dev" ]; then VERSION=$(tr -d '[:space:]' < VERSION); fi; \
+    CGO_ENABLED=1 go build -tags hailo -trimpath \
+    -ldflags "-s -w \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Version=${VERSION} \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.Commit=${COMMIT} \
+      -X github.com/jdolan-exalink/openvms/internal/platform/buildinfo.BuildTime=${BUILD_TIME}" \
+    -o /out/app ./apps/worker \
+ && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/vmsctl ./apps/vmsctl
+
 FROM debian:bookworm-slim AS runtime-ffmpeg
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg ca-certificates libstdc++6 \
@@ -89,6 +126,19 @@ RUN apt-get update \
 COPY --from=build-worker /out/app /app
 COPY --from=build-worker /out/vmsctl /vmsctl
 COPY --from=build-worker /opt/openvms /opt/openvms
+USER appuser
+ENTRYPOINT ["/app"]
+
+FROM debian:bookworm-slim AS runtime-hailo
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg ca-certificates libstdc++6 libusb-1.0-0 \
+ && rm -rf /var/lib/apt/lists/* \
+ && useradd --system --no-create-home --uid 10001 --shell /usr/sbin/nologin appuser
+COPY --from=build-worker-hailo /out/app /app
+COPY --from=build-worker-hailo /out/vmsctl /vmsctl
+COPY --from=build-worker-hailo /opt/openvms /opt/openvms
+COPY --from=build-hailort-sdk /usr/lib/libhailort.so* /usr/lib/
+ENV LD_LIBRARY_PATH=/usr/lib
 USER appuser
 ENTRYPOINT ["/app"]
 

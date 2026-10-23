@@ -162,7 +162,10 @@ Para actualizar use `make deploy` ([`deploy/deploy.sh`](deploy/deploy.sh)); se d
 2. Metadatos: commit, versión y migración actual.
 3. Volcado protegido de Postgres en `.atl/deploy/<timestamp>/postgres.dump`, verificado con `pg_restore --list`.
 4. Etiquetas de rollback `rollback-<timestamp>` en las imágenes `api`, `relay`, `worker` y `web`.
-5. Build, 6. `docker compose up -d`, 7. espera de `/health/ready`, 8. resumen (commit, migración antes y después, volcado y comando de rollback).
+5. Build.
+6. Up, sin recrear en paralelo: borra contenedores temporales `<id>_<nombre>` que dejó una recreación interrumpida, levanta lo que falte (`up -d --no-recreate`), recrea `api`, `relay`, `worker` y `web` de a uno (`up -d --no-build --no-deps --wait <servicio>`; `api` primero porque aplica las migraciones) y converge el resto con `up -d`. Evita los conflictos de nombre de Docker Compose 2.26 al recrear varios servicios a la vez; si un servicio falla, se detiene y muestra el rollback.
+7. Espera de `/health/ready`.
+8. Resumen (commit, migración antes y después, volcado y comando de rollback).
 
 Variables opcionales: `DEPLOY_SKIP_PULL=1`, `DEPLOY_SKIP_BACKUP=1`, `DEPLOY_DRY_RUN=1` (solo imprime), `DEPLOY_WAIT` (segundos de espera, 120) y `DEPLOY_KEEP=<n>` (etiquetas `rollback-*` por servicio y volcados que se conservan; 5 por defecto, nunca se borra lo recién creado). En el primer despliegue no hay imágenes que etiquetar y no hay rollback de imágenes.
 
