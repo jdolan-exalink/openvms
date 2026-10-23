@@ -1,14 +1,12 @@
 # Apply on a Hailo-8 host using:
 # docker compose -f docker-compose.yml -f docker-compose.hailo.yml up -d --build worker
-# Set OPENVMS_HAILORT_SDK_CONTEXT to a directory whose root contains
-# include/hailo/hailort.h and lib/x86_64-linux-gnu/libhailort.so.
+# HailoRT user-space is built into the worker image. Set
+# OPENVMS_HAILORT_VERSION to match the host's installed PCIe driver version.
 services:
   worker:
     build:
       target: runtime-hailo
-      additional_contexts:
-        hailo-sdk: ${OPENVMS_HAILORT_SDK_CONTEXT:-/usr}
       args:
-        HAILORT_LIB_SUBDIR: ${OPENVMS_HAILORT_LIB_SUBDIR:-lib/x86_64-linux-gnu}
+        HAILORT_VERSION: ${OPENVMS_HAILORT_VERSION:?Set this to match the host PCIe driver version}
     devices:
       - /dev/hailo0:/dev/hailo0
