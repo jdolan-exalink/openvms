@@ -14,6 +14,8 @@ cat >"$tmp/bin/docker" <<'STUB'
 #!/bin/sh
 echo "docker $*" >>"$STUB_LOG"
 case "$*" in
+  "compose ps -a --status created"*) [ -n "${STUB_ORPHANS:-}" ] && printf '%s\n' "$STUB_ORPHANS"; exit 0 ;;
+  "compose up -d --no-build --no-deps --wait "*) [ "${STUB_UP_FAIL_ON:-}" = "${7:-}" ] && exit 1; exit 0 ;;
   "compose ps"*) echo abc ;;
   "compose port web 443") echo "${STUB_PORT:-0.0.0.0:9443}" ;;
   "compose exec -T web printenv HTTPS_SITE_ADDRESS") [ -n "${STUB_SITE:-}" ] && echo "$STUB_SITE" ;;
@@ -72,6 +74,43 @@ done
 printf '%s\n' "$out" | grep -q 'docker compose build --pull=false' || fail "build command missing"
 printf '%s\n' "$out" | grep -q 'docker compose up -d$' || fail "up command missing"
 printf '%s\n' "$out" | grep -q 'make rollback TAG=' || fail "rollback_help must lead with make rollback"
+
+# 1b. Step 6 recreates the app services one at a time (Compose 2.26 conflicts on
+# container names when api and relay are recreated together): start what is missing
+# without recreating, recreate api, relay, worker and web in order, then converge.
+up_section=$(printf '%s\n' "$out" | sed -n '/\[6\/8\]/,/\[7\/8\]/p')
+printf '%s\n' "$up_section" | grep -qF 'docker compose up -d --no-recreate' || fail "step 6: missing 'up -d --no-recreate'"
+prev=0
+for svc in api relay worker web; do
+  line=$(printf '%s\n' "$up_section" | grep -nF -- "docker compose up -d --no-build --no-deps --wait $svc" | head -n1 | cut -d: -f1)
+  if [ -z "$line" ]; then fail "step 6: missing sequential recreate of $svc"; continue; fi
+  [ "$line" -gt "$prev" ] || fail "step 6: $svc recreated out of order"
+  prev=$line
+done
+last_up=$(printf '%s\n' "$up_section" | grep -n 'docker compose up -d$' | tail -n1 | cut -d: -f1)
+[ -n "$last_up" ] && [ "$last_up" -gt "$prev" ] || fail "step 6: final converging 'up -d' must follow the per-service recreates"
+
+# 1c. Stale temporary containers left by an interrupted recreate are removed; nothing else is.
+: >"$STUB_LOG"
+out=$(PATH="$tmp/bin:$PATH" DEPLOY_SKIP_PULL=1 DEPLOY_SKIP_BACKUP=1 STUB_TAGS="" DEPLOY_ROOT="$tmp/ok" \
+  STUB_ORPHANS="a4a9960c12ad b1343138b1b4_openvms-relay-1
+deadbeef0001 openvms-tls-bootstrap-1" bash "$here/deploy.sh" 2>&1); rc=$?
+[ "$rc" -eq 0 ] || fail "orphan cleanup run: expected exit 0: $out"
+grep -qF 'docker rm a4a9960c12ad' "$STUB_LOG" || fail "stale temp container not removed: $(cat "$STUB_LOG")"
+grep -qF 'docker rm deadbeef0001' "$STUB_LOG" && fail "a regular created container was removed"
+rm_line=$(grep -n 'docker rm a4a9960c12ad' "$STUB_LOG" | head -n1 | cut -d: -f1)
+up_line=$(grep -n 'compose up -d' "$STUB_LOG" | head -n1 | cut -d: -f1)
+[ -n "$rm_line" ] && [ -n "$up_line" ] && [ "$rm_line" -lt "$up_line" ] || fail "orphans must be removed before the first compose up"
+
+# 1d. A failing per-service recreate aborts: later services are untouched and the rollback hint is shown.
+: >"$STUB_LOG"
+out=$(PATH="$tmp/bin:$PATH" DEPLOY_SKIP_PULL=1 DEPLOY_SKIP_BACKUP=1 STUB_TAGS="api:latest" STUB_UP_FAIL_ON=relay DEPLOY_ROOT="$tmp/ok" bash "$here/deploy.sh" 2>&1); rc=$?
+[ "$rc" -ne 0 ] || fail "recreate failure: expected non-zero exit"
+grep -qF -- '--wait api' "$STUB_LOG" || fail "recreate failure: api should have been recreated first"
+grep -qF -- '--wait worker' "$STUB_LOG" && fail "recreate failure: worker recreated after relay failed"
+grep -qF -- '--wait web' "$STUB_LOG" && fail "recreate failure: web recreated after relay failed"
+printf '%s\n' "$out" | grep -q 'make rollback TAG=' || fail "recreate failure: missing rollback hint"
+printf '%s\n' "$out" | grep -q 'relay' || fail "recreate failure: message should name the failing service"
 
 # 2. Dirty tree aborts before any mutation.
 mkrepo "$tmp/dirty"
