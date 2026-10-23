@@ -24,7 +24,7 @@ type Backend = {
   recognitions: Schemas["FaceRecognition"][][];
   cameras: { id: string; display_name: string }[];
   /** Forces an error answer: status codes for the image upload and the person PATCH. */
-  fail: { upload?: number; patch?: number };
+  fail: { upload?: number; patch?: number; tombstonesFromRequest?: number };
   /** The caller's tenant; null makes the caller a platform administrator. */
   tenantId: string | null;
   sites: { id: string; name: string }[];
@@ -39,6 +39,7 @@ function install(over: Partial<Backend> = {}) {
     ...over,
   };
   const calls: Call[] = [];
+  let tombstoneGets = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (raw: Request | string, init?: RequestInit) => {
@@ -61,7 +62,11 @@ function install(over: Partial<Backend> = {}) {
       if (p === "/api/v1/sites") return json({ items: b.sites });
       if (p === "/api/v1/servers") return json({ items: b.servers });
       if (p === "/api/v1/camera-groups") return json({ items: b.groups });
-      if (p === "/api/v1/faces/persons/tombstones" && input.method === "GET") return json({ items: b.tombstones });
+      if (p === "/api/v1/faces/persons/tombstones" && input.method === "GET") {
+        tombstoneGets += 1;
+        if (b.fail.tombstonesFromRequest && tombstoneGets >= b.fail.tombstonesFromRequest) return json({ code: "internal", message: "tombstones unavailable" }, 500);
+        return json({ items: b.tombstones });
+      }
       if (p === "/api/v1/faces/persons" && input.method === "GET") return json({ items: b.persons });
       if (p === "/api/v1/faces/persons" && input.method === "POST") return json(person("new", (call.body as { display_name: string }).display_name), 201);
       if (/\/images$/.test(p) && input.method === "GET") return json({ items: b.images });
@@ -176,6 +181,25 @@ describe("Faces page", () => {
     expect(await screen.findByRole("status")).toHaveTextContent("Se borraron las etiquetas de los eventos. La limpieza quedó en cola hasta que los servidores vuelvan a estar disponibles.");
     await waitFor(() => expect(calls.filter((call) => call.method === "GET" && call.path === "/api/v1/faces/persons/tombstones").length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Forzar purga" })).not.toBeInTheDocument());
+  });
+
+  it("shows a single error when the tombstone list cannot be loaded", async () => {
+    install({ tombstones: [tombstone()], fail: { tombstonesFromRequest: 1 } });
+    renderPage(Faces);
+    expect(await screen.findByText("tombstones unavailable")).toBeInTheDocument();
+    expect(screen.getAllByText("tombstones unavailable")).toHaveLength(1);
+    expect(screen.queryByText("Limpieza de rostros pendiente")).not.toBeInTheDocument();
+  });
+
+  it("keeps the stale tombstone list and a single error when a refetch fails", async () => {
+    const { calls } = install({ tombstones: [tombstone()], fail: { tombstonesFromRequest: 2 } });
+    renderPage(Faces);
+    fireEvent.click(await screen.findByRole("button", { name: "Forzar purga" }));
+    fireEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Confirmar purga" }));
+    await waitFor(() => expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/force-purge"))).toBe(true));
+    expect(await screen.findByText("tombstones unavailable")).toBeInTheDocument();
+    expect(screen.getAllByText("tombstones unavailable")).toHaveLength(1);
+    expect(screen.getByText("Limpieza de rostros pendiente")).toBeInTheDocument();
   });
 
   it("does not request or show pending tombstones to a faces.view-only user", async () => {

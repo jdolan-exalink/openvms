@@ -706,8 +706,10 @@ type RecordFaceForcedRemoteCleanupParams struct {
 	ID       uuid.UUID
 }
 
-// An operator may purge a tombstone while a live server is unreachable or face-disabled. Keep a
-// durable cleanup obligation for every owned face that has not converged, regardless of current
+// Operator force purge (Service.ForcePurgeTombstone). The only difference from
+// RecordFaceRemoteCleanup is that it drops the "server lacks face recognition" condition: an
+// operator may purge while a live server is unreachable or face-disabled, so keep a durable
+// cleanup obligation for every owned face that has not converged, regardless of current
 // capability; the worker only attempts it after the server reports face recognition enabled.
 func (q *Queries) RecordFaceForcedRemoteCleanup(ctx context.Context, arg RecordFaceForcedRemoteCleanupParams) error {
 	_, err := q.db.Exec(ctx, recordFaceForcedRemoteCleanup, arg.Name, arg.TenantID, arg.ID)
@@ -731,6 +733,10 @@ type RecordFaceRemoteCleanupParams struct {
 	ID       uuid.UUID
 }
 
+// Automatic tombstone purge (Syncer.purgeOne): record cleanup only for owned, non-converged
+// faces on servers that currently lack face recognition. A face-capable server is deleted
+// from by the normal sync before the purge, so it never needs a deferred obligation.
+// RecordFaceForcedRemoteCleanup is the operator variant without the capability condition.
 func (q *Queries) RecordFaceRemoteCleanup(ctx context.Context, arg RecordFaceRemoteCleanupParams) error {
 	_, err := q.db.Exec(ctx, recordFaceRemoteCleanup, arg.Name, arg.TenantID, arg.ID)
 	return err
