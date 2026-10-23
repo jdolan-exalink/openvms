@@ -305,6 +305,7 @@ func buildMux(secret, variant string, sampler *agent.Sampler, discoveryHandler, 
 		mux.HandleFunc("POST /v1/onvif/video-config", opsHandler.HandleVideoConfig)
 		mux.HandleFunc("POST /v1/onvif/video-encoding", opsHandler.HandleVideoEncoding)
 		mux.HandleFunc("POST /v1/onvif/imaging", opsHandler.HandleImaging)
+		mux.HandleFunc("POST /v1/onvif/snapshot", opsHandler.HandleSnapshot)
 	}
 	if lprHandler != nil {
 		mux.Handle("/SendKeepalive", lprHandler)

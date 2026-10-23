@@ -1,6 +1,7 @@
 package onvifdiscover
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -13,8 +14,65 @@ import (
 )
 
 type OpsHandler struct {
-	token    string
-	networks []netip.Prefix
+	token             string
+	networks          []netip.Prefix
+	onvifTransport    http.RoundTripper
+	snapshotTransport http.RoundTripper
+}
+
+type SnapshotRequest struct {
+	Endpoint     string `json:"endpoint"`
+	Username     string `json:"username"`
+	Password     string `json:"password"`
+	ProfileToken string `json:"profile_token"`
+}
+
+func (h *OpsHandler) HandleSnapshot(w http.ResponseWriter, r *http.Request) {
+	if !h.authenticate(r) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req SnapshotRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxProbeRequestBytes)).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	endpoint, address, err := parseProbeEndpoint(req.Endpoint)
+	if err != nil || !h.allowed(address) || req.ProfileToken == "" || len(req.ProfileToken) > maxProbeFieldRunes || len(req.Username) > maxProbeUsernameBytes || len(req.Password) > maxProbePasswordBytes {
+		http.Error(w, "invalid or disallowed endpoint", http.StatusBadRequest)
+		return
+	}
+	if req.Username != "" && req.Password == "" {
+		http.Error(w, "invalid camera credentials", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), probeOperationTimeout)
+	defer cancel()
+	var credentials *onvif.Credentials
+	if req.Username != "" {
+		credentials = onvif.NewCredentials(req.Username, req.Password)
+	}
+	soapClient := onvif.NewClient(h.onvifTransport, onvif.Config{Timeout: probeOperationTimeout, Credentials: credentials})
+	media := onvif.NewMediaClient(soapClient, endpoint)
+	snapshotURI, err := media.GetSnapshotURI(ctx, req.ProfileToken)
+	if err != nil {
+		http.Error(w, "failed to get camera snapshot", http.StatusBadGateway)
+		return
+	}
+	jpeg, err := fetchOnvifSnapshot(ctx, address.String(), snapshotURI, req.Username, req.Password, h.snapshotTransport)
+	if err != nil {
+		http.Error(w, "failed to download camera snapshot", http.StatusBadGateway)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(jpeg)
 }
 
 func NewOpsHandler(token string, cfg Config) (*OpsHandler, error) {
