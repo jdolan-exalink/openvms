@@ -20,7 +20,7 @@ by themselves: a manager confirms each grouping.
 |---|---|---|
 | `FACE_EMBEDDING_MODEL_PATH` | `/opt/openvms/face-models/arcfaceresnet100-8-spatial1.onnx` | CPU ONNX model |
 | `FACE_EMBEDDING_HEF_PATH` | empty | Hailo-8 HEF; preferred over CPU when it initializes and passes the smoke inference |
-| `FACE_EMBEDDING_MODEL_ID` | `omz-arcfaceresnet100-8-spatial1` | Stored with every vector. Change it with the model; vectors from other ids are recomputed and never compared |
+| `FACE_EMBEDDING_MODEL_ID` | `omz-arcfaceresnet100-8-spatial1` | Stored with every vector, plus an input-preprocessing version (`+in2`). Change it with the model; vectors from other ids or preprocessing versions are recomputed and never compared |
 
 ## Notes
 
@@ -33,3 +33,4 @@ by themselves: a manager confirms each grouping.
 - Crops are resized to 112x112 without landmark alignment, which lowers accuracy for tilted faces.
 - Dismissing a suggestion in the UI lasts for the browser session only.
 - Crops and vectors are biometric data: logs carry IDs and counts only.
+- The OMZ ArcFace graph normalizes pixels itself and expects raw 0-255 RGB. Feeding it [-1, 1] (the first release, `in1`) made every crop embed almost identically (median cosine 0.986 across 76 real crops, so every suggestion read as a match). With raw bytes the same crops have median 0.18 and p90 0.37. The `+in2` suffix makes the worker recompute the old vectors on the next pass.

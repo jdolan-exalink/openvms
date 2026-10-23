@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestPreprocessArcFace112ConvertsRGBToNormalizedNCHW(t *testing.T) {
+func TestPreprocessArcFace112ConvertsRGBToRawNCHW(t *testing.T) {
 	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	img.SetRGBA(0, 0, color.RGBA{R: 255, G: 127, B: 0, A: 255})
 	got, err := preprocessArcFace112(img)
@@ -20,8 +20,8 @@ func TestPreprocessArcFace112ConvertsRGBToNormalizedNCHW(t *testing.T) {
 		t.Fatalf("input length = %d", len(got))
 	}
 	plane := faceModelInputSize * faceModelInputSize
-	if got[0] != 1 || got[plane] < -0.01 || got[plane] > 0.01 || got[2*plane] != -1 {
-		t.Fatalf("first pixel channels = %v, want normalized R,G,B = [1, 0, -1]", []float32{got[0], got[plane], got[2*plane]})
+	if got[0] != 255 || got[plane] != 127 || got[2*plane] != 0 {
+		t.Fatalf("first pixel channels = %v, want raw R,G,B bytes = [255, 127, 0]", []float32{got[0], got[plane], got[2*plane]})
 	}
 }
 
