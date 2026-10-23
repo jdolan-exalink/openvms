@@ -70,13 +70,13 @@ export function PersonsTab({ canManage }: { canManage: boolean }) {
           {t("faces.forcePurgeQueued")}
         </p>
       )}
+      {canManage && <ErrorNote error={tombstones.error} />}
       {canManage && (tombstones.data?.length ?? 0) > 0 && (
         <section aria-labelledby="faces-pending-cleanup-title" className="flex flex-col gap-3 rounded-m3-xl border border-warn/30 bg-warn/10 p-4">
           <div>
             <h2 id="faces-pending-cleanup-title" className="text-base font-bold">{t("faces.pendingCleanupTitle")}</h2>
             <p className="text-sm text-on-surface-variant">{t("faces.pendingCleanupDescription")}</p>
           </div>
-          <ErrorNote error={tombstones.error} />
           <ul className="flex flex-col gap-2" aria-label={t("faces.pendingCleanupTitle")}>
             {tombstones.data?.map((tombstone) => (
               <li key={tombstone.id} className="flex flex-wrap items-center justify-between gap-3 rounded-m3-lg bg-surface-1 px-3 py-2">
@@ -92,7 +92,6 @@ export function PersonsTab({ canManage }: { canManage: boolean }) {
           </ul>
         </section>
       )}
-      {canManage && tombstones.error && (tombstones.data?.length ?? 0) === 0 && <ErrorNote error={tombstones.error} />}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="w-full sm:max-w-sm">
           <Field label={t("faces.searchPeople")}>

@@ -536,6 +536,14 @@ func (s *Service) ListImages(ctx context.Context, actor authz.Actor, tenantID, p
 
 // ForcePurgeTombstone removes a deleted person even when an owned face has not converged on a
 // live server. Remote cleanup is persisted for the worker; this request never contacts Frigate.
+//
+// It deliberately does not share code with Syncer.purgeOne (sync.go). The worker purges in
+// several short transactions (scrub batches, then the final delete) and resumes on the next
+// pass when events still carry the name; an operator request instead runs in one transaction
+// and refuses to purge while any event keeps the name. Both must keep the same invariants:
+// record the erased name before scrubbing, scrub in bounded batches, never delete the person
+// while a stored event still carries the name, record the remote cleanup obligation before the
+// delete, and audit the purge. Change them together.
 func (s *Service) ForcePurgeTombstone(ctx context.Context, actor authz.Actor, tenantID, id uuid.UUID) error {
 	return s.tx(ctx, actor, tenantID, authz.FacesManage, func(q *db.Queries) error {
 		if err := lockPerson(ctx, q, id); err != nil {

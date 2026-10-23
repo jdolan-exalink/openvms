@@ -177,6 +177,10 @@ DELETE FROM face_erased_names WHERE tenant_id = @tenant_id AND frigate_name = @n
 DELETE FROM face_erased_names WHERE erased_at < now() - make_interval(secs => @retention_seconds::float8);
 
 -- name: RecordFaceRemoteCleanup :exec
+-- Automatic tombstone purge (Syncer.purgeOne): record cleanup only for owned, non-converged
+-- faces on servers that currently lack face recognition. A face-capable server is deleted
+-- from by the normal sync before the purge, so it never needs a deferred obligation.
+-- RecordFaceForcedRemoteCleanup is the operator variant without the capability condition.
 INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)
 SELECT f.tenant_id, f.server_id, @name::text
 FROM face_server_sync f
@@ -187,8 +191,10 @@ WHERE f.tenant_id = @tenant_id AND f.person_id = @id AND f.owned
 ON CONFLICT DO NOTHING;
 
 -- name: RecordFaceForcedRemoteCleanup :exec
--- An operator may purge a tombstone while a live server is unreachable or face-disabled. Keep a
--- durable cleanup obligation for every owned face that has not converged, regardless of current
+-- Operator force purge (Service.ForcePurgeTombstone). The only difference from
+-- RecordFaceRemoteCleanup is that it drops the "server lacks face recognition" condition: an
+-- operator may purge while a live server is unreachable or face-disabled, so keep a durable
+-- cleanup obligation for every owned face that has not converged, regardless of current
 -- capability; the worker only attempts it after the server reports face recognition enabled.
 INSERT INTO face_remote_cleanup (tenant_id, server_id, frigate_name)
 SELECT f.tenant_id, f.server_id, @name::text

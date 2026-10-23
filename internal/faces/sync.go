@@ -462,6 +462,9 @@ func (y *Syncer) PurgeTombstones(ctx context.Context, limit int) error {
 	return nil
 }
 
+// purgeOne finishes one converged tombstone in bounded transactions. The operator path,
+// Service.ForcePurgeTombstone, keeps the same invariants in a single transaction; see its
+// comment before changing either.
 func (y *Syncer) purgeOne(ctx context.Context, p db.FacePerson) error {
 	// Before scrubbing, so reviews ingested while the scrub runs (and later ones Frigate still
 	// serves) cannot write the name back; see ErasedNameRetention.
