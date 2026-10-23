@@ -30,11 +30,15 @@ by themselves: a manager confirms each grouping.
   risk on 2026-10-23; revisit it before distributing the model.
 - A crop that cannot be embedded is retried at most 5 times and fresh crops go first. Suggestions compare at most the 500 newest pending embeddings per request.
 - Measured on the host CPU: about 100 ms per crop with 2 intra-op threads.
-- The similarity threshold is `faces.DefaultSuggestionThreshold` (cosine 0.55). It was chosen by
-  reviewing 49 real suggestion pairs after the input fix: same-person pairs held from 0.55 up and
-  pairs below about 0.53 started mixing people. That sample covers only a few people, so it is not a
-  calibration on consented data; treat suggestions as hints. Crops that are not faces (black frames,
-  pavement) match each other at any threshold, which is why the detector gate exists.
+- The similarity threshold is `faces.DefaultSuggestionThreshold` (cosine 0.50). It was chosen on
+  aligned embeddings by looking at the crops of the 28 pairs between 0.40 and 0.56: same-person
+  pairs held down to about 0.46, the first clearly different people appeared at 0.44 (a person with
+  white-framed glasses against a man in a red striped shirt), and two more unlikely matches at 0.43
+  and 0.41. 0.50 keeps 0.06 of margin over the first error. The sample is about five people and the
+  labels are from inspection, not operator verdicts, so it is not a calibration on consented data;
+  treat suggestions as hints and re-check it against `face_suggestion_decisions` (see below). Crops
+  that are not faces (black frames, pavement) match each other at any threshold, which is why the
+  detector gate exists.
 - With the detector gate on, each face is aligned before embedding: YuNet's five landmarks (eyes, nose, mouth corners) are mapped onto the standard ArcFace 112x112 template with a similarity transform. Without the gate, crops are stretched to 112x112 and tilted faces lose accuracy. The two inputs have different stored model versions (`+in3a` aligned, `+in2` stretched), so turning the gate on or off recomputes every vector. On 76 real crops, same-person pairs went from 0.59/0.67/0.58 to 0.68/0.77/0.86 (one near-duplicate pair went 0.92 -> 0.81) and the twelve highest-scoring unlabelled pairs were all the same person on inspection; unrelated pairs got a lower median (0.16 -> 0.06). Still not calibrated on consented data.
 - "Not the same person" is stored (`face_suggestion_decisions`) and hides that pair from future suggestions, in both directions. "Group together" on a suggestion stores a `same` verdict. A verdict names one sighting on each side, so it keeps ruling out the two identities when groups merge later. Rows hold sighting IDs and the similarity the operator saw, never biometric data, and survive the crops they refer to. If a verdict cannot be stored the UI shows the error and does not group.
 - Crops and vectors are biometric data: logs carry IDs and counts only.
