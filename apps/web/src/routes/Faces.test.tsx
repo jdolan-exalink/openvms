@@ -19,7 +19,7 @@ type Backend = {
   persons: Schemas["FacePerson"][];
   images: Schemas["FaceImage"][];
   syncStatus: Schemas["FaceSyncStatus"][];
-  train: Schemas["FaceTrainList"];
+  reviewInbox: Schemas["FaceReviewInbox"];
   recognitions: Schemas["FaceRecognition"][][];
   cameras: { id: string; display_name: string }[];
   /** Forces an error answer: status codes for the image upload and the person PATCH. */
@@ -33,7 +33,7 @@ type Backend = {
 
 function install(over: Partial<Backend> = {}) {
   const b: Backend = {
-    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], train: { items: [], servers: [] }, recognitions: [[]], cameras: [], fail: {}, tenantId: "t1",
+    permissions: ["faces.view", "faces.manage"], persons: [], images: [], syncStatus: [], reviewInbox: { items: [] }, recognitions: [[]], cameras: [], fail: {}, tenantId: "t1",
     sites: [{ id: "s1", name: "Sede" }, { id: "s2", name: "Anexo" }], servers: [{ id: "srv1", name: "h01", site_id: "s1" }, { id: "srv2", name: "c01", site_id: "s2" }], groups: [{ id: "g1", name: "Accesos" }],
     ...over,
   };
@@ -73,8 +73,10 @@ function install(over: Partial<Backend> = {}) {
       if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "DELETE") return new Response(null, { status: 204 });
       if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "PATCH" && b.fail.patch) return json({ code: "conflict", message: "name already in use" }, b.fail.patch);
       if (/^\/api\/v1\/faces\/persons\/[^/]+$/.test(p) && input.method === "PATCH") return json({ ...b.persons[0], ...(call.body as object) });
-      if (p === "/api/v1/faces/train") return json(b.train);
-      if (p === "/api/v1/faces/train/assign") return json({ person: person("p1", "Ana"), image: { id: "i9" }, attempt_removed: true }, 201);
+      if (p === "/api/v1/faces/review-inbox" && input.method === "GET") return json(b.reviewInbox);
+      if (/^\/api\/v1\/faces\/review-inbox\/[^/]+\/image$/.test(p)) return new Response(new Uint8Array([1]), { status: 200, headers: { "Content-Type": "image/png" } });
+      if (/^\/api\/v1\/faces\/review-inbox\/[^/]+\/assign$/.test(p)) return json({ person: person("p1", "Ana"), image: { id: "i9" }, attempt_removed: true }, 201);
+      if (/^\/api\/v1\/faces\/review-inbox\/[^/]+$/.test(p) && input.method === "DELETE") return new Response(null, { status: 204 });
       if (p === "/api/v1/faces/recognitions") {
         const idx = url.searchParams.get("cursor") ? 1 : 0;
         const items = b.recognitions[idx] ?? [];
@@ -113,24 +115,24 @@ describe("Faces page as a platform administrator", () => {
     fireEvent.click(screen.getByRole("button", { name: "Crear persona" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/api/v1/faces/persons")).toBe(true));
     fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/train")).toBe(true));
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/review-inbox")).toBe(true));
     fireEvent.click(screen.getByRole("tab", { name: "Reconocimientos" }));
     await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/recognitions")).toBe(true));
     expect(facesCalls(calls).some((c) => c.search.has("tenant_id"))).toBe(false);
   });
 
   it("uses plain train thumbnail URLs and assigns without a tenant", async () => {
-    const train = { items: [{ server_id: "s1", server_name: "h01", file: "a.webp" }], servers: [{ server_id: "s1", server_name: "h01" }] };
-    const { calls } = install({ tenantId: null, persons: [person("p1", "Ana")], train });
+    const reviewInbox = { items: [{ id: "sighting-1", server_id: "s1", server_name: "h01", site_id: "site1", first_seen_at: "2026-10-17T12:00:00Z", crop_available: true }] };
+    const { calls } = install({ tenantId: null, persons: [person("p1", "Ana")], reviewInbox });
     renderPage(Faces);
     fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
     const img = await screen.findByAltText("Intento de reconocimiento en h01");
-    expect(img).toHaveAttribute("src", "/api/v1/faces/train/s1/image?file=a.webp");
+    expect(img).toHaveAttribute("src", "/api/v1/faces/review-inbox/sighting-1/image");
     await screen.findAllByRole("option", { name: "Ana" });
     fireEvent.change(screen.getByLabelText("Asignar a"), { target: { value: "p1" } });
     fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
-    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/train/assign")).toBe(true));
-    expect(calls.find((c) => c.path === "/api/v1/faces/train/assign")?.search.has("tenant_id")).toBe(false);
+    await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/review-inbox/sighting-1/assign")).toBe(true));
+    expect(calls.find((c) => c.path === "/api/v1/faces/review-inbox/sighting-1/assign")?.search.has("tenant_id")).toBe(false);
   });
 
   it("keeps the person image URL free of tenant_id", async () => {
@@ -326,32 +328,31 @@ describe("Faces page", () => {
   describe("Entrenar", () => {
     const attempts = {
       items: [
-        { server_id: "s1", server_name: "h01", file: "a.webp", score: 0.41, seen_at: "2026-10-17T12:00:00Z" },
-        { server_id: "s1", server_name: "h01", file: "b.webp" },
+        { id: "sighting-a", server_id: "s1", server_name: "h01", site_id: "s1", first_seen_at: "2026-10-17T12:00:00Z", seen_at: "2026-10-17T12:00:00Z", score: 0.41, crop_available: true },
+        { id: "sighting-b", server_id: "s1", server_name: "h01", site_id: "s1", first_seen_at: "2026-10-17T12:01:00Z", crop_available: true },
       ],
-      servers: [{ server_id: "s1", server_name: "h01" }, { server_id: "s2", server_name: "c01", error: "the server could not be reached" }],
     };
 
-    it("points to Servers when no server has face recognition", async () => {
-      install({ train: { items: [], servers: [] } });
+    it("shows an empty inbox and a link to Servers", async () => {
+      install({ reviewInbox: { items: [] } });
       renderPage(Faces);
       fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
-      expect(await screen.findByText(/Ningún servidor tiene activado el reconocimiento facial\. La configuración administrada/)).toBeInTheDocument();
+      expect(await screen.findByText("No hay intentos recientes sin clasificar.")).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Ir a Servidores" })).toHaveAttribute("href", "/servers");
     });
 
-    it("shows attempts through the proxied thumbnail endpoint and reports unreachable servers", async () => {
-      install({ persons: [person("p1", "Ana")], train: attempts });
+    it("shows durable sightings with retained crop URLs", async () => {
+      install({ persons: [person("p1", "Ana")], reviewInbox: attempts });
       renderPage(Faces);
       fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
       const imgs = await screen.findAllByAltText("Intento de reconocimiento en h01");
-      expect(imgs[0]).toHaveAttribute("src", "/api/v1/faces/train/s1/image?file=a.webp");
-      expect(screen.getByText("c01: the server could not be reached")).toBeInTheDocument();
+      expect(imgs[0]).toHaveAttribute("src", "/api/v1/faces/review-inbox/sighting-a/image");
+      expect(screen.getByText("ID sin clasificar: sighting-a")).toBeInTheDocument();
       expect(screen.getByText("Puntaje 0.41")).toBeInTheDocument();
     });
 
-    it("assigns an attempt to an existing person and to a new one", async () => {
-      const { calls } = install({ persons: [person("p1", "Ana")], train: attempts });
+    it("assigns sightings to an existing person and to a new one", async () => {
+      const { calls } = install({ persons: [person("p1", "Ana")], reviewInbox: attempts });
       renderPage(Faces);
       fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
       const selects = await screen.findAllByLabelText("Asignar a");
@@ -360,17 +361,17 @@ describe("Faces page", () => {
       expect(await screen.findByText("Elige una persona o escribe un nombre.")).toBeInTheDocument();
       fireEvent.change(selects[0]!, { target: { value: "p1" } });
       fireEvent.click(screen.getAllByRole("button", { name: "Asignar" })[0]!);
-      await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/faces/train/assign").map((c) => c.body)).toEqual([{ server_id: "s1", file: "a.webp", person_id: "p1" }]));
+      await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/faces/review-inbox/sighting-a/assign").map((c) => c.body)).toEqual([{ person_id: "p1" }]));
       expect(await screen.findByText("Foto agregada a Ana.")).toBeInTheDocument();
 
       fireEvent.change(screen.getAllByLabelText("Asignar a")[1]!, { target: { value: "__new__" } });
       fireEvent.change(await screen.findByLabelText("Nombre de la nueva persona"), { target: { value: "Dora" } });
       fireEvent.click(screen.getAllByRole("button", { name: "Asignar" })[1]!);
-      await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/faces/train/assign").map((c) => c.body)).toContainEqual({ server_id: "s1", file: "b.webp", new_person_display_name: "Dora" }));
+      await waitFor(() => expect(calls.filter((c) => c.path === "/api/v1/faces/review-inbox/sighting-b/assign").map((c) => c.body)).toContainEqual({ new_person_display_name: "Dora" }));
     });
 
     it("hides the assign controls from a viewer", async () => {
-      install({ permissions: ["faces.view"], persons: [person("p1", "Ana")], train: attempts });
+      install({ permissions: ["faces.view"], persons: [person("p1", "Ana")], reviewInbox: attempts });
       renderPage(Faces);
       fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
       await screen.findAllByAltText("Intento de reconocimiento en h01");
@@ -445,15 +446,15 @@ describe("Faces page", () => {
 
   describe("Entrenar filters", () => {
     it("narrows the attempts by site and server", async () => {
-      const { calls } = install({ train: { items: [], servers: [{ server_id: "srv1", server_name: "h01" }] } });
+      const { calls } = install({ reviewInbox: { items: [] } });
       renderPage(Faces);
       fireEvent.click(await screen.findByRole("tab", { name: "Entrenar" }));
       await screen.findByRole("option", { name: "Anexo" });
       await screen.findByRole("option", { name: "c01" });
       fireEvent.change(screen.getByLabelText("Sitio"), { target: { value: "s2" } });
-      await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/train" && c.search.getAll("site_id").join() === "s2")).toBe(true));
+      await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/review-inbox" && c.search.getAll("site_id").join() === "s2")).toBe(true));
       fireEvent.change(screen.getByLabelText("Servidor"), { target: { value: "srv2" } });
-      await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/train" && c.search.getAll("server_id").join() === "srv2")).toBe(true));
+      await waitFor(() => expect(calls.some((c) => c.path === "/api/v1/faces/review-inbox" && c.search.getAll("server_id").join() === "srv2")).toBe(true));
     });
   });
 });
