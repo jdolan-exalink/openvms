@@ -94,6 +94,33 @@ WHERE tenant_id = ANY(@tenant_ids::uuid[]) AND deleted_at IS NULL AND capabiliti
   AND (cardinality(@server_ids::uuid[]) = 0 OR id = ANY(@server_ids::uuid[]))
 ORDER BY lower(name), id;
 
+-- name: ListFaceCapableServersAny :many
+-- Worker-only background discovery; RLS is explicitly bypassed through store.AllTenants.
+SELECT * FROM frigate_servers
+WHERE deleted_at IS NULL AND capabilities @> '{"face_recognition": true}'::jsonb
+ORDER BY tenant_id, lower(name), id;
+
+-- name: InsertFaceSighting :one
+INSERT INTO face_sightings (tenant_id, server_id, source_file, source_seen_at, source_label, source_score)
+VALUES (@tenant_id, @server_id, @source_file, @source_seen_at, @source_label, @source_score)
+ON CONFLICT (tenant_id, server_id, source_file) DO NOTHING
+RETURNING *;
+
+-- name: GetFaceSightingBySource :one
+SELECT * FROM face_sightings
+WHERE tenant_id = @tenant_id AND server_id = @server_id AND source_file = @source_file;
+
+-- name: SetFaceSightingCrop :exec
+UPDATE face_sightings
+SET crop_key = @crop_key, crop_content_type = @crop_content_type,
+    crop_size_bytes = @crop_size_bytes, crop_sha256 = @crop_sha256,
+    ingest_error = ''
+WHERE id = @id AND review_status = 'pending';
+
+-- name: SetFaceSightingRetry :exec
+UPDATE face_sightings SET ingest_error = @ingest_error
+WHERE id = @id AND review_status = 'pending' AND crop_key IS NULL;
+
 -- name: ListFacePersonLastRecognitions :many
 -- The newest event per live person on the given cameras (the caller's events.view set). The
 -- lateral join stops at the first match per person, so the cost is one index probe each.
