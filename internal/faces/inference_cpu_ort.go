@@ -104,7 +104,7 @@ func (r *cpuEmbeddingRuntime) Embed(ctx context.Context, img image.Image) ([]flo
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if r == nil || r.session == nil || img == nil {
+	if r == nil || img == nil {
 		return nil, errors.New("CPU face embedding runtime is not ready")
 	}
 	data, err := preprocessArcFace112(img)
@@ -113,6 +113,9 @@ func (r *cpuEmbeddingRuntime) Embed(ctx context.Context, img image.Image) ([]flo
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.session == nil {
+		return nil, errors.New("CPU face embedding runtime is not ready")
+	}
 	copy(r.input.GetData(), data)
 	if err := r.session.Run(); err != nil {
 		return nil, err
