@@ -299,7 +299,7 @@ func (q *Queries) GetFacePersonImage(ctx context.Context, arg GetFacePersonImage
 }
 
 const getFaceSighting = `-- name: GetFaceSighting :one
-SELECT id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at, identity_group_id, embedding, embedding_profile, embedding_model, embedded_at FROM face_sightings WHERE tenant_id = $1 AND id = $2
+SELECT id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at, identity_group_id, embedding, embedding_profile, embedding_model, embedded_at, embed_failures FROM face_sightings WHERE tenant_id = $1 AND id = $2
 `
 
 type GetFaceSightingParams struct {
@@ -332,12 +332,13 @@ func (q *Queries) GetFaceSighting(ctx context.Context, arg GetFaceSightingParams
 		&i.EmbeddingProfile,
 		&i.EmbeddingModel,
 		&i.EmbeddedAt,
+		&i.EmbedFailures,
 	)
 	return i, err
 }
 
 const getFaceSightingBySource = `-- name: GetFaceSightingBySource :one
-SELECT id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at, identity_group_id, embedding, embedding_profile, embedding_model, embedded_at FROM face_sightings
+SELECT id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at, identity_group_id, embedding, embedding_profile, embedding_model, embedded_at, embed_failures FROM face_sightings
 WHERE tenant_id = $1 AND server_id = $2 AND source_file = $3
 `
 
@@ -372,12 +373,13 @@ func (q *Queries) GetFaceSightingBySource(ctx context.Context, arg GetFaceSighti
 		&i.EmbeddingProfile,
 		&i.EmbeddingModel,
 		&i.EmbeddedAt,
+		&i.EmbedFailures,
 	)
 	return i, err
 }
 
 const getFaceSightingForUpdate = `-- name: GetFaceSightingForUpdate :one
-SELECT id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at, identity_group_id, embedding, embedding_profile, embedding_model, embedded_at FROM face_sightings WHERE tenant_id = $1 AND id = $2 FOR UPDATE
+SELECT id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at, identity_group_id, embedding, embedding_profile, embedding_model, embedded_at, embed_failures FROM face_sightings WHERE tenant_id = $1 AND id = $2 FOR UPDATE
 `
 
 type GetFaceSightingForUpdateParams struct {
@@ -410,6 +412,7 @@ func (q *Queries) GetFaceSightingForUpdate(ctx context.Context, arg GetFaceSight
 		&i.EmbeddingProfile,
 		&i.EmbeddingModel,
 		&i.EmbeddedAt,
+		&i.EmbedFailures,
 	)
 	return i, err
 }
@@ -512,7 +515,7 @@ const insertFaceSighting = `-- name: InsertFaceSighting :one
 INSERT INTO face_sightings (tenant_id, server_id, source_file, source_seen_at, source_label, source_score)
 VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (tenant_id, server_id, source_file) DO NOTHING
-RETURNING id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at, identity_group_id, embedding, embedding_profile, embedding_model, embedded_at
+RETURNING id, tenant_id, server_id, source_file, source_seen_at, source_label, source_score, first_seen_at, crop_key, crop_content_type, crop_size_bytes, crop_sha256, ingest_error, review_status, person_id, reviewed_at, identity_group_id, embedding, embedding_profile, embedding_model, embedded_at, embed_failures
 `
 
 type InsertFaceSightingParams struct {
@@ -556,6 +559,7 @@ func (q *Queries) InsertFaceSighting(ctx context.Context, arg InsertFaceSighting
 		&i.EmbeddingProfile,
 		&i.EmbeddingModel,
 		&i.EmbeddedAt,
+		&i.EmbedFailures,
 	)
 	return i, err
 }
@@ -1021,7 +1025,7 @@ const listFaceSightingEmbeddings = `-- name: ListFaceSightingEmbeddings :many
 SELECT id, COALESCE(identity_group_id, id) AS identity_id, embedding_profile, embedding_model, embedding
 FROM face_sightings
 WHERE id = ANY($1::uuid[]) AND review_status = 'pending' AND embedding IS NOT NULL
-ORDER BY first_seen_at, id
+ORDER BY first_seen_at DESC, id DESC
 `
 
 type ListFaceSightingEmbeddingsRow struct {
@@ -1061,15 +1065,17 @@ func (q *Queries) ListFaceSightingEmbeddings(ctx context.Context, ids []uuid.UUI
 const listFaceSightingsToEmbed = `-- name: ListFaceSightingsToEmbed :many
 SELECT id, tenant_id, crop_key FROM face_sightings
 WHERE review_status = 'pending' AND crop_key IS NOT NULL
-  AND (embedding IS NULL OR embedding_profile IS DISTINCT FROM $1::text OR embedding_model IS DISTINCT FROM $2::text)
-ORDER BY first_seen_at, id
-LIMIT $3
+  AND embed_failures < $1::smallint
+  AND (embedding IS NULL OR embedding_profile IS DISTINCT FROM $2::text OR embedding_model IS DISTINCT FROM $3::text)
+ORDER BY embed_failures, first_seen_at, id
+LIMIT $4
 `
 
 type ListFaceSightingsToEmbedParams struct {
-	Profile  string
-	Model    string
-	RowLimit int32
+	MaxFailures int16
+	Profile     string
+	Model       string
+	RowLimit    int32
 }
 
 type ListFaceSightingsToEmbedRow struct {
@@ -1079,7 +1085,12 @@ type ListFaceSightingsToEmbedRow struct {
 }
 
 func (q *Queries) ListFaceSightingsToEmbed(ctx context.Context, arg ListFaceSightingsToEmbedParams) ([]ListFaceSightingsToEmbedRow, error) {
-	rows, err := q.db.Query(ctx, listFaceSightingsToEmbed, arg.Profile, arg.Model, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listFaceSightingsToEmbed,
+		arg.MaxFailures,
+		arg.Profile,
+		arg.Model,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1184,6 +1195,16 @@ func (q *Queries) MoveFaceIdentityGroupMembers(ctx context.Context, arg MoveFace
 	return err
 }
 
+const recordFaceSightingEmbedFailure = `-- name: RecordFaceSightingEmbedFailure :exec
+UPDATE face_sightings SET embed_failures = LEAST(embed_failures + 1, 32767)::smallint
+WHERE id = $1 AND review_status = 'pending'
+`
+
+func (q *Queries) RecordFaceSightingEmbedFailure(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, recordFaceSightingEmbedFailure, id)
+	return err
+}
+
 const rejectFaceSighting = `-- name: RejectFaceSighting :execrows
 UPDATE face_sightings
 SET review_status = 'rejected', reviewed_at = now(),
@@ -1234,7 +1255,7 @@ func (q *Queries) SetFaceSightingCrop(ctx context.Context, arg SetFaceSightingCr
 const setFaceSightingEmbedding = `-- name: SetFaceSightingEmbedding :execrows
 UPDATE face_sightings
 SET embedding = $1::real[], embedding_profile = $2::text, embedding_model = $3::text,
-    embedded_at = now()
+    embedded_at = now(), embed_failures = 0
 WHERE id = $4 AND review_status = 'pending' AND crop_key IS NOT NULL
 `
 

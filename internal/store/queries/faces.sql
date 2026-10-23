@@ -210,18 +210,23 @@ WHERE p.tenant_id = @tenant_id AND p.deleted_at IS NULL;
 -- name: ListFaceSightingsToEmbed :many
 SELECT id, tenant_id, crop_key FROM face_sightings
 WHERE review_status = 'pending' AND crop_key IS NOT NULL
+  AND embed_failures < @max_failures::smallint
   AND (embedding IS NULL OR embedding_profile IS DISTINCT FROM @profile::text OR embedding_model IS DISTINCT FROM @model::text)
-ORDER BY first_seen_at, id
+ORDER BY embed_failures, first_seen_at, id
 LIMIT @row_limit;
+
+-- name: RecordFaceSightingEmbedFailure :exec
+UPDATE face_sightings SET embed_failures = LEAST(embed_failures + 1, 32767)::smallint
+WHERE id = @id AND review_status = 'pending';
 
 -- name: SetFaceSightingEmbedding :execrows
 UPDATE face_sightings
 SET embedding = @embedding::real[], embedding_profile = @profile::text, embedding_model = @model::text,
-    embedded_at = now()
+    embedded_at = now(), embed_failures = 0
 WHERE id = @id AND review_status = 'pending' AND crop_key IS NOT NULL;
 
 -- name: ListFaceSightingEmbeddings :many
 SELECT id, COALESCE(identity_group_id, id) AS identity_id, embedding_profile, embedding_model, embedding
 FROM face_sightings
 WHERE id = ANY(@ids::uuid[]) AND review_status = 'pending' AND embedding IS NOT NULL
-ORDER BY first_seen_at, id;
+ORDER BY first_seen_at DESC, id DESC;

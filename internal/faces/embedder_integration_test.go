@@ -5,6 +5,8 @@ package faces_test
 import (
 	"context"
 	"image"
+
+	"github.com/google/uuid"
 	"testing"
 
 	"github.com/jdolan-exalink/openvms/internal/faces"
@@ -102,5 +104,39 @@ func TestReviewSightingsSuggestSimilarIdentitiesWithoutGrouping(t *testing.T) {
 	}
 	if withSuggestions != 2 {
 		t.Fatalf("suggestions = %d, want 2 (the matching pair, one each way)", withSuggestions)
+	}
+}
+
+func TestEmbedderDoesNotLetAnUnreadableCropStarveTheQueue(t *testing.T) {
+	sf := newSyncFixture(t)
+	sf.setCapability(sf.h01ID, sf.h01, true)
+	sf.svc.Adapters = inventory.NewAdapters(sf.env.Svc)
+	sf.h01.AddFaceTrainImage("1700000000.11-aa-1700000100-unknown-0.41.webp", pngOf(t, 61))
+	sf.h01.AddFaceTrainImage("1700000000.12-bb-1700000200-unknown-0.42.webp", pngOf(t, 62))
+	ctx := context.Background()
+	if err := (&faces.ReviewIngestor{Store: sf.env.Store, Blobs: sf.blobs, Adapters: sf.svc.Adapters, Log: sf.svc.Log}).RunOnce(ctx, 25); err != nil {
+		t.Fatal(err)
+	}
+	var badID uuid.UUID
+	var badKey string
+	sf.queryRow(`SELECT id FROM face_sightings WHERE tenant_id = $1 ORDER BY first_seen_at, id LIMIT 1`, &badID, sf.tenant)
+	sf.queryRow(`SELECT crop_key FROM face_sightings WHERE id = $1`, &badKey, badID)
+	if err := sf.blobs.Put(ctx, badKey, []byte("not an image"), "image/png"); err != nil {
+		t.Fatal(err)
+	}
+	emb := &faces.Embedder{Store: sf.env.Store, Blobs: sf.blobs, Runtime: &fakeEmbedder{profile: faces.EmbeddingProfileCPU}, ModelID: "m1", Log: sf.svc.Log}
+
+	// Two single-slot passes: the unreadable crop is tried once, then the fresh one gets the slot.
+	if n, err := emb.RunOnce(ctx, 1); err == nil || n != 0 {
+		t.Fatalf("first pass = %d, %v; want the unreadable crop to fail", n, err)
+	}
+	if n, err := emb.RunOnce(ctx, 1); err != nil || n != 1 {
+		t.Fatalf("second pass = %d, %v; want the fresh crop embedded", n, err)
+	}
+	for i := 0; i < 6; i++ {
+		_, _ = emb.RunOnce(ctx, 1)
+	}
+	if got := sf.scanInt(`SELECT embed_failures FROM face_sightings WHERE id = $1`, badID); got != 5 {
+		t.Fatalf("embed_failures = %d, want retries capped at 5", got)
 	}
 }

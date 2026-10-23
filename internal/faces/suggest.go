@@ -13,7 +13,8 @@ const DefaultSuggestionThreshold = 0.5
 
 const (
 	maxSuggestionPerIdentity = 3
-	maxSuggestionCandidates  = 2000
+	// maxSuggestionCandidates bounds the pairwise comparison per request; callers pass newest first.
+	maxSuggestionCandidates = 500
 )
 
 // Suggestion points to another pending identity that may be the same person.

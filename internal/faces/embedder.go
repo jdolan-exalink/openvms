@@ -12,7 +12,11 @@ import (
 	"github.com/jdolan-exalink/openvms/internal/store/db"
 )
 
-const embeddingVectorSize = 512
+const (
+	embeddingVectorSize = 512
+	// maxEmbedFailures bounds retries of a crop that keeps failing, so it cannot starve fresh ones.
+	maxEmbedFailures = 5
+)
 
 // Embedder computes the central embedding of retained face crops. Rows whose stored vector was
 // produced by another profile or model id are recomputed, so vectors are never compared across them.
@@ -42,7 +46,7 @@ func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
 	if err := e.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
 		var err error
 		rows, err = q.ListFaceSightingsToEmbed(ctx, db.ListFaceSightingsToEmbedParams{
-			Profile: profile, Model: e.ModelID, RowLimit: int32(limit), //nolint:gosec // bounded above.
+			Profile: profile, Model: e.ModelID, MaxFailures: maxEmbedFailures, RowLimit: int32(limit), //nolint:gosec // bounded above.
 		})
 		return err
 	}); err != nil {
@@ -62,6 +66,7 @@ func (e *Embedder) RunOnce(ctx context.Context, limit int) (int, error) {
 		if err != nil {
 			failed++
 			e.warn(ctx, "embed face sighting", row, err)
+			e.recordFailure(ctx, row)
 			continue
 		}
 		var stored int64
@@ -101,6 +106,14 @@ func (e *Embedder) embedCrop(ctx context.Context, key string) ([]float32, error)
 		return nil, fmt.Errorf("embedding has %d values, want %d", len(vector), embeddingVectorSize)
 	}
 	return vector, nil
+}
+
+func (e *Embedder) recordFailure(ctx context.Context, row db.ListFaceSightingsToEmbedRow) {
+	if err := e.Store.Tx(ctx, store.AllTenants, func(q *db.Queries) error {
+		return q.RecordFaceSightingEmbedFailure(ctx, row.ID)
+	}); err != nil {
+		e.warn(ctx, "record face embedding failure", row, err)
+	}
 }
 
 func (e *Embedder) warn(ctx context.Context, message string, row db.ListFaceSightingsToEmbedRow, err error) {
