@@ -35,7 +35,7 @@ func preprocessHailoRGB112(src image.Image) ([]byte, error) {
 			sx := bounds.Min.X + x*bounds.Dx()/faceModelInputSize
 			r, g, b, _ := src.At(sx, sy).RGBA()
 			i := (y*faceModelInputSize + x) * 3
-			out[i], out[i+1], out[i+2] = byte(r>>8), byte(g>>8), byte(b>>8)
+			out[i], out[i+1], out[i+2] = byte((r>>8)&0xff), byte((g>>8)&0xff), byte((b>>8)&0xff)
 		}
 	}
 	return out, nil
