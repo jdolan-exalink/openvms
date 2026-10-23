@@ -11,8 +11,16 @@ import { fmtDateTime } from "@/lib/format";
 const NEW_PERSON = "__new__";
 
 type SuggestionTarget = { identityId: string; similarity: number; sightingIds: string[] };
+type Verdict = { identityId: string; otherId: string; similarity: number };
 
-function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggestions, onGroupSuggestion, groupingSuggestion }: { attempt: Schemas["FaceReviewSighting"]; persons: Schemas["FacePerson"][]; canManage: boolean; selected: boolean; onSelect: (id: string, selected: boolean) => void; suggestions: SuggestionTarget[]; onGroupSuggestion: (ids: string[]) => void; groupingSuggestion: boolean }) {
+/** recordVerdict keeps the operator's decision on a suggested pair; it is also the calibration data. */
+async function recordVerdict(decision: "same" | "different", v: Verdict) {
+  unwrap(await api.POST("/api/v1/faces/review-inbox/suggestion-decisions", {
+    body: { identity_id: v.identityId, other_identity_id: v.otherId, decision, similarity: v.similarity },
+  }));
+}
+
+function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggestions, onGroupSuggestion, groupingSuggestion }: { attempt: Schemas["FaceReviewSighting"]; persons: Schemas["FacePerson"][]; canManage: boolean; selected: boolean; onSelect: (id: string, selected: boolean) => void; suggestions: SuggestionTarget[]; onGroupSuggestion: (ids: string[], verdict: Verdict) => void; groupingSuggestion: boolean }) {
   const t = useT();
   const qc = useQueryClient();
   const [target, setTarget] = useState("");
@@ -21,6 +29,10 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggesti
   const [confirmReject, setConfirmReject] = useState(false);
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
   const visibleSuggestions = suggestions.filter((sug) => !dismissed.has(sug.identityId));
+  const dismiss = useMutation({
+    mutationFn: (v: Verdict) => recordVerdict("different", v),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["faces", "review-inbox"] }),
+  });
   const assign = useMutation({
     mutationFn: async () => {
       const body = target === NEW_PERSON ? { new_person_display_name: newName.trim() } : { person_id: target };
@@ -74,10 +86,13 @@ function AttemptCard({ attempt, persons, canManage, selected, onSelect, suggesti
           <p className="break-all">{t("faces.suggestionMatch", { id: sug.identityId, percent: Math.round(sug.similarity * 100) })}</p>
           {canManage && (
             <div className="flex flex-wrap gap-1">
-              <Button variant="tonal" disabled={groupingSuggestion} onClick={() => onGroupSuggestion([attempt.id, ...sug.sightingIds])}>
+              <Button variant="tonal" disabled={groupingSuggestion} onClick={() => onGroupSuggestion([attempt.id, ...sug.sightingIds], { identityId: attempt.identity_id, otherId: sug.identityId, similarity: sug.similarity })}>
                 {t("faces.groupSuggestion")}
               </Button>
-              <Button variant="text" onClick={() => setDismissed((current) => new Set(current).add(sug.identityId))}>
+              <Button variant="text" onClick={() => {
+                setDismissed((current) => new Set(current).add(sug.identityId));
+                dismiss.mutate({ identityId: attempt.identity_id, otherId: sug.identityId, similarity: sug.similarity });
+              }}>
                 {t("faces.dismissSuggestion")}
               </Button>
             </div>
@@ -153,7 +168,12 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
   const data = train.data;
   const [confirmRejectSelected, setConfirmRejectSelected] = useState(false);
   const group = useMutation({
-    mutationFn: async (ids: string[]) => unwrap(await api.POST("/api/v1/faces/review-inbox/groups", { body: { sighting_ids: ids } })),
+    mutationFn: async ({ ids, verdict }: { ids: string[]; verdict?: Verdict }) => {
+      const res = unwrap(await api.POST("/api/v1/faces/review-inbox/groups", { body: { sighting_ids: ids } }));
+      // The label is calibration data; failing to store it must not undo the grouping.
+      if (verdict) await recordVerdict("same", verdict).catch(() => undefined);
+      return res;
+    },
     onSuccess: async () => {
       setSelected(new Set());
       await qc.invalidateQueries({ queryKey: ["faces", "review-inbox"] });
@@ -185,7 +205,7 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
         <>
           {canManage && <div className="flex flex-col gap-2 rounded-m3-xl bg-surface-1 p-3 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-sm text-on-surface-variant">{t("faces.groupSelectionCount", { count: selected.size })}</span>
-            <Button variant="tonal" disabled={selected.size < 2 || group.isPending} onClick={() => group.mutate(Array.from(selected))}>
+            <Button variant="tonal" disabled={selected.size < 2 || group.isPending} onClick={() => group.mutate({ ids: Array.from(selected) })}>
               {group.isPending ? t("faces.grouping") : t("faces.groupSelected")}
             </Button>
             <Button variant="text" disabled={selected.size < 1 || rejectSelected.isPending} onClick={() => setConfirmRejectSelected(true)}>
@@ -214,7 +234,7 @@ export function TrainTab({ canManage }: { canManage: boolean }) {
                 canManage={canManage}
                 selected={selected.has(a.id)}
                 suggestions={suggestionTargets(a, data.items)}
-                onGroupSuggestion={(ids) => group.mutate(ids)}
+                onGroupSuggestion={(ids, verdict) => group.mutate({ ids, verdict })}
                 groupingSuggestion={group.isPending}
                 onSelect={(id, checked) => setSelected((current) => {
                   const next = new Set(current);

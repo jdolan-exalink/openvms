@@ -155,10 +155,18 @@ describe("Faces review inbox", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "No es la misma persona" })[1] as HTMLElement);
     expect(screen.getAllByText(/Posible coincidencia/)).toHaveLength(1);
+    await waitFor(() => expect(calls).toContainEqual({
+      method: "POST", path: "/api/v1/faces/review-inbox/suggestion-decisions",
+      body: { identity_id: sightingID2, other_identity_id: sightingID, decision: "different", similarity: 0.874 },
+    }));
 
     fireEvent.click(screen.getByRole("button", { name: "Agrupar juntos" }));
     await waitFor(() => expect(calls).toContainEqual({
       method: "POST", path: "/api/v1/faces/review-inbox/groups", body: { sighting_ids: [sightingID, sightingID2] },
+    }));
+    await waitFor(() => expect(calls).toContainEqual({
+      method: "POST", path: "/api/v1/faces/review-inbox/suggestion-decisions",
+      body: { identity_id: sightingID, other_identity_id: sightingID2, decision: "same", similarity: 0.874 },
     }));
   });
 });
