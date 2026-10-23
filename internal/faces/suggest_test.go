@@ -70,19 +70,19 @@ func TestSuggestIdentitiesLimitsPerIdentityAndIgnoresZeroVectors(t *testing.T) {
 	}
 }
 
-// The default threshold comes from reviewing real crop pairs: same-person pairs held from 0.55 up,
-// while pairs below 0.53 started mixing different people.
-func TestDefaultSuggestionThresholdDropsPairsBelow055(t *testing.T) {
+// The default threshold comes from reviewing real crop pairs with aligned embeddings: same-person
+// pairs held down to about 0.46, and the first different people appeared at 0.44.
+func TestDefaultSuggestionThresholdDropsPairsBelow050(t *testing.T) {
 	at := func(cos float64) []float32 { return vec(float32(cos), float32(math.Sqrt(1-cos*cos))) }
 	base, below, above := uuid.New(), uuid.New(), uuid.New()
 	items := []embeddedSighting{
 		{ID: base, IdentityID: base, Profile: "cpu", Model: "m1", Vector: vec(1, 0)},
-		{ID: below, IdentityID: below, Profile: "cpu", Model: "m1", Vector: at(0.52)},
-		{ID: above, IdentityID: above, Profile: "cpu", Model: "m1", Vector: at(0.58)},
+		{ID: below, IdentityID: below, Profile: "cpu", Model: "m1", Vector: at(0.47)},
+		{ID: above, IdentityID: above, Profile: "cpu", Model: "m1", Vector: at(0.53)},
 	}
 	got := suggestIdentities(items, DefaultSuggestionThreshold, maxSuggestionPerIdentity, nil)
 	if len(got[base]) != 1 || got[base][0].IdentityID != above {
-		t.Fatalf("suggestions for base = %+v, want only the 0.58 match", got[base])
+		t.Fatalf("suggestions for base = %+v, want only the 0.53 match", got[base])
 	}
 }
 
